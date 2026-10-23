@@ -313,12 +313,13 @@ def _handoff_cutover_spawn_result(
         # headless_new_session itself (never the short ``-i``, which
         # PowerShell can intercept).
         if getattr(args, "dry_run", False):
+            from .native_arguments import append_native_arguments
             dry_result: dict[str, object] = {
                 "ok": True,
                 "dry_run": True,
                 "headless": True,
                 "work_dir": work_dir,
-                "cmd": [*launch_cmd, "--interactive", "<seed>"],
+                "cmd": append_native_arguments(launch_cmd, ["--interactive", "<seed>"]),
                 "seed_len": len(seed),
             }
             if selection.assignment is not None:

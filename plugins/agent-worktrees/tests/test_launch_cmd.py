@@ -149,6 +149,244 @@ def test_plain_launch_does_not_append_removed_no_sandbox_flag():
     assert "--no-sandbox" not in cmd
 
 
+@pytest.mark.parametrize("platform_name", ["Windows", "Linux"])
+def test_launch_pins_native_directory_without_powershell_short_flag_binding(monkeypatch, platform_name):
+    monkeypatch.setattr(m.platform, "system", lambda: platform_name)
+    directory = "/selected worktree"
+    command = _inner_command(m._build_launch_cmd(_config(), _args([]), directory))
+    assert f"-C={directory}" in command
+    assert "-C" not in command
+
+
+@pytest.mark.parametrize("directory_args", [
+    ["-C", "/selected worktree"], ["-C=/selected worktree"],
+])
+def test_matching_directory_flag_is_normalized_once(directory_args):
+    command = _inner_command(m._build_launch_cmd(
+        _config(), _args(directory_args), "/selected worktree",
+    ))
+    assert command.count("-C=/selected worktree") == 1
+    assert "-C" not in command
+
+
+@pytest.mark.parametrize("directory_args", [["-C", "/anchor"], ["-C=/anchor"], ["-C"]])
+def test_foreign_or_missing_launch_directory_is_refused(directory_args):
+    with pytest.raises(m.LaunchPreflightError, match="directory"):
+        m._build_launch_cmd(_config(), _args(directory_args), "/selected worktree")
+
+
+@pytest.mark.parametrize("option", ["-p", "--prompt", "--agent", "--add-dir", "--log-dir"])
+@pytest.mark.parametrize("value", ["-C", "-C=/foreign", "--"])
+def test_directory_binding_preserves_literal_native_option_values(option, value):
+    command = _inner_command(m._build_launch_cmd(
+        _config(), _args([option, value]), "/selected worktree",
+    ))
+    assert command[command.index(option) + 1] == value
+    assert command.count("-C=/selected worktree") == 1
+
+
+def test_directory_binding_preserves_end_of_options_data():
+    from agent_worktrees.process_launcher import bind_execution_directory
+
+    command = bind_execution_directory(
+        ["copilot", "--", "-C", "/literal-data"], "/selected", m.LaunchPreflightError,
+    )
+    assert command == ["copilot", "-C=/selected", "--", "-C", "/literal-data"]
+
+
+@pytest.mark.parametrize("option", ["--prompt", "--model", "--add-dir"])
+def test_directory_binding_does_not_supply_a_missing_option_value(option):
+    with pytest.raises(m.LaunchPreflightError, match="requires a value"):
+        m._build_launch_cmd(_config(), _args([option]), "/selected worktree")
+
+
+@pytest.mark.parametrize("value", ["--acp", "--experimental", "--allow-all"])
+def test_literal_option_values_do_not_select_launch_mode_or_suppress_generated_flags(value):
+    command = _inner_command(m._build_launch_cmd(
+        _config(), _args(["--prompt", value]), "/selected",
+    ))
+    assert "-C=/selected" in command
+    assert command[command.index("--prompt") + 1] == value
+    assert command.count("--experimental") == (2 if value == "--experimental" else 1)
+    assert command.count("--allow-all") == (2 if value == "--allow-all" else 1)
+
+
+@pytest.mark.parametrize("template", [["copilot"], ["bash", "-c", "copilot"]])
+def test_late_resume_and_seed_stay_before_literal_tail_without_mutating_prepared_command(template):
+    from agent_worktrees.embody_resume import with_resume, with_seed
+
+    command = m._build_launch_cmd(
+        _config({"linux": template}), _args(["--prompt", "--", "--", "-C", "/literal"]), "/selected",
+    )
+    original = list(command)
+    seed = "literal seed's $value"
+    updated = _inner_command(with_seed(with_resume(command, "history"), seed))
+    native = updated[1:] if template == ["copilot"] else updated[4:]
+    assert native == [
+        "--prompt", "--", "-C=/selected", "--allow-all", "--experimental",
+        "--resume=history", "--interactive", seed, "--", "-C", "/literal",
+    ]
+    assert command == original
+
+
+@pytest.mark.parametrize("recovery", [False, True])
+@pytest.mark.parametrize("prefix", [
+    ["pwsh.exe", "-NoProfile", "-C", "copilot"],
+    ["pwsh.exe", "-NoProfile", "-Command", r"C:\Tools\copilot.exe"],
+])
+def test_custom_launch_preserves_shell_prefix_and_binds_copilot_directory(prefix, recovery):
+    config = _config({"linux": prefix})
+    config.repos["ext"] = dataclasses.replace(
+        config.default_repo, launch_recovery={"linux": prefix},
+    )
+    args = _args(["--resume", "conversation", "-C", "/selected worktree"])
+    args.recovery = recovery
+    command = _inner_command(m._build_launch_cmd(config, args, "/selected worktree"))
+    assert command[:-1] == prefix[:-1]
+    assert command[-1].startswith("& '" + prefix[-1] + "' ")
+    assert "'--resume' 'conversation'" in command[-1]
+    assert command[-1].count("'-C=/selected worktree'") == 1
+    with pytest.raises(m.LaunchPreflightError, match="directory"):
+        m._build_launch_cmd(config, _args(["-C", "/foreign"]), "/selected worktree")
+
+
+def test_custom_launch_embedded_copilot_directory_cannot_override_workspace():
+    config = _config({"linux": ["pwsh.exe", "-C", "copilot", "-C", "/foreign"]})
+    with pytest.raises(m.LaunchPreflightError, match="directory"):
+        m._build_launch_cmd(config, _args([]), "/selected worktree")
+
+
+def test_opaque_powershell_command_requires_explicit_launcher_script():
+    with pytest.raises(m.LaunchPreflightError, match="launcher script"):
+        m._build_launch_cmd(
+            _config({"linux": ["pwsh", "-Command", "copilot; Write-Host done"]}),
+            _args([]), "/selected worktree",
+        )
+
+
+def test_unknown_launcher_prefix_is_not_parsed_as_copilot_arguments():
+    prefix = ["custom-launcher", "-C", "own-option"]
+    command = _inner_command(m._build_launch_cmd(
+        _config({"linux": prefix}), _args([]), "/selected worktree",
+    ))
+    assert command[:len(prefix)] == prefix
+    assert "-C=/selected worktree" in command[len(prefix):]
+
+
+@pytest.mark.parametrize("flag", ["-c", "-lc"])
+@pytest.mark.parametrize("script", ["copilot", "exec copilot"])
+def test_bash_command_template_forwards_native_arguments(flag, script):
+    command = _inner_command(m._build_launch_cmd(
+        _config({"linux": ["bash", flag, script]}),
+        _args(["--resume=conversation"]), "/selected worktree",
+    ))
+    assert command[:4] == ["bash", flag, 'exec copilot "$@"', "copilot"]
+    assert command[4] == "--resume=conversation"
+    assert command.count("-C=/selected worktree") == 1
+    with pytest.raises(m.LaunchPreflightError, match="directory"):
+        m._build_launch_cmd(
+            _config({"linux": ["bash", flag, script]}),
+            _args(["-C", "/foreign"]), "/selected worktree",
+        )
+
+
+def test_bash_forwarding_template_preserves_its_existing_command_name():
+    prefix = ["bash", "-c", 'copilot "$@"', "configured-command-name"]
+    command = _inner_command(m._build_launch_cmd(
+        _config({"linux": prefix}), _args(["--resume=conversation"]), "/selected worktree",
+    ))
+    assert command[:len(prefix)] == prefix
+    assert command.count("-C=/selected worktree") == 1
+
+
+@pytest.mark.parametrize("script", ["copilot", "exec copilot"])
+@pytest.mark.parametrize("command_name", ["configured-command-name", "--"])
+def test_bash_command_template_preserves_existing_command_name_slot(script, command_name):
+    command = _inner_command(m._build_launch_cmd(
+        _config({"linux": ["bash", "-c", script, command_name]}),
+        _args(["--resume=conversation"]), "/selected worktree",
+    ))
+    assert command[:4] == ["bash", "-c", 'exec copilot "$@"', command_name]
+    assert command[4] == "--resume=conversation"
+    assert command.count(command_name) == 1
+    assert command.count("-C=/selected worktree") == 1
+
+
+def test_bash_script_arguments_are_not_shell_command_options():
+    prefix = ["bash", "/custom/setup.sh", "-c", "script-option"]
+    command = _inner_command(m._build_launch_cmd(
+        _config({"linux": prefix}), _args([]), "/selected worktree",
+    ))
+    assert command[:len(prefix)] == prefix
+    assert "-C=/selected worktree" in command[len(prefix):]
+
+
+@pytest.mark.parametrize("script", ["copilot; echo done", "echo copilot"])
+def test_opaque_bash_command_template_requires_explicit_launcher_script(script):
+    with pytest.raises(m.LaunchPreflightError, match="launcher script"):
+        m._build_launch_cmd(
+            _config({"linux": ["bash", "-c", script]}), _args([]), "/selected worktree",
+        )
+
+
+@pytest.mark.parametrize("script,shell,flag", [
+    ("default-setup.ps1", r"C:\Program Files\PowerShell\pwsh.exe", "-ExecutionDirectory"),
+    ("default-setup.sh", "/usr/bin/bash", "--execution-directory"),
+])
+def test_owned_setup_directory_cannot_override_selected_workspace(script, shell, flag):
+    from agent_worktrees import installer
+    from agent_worktrees.process_launcher import bind_execution_directory
+
+    setup = str(installer.install_dir() / "scripts" / script)
+    prefix = [shell, "-noprofile", "-file", setup] if script.endswith(".ps1") else [shell, setup]
+    with pytest.raises(m.LaunchPreflightError, match="directory"):
+        bind_execution_directory([*prefix, flag, "/foreign"], "/selected", m.LaunchPreflightError)
+    command = bind_execution_directory(
+        [*prefix, flag, "/selected"], "/selected", m.LaunchPreflightError,
+    )
+    assert command.count(flag) == 1
+    assert "/foreign" not in command
+
+
+def test_normalized_powershell_envelope_preserves_seed_fields_and_literal_values():
+    from agent_worktrees import installer
+    from agent_worktrees.process_launcher import quote_powershell_command
+
+    setup = str(installer.install_dir() / "scripts" / "default-setup.ps1")
+    command = quote_powershell_command([
+        "pwsh", "-File", setup, "-LaunchSeedRecord", "record", "--prompt", "-LaunchSeedId",
+        "-LaunchSeedId", "seed", "-LaunchSeedRuntimePython", "python", "-Recovery",
+    ], m.LaunchPreflightError)
+    assert command[:3] == ["pwsh", "-File", setup]
+    assert command[command.index("-LaunchSeedId") + 1] == "seed"
+    assert command[command.index("-LaunchSeedRuntimePython") + 1] == "python"
+    assert "-Recovery" in command
+    assert json.loads(command[-1]) == {"args": ["--prompt", "-LaunchSeedId"]}
+    with pytest.raises(m.LaunchPreflightError, match="cannot override"):
+        quote_powershell_command([
+            "pwsh", "-File", setup, "-NativeArgumentsJson", '{"args":[]}',
+        ], m.LaunchPreflightError)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell envelope validation")
+@pytest.mark.parametrize("payload,remaining", [
+    ("not-json", []), ("{}", []), ('{"args":"scalar"}', []),
+    ('{"args":[1]}', []), ('{"args":[null]}', []), ('{"args":[]}', ["--unexpected"]),
+])
+def test_normalized_powershell_rejects_invalid_or_mixed_argument_envelopes(payload, remaining):
+    from agent_procutil import owned_process
+
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    completed = owned_process.run_owned([
+        shell, "-NoProfile", "-File", str(Path(_SCRIPTS_DIR) / "default-setup.ps1"),
+        "-NativeArgumentsJson", payload, *remaining,
+    ], timeout=20)
+    assert completed.returncode != 0
+    assert completed.stderr
+
+
 def test_acp_launch_skips_allow_all():
     cmd = m._build_launch_cmd(_config(), _args(["--acp", "--stdio"]), "/w/wt")
     assert "--allow-all" not in cmd
@@ -1168,6 +1406,249 @@ def test_default_setup_ps1_double_dash_copilot_args_not_mis_bound_positionally(
         "--allow-all", "--experimental", "--model", "claude-sonnet-5",
         "--reasoning-effort", "medium", "--context", "long_context",
     ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell-to-command argument forwarding")
+@pytest.mark.parametrize("command_flag", ["-C", "-Command"])
+@pytest.mark.parametrize("directory_name", ["selected worktree", "worktree's $(literal)"])
+@pytest.mark.parametrize("prompt", ["literal '$value'", "-C", "-C=/foreign"])
+def test_custom_powershell_command_forwards_selected_directory(
+    tmp_path, monkeypatch, command_flag, directory_name, prompt,
+):
+    from agent_procutil import owned_process
+    from agent_worktrees import installer
+    from agent_worktrees.embody_resume import with_resume, with_seed
+
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    selected = tmp_path / directory_name
+    selected.mkdir()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    _stage_launch_command(scripts)
+    monkeypatch.setattr(installer, "install_dir", lambda: tmp_path)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    marker = tmp_path / "native-argv.json"
+    capture = tmp_path / "capture.py"
+    capture.write_text(
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['NATIVE_ARGV_MARKER']).write_text(json.dumps(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "copilot.cmd").write_text(
+        f'@echo off\r\n@"{sys.executable}" "{capture}" %*\r\n', encoding="utf-8",
+    )
+    command = m._build_launch_cmd(
+        _config({"linux": [shell, "-NoProfile", command_flag, "copilot"]}),
+        _args(["--prompt", prompt]),
+        str(selected),
+    )
+    seed = "seed's literal $value"
+    command = with_seed(with_resume(command, "synthetic-anchor-origin"), seed)
+    command[0] = shell
+    monkeypatch.chdir(selected)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setenv("NATIVE_ARGV_MARKER", str(marker))
+    completed = owned_process.run_owned(command, timeout=20)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    received = json.loads(marker.read_text(encoding="utf-8"))
+    assert received == [
+        "--prompt", prompt,
+        f"-C={selected}", "--allow-all", "--experimental",
+        "--resume=synthetic-anchor-origin", "--interactive", seed,
+    ]
+
+
+def _local_bash():
+    shell = shutil.which("bash")
+    if os.name == "nt" and (not shell or "system32" in shell.casefold()):
+        git = shutil.which("git")
+        candidate = Path(git).parent.parent / "bin" / "bash.exe" if git else None
+        shell = str(candidate) if candidate is not None and candidate.is_file() else None
+    if not shell or (os.name == "nt" and "system32" in shell.casefold()):
+        pytest.skip("a local Bash executable is unavailable")
+    return shell
+
+
+@pytest.mark.parametrize("command_name", [None, "--", "--acp", "configured-command-name"])
+def test_bash_command_template_reaches_native_child(tmp_path, command_name):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.embody_resume import with_resume, with_seed
+
+    shell = _local_bash()
+    selected = tmp_path / "selected worktree"
+    selected.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    marker = tmp_path / "native-argv.txt"
+    copilot = bin_dir / "copilot"
+    copilot.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$NATIVE_ARGV_MARKER"\n', encoding="utf-8",
+    )
+    copilot.chmod(0o700)
+    template = [shell, "-c", "copilot"]
+    if command_name is not None:
+        template.append(command_name)
+    command = m._build_launch_cmd(_config({"linux": template}), _args([]), str(selected))
+    seed = "seed's literal $value"
+    command = _inner_command(with_seed(with_resume(command, "synthetic-anchor-origin"), seed))
+    completed = subprocess.run(
+        command, cwd=selected,
+        env={**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
+             "NATIVE_ARGV_MARKER": str(marker)},
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    received = marker.read_text(encoding="utf-8").splitlines()
+    assert f"-C={selected}" in received
+    assert "--resume=synthetic-anchor-origin" in received
+    assert received[received.index("--interactive") + 1] == seed
+    assert "--" not in received
+    assert "--acp" not in received
+    assert "configured-command-name" not in received
+
+
+@pytest.mark.parametrize("prompt_value", [None, "--execution-directory", "--recovery", "--copilot-path"])
+def test_normalized_bash_keeps_selected_directory_before_literal_tail(tmp_path, monkeypatch, prompt_value):
+    from agent_procutil import owned_process
+    from agent_worktrees import installer
+    from agent_worktrees.embody_resume import with_seed
+
+    shell = _local_bash()
+    selected = tmp_path / "selected worktree"
+    selected.mkdir()
+    copilot = tmp_path / "copilot"
+    marker = tmp_path / "native-argv.txt"
+    copilot.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$NATIVE_ARGV_MARKER"\n', encoding="utf-8",
+    )
+    copilot.chmod(0o700)
+    monkeypatch.chdir(selected)
+    monkeypatch.setenv("NATIVE_ARGV_MARKER", str(marker))
+    if os.name == "nt":
+        utilities = Path(shell).parent.parent / "usr" / "bin"
+        monkeypatch.setenv("PATH", str(utilities) + os.pathsep + os.environ["PATH"])
+    literal = ["--", "--execution-directory", "/foreign", "-C", "/literal-data"]
+    native = ["--resume=synthetic-anchor-origin"]
+    if prompt_value is not None:
+        native += ["--prompt", prompt_value]
+    monkeypatch.setattr(installer, "install_dir", lambda: Path(_SCRIPTS_DIR).parent)
+    config = _config({"linux": [
+        shell, str(Path(_SCRIPTS_DIR) / "default-setup.sh"),
+        "--machine", "test", "--copilot-path", str(copilot),
+    ]})
+    command = m._build_launch_cmd(config, _args([*native, *literal]), str(selected))
+    seed = "seed's literal $value"
+    command = _inner_command(with_seed(command, seed))
+    completed = owned_process.run_owned(command, timeout=20)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert marker.read_text(encoding="utf-8").splitlines() == [
+        "-C", str(selected), *native, "--allow-all", "--experimental",
+        "--interactive", seed, *literal,
+    ]
+
+
+def test_bash_native_value_arity_matches_shared_contract():
+    import re
+
+    from agent_worktrees.native_arguments import VALUE_OPTIONS
+
+    source = (Path(_SCRIPTS_DIR) / "default-setup.sh").read_text(encoding="utf-8")
+    body = source.split("native_value_option() {", 1)[1].split("\n}", 1)[0]
+    assert set(re.findall(r"--[a-z][a-z0-9-]*|-[A-Za-z]", body)) == VALUE_OPTIONS | {"-C"}
+
+
+@pytest.mark.parametrize("option", ["--prompt", "--model", "-C"])
+def test_bash_setup_rejects_missing_native_option_values(option):
+    from agent_procutil import owned_process
+
+    completed = owned_process.run_owned([
+        _local_bash(), str(Path(_SCRIPTS_DIR) / "default-setup.sh"), option,
+    ], timeout=20)
+    assert completed.returncode == 2
+    assert "requires a value" in completed.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell-to-command argument forwarding")
+@pytest.mark.parametrize("prompt_option,prompt,literal_tail", [
+    ("--prompt", None, False), ("--prompt", "-C", False), ("-p", "-C", False),
+    ("--prompt", None, True),
+])
+def test_pinned_resume_directory_survives_normalized_powershell_launch(
+    tmp_path, monkeypatch, prompt_option, prompt, literal_tail,
+):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import installer
+    from agent_worktrees.embody_resume import with_resume, with_seed
+
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    selected = tmp_path / "selected worktree"
+    selected.mkdir()
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    staged = _stage_launch_command(scripts)
+    setup = scripts / "default-setup.ps1"
+    setup.write_text(
+        (Path(_SCRIPTS_DIR) / "default-setup.ps1").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    capture = tmp_path / "capture.py"
+    capture.write_text(
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['NATIVE_ARGV_MARKER']).write_text(json.dumps(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "copilot.cmd").write_text(
+        '@echo off\r\n'
+        '> "%NATIVE_CWD_MARKER%" echo %CD%\r\n'
+        f'@"{sys.executable}" "{capture}" %*\r\n',
+        encoding="utf-8",
+    )
+    argv_marker = tmp_path / "native-argv.txt"
+    cwd_marker = tmp_path / "native-cwd.txt"
+    env = {
+        **os.environ, "HOME": str(home), "USERPROFILE": str(home), "PATH": str(bin_dir),
+        "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1",
+        "NATIVE_ARGV_MARKER": str(argv_marker), "NATIVE_CWD_MARKER": str(cwd_marker),
+    }
+    env.pop("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", None)
+    monkeypatch.setattr(installer, "install_dir", lambda: tmp_path)
+    config = _config({"linux": [
+        "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(setup), "-Machine", "test", "-Recovery",
+    ]})
+    arguments = []
+    if prompt is not None:
+        arguments += [prompt_option, prompt]
+    if literal_tail:
+        arguments += ["--", "-C", "/literal-data"]
+    command = m._build_launch_cmd(config, _args(arguments), str(selected))
+    seed = "seed's literal $value"
+    command = _inner_command(with_seed(with_resume(command, "synthetic-anchor-origin"), seed))
+    completed = subprocess.run(
+        [shell, "-NoProfile", "-NoLogo", "-File", str(staged), "--", *command],
+        cwd=selected, env=env, capture_output=True, text=True, timeout=20,
+        **no_window_kwargs(),
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    received = json.loads(argv_marker.read_text(encoding="utf-8"))
+    boundary = arguments.index("--") if literal_tail else len(arguments)
+    assert received == [
+        "-C", str(selected), *arguments[:boundary], "--allow-all", "--experimental",
+        "--resume=synthetic-anchor-origin", "--interactive", seed, *arguments[boundary:],
+    ]
+    assert Path(cwd_marker.read_text(encoding="utf-8").strip()) == selected
 
 
 def _stage_launch_command(tmp_path: Path) -> Path:

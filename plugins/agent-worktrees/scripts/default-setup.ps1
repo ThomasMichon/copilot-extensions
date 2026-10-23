@@ -49,6 +49,9 @@ param(
     # Optional project-scoped Copilot executable. When set, use it instead of
     # resolving the ambient `copilot` command from PATH.
     [string]$CopilotPath,
+    # Bind native resume after PowerShell parameter parsing, which can split
+    # short directory flags containing a Windows drive colon.
+    [string]$ExecutionDirectory,
     # Guarded machine-local root exported to the setup hook. An explicit value
     # is validated before the hook runs.
     [string]$ConfigRoot,
@@ -58,11 +61,30 @@ param(
     [string]$LaunchSeedRecord,
     [string]$LaunchSeedId,
     [string]$LaunchSeedRuntimePython,
+    [string]$NativeArgumentsJson,
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$CopilotArgs
 )
 
 $ErrorActionPreference = 'Stop'
+if ($PSBoundParameters.ContainsKey('NativeArgumentsJson')) {
+    if ($null -ne $CopilotArgs -and $CopilotArgs.Count -gt 0) {
+        throw 'Native argument envelope cannot be combined with remaining arguments.'
+    }
+    $nativeEnvelope = ConvertFrom-Json -InputObject $NativeArgumentsJson
+    if ($null -eq $nativeEnvelope -or $nativeEnvelope.args -isnot [System.Array]) {
+        throw 'Native argument envelope must contain an args array.'
+    }
+    foreach ($nativeArgument in $nativeEnvelope.args) {
+        if ($nativeArgument -isnot [string]) {
+            throw 'Native argument envelope must contain only strings.'
+        }
+    }
+    $CopilotArgs = [string[]]$nativeEnvelope.args
+}
+if ($ExecutionDirectory) {
+    $CopilotArgs = @('-C', $ExecutionDirectory) + $CopilotArgs
+}
 
 # ── --stdio (ACP) mode: keep human output off the JSON-RPC channel ────────
 # In --stdio mode stdout is the ACP JSON-RPC stream (SSH merges Information into

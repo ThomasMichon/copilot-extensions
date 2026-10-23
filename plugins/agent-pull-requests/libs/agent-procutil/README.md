@@ -221,6 +221,27 @@ the original group; this is not a cgroup or privileged escape-containment API.
 Linux native handoff tests do not qualify a complete Python-free producer,
 caller-loss acquisition, macOS, fresh-host installation or rollout.
 
+The packaged `native_owned.sh` supplies the pre-Python half:
+`start_native_owned_process <private-directory> <log> <timeout-seconds> <argv...>`
+starts one direct session child, and `wait_native_owned_process <seconds>`
+observes its bounded completion frame. The actual parent keeps the only
+lifetime writer on FD 8 across deliberate exec; acquisition descendants never
+inherit it or FD 9. EOF or timeout retires the guardian's own live group.
+The leader stays alive after its command exits so Bash cannot reap it before
+`NativeChildCustody` adoption. Keep FD 8 until that custody positively retires
+the group; the command's frame alone does not certify settlement. These
+helpers reserve FDs 5-8 and require non-interactive Bash with job control off.
+
+`native_daemon.sh` provides `start_native_daemon <script> <working-directory>
+<log> <arguments...>`, the Python-free Linux counterpart of the canonical
+POSIX daemon launch. It uses a new session with redirected stdio, closes
+unrelated inherited descriptors and acknowledges the direct child's actual
+session identity before executing the selected script. With
+`COPILOT_EXTENSIONS_TEST_CONTAINED=1`, it preserves the caller's group instead.
+`__native_daemon_pid` is only a live launch observation, never persisted
+application custody or a completion receipt. Neither helper supplies cgroup
+escape, an installation queue or macOS admission.
+
 ## Caller-owned native execution with streaming limits
 
 An ordinary synchronous caller that also needs caller-death cleanup uses the

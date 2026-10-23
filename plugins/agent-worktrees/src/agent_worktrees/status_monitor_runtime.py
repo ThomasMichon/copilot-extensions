@@ -463,7 +463,10 @@ def _valid_monitor_session(sess: str) -> bool:
     )
 
 
-def _register_session_for_monitor(sess: str, path: str | None) -> bool:
+def _register_session_for_monitor(
+    sess: str, path: str | None, *, session_incarnation: str | None = None,
+    registry_dir: Path | None = None,
+) -> bool:
     """Record ``sess -> worktree path`` so the resident monitor can serve it.
 
     One file per session (``status-monitor.d/<sess>``), so concurrent session
@@ -472,20 +475,19 @@ def _register_session_for_monitor(sess: str, path: str | None) -> bool:
     falls back to the per-session updater when it was not, so a session is never
     left without a status bar.  Never raises.
     """
-    if not path or not _valid_monitor_session(sess):
+    if (
+        not path or not _valid_monitor_session(sess)
+        or (session_incarnation is not None and not (
+            isinstance(session_incarnation, str) and session_incarnation
+        ))
+    ):
         return False
-    import tempfile
+    from .status_monitor_discovery import write_standalone_registration
 
-    try:
-        d = _monitor_registry_dir()
-        d.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=sess + ".", suffix=".tmp", dir=str(d))
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(str(path))
-        os.replace(tmp, str(d / sess))
-        return True
-    except OSError:
-        return False
+    return write_standalone_registration(
+        registry_dir if registry_dir is not None else _monitor_registry_dir(),
+        sess, str(path), session_incarnation,
+    )
 
 
 def _read_monitor_registry(reg_dir: Path) -> dict[str, str]:
@@ -504,10 +506,13 @@ def _read_monitor_registry(reg_dir: Path) -> dict[str, str]:
 
 
 def _remove_monitor_entry(reg_dir: Path, sess: str) -> None:
-    try:
-        (reg_dir / sess).unlink()
-    except OSError:
-        pass
+    from .status_monitor_discovery import standalone_identity_path
+
+    for path in (reg_dir / sess, standalone_identity_path(reg_dir, sess)):
+        try:
+            path.unlink()
+        except OSError:
+            pass
 def _manager_owned_mapping_for_session(session_name: str, *, managed_mux_cache=None) -> dict | None:
     if not session_name:
         return None

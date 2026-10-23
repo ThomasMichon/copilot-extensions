@@ -36,6 +36,50 @@ agent-worktrees -p copilot-extensions worktree create --json
 Running a project binstub bare (e.g. `my-control-harness`) still launches the
 interactive picker.
 
+### Attended native CLI sessions
+
+`copilot --worktree-id <id>` or `copilot --codename <name>` creates or rejoins
+the selected worktree's mux in the current terminal. Windows keeps the caller
+waiting for the attached client, with inherited input and output; POSIX replaces
+the caller with that client. Detaching returns the terminal to its backing
+shell. An attach-client failure is reported without terminating the mux server
+or its conversation.
+
+New native launches explicitly select the execution directory, including when
+resuming a conversation originally created in an anchor or another directory.
+A conflicting Copilot `-C` override is refused; a custom launcher's prefix
+options (such as PowerShell's `-C` command abbreviation) remain unchanged.
+Required option values remain literal even when they look like `-C` flags;
+an end-of-options tail is not rewritten as directory selection.
+Normalized PowerShell setup carries native argv in a checked argument envelope,
+separate from setup parameters, preserving flag-shaped values and literal tails.
+Direct PowerShell command-string launches encode the final native arguments
+as quoted PowerShell literals, preserving spaces, apostrophes and literal
+variable syntax through the command-source boundary. Opaque compound commands
+require a launcher script.
+Bash command-string templates using `copilot` or `exec copilot` are normalized
+to forward their arguments explicitly; existing direct `copilot "$@"` forms
+retain their command-name slot. Compound command strings require a launcher
+script instead of silently losing the selected-directory argument.
+Normalized setup passes the directory
+through its own named parameter and constructs Copilot's native `-C` argument
+only after shell parameter parsing, preserving Windows drive paths and spaces.
+Both normalized shells place directory selection before the native argument
+tail. Bash stops interpreting setup parameters at the tail delimiter.
+Bash also consumes required native option/value pairs together, so a literal
+prompt value cannot become a setup directory, recovery or executable override.
+Launch mode and generated flags are likewise selected from actual native
+options, not flag-shaped literal values or Bash command-name slots.
+Generated launch flags and later resume/interactive-seed additions stay at the
+native boundary before literal tails, including encoded PowerShell invocations
+and the normalized argument envelope.
+ACP keeps its existing workspace authority.
+
+Rejoining an already-running mux does not relocate its process or rewrite
+conversation history. Historical session metadata may still describe the
+conversation's origin; use the actual tool/process working directory to
+distinguish that record from the current execution context.
+
 Project-only `get` scalars (`machine`, `platform`, `project`, `repo-dir`, `git-remote`,
 `worktrees-root`, `src-dir`, and `config-dir`) read the layered project
 configuration without scanning current worktree/session identity. Worktree-

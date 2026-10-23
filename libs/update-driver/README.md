@@ -403,6 +403,42 @@ It rechecks the original and frozen inventories under custody. These Linux
 helpers do **not** launch a producer, acquire prerequisites, settle child groups,
 or implement Linux genesis/upgrade; those remain separate integration work.
 
+### Linux foundation producer
+
+`scripts/foundation-submit.sh <execution-root> <full-source-sha256>` launches
+the fixed `foundation-produce.sh` through the canonical native process helper.
+Its `launched:<pid>` acknowledgement is not durable installation acceptance
+or completion: observe `foundation-operation.json` for the admitted operation
+and outcome. This is an internal foundation-construction front door, not a
+plugin provisioning request or an arbitrary-argv installer.
+
+The producer holds the same FD 9 flock before staging, freezes the fixed
+three-package source closure, and acquires pinned uv/private managed Python
+through the existing installer-engine helper. It does not require Python or
+uv on PATH. The native acquisition guardian keeps its direct session child
+alive through Bash's deliberate exec of that private interpreter.
+`NativeChildCustody` must retire the entire pinned group before the producer
+accepts its integer prerequisite result. The same process consumes the
+inherited flock, issues the existing participant witness only to the fixed
+builder, and completes native progress after construction and source rechecks.
+Failure before private Python or positive group settlement preserves an
+interrupted fence, never a success-shaped or settled integer result.
+The canonical constructor still requires native `ps` process observation;
+the producer refuses a missing observer before creating execution state.
+
+An existing selector or queue/sidecar requires the selected immutable
+foundation's own retained `foundation_linux` module and canonical queue
+admission. Missing/legacy capability refuses; no queue is initialized, cleared
+or reinterpreted by the native shell. Pending requests survive an upgrade,
+and the existing immutable-generation/retention contract preserves the old
+slot. A matching healthy selection returns without another acquisition.
+
+The explicit manual `foundation` portfolio includes real Linux cold downloads,
+caller process-group destruction, a contained-launch control, native
+acquisition parent loss, immutable upgrade, pending-request preservation and
+source removal. These are separate from fresh clean-room OS qualification,
+macOS support, publication-wrapper migration and authorized host rollout.
+
 ### Fixed foundation construction participant
 
 On Windows, `update_driver/participant.ps1` supplies the native owner side of

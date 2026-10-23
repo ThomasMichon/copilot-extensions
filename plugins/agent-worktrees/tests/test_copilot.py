@@ -2,9 +2,10 @@
 
 `cmd_copilot` reuses `cmd_embody`'s full create-or-resume logic in-process
 (only its JSON result matters here, not its stdout) and then hands the
-terminal to the resulting mux session via `os.execvp`. These tests mock
-`cmd_embody` and `os.execvp` at the boundary so no real worktree, mux
-session, or process replacement happens.
+terminal to the resulting mux session with a foreground Windows wait or
+POSIX `os.execvp`. These tests mock
+`cmd_embody` and the terminal client boundary so no real worktree or user
+mux session is changed. The native control below uses an isolated fake mux.
 
 Fakes emit their JSON via `output._json_output` (not a bare
 `print(json.dumps(...))`) to match `cmd_embody`'s real contract: its JSON
@@ -25,6 +26,12 @@ created. Fixed via `output.capture_json_output()`, which swaps
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
 
 from agent_worktrees import copilot_cli as m
 from agent_worktrees import output
@@ -41,6 +48,10 @@ def _ns(**kwargs) -> argparse.Namespace:
 
 
 class TestCmdCopilot:
+    @pytest.fixture(autouse=True)
+    def posix_attachment(self, monkeypatch):
+        monkeypatch.setattr(m.sys, "platform", "linux")
+
     def test_requires_a_controlling_terminal(self, monkeypatch, capfd):
         monkeypatch.setattr(m.sys.stdin, "isatty", lambda: False)
         rc = m.cmd_copilot(_ns(worktree_id="wt1"))
@@ -175,3 +186,153 @@ class TestCmdCopilot:
         assert rc == 0
         assert seen["mux"] == "psmux"
         assert execed["argv"][0] == "psmux"
+
+    @pytest.mark.parametrize("exit_code", [0, 7])
+    def test_windows_keeps_foreground_custody_until_client_exits(self, monkeypatch, exit_code):
+        monkeypatch.setattr(m.sys, "platform", "win32")
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "psmux")
+        monkeypatch.setattr(
+            m.handoff_cli, "cmd_embody",
+            lambda args: output._json_output({"ok": True, "session": "wt-abc"}) or 0,
+        )
+        monkeypatch.setattr(
+            m.os, "execvp",
+            lambda *_: pytest.fail("Windows overlay releases the backing console"),
+        )
+        calls = []
+
+        class Client:
+            def wait(self):
+                calls.append("wait")
+                return exit_code
+
+        def popen(argv, **kwargs):
+            assert argv == ["psmux", "attach-session", "-t", "wt-abc"]
+            assert kwargs == {}
+            calls.append("spawn")
+            return Client()
+
+        monkeypatch.setattr(subprocess, "Popen", popen)
+        assert m.cmd_copilot(_ns(worktree_id="abc")) == exit_code
+        assert calls == ["spawn", "wait"]
+
+    def test_windows_attachment_failure_is_reported(self, monkeypatch, capfd):
+        monkeypatch.setattr(m.sys, "platform", "win32")
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "psmux")
+        monkeypatch.setattr(
+            m.handoff_cli, "cmd_embody",
+            lambda args: output._json_output({"ok": True, "session": "wt-abc"}) or 0,
+        )
+        monkeypatch.setattr(
+            m.os, "execvp",
+            lambda *_: pytest.fail("Windows attach must not use an overlay"),
+        )
+
+        def popen(*args, **kwargs):
+            raise OSError("attach client refused")
+
+        monkeypatch.setattr(subprocess, "Popen", popen)
+        assert m.cmd_copilot(_ns(worktree_id="abc")) == 1
+        assert "attach client refused" in capfd.readouterr().out
+
+    @pytest.mark.parametrize("exits_after_interrupt", [True, False])
+    def test_windows_interrupt_waits_for_or_reaps_only_its_attach_client(
+        self, monkeypatch, exits_after_interrupt,
+    ):
+        monkeypatch.setattr(m.sys, "platform", "win32")
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "psmux")
+        monkeypatch.setattr(
+            m.handoff_cli, "cmd_embody",
+            lambda args: output._json_output({"ok": True, "session": "wt-abc"}) or 0,
+        )
+        calls = []
+
+        class Client:
+            def wait(self, timeout=None):
+                calls.append(("wait", timeout))
+                if len(calls) == 1:
+                    raise KeyboardInterrupt
+                if timeout is not None and not exits_after_interrupt:
+                    raise subprocess.TimeoutExpired("attach", timeout)
+                return 11
+
+            def kill(self):
+                calls.append(("kill", None))
+
+        monkeypatch.setattr(subprocess, "Popen", lambda argv: Client())
+        assert m.cmd_copilot(_ns(worktree_id="abc")) == (11 if exits_after_interrupt else 130)
+        assert calls[:2] == [("wait", None), ("wait", 30)]
+        assert (("kill", None) in calls) is not exits_after_interrupt
+
+    @pytest.mark.parametrize("interrupt_kill", [False, True])
+    def test_repeated_interrupts_cannot_release_terminal_before_reaping(
+        self, monkeypatch, interrupt_kill,
+    ):
+        monkeypatch.setattr(m.sys, "platform", "win32")
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "psmux")
+        monkeypatch.setattr(
+            m.handoff_cli, "cmd_embody",
+            lambda args: output._json_output({"ok": True, "session": "wt-abc"}) or 0,
+        )
+        waits = iter([KeyboardInterrupt(), KeyboardInterrupt(), KeyboardInterrupt(), 7])
+        events = []
+
+        class Client:
+            def wait(self, timeout=None):
+                events.append(("wait", timeout))
+                result = next(waits)
+                if isinstance(result, BaseException):
+                    raise result
+                events.append(("reaped", result))
+                return result
+
+            def kill(self):
+                events.append(("kill", None))
+                if interrupt_kill and events.count(("kill", None)) == 1:
+                    raise KeyboardInterrupt
+
+        monkeypatch.setattr(subprocess, "Popen", lambda argv: Client())
+        try:
+            result = m.cmd_copilot(_ns(worktree_id="abc"))
+        except KeyboardInterrupt:
+            pytest.fail("an interrupt escaped while the attach client still owned the terminal")
+        assert result == 130
+        assert events[-1] == ("reaped", 7)
+        assert events.count(("kill", None)) == (2 if interrupt_kill else 1)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows foreground process contract")
+def test_native_windows_attach_retains_inherited_input_and_waits(tmp_path):
+    from agent_procutil import no_window_kwargs
+
+    (tmp_path / "attach-session").write_text(
+        "import sys\n"
+        "print('MUX_INPUT=' + sys.stdin.readline().strip(), flush=True)\n"
+        "raise SystemExit(7)\n",
+        encoding="utf-8",
+    )
+    driver = tmp_path / "driver.py"
+    driver.write_text(
+        "import argparse, sys\n"
+        "from agent_worktrees import copilot_cli, output\n"
+        "sys.stdin.isatty = lambda: True\n"
+        "copilot_cli.sessions._mux_bin = lambda mux=None: sys.executable\n"
+        "copilot_cli.handoff_cli.cmd_embody = lambda args: "
+        "output._json_output({'ok': True, 'session': 'wt-synthetic'}) or 0\n"
+        "result = copilot_cli.cmd_copilot(argparse.Namespace(mux=None))\n"
+        "print('WRAPPER_EXIT=' + str(result), flush=True)\n"
+        "raise SystemExit(result)\n",
+        encoding="utf-8",
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(m.__file__).parents[1])}
+    completed = subprocess.run(
+        [sys.executable, str(driver)], cwd=tmp_path, env=env,
+        input="mux-owned-input\n", capture_output=True, text=True, timeout=20,
+        **no_window_kwargs(),
+    )
+    assert completed.returncode == 7, completed.stderr
+    assert completed.stdout.splitlines() == ["MUX_INPUT=mux-owned-input", "WRAPPER_EXIT=7"]
