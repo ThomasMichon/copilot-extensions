@@ -714,3 +714,23 @@ def test_editing_other_keeps_existing_single_freeform_semantics(tmp_path, monkey
             controls["other"].text = "one new, freeform\ncustom answer"
             assert form._collect()["answer"] == ["one", "two", "one new, freeform\ncustom answer"]
     asyncio.run(run())
+
+
+def test_strict_multichoice_cannot_confirm_invisible_or_duplicate_members(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path))
+    fields = [{"name": "answer", "type": "multichoice", "options": ["perf", "other"], "allow_other": False}]
+    form = PivotFormScreen(
+        CARD, fields, "Answer", task_id="same-id", draft_binding=binding(fields=fields),
+        draft_values={"answer": ["perf", "not-an-option", "perf"]},
+    )
+
+    async def run():
+        app = Host(form)
+        async with app.run_test() as pilot:
+            assert form._q[0]["primary"].selected == ["perf"]
+            assert form._q[0]["other"] is None
+            form._confirm()
+            await pilot.pause()
+            assert app.result["values"] == {"answer": ["perf"]}
+            assert json.loads(form._draft_path().read_text())["values"] == {"answer": ["perf"]}
+    asyncio.run(run())

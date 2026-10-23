@@ -1168,3 +1168,9 @@ authorized installed proof remain distinct obligations.
   Configuration's separate line convention. The combined form/result/local
   cleanup and Configuration selection passed 212 tests with two opt-in skips.
   These fixes still require updated-head review and required CI.
+- Review then caught strict multichoice caches returning out-of-options values
+  that the operator could not see or remove. Cache only permitted visible
+  members when Other is disabled and deduplicate displayed selections. The
+  untouched strict-Confirm regression and combined form/Configuration selection
+  passed 213 tests with two opt-in skips. This retains the same source slice,
+  not an expansion into workflow state or a new input authority.

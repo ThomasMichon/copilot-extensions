@@ -207,6 +207,8 @@ and order, including separate custom values containing commas or newlines.
 Changing a known selection retains unchanged custom members; editing Other
 retains its existing single-freeform-value semantics. Configuration's explicit
 one-custom-value-per-line convention remains separate.
+When Other is disabled, restoration cannot cache invisible out-of-options
+members or duplicate a displayed selection in the submitted result.
 
 Reset asks first, freezes input during Clear and retains fields/local recovery
 until a valid acknowledgement arrives. It updates only this form's observed

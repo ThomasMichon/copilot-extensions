@@ -73,7 +73,7 @@ class FieldQuestionsMixin:
                 for member in members:
                     if str(member) in options:
                         primary.select(str(member))
-                    else:
+                    elif rec["allow_other"]:
                         extras.append(str(member))
                 if rec["allow_other"] and other is not None and extras:
                     other.text = ("\n" if multiple_other_values else ", ").join(extras)
@@ -82,7 +82,10 @@ class FieldQuestionsMixin:
                     primary.select(_OTHER_SENTINEL)
                 if not multiple_other_values:
                     rec["restored_multichoice"] = {
-                        "members": [str(member) for member in members],
+                        "members": list(dict.fromkeys(
+                            str(member) for member in members
+                            if rec["allow_other"] or str(member) in options
+                        )),
                         "extras": extras,
                         "selected": list(primary.selected),
                         "other": other.text if other is not None else "",
