@@ -238,6 +238,16 @@ SSH or lightweight terminal attachment. The full verbatim capture and
 is stated intent; the alternative control/console scheme does not itself
 assign runtime implementation, select a protocol or authorize SSH retirement.
 
+After that amendment and publication recovery, the operator directed:
+
+> Great. Keep driving.
+
+The next **agent-recommended bounded implementation** is the isolated
+[scoped point-set snapshot](scoped-observation-snapshot.md), extending only the
+owned admission/observation composition. Its plan requires actual review before
+code; retained producer, resident, provider, Manager and deployment boundaries
+and the no-other-agent-coordination instruction remain unchanged.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -353,6 +363,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [x] Land and validate the explicitly assigned
   [isolated scoped point-reader](scoped-observation-reader.md), composing only
   owned admission/storage libraries without wiring a resident consumer (#8052).
+- [ ] Review and implement the bounded
+  [scoped point-set snapshot](scoped-observation-snapshot.md) prerequisite,
+  preserving one committed read view without adding replay or wire authority.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
   The subsequent operator approval permits only an isolated transport-neutral
@@ -436,6 +449,17 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-23 - Isolated point-set snapshot prerequisite proposed
+
+- Continued the owned observation lane after #8272 actually merged, with the
+  source worktree synchronized and the interrupted publication reconciled.
+- Proposed one bounded correlated snapshot over existing admission and storage,
+  instead of treating repeated independent point reads as a coherent view.
+  The explicit source/test seam excludes producer and resident integration.
+- Kept the existing point-reader behavior, policy fence, terminal completion
+  and storage schema. Defined real-process consistency and negative-control
+  obligations before implementation; scope-safe replay remains separate.
 
 ### 2026-10-22 - Federation read paths and independent console direction
 
