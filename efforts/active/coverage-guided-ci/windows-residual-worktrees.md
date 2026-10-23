@@ -87,6 +87,28 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-CREATION-REFS one fresh ref map per creation-point call
+
+Creation-point inference includes every same-remote qualified source's local
+shadow in its existing ref/object query, validates that response, and passes
+the returned names directly to the later-reset check in that call. This
+removes the measured second ref-name query without retaining evidence across
+calls or pruning decisions. The helper's standalone path still reads its own
+names, and reset-tip reflogs remain independently read.
+
+A focused control proves one ref-map query per call, a changed result after a
+later local-shadow mutation, refusal after a failed read, and exclusion of a
+different remote's purported landing base. Existing real-Git historical reset,
+shadow, missing-source and expired-proof cases remain unchanged.
+
+Native functional validation retains exactly two workers and all original
+item, process, memory and native deadlines: 107 creation/landing behavior
+controls pass in 215.94 seconds preparation/cleanup inclusive; the six
+copy-isolation guards plus 104 precondition, open-PR and blob controls pass
+in 124.75 seconds inclusive. These complementary selections do not qualify
+an unchanged normal group or the aggregate portfolio. All parent timing and
+residual-settlement gates remain open.
+
 ### B-FAST-FORWARD private aligned repository inputs
 
 The fast-forward module publishes its unchanged bare origin, publisher and

@@ -152,17 +152,23 @@ def creation_point(ref: str, cwd: str, *, published_bases: tuple[str, ...] = ())
         return ""
     remote = source.partition("/")[0]
     remote_prefix = f"refs/remotes/{remote}/"
+    sources = {f"refs/remotes/{source}"} | {
+        base for base in published_bases if base.startswith(remote_prefix)
+    }
+    shadows = sorted(ref.replace("refs/remotes/", "refs/heads/", 1) for ref in sources)
     refs_r = _history_read(
         "for-each-ref", "--format=%(refname)%09%(objectname)",
-        f"refs/heads/{source}", remote_prefix, cwd=cwd,
+        *shadows, remote_prefix, cwd=cwd,
     )
     if refs_r.returncode != 0:
         return ""
     remote_tips = set()
+    names = set()
     for line in refs_r.stdout.splitlines():
         name, separator, object_id = line.partition("\t")
         if not separator or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", object_id):
             return ""
+        names.add(name)
         if name == f"refs/heads/{source}":
             return ""  # a local branch can shadow the source in the creation message
         if name.startswith(remote_prefix):
@@ -178,17 +184,21 @@ def creation_point(ref: str, cwd: str, *, published_bases: tuple[str, ...] = ())
             if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
                 created = sha
                 break
-    return _later_resets_to_source(entries, created, source, published_bases, cwd) if created else ""
+    return _later_resets_to_source(
+        entries, created, source, published_bases, cwd, names=names,
+    ) if created else ""
 
 
 def _later_resets_to_source(
     entries: list[str], created: str, source: str, published_bases: tuple[str, ...], cwd: str,
+    *, names: set[str] | None = None,
 ) -> str:
     """Find the latest reset to an independently proven source/landing-base tip.
 
     Earlier local work does not make a subsequent published tip unpublished.
     Commits beyond that tip remain outside this boundary, including empty or
     reverted commits; other tracked PR branches are checked separately.
+    ``names`` comes only from this creation-point call's validated ref query.
     """
     if not any(
         entry.partition("\t")[2].startswith(("branch: Reset to ", "reset: moving to "))
@@ -198,12 +208,13 @@ def _later_resets_to_source(
     prefix = f"refs/remotes/{source.partition('/')[0]}/"
     sources = {f"refs/remotes/{source}"} | {b for b in published_bases if b.startswith(prefix)}
     shadows = {ref: ref.replace("refs/remotes/", "refs/heads/", 1) for ref in sources}
-    refs = _history_read(
-        "for-each-ref", "--format=%(refname)", *sorted(sources | set(shadows.values())), cwd=cwd,
-    )
-    if refs.returncode != 0:
-        return created
-    names = set(refs.stdout.splitlines())
+    if names is None:
+        refs = _history_read(
+            "for-each-ref", "--format=%(refname)", *sorted(sources | set(shadows.values())), cwd=cwd,
+        )
+        if refs.returncode != 0:
+            return created
+        names = set(refs.stdout.splitlines())
     qualified = sorted(ref for ref in sources if ref in names and shadows[ref] not in names)
     if not qualified:
         return created

@@ -177,6 +177,50 @@ def test_creation_point_without_a_later_reset_needs_no_source_tip_reread(monkeyp
     ) == "created"
 
 
+def test_creation_point_reuses_only_current_call_ref_names_for_reset_proof(monkeypatch):
+    created, reset = "a" * 40, "b" * 40
+    calls = []
+    state = {"shadow": False, "fail": False}
+
+    def evidence(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "rev-parse":
+            return SimpleNamespace(returncode=0, stdout="refs/heads/task\n")
+        if args[0] == "remote":
+            return SimpleNamespace(returncode=0, stdout="origin\n")
+        if args[0] == "for-each-ref":
+            assert args == (
+                "for-each-ref", "--format=%(refname)%09%(objectname)",
+                "refs/heads/origin/dev", "refs/heads/origin/main", "refs/remotes/origin/",
+            )
+            rows = f"refs/remotes/origin/dev\t{created}\nrefs/remotes/origin/main\t{reset}\n"
+            if state["shadow"]:
+                rows += f"refs/heads/origin/main\t{reset}\n"
+            return SimpleNamespace(returncode=int(state["fail"]), stdout=rows)
+        assert args[:2] == ("reflog", "show")
+        if args[2] == "--format=%H%x09%gs":
+            rows = (
+                f"{reset}\tbranch: Reset to origin/main\n"
+                f"{created}\tbranch: Created from origin/dev\n"
+            )
+        else:
+            expected = ("refs/remotes/origin/dev",) if state["shadow"] else (
+                "refs/remotes/origin/dev", "refs/remotes/origin/main",
+            )
+            assert args[2:] == ("--format=%H", *expected, "--")
+            rows = f"{created}\n" if state["shadow"] else f"{created}\n{reset}\n"
+        return SimpleNamespace(returncode=0, stdout=rows)
+
+    monkeypatch.setattr(git_ops, "git", evidence)
+    bases = ("refs/remotes/origin/main", "refs/remotes/other/main")
+    assert finalize_ref.creation_point("task", "unused", published_bases=bases) == reset
+    state["shadow"] = True
+    assert finalize_ref.creation_point("task", "unused", published_bases=bases) == created
+    state["fail"] = True
+    assert finalize_ref.creation_point("task", "unused", published_bases=bases) == ""
+    assert sum(args[0] == "for-each-ref" for args in calls) == 3
+
+
 def test_a_reset_after_earlier_local_work_still_reads_qualified_tips(monkeypatch):
     calls = []
 

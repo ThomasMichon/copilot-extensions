@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse the fresh creation-point ref map within its own reset-proof evaluation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
