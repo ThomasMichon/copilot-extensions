@@ -42,11 +42,15 @@ def test_native_bootstrap_death_fences_pending_python_work_without_replay(area):
             **pu.no_window_kwargs(),
         )
         try:
-            deadline = time.monotonic() + 15
+            # Stock PowerShell's first Add-Type compiler startup can exceed 15s on hosted Windows.
+            deadline = time.monotonic() + 60
             while not (root / "native-ready").exists():
                 assert parent.poll() is None, (root / "native.log").read_text()
                 if time.monotonic() >= deadline:
-                    pytest.fail("native foundation owner did not reach its custody gate")
+                    pytest.fail(
+                        "native foundation owner did not reach its custody gate:\n"
+                        + (root / "native.log").read_text()
+                    )
                 time.sleep(.02)
             queued = enqueue(
                 RequestSpec("native-foundation-fixture"), root=root,

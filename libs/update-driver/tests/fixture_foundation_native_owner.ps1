@@ -1,5 +1,7 @@
 param([string]$Root, [string]$Helper)
 $ErrorActionPreference = 'Stop'
+[Console]::Out.WriteLine('loading native operation custody')
+[Console]::Out.Flush()
 . $Helper
 $owned = Enter-NativeOperationLock (Join-Path $Root 'execution.lock')
 try {
