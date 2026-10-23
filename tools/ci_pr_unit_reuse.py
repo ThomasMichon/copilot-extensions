@@ -23,6 +23,7 @@ from candidate_qualification_receipt import (
     MAX_PACKET_FILE_BYTES,
     PACKET_FILES,
     UnitQualificationError,
+    canonical_digest,
     packet_binding,
     verify_archive,
 )
@@ -193,6 +194,27 @@ def artifact_name(identity: dict, run_id: int, attempt: int) -> str:
     if not _positive(run_id) or not _positive(attempt):
         raise ReuseUnavailable("invalid-artifact-origin")
     return f"pr-unit-evidence-v1-{manifest_digest(identity)}-{run_id}-{attempt}"
+
+
+def context_fingerprint(identity: dict) -> dict:
+    """Explain cache misses using existing digests, never environment values or paths."""
+    return {
+        "identity": {
+            name: canonical_digest(value)
+            for name, value in identity.items()
+            if name not in ("runtime", "environment")
+        },
+        "runtime": {
+            name: canonical_digest(value)
+            for name, value in identity["runtime"].items()
+            if name != "distributions"
+        },
+        "distributions": identity["runtime"]["distributions"],
+        "environment": {
+            name: canonical_digest(value)
+            for name, value in identity["environment"].items()
+        },
+    }
 
 
 def runtime_identity() -> dict:
@@ -590,6 +612,11 @@ def main() -> int:
             raise ReuseUnavailable("rerun-requires-fresh-execution")
         event = decode_json(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
         identity = context(dict(os.environ), event, manifest, runtime_identity())
+        print(
+            json.dumps(
+                {"pr_unit_context": context_fingerprint(identity)}, sort_keys=True
+            )
+        )
         if not os.environ.get("GH_TOKEN"):
             raise ReuseUnavailable("missing-read-only-provider-token")
         deadline = time.monotonic() + MAX_LOOKUP_SECONDS

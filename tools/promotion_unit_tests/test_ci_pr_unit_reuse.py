@@ -185,6 +185,21 @@ def test_artifact_names_bind_each_producing_run_and_attempt(case):
     assert name != reuse.artifact_name(case.identity, 21, 2)
 
 
+def test_context_fingerprints_identify_changes_without_disclosing_values(case):
+    identity = copy.deepcopy(case.identity)
+    identity["environment"]["PATH"] = "/private/synthetic/path"
+    identity["source_root"] = "/private/synthetic/workspace"
+    before = reuse.context_fingerprint(identity)
+    rendered = json.dumps(before)
+    assert "/private/" not in rendered
+    assert identity["runtime"]["python"] not in rendered
+    identity["environment"]["HOME"] = "/different/synthetic/home"
+    after = reuse.context_fingerprint(identity)
+    assert before["environment"]["HOME"] != after["environment"]["HOME"]
+    assert before["runtime"] == after["runtime"]
+    assert before["distributions"] == after["distributions"]
+
+
 @pytest.mark.parametrize("run_id,attempt", [(0, 1), (1, 0), (True, 1), (1, True)])
 def test_artifact_names_refuse_unqualified_origins(case, run_id, attempt):
     with pytest.raises(reuse.ReuseUnavailable, match="invalid-artifact-origin"):
