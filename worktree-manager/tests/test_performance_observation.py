@@ -137,7 +137,10 @@ def test_readback_scopes_logs_before_validating_foreign_batch_content():
     assert not result["complete"] and result["invalid_matching_lines"] == 1
 
 
-@pytest.mark.parametrize("corruption", ["wrong_unit", "wrong_type", "multiple_types"])
+@pytest.mark.parametrize("corruption", [
+    "wrong_unit", "wrong_type", "multiple_types", "wrong_start", "bad_start",
+    "unavailable", "reserved_flag", "bool_value", "fractional_value", "value_oneof", "bool_temporality",
+])
 def test_readback_uses_received_metric_type_and_rejects_conflicting_points(corruption):
     from copy import deepcopy
     from worktree_manager.performance_report import signal_readback
@@ -168,12 +171,62 @@ def test_readback_uses_received_metric_type_and_rejects_conflicting_points(corru
         bad["unit"] = "s"
     elif corruption == "wrong_type":
         bad["gauge"] = bad.pop("sum")
-    else:
+    elif corruption == "multiple_types":
         bad["gauge"] = deepcopy(bad["sum"])
+    elif corruption == "bool_temporality":
+        bad["sum"]["aggregationTemporality"] = True
+    else:
+        altered = bad["sum"]["dataPoints"][0]
+        altered.update({
+            "wrong_start": {"startTimeUnixNano": "101"},
+            "bad_start": {"startTimeUnixNano": "invalid"},
+            "unavailable": {"flags": 1}, "reserved_flag": {"flags": 2},
+            "bool_value": {"asInt": True}, "fractional_value": {"asInt": 1.5},
+            "value_oneof": {"asDouble": 1.0},
+        }[corruption])
     request["resourceMetrics"][0]["scopeMetrics"][0]["metrics"].append(bad)
     result = signal_readback([json.dumps(request)], signal="metrics", expected_metrics=expected)
     assert not result["complete"]
     assert result["extra"] + result["mismatched"] + result["invalid_matching_lines"] > 0
+
+
+@pytest.mark.parametrize("corruption", ["flags", "bool_count", "bool_bucket", "bool_bound"])
+def test_histogram_readback_preserves_missing_value_flags_and_integer_semantics(corruption):
+    from worktree_manager.performance_report import signal_readback
+    from process_telemetry.signals import BOUNDS
+
+    def attributes(values):
+        return [{"key": key, "value": {"stringValue": value}} for key, value in values.items()]
+
+    expected = {
+        "name": "ce.source.duration", "unit": "s", "stage": "input_ack", "outcome": "ok",
+        "start_time_ns": 100, "time_ns": 200, "count": 1, "sum": 0., "min": 0., "max": 0.,
+        "bounds": list(BOUNDS), "bucket_counts": [1] + [0] * len(BOUNDS),
+    }
+    point = {
+        "attributes": attributes({"ce.stage": "input_ack", "ce.outcome": "ok"}),
+        "startTimeUnixNano": "100", "timeUnixNano": "200", "count": "1",
+        "sum": 0., "min": 0., "max": 0., "explicitBounds": list(BOUNDS),
+        "bucketCounts": ["1"] + ["0"] * len(BOUNDS),
+    }
+    metric = {"name": expected["name"], "unit": "s",
+              "histogram": {"aggregationTemporality": 1, "dataPoints": [point]}}
+    request = {"resourceMetrics": [{
+        "resource": {"attributes": attributes({"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"})},
+        "scopeMetrics": [{"scope": {"name": "copilot-extensions.process-telemetry", "version": "1"},
+                          "metrics": [metric]}],
+    }]}
+    assert signal_readback([json.dumps(request)], signal="metrics", expected_metrics=[expected])["complete"]
+    if corruption == "flags":
+        point["flags"] = 1
+    elif corruption == "bool_count":
+        point["count"] = True
+    elif corruption == "bool_bucket":
+        point["bucketCounts"][0] = True
+    else:
+        point["explicitBounds"][8] = True
+    result = signal_readback([json.dumps(request)], signal="metrics", expected_metrics=[expected])
+    assert not result["complete"]
 
 
 def test_real_source_writer_sdk_logs_metrics_and_exact_readback(tmp_path):

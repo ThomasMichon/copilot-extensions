@@ -235,9 +235,24 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
     """Exact owned log correlations or metric intervals; no raw receiver content."""
     import json
     import base64
+    import math
     from collections import Counter
 
     resources = {"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"}
+
+    def unsigned(value):
+        if type(value) is str:
+            if not 1 <= len(value) <= 20 or not value.isascii() or not value.isdecimal():
+                raise ValueError("invalid unsigned integer")
+            value = int(value)
+        if type(value) is not int or not 0 <= value < 2**64:
+            raise ValueError("invalid unsigned integer")
+        return value
+
+    def real(value):
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError("invalid measured scalar")
+        return value
 
     def correlation(value, width):
         try:
@@ -286,7 +301,7 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
         if len(expected) != len(expected_metrics):
             return {"complete": False, "reason": "duplicate_sender_metric_interval"}
         selectors = {str(key[-1]) for key in expected}
-        owned_intervals = {key[-2:] for key in expected}
+        owned_ends = {key[-1] for key in expected}
     else:
         raise ValueError("unsupported readback signal")
     seen, matched, mismatched, extra = Counter(), set(), set(), 0
@@ -325,7 +340,7 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
                                 and log.get("eventName") == "agent.source.observation"
                                 and log.get("severityNumber") == wanted["severity_number"]
                                 and log.get("severityText") == wanted["severity_text"]
-                                and int(log.get("timeUnixNano", -1)) == wanted["time_ns"]
+                                and unsigned(log.get("timeUnixNano", -1)) == wanted["time_ns"]
                             )
                             (matched if good else mismatched).add(key)
                     else:
@@ -336,12 +351,12 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
                                        for point in metric[kind].get("dataPoints", [])]
                             for kind, data, point in entries:
                                 try:
-                                    interval = (int(point.get("startTimeUnixNano", -1)),
-                                                int(point.get("timeUnixNano", -1)))
+                                    end = unsigned(point.get("timeUnixNano", -1))
                                 except (ValueError, TypeError):
                                     continue
-                                if interval not in owned_intervals:
+                                if end not in owned_ends:
                                     continue
+                                interval = (unsigned(point.get("startTimeUnixNano", -1)), end)
                                 labels = attrs(point.get("attributes", []))
                                 key = (
                                     metric.get("name"), metric.get("unit"), labels.get("ce.stage"),
@@ -352,20 +367,28 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
                                     continue
                                 seen[key] += 1
                                 wanted = expected[key]
+                                temporality = data.get("aggregationTemporality")
                                 good = (
                                     common() and len(kinds) == 1
                                     and kind == ("sum" if "value" in wanted else "histogram")
                                     and set(labels) == {"ce.stage", "ce.outcome"}
-                                    and data.get("aggregationTemporality") in (1, "AGGREGATION_TEMPORALITY_DELTA")
+                                    and (type(temporality) is int and temporality == 1
+                                         or temporality == "AGGREGATION_TEMPORALITY_DELTA")
+                                    and unsigned(point.get("flags", 0)) == 0
                                     and not point.get("exemplars")
                                 )
                                 if kind == "sum":
-                                    good = good and data.get("isMonotonic") is True and int(point.get("asInt", -1)) == wanted["value"]
+                                    good = (
+                                        good and data.get("isMonotonic") is True and "asDouble" not in point
+                                        and unsigned(point.get("asInt", -1)) == wanted["value"]
+                                    )
                                 elif kind == "histogram":
-                                    good = good and all(
-                                        float(point.get(field, -1)) == wanted[field] for field in ("count", "sum", "min", "max")
-                                    ) and [int(v) for v in point.get("bucketCounts", [])] == wanted["bucket_counts"]
-                                    good = good and point.get("explicitBounds") == wanted["bounds"]
+                                    good = (
+                                        good and unsigned(point.get("count", -1)) == wanted["count"]
+                                        and all(real(point.get(field)) == wanted[field] for field in ("sum", "min", "max"))
+                                        and [unsigned(v) for v in point.get("bucketCounts", [])] == wanted["bucket_counts"]
+                                        and [real(v) for v in point.get("explicitBounds", [])] == wanted["bounds"]
+                                    )
                                 (matched if good else mismatched).add(key)
         except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
             invalid += 1

@@ -139,6 +139,10 @@ No per-signal SDK queue or periodic exporter is created.
 Log readback matches exact binary correlation IDs (collector hex or protobuf
 JSON base64), closed attributes/body/severity and source timestamp. Metrics
 match exact instrument/unit/labels/interval/count/buckets, not run-ID labels.
+Candidate metric points are selected by owned collection end before validating
+the start/type/unit, so a conflicting overlapping interval cannot disappear.
+Nonzero point flags (including no-recorded-value) and lossy numeric coercions
+cannot turn missing or malformed measurements into persistence evidence.
 Unknown resource/scope attributes, conflicting duplicates, extra owned points
 and malformed matching records fail qualification. No raw receiver rows are
 returned. A partial, failed or not-attempted sender makes the whole requested
