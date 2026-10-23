@@ -232,6 +232,37 @@ def test_admission_finishes_before_close_and_owner_summary(tmp_path, monkeypatch
     assert state["counts"]["after_close"] == 0
 
 
+def test_summary_snapshots_writer_reference_once(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    reporter = frame_health.FrameHealthReporter(tmp_path / "events", observation=admitted())
+    reads = []
+    writer = SimpleNamespace(is_alive=lambda: False)
+    def current_thread(self):
+        reads.append(True)
+        return writer if len(reads) == 1 else None
+    monkeypatch.setattr(frame_health.FrameHealthReporter, "_thread", property(current_thread), raising=False)
+    assert reporter.observation_summary()["writer_alive"] is False
+    assert len(reads) == 1
+
+
+def test_terminal_counts_are_read_after_writer_liveness(tmp_path):
+    observation = admitted()
+    reporter = frame_health.FrameHealthReporter(tmp_path / "events", observation=observation)
+    observation.increment("queued", 3)
+    observation.increment("written", 2)
+    reporter._source_closed = True
+    class Completing:
+        def is_alive(self):
+            observation.increment("written")
+            reporter._thread = None
+            return False
+    reporter._thread = Completing()
+    state = reporter.observation_summary()
+    assert state["counts"]["queued"] == state["counts"]["written"] == 3
+    assert state["abandoned"] == 0
+
+
 @pytest.mark.parametrize("initialization_failure", [False, True])
 def test_export_failure_preserves_local_observations(tmp_path, monkeypatch, initialization_failure):
     from process_telemetry import otlp

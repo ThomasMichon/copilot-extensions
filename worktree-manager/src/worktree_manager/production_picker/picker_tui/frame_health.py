@@ -302,8 +302,9 @@ class FrameHealthReporter:
         """Off-path owner snapshot, not a paint/authority or persistence claim."""
         if self.observation is None:
             return None
+        thread = self._thread
+        alive = thread is not None and thread.is_alive()
         state = self.observation.summary()
-        alive = self._thread is not None and self._thread.is_alive()
         unwritten = max(0, state["counts"]["queued"] - state["counts"]["written"])
         return {
             **state, "writer_started": self._source_writer_started,
