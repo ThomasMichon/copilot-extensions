@@ -6,11 +6,11 @@
   },
   "advertisement_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-owned-cold-drain.json",
-    "sha256": "a25f33579e8682e34e407347bb6ff07dbc881164429e2040eb0945e103665648"
+    "sha256": "dbb25e685428e838a817ef0c5a688b0ba1d36b9abcb27d470d92d938d1ec91fd"
   },
   "scope": "source bytes unchanged; previous-generation vector preserved, not a new runtime capture",
   "captured_from": {
-    "commit": "d3535754c8b7c1d0dca1150adf690c85abded4df",
+    "commit": "505dfb852ffe5b357d87fda491decc8f1d026170",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/send_outcome.py",

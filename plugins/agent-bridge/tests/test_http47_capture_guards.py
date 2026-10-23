@@ -538,7 +538,15 @@ def test_http47_capture_contained_dispatch_binds_input_report_and_portfolio(
             "agent-bridge",
         ]
         assert limits["timeout"] == 240
-        assert argv.count("--test-file") == 3
+        assert argv[3:-2] == [
+            "--test-file", "tests/test_http47_capture_probes.py",
+            "--test-file", "tests/test_cold_drain.py",
+            "--test-file", "tests/test_cold_recovery_races.py",
+            "--test-file", "tests/test_cold_recovery_drain.py",
+            "--test-file", "tests/test_cold_recovery_handoff_fence.py",
+        ]
+        assert argv[-2] == "-k"
+        assert set(argv[-1].split(" or ")) == set(evidence.PROBES)
         request = Path(os.environ[capture.REQUEST_ENV])
         raw = request.read_bytes()
         assert evidence.digest(raw) == os.environ[capture.REQUEST_SHA_ENV]
