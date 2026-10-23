@@ -45,6 +45,10 @@ function New-NativeExecutionDirectory {
     param([Parameter(Mandatory)][string]$Root)
     if ($env:OS -ne 'Windows_NT') { throw 'Native execution directory creation requires Windows.' }
     if ([CopilotExtensions.NativeFoundationState]::CheckPath($Root, $true, $true)) { return }
+    $anchor = [IO.Path]::GetPathRoot($Root)
+    while ($Root.Length -gt $anchor.Length -and $Root.EndsWith('\')) {
+        $Root = $Root.Substring(0, $Root.Length - 1)
+    }
     $parent = [IO.Path]::GetDirectoryName($Root)
     [IO.Directory]::CreateDirectory($parent) | Out-Null
     $null = [CopilotExtensions.NativeFoundationState]::CheckPath($parent, $true, $false)

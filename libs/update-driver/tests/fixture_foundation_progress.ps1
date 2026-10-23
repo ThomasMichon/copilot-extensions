@@ -60,17 +60,18 @@ if ($Mode -eq 'directory') {
     if ([IO.Directory]::GetAccessControl($Root).GetSecurityDescriptorSddlForm('All') -ne $before) {
         throw 'existing execution ACL was rewritten'
     }
-    $fresh = Join-Path $Root 'nested\fresh'
-    New-NativeExecutionDirectory -Root $fresh
-    $security = [IO.Directory]::GetAccessControl($fresh)
-    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-    if ($security.GetOwner([Security.Principal.SecurityIdentifier]) -ne $sid -or -not $security.AreAccessRulesProtected) {
-        throw 'new execution directory owner or protection differs from TokenUser policy'
+    foreach ($fresh in @((Join-Path $Root 'nested\fresh'), ((Join-Path $Root 'trailing\fresh') + '\'))) {
+        New-NativeExecutionDirectory -Root $fresh
+        $security = [IO.Directory]::GetAccessControl($fresh)
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        if ($security.GetOwner([Security.Principal.SecurityIdentifier]) -ne $sid -or -not $security.AreAccessRulesProtected) {
+            throw 'new execution directory owner or protection differs from TokenUser policy'
+        }
+        $allowed = @($sid.Value, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object -Unique
+        $actual = @($security.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+            ForEach-Object { $_.IdentityReference.Value }) | Sort-Object -Unique
+        if (($allowed -join ',') -ne ($actual -join ',')) { throw 'new execution access policy differs' }
     }
-    $allowed = @($sid.Value, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object -Unique
-    $actual = @($security.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
-        ForEach-Object { $_.IdentityReference.Value }) | Sort-Object -Unique
-    if (($allowed -join ',') -ne ($actual -join ',')) { throw 'new execution access policy differs' }
     Save 'directory-ok' 'new owner/protected ACL and unchanged existing ACL verified'
     exit 0
 }

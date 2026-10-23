@@ -95,6 +95,7 @@ def test_native_directory_creation_matches_queue_policy_without_acl_migration(na
     create_queue_directory(root)
     run_native(root, native_source, "directory")
     assert (root / "nested" / "fresh").is_dir()
+    assert (root / "trailing" / "fresh").is_dir()
     assert (root / "directory-ok").is_file()
     assert not (root / fs.FILENAME).exists()
 
