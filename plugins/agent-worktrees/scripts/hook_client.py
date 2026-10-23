@@ -363,12 +363,8 @@ def _command_catalog_context() -> str:
                 root, contract["plugin"], Path.home() / ".agent-worktrees"
             ),
         }
-        projection = _load_sibling("resident_control_projection.py")
-        project_candidate = getattr(projection, "project_candidate", None)
-        if callable(project_candidate):
-            candidate = project_candidate(catalog["binding"])
-            if candidate is not None:
-                catalog["residentControl"] = candidate
+        if callable(add_projection := getattr(_load_sibling("resident_control_projection.py"), "add_to_catalog", None)):
+            add_projection(catalog)
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, StopIteration) as error:
         sys.stderr.write(f"[agent-worktrees] Command catalog unavailable: {error}\n")
         return ""
@@ -399,30 +395,11 @@ def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
     catalog = metadata.get("commandCatalog") if isinstance(metadata, dict) else None
     contexts = []
     if registration.startswith(_COMMAND_CATALOG_HEADING):
-        def catalog_block(context):
-            if not isinstance(context, str) or not context.startswith(_COMMAND_CATALOG_HEADING):
-                return None
-            match = re.search(r"(?ms)^```json\r?\n(.*?)\r?\n```(?=\r?\n|$)", context)
-            if match is None:
-                return None
-            try:
-                value = json.loads(match.group(1))
-            except (ValueError, TypeError):
-                return None
-            if (
-                not isinstance(value, dict)
-                or value.get("schema") != "copilot-extensions.session-command-catalog"
-                or type(value.get("version")) is not int or value["version"] != 1
-                or value.get("plugin") != "agent-worktrees"
-            ):
-                return None
-            return match
-
-        old, current = catalog_block(registration), catalog_block(catalog)
-        if old is not None and current is not None:
-            registration = (
-                registration[:old.start()] + current.group(0) + registration[old.end():]
-            )
+        if isinstance(catalog, str) and catalog.startswith(_COMMAND_CATALOG_HEADING):
+            block = re.compile(r"(?ms)^```json\r?\n.*?\r?\n```(?=\r?\n|$)")
+            current = block.search(catalog)
+            if current is not None:
+                registration = block.sub(lambda _: current.group(0), registration, count=1)
         contexts.append(registration)
     else:
         if not isinstance(catalog, str) or not catalog.startswith(_COMMAND_CATALOG_HEADING):

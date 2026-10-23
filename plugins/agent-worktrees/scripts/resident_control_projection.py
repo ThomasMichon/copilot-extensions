@@ -5,6 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def add_to_catalog(catalog: dict) -> None:
+    candidate = project_candidate(catalog["binding"])
+    if candidate is not None:
+        catalog["residentControl"] = candidate
+
+
 def project_candidate(binding: dict) -> dict | None:
     if not isinstance(binding, dict) or binding.get("status") != "selected":
         return None
