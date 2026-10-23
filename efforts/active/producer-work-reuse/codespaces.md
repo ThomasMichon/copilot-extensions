@@ -2,6 +2,18 @@
 
 [Effort](README.md) · [Validation and ownership](validation.md)
 
+## Authority amendment
+
+The explicitly selected policy is
+[`selected_then_full_publication`](selected-authority-contract.md): fresh
+selected-account/source/configuration/credential checks admit observational
+effects and retries; full live candidate/configuration/credential validation
+gates actionable, bounded publication. An unrelated candidate change may allow
+an observation or connection wake before its result is rejected. This accepted
+tradeoff replaces whole-set revalidation at each observation; selected
+authentication, no-wake/age protections, owner/tenant fencing and all performance
+gates remain. The amendment owns the exact schedule and rejection semantics.
+
 Paths below are relative to `plugins/agent-codespaces/`. New API names and
 workloads are agent-recommended proposals.
 
@@ -50,8 +62,10 @@ providers to understand a new global singleton.
   admission age. A queued slow venue cannot connect from arbitrarily old
   Available evidence. Expired proof returns unknown/deferred; any necessary
   refresh is explicit, deduplicated and counted, not hidden per-venue relisting.
-- Changes of source, account credentials/selection or owner generation invalidate
-  reuse. No durable account token is stored in the inventory.
+- Selected source/account/configuration/credential changes or owner-generation
+  changes invalidate effect admission; full candidate/configuration/credential
+  changes invalidate actionable publication under the amendment above.
+  No durable account token is stored in the inventory.
 
 ## S3b — Batch mux checks and bounded venue concurrency
 
