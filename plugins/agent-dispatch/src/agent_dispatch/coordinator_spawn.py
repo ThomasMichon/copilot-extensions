@@ -289,7 +289,8 @@ def register_spawn_routes(
                         delivered = bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30)
                         if delivered:
                             attempt.sent()
-                except (TaskError, OSError, sqlite3.Error, subprocess.SubprocessError) as exc:
+                except (TaskError, OSError, sqlite3.Error, subprocess.SubprocessError,
+                        bridge.BridgeUnavailable) as exc:
                     if delivery_attempted:
                         # Transport or receipt settlement may fail after acceptance.
                         # Keep custody; release is not observation recovery.

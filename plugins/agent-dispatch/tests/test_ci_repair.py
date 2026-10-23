@@ -516,7 +516,7 @@ def test_authority_probe_does_not_hold_coordinator_write_lock(tmp_path, monkeypa
                                  repo=task["repo"], task_id=task["id"])
 
 
-@pytest.mark.parametrize("delivery", ["accepted", "unknown", "receipt_failure"])
+@pytest.mark.parametrize("delivery", ["accepted", "unknown", "receipt_failure", "unavailable"])
 def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeypatch, delivery):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -536,6 +536,8 @@ def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeyp
         calls.append(k) or SimpleNamespace(returncode=0, stdout='{"session_id":"trusted"}', stderr="")
     ))
     def deliver(*args, **kwargs):
+        if delivery == "unavailable":
+            raise bridge.BridgeUnavailable("protocol support is unconfirmed")
         if delivery != "accepted":
             from agent_procutil.startup import StartupExpiry, StartupTimeouts
             raise bridge.StartupOutcomeUnknown(

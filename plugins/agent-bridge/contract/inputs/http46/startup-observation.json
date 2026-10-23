@@ -38,6 +38,18 @@
     "method": "GET", "path": "/health", "late_receipt_seconds": 31,
     "clock": "communication", "mutations": 0, "maximum_socket_timeout_seconds": 30
   },
+  "resume_acknowledgement": {
+    "session_id": "bridge-a",
+    "invalid_results": [
+      null, {}, [], {"session_id": "bridge-a"}, {"status": "idle"},
+      {"session_id": "bridge-a", "status": "starting"},
+      {"session_id": "other", "status": "idle"}
+    ],
+    "ready": false,
+    "reason": "resume_unknown",
+    "resume_posts": 1,
+    "prompt_posts": 0
+  },
   "prompt_request": {
     "method": "POST", "path": "/api/v1/sessions/bridge-a/turns",
     "body": {"prompt": "one exact continuation", "no_resume": true},

@@ -5,6 +5,7 @@ import copy
 import hashlib
 import http.client
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -199,6 +200,45 @@ def test_http46_lost_ack_posts_once_after_ready_without_retry_or_resume(monkeypa
     output = capsys.readouterr()
     assert json.loads(output.out) == vector["lost_ack"]["json"]
     assert "one exact continuation" not in output.err
+
+
+@pytest.mark.parametrize("index", range(7))
+def test_http46_incomplete_resume_ack_cannot_authorize_prompt(monkeypatch, index):
+    expected = packet()["resume_acknowledgement"]
+    client = BridgeClient("http://fixture.invalid", "fixture")
+    calls = []
+    release = threading.Event()
+
+    class Stream:
+        def __iter__(self):
+            yield {"event": "_heartbeat", "data": {}}
+            release.wait(2)
+
+        def close(self):
+            pass
+
+    def request(method, path, *args, **kwargs):
+        calls.append((method, path, kwargs))
+        return expected["invalid_results"][index]
+
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(client, "get_cursor_info", lambda *a, **kw: {
+        "head_id": 0, "continuity_id": None,
+    })
+    monkeypatch.setattr(client, "stream_events", lambda *a, **kw: Stream())
+    try:
+        with observer.observing_send(arguments()):
+            with pytest.raises(observer.StartupObservationError) as raised:
+                client.resume_session(expected["session_id"])
+                client.submit_prompt(expected["session_id"], "must not be submitted")
+            assert raised.value.reason == expected["reason"] == "resume_unknown"
+            assert observer.current().clock.ready is expected["ready"] is False
+        assert len(calls) == expected["resume_posts"] == 1
+        assert calls[0][:2] == ("POST", "/api/v1/sessions/bridge-a/resume")
+        assert calls[0][2]["allow_retry"] is False
+        assert sum(path.endswith("/turns") for _, path, _ in calls) == expected["prompt_posts"] == 0
+    finally:
+        release.set()
 
 
 def test_http46_local_timer_does_not_renew_and_process_budget_is_independent(capsys):

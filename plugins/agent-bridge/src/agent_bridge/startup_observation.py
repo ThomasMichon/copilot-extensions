@@ -31,6 +31,8 @@ class StartupObservationError(Exception):
         self.reason = reason
         if reason == "admission_unknown":
             boundary = "prompt admission acknowledgement unavailable"
+        elif reason == "resume_unknown":
+            boundary = "resume readiness acknowledgement unavailable"
         elif clock is None:
             boundary = f"startup observation unavailable at {phase}"
         else:
@@ -276,8 +278,15 @@ class StartupObservation:
                 result = call()
                 if not stop.is_set():
                     self.received(event="resume-response")
-                    if isinstance(result, dict) and result.get("status") in {"idle", "running"}:
-                        self.ready()
+                    if (
+                        not isinstance(result, dict)
+                        or result.get("status") not in ("idle", "running")
+                        or result.get("session_id") != session_id
+                    ):
+                        raise StartupObservationError(
+                            None, self.phase, self.clock.elapsed, reason="resume_unknown",
+                        )
+                    self.ready()
                     messages.put(("result", result))
             except BaseException as exc:
                 if not stop.is_set():
@@ -305,7 +314,7 @@ class StartupObservation:
                     self.check()
                     return value
                 elif kind == "request-error":
-                    if isinstance(value, BridgeClientError):
+                    if isinstance(value, (BridgeClientError, StartupObservationError)):
                         raise value
                     self.check()
                     self.report("observation_lost", error_type=type(value).__name__)

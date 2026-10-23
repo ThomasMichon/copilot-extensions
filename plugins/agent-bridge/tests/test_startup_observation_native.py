@@ -18,7 +18,7 @@ from agent_bridge.provider_process import run_captured
 class Backend:
     def __init__(
         self, *, updates=True, disconnect=False, lost_admission=False,
-        ack_failure=None, protocol=46, delayed_preflight=None,
+        ack_failure=None, protocol=46, delayed_preflight=None, resume_ack_failure=None,
     ):
         self.updates = updates
         self.disconnect = disconnect
@@ -133,6 +133,19 @@ class Backend:
                                 backend.condition.notify_all()
                     backend.state = "idle"
                     backend.resumed.set()
+                    if resume_ack_failure == "no-content":
+                        self.send_response(204)
+                        self.end_headers()
+                        return
+                    if resume_ack_failure == "empty":
+                        self.reply({})
+                        return
+                    if resume_ack_failure == "wrong-session":
+                        self.reply({"session_id": "other", "status": "idle"})
+                        return
+                    if resume_ack_failure == "starting":
+                        self.reply({"session_id": "original", "status": "starting"})
+                        return
                     self.reply({"session_id": "original", "status": "idle"})
                 elif path == "/api/v1/sessions/original/turns":
                     backend.turns.append(body)
@@ -344,4 +357,18 @@ def test_real_protocol_refusal_never_replaces_retained_dispatch_session(monkeypa
                 prior_session_id="original", liveness_fn=lambda _: "gone",
             )
         assert backend.resume_calls == 0
+        assert backend.turns == []
+
+
+@pytest.mark.parametrize("failure", ["no-content", "empty", "wrong-session", "starting"])
+def test_incomplete_resume_ack_never_admits_a_followup_prompt(failure):
+    with Backend(resume_ack_failure=failure) as backend:
+        result, _ = invoke(backend)
+        assert result.returncode == 70, result.stderr
+        payload = json.loads(result.stdout)
+        assert payload["reason"] == "resume_unknown"
+        assert payload["retryable"] is False
+        assert not any(item["event"] == "ready" for item in frames(result))
+        assert backend.resume_calls == 1
+        assert backend.resumed.is_set()
         assert backend.turns == []

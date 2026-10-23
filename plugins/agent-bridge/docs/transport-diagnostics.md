@@ -171,6 +171,11 @@ stopped. Inspect that session and its existing receipt/history; do not infer
 permission to resend or replace it. Explicit cancellation remains with the
 operation owner.
 
+A resume acknowledgement must identify the original session and confirm `idle`
+or `running` before startup can become ready. An empty/204 response, a missing
+status, another session's response or a non-ready status exits 70 with
+`reason: resume_unknown`; no follow-up prompt is admitted.
+
 After readiness, prompt admission uses a separate short response wait and
 `no_resume: true`: a race back to STOPPED cannot silently begin another
 startup. A lost admission acknowledgement also exits 70 with

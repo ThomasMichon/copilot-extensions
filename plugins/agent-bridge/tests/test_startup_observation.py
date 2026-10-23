@@ -174,6 +174,29 @@ def test_late_preflight_response_cannot_renew_an_expired_contact_clock(monkeypat
         observation._active.reset(token)
 
 
+@pytest.mark.parametrize("result", [
+    None, {}, [], {"session_id": "original"}, {"status": "idle"},
+    {"session_id": "original", "status": "starting"},
+    {"session_id": "original", "status": []},
+    {"session_id": "other", "status": "idle"},
+])
+def test_incomplete_resume_acknowledgement_never_marks_ready(result):
+    release = threading.Event()
+
+    def events():
+        while not release.wait(.01):
+            yield {"event": "_heartbeat", "data": {}}
+
+    item = observation.StartupObservation(StartupTimeouts())
+    try:
+        with pytest.raises(observation.StartupObservationError) as raised:
+            item.request(Client(events), "original", lambda: result)
+        assert raised.value.reason == "resume_unknown"
+        assert not item.clock.ready
+    finally:
+        release.set()
+
+
 def test_ready_ends_startup_budget_not_a_later_turn(capsys):
     now = [0.0]
     item = observation.StartupObservation(StartupTimeouts())
@@ -348,7 +371,9 @@ def test_actual_service_accepts_the_observers_initial_subscription(empty):
             return Stream(events)
 
     item = observation.StartupObservation(StartupTimeouts(1, 3, 1))
-    assert item.request(RouteClient(), "original", lambda: {"status": "idle"})["status"] == "idle"
+    assert item.request(
+        RouteClient(), "original", lambda: {"session_id": "original", "status": "idle"},
+    )["status"] == "idle"
     assert len(subscribed) == 1
     assert subscribed[0]["caller_id"] == item.caller_id
     assert subscribed[0]["transient"] is (not empty)
