@@ -88,6 +88,9 @@ staged self-installation under the original request's custody. `--no-update`
 and `--with-reconcile` independently select that work; equivalent pending
 requests coalesce without discarding another project's request. Acceptance is
 not maintenance completion; follow the durable request/log for the outcome.
+Worktrees publication refusal leaves independently eligible bootstrap and
+reconciliation work available. Known phase failures do not cancel independent
+later phases; the aggregate durable outcome remains unsuccessful.
 
 Explicit blocking launch maintenance retains fixed `launch-update bootstrap`,
 `launch-update reconcile` and `launch-update staged --status <acquisition-result>`

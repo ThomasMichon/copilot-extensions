@@ -686,3 +686,33 @@ repository history.
   passed. The next exact-source Linux run also selects the shared driver's
   core and transport tests through the same hardened wrapper, not host-side
   integration or an enlarged required-PR test portfolio.
+
+### 2026-10-23 - Native Linux passes; preserve independent work after review findings
+
+- Exact-source run
+  [39914962618](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39914962618)
+  at `afb2d47f7ab156c3e6ab9ba6d31624c46a91eda9` passed all three actual
+  Linux container targets: Worktrees, Manager and the shared driver. This
+  includes live long-root participation and native Bash handoff. The disabled
+  Windows rotation and shared-issue reporting were correctly skipped, not
+  treated as qualification.
+- Copilot identified two concrete orchestration misses. A denied Worktrees
+  publication must not suppress independently eligible repository bootstrap
+  and reconciliation. Likewise, an unrelated reconciliation failure must not
+  suppress eligible staged Worktrees apply. The revised executor continues
+  those canonical phases, retains the refusal diagnostic and returns a failed
+  aggregate outcome. Acquisition failure and unhandled custody failures are
+  not converted into permission to continue.
+- Added managed-refusal and phase-failure regressions, then re-ran the full
+  local composed slice: 209 passed, 25 explicit platform/native skips, with
+  sandbox retirement. Four actual healthy handoffs completed in 18.36 seconds
+  total before the gated installer was released. Their existing 20-second
+  per-handoff limit, installer gate and production deadlines are unchanged.
+- Local-only investigation separated that latency contract from the explicit
+  blocking compatibility command, whose completion includes serial worker
+  and executor startup. Its diagnostic samples completed in 5.56--19.69 seconds;
+  the result-correctness watchdog is now separately bounded at 30 seconds,
+  not represented as healthy-handoff latency. Failure-only phase/request/log
+  diagnostics remain; all temporary timers and source instrumentation were
+  removed before publication. Final-head review, CI and Linux acceptance
+  still precede merge. The operator selected local-only Windows qualification.

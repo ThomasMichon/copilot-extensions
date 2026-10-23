@@ -213,6 +213,9 @@ stage, background-job join, inline-download retry or separate maintenance queue.
 `WORKTREE_NO_UPDATE` and `WORKTREE_NO_RECONCILE` remain independent. A failed
 submission warns without starting an inline installer; a failed accepted
 operation remains inspectable in its durable request/log.
+The owner continues independently eligible maintenance after a handled phase
+failure and preserves the failed aggregate outcome; one plugin's failure does
+not suppress an otherwise permitted staged Worktrees update.
 
 Blocking native wrappers submit fixed `launch-update bootstrap`, `launch-update reconcile`
 and `launch-update staged` requests instead of executing JSON plan

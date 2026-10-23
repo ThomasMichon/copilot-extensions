@@ -123,6 +123,7 @@ def _execute_automatic(args: argparse.Namespace) -> int:
     from .update_driver_json_cli import _ProtocolBuffer
 
     results = []
+    diagnostics = []
 
     def run_phase(phase: str, **options) -> int:
         selected = argparse.Namespace(
@@ -147,21 +148,31 @@ def _execute_automatic(args: argparse.Namespace) -> int:
         if stage.get("acquisition_ok") is False:
             raise ValueError("automatic update acquisition failed; see updater status")
         if stage.get("runtime_apply_blocked"):
-            raise ValueError(f"Automatic runtime apply blocked: {stage['runtime_apply_blocked']}")
-        if run_phase("bootstrap", defer_worktrees=stage.get("plugin_changed") is True):
-            print(json.dumps({"action": "launch-update", "phase": "automatic", "executed": results}))
-            return 1
-    if getattr(args, "with_reconcile", False) and run_phase("reconcile"):
-        print(json.dumps({"action": "launch-update", "phase": "automatic", "executed": results}))
-        return 1
-    if stage is not None and stage.get("plugin_changed") is True:
+            reason = stage["runtime_apply_blocked"]
+            diagnostic = stage.get("runtime_apply_diagnostic")
+            diagnostics.append(diagnostic if isinstance(diagnostic, dict) else {
+                "service": "agent-worktrees", "phase": "runtime",
+                "reason": reason, "message": f"Automatic runtime apply blocked: {reason}",
+            })
+            _log(f"launch: Worktrees runtime apply blocked: {reason}")
+        run_phase(
+            "bootstrap",
+            defer_worktrees=stage.get("plugin_changed") is True or bool(diagnostics),
+        )
+    if getattr(args, "with_reconcile", False):
+        run_phase("reconcile")
+    if (
+        stage is not None and stage.get("plugin_changed") is True
+        and not stage.get("runtime_apply_blocked")
+    ):
         path = update_stage.status_path()
         _current, digest = _staged_snapshot(path)
-        if run_phase("staged", status=str(path), snapshot=digest):
-            print(json.dumps({"action": "launch-update", "phase": "automatic", "executed": results}))
-            return 1
-    print(json.dumps({"action": "launch-update", "phase": "automatic", "executed": results}))
-    return 0
+        run_phase("staged", status=str(path), snapshot=digest)
+    result = {"action": "launch-update", "phase": "automatic", "executed": results}
+    if diagnostics:
+        result["diagnostics"] = diagnostics
+    print(json.dumps(result))
+    return 1 if diagnostics or any(item["returncode"] for item in results) else 0
 
 
 def _execute_phase(args: argparse.Namespace) -> int:

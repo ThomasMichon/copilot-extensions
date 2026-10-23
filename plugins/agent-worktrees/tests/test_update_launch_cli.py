@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 
 import pytest
@@ -91,13 +92,58 @@ def test_automatic_work_runs_only_after_dispatch_under_one_custody(
     {"stage_done": False},
     {"stage_done": True, "skipped": "locked"},
     {"stage_done": True, "acquisition_ok": False},
-    {"stage_done": True, "runtime_apply_blocked": "deployment-managed"},
 ])
 def test_automatic_acquisition_refusal_never_starts_installers(monkeypatch, capsys, stage):
     monkeypatch.setattr(launch.update_stage, "stage", lambda: stage)
     monkeypatch.setattr(launch, "_execute_phase", lambda *a: pytest.fail("installer started"))
     assert launch._execute(_args(phase="automatic", with_reconcile=True)) == 1
     assert json.loads(capsys.readouterr().out)["reason"] == "launch-phase-invalid"
+
+
+@pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("include_diagnostic", [False, True])
+def test_managed_worktrees_retains_refusal_but_runs_independent_bootstrap_and_reconcile(
+    monkeypatch, capsys, changed, include_diagnostic,
+):
+    diagnostic = dict(
+        service="agent-worktrees", phase="runtime", reason="deployment-managed",
+        message="Worktrees runtime is externally managed",
+    )
+    stage = dict(
+        stage_done=True, acquisition_ok=True, plugin_changed=changed,
+        runtime_apply_blocked="deployment-managed",
+    )
+    if include_diagnostic:
+        stage["runtime_apply_diagnostic"] = diagnostic
+    monkeypatch.setattr(launch.update_stage, "stage", lambda: stage)
+    plans = iter([
+        dict(action="self-update", diagnostics=[diagnostic], updates=[
+            dict(service="repository-bootstrap", argv=["repository-installer"]),
+        ]),
+        dict(action="continue", diagnostics=[diagnostic]),
+    ])
+    monkeypatch.setattr(launch.update_cli, "_core_helper", lambda *a: lambda: next(plans))
+    monkeypatch.setattr(launch, "_staged_snapshot", lambda *a: pytest.fail("denied staged apply"))
+    monkeypatch.setattr(launch, "execution_diagnostic", lambda *a, **kw: None)
+    observed = []
+    monkeypatch.setattr(launch.reconcile, "_run_plan_step", lambda argv, update, log, **kw: (
+        observed.append(update["service"]) or 0
+    ))
+
+    def reconcile(args):
+        observed.append("reconcile")
+        print(json.dumps({"executed": []}))
+        return 0
+
+    monkeypatch.setattr(launch.update_cli, "cmd_reconcile_plugins", reconcile)
+    assert launch._execute(_args(phase="automatic", with_reconcile=True)) == 1
+    assert observed == ["repository-bootstrap", "reconcile"]
+    result = json.loads(capsys.readouterr().out)
+    assert [item["phase"] for item in result["executed"]] == ["bootstrap", "reconcile"]
+    assert all(item["returncode"] == 0 for item in result["executed"])
+    assert result["diagnostics"][0]["reason"] == "deployment-managed"
+    if include_diagnostic:
+        assert result["diagnostics"] == [diagnostic]
 
 
 @pytest.mark.parametrize("failed", ["bootstrap", "reconcile", "staged"])
@@ -115,8 +161,9 @@ def test_automatic_phase_failure_is_not_a_successful_completion(monkeypatch, cap
 
     monkeypatch.setattr(launch, "_execute_phase", execute)
     assert launch._execute(_args(phase="automatic", with_reconcile=True)) == 1
-    assert executed[-1] == failed
-    assert json.loads(capsys.readouterr().out)["executed"][-1]["returncode"] == 7
+    assert executed == ["bootstrap", "reconcile", "staged"]
+    result = json.loads(capsys.readouterr().out)
+    assert next(item for item in result["executed"] if item["phase"] == failed)["returncode"] == 7
 
 
 def test_reconcile_phase_calls_canonical_executor_only_under_request_custody(monkeypatch):
@@ -367,10 +414,28 @@ def test_actual_fixed_request_has_durable_result_on_empty_inventory(tmp_path, mo
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.chdir(tmp_path)
-    result = run_owned(
-        [sys.executable, "-m", "agent_worktrees", "launch-update", phase],
-        timeout=20,
-    )
+    # Blocking compatibility includes worker/executor startup, unlike detached handoff.
+    completion_timeout = 30
+    try:
+        result = run_owned(
+            [sys.executable, "-m", "agent_worktrees", "launch-update", phase],
+            timeout=completion_timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        root = home / ".copilot-extensions" / "update-driver"
+        requests = driver.status(root=root)
+        logs = [
+            row.log_path.read_text(encoding="utf-8")
+            for row in requests if row.log_path.exists()
+        ]
+        worker_log = root / "worker.log"
+        if worker_log.exists():
+            logs.append(worker_log.read_text(encoding="utf-8"))
+        raise AssertionError(
+            f"fixed {phase} request exceeded {completion_timeout}s; "
+            f"requests={[(row.state, row.error) for row in requests]}; "
+            f"stdout={error.stdout!r}; stderr={error.stderr!r}; logs={logs}"
+        ) from error
     assert result.returncode == 0, result.stderr
     summary = json.loads(result.stdout)
     assert summary["executed"] == []

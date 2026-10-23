@@ -1293,6 +1293,9 @@ request, not on the handoff path. `--no-update` skips acquisition and bootstrap;
 valid only for `automatic`, which derives its stage rather than accepting a
 status path or snapshot. Acquisition refusal or a failed phase is a failed
 durable result, never successful installation.
+Worktrees publication refusal is retained as a diagnostic without suppressing
+independent bootstrap or reconciliation. A reconciliation failure does not
+cancel eligible staged Worktrees apply; the final aggregate result is nonzero.
 
 Blocking wrappers submit `launch-update reconcile`, `launch-update bootstrap`
 and `launch-update staged --status <path>` rather than running cached argv.

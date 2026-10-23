@@ -161,6 +161,7 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shel
     home = tmp_path / "home"
     home.mkdir()
     started, gate, finished = (tmp_path / name for name in ("started", "gate", "finished"))
+    shell_entered, client_entered = (tmp_path / name for name in ("shell-entered", "client-entered"))
     installer = tmp_path / "installer.py"
     installer.write_text(
         "import time\nfrom pathlib import Path\n"
@@ -179,6 +180,7 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shel
     (package / "__main__.py").write_text(
         "import argparse,sys\nfrom pathlib import Path\n"
         "_INVOCATION_CWD=Path.cwd()\n"
+        f"Path({str(client_entered)!r}).write_text('entered')\n"
         "from agent_worktrees import config as cfg,update_cli,update_launch_cli as launch\n"
         "argv=sys.argv[1:]; project=None\n"
         "if argv[:1]==['--project']: project=argv[1]; argv=argv[2:]\n"
@@ -223,6 +225,7 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shel
             )),
             "function Start-Job { throw 'healthy launch started shell-owned staging' }",
             "if($null -ne (Start-UpdateStage)){throw 'unexpected stage handle'}",
+            f"[IO.File]::WriteAllText('{shell_entered}','entered')",
             "Invoke-UpdateApply",
         ])
         fixture = tmp_path / "launch.ps1"
@@ -245,6 +248,7 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shel
                 "_run_launch_request", "invoke_update_apply", "start_update_stage",
             )),
             "start_update_stage", "[[ -z \"$_STAGE_PID\" ]]",
+            f"printf 'entered' > {shlex.quote(str(shell_entered))}",
             "invoke_update_apply",
         ])
         fixture = tmp_path / "launch.sh"
@@ -254,16 +258,27 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shel
     requests = ()
     try:
         for cycle in range(4):
+            shell_entered.unlink(missing_ok=True)
+            client_entered.unlink(missing_ok=True)
             if cycle == 3:
                 source = fixture.read_text(encoding="utf-8-sig")
                 source = source.replace(
                     "$script:LaunchProject='fixture'", "$script:LaunchProject='other-project'",
                 ).replace("LAUNCH_PROJECT=fixture", "LAUNCH_PROJECT=other-project")
                 fixture.write_text(source, encoding="utf-8-sig" if shell == "pwsh" else "utf-8")
-            result = subprocess.run(
-                command, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20,
-                **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-            )
+            try:
+                result = subprocess.run(
+                    command, cwd=tmp_path, env=env, capture_output=True, text=True, timeout=20,
+                    **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+                )
+            except subprocess.TimeoutExpired as error:
+                state = [(row.state, row.error) for row in driver.status(root=queue_root)]
+                report = log.read_text(encoding="utf-8-sig") if log.exists() else "no setup log"
+                raise AssertionError(
+                    f"handoff cycle {cycle + 1} exceeded 20s; shell={shell_entered.exists()}, "
+                    f"client={client_entered.exists()}, installer={started.exists()}, "
+                    f"finished={finished.exists()}, requests={state}\n{report}"
+                ) from error
             assert result.returncode == 0, result.stdout + result.stderr
             report = log.read_text(encoding="utf-8-sig")
             assert "failed (exit" not in report, report
