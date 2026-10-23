@@ -124,6 +124,59 @@ def test_console_decline_calls_existing_entry_exactly_once(monkeypatch):
     assert calls == ["legacy"]
 
 
+def test_module_entry_decline_has_no_root_import_or_exit(monkeypatch):
+    from agent_worktrees import _shutdown_exit
+
+    imports = []
+    original_import = builtins.__import__
+
+    def record_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name in {"__main__", "agent_worktrees.__main__"} or "__main__" in (fromlist or ()):
+            imports.append(name)
+            raise AssertionError("declined module entry imported the root")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(sys, "argv", ["agent-worktrees", "--help"])
+    monkeypatch.setattr(entry, "select_current_feed", lambda _: None)
+    monkeypatch.setattr(_shutdown_exit, "run_and_exit",
+                        lambda _: pytest.fail("declined module entry exited"))
+    with monkeypatch.context() as scoped:
+        scoped.setattr(builtins, "__import__", record_import)
+        result = entry.run_module_if_selected()
+    assert result is None and imports == []
+
+
+def test_module_entry_passes_selected_callable_to_current_exit_policy_once(monkeypatch):
+    from agent_worktrees import _shutdown_exit
+
+    def selected():
+        pytest.fail("handler ran outside the exit policy")
+
+    calls = []
+    monkeypatch.setattr(sys, "argv", ["agent-worktrees", "--project", "p", "list", "--follow"])
+    monkeypatch.setattr(entry, "select_current_feed", lambda _: selected)
+    monkeypatch.setattr(_shutdown_exit, "run_and_exit", lambda handler: calls.append(handler))
+    assert entry.run_module_if_selected() is None
+    assert calls == [selected]
+
+
+def test_root_console_entry_preserves_identity_and_late_bound_main(monkeypatch):
+    import inspect
+    from agent_worktrees import __main__ as core, _shutdown_exit
+
+    def replacement():
+        pytest.fail("main ran outside the exit policy")
+
+    calls = []
+    monkeypatch.setattr(core, "main", replacement)
+    monkeypatch.setattr(_shutdown_exit, "run_and_exit", lambda handler: calls.append(handler))
+    assert core.console_entry.__name__ == "console_entry"
+    assert core.console_entry.__module__ == "agent_worktrees.__main__"
+    assert not inspect.signature(core.console_entry).parameters
+    assert core.console_entry() is None
+    assert calls == [replacement]
+
+
 def test_current_handler_preserves_config_cell_and_selector_arguments(monkeypatch):
     old = cfg.active_project()
     seen = []

@@ -76,6 +76,28 @@ def _run_current_feed(argv):
         return 130
 
 
+def run_module_if_selected() -> None:
+    import sys
+
+    selected = select_current_feed(sys.argv[1:])
+    if selected is not None:
+        from ._shutdown_exit import run_and_exit
+
+        run_and_exit(selected)
+
+
+def run_legacy_console(main) -> None:
+    """Keep the existing shutdown policy around the caller's current handler.
+
+    The root compatibility entry supplies its late-bound main callable, rather
+    than importing the root here. This keeps legacy callers and the installed
+    entry's fallback on the same interrupt, atexit and stream-flush policy.
+    """
+    from ._shutdown_exit import run_and_exit
+
+    run_and_exit(main)
+
+
 def console_entry():
     import sys
 
