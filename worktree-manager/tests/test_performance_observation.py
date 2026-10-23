@@ -179,6 +179,21 @@ def test_readback_scopes_logs_before_validating_foreign_batch_content():
         "scopeLogs": [{"logRecords": [{"traceId": "d" * 32}]}],
     }]}
     assert signal_readback([json.dumps(request)], signal="logs", expected_logs=expected)["complete"]
+    upper = deepcopy(request)
+    upper_log = upper["resourceLogs"][0]["scopeLogs"][0]["logRecords"][2]
+    upper_log["traceId"] = upper_log["traceId"].upper()
+    upper_log["spanId"] = upper_log["spanId"].upper()
+    duplicate = signal_readback([json.dumps(request), json.dumps(upper)], signal="logs", expected_logs=expected)
+    assert not duplicate["complete"] and duplicate["duplicates"] == 1
+    upper_expected = {(trace.upper(), span.upper()): value for (trace, span), value in expected.items()}
+    assert signal_readback([json.dumps(request)], signal="logs", expected_logs=upper_expected)["complete"]
+    import base64
+    encoded = deepcopy(upper)
+    encoded_log = encoded["resourceLogs"][0]["scopeLogs"][0]["logRecords"][2]
+    encoded_log["traceId"] = base64.b64encode(bytes.fromhex(encoded_log["traceId"])).decode()
+    encoded_log["spanId"] = base64.b64encode(bytes.fromhex(encoded_log["spanId"])).decode()
+    duplicate = signal_readback([json.dumps(upper), json.dumps(encoded)], signal="logs", expected_logs=expected)
+    assert not duplicate["complete"] and duplicate["duplicates"] == 1
     bad = deepcopy(log)
     del bad["spanId"]
     request["resourceLogs"][0]["scopeLogs"][0]["logRecords"].append(bad)

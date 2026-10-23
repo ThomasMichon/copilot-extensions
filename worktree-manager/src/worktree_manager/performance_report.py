@@ -307,7 +307,12 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
         )
 
     if signal == "logs":
-        expected = expected_logs or {}
+        expected = {}
+        for (trace, span), wanted in (expected_logs or {}).items():
+            key = (correlation(trace, 16), correlation(span, 8))
+            if key in expected:
+                return {"complete": False, "reason": "duplicate_sender_log_identity"}
+            expected[key] = wanted
         owned_traces = {trace for trace, _ in expected}
         selectors = {trace for trace, _ in expected}
         selectors.update(base64.b64encode(bytes.fromhex(trace)).decode("ascii") for trace, _ in expected)
@@ -321,8 +326,10 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
         raise ValueError("unsupported readback signal")
     seen, matched, mismatched, extra = Counter(), set(), set(), 0
     invalid = 0
+    candidate_selectors = {value.lower() for value in selectors} if signal == "logs" else selectors
     for line in lines:
-        if not any(selector in line for selector in selectors):
+        candidate = line.lower() if signal == "logs" else line
+        if not any(selector in candidate for selector in candidate_selectors):
             continue
         try:
             value = json.loads(line)
