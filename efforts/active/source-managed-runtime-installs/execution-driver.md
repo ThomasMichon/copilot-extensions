@@ -40,8 +40,9 @@ policy changed or recurring worker enrolled by this plan.
    telemetry and failure exit status. Unsupported skew must fail explicitly,
    not fall back to a second foreground installer.
 5. Keep direct execution an explicitly named supervised-debug path using the
-   same transaction authority. A live owner cannot be bypassed with force,
-   stale timestamps, an expired lease or a second installation caller.
+   same transaction authority. Normal callers wait for a live installer;
+   operator-approved force/repair follows the bounded takeover contract below.
+   Neither mode permits overlapping installation writers.
 6. On worker loss, retain an interrupted/uncertain outcome. Recover pending
    work under exclusive authority, but do not automatically replay an ambiguous
    active installation. Do not kill unknown descendants or reclaim authority
@@ -118,6 +119,69 @@ Native macOS/stock-shell compatibility remains explicit rather than inferred.
 
 This amendment clears its own review gate before foundation implementation.
 
+## Normal and force/repair operation
+
+**Operator requirement summary:** exclusivity means one active installer for
+the addressed installation, not a persistent dead-letter veto. Locks and owner
+markers are collaboration requests tied to the live installer process or
+source; a missing/non-running owner must not lock out upgrades. Normal mode
+debounces same-version requests and queues differing versions from one central
+desired-version authority, avoiding accidental rollback. Blocking failures
+cleanly roll back failed preparation without cutover. ZDD is best effort:
+handoff incompatibility permits bounded retirement of the old service rather
+than abandoning the new selected version.
+
+Force/repair is a distinct, explicitly requested mode available to any intact
+authorized installer. Agents obtain operator approval for a concrete run. It
+may briefly cooperate, then takes over from previous installers, invalidates
+their stale installation-control state and retires older managed daemons so
+only selected code remains active on success. It does not guarantee ZDD.
+This requirement supersedes a blanket prohibition on takeover of a live
+installer; it does not authorize a live repair merely by landing this plan.
+
+**Agent-recommended implementation and validation scope:**
+
+1. Define one authoritative target resolver using the existing installation/
+   product source selections. Bound background producers and coalesce requests
+   for the same target already pending or executing. Queue different targets,
+   discard superseded normal requests against current desired state, and
+   prevent ordinary stale callers from rolling a newer selection backward.
+   Explicit rollback/repair targeting is distinguishable from that mistake.
+2. Tie active-install coordination to the actual installer PID/birth identity
+   and source, with bounded liveness checks and no permanent marker veto.
+   **Operator-suggested, not yet selected:** a short lease refreshed by the live
+   source installer. Qualify whichever mechanism is chosen against stalled
+   refresh, dead/source-missing owners, PID reuse, split repair callers and
+   installation children, preserving one actual writer.
+3. Separate failed preparation from an incompatible handoff. Qualify I/O,
+   network, ACL and crash failures leaving clean candidate/selection state;
+   qualify compatible handoff and bounded cold replacement independently.
+   A failed old-generation drain is not permission to abandon the new target,
+   and a killed predecessor is not proof that the newcomer is ready.
+4. Add explicit repair admission outside the broken old owner's veto while
+   retaining existing source/authentication and installation-scope selection.
+   Bound cooperation, retire the exact old installer process scope, then
+   invalidate its locks/owner/queue-control evidence under the new takeover
+   authority. An installer losing authority cannot continue installation or
+   reacquire it from a stale lease. Competing repairs must not overlap writers
+   or livelock by repeatedly terminating one another.
+5. Qualify completion against actual installed/runtime identity and all older
+   managed daemons, service registrations, routing and maintenance reactivation
+   paths. Old retained files may remain inert; application data and unrelated
+   services/installations are not repair debris. Retain attributable failure
+   history where possible without turning it back into a lockout. Refuse to
+   report success if old code still serves or the selected runtime is unready.
+6. Exercise both modes with native Windows/Linux process boundaries, a damaged
+   or absent old installation/driver, active installer supersession, stale
+   markers/leases, newer normal targets, explicit repair targets, process death,
+   service incompatibility and bounded cold cutover. No kernel restart,
+   manual journal surgery or test-only owner override qualifies recovery.
+
+These are coordinated changes to #7758, not another queue or lifecycle owner.
+The existing implementer retains foundation and first-use publication work.
+Review this revised mode contract before implementation; current commands and
+runtime docs must not imply the proposed repair is already available.
+
 ## Live-cutover recovery correction
 
 **Operator requirement:** “It is inapproriate that the installer would require
@@ -131,6 +195,9 @@ boot can remain useful evidence after a restart that actually occurred; it
 cannot be the only way to settle an interrupted installation. This correction
 does not authorize a reboot, manual queue reset, alternate execution root,
 parallel installer or bypass of a live owner's authority.
+The explicit operator-approved repair mode above is the supported exception
+for retiring an old live installer before the new writer proceeds; it is not
+an uncoordinated concurrent installation.
 
 **Agent-recommended implementation sequence**, retained under #7758 and the
 existing installation execution implementer:
@@ -141,9 +208,9 @@ existing installation execution implementer:
    than imposing an indefinite global interruption fence. Missing logs or an
    exception type alone do not establish that boundary.
 2. Extend the existing native process-custody and transaction owner to recover
-   interrupted work on the same boot. A live owner may yield through its
-   supported handoff; a lost owner requires positive, identity-bound settlement
-   of its installation descendants before a new writer enters. Reuse the
+   interrupted work on the same boot. A live owner may yield through supported
+   handoff or be retired by approved repair. Dead markers cannot retain authority;
+   settle old installation descendants before a new writer enters, reusing the
    current authority, request journal and native cleanup primitives.
 3. Provide an explicit supported path for existing interrupted records,
    including records whose older producer lacks the new admission evidence.

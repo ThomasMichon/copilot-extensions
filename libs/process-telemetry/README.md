@@ -20,6 +20,19 @@ Legacy sinks remain **synchronous**. Register a bounded adapter explicitly for
 latency-sensitive producers; this release does not silently change existing
 sink delivery or automatically configure a collector.
 
+The legacy JSONL spools encode a complete record and newline before one native
+append write: POSIX `O_APPEND`, Windows `FILE_APPEND_DATA` without
+`FILE_WRITE_DATA`. This preserves record boundaries among concurrent threads
+and processes writing a local file, without a server, queue, or dropping policy.
+Fields, emit-time `ts` defaults and existing timestamps are unchanged; parent
+directories are not created. The callbacks remain synchronous and fail-open.
+This is not bounded-latency delivery, an `fsync`/durability promise, or a
+network-filesystem guarantee. A failed/short write may leave a partial record;
+the helper reports failure without retrying a suffix that could interleave.
+The callbacks log that uncertainty at debug level, not a successful delivery.
+Existing partial tails, rotation/truncation coordination, and writes by older
+seek-then-write implementations are not repaired or fenced by this fix.
+
 ```python
 from agent_bridge import telemetry
 
