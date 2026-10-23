@@ -31,6 +31,8 @@ import yaml
 
 from .machine_environment import MachineEnvironment, legacy_alias_forms, normalize_environment, split_machine_environment
 
+_SafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
 __all__ = [
     "AmbiguousMachineError",
     "PhysicalMachineError",
@@ -139,7 +141,7 @@ def parse_machines_yaml_file(
       required before switching to this shared parser.
     """
     with open(path, encoding="utf-8") as f:
-        raw: Any = yaml.safe_load(f)
+        raw: Any = yaml.load(f, Loader=_SafeLoader)
 
     # Validate the document root itself is a mapping BEFORE calling
     # ``.get()`` on it -- a non-empty YAML sequence or scalar root (e.g. a

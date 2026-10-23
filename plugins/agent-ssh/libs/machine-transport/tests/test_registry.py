@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import importlib.util
+import sys
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 
+from machine_transport import registry
 from machine_transport.registry import (
     MachineEntry,
     SSHEnvironment,
@@ -157,7 +161,64 @@ def test_legacy_guest_hostname_and_display_metadata_do_not_alias_native_identity
     assert not entries["example-host-wsl"].execution_platform
 
 
+@pytest.fixture(params=["python", "preferred"])
+def registry_yaml_loader(request, monkeypatch):
+    loader = yaml.SafeLoader if request.param == "python" else getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+    monkeypatch.setattr(registry, "_SafeLoader", loader)
+
+
+def test_registry_prefers_the_available_safe_yaml_backend():
+    assert registry._SafeLoader is getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def test_registry_import_falls_back_without_c_safe_loader(monkeypatch, tmp_path):
+    monkeypatch.delattr(yaml, "CSafeLoader", raising=False)
+    name = "machine_transport._registry_fallback_test"
+    spec = importlib.util.spec_from_file_location(name, registry.__file__)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    assert module._SafeLoader is yaml.SafeLoader
+    path = _write(tmp_path, "machines:\n  box:\n    alias: fallback\n")
+    assert module.parse_machines_yaml_file(path)["box"].alias == "fallback"
+    path.write_text("machines: !!python/object:builtins.dict {}", encoding="utf-8")
+    with pytest.raises(yaml.YAMLError):
+        module.parse_machines_yaml_file(path)
+
+
+@pytest.mark.usefixtures("registry_yaml_loader")
 class TestParseMachinesYamlFile:
+    def test_each_read_observes_replacement_and_parser_failures(self, tmp_path):
+        path = _write(tmp_path, "machines:\n  box:\n    alias: before\n")
+        assert parse_machines_yaml_file(path)["box"].alias == "before"
+        path.write_text("machines:\n  box:\n    alias: after\n", encoding="utf-8")
+        assert parse_machines_yaml_file(path)["box"].alias == "after"
+        for body in ("machines: [", "machines: !!python/object:builtins.dict {}"):
+            path.write_text(body, encoding="utf-8")
+            with pytest.raises(yaml.YAMLError):
+                parse_machines_yaml_file(path)
+        path.unlink()
+        with pytest.raises(FileNotFoundError):
+            parse_machines_yaml_file(path)
+
+    def test_safe_backends_preserve_aliases_merges_and_quoted_scalars(self, tmp_path):
+        body = (
+            "defaults: &defaults\n"
+            "  description: |\n"
+            "    line one\n"
+            "    caf\u00e9\n"
+            "  ssh:\n"
+            "    ready: true\n"
+            "    environments: [{name: windows, alias: route, port: 2201}]\n"
+            "machines:\n"
+            "  '01':\n"
+            "    <<: *defaults\n"
+            "    alias: !!str true\n"
+        )
+        expected = parse_machines_yaml(yaml.safe_load(body))
+        assert parse_machines_yaml_file(_write(tmp_path, body)) == expected
+
     def test_parses_basic_entry(self, tmp_path):
         path = _write(tmp_path, (
             "machines:\n"
