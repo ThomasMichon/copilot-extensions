@@ -1253,6 +1253,32 @@ mounting replays the accepted header, verbs and footer rather than clearing it.
 These are functional guarantees; headless modal tests do not establish the
 native Actions-under-one-second or input-under-100ms budgets.
 
+### Configuration snapshots and locality
+
+The production Picker's file-cache scopes share a bounded, binding-qualified
+generation. Existing background demand revalidates file bytes after 60 seconds;
+unchanged bytes reuse parsed YAML, and concurrent consumers share one read per
+key and generation. A zero-TTL scope reuses only within that pass. This is
+demand-driven freshness, not a new polling service or a claim that an idle view
+refreshes on a timer.
+
+Input reads never wait for an in-flight file load or perform cold discovery.
+Missing/expired snapshots report not-ready; malformed or unreadable inputs are
+not installed as valid empty mappings. Manual reload invalidates before its
+worker collects data, preserving newly prepared snapshots and accepted scalar
+bindings. Derived machine-name mappings refresh without resetting selection and
+reject obsolete source/setup completions.
+
+Supplier fallback uses `harness_state.project_anchor_selection`: at most the
+two owner registry files are read, using the same platform-path and anchor
+precedence as the full builders, without materializing unrelated projects.
+The actual supplier roster is included in the file generation. These YAML
+readers do not expand external templates/includes.
+
+Known locality retains its Boolean behavior. Unavailable locality is a visible
+refusal, never a remote/SSH classification: ordinary resume, headed launch and
+internal embodiment/resume callers stop before exit or launch effects.
+
 ### Developing a pivot: render early, render often
 
 Any change touching a pivot's columns, derived fields, row grouping, or

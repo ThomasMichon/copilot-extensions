@@ -181,11 +181,16 @@ def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tm
                 if phase == "reload":
                     screen._start_setup_reload_worker()
                 for _ in range(50):
-                    if screen._setup_applied_epoch == screen._setup_epoch:
+                    if screen._setup_epoch and screen._setup_applied_epoch == screen._setup_epoch:
                         break
                     await pilot.pause(0.02)
-                assert screen._setup_applied_epoch == screen._setup_epoch
+                assert screen._setup_epoch and screen._setup_applied_epoch == screen._setup_epoch
                 prepared_calls = list(calls)
+                generation = cfg._file_generation
+                assert generation is not None and generation.current() and not generation.expired(), (
+                    phase, generation and (generation.ttl, generation.current(), generation.expired()),
+                    screen._config_cache_session.ttl,
+                )
                 assert data_local.is_local(alias, Source.LOCAL[1])
                 decision = screen._resume_decision({
                     "raw": {"id": "fixture"}, "machine": alias, "env": Source.LOCAL[1],

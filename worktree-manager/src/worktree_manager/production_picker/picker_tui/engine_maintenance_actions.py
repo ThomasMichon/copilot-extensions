@@ -295,9 +295,15 @@ class PickerScreenMaintenanceActionsMixin:
 
         ``PickerApp.result`` stays ``None`` on cancel (q/Esc); a dict here is a
         concrete instruction the caller maps onto resume/create/remote paths.
+        A deferred decision reports its reason and returns False without exit.
         """
+        if decision.get("deferred"):
+            self.debug = decision.get("reason") or "Locality is not ready; refresh and retry."
+            self.refresh()
+            return False
         self.app.result = decision
         self.app.exit()
+        return True
     def _resume_decision(self, rec, no_mux=False, ahp=False, bare_resume=False,
                           seed_prompt=""):
         """Build the resume decision for a worktree row/submenu selection.
@@ -313,6 +319,13 @@ class PickerScreenMaintenanceActionsMixin:
         """
         raw = rec.get("raw") or {}
         m, e = rec.get("machine"), rec.get("env")
+        try:
+            is_local = self.src.is_local(m, e)
+        except RuntimeError as exc:
+            return {
+                "action": "resume", "deferred": True, "reason": str(exc),
+                "worktree_id": raw.get("id"), "is_local": None,
+            }
         decision = {
             "action": "resume",
             "worktree_id": raw.get("id"),
@@ -320,7 +333,7 @@ class PickerScreenMaintenanceActionsMixin:
             "machine": m,
             "env": e,
             "title": rec.get("title"),
-            "is_local": self.src.is_local(m, e),
+            "is_local": is_local,
         }
         opts = {}
         if no_mux:

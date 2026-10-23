@@ -533,6 +533,9 @@ class PickerScreenLoadingMixin:
         self._pr_reconciled = True
         self._bound_live_reconciled = True
         self._reconcile_wt_sel()
+        prewarm = getattr(self, "_prewarm_machine_key_map", None)
+        if callable(prewarm) and getattr(self, "is_mounted", False):
+            prewarm()
     def _apply_loader_records(self):
         """Merge incomplete stream prefixes over cached rows."""
         if self.loader is None:

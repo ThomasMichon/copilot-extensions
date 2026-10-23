@@ -108,6 +108,9 @@ def open_worktree_cli_headed(screen, rec, *, no_mux: bool = False, ahp: bool = F
         return
 
     decision = screen._resume_decision(rec, no_mux=no_mux, ahp=ahp)
+    if decision.get("deferred"):
+        screen._decide(decision)
+        return
     opts = dict(decision.get("options") or {})
     project = context.project()
 

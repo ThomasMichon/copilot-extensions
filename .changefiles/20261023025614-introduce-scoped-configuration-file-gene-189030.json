@@ -1,0 +1,9 @@
+{
+  "comment": "Honor bounded configuration freshness and refuse launches while source locality is unavailable.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
