@@ -27,7 +27,7 @@ from . import git_ops, output, tracking
 from .creation_identity import IdentityMode, new_tracking_identity, validate_mode
 
 
-def _worktree_id_from_git(cwd: Path) -> str | None:
+def _worktree_id_from_git(cwd: Path, *, isolated_repository: bool = False) -> str | None:
     """Return the git-internal worktree name if CWD is inside a *linked*
     worktree, else None.
 
@@ -44,7 +44,7 @@ def _worktree_id_from_git(cwd: Path) -> str | None:
     try:
         result = git_ops.git(
             "rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10,
-            isolated_repository=True,
+            **({"isolated_repository": True} if isolated_repository else {}),
         )
     except Exception:
         return None
@@ -71,11 +71,13 @@ def _confirmed_anchor_checkout(cwd: Path, anchor: Path) -> bool:
         lines = (result.stdout or "").strip().splitlines()
         if result.returncode != 0 or len(lines) != 2:
             return False
-        git_dir = Path(lines[1])
-        root = git_dir if lines[0] == "true" else (
-            git_dir.parent if lines[0] == "false" and git_dir.name == ".git" else None
+        git_dir = Path(lines[1]).resolve()
+        anchor = anchor.resolve()
+        return (
+            lines[0] in {"true", "false"} and git_dir == anchor / ".git"
+        ) or (
+            lines[0] == "true" and git_dir == anchor
         )
-        return root is not None and root.resolve() == anchor.resolve()
     except Exception:
         return False
 
@@ -88,7 +90,7 @@ def tracked_invocation_record(
     if anchor is not None and cwd == anchor.resolve():
         return None
     tracking_path = cfg.project_dir(project) / "worktrees"
-    worktree_id = _worktree_id_from_git(cwd)
+    worktree_id = _worktree_id_from_git(cwd, isolated_repository=True)
     if (
         worktree_id is None and anchor is not None
         and cwd.is_relative_to(anchor.resolve()) and _confirmed_anchor_checkout(cwd, anchor)

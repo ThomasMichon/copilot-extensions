@@ -25,7 +25,7 @@ def _bootstrap(monkeypatch, tmp_path, cwd):
 def test_anchor_bootstrap_does_not_enumerate_worktrees(monkeypatch, tmp_path, capfd, nested):
     cwd = tmp_path / "anchor"
     _bootstrap(monkeypatch, tmp_path, cwd / "src" if nested else cwd)
-    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd: None)
+    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd, **kw: None)
     monkeypatch.setattr(
         worktree_identity.git_ops, "git",
         lambda *a, **k: SimpleNamespace(returncode=0, stdout=f"false\n{cwd / '.git'}\n"),
@@ -42,7 +42,7 @@ def test_anchor_bootstrap_does_not_enumerate_worktrees(monkeypatch, tmp_path, ca
 def test_linked_bootstrap_reads_one_validated_record(monkeypatch, tmp_path, capfd, nested):
     root = tmp_path / "anchor" / "workspace" if nested else tmp_path / "workspace"
     _bootstrap(monkeypatch, tmp_path, root / "nested")
-    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd: "exact-id")
+    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd, **kw: "exact-id")
     reads = []
 
     def load(worktree_id, **kwargs):
@@ -65,7 +65,7 @@ def test_unconfirmed_git_identity_preserves_tracked_path_fallback(
 ):
     root = tmp_path / "workspace"
     _bootstrap(monkeypatch, tmp_path, root / "nested")
-    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd: "other-id")
+    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd, **kw: "other-id")
     records = {
         "other-id": SimpleNamespace(
             repo="other" if foreign == "repo" else "project",
@@ -92,7 +92,7 @@ def test_bare_headless_check_does_not_resolve_unrelated_pr_topology(monkeypatch,
 def test_failed_git_probe_keeps_nested_tracking_fallback(monkeypatch, tmp_path, capfd):
     root = tmp_path / "anchor" / "workspace"
     _bootstrap(monkeypatch, tmp_path, root / "nested")
-    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd: None)
+    monkeypatch.setattr(worktree_identity, "_worktree_id_from_git", lambda cwd, **kw: None)
 
     def failed_probe(*args, **kwargs):
         raise OSError("fixture Git unavailable")
@@ -162,3 +162,26 @@ def test_fast_record_ignores_an_enclosing_worktree_git_selector(tmp_path, monkey
     assert worktree_identity.tracked_invocation_record(
         nested, project="project", anchor=anchor,
     ) is records["nested"]
+
+
+@pytest.mark.parametrize("layout", ["ordinary", "converted-bare", "pure-bare"])
+def test_real_anchor_subdirectory_does_not_enumerate(tmp_path, monkeypatch, layout):
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    git = worktree_identity.git_ops.git
+    git(
+        "init", *(["--bare"] if layout == "pure-bare" else []),
+        cwd=anchor, isolated_repository=True,
+    )
+    if layout == "converted-bare":
+        git("config", "core.bare", "true", cwd=anchor, isolated_repository=True)
+    nested = anchor / "src"
+    nested.mkdir()
+    monkeypatch.setattr(worktree_identity.cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(
+        tracking, "find_worktree_id_by_cwd",
+        lambda *a, **k: pytest.fail("confirmed anchor enumerated the roster"),
+    )
+    assert worktree_identity.tracked_invocation_record(
+        nested, project="project", anchor=anchor,
+    ) is None
