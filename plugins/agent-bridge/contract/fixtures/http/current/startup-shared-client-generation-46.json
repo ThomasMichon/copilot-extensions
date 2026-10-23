@@ -148,6 +148,10 @@
     "allow_retry": false,
     "count": 1
   },
+  "invalid_admission_statuses": [
+    "",
+    "not-a-lifecycle-status"
+  ],
   "lost_ack": {
     "exit_code": 70,
     "json": {
@@ -172,10 +176,10 @@
   },
   "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-observation-generation-46.json",
-    "sha256": "9502a732534caf6a77dd05d751891aa39c69a546368703d44ae8c55ff843decf"
+    "sha256": "f33f4502f3a0f087857733c086c8068985867be98e0bc46cb69baa518cf241a5"
   },
   "captured_from": {
-    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
     "source_git_blob": "549559cf0781113c6c0c6d7d385db53ab1ab3267",

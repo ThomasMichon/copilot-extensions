@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
     "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",

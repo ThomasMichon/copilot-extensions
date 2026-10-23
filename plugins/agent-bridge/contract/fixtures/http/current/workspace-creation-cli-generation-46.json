@@ -58,7 +58,7 @@
   },
   "scope": "Independent synthetic expected vectors for the real CLI/parser/client builder; no workspace allocation or native backend is executed.",
   "captured_from": {
-    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
     "source_git_blob": "e34368a3bc620f55c3d0e97032ccf8c1e117c9f3",

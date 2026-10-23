@@ -148,6 +148,10 @@
     "allow_retry": false,
     "count": 1
   },
+  "invalid_admission_statuses": [
+    "",
+    "not-a-lifecycle-status"
+  ],
   "lost_ack": {
     "exit_code": 70,
     "json": {
@@ -171,7 +175,7 @@
     "contact_uses_local_receipt_not_payload_timestamp": true
   },
   "captured_from": {
-    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/startup_observation.py",
     "source_git_blob": "69e14738b0224ec360de53bd2c12e5060bdea6f3",

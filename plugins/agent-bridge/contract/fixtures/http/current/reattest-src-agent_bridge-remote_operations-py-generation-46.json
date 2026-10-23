@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
     "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",

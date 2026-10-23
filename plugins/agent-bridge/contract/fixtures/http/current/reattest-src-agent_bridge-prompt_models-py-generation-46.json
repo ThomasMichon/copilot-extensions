@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
     "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
