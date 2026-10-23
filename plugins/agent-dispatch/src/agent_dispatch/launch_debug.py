@@ -1,4 +1,4 @@
-"""Default-off observation of the ordinary Bridge subprocess boundary."""
+"""Default-off observation of ordinary Bridge startup and local continuation."""
 
 from __future__ import annotations
 
@@ -159,7 +159,8 @@ class Trace:
 
 
 def begin(prefix: list[str], argv: list[str], *, prompt_input: str | None = None,
-          input_reference: str | None = None, timeout: float = 180) -> Trace | None:
+          input_reference: str | None = None, timeout: float | None = 180,
+          input_source: str = "frozen_startup_invocation") -> Trace | None:
     """Record the actual call, not a recipe or an alternate execution route."""
     root = install_dir()
     if not _enabled(root):
@@ -200,7 +201,7 @@ def begin(prefix: list[str], argv: list[str], *, prompt_input: str | None = None
             },
             "timeout_seconds": timeout,
             "stdin": {
-                **_metadata(prompt_input), "source": "frozen_startup_invocation" if prompt_input is not None else "none",
+                **_metadata(prompt_input), "source": input_source if prompt_input is not None else "none",
                 "json_status": json_status, "json_sha256": json_sha256,
                 "reference": _safe(input_reference, environment) if input_reference else None,
                 "content": "omitted",

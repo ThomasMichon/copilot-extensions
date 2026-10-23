@@ -3,7 +3,9 @@
 This is a **default-off, user-level observation switch**, not another launcher,
 pause mechanism or permission check. It observes the existing `ordinary_bridge`
 create/status/resume/send `subprocess.run` calls. It does not trace other
-Dispatch backends, change their flags, input, environment, result parsing,
+Dispatch backends. It also observes `bridge.resume_worker`'s local continuation
+call, used when a cold worker receives durable steering. It does not change
+flags, input, environment, result parsing,
 ownership, retries or task transitions. No Bridge package import is required.
 
 ## Enable and find traces
@@ -58,8 +60,10 @@ Recorded fields:
   Credential patterns and known credential values use the shared subprocess
   diagnostic redactor extracted from Bridge; actual changes mark metadata
   non-exact instead of silently reconstructing it.
-- Stdin source (`none` or `frozen_startup_invocation`), retained reservation
-  reference, UTF-8 byte size and SHA-256. **Never stdin/prompt content.**
+- Stdin source (`none`, `frozen_startup_invocation` or `continuation_prompt`),
+  reference, UTF-8 byte size and SHA-256. The reference is the retained
+  reservation for ordinary startup, or the existing Bridge session ID for a
+  local continuation. **Never stdin/prompt content.**
   These raw byte fields remain unchanged. Additive `json_status` is `valid`,
   `invalid` or `absent`; `json_sha256` is null unless valid. The JSON digest
   hashes UTF-8 `json.dumps(json.loads(input), sort_keys=True, separators=(",", ":"),
@@ -141,6 +145,7 @@ bounded subprocess behavior. Typically the recorded stages are:
 <prefix...> --json status <retained-session> [--full]
 <prefix...> --json resume <retained-session-or-worktree> --strict
 <prefix...> --json send <retained-session> --expected-native-session-id <retained-native> --native-invocation-file - [--receipt-only] --no-wait
+<prefix...> send <retained-session> --prompt-file - --no-wait
 ```
 
 These are explanatory shapes; only the trace contains the historically
@@ -148,7 +153,16 @@ executed argument array. Do not run every shape in sequence: follow the
 actual observed branch. A new create needs ordinary coordinator storage/readback
 before sending, not manual database edits.
 
-For a send, use the existing frozen invocation from an authenticated coordinator
+The final shape is a plain local continuation, not a frozen startup invocation.
+Its trace records the actual existing caller timeout (normally 20 seconds);
+tracing does not enlarge it. A continuation prompt is not retained in the
+trace, and its session reference cannot reconstruct it. Inspect the original
+caller's durable steering/progress and the existing conversation before
+considering another send. Do not apply the startup reconstruction below to a
+`continuation_prompt`, treat a timeout as non-delivery, or replay it automatically.
+Only a frozen startup invocation has the receipt contract described below.
+
+For a frozen startup send, use the existing invocation from an authenticated coordinator
 reservation read, **in memory** in the Dispatch runtime. The serialization used
 at the boundary uses `json.dumps(..., ensure_ascii=False)`, but the initial
 send can serialize the locally prepared mapping while storage sorts its keys.

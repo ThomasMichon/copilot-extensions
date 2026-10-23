@@ -609,18 +609,31 @@ def resume_worker(
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
-    cmd = [*exe, "send", session_id, "--prompt-file", "-"]
+    argv = ["send", session_id, "--prompt-file", "-"]
     if not wait:
-        cmd.append("--no-wait")
-    completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
-        cmd,
-        input=prompt,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        **no_window_kwargs(),
+        argv.append("--no-wait")
+    from .launch_debug import begin
+
+    trace = begin(
+        exe, argv, prompt_input=prompt, input_reference=session_id,
+        timeout=timeout, input_source="continuation_prompt",
     )
+    try:
+        completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
+            [*exe, *argv],
+            input=prompt,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        if trace:
+            trace.finish(error=exc)
+        raise
+    if trace:
+        trace.finish(result=completed)
     return completed.returncode == 0
 
 

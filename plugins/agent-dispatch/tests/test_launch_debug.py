@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_dispatch import launch_debug
+from agent_dispatch import bridge, launch_debug
 from agent_dispatch.procutil import no_window_kwargs
 
 pytestmark = pytest.mark.contract("agent_dispatch.ordinary_bridge")
@@ -233,3 +233,113 @@ def test_real_timeout_is_not_replayed(tmp_path, monkeypatch):
     assert len(rows) == 2
     assert rows[1]["outcome"] == "unknown_timeout" and rows[1]["returncode"] is None
     assert "opaque partial output" not in json.dumps(rows)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("returncode", [0, 7])
+@pytest.mark.parametrize("wait", [False, True])
+def test_local_resume_observes_exact_call_without_changing_result(
+    tmp_path, monkeypatch, enabled, returncode, wait,
+):
+    root = configure(monkeypatch, tmp_path, enabled)
+    prefix = ["python", "-m", "agent_bridge"]
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: prefix)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, returncode, "opaque stdout", "connection refused")
+
+    monkeypatch.setattr(bridge.subprocess, "run", run)
+    assert bridge.resume_worker("session-a", "private continuation", wait=wait) is (returncode == 0)
+    expected = [*prefix, "send", "session-a", "--prompt-file", "-"]
+    if not wait:
+        expected.append("--no-wait")
+    assert len(calls) == 1
+    assert calls[0] == (expected, {
+        "input": "private continuation", "check": False, "capture_output": True,
+        "text": True, "timeout": 20.0, **no_window_kwargs(),
+    })
+    if enabled:
+        started, finished = records(root)
+        assert [*started["prefix"], *started["argv"]] == expected
+        assert started["timeout_seconds"] == 20.0
+        assert started["stdin"]["source"] == "continuation_prompt"
+        assert started["stdin"]["reference"] == "session-a"
+        assert finished["returncode"] == returncode
+        assert "private continuation" not in json.dumps(records(root))
+    else:
+        assert not (root / "logs").exists()
+
+
+@pytest.mark.parametrize("error", [
+    OSError(2, "private error"),
+    subprocess.TimeoutExpired("bridge", 20, output=b"partial", stderr=b"timed out"),
+])
+def test_local_resume_records_and_preserves_exception(tmp_path, monkeypatch, error):
+    root = configure(monkeypatch, tmp_path)
+    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: ["bridge"])
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise error
+
+    monkeypatch.setattr(bridge.subprocess, "run", run)
+    with pytest.raises(type(error)) as caught:
+        bridge.resume_worker("session-a", "private continuation")
+    assert caught.value is error
+    assert len(calls) == 1
+    finished = records(root)[1]
+    assert finished["returncode"] is None
+    if isinstance(error, subprocess.TimeoutExpired):
+        assert finished["outcome"] == "unknown_timeout"
+        assert finished["stdout"]["capture"] == "partial"
+        assert finished["stderr"]["diagnostics"] == ["timed out"]
+    else:
+        assert finished["outcome"] == "os_error"
+        assert finished["errno"] == 2
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_real_local_resume_trace_survives_caller_exit(tmp_path, monkeypatch, timeout):
+    root = configure(monkeypatch, tmp_path)
+    source = Path(bridge.__file__).resolve().parents[1]
+    marker = tmp_path / "invocations"
+    child = tmp_path / "bridge_child.py"
+    child.write_text(
+        "import pathlib,sys,time\n"
+        "assert sys.argv[1:]==['send','session-a','--prompt-file','-','--no-wait']\n"
+        "assert sys.stdin.read()=='private continuation'\n"
+        f"with pathlib.Path({str(marker)!r}).open('a') as sink: sink.write('once\\n')\n"
+        "print('opaque stdout',flush=True)\n"
+        "print('connection refused',file=sys.stderr,flush=True)\n"
+        + ("time.sleep(60)\n" if timeout else "sys.exit(7)\n"),
+        encoding="utf-8",
+    )
+    script = (
+        "import subprocess,sys\n"
+        f"sys.path.insert(0,{str(source)!r})\n"
+        "from agent_dispatch import bridge\n"
+        f"bridge._agent_bridge_launch_prefix=lambda:[sys.executable,{str(child)!r}]\n"
+        "try:\n"
+        " result=bridge.resume_worker('session-a','private continuation',timeout=5)\n"
+        "except subprocess.TimeoutExpired as error:\n"
+        f" assert {timeout!r} and error.timeout==5\n"
+        "else:\n"
+        f" assert not {timeout!r} and result is False\n"
+    )
+    caller = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True,
+        timeout=20, check=False, **no_window_kwargs(),
+    )
+    assert caller.returncode == 0, caller.stderr
+    assert marker.read_text().splitlines() == ["once"]
+    started, finished = records(root)
+    assert started["stdin"]["source"] == "continuation_prompt"
+    assert started["timeout_seconds"] == 5
+    assert finished["outcome"] == ("unknown_timeout" if timeout else "exited")
+    assert finished["returncode"] == (None if timeout else 7)
+    assert finished["stderr"]["diagnostics"] == ["connection refused"]
+    assert finished["stdout"]["capture"] == ("partial" if timeout else "complete")
+    assert "private continuation" not in json.dumps(records(root))

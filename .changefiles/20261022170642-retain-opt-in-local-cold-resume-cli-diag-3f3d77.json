@@ -1,0 +1,9 @@
+{
+  "comment": "Retain opt-in local cold-resume CLI diagnostics without changing continuation delivery or timeout semantics.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
