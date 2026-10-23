@@ -260,7 +260,7 @@ def read(
         )
     except TimeoutError:
         raise
-    except (OSError, ValueError, TypeError, AttributeError):
+    except (OSError, ValueError, TypeError, AttributeError, RuntimeError):
         return None
 
 

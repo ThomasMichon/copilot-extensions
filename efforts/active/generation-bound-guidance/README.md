@@ -196,6 +196,10 @@ coordinate the smallest additive owner API before changing another slice.
   liveness controls passed, including a real parent/worker exit sequence and
   access-denial preservation. No process termination or request takeover is
   performed by this advisory reader.
+- The requested clarification supplied a concrete cyclic-link case. Added
+  failing fresh/cached controls, handled resolution `RuntimeError` per provider
+  and as invalid cached evidence, and retained explicit deadline propagation.
+  Ten focused cyclic/missing-source/deadline controls passed.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

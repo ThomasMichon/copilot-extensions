@@ -188,3 +188,9 @@ consumer still reports failure without relying on the vanished reaper. Native
 read-only exit observation retains live or access-denied owners; it does not
 terminate processes or rewrite worker state. Those two integration controls
 plus four liveness controls completed **6 passed**.
+
+The clarification review identified cyclic (not merely dangling) source links
+on Python 3.10–3.12. Fresh and previously cached self-linked providers now fail
+independently; invalid cached evidence is retried while `TimeoutError` still
+propagates. Both new controls failed before the correction. The cyclic,
+missing-source and actual receipt-deadline selection completed **10 passed**.

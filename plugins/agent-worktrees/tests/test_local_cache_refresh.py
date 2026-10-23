@@ -377,6 +377,29 @@ def test_symlinked_input_publishes_and_reuses(copy_workspace, kind):
     assert lcr.prepare_for_launch(root).reused
 
 
+@pytest.mark.parametrize("cached", [False, True])
+def test_cyclic_source_link_preserves_independent_publication(copy_workspace, cached):
+    root, home = copy_workspace
+    broken, old_output = provider(root, home, "broken", content=b"old guidance")
+    healthy, healthy_output = provider(root, home, "healthy", content=b"old healthy guidance")
+    if cached:
+        assert lcr.prepare_for_launch(root).status == "ready"
+    healthy.write_bytes(b"current healthy guidance")
+    broken.unlink()
+    try:
+        broken.symlink_to(broken.name)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("native file-link privilege unavailable")
+        raise
+    result = lcr.prepare_for_launch(root)
+    assert result.status == "partial", result.diagnostic
+    assert result.blocking == 1 and not result.reused
+    assert healthy_output.read_bytes() == b"current healthy guidance"
+    if cached:
+        assert old_output.read_bytes() == b"old guidance"
+
+
 def test_new_ignore_negation_invalidates_cached_readiness(copy_workspace):
     root, home = copy_workspace
     _, output = provider(root, home)

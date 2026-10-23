@@ -179,7 +179,7 @@ def _selection(root: Path, home: Path, *, deadline: float | None = None) -> tupl
                 for relative in PLUGIN_MANIFEST_RELS
             ]])
             plugins[identity] = plugin
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, RuntimeError) as exc:
             failures.append(f"{identity}: {exc}")
     return selection, plugins, failures
 
@@ -201,7 +201,7 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> _Snap
             entries = _plugin_snapshot(root, identity, plugin, deadline=deadline)
         except TimeoutError:
             raise
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, RuntimeError) as exc:
             result.failures.append(f"{identity}: {exc}")
             continue
         for relative, content in entries.items():
