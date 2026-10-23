@@ -47,10 +47,10 @@ existing producer, process, maintenance, collector and rollout owners remain sep
   Remaining checklist items stay with the performance campaign coordinator under
   #7935/#5900; neither the effort nor its umbrella issues are closed.
 - The Manager source-observation slice is complete at its stated boundary.
-  The next assigned episode is [structured-signal design](structured-signals.md)
-  only, owned by the Telemetry implementation owner. Exact shared API and file
-  scope return to the coordinator before implementation; reserved Manager/entry
-  files and the retained #8036 qualification remain independently owned.
+  The next assigned episode implements the reviewed
+  [structured-signal contract](structured-signals.md), owned by the Telemetry
+  implementation owner after exact API/file-scope admission. Reserved Manager/
+  entry/custody files and the retained #8036 qualification remain independent.
 
 ## Context
 
@@ -163,9 +163,19 @@ sample/drop/missing evidence and the later structured-signal/hook work.
   boundaries, bounded transport/accounting and consumer-owned retention handshake.
 - [x] Publish exact shared API/file scope and claim for the campaign coordinator's
   acceptance before implementation. Plan merge is not implementation or deployment
-  approval; that decision remains open under #7935/#5900.
+  approval; the later explicit source admission is recorded in Phase 7.
 - Preserve all native reports/environments and historical attribution corrections
   until their durable copy is verified; no cleanup is authorized by this phase.
+
+### Phase 7 — Admitted structured-signal source implementation
+- [x] Admit the exact reviewed API and file scope, retaining one existing writer,
+  closed content/labels, optional SDK and legacy trace behavior.
+- [x] Implement and validate SDK Logs/Metrics protobuf and complete per-signal
+  accounting through the existing source consumer, including isolated wire proof.
+- [ ] Pass source review/CI and merge; preserve complete raw validation packets.
+- [x] Deferred to `#7935`: obtain the separate collector-owner handshake,
+  then qualify actual native source receive/persist and overhead before any
+  installed rollout or native budget claim.
 
 ### Plan addendum: retained Windows mention-guard whole-dispatch qualification (#8036)
 
@@ -272,10 +282,31 @@ independently of shared collector deployment. Missing deployment authorization
 blocks that acceptance item, not pure implementation.
 
 For the later structured-signal slice specifically, the design merged in #8187.
-Its exact functional shared API/file scope still awaits coordinator acceptance;
-no implementation or collector change is admitted by that design merge.
+The coordinator subsequently admitted its exact functional shared API/file scope,
+including isolated port-zero SDK/wire fixtures. The admission does not permit
+collector edits, installed enrollment, reserved callers or process-custody changes.
+Actual native source Logs/Metrics receipt still awaits the collector handshake.
 
 ## Journal
+
+### 2026-10-23 — Structured-signal source implementation admitted
+
+- Started a fresh deduplicated implementation episode after explicit acceptance
+  of the reviewed API/file scope; completed design/source task history remains.
+- Added closed signal models, SDK/public protobuf adapters and finite transport,
+  preserving the existing source queue/writer and legacy trace-only ACK behavior.
+  No `frame_health.py`, reserved caller or process-custody file was edited.
+- Initial isolated tests exposed and corrected a required SDK exporter method
+  and HTTP/1.0 response-stream lifetime. Historical failed runs remain evidence,
+  not omitted retries. Current source consumer/wire assertions pass; final
+  source gates/review and complete accounting follow.
+- A retained burst/outage API control exposed coarse Windows clock ties between
+  fast batches. High-resolution monotonic collection and explicit unavailable
+  non-advancing intervals now prevent duplicate/zero-length DELTA identities.
+  This is synthetic reporter/API evidence, not native Picker qualification.
+- Retained all historical reports/environments and assembled a verified private
+  copy packet for the coordinator. No environment cleanup or shared collector
+  change occurred. Native/installed receive, retention and budgets remain open.
 
 ### 2026-10-23 — Structured-signal plan reviewed and merged
 

@@ -1,0 +1,17 @@
+{
+  "comment": "Add optional closed source Logs/Metrics through the existing writer with finite OTLP transport and per-signal accounting; preserve trace compatibility",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -32,6 +32,17 @@ def probe_module():
     return module
 
 
+def test_signal_readback_cannot_claim_a_signal_the_sender_did_not_request(tmp_path):
+    from types import SimpleNamespace
+    probe = probe_module()
+    args = SimpleNamespace(
+        endpoint=None, logs_endpoint=None, metrics_endpoint=None,
+        logs_receiver_jsonl=str(tmp_path / "logs.jsonl"), metrics_receiver_jsonl=None,
+    )
+    with pytest.raises(ValueError, match="configured sender endpoint"):
+        probe.run(args)
+
+
 def test_key_receipt_excludes_later_handler_settling():
     import asyncio
     from types import SimpleNamespace
