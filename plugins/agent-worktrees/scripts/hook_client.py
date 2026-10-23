@@ -363,6 +363,12 @@ def _command_catalog_context() -> str:
                 root, contract["plugin"], Path.home() / ".agent-worktrees"
             ),
         }
+        projection = _load_sibling("resident_control_projection.py")
+        project_candidate = getattr(projection, "project_candidate", None)
+        if callable(project_candidate):
+            candidate = project_candidate(catalog["binding"])
+            if candidate is not None:
+                catalog["residentControl"] = candidate
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, StopIteration) as error:
         sys.stderr.write(f"[agent-worktrees] Command catalog unavailable: {error}\n")
         return ""

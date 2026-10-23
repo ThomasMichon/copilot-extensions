@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent planning PR; separately admitted owner implementation
 - **Created:** 2026-10-23
-- **Status:** Draft
+- **Status:** Active; delivery/control implementation admitted, backend/subject producer prerequisites retained
 - **Vision:** [Worktree lifetime authority](../../../visions/plugins/agent-worktrees/README.md); [same-cell composition](../../../visions/plugin-services/installation-cells/README.md)
 - **Umbrella issue:** #7942 (dependency slice only; does not take over the consumer)
 
@@ -91,10 +91,11 @@ The concrete names, byte ceilings and decomposition in `contract.md` are
 - [x] Trace existing control, binding, exact-session delivery and receipt code.
 - [x] Obtain narrow interface/claim statements from the existing receipt and
   roster owners, without touching their files.
-- [ ] Integration owner reads and admits the exact proposed API, delivery and
+- [x] Integration owner reads and admits the exact proposed API, delivery and
   file ownership in `contract.md`.
-- [ ] Publish this planning-only change and clear source review/required CI.
-- [ ] Refresh overlapping claims immediately before any implementation
+- [x] Publish this planning-only change and clear source review/required CI.
+  #8193 merged as `57bcc244f8f2b7924f609c1001110a31e430168e`.
+- [x] Refresh overlapping claims immediately before any implementation
   assignment. Existing claim statements are not perpetual edit permission.
 
 ### Phase 2 — Separately admitted implementation
@@ -119,7 +120,7 @@ The concrete names, byte ceilings and decomposition in `contract.md` are
 
 ## Validation Plan
 
-- [ ] Source-plan structure, links, public-safe wording and scope checked.
+- [x] Source-plan structure, links, public-safe wording and scope checked.
 - [ ] Real owned synthetic existing control server plus real Node sockets, with
   isolated installation/state fixtures and known cleanup.
 - [ ] Wrong token, wrong source/installation, active/previous-route confusion,
@@ -161,3 +162,45 @@ All functional phases remain gated even if this proposal merges.
 - The request summary was checked against the selected constraints: per-user
   authority, successor support, zero lifecycle/fallback work, exact replay,
   unchanged timing boundary and separate implementation admission are retained.
+
+### 2026-10-23 — Source review cleared; implementation admission pending
+
+- #8193 received Copilot approval at its exact head and passed required CI,
+  then merged as `57bcc244f8f2b7924f609c1001110a31e430168e`.
+- The reviewer left one Low, non-blocking navigation suggestion: add this
+  effort's own row to the active index. The planning PR deliberately remained
+  limited to its two claimed files. Carry that navigation follow-up into the
+  next coordinated documentation update without altering the receipt owner's
+  existing row.
+- The integration owner's exact API/file admission remains open. No functional
+  implementation, runtime qualification, rollout or parent-issue completion is
+  claimed. The next action is that owner's review of `contract.md`, followed by
+  fresh claims and explicit implementation assignment.
+
+### 2026-10-23 — Bounded delivery/control slice admitted
+
+- The integration owner admitted the reviewed API and assigned the catalog,
+  fixed-purpose control adapter, existing control framing/health/drain and their
+  focused tests/documentation. Receipt backend/activity/Node/scheduler and
+  roster-owner hunks remain separately owned.
+- Source changes now keep the optional candidate separate from readiness,
+  constrain frames to 8 KiB, cap receipt admission at four with no queue, and
+  retain disconnected writes in drain accounting until settlement. An absent
+  qualified backend advertises no capability.
+- The backend owner accepted the callable/guard contract and bounded storage
+  ceilings recorded in the runtime documentation. The canonical trace-lock
+  deadline hunk and existing registration-producer project/nonce projection
+  remain explicit additional admission gates, not inferred edit authority.
+- Validation: 79 focused catalog/control/cutover tests passed, including real
+  sockets and real source binding against isolated fixtures; 180 resident
+  lifecycle tests passed. Install contract and touched-file lint passed.
+  No native/live deployment or full Node/backend qualification was performed.
+- The actual source-binding fixture observes one startup selection plus six
+  fixed binding calls across health/admission/checkpoints/completion and rejects
+  helper process starts. A changed selection cannot relabel the old resident.
+  This is not a claim about the full hook enrichment or an installed host.
+- The original local review journal was preserved through backed pull-forward.
+  Managed sync refused a deleted PR ref; only the distinct journal commit was
+  replayed onto the fetched reviewed default branch.
+- This source update adds this effort's own index row, resolving the prior
+  non-blocking navigation suggestion without modifying another owner's row.

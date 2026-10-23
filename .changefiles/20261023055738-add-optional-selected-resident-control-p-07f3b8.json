@@ -1,0 +1,9 @@
+{
+  "comment": "Add optional selected-resident control projection and bounded prompt receipt control admission, disabled without the qualified receipt backend.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

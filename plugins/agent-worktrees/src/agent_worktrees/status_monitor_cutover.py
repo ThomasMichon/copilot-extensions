@@ -25,6 +25,7 @@ from zdd.cutover import CutoverOrchestrator
 from . import locks
 from .status_monitor_drain import DrainTrace
 from .status_monitor_python import direct_monitor_python
+from .handoff_prompt_receipt_control import ACTION as RECEIPT_ACTION, FRAME_BYTES, unique_object
 
 _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
@@ -137,6 +138,17 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             ):
                 return
             action = str(request.get("action") or "health")
+            if action == RECEIPT_ACTION and (
+                len(raw) > FRAME_BYTES or not raw.endswith(b"\n")
+                or set(request) != {"version", "token", "action", "payload"}
+                or type(request.get("version")) is not int or request["version"] != 1
+            ):
+                self.wfile.write(b'{"version":1,"result":{"contractVersion":1,'
+                                 b'"status":"unavailable","reason":"invalid-frame",'
+                                 b'"replayed":false,"subject":null,"owner":null}}\n')
+                return
+            if action == RECEIPT_ACTION:
+                request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
             payload = request.get("payload")
             if not isinstance(payload, dict):
                 payload = {}
@@ -163,12 +175,14 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             result = self.server.owner.handle(action, payload)  # type: ignore[attr-defined]
             if not isinstance(result, dict):
                 result = {}
-            self.wfile.write(
-                json.dumps(
-                    {"version": 1, "result": result}, separators=(",", ":"), ensure_ascii=False,
-                ).encode("utf-8")
-                + b"\n"
-            )
+            encoded = json.dumps(
+                {"version": 1, "result": result}, separators=(",", ":"), ensure_ascii=False,
+            ).encode("utf-8") + b"\n"
+            if action == RECEIPT_ACTION and len(encoded) > FRAME_BYTES:
+                encoded = (b'{"version":1,"result":{"contractVersion":1,'
+                           b'"status":"unknown","reason":"response-too-large",'
+                           b'"replayed":false,"subject":null,"owner":null}}\n')
+            self.wfile.write(encoded)
         except Exception:
             return
         finally:

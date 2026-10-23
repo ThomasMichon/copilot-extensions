@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Ready Resident Prompt Receipt](active/ready-resident-prompt-receipt/README.md) | Active; delivery/control source slice, qualified backend and subject delivery remain gated | #7942; preserves receipt/roster owners and prohibits helper/lifecycle fallbacks |
 | [Bridge Retained Runtime Restoration](active/bridge-retained-runtime-restoration/README.md) | Active; #8179 proposal merged, bounded DB/storage foundation in source review; full Phase 1 open | #8063; specializes #7268 without substituting for Dispatch/adopter acknowledgement; no rollout |
 | [Actions Dialog Isolation](active/actions-dialog-isolation/README.md) | Draft amendment; Actions source complete, new configuration-freshness episode | #7940 exact file-store/consumer admission; #7939 release and #7935 native gates remain |
 | [Producer Work Reuse](active/producer-work-reuse/README.md) | Draft; code-grounded producer caching/batching/indexing plan only; execution admission pending | #7948/#7949/#7950 and retained #2110 declaration/health acceptance; no rollout |
