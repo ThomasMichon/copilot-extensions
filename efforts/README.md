@@ -42,7 +42,7 @@ that pattern to this repository.
 | [Runtime Operational Contracts](active/review-pipeline-operational-contracts/README.md) | Active; proposal/prerequisites merged, activation/readiness/Windows contracts and adoption open | #6274; existing Windows regression #6266 |
 | [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Active; proposal reviewed, section and instance contracts | #6379 |
 | [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; shared consolidation roadmap and owner-only local-provider review rescue proposed, gated implementation open | #6237; canonical audit/coordination lead, existing release/runner/portfolio owners retained |
-| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; identity/admission prerequisites merged; provider/enrollment/integration/lifecycle open | #6236, #6240, #6241, #6443, #5862; existing #3761/#352/#5789/#6030/#6424 owners retained |
+| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; identity/admission/reader prerequisites merged; provider/enrollment/integration/lifecycle open | #6236, #6240, #6241, #6443, #5862; existing #3761/#352/#5789/#6030/#6424 owners retained |
 | [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Active; proposal reviewed, dependency reduction | #6234 |
 | [Resilient Update Sequencing](active/resilient-update-sequencing/README.md) | Active; reviewed, historical command migration and cheap finishing first | #6820; complementary to #6812 |
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Active; reader-lifetime continuation | #3963; registry presentation separately #5559 |

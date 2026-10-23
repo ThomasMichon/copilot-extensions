@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; identity/admission prerequisites merged; provider/enrollment/integration/lifecycle open
+- **Status:** Active; identity/admission/reader prerequisites merged; provider/enrollment/integration/lifecycle open
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -332,9 +332,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   existing #5862, preserving #3761 origin authority and #352 client/mux ownership.
 - [x] Review the explicitly assigned
   [isolated scoped point-reader contract](scoped-observation-reader.md) (#8041).
-- [ ] Land and validate the explicitly assigned
+- [x] Land and validate the explicitly assigned
   [isolated scoped point-reader](scoped-observation-reader.md), composing only
-  owned admission/storage libraries without wiring a resident consumer.
+  owned admission/storage libraries without wiring a resident consumer (#8052).
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
   The subsequent operator approval permits only an isolated transport-neutral
@@ -416,6 +416,28 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-22 - Isolated scoped-reader prerequisite merged
+
+- #8052 actually merged at `715709202b0f815f873236663a945865993da753`,
+  `2026-10-23T03:04:29Z`, from exact head `e1b3703154`. The current-head
+  Copilot review `5623404449` approved with no open issues, both review
+  threads were resolved, and all required checks passed before managed merge.
+- The isolated implementation and its bounded contract are complete. Native
+  Windows contained validation passes 123 owned reader/admission/store cases
+  in 48.21 seconds under the unchanged 120-second bound. The separate-process
+  mixed-caller proof includes an inverted-lock negative control. Required
+  hosted unit/guard CI is not represented as full native Fleet integration.
+- Reconciled actual terminal PR tracking and retained a source backup. The
+  original aggregate patch exactly matches the squash merge; pull-forward
+  preserves an unrelated upstream service-Gateway README change. No source,
+  claims or accepted responsibilities were discarded or worktrees finalized.
+- This closes only the explicitly assigned local composition prerequisite.
+  Resident consumers, authenticated snapshot/provider provenance, durable
+  shared epochs, wire-emission fencing, enrollment and deployment remain
+  outside the assignment. The full parent stays Active with every broader
+  Plan and Validation Plan gate intact. No other-agent coordination or
+  background monitor was started.
 
 ### 2026-10-22 - Explicitly assigned local scoped-reader implementation
 

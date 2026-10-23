@@ -1,5 +1,8 @@
 # Isolated scoped observation reader
 
+**Status:** Implemented local prerequisite (#8052); resident/provider/adoption
+gates remain open in the parent effort.
+
 Back to [Fleet Control V2](README.md). This is an **agent-recommended bounded
 implementation contract**, accepted by the operator as `isolated-scoped-reader`.
 It closes a local composition prerequisite of the reviewed
@@ -70,8 +73,9 @@ result as a substitute for current execution/emission authorization.
 - [x] Storage and callback failures propagate; no silent retry or cached allow.
 - [x] A fresh-process real-identity/SQLite consumer uses production modules,
   and importing the adapter preserves the dependency-free client boundary.
-- [ ] Existing admission/store tests and unchanged required partition budgets
-  pass; current-head review and required CI pass before implementation merge.
+- [x] Existing admission/store tests retain the unchanged 120-second contained
+  selection bound; exact-head review and required CI pass before implementation
+  merge (#8052).
 
 No first-machine installer behavior changes. Clean-room role installation and
 live external provider/serving proof are not supplied by this isolated library;
