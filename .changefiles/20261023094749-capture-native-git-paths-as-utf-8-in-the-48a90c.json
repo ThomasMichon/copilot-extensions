@@ -1,0 +1,9 @@
+{
+  "comment": "Capture native Git paths as UTF-8 in the PowerShell policy entrypoint and restore the caller output encoding.",
+  "changes": [
+    {
+      "plugin": "ai-attribution",
+      "type": "patch"
+    }
+  ]
+}

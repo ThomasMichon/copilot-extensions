@@ -651,6 +651,13 @@ function Invoke-Policy {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-Policy @args
+    $OriginalOutputEncoding = [Console]::OutputEncoding
+    try {
+        # Git emits UTF-8 paths even when a headless host defaults to OEM capture.
+        [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+        Invoke-Policy @args
+    } finally {
+        [Console]::OutputEncoding = $OriginalOutputEncoding
+    }
     exit 0
 }
