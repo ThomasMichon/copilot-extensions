@@ -1087,6 +1087,9 @@ sync the containing directory and each newly published parent's entry, not
 unrelated existing ancestors. Both platforms stage a local pending marker
 before publishing a new directory; a leftover marker requires a successful
 parent-directory flush before the directory can be reused.
+Directory publication is exclusive, so concurrent writers cannot replace
+another writer's new empty directory; unavailable exclusive-rename or flush
+primitives fail closed.
 Inspection loads observations
 off the UI thread and reports unreadable observations without hiding the
 original request. **Retained

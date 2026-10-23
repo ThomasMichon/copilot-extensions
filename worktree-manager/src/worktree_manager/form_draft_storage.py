@@ -6,6 +6,7 @@ import errno
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import time
 import uuid
@@ -52,6 +53,32 @@ def _windows_flush_directory(path: Path) -> None:
         kernel.CloseHandle(handle)
 
 
+def _posix_move_directory(source: Path, destination: Path) -> None:
+    import ctypes
+
+    library = ctypes.CDLL(None, use_errno=True)
+    paths = (os.fsencode(source), os.fsencode(destination))
+    try:
+        if sys.platform == "darwin":
+            move = library.renamex_np
+            move.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+            arguments = (*paths, 0x4)  # RENAME_EXCL
+        elif sys.platform.startswith("linux"):
+            move = library.renameat2
+            move.argtypes = [
+                ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint,
+            ]
+            arguments = (-100, paths[0], -100, paths[1], 0x1)  # RENAME_NOREPLACE
+        else:
+            raise AttributeError
+    except AttributeError:
+        raise OSError(errno.ENOTSUP, "Exclusive directory publication is unavailable", str(destination)) from None
+    move.restype = ctypes.c_int
+    if move(*arguments) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(destination))
+
+
 def _ensure_directory(path: Path) -> None:
     if path.is_dir():
         pending = path / _PENDING_DIRECTORY
@@ -81,7 +108,7 @@ def _ensure_directory(path: Path) -> None:
             if os.name == "nt":
                 _windows_move(temporary, path, replace=False)
             else:
-                os.rename(temporary, path)
+                _posix_move_directory(temporary, path)
                 _sync_directory(path.parent)
         except FileExistsError:
             if not path.is_dir():

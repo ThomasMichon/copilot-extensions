@@ -100,6 +100,7 @@ def test_posix_first_touch_retains_each_failed_parent_barrier(tmp_path, monkeypa
     monkeypatch.setattr(storage, "os", SimpleNamespace(
         name="posix", fsync=os.fsync, replace=os.replace, rename=os.rename, unlink=os.unlink,
     ))
+    monkeypatch.setattr(storage, "_posix_move_directory", lambda source, target: os.rename(source, target))
     monkeypatch.setattr(storage, "_sync_directory", sync)
     for _ in range(2):
         with pytest.raises(OSError, match="parent publication failed"):
@@ -111,6 +112,55 @@ def test_posix_first_touch_retains_each_failed_parent_barrier(tmp_path, monkeypa
     storage.write_record(path, {"id": "original"})
     assert json.loads(path.read_text(encoding="utf-8")) == {"id": "original"}
     assert not list(tmp_path.rglob(storage._PENDING_DIRECTORY))
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+@pytest.mark.parametrize("error", [0, 17, 5])
+def test_posix_directory_publication_requires_exclusive_rename(monkeypatch, tmp_path, platform, error):
+    import ctypes
+    calls = []
+
+    class Move:
+        def __call__(self, *args):
+            calls.append(args)
+            return -1 if error else 0
+
+    move = Move()
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: SimpleNamespace(
+        renameat2=move, renamex_np=move,
+    ))
+    monkeypatch.setattr(ctypes, "get_errno", lambda: error)
+    monkeypatch.setattr(storage, "sys", SimpleNamespace(platform=platform))
+    source, target = tmp_path / "staged", tmp_path / "destination"
+    if error:
+        with pytest.raises(FileExistsError if error == 17 else OSError):
+            storage._posix_move_directory(source, target)
+    else:
+        storage._posix_move_directory(source, target)
+    encoded = (os.fsencode(source), os.fsencode(target))
+    assert calls == ([(-100, encoded[0], -100, encoded[1], 1)] if platform == "linux"
+                     else [(*encoded, 4)])
+    assert move.argtypes and move.restype
+
+
+@pytest.mark.parametrize("platform", ["linux", "unsupported"])
+def test_unavailable_posix_exclusive_rename_fails_as_a_filesystem_error(monkeypatch, tmp_path, platform):
+    import ctypes
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: SimpleNamespace())
+    monkeypatch.setattr(storage, "sys", SimpleNamespace(platform=platform))
+    with pytest.raises(OSError, match="Exclusive directory publication is unavailable"):
+        storage._posix_move_directory(tmp_path / "staged", tmp_path / "destination")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX exclusive directory rename")
+def test_native_posix_directory_publish_never_replaces_an_existing_empty_directory(tmp_path):
+    source, target = tmp_path / "staged", tmp_path / "destination"
+    source.mkdir()
+    target.mkdir()
+    identity = target.stat().st_ino
+    with pytest.raises(FileExistsError):
+        storage._posix_move_directory(source, target)
+    assert source.is_dir() and target.stat().st_ino == identity
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX directory permissions")
