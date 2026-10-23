@@ -335,7 +335,7 @@ def test_client_refuses_invalid_views_without_mutating_semantic_progress(pair, t
 
 
 def seed_unrelated(store, start, count, *, structured, codename="agent-a",
-                   channel="room", recipients=None):
+                   channel="room", recipients=None, kind="question"):
     with store._transaction():
         for number in range(start, start + count):
             request = {
@@ -344,7 +344,7 @@ def seed_unrelated(store, start, count, *, structured, codename="agent-a",
             }
             if structured:
                 request["collaboration"] = annotation(
-                    to=["agent-c"] if recipients is None else recipients,
+                    kind, to=["agent-c"] if recipients is None else recipients,
                 )
             store._post(request)
 
@@ -371,9 +371,13 @@ def test_empty_inbox_work_does_not_grow_with_unrelated_questions(store):
     own = collaborate(store, "own", codename="agent-b", to=["agent-c"])
     seed_unrelated(store, 0, 100, structured=True)
     seed_unrelated(store, 0, 100, structured=False, codename="agent-b")
+    seed_unrelated(store, 0, 100, structured=True, codename="agent-c",
+                   kind="notice", recipients=["agent-b"])
     small, first = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
     seed_unrelated(store, 100, 4900, structured=True)
     seed_unrelated(store, 100, 4900, structured=False, codename="agent-b")
+    seed_unrelated(store, 100, 4900, structured=True, codename="agent-c",
+                   kind="notice", recipients=["agent-b"])
     large, last = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
     assert first["entries"] == last["entries"] == []
     assert not first["more"] and not last["more"]

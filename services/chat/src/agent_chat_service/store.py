@@ -327,10 +327,11 @@ class ChatStore:
                     event_id INTEGER NOT NULL REFERENCES collaborations(event_id),
                     codename TEXT NOT NULL REFERENCES actors(codename),
                     channel TEXT NOT NULL REFERENCES channels(name),
+                    kind TEXT NOT NULL,
                     PRIMARY KEY(event_id, codename)
                 );
                 CREATE INDEX IF NOT EXISTS collaboration_recipient_events
-                    ON collaboration_recipients(channel, codename, event_id);
+                    ON collaboration_recipients(channel, codename, kind, event_id);
             """)
             with self._transaction():
                 self._db.execute(
@@ -605,8 +606,9 @@ class ChatStore:
                  channel, reply_author, codename),
             )
             self._db.executemany(
-                "INSERT INTO collaboration_recipients (event_id, codename, channel) VALUES (?, ?, ?)",
-                [(row_id, recipient, channel) for recipient in value["to"]],
+                """INSERT INTO collaboration_recipients (event_id, codename, channel, kind)
+                VALUES (?, ?, ?, ?)""",
+                [(row_id, recipient, channel, value["kind"]) for recipient in value["to"]],
             )
         self._db.execute(
             "UPDATE settings SET value=CAST(value AS INTEGER)+1 WHERE key='event_count'"

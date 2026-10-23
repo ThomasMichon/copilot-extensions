@@ -147,6 +147,7 @@ WITH directed AS (
     FROM collaboration_recipients recipient INDEXED BY collaboration_recipient_events
     CROSS JOIN collaborations q ON q.event_id=recipient.event_id
     WHERE recipient.channel=:channel AND recipient.codename=:viewer
+    AND recipient.kind='question'
     AND recipient.event_id>:after AND recipient.event_id<=:head AND q.kind='question'
     AND NOT EXISTS (
         SELECT 1 FROM collaborations answer INDEXED BY collaborations_answer
