@@ -15,6 +15,9 @@ RELATIONS = {
     "answer": {"question"}, "review": {"finding", "result", "proposal"},
     "resolve": {"question", "proposal"},
 }
+MAX_INBOX_CANDIDATES = 100
+
+
 def normalize(value):
     try:
         _unicode(value)
@@ -140,42 +143,40 @@ NOT EXISTS (
 )
 """
 
-# Keep snapshot filters and ordered lookahead inside each indexed branch.
+# Bound candidate examination before applying snapshot retirement filters.
 PENDING = f"""
 WITH directed AS (
-    SELECT q.event_id, 'reply' AS attention
+    SELECT recipient.event_id, 'reply' AS attention, recipient.event_id AS question_id
     FROM collaboration_recipients recipient INDEXED BY collaboration_recipient_events
-    CROSS JOIN collaborations q ON q.event_id=recipient.event_id
     WHERE recipient.channel=:channel AND recipient.codename=:viewer
     AND recipient.kind='question'
-    AND recipient.event_id>:after AND recipient.event_id<=:head AND q.kind='question'
-    AND NOT EXISTS (
-        SELECT 1 FROM collaborations answer INDEXED BY collaborations_answer
-        WHERE answer.kind='answer' AND answer.reply_to=q.event_id
-        AND answer.author_codename=:viewer AND answer.event_id<=:head
-    )
-    AND {LIVE_QUESTION}
-    ORDER BY recipient.event_id LIMIT :limit
+    AND recipient.event_id>:after AND recipient.event_id<=:head
+    ORDER BY recipient.event_id LIMIT :scan_limit
 ), reviewed AS (
-    SELECT answer.event_id, 'review' AS attention
+    SELECT answer.event_id, 'review' AS attention, answer.reply_to AS question_id
     FROM collaborations answer INDEXED BY collaborations_review
-    CROSS JOIN collaborations q ON q.event_id=answer.reply_to
     WHERE answer.channel=:channel AND answer.reply_author=:viewer AND answer.kind='answer'
-    AND q.kind='question' AND answer.event_id>:after AND answer.event_id<=:head
-    AND NOT EXISTS (
-        SELECT 1 FROM collaborations amendment
-        WHERE amendment.supersedes=answer.event_id AND amendment.event_id<=:head
-    )
-    AND {LIVE_QUESTION}
-    ORDER BY answer.event_id LIMIT :limit
+    AND answer.event_id>:after AND answer.event_id<=:head
+    ORDER BY answer.event_id LIMIT :scan_limit
 ), pending AS (
-    SELECT event_id, attention FROM directed
-    UNION ALL SELECT event_id, attention FROM reviewed
-    ORDER BY event_id LIMIT :limit
+    SELECT event_id, attention, question_id FROM directed
+    UNION ALL SELECT event_id, attention, question_id FROM reviewed
+    ORDER BY event_id LIMIT :scan_limit
 )
-SELECT e.*, c.metadata AS collaboration_metadata, c.thread_root, p.attention
-FROM pending p JOIN events e ON e.id=p.event_id
-JOIN collaborations c ON c.event_id=p.event_id
+SELECT p.event_id AS candidate_id, p.attention, e.*,
+       c.metadata AS collaboration_metadata, c.thread_root
+FROM pending p CROSS JOIN collaborations q ON q.event_id=p.question_id
+LEFT JOIN events e ON e.id=p.event_id AND q.kind='question' AND {LIVE_QUESTION}
+AND (p.attention='review' OR NOT EXISTS (
+    SELECT 1 FROM collaborations answer INDEXED BY collaborations_answer
+    WHERE answer.kind='answer' AND answer.reply_to=q.event_id
+    AND answer.author_codename=:viewer AND answer.event_id<=:head
+))
+AND (p.attention='reply' OR NOT EXISTS (
+    SELECT 1 FROM collaborations amendment
+    WHERE amendment.supersedes=p.event_id AND amendment.event_id<=:head
+))
+LEFT JOIN collaborations c ON c.event_id=e.id
 ORDER BY p.event_id
 """
 
@@ -214,9 +215,10 @@ def view(store, request):
     result = {
         "schema": "agent-chat.collaboration-view", "version": 1, "view": request["op"],
         "channel": channel, "codename": viewer, "epoch": store.log_epoch, "head": head,
-        "entries": [], "recent": [], "more": False, "next": None,
+        "entries": [], "recent": [], "count": 0, "more": False, "next": None,
     }
     recent = []
+    pending_more, pending_after = False, after
     if request["op"] == "thread":
         target = store._db.execute(
             SELECT_ENTRY + " WHERE e.channel=? AND e.id=? AND e.id<=?",
@@ -237,7 +239,13 @@ def view(store, request):
             {"root": root, "after": after, "head": head, "limit": limit + 1},
         ).fetchall()
     else:
-        entries = store._db.execute(PENDING, controls).fetchall()
+        candidates = store._db.execute(
+            PENDING, {**controls, "scan_limit": MAX_INBOX_CANDIDATES + 1},
+        ).fetchall()
+        pending_more = len(candidates) > MAX_INBOX_CANDIDATES
+        examined = candidates[:MAX_INBOX_CANDIDATES]
+        pending_after = examined[-1]["candidate_id"] if pending_more else head
+        entries = [row for row in examined if row["id"] is not None]
         recent = store._db.execute(
             SELECT_ENTRY + """
             WHERE e.id IN (SELECT id FROM events WHERE channel=? AND id<=?
@@ -254,6 +262,7 @@ def view(store, request):
             result[name].append(item)
             # Reserve the worst-size continuation before accepting the next item.
             result["more"] = True
+            result["count"] = limit
             result["next"] = {
                 "epoch": store.log_epoch, "head": head,
                 "after": head, **({"recent_after": head, "recent_limit": request.get("recent_limit", 10)}
@@ -265,14 +274,18 @@ def view(store, request):
         if len(result[name]) != len(rows):
             break
     returned = len(result["entries"]) + len(result["recent"])
+    result["count"] = returned
     if remaining and not returned:
         raise ChatError("capacity", "View byte bound cannot hold the next event.")
-    result["more"] = returned < remaining
+    result["more"] = returned < remaining or pending_more
     result["next"] = None
     if result["more"]:
+        position = result["entries"][-1]["event"]["id"] if result["entries"] else after
+        if request["op"] == "inbox" and len(result["entries"]) == len(entries):
+            position = pending_after
         result["next"] = {
             "epoch": store.log_epoch, "head": head,
-            "after": result["entries"][-1]["event"]["id"] if result["entries"] else after,
+            "after": position,
             **({
                 "recent_after": result["recent"][-1]["event"]["id"]
                 if result["recent"] else recent_after,

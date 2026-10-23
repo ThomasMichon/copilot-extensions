@@ -376,9 +376,19 @@ index before loading bounded event bodies. Unrelated channel traffic does not
 require a projection scan. Pending-answer existence is indexed by question,
 answering codename and captured event boundary, so other participants' answers
 do not require scanning a question's reply backlog.
-Each inbox branch applies snapshot retirement filters and its ordered lookahead
-limit before the bounded merge, so a small page does not sort an entire
-genuinely pending backlog.
+Each inbox branch selects at most 101 indexed candidates before their bounded
+merge. Retirement checks apply only to that combined window; at most 100
+candidates advance the scan, with one lookahead. Answered, resolved or
+superseded histories therefore cannot force a whole-history examination under
+the store lock.
+
+Every view includes `count`, exactly the combined length of `entries` and
+`recent`. An inbox page may have `count: 0` and `more: true` after examining only
+settled candidates. Follow `next` until `more` is false, rather than treating an
+empty page as terminal. `next.after` can advance past examined retired IDs, but
+never an omitted pending entry; its epoch/head remain the captured boundary.
+The client validates counts, strict continuation progress and captured bounds.
+No scan position changes durable semantic cursors or settles delivery.
 
 ### Offline installed invocation catalog
 

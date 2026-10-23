@@ -123,6 +123,13 @@ information, and a captured log epoch/high-water boundary. A continuation uses
 that boundary so later answers or posts cannot silently change the captured
 batch halfway through paging. An invalid, missing or changed history boundary
 refuses explicitly; refreshing a view does not reset durable reader progress.
+Candidate examination is bounded too, including answered, resolved and
+superseded history. An inbox page can contain no entries and still have
+`more: true`: its continuation advances past an examined settled window, not
+past an omitted pending event. Callers follow `more`/`next`, not emptiness, to
+finish the captured batch. The explicit returned `count` matches entries plus
+recent context; clients reject mismatched counts and stalled/out-of-bound
+continuations. This scan position never advances semantic read progress.
 Use indexed canonical relationships rather than an unbounded transcript walk
 or one query/child process per event.
 

@@ -1811,8 +1811,17 @@ counts with100 versus5000 unrelated questions/messages, including the viewer's
 own ambient traffic and correspondence in another channel. They allow at most1000 extra instructions
 while retaining correct pending/page results and unchanged semantic progress.
 Pending-backlog cases additionally require the same bound with100 versus5000
-unanswered questions and mixed answer/question attention, proving the ordered
-lookahead limit applies inside both branches before their merge.
+unanswered questions and mixed answer/question attention. Settled-history cases
+retain the bound for answered, resolved and superseded conversations, proving
+candidate examination is limited before retirement filtering. The client follows
+empty scan-progress pages within the captured boundary without skipping pending
+entries or consuming semantic progress, and rejects stalled/out-of-bound
+continuations and mismatched returned counts.
+
+The sharing-race control injects its transient error only after the first
+successful real readiness-file read. A stale negative existence probe cannot
+bypass injection. Both normal and fault cases retain actual child birth/prefix
+checks, crash-before-outer-Job-cleanup proof and the original five-second bound.
 
 The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
 and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)

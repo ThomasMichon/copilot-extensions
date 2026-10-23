@@ -26,6 +26,8 @@ test_inbox_work_ignores_other_channel_correspondence
 test_sparse_thread_work_and_pagination_ignore_unrelated_history
 test_inbox_lookahead_work_is_bounded_before_merging_pending_branches
 test_pending_question_lookup_work_ignores_other_participants_answers
+test_inbox_examination_is_bounded_over_settled_history
+test_inbox_scan_continuations_preserve_captured_pending_without_skips
 """,
     "test_workspace.py": """
 test_worktree_identity_survives_sessions_and_label_changes_without_adoption
@@ -172,8 +174,10 @@ PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
     "test_collaboration.py::test_metadata_refuses_invalid_fields_and_bounds": 22,
     "test_collaboration.py::test_annotated_pending_requires_complete_receipt_before_recovery": 6,
-    "test_collaboration.py::test_client_refuses_invalid_views_without_mutating_semantic_progress": 11,
+    "test_collaboration.py::test_client_refuses_invalid_views_without_mutating_semantic_progress": 13,
     "test_collaboration.py::test_inbox_lookahead_work_is_bounded_before_merging_pending_branches": 2,
+    "test_collaboration.py::test_inbox_examination_is_bounded_over_settled_history": 3,
+    "test_collaboration.py::test_inbox_scan_continuations_preserve_captured_pending_without_skips": 3,
     "test_workspace.py::test_existing_owner_head_and_execution_tuple_are_not_reassigned": 4,
     "test_workspace.py::test_invalid_initialization_refuses_before_executing_owner": 6,
     "test_workspace.py::test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback": 22,

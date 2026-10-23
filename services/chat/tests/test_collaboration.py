@@ -289,6 +289,7 @@ def test_unsupported_structured_service_never_falls_back_to_plaintext(pair):
 @pytest.mark.parametrize("damage", [
     "fields", "version", "identity", "epoch", "head", "ordering",
     "metadata", "attention", "continuation", "boolean-position", "empty-more",
+    "count", "boolean-count",
 ])
 def test_client_refuses_invalid_views_without_mutating_semantic_progress(pair, tmp_path, damage):
     _, transport, store = pair
@@ -318,6 +319,10 @@ def test_client_refuses_invalid_views_without_mutating_semantic_progress(pair, t
             result["next"]["head"] += 1
         elif damage == "boolean-position":
             result["next"]["after"] = True
+        elif damage == "count":
+            result["count"] += 1
+        elif damage == "boolean-count":
+            result["count"] = True
         else:
             result["entries"] = []
         return result
@@ -488,4 +493,99 @@ def test_pending_question_lookup_work_ignores_other_participants_answers(store):
     collaborate(store, "own-answer", codename="agent-b", kind="answer",
                 reply_to=question["id"])
     assert inbox(store, recent_limit=0)["entries"] == []
+    assert read(store, "agent-b")["cursor"] == 0
+
+
+def seed_settled(store, start, count, settlement):
+    asker, answerer = (
+        ("agent-a", "agent-b") if settlement == "answered" else ("agent-b", "agent-a")
+    )
+    def append(number, codename, suffix, value):
+        return store._post({
+            "channel": "room", "codename": codename, "text": "settled correspondence",
+            "request_id": f"{settlement}-{number}-{suffix}", "collaboration": value,
+        })["event"]["id"]
+
+    with store._transaction():
+        for number in range(start, start + count):
+            question = append(number, asker, "question", annotation(to=[answerer]))
+            append(number, answerer, "answer", annotation("answer", reply_to=question))
+            if settlement == "resolved":
+                append(number, asker, "close", annotation("resolve", reply_to=question))
+            elif settlement == "superseded":
+                append(number, asker, "replace", annotation(to=[answerer], supersedes=question))
+
+
+@pytest.mark.parametrize("settlement", ["answered", "resolved", "superseded"])
+def test_inbox_examination_is_bounded_over_settled_history(store, settlement):
+    join(store)
+    join(store, "agent-b")
+    seed_settled(store, 0, 100, settlement)
+    small, first = sqlite_work(store, lambda: inbox(store, limit=1, recent_limit=0))
+    seed_settled(store, 100, 4900, settlement)
+    large, page = sqlite_work(store, lambda: inbox(store, limit=1, recent_limit=0))
+    assert first["entries"] == page["entries"] == []
+    assert large <= small + 1000, (small, large)
+    captured = page["epoch"], page["head"]
+    requests = 1
+    while page["more"]:
+        assert page["count"] == 0
+        after = page["next"]["after"]
+        page = inbox(store, limit=1, **page["next"])
+        assert (page["epoch"], page["head"]) == captured
+        assert page["entries"] == [] and page["recent"] == []
+        if page["more"]:
+            assert page["next"]["after"] > after
+        requests += 1
+        assert requests <= 60
+    assert requests > 1
+    assert read(store, "agent-b")["cursor"] == 0
+
+
+@pytest.mark.parametrize("damage", ["normal", "stalled", "past-head"])
+def test_inbox_scan_continuations_preserve_captured_pending_without_skips(
+    pair, tmp_path, damage,
+):
+    _, transport, store = pair
+    join(store, "agent-b")
+    seed_settled(store, 0, 101, "answered")
+    seed_settled(store, 0, 100, "resolved")
+    pending = [
+        collaborate(store, f"pending-{number}", to=["agent-b"])["event"]["id"]
+        for number in range(2)
+    ]
+    viewer = Client(transport, {"codename": "agent-b"}, tmp_path / "viewer")
+
+    def corrupt(request, result):
+        if damage == "stalled":
+            result["next"]["after"] = request.get("after", 0)
+        else:
+            result["next"]["after"] = result["head"] + 1
+        return result
+
+    if damage != "normal":
+        transport.after = corrupt
+        with pytest.raises(ClientError) as caught:
+            viewer.inbox("room", limit=1, recent_limit=0)
+        assert caught.value.code == "invalid_response"
+        assert read(store, "agent-b")["cursor"] == 0
+        return
+
+    page = viewer.inbox("room", limit=1, recent_limit=0)
+    assert page["entries"] == [] and page["more"] and page["count"] == 0
+    captured = page["epoch"], page["head"]
+    collaborate(store, "later-answer", codename="agent-b", kind="answer", reply_to=pending[0])
+    collaborate(store, "outside-capture", to=["agent-b"])
+    seen = []
+    requests = 0
+    while True:
+        assert (page["epoch"], page["head"]) == captured
+        assert page["count"] == len(page["entries"])
+        seen.extend(entry["event"]["id"] for entry in page["entries"])
+        if not page["more"]:
+            break
+        page = viewer.inbox("room", limit=1, **page["next"])
+        requests += 1
+        assert requests <= 6
+    assert seen == pending
     assert read(store, "agent-b")["cursor"] == 0

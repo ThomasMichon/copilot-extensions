@@ -370,7 +370,7 @@ class Client:
         try:
             fields = {
                 "schema", "version", "view", "channel", "codename", "epoch", "head",
-                "entries", "recent", "more", "next",
+                "entries", "recent", "count", "more", "next",
             } | ({"thread_root"} if op == "thread" else set())
             if (set(result) != fields or result["schema"] != "agent-chat.collaboration-view"
                     or type(result["version"]) is not int or result["version"] != 1
@@ -379,6 +379,7 @@ class Client:
                     or not isinstance(result["epoch"], str)
                     or not re.fullmatch(r"[a-f0-9]{32}", result["epoch"])
                     or type(result["head"]) is not int or not 0 <= result["head"] <= 2**63 - 1
+                    or type(result["count"]) is not int or result["count"] < 0
                     or type(result["more"]) is not bool
                     or controls.get("epoch", result["epoch"]) != result["epoch"]
                     or controls.get("head", result["head"]) != result["head"]
@@ -426,7 +427,8 @@ class Client:
                     previous = event["id"]
                 positions[position] = previous
                 count += len(rows)
-            if count > controls.get("limit", 50) or len(result["recent"]) > controls.get("recent_limit", 10):
+            if (count != result["count"] or count > controls.get("limit", 50)
+                    or len(result["recent"]) > controls.get("recent_limit", 10)):
                 raise ValueError("view count")
             if result["more"]:
                 if not isinstance(result["next"], dict):
@@ -437,10 +439,17 @@ class Client:
                 })
                 expected = {"epoch": result["epoch"], "head": result["head"], "after": positions["after"]}
                 if op == "inbox":
+                    position = result["next"]["after"]
+                    if (not positions["after"] <= position <= result["head"]
+                            or position == controls.get("after", 0)
+                            and positions["recent_after"] == controls.get("recent_after", 0)
+                            or not count and position == result["head"]):
+                        raise ValueError("inbox scan progress")
                     expected.update(
+                        after=position,
                         recent_after=positions["recent_after"], recent_limit=controls.get("recent_limit", 10),
                     )
-                if not count or result["next"] != expected:
+                if (op == "thread" and not count) or result["next"] != expected:
                     raise ValueError("view continuation")
             elif result["next"] is not None:
                 raise ValueError("terminal continuation")
