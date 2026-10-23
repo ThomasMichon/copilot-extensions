@@ -436,3 +436,23 @@ restarted or updated to force acceptance. No productive rollout is performed.
   The final eight-module launch/resume/resolve/handoff consumer portfolio
   passes 612 cases in 115.98 seconds. Lint, module ceilings, install closure
   and headless-launch contracts pass without raising a limit.
+
+### 2026-10-23 - Bash native value ownership
+
+- Closed the next review's Bash parser defect: required native option/value
+  pairs are consumed together before setup-parameter interpretation. Literal
+  directory, recovery or executable-override names remain prompt data rather
+  than replacing setup state. Missing native values fail before launch.
+- The bootstrap-independent shell table is checked against the shared native
+  option contract, preventing duplicated arity knowledge from drifting.
+  No Python or other runtime dependency was added to Bash setup.
+- Exact native controls first reproduced four failures, including an actual
+  selected-directory override. The corrected full launch portfolio passes
+  158 cases in 65.52 seconds with unchanged containment and child deadlines.
+- Audited the same value/option distinction in launch-mode selection:
+  literal `--acp`, `--experimental` and `--allow-all` values could previously
+  suppress directory selection or generated flags. Three fail-first cases
+  reproduced it. The builder now uses actual native option tokens for mode,
+  default flags and preference deduplication, excluding setup values and
+  Bash command-name slots. Genuine ACP transport remains unchanged.
+  All 162 launch cases pass in 66.44 seconds.

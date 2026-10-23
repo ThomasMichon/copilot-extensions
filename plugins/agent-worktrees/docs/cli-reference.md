@@ -66,6 +66,10 @@ through its own named parameter and constructs Copilot's native `-C` argument
 only after shell parameter parsing, preserving Windows drive paths and spaces.
 Both normalized shells place directory selection before the native argument
 tail. Bash stops interpreting setup parameters at the tail delimiter.
+Bash also consumes required native option/value pairs together, so a literal
+prompt value cannot become a setup directory, recovery or executable override.
+Launch mode and generated flags are likewise selected from actual native
+options, not flag-shaped literal values or Bash command-name slots.
 Generated launch flags and later resume/interactive-seed additions stay at the
 native boundary before literal tails, including encoded PowerShell invocations
 and the normalized argument envelope.

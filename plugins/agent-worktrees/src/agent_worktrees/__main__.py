@@ -115,7 +115,7 @@ from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
 from . import state_root as state_root_mod
 from .copilot_launch_prefs import resolve_launch_pref_flags
-from .process_launcher import apply_process_launcher, bind_execution_directory, quote_powershell_command
+from .process_launcher import apply_process_launcher, bind_execution_directory, native_option_tokens, quote_powershell_command
 from .update_stage import cmd_stage_update as cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
 # front_door_cli's own names are re-exported eagerly (not deferred to
 # _load_full_command_surface() below) because main() calls several of them
@@ -2174,6 +2174,7 @@ def _build_launch_cmd(
     profile_args = profile.copilot_args if profile and profile.copilot_args else []
     cmd.extend(profile_args)
     generated = []
+    native_options = native_option_tokens(cmd, passthrough_start=passthrough_start)
 
     # Auto-approve everything so worktree sessions run without any
     # confirmation prompts.  --allow-all is equivalent to
@@ -2188,13 +2189,12 @@ def _build_launch_cmd(
     # copilot_args/profile args), so a configured `launch` template that
     # embeds `--acp` directly is detected too -- same class of gap as the
     # duplicate-flag check below, applied uniformly.
-    passthrough = list(extra) + list(profile_args)
-    is_acp = "--acp" in cmd
+    is_acp = "--acp" in native_options
     if not is_acp and not any(
-        a == flag for a in passthrough for flag in ("--allow-all-tools", "--allow-all", "--yolo")
+        flag in native_options for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
         generated.append("--allow-all")
-    if "--experimental" not in cmd:
+    if "--experimental" not in native_options:
         generated.append("--experimental")
 
     # Re-express the persisted model/effort/context-tier preference
@@ -2210,7 +2210,7 @@ def _build_launch_cmd(
     # model/effort through its own configuration path there instead (context
     # tier is not yet carried through ACP -- a separate, tracked gap).
     if not is_acp:
-        generated.extend(resolve_launch_pref_flags(cmd))
+        generated.extend(resolve_launch_pref_flags(native_options))
         cmd = bind_execution_directory(cmd, work_dir, LaunchPreflightError,
             passthrough_start=passthrough_start, native_suffix=generated)
     else:

@@ -48,6 +48,34 @@ def _bash_argument_boundary(command, passthrough_start: int, error_type):
     return command, script_index + 2
 
 
+def native_option_tokens(command, *, passthrough_start: int):
+    """Return native option names, excluding values, setup fields and shell slots."""
+    normalized = _normalized_setup_index(command)
+    if normalized is not None:
+        index = normalized + 1
+    elif command and PureWindowsPath(command[0]).stem.casefold() == "bash" and (
+        script := bash_command_index(command, limit=passthrough_start)
+    ) is not None:
+        index = script + 2 if passthrough_start > script + 1 else script + 1
+    else:
+        index = next(
+            (i + 1 for i, arg in enumerate(command[:passthrough_start])
+             if PureWindowsPath(arg).stem.casefold() == "copilot"), 1,
+        )
+    result = []
+    while index < len(command) and command[index] != "--":
+        arg = command[index]
+        if normalized is not None and (
+            arg.casefold() in _SETUP_VALUE_OPTIONS or arg.casefold() == "-executiondirectory"
+        ):
+            index += 2
+            continue
+        if arg.startswith("-"):
+            result.append(arg.split("=", 1)[0])
+        index += 2 if arg in _NATIVE_VALUE_OPTIONS or arg == "-C" else 1
+    return result
+
+
 def bind_execution_directory(
     command, work_dir: str, error_type, *, passthrough_start: int = 1, native_suffix=(),
 ):

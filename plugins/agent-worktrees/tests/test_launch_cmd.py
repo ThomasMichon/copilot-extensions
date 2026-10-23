@@ -200,6 +200,17 @@ def test_directory_binding_does_not_supply_a_missing_option_value(option):
         m._build_launch_cmd(_config(), _args([option]), "/selected worktree")
 
 
+@pytest.mark.parametrize("value", ["--acp", "--experimental", "--allow-all"])
+def test_literal_option_values_do_not_select_launch_mode_or_suppress_generated_flags(value):
+    command = _inner_command(m._build_launch_cmd(
+        _config(), _args(["--prompt", value]), "/selected",
+    ))
+    assert "-C=/selected" in command
+    assert command[command.index("--prompt") + 1] == value
+    assert command.count("--experimental") == (2 if value == "--experimental" else 1)
+    assert command.count("--allow-all") == (2 if value == "--allow-all" else 1)
+
+
 @pytest.mark.parametrize("template", [["copilot"], ["bash", "-c", "copilot"]])
 def test_late_resume_and_seed_stay_before_literal_tail_without_mutating_prepared_command(template):
     from agent_worktrees.embody_resume import with_resume, with_seed
@@ -1462,7 +1473,7 @@ def _local_bash():
     return shell
 
 
-@pytest.mark.parametrize("command_name", [None, "--", "configured-command-name"])
+@pytest.mark.parametrize("command_name", [None, "--", "--acp", "configured-command-name"])
 def test_bash_command_template_reaches_native_child(tmp_path, command_name):
     from agent_procutil import no_window_kwargs
     from agent_worktrees.embody_resume import with_resume, with_seed
@@ -1496,10 +1507,12 @@ def test_bash_command_template_reaches_native_child(tmp_path, command_name):
     assert "--resume=synthetic-anchor-origin" in received
     assert received[received.index("--interactive") + 1] == seed
     assert "--" not in received
+    assert "--acp" not in received
     assert "configured-command-name" not in received
 
 
-def test_normalized_bash_keeps_selected_directory_before_literal_tail(tmp_path, monkeypatch):
+@pytest.mark.parametrize("prompt_value", [None, "--execution-directory", "--recovery", "--copilot-path"])
+def test_normalized_bash_keeps_selected_directory_before_literal_tail(tmp_path, monkeypatch, prompt_value):
     from agent_procutil import owned_process
 
     shell = _local_bash()
@@ -1517,15 +1530,39 @@ def test_normalized_bash_keeps_selected_directory_before_literal_tail(tmp_path, 
         utilities = Path(shell).parent.parent / "usr" / "bin"
         monkeypatch.setenv("PATH", str(utilities) + os.pathsep + os.environ["PATH"])
     literal = ["--", "--execution-directory", "/foreign", "-C", "/literal-data"]
+    native = ["--resume=synthetic-anchor-origin"]
+    if prompt_value is not None:
+        native += ["--prompt", prompt_value]
     completed = owned_process.run_owned([
         shell, str(Path(_SCRIPTS_DIR) / "default-setup.sh"), "--machine", "test",
         "--copilot-path", str(copilot), "--execution-directory", str(selected),
-        "--resume=synthetic-anchor-origin", *literal,
+        *native, *literal,
     ], timeout=20)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert marker.read_text(encoding="utf-8").splitlines() == [
-        "-C", str(selected), "--resume=synthetic-anchor-origin", *literal,
+        "-C", str(selected), *native, *literal,
     ]
+
+
+def test_bash_native_value_arity_matches_shared_contract():
+    import re
+
+    from agent_worktrees.native_arguments import VALUE_OPTIONS
+
+    source = (Path(_SCRIPTS_DIR) / "default-setup.sh").read_text(encoding="utf-8")
+    body = source.split("native_value_option() {", 1)[1].split("\n}", 1)[0]
+    assert set(re.findall(r"--[a-z][a-z0-9-]*|-[A-Za-z]", body)) == VALUE_OPTIONS | {"-C"}
+
+
+@pytest.mark.parametrize("option", ["--prompt", "--model", "-C"])
+def test_bash_setup_rejects_missing_native_option_values(option):
+    from agent_procutil import owned_process
+
+    completed = owned_process.run_owned([
+        _local_bash(), str(Path(_SCRIPTS_DIR) / "default-setup.sh"), option,
+    ], timeout=20)
+    assert completed.returncode == 2
+    assert "requires a value" in completed.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native PowerShell-to-command argument forwarding")

@@ -30,8 +30,29 @@ LAUNCH_SEED_RECORD=""
 LAUNCH_SEED_ID=""
 LAUNCH_SEED_RUNTIME_PYTHON=""
 COPILOT_ARGS=()
-
+native_value_option() {
+    case "$1" in
+        -C|-i|--interactive|-p|--prompt|--model|--reasoning-effort|\
+        --context|--auto-tier|--agent|-n|--name|--session-id|\
+        --log-dir|--extension-sdk-path|--log-level|--stream|--output-format|\
+        --add-dir|--attachment|--disable-mcp-server|--add-github-mcp-toolset|\
+        --add-github-mcp-tool|--plugin-dir|--additional-mcp-config|--mcp-github-auth|\
+        --max-autopilot-continues|--mode|--environment-host|--environment-compute-id|\
+        --dynamic-retrieval|--enable-mcp-server|--max-ai-credits|--usage-output-file)
+            return 0 ;;
+    esac
+    return 1
+}
 while [[ $# -gt 0 ]]; do
+    if native_value_option "$1"; then
+        if [[ $# -lt 2 ]]; then
+            printf 'Native Copilot option %s requires a value\n' "$1" >&2
+            exit 2
+        fi
+        COPILOT_ARGS+=("$1" "$2")
+        shift 2
+        continue
+    fi
     case "$1" in
         --)             COPILOT_ARGS+=("$@"); break ;;
         --machine)      MACHINE="$2"; shift 2 ;;
