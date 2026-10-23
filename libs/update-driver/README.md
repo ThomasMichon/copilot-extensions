@@ -403,6 +403,8 @@ inherited flock, issues the existing participant witness only to the fixed
 builder, and completes native progress after construction and source rechecks.
 Failure before private Python or positive group settlement preserves an
 interrupted fence, never a success-shaped or settled integer result.
+The canonical constructor still requires native `ps` process observation;
+the producer refuses a missing observer before creating execution state.
 
 An existing selector or queue/sidecar requires the selected immutable
 foundation's own retained `foundation_linux` module and canonical queue

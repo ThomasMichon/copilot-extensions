@@ -50,13 +50,12 @@ def test_actual_private_genesis_and_queue_preserving_upgrade_after_caller_group_
     for name in (
         "bash", "dirname", "uname", "readlink", "stat", "find", "sort", "sha256sum", "iconv",
         "cat", "mkdir", "sync", "awk", "date", "mktemp", "mv", "rm", "cp", "flock", "grep",
-        "sleep", "setsid", "mkfifo", "rmdir", "curl", "tar", "gzip", "head", "chmod", "sed", "tr",
+        "sleep", "setsid", "mkfifo", "rmdir", "curl", "tar", "gzip", "head", "chmod", "sed", "tr", "ps",
     ):
         executable = shutil.which(name)
         assert executable, f"native tool missing: {name}"
         (tools / name).symlink_to(executable)
     env = dict(os.environ, PATH=str(tools), UV_PYTHON_DOWNLOADS="automatic")
-    env["UPDATE_DRIVER_FOUNDATION_DIAGNOSTICS"] = "1"
     env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
     env.pop("UPDATE_DRIVER_WITNESS", None)
     descriptors = []

@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import faulthandler
-import os
 import sys
 import tempfile
-import traceback
 from pathlib import Path
 
 SOURCE = Path(__file__).absolute().parent.parent
@@ -82,25 +79,10 @@ def main() -> int:
     parser.add_argument("--base-python", required=True, type=Path)
     parser.add_argument("--admitted-source", type=Path)
     args = parser.parse_args()
-    if os.environ.get("UPDATE_DRIVER_FOUNDATION_DIAGNOSTICS") == "1":
-        operation = foundation_state.read(args.root)
-        with (args.root / f"foundation-stack-{operation.operation_id}.log").open("a") as diagnostic:
-            faulthandler.dump_traceback_later(30, repeat=True, file=diagnostic)
-            try:
-                construct(
-                    root=args.root, source_hash=args.source_hash, uv=args.uv,
-                    base_python=args.base_python, admitted_source=args.admitted_source,
-                )
-            except BaseException:
-                traceback.print_exc(file=diagnostic)
-                raise
-            finally:
-                faulthandler.cancel_dump_traceback_later()
-    else:
-        construct(
-            root=args.root, source_hash=args.source_hash, uv=args.uv, base_python=args.base_python,
-            admitted_source=args.admitted_source,
-        )
+    construct(
+        root=args.root, source_hash=args.source_hash, uv=args.uv, base_python=args.base_python,
+        admitted_source=args.admitted_source,
+    )
     return 0
 
 

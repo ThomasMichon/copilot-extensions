@@ -12,6 +12,8 @@ unset UPDATE_DRIVER_WITNESS
 [[ "$digest" =~ ^[0-9a-f]{64}$ && "$root" == /* &&
     "$(readlink -m -- "$root")" == "$root" ]] || exit 2
 _native_foundation_outside_sources "$root" "$plugin"
+command -v ps >/dev/null ||
+    { _native_foundation_error 'construction requires native ps observation'; exit 1; }
 mkdir -p -m 700 -- "$root"
 check_native_foundation_execution_root "$root" "$plugin"
 deadline=$((SECONDS + 600))
