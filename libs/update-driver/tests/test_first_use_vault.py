@@ -225,6 +225,57 @@ def cold_environment(installation, project, area):
     return env
 
 
+@pytest.mark.parametrize("entry", ["payload", "primary"])
+def test_cold_commands_normalize_project_and_foreign_runtime_environment(
+    materialized_vault, area, entry,
+):
+    payload, installation, project = materialized_vault
+    if entry == "primary":
+        payload, command = stamp_vault(payload, installation, project)
+    else:
+        command = vault_command(payload)
+    scripts = payload / "libs" / "update-driver" / "scripts"
+    if os.name == "nt":
+        (scripts / "first-use.ps1").write_text(
+            "param([string]$Root,[string]$Payload,[string]$RuntimeRoot,[string]$Project,[switch]$Wait)\n"
+            "$id = if (Test-Path Env:AGENT_VAULT_INSTALLATION_ID) { $env:AGENT_VAULT_INSTALLATION_ID } else { '<absent>' }\n"
+            "$pipe = if (Test-Path Env:AGENT_VAULT_PIPE) { $env:AGENT_VAULT_PIPE } else { '<absent>' }\n"
+            "[IO.File]::WriteAllLines((Join-Path $Project 'handoff.txt'), "
+            "@($Root,$Payload,$RuntimeRoot,$Project,$id,$pipe))\nexit 37\n",
+            encoding="utf-8",
+        )
+        quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+        script = command[command.index("-File") + 1]
+        command = [
+            command[0], "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+            f"Set-Location -LiteralPath {quote(project)}; "
+            f"[IO.Directory]::SetCurrentDirectory({quote(area)}); "
+            f"& {quote(script)} --help; exit $LASTEXITCODE",
+        ]
+    else:
+        (scripts / "first-use.sh").write_text(
+            '#!/usr/bin/env bash\nprintf "%s\\n" "$1" "$2" "$3" "$4" '
+            '"${AGENT_VAULT_INSTALLATION_ID-<absent>}" "${AGENT_VAULT_PIPE-<absent>}" '
+            '>"$4/handoff.txt"\nexit 37\n', encoding="utf-8",
+        )
+        link = area / "project-link"
+        link.symlink_to(project, target_is_directory=True)
+        command = [shutil.which("bash"), "-c", 'cd -- "$1"; shift; exec "$@"',
+                   "bash", str(link), *command]
+    result = subprocess.run(
+        command, env={**os.environ, "AGENT_VAULT_INSTALLATION_ID": "fixture-foreign",
+                      "AGENT_VAULT_PIPE": "fixture-foreign-pipe"},
+        cwd=area, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=90, **no_window_kwargs(),
+    )
+    assert result.returncode == 37, result.stdout + result.stderr
+    assert (project / "handoff.txt").read_text(encoding="utf-8-sig").splitlines() == [
+        str(installation.parent / ".copilot-extensions" / "update-driver"),
+        str(payload), str(installation), str(project), "<absent>", "<absent>",
+    ]
+    assert not (installation.parent / ".copilot-extensions" / "update-driver").exists()
+
+
 @native_genesis
 def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
     materialized_vault, area, native_window_observation,

@@ -15,6 +15,12 @@ if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Co
     exit 126
 }
 $payloadRoot = (Resolve-Path -LiteralPath $payloadRoot).Path
+$location = Get-Location
+if ($location.Provider.Name -ne 'FileSystem') {
+    [Console]::Error.WriteLine('[agent-vault] invocation requires a filesystem project location.')
+    exit 126
+}
+$project = $location.ProviderPath
 $scriptDir = Join-Path $payloadRoot 'scripts'
 $modeRunner = Join-Path $scriptDir 'installation-context\installation-context.ps1'
 $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'
@@ -54,7 +60,7 @@ $statusArgs = @(
     'status',
     '-PayloadRoot', $payloadRoot,
     '-PluginId', 'agent-vault',
-    '-LegacyRoot', $legacyRoot
+    '-LegacyRoot', $legacyRoot, '-ProjectRoot', $project
 )
 if ($env:COPILOT_EXTENSIONS_CONTEXT) {
     $statusArgs += @('-Context', $env:COPILOT_EXTENSIONS_CONTEXT)
@@ -291,7 +297,7 @@ if ($env:AGENT_VAULT_NO_SELFPROVISION) {
 $publicationArgs = @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
     'probe-plugin-publication', '-PayloadRoot', $payloadRoot,
-    '-PluginId', 'agent-vault', '-LegacyRoot', $runtimeRoot
+    '-PluginId', 'agent-vault', '-LegacyRoot', $runtimeRoot, '-ProjectRoot', $project
 )
 if ($context) {
     $publicationArgs += @('-Context', $context, '-DurableHome', $validationDurableHome)
@@ -336,7 +342,6 @@ if (-not (Test-Path -LiteralPath $firstUse -PathType Leaf)) {
     exit 126
 }
 $executionRoot = Join-Path $env:USERPROFILE '.copilot-extensions\update-driver'
-$project = [IO.Directory]::GetCurrentDirectory()
 [Console]::Error.WriteLine(
     "[agent-vault] submitting first-use provisioning to the installation driver: $executionRoot"
 )
@@ -344,6 +349,7 @@ $previousEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
     $nativeShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    Set-RuntimeEnvironment
     & $nativeShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $firstUse `
         -Root $executionRoot -Payload $payloadRoot -RuntimeRoot $runtimeRoot -Project $project -Wait
     $provisionCode = $LASTEXITCODE

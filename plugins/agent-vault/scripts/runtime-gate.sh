@@ -12,6 +12,7 @@ PAYLOAD_ROOT="${AGENT_VAULT_PAYLOAD_ROOT:-}"
 }
 
 SCRIPT_DIR="$PAYLOAD_ROOT/scripts"
+PROJECT_ROOT="$(pwd -P)"
 MODE_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
 JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
 RUNTIME_RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
@@ -124,6 +125,7 @@ STATUS_ARGS=(
     --payload-root "$PAYLOAD_ROOT"
     --plugin-id agent-vault
     --legacy-root "$LEGACY_ROOT"
+    --project-root "$PROJECT_ROOT"
 )
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     STATUS_ARGS+=(--context "$COPILOT_EXTENSIONS_CONTEXT")
@@ -237,7 +239,7 @@ fi
 
 PUBLICATION_ARGS=(
     probe-plugin-publication --payload-root "$PAYLOAD_ROOT"
-    --plugin-id agent-vault --legacy-root "$RUNTIME_ROOT"
+    --plugin-id agent-vault --legacy-root "$RUNTIME_ROOT" --project-root "$PROJECT_ROOT"
 )
 if [[ -n "$CONTEXT" ]]; then
     PUBLICATION_ARGS+=(--context "$CONTEXT" --durable-home "$VALIDATION_DURABLE_HOME")
@@ -270,7 +272,8 @@ if [[ ! -f "$FIRST_USE" ]]; then
 fi
 EXECUTION_ROOT="$HOME/.copilot-extensions/update-driver"
 printf '[agent-vault] submitting first-use provisioning to the installation driver: %s\n' "$EXECUTION_ROOT" >&2
-bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PWD" --wait || exit "$?"
+apply_runtime_env
+bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT_ROOT" --wait || exit "$?"
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"

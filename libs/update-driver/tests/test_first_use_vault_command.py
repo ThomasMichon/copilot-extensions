@@ -36,6 +36,7 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
     else:
         command = vault_command(payload)
     env = cold_environment(installation, project, area)
+    env["AGENT_VAULT_INSTALLATION_ID"] = "fixture-foreign-installation"
     if os.name != "nt":
         systemctl = shutil.which("systemctl")
         assert systemctl, "hosted qualification requires the real platform service manager client"
@@ -47,9 +48,21 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
     installer = selected_payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
     if os.name == "nt":
         shell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+        script = command[command.index("-File") + 1]
+        command = [
+            shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+            f"Set-Location -LiteralPath {quote(project)}; "
+            f"[IO.Directory]::SetCurrentDirectory({quote(profile)}); "
+            f"& {quote(script)} --help; exit $LASTEXITCODE",
+        ]
         cleanup = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
                    str(installer), "-Action", "uninstall", "-InstallDir", str(installation)]
     else:
+        link = area / "project-link"
+        link.symlink_to(project, target_is_directory=True)
+        command = [str(Path(env["PATH"]) / "bash"), "-c",
+                   'cd -- "$1"; shift; exec "$@"', "bash", str(link), *command]
         cleanup = [str(Path(env["PATH"]) / "bash"), str(installer),
                    "uninstall", "--install-dir", str(installation)]
     try:
@@ -67,6 +80,7 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
         request = requests[0]
         assert request.state == "completed" and request.exit_code == 0, diagnostic
         assert request.spec.argv == (), "ordinary commands must not select client-only"
+        assert "AGENT_VAULT_INSTALLATION_ID" not in dict(request.spec.context)
         admission = json.loads(request.spec.source)
         assert Path(admission["payload"]) == selected_payload
         assert Path(admission["runtime_root"]) == installation
@@ -79,6 +93,7 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
         assert "service skipped" not in request.log_path.read_text(errors="replace")
         if os.name == "nt":
             assert (installation / "service.ps1").is_file(), diagnostic
+            assert "fixture-foreign-installation" not in (installation / "service.ps1").read_text()
             suffix = hashlib.sha256(str(installation).lower().encode()).hexdigest()[:12]
             task = f"AgentVault-{suffix}"
             probe = subprocess.run(
@@ -92,6 +107,7 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
         else:
             units = list((profile / ".config" / "systemd" / "user").glob("agent-vault-*.service"))
             assert len(units) == 1 and str(installation) in units[0].read_text(), diagnostic
+            assert "fixture-foreign-installation" not in units[0].read_text()
         healthy = subprocess.run(
             command, env={**env, "AGENT_VAULT_NO_SELFPROVISION": "1"}, cwd=project,
             stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
@@ -101,8 +117,10 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
         assert len(status(root=root)) == 1
         assert (slot / ".install-complete.json").read_bytes() == completion
     finally:
+        cleanup_env = dict(env)
+        cleanup_env.pop("AGENT_VAULT_INSTALLATION_ID", None)
         removed = subprocess.run(
-            cleanup, env=env, cwd=project, stdin=subprocess.DEVNULL,
+            cleanup, env=cleanup_env, cwd=project, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=90, **no_window_kwargs(),
         )
         assert removed.returncode == 0, removed.stdout + removed.stderr
