@@ -54,6 +54,14 @@ bound, rolling progress past a blocked target, distinct subscriber identities,
 real native-child completion order and retained writer custody until every
 parallel read settles. These source controls are not a fleet latency benchmark.
 
+The same store/service and installed-host selections exercise durable
+fleet/Gateway/slot binding on every disk transaction, cross-mode and wrong-volume
+refusal without mutation, original-ID recovery after uncertain commits, and
+same-bound-volume restart/replay/ACK. Installed host processes try each changed
+identity after clean drain and must refuse without native reads or replay writes.
+This is a disk-schema/update safeguard, not an image build, automatic migration,
+cross-host writer fence or completed update/rollback lifecycle.
+
 ## Optional diagnostic telemetry
 
 Manager's source-native consumer lane is documented in

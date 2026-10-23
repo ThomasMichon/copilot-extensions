@@ -1,0 +1,9 @@
+{
+  "comment": "Bind standalone replay storage to its fleet, Gateway and service identity; refuse implicit storage migration or downgrade.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

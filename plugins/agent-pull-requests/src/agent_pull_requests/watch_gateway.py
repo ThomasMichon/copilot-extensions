@@ -20,7 +20,7 @@ from single_instance_lease import OperationLockedError, OperationOwnershipError
 from .watch_replay import MAX_BATCH, ConsumerScope
 from .watch_notification import positive_seconds
 from .watch_replay_store import (
-    ReplayCallerExpired, ReplayStore, ReplayStoreInvalid, json_object,
+    ReplayCallerExpired, ReplayServiceIdentity, ReplayStore, ReplayStoreInvalid, json_object,
 )
 
 _TARGET = re.compile(r"[a-z0-9][a-z0-9-]{0,63}")
@@ -95,6 +95,10 @@ class WatchGateway:
     ) -> None:
         for name in (fleet, gateway, slot):
             identifier(name)
+        if store.service_identity is not None and store.service_identity != ReplayServiceIdentity(
+            fleet, gateway, slot,
+        ):
+            raise ValueError("service identity differs from replay storage binding")
         selected = {}
         if not isinstance(bindings, tuple):
             raise ValueError("watch scope bindings must be immutable")

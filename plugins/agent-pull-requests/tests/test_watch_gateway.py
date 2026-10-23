@@ -14,7 +14,7 @@ from single_instance_lease import OperationLock, OperationLockedError
 
 from agent_pull_requests.watch_gateway import WatchGateway, WatchScopeBinding
 from agent_pull_requests.watch_replay import ConsumerScope
-from agent_pull_requests.watch_replay_store import ReplayStore
+from agent_pull_requests.watch_replay_store import ReplayServiceIdentity, ReplayStore
 
 SCOPE = ConsumerScope("consumer-a", "account-a", "example/project")
 OTHER = ConsumerScope("consumer-b", "account-b", "example/project")
@@ -53,6 +53,20 @@ def call(gateway, *args, **kwargs):
         await gateway.drain(timeout=1)
         return response.status, json.loads(response.body)
     return asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("field", ["fleet", "gateway", "slot"])
+def test_gateway_cannot_use_store_bound_to_another_service(gateway, field):
+    gateway.store.service_identity = replace(
+        ReplayServiceIdentity(gateway.fleet, gateway.gateway, gateway.slot), **{field: "other"},
+    )
+    before = gateway.store.path.read_bytes()
+    with pytest.raises(ValueError, match="storage binding"):
+        WatchGateway(
+            gateway.store, fleet=gateway.fleet, gateway=gateway.gateway, slot=gateway.slot,
+            bindings=(WatchScopeBinding("caller-a", "project", SCOPE),),
+        )
+    assert gateway.store.path.read_bytes() == before
 
 
 def test_only_configured_scope_is_used_and_caps_do_not_expose_inventory(gateway):

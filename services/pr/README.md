@@ -104,6 +104,24 @@ existing state. Serve adopts existing valid state; it does not provision it.
 Use a dedicated root, never the native watch owner's state. One host-local
 writer lease covers the actual observation/serving work. A failed/timed-out
 drain does not release ongoing in-process custody or promise rollback.
+Provision binds the entire replay envelope to the configured namespace and
+exact fleet/Gateway/slot identity. Every transaction rechecks that binding;
+changing those identifiers cannot adopt the same retained volume. Ordinary
+restart, credential-reference rotation and compatible code updates preserve
+the binding and original registration/event identities. These local labels
+prevent wrong-volume adoption; they do not authenticate a caller or fence a
+different host.
+
+The standalone host requires the versioned
+`agent-pull-requests.watch-service-store/v1` disk envelope. Earlier unbound
+replay stores refuse without rewriting them; there is no automatic migration,
+identity rebinding or downgrade fallback. Older readers also refuse the bound
+envelope. Preserve an existing volume for a separately admitted migration
+rather than provisioning over it or stripping its binding to make an old image
+start. Remote request/replay/ACK payloads and the native callback store are
+unchanged. A supported image update must retain this storage contract as well
+as separately proving writer transfer and data compatibility.
+
 An ambiguous durable request reconciles its original request/registration/event
 identity; disconnect or revocation is not proof that an in-flight commit failed.
 The native snapshot command retains its existing bounded execution contract.
@@ -151,8 +169,9 @@ host-local lock.
 Image construction, fresh-container restart/drain, fleet placement,
 cross-host fencing, safe update/rollback/interrupted cutover and owned uninstall
 require their own real proofs. A wheel install, source fixture, passive status
-file or role plan does not satisfy them. The existing serial observation cycle
-also does not yet qualify unrelated slow-target fairness.
+file or role plan does not satisfy them. The observer's bounded four-read
+window applies completed targets without waiting for an earlier slow read;
+this source behavior does not qualify representative fleet performance.
 
 On Windows a concurrent passive health reader can prevent atomic status-file
 replacement. That sharing refusal skips one publication; it does not stop the

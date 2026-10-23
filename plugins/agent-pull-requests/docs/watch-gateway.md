@@ -19,6 +19,12 @@ explicit first creation and refuses any existing state. Normal opening never
 provisions or treats a missing, corrupt or foreign-namespace store as empty.
 The complete envelope lives in `watch-replay.json`, never the native daemon's
 list-format `watch-subscriptions.json`.
+The optional `ReplayServiceIdentity(fleet, gateway, slot)` disk binding must
+match the Gateway adapter's configured identity. The standalone host always
+uses this binding; the disk adapter rechecks it and the namespace under custody
+on every transaction. Unbound/foreign volumes refuse rather than becoming
+implicitly adopted stores. This prevents wrong-volume use, not filesystem
+tampering or cross-host concurrent writers.
 
 Construct `WatchGateway(store, fleet=..., gateway=..., slot=..., bindings=...)`
 beside the trusted connector. Each immutable

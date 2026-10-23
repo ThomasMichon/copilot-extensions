@@ -52,6 +52,9 @@ def test_load_is_passive_and_provision_is_separate_and_never_replaces(configurat
     assert not config.root.exists()
     assert main(["provision", "--config", str(path)]) == 0
     original = config.store().path.read_bytes()
+    assert json.loads(original)["service"] == {
+        "fleet": config.fleet, "gateway": config.gateway, "slot": config.slot,
+    }
     assert main(["provision", "--config", str(path)]) == 1
     assert config.store().path.read_bytes() == original
     assert not config.status_path.exists()
