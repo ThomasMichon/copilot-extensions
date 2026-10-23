@@ -16,6 +16,8 @@ machine.
 ``Dockerfile*``, ``*.sh``, ``*.ps1``, and ``.github/workflows/*.yml``/``.yaml``.
 Never ``package-lock.json`` (npm's lockfile is inherently saturated with
 resolved public URLs by design -- that is a distinct, out-of-scope concern).
+Candidate traversal prunes only the existing excluded directory names;
+workflow discovery remains shallow and enumeration failures propagate.
 
 **What counts as a violation.** A line containing a known public feed
 hostname as part of a URL, unless it sits behind one of:
@@ -42,6 +44,8 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import os
 import re
 import subprocess
 import sys
@@ -76,15 +80,23 @@ _SHELL_DEFAULT_PREFIX_RE = re.compile(r"\$\{?\w+:-\s*['\"]?$")
 _PS_COALESCE_PREFIX_RE = re.compile(r"\?\?\s*['\"]?$")
 
 
+def _raise_walk_error(error: OSError) -> None:
+    raise error
+
+
 def _iter_candidate_files() -> list[Path]:
     seen: set[Path] = set()
     files: list[Path] = []
-    for pattern in _SCAN_GLOBS:
-        for f in REPO.rglob(pattern):
-            if _SCAN_DIR_EXCLUDE_PARTS & set(f.relative_to(REPO).parts):
+    for directory, subdirectories, filenames in os.walk(REPO, onerror=_raise_walk_error):
+        subdirectories[:] = [
+            name for name in subdirectories if name not in _SCAN_DIR_EXCLUDE_PARTS
+        ]
+        for name in (*subdirectories, *filenames):
+            if name in _SCAN_DIR_EXCLUDE_PARTS:
                 continue
-            if f in seen:
+            if not any(fnmatch.fnmatch(name, pattern) for pattern in _SCAN_GLOBS):
                 continue
+            f = Path(directory) / name
             seen.add(f)
             files.append(f)
     workflows = REPO / ".github" / "workflows"
