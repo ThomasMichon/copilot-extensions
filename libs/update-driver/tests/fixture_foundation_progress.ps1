@@ -50,6 +50,15 @@ try {
         throw 'absent status returned progress'
     }
     if (Test-Path -LiteralPath (Join-Path $Root 'absent')) { throw 'absent status created state' }
+    if ($null -ne (Get-NativeFoundationProgress -Root (Join-Path $Root 'absent-parent\state'))) {
+        throw 'nested-absent status returned progress'
+    }
+    if (Test-Path -LiteralPath (Join-Path $Root 'absent-parent')) { throw 'nested-absent status created state' }
+    Save 'file-parent' 'ordinary file is not an absent directory'
+    $refused = $false
+    try { $null = Get-NativeFoundationProgress -Root (Join-Path $Root 'file-parent\state') }
+    catch { $refused = $true }
+    if (-not $refused) { throw 'file ancestor was treated as absent state' }
     Save 'observed.json' (Get-NativeFoundationProgress -Root $Root)
     $foreign = Enter-NativeOperationLock ([IO.Path]::Combine($Root, 'other.lock'))
     try {

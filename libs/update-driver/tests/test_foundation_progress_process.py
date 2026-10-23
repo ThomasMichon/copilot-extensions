@@ -120,6 +120,14 @@ def test_native_reader_differential_protocol_corpus(native_source, area):
         json.dumps(base).replace('"version": 1', '"version": 01'),
         json.dumps(base).replace('"version": 1', '"version": +1'),
         json.dumps(base).replace('"version": 1', '"version": /* comment */ 1'),
+        json.dumps(dict(base, __type="untrusted")),
+        json.dumps(dict(base, __type={})),
+        json.dumps(dict(base, __type=None)),
+        '{"__type":"Example:#Example",' + json.dumps(base)[1:],
+        '{"__type":"Example:#Example",' + json.dumps(dict(
+            base, state="completed", exit_code=0, finished_at=2,
+        ))[1:],
+        json.dumps(base)[:-1] + ', "ver\\u0073ion": 1}',
     ]
     for timestamp in [1.1234567890123457, 9223372036854775809, 10**100 + 1]:
         candidates.append(json.dumps(dict(base, started_at=timestamp)))

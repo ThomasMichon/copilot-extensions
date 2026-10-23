@@ -100,11 +100,13 @@ namespace CopilotExtensions {
                 try {
                     FileAttributes attributes = File.GetAttributes(item);
                     if ((attributes & FileAttributes.ReparsePoint) != 0
+                        || (item != path && (attributes & FileAttributes.Directory) == 0)
                         || (item == path && ((attributes & FileAttributes.Directory) != 0) != directory))
                         throw Invalid("path must be ordinary and unlinked");
-                } catch (FileNotFoundException) {
-                    if (item != path || !missing) throw;
-                    present = false;
+                } catch (IOException error) {
+                    if (!missing || (!(error is FileNotFoundException) && !(error is DirectoryNotFoundException)))
+                        throw;
+                    if (item == path) present = false;
                 }
                 string parent = Path.GetDirectoryName(item);
                 if (parent == item) break;
@@ -163,7 +165,7 @@ namespace CopilotExtensions {
             using (var reader = JsonReaderWriterFactory.CreateJsonReader(bytes, quotas))
                 xml.Load(reader);
             XmlElement root = xml.DocumentElement;
-            if (root == null || root.GetAttribute("type") != "object")
+            if (root == null || root.GetAttribute("type") != "object" || root.Attributes.Count != 1)
                 throw Invalid("unsupported operation schema");
             var values = new Dictionary<string, object>(StringComparer.Ordinal);
             foreach (XmlNode node in root.ChildNodes) {
