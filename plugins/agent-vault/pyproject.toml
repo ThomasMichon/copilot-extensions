@@ -55,6 +55,8 @@ agent-single-instance-lease = { path = "../../libs/single-instance-lease", edita
 # and seal/unseal raise a clear error.
 cache = ["cryptography>=50.0.0"]
 kek = ["cryptography>=50.0.0"]
+ssh = ["cryptography>=50.0.0"]
+dev = ["pytest", "cryptography>=50.0.0"]
 
 [project.scripts]
 agent-vault = "agent_vault.__main__:main"
