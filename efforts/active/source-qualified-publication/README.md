@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PRs against `dev`
 - **Created:** 2026-10-22
-- **Status:** Active
+- **Status:** Blocked
 - **Vision:** `visions/plugins/agent-worktrees/README.md`, resident authoritative live-state database; `visions/picker/README.md`, consumer presentation
 - **Umbrella issue:** #7937
 - **Sub-issues:** #7936 · #7946
@@ -282,6 +282,20 @@ it does not expand F1 into launch, installer or owner-side effects.
   previous prototype and evidence carriers remain preserved. Product source
   did not change in this guard-only correction. Scoped source publication is
   now pending its normal review/required-CI gates; root goals remain open.
+
+### 2026-10-23 — Required source guard blocks publication completion
+- The managed source publication rebased/squashed the candidate. Required
+  eligible-unit execution, attribution and workflow checks pass; the
+  module-size guard fails: `__main__.py` has 6,773 lines versus its shrink-only
+  ceiling of 6,761. No baseline increase, suppression or merge bypass was used.
+- The current test-only admission cannot authorize the production extraction
+  needed to remove that twelve-line growth. A bounded proposal is to move
+  early-dispatch composition and the existing shutdown-wrapper implementation
+  into `current_roster_entry`, retaining real-`__main__` gating and the public
+  `__main__.console_entry` compatibility wrapper. It is not implemented.
+- All raw required-CI logs and exact publication metadata remain retained.
+  Source review/merge and finalization are still outstanding; finite native
+  success does not satisfy those separate gates.
 
 ### 2026-10-22 — Bounded planning
 - Read the three live issue bodies and their empty prior comment/assignment

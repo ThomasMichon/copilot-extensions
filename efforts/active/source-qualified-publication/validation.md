@@ -434,3 +434,39 @@ stdout/stderr/phases/interpreter/source/outcome, load samples and guards.
 It is retained in a proposed **EVIDENCEONLY** carrier with exact decompressed
 readback verification. The prior carrier and prototype remain preserved and
 non-runnable; no queue/spawn/execute action was used.
+
+### Required source publication gate
+
+The published candidate is `9bd44cff26fae9821b16444eadcad55f34acf94e` against
+base `c1e4e48867c7242e0a7f62b35930f01eb27a1376`. Managed publication rebased
+and squashed the retained commits; earlier prototypes remain backed up.
+The rebase's additional runtime files belong to already-landed upstream work,
+not new F1 edits. Local all-changed-file Ruff passes on that stable published
+head using its merge-base diff.
+
+An earlier lint invocation mistakenly used a two-dot comparison against an
+advancing shared `origin/dev`, which selected upstream-only missing files and
+reported E902. The corrected merge-base/ACMR selection checked 22 actual
+changed Python files and passed; no code finding was suppressed.
+
+Required CI run `39954062531` reports successful eligible units, workflow
+lockdown and source attribution, but its module-size guard fails:
+
+```text
+plugins/agent-worktrees/src/agent_worktrees/__main__.py:
+6773 lines, grandfathered shrink-only ceiling 6761
+```
+
+The required aggregate therefore fails too. This is not a flaky test, an
+installation issue or a permitted gate exception. The twelve-line increase
+comes from the early entry and preserved public process-module binding.
+Raising the baseline or trimming unrelated comments merely to satisfy the
+counter is not the proposed remedy.
+
+A production-code extraction would be needed, outside the current test-only
+admission: keep a small real-`__main__` call to an entry-owned dispatch helper,
+and retain the public `__main__.console_entry` name/signature while delegating
+its existing `_shutdown_exit.run_and_exit(main)` composition to the same
+entry module. This can reduce the monolith without changing command,
+shutdown, authorization or timing semantics. No such change was made.
+Source review remains pending and the PR is not merged/finalized.
