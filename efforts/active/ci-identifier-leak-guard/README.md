@@ -6,7 +6,8 @@
 - **Created:** 2026-09-26
 - **Status:** Active
 - **Vision:** Below altitude relative to the standing publication-safety / public-artifact-hygiene intent; this effort closes a known enforcement gap in existing tooling. _(agent-recommended)_
-- **Umbrella issue:** #3923
+- **Source umbrella:** #3923; continuing coordination is this Active ROOT's
+  reviewed Plan/Validation/Journal and eligible OPEN bounded-source issues
 
 ## Guiding Intent
 
@@ -19,17 +20,27 @@ contributors who do not have the private denylist configured on their machine.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | effort host | Owns the reviewed plan PR and follow-on implementation slices | isolated worktree |
-| private-downstream-repo agent | Assembles the facility-context denylist (`FORBIDDEN_IDS_FACILITY`) -- not secret from within private-downstream-repo, only from the public repo -- and pushes it to the repository secret via `gh secret set` | private-downstream-repo facility session |
-| operator's work-context harness agent | Assembles the separate work-context denylist (`FORBIDDEN_IDS_WORK`) from a list the operator keeps on their work OneDrive, and pushes it to the repository secret via `gh secret set` | cross-repo/cross-harness collaboration (private-context harness; not named here) |
-| repository operator | Confirmed (2026-09-27) the denylists are not secret *from* either agent -- only from the public repo -- so both are agent-assembled/pushed rather than operator-typed; keeps the source lists in personal OneDrive locations (facility list does not need Vault, no credential material) | — |
+| private-downstream-repo agent | Assembles the private-adopter-context denylist (`<private-input-family-a>`) -- not secret from within private-downstream-repo, only from the public repo -- and pushes it to the repository secret via `gh secret set` | private-downstream-repo session |
+| operator's work-context harness agent | Assembles the separate work-context denylist (`<private-input-family-b>`) from a list the operator keeps in their private work-context source location, and pushes it to the repository secret via `gh secret set` | cross-repo/cross-harness collaboration (private-context harness; not named here) |
+| repository operator | Confirmed (2026-09-27) the denylists are not secret *from* either agent -- only from the public repo -- so both are agent-assembled/pushed rather than operator-typed; keeps the source lists in private personal source locations (first private source list does not need Vault, no credential material) | — |
 
 ## Coordination
+
+The complete #3923 retained finite family continues through this existing Active ROOT's
+reviewed Plan, actual global Validation and Journal/open bounded-source process under
+the SAME declared and source-specific custodians. Preserve every incumbent alternative,
+native/source/resource reservation and independent acceptance gate. Closed source
+trackers are historical provenance, never required live claim tokens; no assignment,
+claim expiry or new blanket ACK is created.
 
 - **Topology:** reviewed plan PR first, then follow-on implementation PR slices.
 - **Host (owns PRs):** effort host.
 - **Delegates:** none yet; follow-on slices may split by phase if the implementation grows.
 - **Handoff:** each merged slice updates this effort before the next phase starts.
-- **Public coordination token:** #3923.
+- **Continuing coordination:** this Active ROOT's reviewed Plan/Validation/Journal
+  and eligible OPEN bounded-source claims, under the same private-source,
+  trusted-CI and branch-policy custodians. After reviewed supersession,
+  #3923 and #4339 are historical provenance, not live claim tokens.
 
 ## Context
 
@@ -48,12 +59,16 @@ enforcement into CI so every contributor path hits the backstop.
 
 ## Request
 
+Private input labels, control-record identifiers and adopter-specific storage
+references below are neutral abstractions; their distinct roles, ownership,
+conditions and recorded outcomes are unchanged.
+
 Capture the operator's settled design as the implementation contract for the
 follow-on phases:
 
 1. **Storage:** the denylist(s) live as GitHub Actions repository secrets on
-   `ThomasMichon/copilot-extensions` (for example `FORBIDDEN_IDS_FACILITY` for
-   the facility set and `FORBIDDEN_IDS_WORK` or similar for the separate work
+   `ThomasMichon/copilot-extensions` (for example `<private-input-family-a>` for
+   the first private source set and `<private-input-family-b>` or similar for the separate work
    context) — never committed to the repo and never exposed to contributor
    agents. The secret format is newline- or `;`-separated `token|reason`
    entries, where the reason explains why the token is forbidden and what kind
@@ -83,7 +98,7 @@ follow-on phases:
    `identifier leak guard`) and `success`/`failure` conclusion. *That* custom
    check -- not the untrusted CI job's own status and not the trusted
    workflow's native run status -- becomes the required branch-protection
-   signal on both `dev` and `main`. `main` already has ruleset `18553911`; the
+   signal on both `dev` and `main`. `main` already has ruleset `<main-ruleset-id>`; the
    implementation phase must inspect its current required-check list and the
    corresponding `dev` protection/ruleset, then prepare the exact mutation
    needed to add the new custom check there without applying it until the
@@ -133,7 +148,7 @@ an untrusted findings artifact at all.
   workflow definition, never checks out or executes the PR head, resolves the
   triggering PR/head metadata, reads the changed file contents as inert data
   only, and runs the trusted scanner with the merged
-  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` secret-backed denylist.
+  `<private-input-family-a>`/`<private-input-family-b>` secret-backed denylist.
 - [x] Create a custom Check Run on the PR head SHA with a stable required-check
   name and a success/failure conclusion derived from the trusted scan.
 - [x] Post failure feedback back to the PR via API-delivered text that may name
@@ -154,7 +169,7 @@ an untrusted findings artifact at all.
   custom Check Run name, and stop for explicit operator confirmation before any
   mutating admin call.
 - [x] After operator confirmation, add `identifier leak guard` to the required
-  status checks on `main` ruleset `18553911` and `dev` ruleset `23904550`.
+  status checks on `main` ruleset `<main-ruleset-id>` and `dev` ruleset `<dev-ruleset-id>`.
 
 ### Phase 4 - Provision the secret-backed denylists
 
@@ -162,14 +177,14 @@ _(Revised 2026-09-27: the operator will not personally type these secrets --
 see the Journal entry below. Both are agent-assembled/pushed instead of
 "operator only.")_
 
-- [x] A **private-downstream-repo agent** assembles the `FORBIDDEN_IDS_FACILITY` list
-  (facility-context identifiers -- machine names, internal hosts, personal
+- [x] A **private-downstream-repo agent** assembles the `<private-input-family-a>` list
+  (private-adopter-context identifiers -- machine names, internal hosts, personal
   names, etc.; not secret from within private-downstream-repo, only from the public
   repo) and pushes it to the `ThomasMichon/copilot-extensions` repository
   secret via `gh secret set`.
 - [x] Collaborate with the operator's **private-context work harness agent** to
-  assemble the separate `FORBIDDEN_IDS_WORK` list from a source list the
-  operator keeps on their work OneDrive, and push it to the repository secret
+  assemble the separate `<private-input-family-b>` list from a source list the
+  operator keeps in their private work-context source location, and push it to the repository secret
   via `gh secret set`. **Done 2026-10-01** -- landed and rotated across the
   `identifier-leak-guard-scrub` effort/PR #4858 (see that effort's own
   Journal); confirmed present via `gh secret list`.
@@ -178,7 +193,7 @@ see the Journal entry below. Both are agent-assembled/pushed instead of
 
 ### Phase 5 - Centralized, pluggable cross-repo sweep (generalizes Phase 4's manual provisioning)
 
-Phase 4 proved the concept but left `FORBIDDEN_IDS_WORK` provisioning as a
+Phase 4 proved the concept but left `<private-input-family-b>` provisioning as a
 fully manual, hand-copied step from a single private source file. This phase
 replaces that with a discoverable, pluggable convention any locally
 registered repo can participate in -- both as a *source* of blocklist terms
@@ -211,25 +226,116 @@ audience-exposure tier.
 - [x] Document the convention end-to-end in
   [`docs/identifier-blocklist.md`](../../../docs/identifier-blocklist.md),
   including the YAML entry schema (`token`/`kind`/`whole_word`/
-  `case_sensitive`/`reason`) and the regenerated `FORBIDDEN_IDS_WORK`
+  `case_sensitive`/`reason`) and the regenerated `<private-input-family-b>`
   provisioning recipe (now sourced from a live sweep instead of a hand-copied
   file).
-- [ ] Migrate the harness repo carrying the current `FORBIDDEN_IDS_WORK`
+- [ ] Migrate the harness repo carrying the current `<private-input-family-b>`
   source list (private, not named here) to a `.identifier-blocklist/
   block-for-public.yaml` at its own anchor root, in the new YAML schema, and
   set its registered `visibility: public`. Retires the old pipe-delimited
   `.txt` convention that effort's own history section already documents as
   superseded.
-- [ ] Re-provision `FORBIDDEN_IDS_WORK` from the live sweep's output (rather
+- [ ] Re-provision `<private-input-family-b>` from the live sweep's output (rather
   than the old hand-copied file) once the migration above lands, confirming
   parity with the current secret content.
 
+<!-- backlog-reconciliation:7556:transfer:3923:to:efforts/active/ci-identifier-leak-guard/README.md -->
+
+### Direct complete CI-backstop and inherited finite provisioning acceptance from #3923
+
+#### Continuing Coordination
+
+Retain the SAME existing Active ROOT, every original Plan/Validation/Journal row and
+all4339 inheritance. The current effort host, two existing private-input/source
+custodians, trusted scanner/reporting, fork/contributor approval, CI-control and
+branch-policy owners keep their scope and nonexpiring claims. No credential/list/source
+inventory is moved, read, re-provisioned or reassigned here. Before administrative3923
+closure, reconcile the ROOT's operative public-coordination pointer:3923 and4339 become
+historical provenance, NOT closed live claim tokens. Continue this ROOT
+Plan/Validation/Journal and actual eligible OPEN bounded-source/CI coordination under
+those same owners; do not manufacture a new writer or universal ACK ceremony.
+
+#### Unchecked Plan
+
+- [ ] Preserve the original CI backstop for fork/external/contributor paths without
+  privately configured local guards. Explicitly map original required coverage to
+  current accepted admission/approval constraints and owner-scoped Main versus retained
+  CI-completion producers; do not infer all paths from one safe caller or silently
+  weaken the original outcome.
+- [ ] Reuse the existing scanner and BOTH existing private input families,
+  private/uncommitted and assembled/provisioned only through their established owners.
+  Credit the actual public provisioning/rotation and trusted-load/scan/report receipts;
+  no repetition merely to tick a new tracker.
+- [ ] Preserve trusted default-branch/pinned tooling and exact PR/head resolution.
+  Candidate changed paths/content remain inert Git/API data, never executed with private
+  inputs. Retain lossless filename transport, stale-head fences and independently
+  trusted reporting; no untrusted findings artifact grants authority.
+- [ ] Preserve count-only workflow logs and redacted ordinary artifacts. Useful complete
+  findings follow the EXISTING approved trusted custom-result/API reporting contract,
+  with best-effort comments separate from the authoritative result. No raw values,
+  private source/secret names or denylist copies belong in this intake or its examples.
+- [ ] Preserve actual head-bound custom-result success/failure/required-check semantics
+  and all setup/load/fetch/scan/report failures. A genuinely operational unconfigured
+  neutral/no-op outcome is NOT a configured enforced scan or permission to make a failed
+  result green. Required-policy changes remain separately authorized owner actions.
+- [ ] Carry ALL four4339 rows: finite two-family provisioning; meaningful safe-canary
+  negative control; accepted fork/contributor/required-result coverage and migration;
+  changed-path versus separate historical cleanup/custody. Preserve same
+  source/candidate/trusted-reporter identity and no later failure-to-success conversion.
+  Use suitable existing safe negative evidence where sufficient, including the recorded
+  actual failure witness; no new live seeded test is authorized or universally imposed.
+- [ ] Resolve the existing Phase5 private-source format migration under its same source
+  custodian, retaining registered-repository visibility/tier/precedence semantics and
+  current local behavior. Do not inspect a private source to claim its status from this
+  public research.
+- [ ] Resolve existing sweep-derived re-provision/parity follow-through through its
+  established owner OR transfer every residual explicitly to a named accepted tracked
+  objective. Earlier provisioning is complete at its evidenced scope; unchecked later
+  migration does not retroactively negate it or prove current absence.
+- [ ] Keep the local developer path, changed-path scan and separately tracked historical
+  full-tree cleanup. No global privacy/history-erasure attestation, new
+  scanner/registry, source/list publication, branch mutation, workflow activation or
+  claim expiry is introduced.
+
+#### Unchecked Validation Plan
+
+- [ ] Record the exact accepted contributor/fork/owner/base/approval and
+  required-custom-result matrix through the existing trusted producers; distinguish
+  declared, configured, actually scanned/reported and required/enforced evidence.
+  Unknown current policy remains unknown, not a silent waiver.
+- [ ] Preserve causal positive and negative controls for inert-head safety, filenames,
+  stale events, malformed/missing reports, infrastructure failure, configured clean scan
+  and genuinely unconfigured neutrality under current bounds. Research executes none of
+  these controls.
+- [ ] Credit and bind suitable existing provisioning and safe-canary failure evidence to
+  its actual source/head/trusted report. If a finite qualification remains unproved,
+  leave it explicitly owned rather than run a secret/credential/security probe, repeat
+  completed provisioning or declare ordinary clean PASS a rejection proof.
+- [ ] Retain both private-source migration and re-provision/parity outcomes or explicit
+  accepted tracked dispositions, same custodians and whole original ROOT/4339 scope.
+  Keep source, hosted/control, required-policy and provisioning facts distinct.
+
+Receiving gate: a NEW ordinary reviewed ACTUAL MERGE must deliver this ENTIRE direct
+unchecked Plan AND Validation/continuing Coordination, including the real global
+Validation entry and operative-pointer reconciliation. FULL CURRENT Active ROOT
+Plan/Validation/Coordination/Journal and actual live claims must be read back BEFORE3923
+supersession. Old creation/review, a title/link/child-only note, an unmerged amendment
+or this proposal is not delivery. If any original/4339 clause, custodian or coordination
+condition cannot be preserved, RETAIN #3923. No scanner, canary, credential/list/secret
+inventory, branch policy, workflow, source or runtime effect occurs here.
+
 ## Validation Plan
+
+- [ ] Resolve EVERY direct3923 and inherited4339 Plan/Validation clause above at its
+  original finite scope, preserving whole incumbent ROOT, same private-source/CI/control
+  owners, existing alternatives and actual continuing coordination. Administrative
+  consolidation is not implemented coverage, privacy attestation or permission to access
+  private inputs.
 
 - [x] Open a clean scratch PR and confirm the ordinary `CI` workflow runs
   first, then the trusted `workflow_run` follow-up runs, and then a custom
   Check Run named `identifier leak guard` appears on the PR head SHA.
-- [x] If `FORBIDDEN_IDS_FACILITY` / `FORBIDDEN_IDS_WORK` exist, open a scratch
+- [x] If `<private-input-family-a>` / `<private-input-family-b>` exist, open a scratch
   PR that deliberately reintroduces a known-safe fabricated placeholder test
   token and confirm the trusted Check Run reports `failure` naming the
   matched value and reason in its own output. If the secrets are absent,
@@ -250,6 +356,15 @@ audience-exposure tier.
 _Pending._
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3923
+
+- Retained the complete #3923 acceptance directly in this ROOT Plan, its actual global
+  Validation and continuing Coordination. Every incumbent obligation, historical
+  outcome, alternative and custodian remains; neutral historical privacy/coordination
+  corrections change no substantive gate. New normal review, actual merge and complete
+  current readback precede source supersession. The effort stays Active; no
+  implementation, tests, native result or rollout is claimed.
 
 ### 2026-09-26 - Kickoff
 - Effort created to capture the settled fork-safe CI backstop design before any
@@ -305,16 +420,16 @@ _Pending._
 - Operator confirmed the exact before/after diff and the mutation was applied
   directly via the GitHub API (fetch-then-PUT full ruleset payload, preserving
   every pre-existing rule):
-  - `main` ruleset `18553911`: required status checks
+  - `main` ruleset `<main-ruleset-id>`: required status checks
     `["main source gate"]` -> `["main source gate", "identifier leak guard"]`.
-  - `dev` ruleset `23904550`: added a new `required_status_checks` rule with
+  - `dev` ruleset `<dev-ruleset-id>`: added a new `required_status_checks` rule with
     `["identifier leak guard"]` (previously had no such rule).
 - Phase 3 is now fully complete. Remaining work is entirely Phase 4
   (operator-only secret provisioning) plus the two validation items gated on
   those secrets existing.
 
 ### 2026-09-27 - Interim non-blocking fix: misconfigured reports neutral, not failure
-- Neither `main` (ruleset `18553911`) nor `dev` (rulesets `23904550`/`24069919`)
+- Neither `main` (ruleset `<main-ruleset-id>`) nor `dev` (rulesets `<dev-ruleset-id>`/`<additional-dev-ruleset-id>`)
   currently list `identifier leak guard` as a required status check -- Phase 3's
   last checkbox (adding it to required checks) is correctly still unchecked --
   but the misconfigured-secrets path reported `conclusion: "failure"` on every
@@ -329,7 +444,7 @@ _Pending._
   identifiers found, or a genuine step error) still report `failure` and post
   PR feedback exactly as before -- only the "not configured yet" case changed.
 - This is a stopgap for the development window only. Once Phase 4 provisions
-  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK`, `configured` becomes true and
+  `<private-input-family-a>`/`<private-input-family-b>`, `configured` becomes true and
   this neutral branch never fires again; the check should still not be added
   to required status checks until Phase 3's validation-with-a-real-secret step
   is complete.
@@ -346,37 +461,37 @@ _Pending._
   not personally type these secrets. Both are **agent-assembled and
   agent-pushed** instead, because the content is not secret from within either
   source context -- only from the public repo:
-  - `FORBIDDEN_IDS_FACILITY` -- an private-downstream-repo agent assembles this list and
+  - `<private-input-family-a>` -- an private-downstream-repo agent assembles this list and
     pushes it via `gh secret set`. Storage doesn't need Vault (no credential
     material, just names/identifiers), and can live in the operator's
-    personal OneDrive.
-  - `FORBIDDEN_IDS_WORK` -- needs collaboration with the operator's
+    private personal source location.
+  - `<private-input-family-b>` -- needs collaboration with the operator's
     private-context work harness agent, sourced from a separate list the
-    operator keeps on their **work** OneDrive, then pushed the same way.
+    operator keeps on their **work-context** private source location, then pushed the same way.
   See Participants and the revised Phase 4 above. Exact list contents,
-  OneDrive paths, and which agent actually runs `gh secret set` are not yet
+  private source paths, and which agent actually runs `gh secret set` are not yet
   settled -- this entry captures the operator's stated approach, not a
   completed plan.
 
-### 2026-09-29 - `FORBIDDEN_IDS_FACILITY` provisioned
+### 2026-09-29 - `<private-input-family-a>` provisioned
 
-- Storage location changed again from the 2026-09-27 entry's OneDrive plan: the
+- Storage location changed again from the 2026-09-27 entry's private source-location plan: the
   source list now lives as a plain, versioned asset in the private downstream
-  private downstream repository, rather than a personal OneDrive path -- that
+  private downstream repository, rather than a private personal source path -- that
   repo already documents every one of these identifiers openly on its own
   side; they're secret only *from this public repo*, not from that one -- so
-  keeping the source alongside the facility docs it's derived from (rather
-  than an unversioned OneDrive file) makes the denylist reviewable, diffable,
+  keeping the source alongside the private adopter docs it's derived from (rather
+  than an unversioned private source-location file) makes the denylist reviewable, diffable,
   and easy to keep in sync as that roster changes.
 - The downstream agent assembled the `token|reason` list and pushed it to the
-  `FORBIDDEN_IDS_FACILITY` repository secret via `gh secret set` (account-
+  `<private-input-family-a>` repository secret via `gh secret set` (account-
   routed through `agent-worktrees repos gh`, never a bare `gh`).
   `gh secret list --repo ThomasMichon/copilot-extensions` confirms the secret
   is present.
 - Deliberately excluded from the list: generic English/mythological words used
   as individual device codenames on the downstream side, and single-word
   machine names that also double as this repo's own generic example persona/
-  voice-kernel content, as opposed to the compound `<name>.facility.<domain>`
+  voice-kernel content, as opposed to the compound `<device>.internal.example`
   hostname form, which is unambiguous. Both classes would produce
   disproportionate false-positive risk against ordinary public content for a
   denylist whose whole purpose is precision, not maximal recall.
@@ -394,10 +509,10 @@ _Pending._
   window. The downstream source asset's header now states this constraint
   explicitly and its push instructions filter comments/blank lines before
   piping to `gh secret set`.
-- Left for `FORBIDDEN_IDS_WORK`: unchanged, still the operator's separate
-  work-context harness agent's task, sourced from their work OneDrive.
+- Left for `<private-input-family-b>`: unchanged, still the operator's separate
+  work-context harness agent's task, sourced from their private work-context source location.
 - Discovered while assembling this list: a handful of these same personal/
-  facility identifiers (distinct from the ones the 2026-09-26 sweep in #3910
+  private adopter identifiers (distinct from the ones the 2026-09-26 sweep in #3910
   already cleaned up) have re-leaked into this repo's own tracked docs post-
   cleanup (mostly under recent `efforts/active/*` READMEs and one plugin
   skill doc). That is a real, separate cleanup item -- filed as
@@ -407,11 +522,11 @@ _Pending._
 
 ### 2026-09-30 - Failure-path validated for real; a genuine bug found and fixed
 
-- With `FORBIDDEN_IDS_FACILITY` now present, the two remaining
+- With `<private-input-family-a>` now present, the two remaining
   secret-gated Validation Plan items could finally be exercised for real
   (`configured` becomes `true` from either secret alone -- the workflow
   concatenates both when present, so neither item needed
-  `FORBIDDEN_IDS_WORK` to be actionable). Added a synthetic, non-real
+  `<private-input-family-b>` to be actionable). Added a synthetic, non-real
   canary token to the denylist specifically so this validation (and any
   future re-validation) never needs to risk a real identifier.
 - A scratch PR reintroducing that canary confirmed the Check Run correctly
@@ -442,30 +557,30 @@ _Pending._
   secret format and the exact provisioning/rotation command directly in
   its own header, and the scanner's docstring documents the CI-mode
   loader's non-comment-skipping behavior.
-- Remaining: `FORBIDDEN_IDS_WORK` provisioning is still the operator's
+- Remaining: `<private-input-family-b>` provisioning is still the operator's
   work-context harness agent's own task, unchanged from the 2026-09-27
   entry above.
 
-### 2026-09-30 - `FORBIDDEN_IDS_WORK` now actively being built by the work-context harness agent
+### 2026-09-30 - `<private-input-family-b>` now actively being built by the work-context harness agent
 
 - Operator confirmed a work-context harness agent is actively building the
-  `FORBIDDEN_IDS_WORK` denylist and will push it to the repository secret the
-  same way `FORBIDDEN_IDS_FACILITY` landed. This is genuinely out of reach
-  for this repo's own facility/public-repo session: that harness isn't part
+  `<private-input-family-b>` denylist and will push it to the repository secret the
+  same way `<private-input-family-a>` landed. This is genuinely out of reach
+  for this repo's own first-private-source/public-repo session: that harness isn't part
   of any reachable machine mesh or agent-bridge roster here, so it is tracked
   as an external, in-flight handoff rather than driven from this side.
-- With this confirmation, the facility/public-repo side of this effort is
+- With this confirmation, the first-private-source/public-repo side of this effort is
   fully complete -- every other Plan and Validation Plan item is already
   checked (see Phase 0-4 and the Validation Plan above). The only remaining
-  open item is `FORBIDDEN_IDS_WORK` provisioning itself, owned entirely by
+  open item is `<private-input-family-b>` provisioning itself, owned entirely by
   that external agent; this effort stays **Active** (not yet `Done`) until
   that secret lands and the Validation Plan's denylist-backed-scan item can
   be reconfirmed with both secrets present.
 
-### 2026-10-01 - `FORBIDDEN_IDS_WORK` landed; Phase 5 opened for a reusable cross-repo mechanism
+### 2026-10-01 - `<private-input-family-b>` landed; Phase 5 opened for a reusable cross-repo mechanism
 
-- The work-context harness agent's `FORBIDDEN_IDS_WORK` build-out completed:
-  confirmed via `gh secret list` (`FORBIDDEN_IDS_WORK` present, rotated
+- The work-context harness agent's `<private-input-family-b>` build-out completed:
+  confirmed via `gh secret list` (`<private-input-family-b>` present, rotated
   2026-10-01), alongside the pre-existing cleanup of 46 pre-existing-leak
   files this same expansion surfaced (`#4834`, closed via PR #4858; see the
   now-closed `identifier-leak-guard-scrub` effort for that cleanup's own

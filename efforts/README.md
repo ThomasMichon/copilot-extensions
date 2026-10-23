@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Bridge Retained Runtime Restoration](active/bridge-retained-runtime-restoration/README.md) | Draft; local architecture accepted, normal proposal review/landing before implementation | #8063; specializes #7268 without substituting for Dispatch/adopter acknowledgement; no rollout |
 | [Actions Dialog Isolation](active/actions-dialog-isolation/README.md) | Draft amendment; Actions source complete, new configuration-freshness episode | #7940 exact file-store/consumer admission; #7939 release and #7935 native gates remain |
 | [Producer Work Reuse](active/producer-work-reuse/README.md) | Draft; code-grounded producer caching/batching/indexing plan only; execution admission pending | #7948/#7949/#7950 and retained #2110 declaration/health acceptance; no rollout |
 | [Reconstructible Runtime State](active/reconstructible-runtime-state/README.md) | Active; G1 disconnected slice merged, G3 exact report-only diagnostics admitted; later slices gated | #7947; preserves #1460 compatibility (including consolidated #1915) and #3761 ground-state ownership; no live rebuild or rollout |

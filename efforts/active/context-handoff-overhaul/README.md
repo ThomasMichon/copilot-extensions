@@ -26,6 +26,13 @@ prior/in-flight efforts already landed.
 
 ## Coordination
 
+The complete #3982 retained finite family continues through this existing Active ROOT's
+reviewed Plan, actual global Validation and Journal/open bounded-source process under
+the SAME declared and source-specific custodians. Preserve every incumbent alternative,
+native/source/resource reservation and independent acceptance gate. Closed source
+trackers are historical provenance, never required live claim tokens; no assignment,
+claim expiry or new blanket ACK is created.
+
 This existing Active ROOT Plan, Validation and Journal remain the continuing overhaul
 coordination record, with the SAME continuity/configuration/native, task/storage,
 ground/head, journal and admitted provider custodians. #2594 is the complete source
@@ -51,7 +58,7 @@ transcript reference, and the three-bin diff (already-correct / genuine blind
 spot / vision-ahead delta) this effort's Plan is carved from.
 
 This effort's kickoff also **migrated three related effort docs into this
-repo** from a private facility repo, where they had been
+repo** from a private control repository, where they had been
 authored despite being entirely about these plugins (tracked via this repo's
 own issues):
 
@@ -164,7 +171,7 @@ Verbatim from the operator:
 - [x] Author `visions/plugins/context-handoff/README.md`, folding genuine
   blind spots back as should-be intent; link it from `agent-fabric` and the
   visions index.
-- [x] Migrate the three related private-facility-repo effort docs into this
+- [x] Migrate the three related private control repository effort docs into this
   repo (separate PR, this-repo#2593 — the private repo's own issue for this
   migration is not public).
 - [x] File the umbrella issue + sub-issues for Phases 1-5 below.
@@ -421,7 +428,7 @@ Verbatim from the operator:
 > "materially broken, seemingly everywhere" in live production use --
 > plugin load failures, Worktree Manager pickup failures, duplicate spawns,
 > stuck predecessors, and unreliable head tracking severe enough to warrant
-> shutting automatic behavior off until resolved. Tracked in the facility's
+> shutting automatic behavior off until resolved. Tracked in a private control repository's
 > internal issue tracker (plugin load failures; durable logging +
 > cut-me-over/check-the-handoff diagnostic skill; successor fallback
 > discoverability; several deduplicated against already-open internal
@@ -486,7 +493,7 @@ Verbatim from the operator:
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
-_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+_Correlated via a repository-wide sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
 - [ ] **#2660** context-handoff consume ETIMEDOUT: agent-dispatch identity/repo resolution shells out to `agent-worktrees get` twice, each costing 6.5-9.5s
   - A context-handoff consume timeout is squarely this effort's plugin scope.
@@ -925,7 +932,90 @@ accepted, retain that source independently. No preference/config write, model/na
 trial, abort/consume/head/claim/link, task/state write, process/service or source
 operation is authorized.
 
+<!-- backlog-reconciliation:7556:transfer:3982:to:efforts/active/context-handoff-overhaul/README.md -->
+
+### Direct retained seeded-successor MCP initialization/order and feedback from #3982
+
+Append the COMPLETE original and six inherited #4306 rows DIRECTLY to this EXISTING
+Active ROOT Plan, its own Validation and actual global Validation Plan, with continuing
+Coordination/Journal. Preserve every incumbent row/Journal, accepted native/custom
+distinction and SAME continuity/configuration, task/storage, ground/head, journal and
+execution-host/frontend custodian. #912's unreleased claim and all source-specific holds
+remain untouched.
+
+#### Plan
+
+- [ ] Investigate the actual supported execution-host first-instruction contract: can
+  the exact seeded continuation be admitted BEFORE OR IN PARALLEL WITH GitHub MCP
+  initialization? Preserve this OR and distinct custom successor/new-owner process case.
+  If a supported host limitation is explicitly accepted, document a usable honest
+  continuation/recovery outcome rather than silently discard the goal or call feedback
+  equivalent to early delivery.
+- [ ] Show clear visible capability/MCP initialization progress/state WHILE the actual
+  resumed successor initializes. If fine-grained host/frontend progress is unavailable,
+  explicitly state that limitation plus honest initializing/waiting state. Timers,
+  extension counts, wrapper receipts and a history-resume caption cannot fabricate
+  completion of this different phase.
+- [ ] Do not silently queue the original first instruction with no feedback. Distinguish
+  not-admitted/queued, actual start/consumption, failed/unavailable initialization and
+  stalled/unknown state with useful supported recovery through the real host/frontend
+  owner.
+- [ ] Preserve exact original seed, stored locator, native workspace/session and
+  input/source identity. Do not replace the instruction with a synthetic progress turn,
+  create another conversation or resend an ambiguously admitted seed without the
+  existing identity/idempotence contract. Progress, delivery receipt, consume and
+  accepted head/custody are separate facts.
+- [ ] Early/parallel admission cannot bypass required guidance, tool readiness, policy
+  or current owner admission. Native SAME-owner checkpoint/context rollover remains
+  distinct from actual custom new-owner/process startup; avoiding a needless process is
+  legitimate but does not qualify supported successor startup feedback/order.
+- [ ] Keep context-handoff policy process-manager agnostic; host/frontend owns startup
+  scheduling/presentation and ground/task/storage owners retain durable identity. Reuse
+  existing startup-race/reload work; no competing global controller, wider timeout,
+  MCP/permission/config change or new universal ACK/incoming-ready gate. Preserve each
+  source-specific retirement/ownership contract and legitimate owning-authority
+  best-effort cold takeover without weakening actual candidate/output health or verified
+  retained-good-generation recovery.
+
+#### Validation
+
+- [ ] Qualify the ACTUAL supported distinct-successor phase for ordered/parallel seed
+  admission, queued versus consumed state, visible in-flight initialization, supported
+  unavailable/failure/stall feedback and usable recovery. Source generation,
+  extension-ready or native same-owner rollover alone is not this witness.
+- [ ] Preserve all six inherited #4306 clauses: real initialization progress OR honest
+  granularity limitation; nonsilent original instruction; separate before/parallel
+  investigation; exact seed/source/idempotence; native/custom distinction; attributable
+  finite evidence without a new controller or authority.
+- [ ] Preserve exact owner/workspace/seed and original guidance/tool/policy admission
+  under error, ambiguous delivery and retry, with no duplicate conversation or unkeyed
+  replay. Keep source/release and separately authorized actual host/native observation
+  distinct; no unrelated all-host/whole-parent gate is added.
+- [ ] BEFORE administratively closing #3982, obtain a NEW normal reviewed ACTUAL merge
+  of the complete direct ROOT Plan/Validation/Coordination/Journal plus actual global
+  row, then read back CURRENT FULL receiving sections. #6066, old ROOT creation, a
+  child/title link or this proposal is not receiving delivery.
+
+#### Continuing Coordination and Journal
+
+- [ ] Continue under the SAME continuity/configuration, storage/task,
+  ground/head/journal and admitted host/frontend owners through this ROOT Journal and
+  eligible OPEN bounded-source process. Preserve unreleased #912 and other
+  source/resource/native reservations; no generic new ACK, claim expiry, consume, launch
+  or retirement occurs.
+- [ ] Journal the new reviewed intake merge/current full readback, native-selection
+  delivery versus exact remaining successor-init/order evidence, and the next bounded
+  Plan item. Keep this effort Active and every incumbent Plan/Validation/Journal
+  obligation intact.
+
 ## Validation Plan
+
+- [ ] Resolve EVERY directly retained #3982 original and inherited #4306
+  Plan/Validation/continuing Coordination clause at its original finite evidence tier,
+  preserving before-OR-parallel, progress-OR-explicit-limitation, native
+  SAME-owner/custom successor distinctions and all current custodians/holds.
+  Consolidation is not startup ordering, real feedback, custody transfer or parent
+  completion.
 
 - [ ] Complete every directly retained #2628 Plan/Validation clause above at its original evidence tier, preserving all owners, holds and unfinished acceptance. Administrative consolidation is not implementation.
 
@@ -987,7 +1077,7 @@ operation is authorized.
   suite has one known pre-existing, unrelated failure block
   (`test_doctor.py`, confirmed reproducing on clean `origin/main`) but no
   regression from this rewire.
-  **Live-mux validation completed 2026-09-18** on a private facility host
+  **Live-mux validation completed 2026-09-18** on a private adopter host
   (Windows/psmux) using disposable `--system` worktrees and the isolated
   CLI harness (never the attached session, per the redesign's own runbook):
   found and fixed two real safety/reliability bugs surfaced only by live
@@ -1033,6 +1123,15 @@ detail; a fuller Proposal will fill in once Phase 0's issue-filing and review
 gate land._
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3982
+
+- Retained the complete #3982 acceptance directly in this ROOT Plan, its actual global
+  Validation and continuing Coordination. Every incumbent obligation, historical
+  outcome, alternative and custodian remains; neutral historical privacy/coordination
+  corrections change no substantive gate. New normal review, actual merge and complete
+  current readback precede source supersession. The effort stays Active; no
+  implementation, tests, native result or rollout is claimed.
 
 ### 2026-10-22 - Direct retained acceptance from #2628
 
@@ -1412,7 +1511,7 @@ gate land._
   (`--headless`). Updated `handoff-live-cutover`'s README checklist +
   journal in place with per-item provenance notes rather than leaving it
   stale -- only its private, non-resolvable stretch validation (a live
-  tmux pass, #2261†/#2262†) remains open there, unchanged from migration.
+  tmux pass, private live-mux qualification records) remains open there, unchanged from migration.
 - 13 new tests (7 pure `extractRecoveryLocatorFromPrompt` cases in
   `cutover-seed.test.mjs`, 3 `logHandoffPromptReceived` cases, and an
   end-to-end `triggerHandoff` test proving the real (unmocked)
@@ -1582,7 +1681,7 @@ gate land._
 ### 2026-09-18 — Live-mux validation of Phase 6's isolated harness (2 bugs found + fixed)
 
 - Ran the isolated `pane-create`/`pane-terminate` CLI harness against real
-  disposable `--system` worktrees/mux sessions on a private facility host
+  disposable `--system` worktrees/mux sessions on a private adopter host
   (Windows/psmux), per the effort's own manual-validation runbook (never
   the attached session) — the one Validation Plan item this Phase's landed
   work hadn't yet proven.
@@ -1818,14 +1917,14 @@ gate land._
 - Per operator direction: swept every filed context-handoff/agent-worktrees
   symptom bug across both trackers (private-downstream-repo Gitea + this repo's GitHub
   issues) to check for a clean, consistent pattern before continuing.
-  Notable open items found: GitHub #3006/#3001/#3000/#2830 (unbounded
+  Notable public items found: GitHub #3006/#3001/#3000/#2830 (unbounded
   cutover-spawn retries, orphaned/stacked panes, three-way state desync
-  between mux/agent-worktrees/agent-dispatch); Gitea #7072/#7179 (Windows
-  psmux env-var-propagation confirmation gap; successor sessions missing
-  `context-handoff` re-triggering an auto-handoff loop forever); #4702/#3454
-  (head-pointer zombie regression, deeper root cause: phantom `resources`
-  entries marked active/released for pickup attempts never corroborated
-  against real `agent-bridge` liveness).
+  between mux/agent-worktrees/agent-dispatch). Separate private records
+  retain the Windows psmux environment-propagation confirmation gap,
+  successor sessions missing `context-handoff` and retriggering an
+  automatic-handoff loop, and head-pointer zombie regressions caused by
+  phantom `resources` entries marked active/released for pickup attempts
+  never corroborated against real `agent-bridge` liveness.
 - **Avoided duplicating in-flight work:** began an independent fix for the
   "controller endlessly retries a cutover" bug (GitHub #3006/#3001; a durable
   per-handoff `spawn_attempted_at` field gating the automatic monitor sweep
@@ -1861,7 +1960,7 @@ gate land._
   - Merge commit `2fd2dc8de`.
 - **Operational hazard found and worked around, not fixed:** the shared
   local worktree checkout used for this work
-  (`copilot-extensions.worktrees/manual-context-handoff-overhaul`) had
+  (`<isolated-source-worktree>`) had
   unrelated, uncommitted `worktree-manager` picker-TUI changes mixed into it
   mid-session -- almost certainly a concurrent session sharing the same
   checkout. Left that WIP completely untouched; did all rebase/push work for
@@ -1876,7 +1975,7 @@ gate land._
 
 - Operator reported context-handoff "materially broken, seemingly
   everywhere" in real production use, with seven distinct live symptoms
-  (see Phase 7 above) and asked to (a) file each in the facility's internal
+  (see Phase 7 above) and asked to (a) file each in the private control repository's internal
   tracker, (b) drive more phases in this effort, and (c) immediately gate
   the risky automatic behavior behind explicit opt-in. Filed three new
   internal tracking items (plugin load failures; durable logging +
@@ -1952,7 +2051,7 @@ gate land._
 
 ### 2026-09-20 (still later) -- Phase 7 item 1: plugin-load investigation, first pass
 
-- Picked up this effort's internal-tracker issue #7264 (plugin frequently
+- Picked up this effort's private plugin-load tracker (plugin frequently
   fails to load) per this effort's own recommendation that it unblocks
   reasoning about the other four remaining Phase 7 items.
 - Structural diff against known-reliable sibling plugins (`agent-worktrees`,
@@ -2012,7 +2111,7 @@ gate land._
   scenario. `node --test`: 116 tests, 114 pass (2 pre-existing skips), no
   regressions. Live smoke test (`copilot --plugin-dir ... -p "..."`)
   reconfirmed all four tools load correctly after the change.
-- Issue #7264 -- this plugin's own contribution is addressed by the fix
+- The private plugin-load tracker -- this plugin's own contribution is addressed by the fix
   above; the plugin-load investigation as a whole stays open pending
   confirmation that `agent-bridge`'s fix (the dominant contributor)
   resolves the operator's original live symptom.
@@ -3202,8 +3301,7 @@ since prior rounds' verification):
 - This effort's Phase 3-slice-2 entry above (2026-09-15/16) documented
   `agent-bridge create --reclaim` as the implemented mechanism behind
   `agent_dispatch.bridge.spawn_worker(reclaim=...)`. That CLI flag no
-  longer exists: `agent-bridge-cold-resume` Phase 3 (#6744,
-  copilot-extensions PR #3161) removed `create`'s own session-lifecycle
+  longer exists: `agent-bridge-cold-resume` Phase 3 (copilot-extensions PR #3161) removed `create`'s own session-lifecycle
   head-guard bypass entirely -- `create` into an occupied worktree has no
   break-glass of its own now.
 - `spawn_worker(reclaim=...)` **still exists** and this effort's
@@ -3298,7 +3396,7 @@ since prior rounds' verification):
     anything specific to this plugin or to Linux.
 
 - **Windows arm VALIDATED: clash confirmed reproducible on Windows, 2/2**
-  (run against a real Windows-container Hyper-V-isolated host, `cloud2`).
+  (run against a real Windows-container Hyper-V-isolated host, `<isolated-windows-host>`).
   Getting there needed five real, independent bugs fixed -- none of them
   in the clash mechanism itself, all in getting a genuinely headed Windows
   session to stand up at all:
