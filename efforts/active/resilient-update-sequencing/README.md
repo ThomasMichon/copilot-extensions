@@ -30,6 +30,13 @@ waiting for a complete installer redesign.
 
 ## Coordination
 
+The finite #3491 ordinary POSIX new-slot serving family continues through the existing
+#6820 sequencing coordinator and Bridge lifecycle/adopter/native/deployment,
+#6476/shared-constructor/installer-engine and incumbent source/maintenance/driver
+owners. Preserve best-effort bounded identity-checked cold takeover, honest
+outage/unknown/retry, actual candidate/output health and verified retained-good
+recovery. No new updater, live operation or universal acknowledgement is authorized.
+
 - **Topology:** sequential reviewed slices; the Coordinator owns this effort's
   implementation and completion gate.
 - **Host (owns PRs):** Coordinator.
@@ -142,7 +149,104 @@ fulfilling that direction, not additional operator requirements.
 - [ ] Resolve or explicitly transfer every implementation and validation item
   to an accepted named objective, update reality docs, archive and finalize.
 
+<!-- backlog-reconciliation:7556:transfer:3491:to:efforts/active/resilient-update-sequencing/README.md -->
+
+Add this COMPLETE finite Bridge POSIX ordinary-update serving family DIRECTLY to the
+existing reviewed ACTIVE ROOT Phase 3 per-adapter activation Plan AND Phase
+4/Validation/continuing Coordination. Preserve EVERY incumbent Plan/Validation/Journal
+row and existing #6820 coordinator, Bridge lifecycle/adopter/native/deployment owners,
+#6476/shared-constructor/installer-engine custody, source/maintenance/driver and
+telemetry/command/profile owners. This is additive acceptance coordination, not taking
+over their implementation, creating another updater or executing a transition.
+
+### Detached routed survivor across successive Bridge updates retained from #3491
+- [ ] Reconcile the original ordinary fresh/new-slot update path against the ACTUAL
+  serving local Bridge, not only PID-file/systemd activity. A correctly identified
+  routed detached survivor from a prior cutover must be recognized even without those
+  native tracking hints; its healthy endpoint is not proof it already serves the
+  selected newly installed runtime.
+- [ ] Credit #6877's delivered guarded published-slot REUSE reconciliation and native
+  worker/retirement/rollback fixtures. Trace and qualify ordinary construction ->
+  completion/selection -> actual start/deploy separately; reuse-only early-return repair
+  does not establish new-slot behavior. Current do_start can return healthy for another
+  generation, so package/CLI/selector/unit/manifest success must not stand in for actual
+  serving convergence.
+- [ ] Carry the intended selected source/runtime/generation through transition and
+  confirm ACTUAL worker PID/native birth, role, runtime/source and active route where
+  required by existing lifecycle custody. Revalidate exact predecessor/selection/owner
+  at mutation/publication/retirement boundaries; preserve pending-retirement,
+  concurrent-owner/refusal, failure/rollback and retry evidence. Unknown/absent routing
+  or a bare/reused PID is not permission to terminate or claim convergence.
+- [ ] Preserve forwarded/foreign installations and inactive/client-only scope: do not
+  start, drain, stop or replace a local service merely because runtime files update.
+  Retain correct local healthy/current no-op and existing source/installation admission
+  without version-blind wrong-generation success or a second native owner.
+- [ ] Apply CURRENT best-effort handoff: prefer compatible graceful work/drain
+  continuity, but broken/incompatible/refused/non-settling old handoff must not veto the
+  authorized selected generation. Permit bounded identity-checked old-owned-scope
+  shutdown/cold takeover BEFORE incoming readiness under the existing lifecycle
+  authority, with exit/write-exclusion confirmation, explicit outage/unknown/failure
+  outcomes, client reconnect/safe retry and crash-consistent durable child recovery.
+  Never restore a zero-outage or successor-ready-before-EVERY-retirement bar, kill by
+  name/age/bare PID, or touch foreign/successor/separately owned scope.
+- [ ] Keep actual admitted candidate/output CLI health before construction
+  completion/promotion and preserve a VERIFIED RETAINED previous-good generation/durable
+  state across construction, publication or cutover failure. Bad current/LKG evidence is
+  not health; repair published bad content by a distinct admitted generation, never
+  in-place rebuild/global-cache deletion/forced policy bypass. Retained good
+  code/recovery is not a promise that the old process must stay uninterrupted during
+  authorized cold takeover.
+- [ ] Report actual transition outcome and serving identity truthfully:
+  failed/uncertain/partial recovery or wrong-generation service cannot become Update
+  complete solely through written selectors/manifests or version-blind healthy start.
+  Keep source merge, containing release, installed target and actual serving/native
+  evidence separate.
+
+### Validation and continuing coordination for #3491
+- [ ] In an existing authorized isolated original POSIX/native lane, establish a real
+  local routed survivor with no installer PID/unit tracking, perform at least TWO
+  successive new-target ordinary updates, and record actual worker/route/runtime/source
+  identity and bounded outcome after each. Retain current-reuse regression, meaningful
+  wrong-version/foreign/forwarded/inactive/unknown-owner and pending-retirement/failure
+  controls; mock/CLI/manifest success alone is not original serving proof.
+- [ ] Qualify compatible handoff and the accepted bounded cold path at applicable
+  changed boundaries with exact owned identity, preserved admitted
+  candidate/retained-good recovery, honest interruption/unknown/retry behavior and no
+  overlapping exclusive writers. Preserve original actual evidence tiers; do not add all
+  hosts/platforms, every parent test, whole portfolio/release campaign or a universal
+  owner ACK to this finite family.
+- [ ] Continue through the existing sequencing coordinator and concrete
+  Bridge/installer/adopter/source/native owners with normal independently reviewed
+  slices and Journal updates. Old creation, historical draft-status snapshots, completed
+  reuse-only work or this proposal does not complete this new family. Preserve every
+  unrelated existing obligation and current best-effort direction.
+
+Receiving gate: a NEW normal reviewed ACTUAL merge must materialize ALL direct unchecked
+ROOT Plan AND Validation/continuing Coordination rows, followed by FULL CURRENT ROOT
+readback including incumbent Plan/Validation/Coordination/Journal and unchanged owners,
+BEFORE administrative supersession of #3491. If ROOT is not Active, acceptance is
+incomplete or custody cannot be preserved, retain the source. This proposal is not
+implementation, running-state/native qualification, rollout or live
+force/service/process authorization.
+
+At c3acde020b24eb56fd89004976b0c10e0fdae8d9, the Bridge installer delta is confined to
+deploy_binstub's generated command wrapper. Actual dev-merged #8120
+(0439a3c7a29f19da3d1cc70a5363751318dacc1d) adds first-use publication/context admission
+and preserves healthy current/LKG command dispatch, with bounded native command
+fixtures. It does not change ordinary do_update's PID/unit was_running predicate,
+internal resolved-Python deploy/start path or do_start's version-blind healthy
+routed-service return. Thus the previously documented fresh/new-slot versus reuse
+serving distinction remains at the inspected head; no live stale-serving failure or
+complete repair is newly claimed. Preserve all ten direct 3491
+Plan/Validation/Coordination clauses and current best-effort
+cold-recovery/candidate-health/verified-retained-good-generation semantics.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #3491 Plan/Validation/continuing Coordination
+  clause above at its original finite scope and evidence tier, preserving alternatives,
+  same custodians and nonexpiring holds. Administrative intake is not implementation,
+  UI/native acceptance, deployment or unrelated parent completion.
 
 - [x] Historical receipt/template fixtures cover same-lineage payload relocation,
   known pre-receipt formats, missing/retired projects and knowledge-only commands.
@@ -176,6 +280,16 @@ preparation barrier requires actual installer adapter support; it is not
 achieved by rearranging today's combined installer invocations.
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3491
+
+- Added the complete #3491 direct retained acceptance to this ROOT Plan, its actual
+  global Validation and continuing Coordination. Every incumbent obligation,
+  alternative, historical outcome and custodian remains; controlled historical
+  identifier abstractions preserve their technical roles. A new normal reviewed actual
+  merge and complete current receiving-section readback must precede source
+  supersession. The effort stays Active; no implementation, test, native result, worker
+  activation, rollout or resource effect is claimed.
 
 ### 2026-10-15 - Proposal and execution authorization
 - Captured the requested historical cleanup, profile latency and resilience

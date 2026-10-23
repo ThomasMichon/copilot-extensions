@@ -1,8 +1,8 @@
 # Worktrees Pivot UX Overhaul
 
 - **Slug:** `worktrees-pivot-ux-overhaul`
-- **Repo:** copilot-extensions (control-plane home; PR-required `main`, self-merge)
-- **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `main`
+- **Repo:** copilot-extensions (control-plane home; PR-required `dev`, self-merge)
+- **Branch(es):** per-phase `pr/<slug>` worktrees against `dev`; release via promotion
 - **Created:** 2026-09-22
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** vision-closing / vision-extending against:
@@ -18,7 +18,10 @@
     this effort's Phase 8 continues it per its own stated Non-Goals gating
     (break-glass head override, split-screen sub-agents, etc. are explicitly
     *not* v1 and must not be folded in silently).
-- **Umbrella issue:** [#3307](https://github.com/ThomasMichon/copilot-extensions/issues/3307)
+- **Originating issue:** [#3307](https://github.com/ThomasMichon/copilot-extensions/issues/3307)
+  (historical tracking after reviewed supersession; not a live claim token)
+- **Continuing coordination:** this Active ROOT's Plan, Validation and Journal,
+  with eligible open bounded-source claims and existing custodians unchanged.
 - **Sub-issues:** filed per-phase as each phase is scoped for execution
   (see Plan; none filed yet — this is the reviewed-plan stage).
 
@@ -38,6 +41,30 @@ Textual-era screenshots. This effort collects those into one coherently
 sequenced campaign, explicitly bounded to the Worktrees pivot itself (not a
 re-litigation of the broader Picker/Manager extraction, which
 `worktree-manager-control-plane` already owns).
+
+## Coordination
+
+The #3587 five-facet search, exact two-way keyboard focus and considered
+highlight-footer disposition stays with the same Worktrees presentation and
+authoritative engine/claims owners. Preserve bounded reads, performance, missing-data
+honesty, current native/source holds and the independent real-mesh, recency, New/Resume
+and recovery scopes.
+
+The #3307 umbrella continues through this Active ROOT, its existing Journal and eligible
+open bounded-source coordination. Preserve the same Worktrees presentation,
+engine/claims and native custodians, independent #3418/#5908/#5909 scopes, and the
+real-mesh OR explicit operator-accepted demo-only alternative. The source becomes
+historical provenance only after reviewed supersession; it is not a live claim token.
+
+Continue through this Active ROOT's existing Journal and eligible open bounded-source
+claiming. Existing Worktrees presentation, authoritative engine/claims, phase/source,
+resource and native custodians retain their scope and nonexpiring claims. Check concrete
+overlapping edits before implementation; no new participant assignment or blanket
+acknowledgement is created. Preserve independent #3418/#5908/#5909 acceptance and the
+real-mesh validation OR the operator's explicit accepted demo-only alternative.
+Historical umbrella #3307 is provenance after reviewed supersession, not continuing live
+claim authority. This documentation intake authorizes no implementation,
+UI/native/runtime or resource action.
 
 ## Context
 
@@ -81,7 +108,7 @@ pivot specifically.
   private knowledge-repo tracker
   ("Setup diagnostics: local Worktree Manager screenshot command crashes")
   — an active but not-yet-designed bug-triage effort exists at
-  `<knowledge-repo>/efforts/active/harness/setup-diagnostics-worktree-screenshot/README.md`.
+  `<consumer screenshot-diagnostics objective>`.
   This effort's Phase 1 fixes that crash as a prerequisite, then captures the
   actual comparison baseline.
 - **Accelerator (fast claims/status reads) — already built and deployed.**
@@ -107,15 +134,15 @@ pivot specifically.
   (captured, unscheduled) — an audit/verb-consolidation idea and a Defender-
   exclusion idea. Neither blocks this effort; noted only in case Phase 6's
   read path benefits from the audit-verb consolidation.
-- **`worktree-state-live-db`** (dotfiles-tracked, copilot-extensions#229) —
+- **`worktree-state-live-db`** (consumer-tracked, copilot-extensions#229) —
   currently redirected from "embedded DB" to "record decomposition (cells) +
   forward-only journal + deterministic head/status derivation." That
   journal/derivation work is the most direct fix for the **root cause**
-  behind Phase 7's last-session/handoff-head mismatch warning (dotfiles#1298).
+  behind Phase 7's last-session/handoff-head mismatch warning (head/session mismatch report).
   This effort's Phase 7 should build the **surfaced warning**; if the
   underlying journal/derivation lands first, Phase 7 becomes thinner (read
   the derived state) rather than needing its own reconciliation logic.
-- **`consolidated-status-daemon`** (dotfiles-tracked, copilot-extensions#918)
+- **`consolidated-status-daemon`** (consumer-tracked, copilot-extensions#918)
   — Phase 1 (cutover reap+restart) and Phase 4 Slice 1 (list cache) are done;
   Phases 2, 3, 4-Slice-2, and 5 (liveness roots, full catalog reconciliation,
   cache warming, orphan-pane reaper) are still open. Largely superseded in
@@ -129,8 +156,8 @@ pivot specifically.
   `interpret_descriptor_payload` outcome). Touches the same Worktrees-pivot
   screen but is a distinct capability (destructive bulk action UX, not
   presentation/columns/ordering). Left alone; cross-link only.
-- **A real-world consuming harness's own tracker issue #1998** ("Worktree Manager: Add
-  cross-repository authoritative-agent picker") and **`#181`** ("Textual
+- **A consumer's authoritative-agent picker request** ("Worktree Manager: Add
+  cross-repository authoritative-agent picker") and **OpenSSH keyboard-input report** ("Textual
   picker keyboard-dead over Windows OpenSSH") — tangential Worktrees-pivot
   bugs/asks unrelated to this effort's scope (input platform bug; a
   different picker altogether). Noted, not adopted.
@@ -141,15 +168,15 @@ pivot specifically.
   question of whether the Worktrees pivot's own **table widget** should be a
   native Textual `DataTable`/`OptionList` rather than a hand-rolled
   `engine_views.py` renderer. No overlap; both may proceed independently.
-- **dotfiles#494** ("Worktree Manager misses pending-input hourglass for
-  rest-only sessions"), **#1205** ("mux_live never refreshed by periodic
+- **pending-input indicator follow-up** ("Worktree Manager misses pending-input hourglass for
+  rest-only sessions"), **mux-liveness refresh follow-up** ("mux_live never refreshed by periodic
   sweep") — `LIVE`-state freshness bugs that Phase 6's SESS/TURNS work will
   likely touch the same rendering path as; cross-linked, fixed opportunistically
   if in-path, not separately scheduled.
 
 ### Net-new — no prior art found
 
-A repo-wide sweep (dotfiles issues, copilot-extensions issues/efforts,
+A repo-wide sweep (consumer issue trackers, copilot-extensions issues/efforts,
 harness issues) found **no** existing tracked work for: the "R" column's
 confusing semantics, Recent-section sort-by-most-recently-used (vs.
 newest-to-oldest by a status-transition timestamp), or a dedicated
@@ -334,7 +361,7 @@ parallelizable across worktrees.
       recently-resumed worktree now sorts above the merely-newer-but-
       untouched one, confirmed by diff (2 lines changed, only the two
       title/detail rows swapping order).
-- [ ] Cross-link dotfiles#1016 (indented sub-row nesting for paired
+- [ ] Cross-link the paired-worktree nesting follow-up (indented sub-row nesting for paired
       worktrees) if the same section-ordering code path is touched. **Not
       done this slice** — the sort-key change didn't touch row-nesting
       rendering, so left uncrossed; revisit if a later phase touches that
@@ -439,13 +466,13 @@ parallelizable across worktrees.
 - [x] Add a combined `SESS/TURNS` (or equivalent) column: total session
       count for the worktree, and the current session's turn number.
 - [x] Fix delegate/child worktrees incorrectly showing 0 turns
-      (dotfiles#458) as part of this column's data path, since it is the
+      (delegate/child turn-count report) as part of this column's data path, since it is the
       same undercount this column would otherwise inherit.
 
 ### Phase 7 — Session/handoff-head mismatch warning + Sessions sub-menu (Done 2026-09-27)
 - [x] Surface a visible warning when a worktree's recorded "last session id"
       and "handoff head session" disagree (root-cause context:
-      dotfiles#1298, `worktree-state-live-db`'s journal/deterministic-head
+      head/session mismatch report, `worktree-state-live-db`'s journal/deterministic-head
       direction — reuse its derived state if landed first; otherwise
       implement the comparison directly against current fields).
 - [x] Add a "Sessions" sub-menu/dialog listing all sessions recorded against
@@ -472,7 +499,7 @@ parallelizable across worktrees.
         kind prefixes: `session`→`SESS`, `worktree`→`WT`, `codespace`→`CS`,
         `container`→`CT`, `task`→`T`, `bridge`→`BR`, `ssh`→`SSH`,
         `effort`→`EFF`. PRs and bugs/issues carry NO kind prefix by default —
-        `odsp-web#2578906`, `copilot-extensions#4507`, `#589` (bare
+        `example-repo#123`, `copilot-extensions#4507`, `#589` (bare
         same-repo) — but a plugin-contributed `label_overrides[kind]` (e.g.
         an ADO-sourced "bug") still applies and IS prefixed, preserving that
         extensibility point. Session claims (not yet a claimable kind) now
@@ -563,13 +590,159 @@ parallelizable across worktrees.
 - [x] Riff on the `⚭` paired-worktree marker: named THIS row's own
       `pair_role` inline (e.g. `⚭knowledge Implement Retry Logic`) rather
       than the bare icon. Naming the SIBLING's actual repo (the operator's
-      literal example, `⚭dotfiles ...`) needs a new cross-project lookup
+      literal example, `⚭example-repo ...`) needs a new cross-project lookup
       (resolve `pair_id` -> sibling record, possibly in a different tracked
       project) -- operator chose the available, no-new-plumbing option for
       now; the sibling-repo lookup remains a distinct, separately-tracked
       follow-up if wanted later (2026-09-27).
 
+<!-- backlog-reconciliation:7556:transfer:3307:to:efforts/active/worktrees-pivot-ux-overhaul/README.md -->
+
+### Direct retained Worktrees UX umbrella acceptance from #3307
+
+Receive this into the EXISTING Active ROOT Plan and its own Validation Plan. Preserve
+all phases, accepted choices, historical Journal, current implementation/resource
+custodians and completion gates. This is administrative tracker coalescence, not feature
+completion.
+
+#### Plan
+
+- [ ] Reconcile the complete original Worktrees-pivot umbrella with actual delivered
+  production mock/golden capture, native-widget evaluation and accepted OptionList
+  choice, recent-use ordering/USED, shared CLAIMS/ranking and R replacement,
+  session/turn visibility, session/head mismatch guard and history browser. Credit
+  merged results; do not reopen them from stale introductory prose or silently drop
+  their correctness/performance contracts.
+- [ ] Retain head/session identity and unknown-observation handling, owner-authoritative
+  shared claims ordering/presentation, existing cache/read authority and render
+  responsiveness. Warm or demo state is not new live authority.
+- [ ] Finish Phase 9 wishlist reconciliation and explicitly dispose of its optional
+  interactive-claim-navigation candidate under existing owners. Keep the accepted
+  Companion handoff-tracking slice distinct from operator-deferred
+  split-screen/extended-status candidates; deferral is not missing mandatory
+  implementation.
+- [ ] Preserve the independently owned #3418 real adopted-data capture/whole-operation
+  budget rows and #5908/#5909 acceptance. This umbrella does not absorb those
+  implementations, erase their gates or transfer a live source/resource claim.
+- [ ] Keep the complete existing Plan and unfinished Validation directly in this Active
+  ROOT. Replace the active umbrella/coordination pointer with this continuing ROOT plus
+  eligible open bounded-source coordination after supersession; #3307 then remains
+  historical provenance only. Reconcile legacy Main-target wording with the current Dev
+  review/promotion flow without rewriting historical Journal records.
+
+#### Validation
+
+- [ ] Preserve all existing production mock/golden, derivation, shared-claim,
+  session/head and Companion coverage and every unresolved own Validation item; a newer
+  phase merge does not resolve the whole parent.
+- [ ] Complete the explicitly retained REAL multi-worktree mesh check of adopted
+  recency/order, claims/ranking and session/turn data against their authoritative owners
+  OR obtain the operator's explicit acceptance of the documented demo-only alternative.
+  Preserve this OR exactly. No waiver, mesh run or native success is asserted by this
+  intake; mock/golden output alone is not the actual mesh branch.
+- [ ] Record whether Phase 9 and each considered/deferred candidate is delivered,
+  explicitly deferred or retained, without making deferred Companion scope mandatory or
+  treating wishlist title matching as acceptance.
+- [ ] Keep source, released-containing, installed and native observations attributable
+  and separate at the existing finite gates; do not invent an all-host or whole-Manager
+  requirement.
+- [ ] BEFORE closing #3307 as administratively superseded, obtain a NEW normal reviewed
+  ACTUAL merge containing this complete direct ROOT Plan/Validation/continuing
+  Coordination intake and read back the CURRENT FULL receiving sections. Old
+  creation/phase PRs, a child-only link, a proposed patch or this text are not that
+  receipt.
+
+#### Continuing Coordination and Journal
+
+- [ ] Keep the effort Active, preserve existing Journal and actual owners, and continue
+  selecting/claiming unfinished bounded Plan items through the existing
+  Journal/open-source process. Check concrete overlapping edits; do not fabricate a new
+  universal acknowledgement gate or use the closed source as a live claim token.
+- [ ] Journal the reviewed intake merge, its exact full readback, delivered partials and
+  the next remaining Plan/Validation stretch. Tracker retirement does not mark the
+  effort Done or authorize implementation, UI/native/runtime/claim actions.
+
+<!-- backlog-reconciliation:7556:transfer:3587:to:efforts/active/worktrees-pivot-ux-overhaul/README.md -->
+
+### Direct retained Worktrees search facets, keyboard focus and footer disposition from #3587
+
+Add directly to this EXISTING Active Worktrees-presentation ROOT Plan and own
+Validation, retaining every previous phase, accepted deferral, native mesh OR
+alternative, historical Journal and current claims/source custodians. This is not a new
+data/claims owner or a revival of the Draft creature-comforts effort.
+
+#### Plan
+
+- [ ] Credit and preserve current slash-filter query, case-folded substring match,
+  Escape clearing and stable visible-row remapping. Implement the requested Ctrl+F
+  footer search-box affordance and live narrowing across ALL five independent
+  identifying facets: four-digit ID, codename, full title, current-activity slot and
+  actual claim set. Status/claim-count markers are not claim-set identities; raw nested
+  data is not searched merely because it exists in a record.
+- [ ] Preserve exact two-way keyboard contract: Escape clears; Up OR Shift-Tab from box
+  enters the filtered list; Tab OR arrow past list bottom returns to the box. Keep
+  focus/selection legible, selection stable and subsequent actions bound to the correct
+  underlying unmodified record/source.
+- [ ] Explicitly consider, scope or defer the additive persistent highlight-driven
+  detail footer: codename/full title/claim set/activity visible on row highlight without
+  Enter, with an explicit coexistence/swap relationship to Ctrl+F search. Preserve its
+  considered-extension status rather than silently drop it OR invent a mandatory
+  arbitrary redesign. An Enter-only details modal is not the proposed highlight-driven
+  result.
+- [ ] Obtain complete facet data through existing bounded authoritative
+  owner/search/read contracts, preserving current claims identity and
+  unknown/unavailable handling. Do not add per-keystroke live graph/network scans,
+  fabricate a complete claim search from counts or silently call unsupported facets
+  covered.
+- [ ] Keep this Worktrees UX interaction bounded and separate from recency source
+  ownership, New/Resume eligibility, detached-create/title and provider recovery.
+  Preserve current performance, render/derive authority and the rest of this ROOT's
+  Plan/Validation without making whole-parent completion a prerequisite for this finite
+  feature.
+
+#### Validation
+
+- [ ] Check positive and negative substring matching independently for EACH of the five
+  facets, case handling, query/clear/remap and correct record/action binding; include
+  cases where the term appears only in codename, activity or an actual claim identity,
+  not title/status.
+- [ ] Qualify the actual Ctrl+F footer, live narrowing, Escape and both directional
+  keyboard alternatives, visible focus, list boundaries, zero matches and return to
+  normal navigation through the existing applicable UI/native lanes. A slash binding,
+  palette or source tuple alone is not that full interaction.
+- [ ] Record the explicit highlight-footer decision and, if accepted for this slice, its
+  focus-driven details and search coexistence. A considered/deferred extension is not
+  silently made mandatory or reported implemented.
+- [ ] Preserve bounded owner reads, render responsiveness and truthful
+  unavailable/incomplete facet state. Keep source and actual UI/native evidence
+  separate; no universal every-host or whole-Manager test gate is introduced.
+- [ ] BEFORE closing #3587 administratively, obtain a NEW normal reviewed ACTUAL merge
+  containing the complete direct ROOT Plan/Validation/continuing Coordination and read
+  back the CURRENT FULL receiving sections. Draft #3589 planning, old ROOT creation,
+  title/link/child-only text or this proposal is not that receipt.
+
+#### Continuing Coordination and Journal
+
+- [ ] Continue under the SAME Worktrees presentation and authoritative engine/claims
+  owners through this Active ROOT's existing Journal/open bounded-source process.
+  Preserve all current actual edit/resource/native holds, without using a closed source
+  as a live token or inventing a generic new ACK.
+- [ ] Journal the reviewed intake merge/readback, current delivered filter, explicit
+  facet/keyboard/footer remainder and the next unfinished bounded Plan item. Preserve
+  historical Journal and all previous parent gates; this intake launches no
+  UI/native/test or worker action.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #3587 Plan/Validation/continuing Coordination
+  clause above at its original finite scope and evidence tier, preserving alternatives,
+  same custodians and nonexpiring holds. Administrative intake is not implementation,
+  UI/native acceptance, deployment or unrelated parent completion.
+
+- [ ] Resolve every directly retained #3307 Plan/Validation/continuing Coordination
+  clause above at its original finite scope and evidence tier, preserving alternatives,
+  same custodians and nonexpiring holds. Administrative intake is not implementation,
+  UI/native acceptance, deployment or unrelated parent completion.
 
 - [x] Golden-screenshot diff run before/after every phase in this effort
       (Phase 1's harness), with intentional deltas called out explicitly in
@@ -622,6 +795,26 @@ This effort remains **Active**, not yet ready to archive.
 
 ## Journal
 
+### 2026-10-23 - Direct retained acceptance from #3587
+
+- Added the complete #3587 direct retained acceptance to this ROOT Plan, its actual
+  global Validation and continuing Coordination. Every incumbent obligation,
+  alternative, historical outcome and custodian remains; controlled historical
+  identifier abstractions preserve their technical roles. A new normal reviewed actual
+  merge and complete current receiving-section readback must precede source
+  supersession. The effort stays Active; no implementation, test, native result, worker
+  activation, rollout or resource effect is claimed.
+
+### 2026-10-23 - Direct retained acceptance from #3307
+
+- Added the complete #3307 direct retained acceptance to this ROOT Plan, its actual
+  global Validation and continuing Coordination. Every incumbent obligation,
+  alternative, historical outcome and custodian remains; controlled historical
+  identifier abstractions preserve their technical roles. A new normal reviewed actual
+  merge and complete current receiving-section readback must precede source
+  supersession. The effort stays Active; no implementation, test, native result, worker
+  activation, rollout or resource effect is claimed.
+
 ### 2026-09-22 — Kickoff: triage sweep + reviewed plan drafted
 - Swept the operator's personal harness repo, their private knowledge repo
   (bound knowledge repo), and `copilot-extensions` itself for existing issues and
@@ -643,14 +836,14 @@ This effort remains **Active**, not yet ready to archive.
 ### 2026-09-22 — Phase 1 investigation: filed the live screenshot-crash bug
 - Reproduced the screenshot-capture crash live (both via the deployed
   `worktree-manager` binstub and directly against this repo checkout).
-  Confirmed the originally-cited traceback (harness#265/dotfiles#2120) is
+  Confirmed the originally-cited traceback (the historical downstream screenshot reports) is
   stale — the code it references was retired — and found the current,
   reproducible root cause: a lazy-dispatch coverage gap from #3309/#3313
   that the operator asked to route to the agent responsible for that work
   rather than fix here.
 - Filed [copilot-extensions#3319](https://github.com/ThomasMichon/copilot-extensions/issues/3319)
   with the precise root cause and expected fix seam. Cross-linked from
-  harness#265 and dotfiles#2120.
+  both historical downstream screenshot reports.
 - Phase 1 remains blocked on #3319 landing before the actual golden
   captures can be taken. No code changes made in this slice.
 
@@ -759,15 +952,13 @@ This effort remains **Active**, not yet ready to archive.
   follow-up markers (✚), and PR numbers/states. Full suite: 1155 passed,
   1 skipped.
 
-### 2026-09-23 — Filed screenshot evidence to OneDrive; effort marked Active
+### 2026-09-23 — Filed screenshot evidence to artifact storage; effort marked Active
 - Installed `resvg` (`worktree-manager/scripts/picker-snapshot`, `npm
   install`) as a deterministic PNG rasterizer — headless Edge hung
   unrelated to this effort's own code (an environment quirk on this
   machine, not a repo bug), `resvg` did not.
-- Captured and filed 3 screenshots to the operator's OneDrive
-  (`2026/09.22 Worktrees Pivot UX Overhaul/`, per their maintained
-  organization profile's "tied to a specific project with a known start
-  date" placement heuristic): the current Worktrees pivot (`--demo`,
+- Captured and filed 3 screenshots in an operator-selected project evidence
+  folder: the current Worktrees pivot (`--demo`,
   enriched fixture), the injected "Demo Queue" mock pivot, and the
   original `v1.0.0` baseline — with a short `README.md` index. Local
   temp captures cleaned up; nothing else changed in-repo this slice.
@@ -905,7 +1096,7 @@ This effort remains **Active**, not yet ready to archive.
   redistribution, so no second full suite run was needed.
 - **Next up: Phase 6** — combined SESS/TURNS column on LIVE rows, plus
   fixing delegate/child worktrees incorrectly showing 0 turns
-  (dotfiles#458). Not yet started.
+  (delegate/child turn-count report). Not yet started.
 
 ### Phase 6 — SESS/TURNS column on LIVE rows (Done 2026-09-25)
 - **SESS/TURNS column:** `derive._sess_turns(w)` renders
@@ -920,7 +1111,7 @@ This effort remains **Active**, not yet ready to archive.
   essential of the LIVE-row columns); `LIST_SPECS`'s old standalone `t`
   turns-only column is replaced in place by the same `sess_turns` column
   (same drop-priority 8 it had).
-- **dotfiles#458 (delegate/child 0-turns undercount) -- root-caused and
+- **delegate/child turn-count report (delegate/child 0-turns undercount) -- root-caused and
   fixed:** the actual bug was in `agent_bridge.worktree_lineage
   .register_session()`, NOT in `agent_worktrees.sessions.scan_sessions_fast`
   (the registry-enrichment path investigated last slice, which turned out
@@ -988,10 +1179,8 @@ This effort remains **Active**, not yet ready to archive.
   illustrative `session_count` values to the "management memo" roster
   (roughly correlated with age/turn_count, never exceeding it), so the
   demo render now shows a believable spread (`1/6`, `2/14`, `5/52`, etc.).
-  Filed the resulting SVG+PNG to the operator's OneDrive in a new dated
-  folder (`2026/09.26 Worktrees Pivot UX Overhaul Phase 6/`, per their
-  organization profile's `MM.DD Topic Name` convention), alongside a short
-  README index, distinct from the Phase 1 baseline set.
+  Filed the resulting SVG+PNG in a separate dated project evidence folder,
+  alongside a short README index, distinct from the Phase 1 baseline set.
 - Added a **"Developing a pivot: render early, render often"** section to
   `worktree-manager/README.md`'s Production Picker transplant docs (per
   operator request): any pivot change touching columns/derived fields/
@@ -1059,7 +1248,7 @@ Operator feedback on the rendered pivot, addressed as a bundled follow-up
   - **Deferred, not built this slice** (operator's own call): a NEW
     agent-bridge "report-intent" MCP tool so ACP/bridge-driven sessions
     (which may miss the existing live-pulse extension the same way they
-    missed session registration, dotfiles#458/Phase 6) can report activity
+    missed session registration, delegate/child turn-count report/Phase 6) can report activity
     directly. For now, ACP sessions get activity only via the disposition
     `--activity` flag (already usable from any session shape) or the
     existing live-pulse extension when it does fire.
@@ -1141,7 +1330,7 @@ Operator feedback on the rendered pivot, addressed as a bundled follow-up
   the asserted head, with an existing test
   (`test_worktree_to_dict_keeps_head_over_newer_transcript_and_mux`) proving
   the mismatch case is real and already deliberately resolved (head wins) --
-  but with NO warning surfaced. Root-caused the exact dotfiles#1298 scenario
+  but with NO warning surfaced. Root-caused the exact head/session mismatch report scenario
   this represents (a resumed session landing on a stale predecessor, or a
   surviving predecessor mux still writing to its own old session dir after a
   handoff) and implemented Phase 7 as a thin, additive layer on top of that
@@ -1315,14 +1504,14 @@ Operator feedback on the rendered pivot, addressed as a bundled follow-up
 
 ### 2026-09-29 — Lineage cleanup + Validation Plan/Proposal reconciled against reality
 - The operator asked to identify the correct head session after several
-  days' worth of resumed sessions had run in the odsp-web-harness control
+  days' worth of resumed sessions had run in the historical consumer control
   worktree without formal `link-succession` chaining between them
   (`hook:new`-style resumes, not `context-handoff` cutovers). Traced the
   full chain via `agent-worktrees list-sessions`/`session-lineage`/
   `head-session`/`handoffs-check` rather than guessing: five sessions ran
-  since the original 2026-09-23 handoff (`dfa8f775` Phase 2, `33d446f4`
-  the Post-Phase-6-renders slice, `dfbc8f44` Phase 9 item 1's sticky-header/
-  focus-scroll work, a stray 1-turn `2d142c3d`, and the original session
+  since the original 2026-09-23 handoff (`<phase-2-session>` Phase 2, `<render-session>`
+  the Post-Phase-6-renders slice, `<sticky-header-session>` Phase 9 item 1's sticky-header/
+  focus-scroll work, a stray 1-turn `<short-session>`, and the original session
   itself, now resumed). All had already landed their real work (confirmed
   against `origin/main` git history and the PRs cited in this Journal) —
   no dangling uncommitted work, no open PRs, no split-brain hazard

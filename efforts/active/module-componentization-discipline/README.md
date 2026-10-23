@@ -36,6 +36,18 @@ to test modules via behavioral-contract splitting with filterable attribution.
 
 ## Coordination
 
+The finite #3458 five-module split and full #3353 inheritance continues under the same
+Manager/generator/selection/config/CLI/installer, Worktrees
+configuration/publication/claims and compatibility/module-health/automation/native
+custodians. Preserve OPEN #2805 and all #3124/#3446 obligations without a claim expiry,
+source transfer or whole-program gate.
+
+The #3446 compound recurrence-prevention AND terminal-fragment split stays with the same
+componentization, Manager/generator, module-health, compatibility, automation,
+release/control, installer and native owners. Preserve OPEN #2805, every incumbent
+alternative and the entire #3124 intake/global Validation reference. No live claim
+expires or transfers.
+
 The direct #3124 four-poller extraction stays with the current componentization host,
 OPEN #2805, eligible bounded-source coordination, and existing
 source/compatibility-root/module-health/automation/lifecycle/installer custodians. No
@@ -43,7 +55,7 @@ unreleased overlapping claim expires or transfers; closing the administrative so
 not a live claim token or worker-activation authority.
 
 - **Topology:** one host worktree for Phase 0; later phases (module/test
-  splits) each land as their own independent PR against `main`, claimed off
+  splits) each land as their own independent PR against `dev`, claimed off
   the Plan below.
 - **Host (owns PRs):** the current worktree for Phase 0; whichever
   worktree/session picks up a later phase owns that phase's PR.
@@ -54,8 +66,8 @@ not a live claim token or worker-activation authority.
 
 ## Context
 
-Triggered by reviewing `namankanakiya/copilot-extensions#2785` on the
-private downstream repo's side: its `guards + lint` CI check was failing on
+Triggered by a contributor review: a consumer's `guards + lint` CI check
+was failing on
 `worktree-manager/.../engine.py` exceeding its own grandfathered ceiling by 48
 lines — a regression introduced by an unrelated, already-merged PR (#2788/
 #2794). That a single feature PR could push a baselined file further over its
@@ -497,7 +509,7 @@ Verbatim from the operator:
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
-_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+_Correlated via a repository-wide sweep of open `bug`-labeled issues against active efforts (semantic discovery + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
 - [ ] **#3446** guards: module-size baseline/hard-cap drift is now a recurring pre-push blocker (3x in <24h)
   - Module-size baseline/hard-cap drift is the exact policy surface this effort establishes.
@@ -603,7 +615,166 @@ https://github.com/ThomasMichon/copilot-extensions/pull/3039 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/6487 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/2807 .
 
+<!-- backlog-reconciliation:7556:transfer:3446:to:efforts/active/module-componentization-discipline/README.md -->
+
+### Direct compound recurrence and terminal-fragment acceptance from #3446
+
+#### Coordination
+
+Keep the SAME existing Active componentization ROOT, every incumbent
+Plan/Validation/Journal row, OPEN #2805 and eligible bounded-source coordination.
+Preserve all2730/3382/2614 alternatives and every3124
+four-poller/shared-deadline/future/drain/equivalence clause and actual global Validation
+cross-reference. Existing Manager/terminal-generation, module-health,
+compatibility-root, automation, installer, release/control and native owners keep their
+scope and nonexpiring claims. Historical #6430 attribution is not a newly assigned or
+closed live claim token; actual continuing activation stays with existing
+release/control owners. This intake neither performs nor authorizes implementation,
+baseline maintenance, worker activation or a native operation.
+
+#### Unchecked Plan
+
+- [ ] Retain BOTH original asks: prevent recurring unrelated-contributor baseline
+  blockage through the selected proactive/fair maintenance design AND complete the
+  original real terminal_fragment responsibility split. One automation fix, widened file
+  or historical unblock does not complete the compound case.
+- [ ] Credit the current publication-only pre-push, separate CI audit and fair
+  changed-source/baseline-entry scoping. Preserve positive enforcement for touched/new
+  offending files while unrelated organic drift is not attributed to every future
+  branch; an untouched-file skip is not a size repair.
+- [ ] Reuse trusted committed-Dev CI-completion measurement and reviewed baseline-only
+  Dev publication through existing control authority. Preserve pinned trusted tooling,
+  credential-free candidate-as-data, exact stale-input/diff fencing and ordinary review.
+  Do not resurrect an independent generated-Main baseline writer, second scheduler or
+  untrusted-tool credential path.
+- [ ] Preserve operator-selected existing-ceiling widening-only automation: no
+  lowering/removal/new entry; deliberate manual tightening and new-file1000-line hard
+  cap remain. Tolerated stale higher ceilings are not an automatic strict-base/equality
+  defect or a reason to add a merge queue/extra CI lane.
+- [ ] Resolve actual deployed producer/admission/covering-release acceptance through
+  current control owners, with source policy distinguished from actual
+  activation/effect. Do not claim a workflow string, old merge or an unrelated green job
+  proves live prevention.
+- [ ] Complete the originally ungrandfathered CURRENT Manager terminal_fragment coherent
+  split rather than move/rename or baseline widening. Preserve one canonical generator,
+  current profile/selection/caller/process/installer authority and focused
+  behavior/native contracts. Keep #3458's complete finite named-file and inherited3353
+  stream independent until separately accepted; do not erase it when this tracker
+  closes.
+- [ ] Remove only relevant obsolete ceilings when their owning finite split qualifies
+  under current reviewed policy. No blanket refresh, automatic new offender waiver,
+  destructive profile deployment, process/claim release or whole-program completion is
+  introduced.
+
+#### Unchecked Validation Plan
+
+- [ ] Demonstrate fair contribution attribution, baseline-key edits, new-offender
+  refusal and trusted existing-ceiling maintenance without unrelated source blame or
+  hidden policy tightening.
+- [ ] Record actual intended producer/admission/covering-release outcome with its
+  existing owner; preserve wrong-source/untrusted-tool/stale-input/diff/publication
+  refusals. Static source and actual activation are different evidence.
+- [ ] Verify terminal-fragment responsibility/caller/generator equivalence and
+  meaningful resulting module caps/baseline disposition through the current authorized
+  bounded portfolio. A missing old path, below-grandfathered count or generic
+  module-health report is not the finite split.
+- [ ] Keep source/CI/native/installed evidence and unavailable results separately
+  attributed at original scope. Preserve existing native/installer/claim gates; add no
+  every-host, whole-parent or new ACK prerequisite.
+
+Receiving gate: only a NEW ordinary reviewed ACTUAL MERGE and FULL CURRENT Active ROOT
+Plan/Validation/Coordination/Journal readback, including this direct block and real
+global Validation entry, permits administrative source supersession. Preserve whole
+incumbent content, OPEN2805/eligible bounded-source coordination and every unreleased
+claim. Old creation, a title/link/child-only note, this proposal or an unmerged
+amendment is not delivery. If any clause, owner or gate is not preserved, RETAIN #3446.
+No check, test, workflow, baseline, native effect or source mutation is performed here.
+
+<!-- backlog-reconciliation:7556:transfer:3458:to:efforts/active/module-componentization-discipline/README.md -->
+
+### Direct finite five-module split and inherited terminal-fragment contract from #3458
+
+#### Coordination
+
+Retain the SAME Active ROOT Plan/Validation/Journal, OPEN #2805, eligible bounded-source
+coordination, all2730/3382/2614 ORs, exact3124 fourteen-clause intake/global Validation
+row and any already delivered3446 compound block. Current Manager/terminal
+generator/selection/config/CLI/installer custodians, Worktrees
+configuration/publication/claims owners and
+compatibility/module-health/automation/native holders remain responsible. No
+source/resource ownership transfers or claim expires; closed3353/3458 become historical
+provenance, never live claim tokens. Future implementation uses normal reviewed current
+Dev workflow and original finite source scope; this documentation intake is not
+implementation admission.
+
+#### Unchecked Plan
+
+- [ ] Coherently split BOTH current Manager __main__.py and terminal_fragment.py AND the
+  later explicitly named Worktrees config.py, pr_ops.py and claims_cli.py. Every named
+  family remains accountable; temporary widen receipts or completion of one file do not
+  settle all five.
+- [ ] Preserve3353's old-to-current-owner ancestry and exact terminal-fragment
+  responsibility seams: pure profile model/generation, machine/project/selection input,
+  migration and diagnosis/reconciliation, and explicit deployment where appropriate.
+  Renaming/moving a large file is not its finite split.
+- [ ] Keep ONE canonical generator and shared terminal_profiles selection; preserve
+  stable GUIDs, machine-key/SSH identity, locked self-agent selection, existing profile
+  compatibility and pure builder/read-only versus explicit apply boundaries.
+- [ ] Preserve actual current callers/imports/CLI and owning process boundary. Do not
+  restore the retired Worktrees terminal-profile CLI or introduce another generator to
+  manufacture a smaller old path. Preserve config/publication/claim behavior for the
+  other three named modules.
+- [ ] Bring resulting normal source modules within the actual1000-line cap through
+  coherent responsibility reduction, not blanket ceiling widening. Current below-ceiling
+  counts and missing old paths are not under-cap/equivalence proof.
+- [ ] Remove relevant current grandfathered entries when no longer needed and explicitly
+  retire the obsolete old-path entry through normal reviewed baseline flow. Do not
+  mechanically refresh unrelated entries or weaken new-file hard-cap policy.
+- [ ] Preserve focused responsibility/behavior regressions and installer/deploy-facing
+  contract coverage under the existing bounded current portfolio when separately
+  authorized. Current installer/native/activation/host-profile permissions remain
+  independent; this tracker transfer changes no terminal setting or profile.
+- [ ] Keep this FINITE five-family/inherited outcome independent of whole2805
+  completion, other modules, all-host qualification or a new blanket ACK. All
+  incumbent3446/3124/installer/automation requirements remain open until separately
+  evidenced.
+
+#### Unchecked Validation Plan
+
+- [ ] Record exact original/current source/consumer mapping for all five named modules
+  and each resulting responsibility. Verify
+  caller/import/CLI/generator/config/publication/claim equivalence, not line counts
+  alone.
+- [ ] Exercise stable GUIDs, machine/SSH/selection locking, compatible existing
+  profiles, pure builder and explicit apply boundaries through their existing owning
+  tests/consumers, preserving installer/deploy contracts at their original supported
+  tier and limits.
+- [ ] Verify resulting normal modules' real cap compliance and only relevant
+  current/obsolete baseline removal through current reviewed tooling; no unrelated broad
+  tightening or new offender waiver.
+- [ ] Record actual source/validation/release/native/installed evidence separately.
+  Static source counts, old-path retirement or a passing unrelated helper is not actual
+  finite split acceptance; no unexecuted lane becomes a pass.
+
+Receiving gate: a NEW ordinary reviewed ACTUAL MERGE must deliver this COMPLETE
+unchecked block and corresponding actual ROOT Validation entry, followed by FULL CURRENT
+Active ROOT Plan/Validation/Coordination/Journal and live-holder readback BEFORE3458
+administrative supersession. Preserve every old row and open bounded-source
+coordination. Old creation/review, a title/link/child-only note, an unmerged patch or
+this proposal is not delivery. If any inherited clause or owner/gate cannot be
+preserved, RETAIN #3458. No source edit, checker/test, generator, native profile
+deployment or resource effect occurs here.
+
 ## Validation Plan
+
+- [ ] Resolve EVERY direct3458 Plan/Validation row including ALL3353 inheritance and the
+  five named source families, preserving same custodians, original bounds and all
+  incumbent ROOT/2805/3124/3446 work. Administrative intake is not implementation or
+  whole-program completion.
+
+- [ ] Resolve EVERY directly retained3446 Plan/Validation clause above, preserving both
+  independent asks, current programme/3124/2805 obligations, original limits and SAME
+  custodians. Tracker consolidation is not implementation or native/control adoption.
 
 - [ ] Resolve every directly retained #3124 Plan/Validation row above through its
   original finite source-behavior scope, preserving current owners, focused regression
@@ -642,6 +813,26 @@ onward has no open design question yet — each is a mechanical application of
 the Phase 0 runbook, picked up as capacity allows.
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3458
+
+- Added the complete #3458 direct retained acceptance to this ROOT Plan, its actual
+  global Validation and continuing Coordination. Every incumbent obligation,
+  alternative, historical outcome and custodian remains; controlled historical
+  identifier abstractions preserve their technical roles. A new normal reviewed actual
+  merge and complete current receiving-section readback must precede source
+  supersession. The effort stays Active; no implementation, test, native result, worker
+  activation, rollout or resource effect is claimed.
+
+### 2026-10-23 - Direct retained acceptance from #3446
+
+- Added the complete #3446 direct retained acceptance to this ROOT Plan, its actual
+  global Validation and continuing Coordination. Every incumbent obligation,
+  alternative, historical outcome and custodian remains; controlled historical
+  identifier abstractions preserve their technical roles. A new normal reviewed actual
+  merge and complete current receiving-section readback must precede source
+  supersession. The effort stays Active; no implementation, test, native result, worker
+  activation, rollout or resource effect is claimed.
 
 ### 2026-10-22 - Direct retained acceptance from #3124
 
@@ -769,7 +960,7 @@ the Phase 0 runbook, picked up as capacity allows.
 
 ### 2026-09-16 — Kickoff + Phase 0
 - Effort created from an operator request following review of
-  `namankanakiya/copilot-extensions#2785` and the `engine.py`/#2788/#2794
+  a contributor change and the `engine.py`/#2788/#2794
   module-size regression it surfaced.
 - Landed `CONTRIBUTING.md` guideline extension, the `componentizing-modules`
   skill, `tools/rank-module-size.py`, and the `@pytest.mark.contract` marker

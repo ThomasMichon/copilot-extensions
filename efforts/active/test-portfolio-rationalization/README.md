@@ -55,6 +55,12 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The finite #3497 historical-Git fixture/policy family uses the existing Phase 7
+migration-intake gate and Phase 4 Bridge/repository wave. Preserve OPEN #1303, all
+incumbent body inheritances, #1349 native, #2721/#584 mock and #3093 order-leak
+acceptance and actual audit/source/cohort/periodic-failure/release custody. Bounded unit
+scope is not a broader census, fixture or native-work claim.
+
 The direct #3093 finite order/context-leak family continues through the existing
 reviewed Worktrees wave. Preserve #1349 native acceptance, #2721/#584 quota/mock
 acceptance, OPEN #1303, and every actual audit, source, cohort, and failure claim. Fix
@@ -245,7 +251,7 @@ suites first.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
-_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+_Correlated via a repository-wide sweep of open `bug`-labeled issues against active efforts (semantic discovery + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
 - [ ] **#3497** tests: discourage real git subprocess calls against the ambient checkout (fragile across clone depths)
   - Directly about discouraging real git subprocess calls in tests -- core test-portfolio scope.
@@ -413,7 +419,87 @@ section or this proposal is not receipt. If either scope/custody or actual compl
 delivery is unavailable, retain #3093. The technical order-leak investigation and repair
 remain unresolved after tracker consolidation.
 
+<!-- backlog-reconciliation:7556:transfer:3497:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+### Direct ambient-checkout historical-Git contract from #3497
+
+#### Coordination
+
+Accept this finite policy/fixture family through the existing Phase7 migration-intake
+deduplication/ownership gate and Phase4 Bridge/repository test wave, not a new
+programme. Preserve the whole incumbent Active ROOT Plan/Validation/Journal, OPEN #1303
+and ALL existing body inheritances,1349 native/2721-584 mock/3093 order-leak families,
+audit/source/cohort/periodic-failure custody and current release/control owners. A
+bounded original-body unit contribution is not permission to take broader census,
+fixture or native work. No source/resource/claim transfer, test execution or new generic
+ACK occurs here.
+
+#### Unchecked Plan
+
+- [ ] Preserve the exact generation-one historical protocol lookup and its minimal
+  disconnected/container-snapshot recurrence. Credit6469's hash/blob-verified
+  frozen-source fallback and genuine-error preservation;3502 full-depth checkout was a
+  workaround, not the complete repository rule.
+- [ ] Establish the original alternatives as the supported test-authoring contract: own
+  a minimal Git fixture with precisely required commits OR mock/stub the relevant call
+  faithfully OR explicitly document/assert a genuinely necessary ambient-history
+  dependency with an honest actionable unavailable/skip result. Do not turn OR into
+  mandatory full-history acquisition or an unconditional ban on real Git.
+- [ ] Prevent silent dependence on ambient checkout depth, branches and external commit
+  availability. Preserve bounded local probes, scrubbed Git environment, no
+  replacement/config injection, disabled lazy fetch and no network/credential escape
+  from an isolated historical contract.
+- [ ] Keep unavailable commit distinct from corrupted frozen bytes/identity, actual Git
+  failure and available commit with missing path. Preserve SHA256/Git-blob reference
+  verification and all real failure diagnostics; no blanket fallback/catch, hidden fetch
+  or skipped-as-passing evidence.
+- [ ] Explicitly CONSIDER and record the original repo-wide guard/lint suggestion for
+  test git-show/git-log external-history patterns. Implement an appropriately scoped
+  useful check OR record the reviewed decision/rationale and accepted guidance
+  alternative. Do not invent a guessed mandatory new linter, exhaustive rewrite or
+  strict history policy; any chosen check must avoid flagging legitimate fixture-owned
+  integration.
+- [ ] Preserve valid isolated real-Git/native integration and meaningful
+  historical-source negatives at the least expensive faithful CURRENT contained/periodic
+  tier. Pure rules may qualify only under existing unit admission; a collection result,
+  skip, moved CI lane or helper presence is not historical execution.
+- [ ] Keep finite3497 completion independent of whole portfolio, full historical test
+  census or every platform/parent native gate. Record each genuine remaining
+  unsupported/history case honestly; no budget enlargement, assertion loss, source-owner
+  expiry or arbitrary exception.
+
+#### Unchecked Validation Plan
+
+- [ ] Verify exact immediate fallback behavior for available/unavailable historical
+  commit, corrupted frozen content/identity, unrelated Git error and missing path on an
+  available commit, preserving real consumer assertions and no hidden fetch.
+- [ ] Qualify supported shallow/partial/minimal snapshot and
+  fixture/mock/explicit-dependency cases at their proper bounded tier, with exact source
+  and honest skip/unavailable classification. No need to copy the whole host history
+  into a clean venue.
+- [ ] Record a concrete reviewed guard/lint disposition, positive/negative sensitivity
+  if implemented and legitimate fixture-owned integration compatibility. Document
+  intended authoring/diagnostic behavior even if a separate linter is declined.
+- [ ] Preserve original effect/containment/budget/provenance and existing
+  native/periodic/audit/cohort failure ownership. Source inspection, policy wording and
+  current runtime execution are distinct evidence; no existing family or assertion is
+  silently removed.
+
+Receiving gate: a NEW normal reviewed ACTUAL MERGE must deliver the ENTIRE direct
+unchecked Plan AND Validation/continuing Coordination, including the real ROOT
+Validation entry, then FULL CURRENT Active ROOT Plan/Validation/Coordination/Journal and
+open1303/actual claim readback BEFORE3497 supersession. The old3497 bug-title link, old
+effort creation, child-only note, unmerged proposal or this text is not receipt. If
+complete scope/intake/custody cannot be verified, RETAIN #3497. The source's technical
+policy remains open after administrative consolidation; no
+tests/imports/collection/checkers/clone/runtime effects occur here.
+
 ## Validation Plan
+
+- [ ] Resolve ALL direct3497 Plan/Validation clauses and its original alternatives
+  through existing migration intake and owning Bridge/repository portfolio wave,
+  preserving whole incumbent ROOT/1303/native/mock/order-leak work and same custodians.
+  Tracker consolidation is not repair or native acceptance.
 
 - [ ] Resolve every directly retained #3093 Plan/Validation clause above at its original
   finite scope and evidence tier, preserving alternatives, same owners, holds, and
@@ -456,6 +542,16 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3497
+
+- Added the complete #3497 direct retained acceptance to this ROOT Plan, its actual
+  global Validation and continuing Coordination. Every incumbent obligation,
+  alternative, historical outcome and custodian remains; controlled historical
+  identifier abstractions preserve their technical roles. A new normal reviewed actual
+  merge and complete current receiving-section readback must precede source
+  supersession. The effort stays Active; no implementation, test, native result, worker
+  activation, rollout or resource effect is claimed.
 
 ### 2026-10-22 - Direct retained acceptance from #3093
 

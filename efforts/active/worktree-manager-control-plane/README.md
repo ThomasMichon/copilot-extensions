@@ -446,7 +446,12 @@ the same effort Journal/open bounded-source process preserves current owners.
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
-### Phase 3d — Retire the Picker's in-process engine-module boundary (Done — #3360)
+### Phase 3d — Retire the production Picker's in-process engine-module boundary (production slice Done)
+
+Production Picker conversion is delivered. The complete original #3360
+compatibility/dev/test and call-frequency disposition remains directly
+unchecked in this ROOT's retained intake below. Historical completion records
+and the production migration stay intact; no production work is reopened.
 
 _(agent-recommended scoping below the two linked issues; the issues
 themselves are operator-filed.)_
@@ -1284,7 +1289,7 @@ fixed with a dedicated `_applescript_quote` helper and regression test.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
-_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
+_Correlated via a repository-wide sweep of open `bug`-labeled issues against active efforts (semantic discovery + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
 - [x] **#2426** Worktree Manager/Picker can show/act on the wrong project's content
   - Showing/acting on the wrong project's content is a direct control-plane bug.
@@ -1449,7 +1454,152 @@ Plan/Validation/Coordination readback. Old creation/proposal PRs are not this de
 If full scope or custody is not accepted, retain #2437. No setting, model/account, AHP,
 reservation, host, process or credential action is performed.
 
+<!-- backlog-reconciliation:7556:transfer:3360:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+### Direct retained all-caller engine-boundary disposition from #3360
+
+Add directly under this EXISTING Active Manager ROOT Plan with matching own Validation
+and continuing Coordination. Phase 3d's production Picker conversion is delivered
+baseline, not a claim that every non-Picker compatibility/dev/test use disappeared.
+Preserve all other phases, accepted ownership decisions, historical Journal and live
+implementation/resource custodians.
+
+#### Plan
+
+- [ ] Retain an attributable final map of the original config, profiles, pr_ops,
+  reclaim, sessions, tracking, CLI-root, update-stage and state-root responsibilities,
+  including runner and pivot-manifest inline calls, to the public CLI/JSON seam OR an
+  explicitly Manager-owned relocated responsibility. Preserve actual completed
+  production conversion and the separate profile/shared-library ownership decisions
+  rather than rebuilding them.
+- [ ] Inventory and resolve/disposition ALL remaining compatibility-helper,
+  screenshot/dev-tool checkout/sys.path and test-bootstrap/direct-engine callers
+  explicitly included in the original. Retire the dynamic private-runtime/vendor-path
+  bootstrap when required callers are converted; renaming/moving the helper does not
+  itself retire the boundary.
+- [ ] If a narrowly isolated cross-surface fixture legitimately imports engine-side
+  assertions, document its approved scope and owner. It must not satisfy Manager runtime
+  dependencies accidentally or be presented as exercising a subprocess boundary.
+  Preserve engine-side assertions in their own authority instead of an undocumented
+  shared live venv.
+- [ ] Ensure boundary-facing tests use the actual fake/real subprocess and JSON
+  protocol, selected runtime/argv and independent interpreter environment. Preserve
+  typed errors, optional-feature/version-skew handling and machine/environment
+  separation; never repair a missing capability by importing private CLI modules.
+- [ ] Preserve incremental independently reviewable/revertible migration and the
+  accepted frequency-appropriate batching/cache/companion OR low-frequency subprocess
+  choices. Keep high-frequency work off rendering and measure first-paint/refresh
+  behavior; neither subprocess-per-frame nor private-import shortcuts are accepted
+  substitutes.
+- [ ] Reconcile the active Phase 3d Done wording and regression guard with the actual
+  scope: production proxy retirement is Done, while this explicitly retained
+  compatibility/dev/test disposition remains open. Preserve historical completion
+  records, #3359 vendoring, #3390 profile relocation and the independent #3124 polling
+  split; this does not reopen or absorb those scopes.
+
+#### Validation
+
+- [ ] Trace every original responsibility and every surviving lower-priority caller to
+  its implemented public/owned boundary or explicit reviewed narrow fixture disposition.
+  Verify actual consumers, not absence of an old filename alone.
+- [ ] Demonstrate process/JSON and failure/skew/runtime-attribution behavior through
+  existing bounded contract surfaces without a test bootstrap silently lending the
+  Manager another runtime. Check that deliberately isolated engine assertions cannot
+  mask a Manager dependency regression.
+- [ ] Preserve behavior and the original call-frequency/first-paint/refresh acceptance
+  at its finite applicable evidence tier. A source-only production_picker guard is not
+  whole-Manager/dev/test qualification, and whole-Manager installation/native completion
+  is not added as a new prerequisite for this finite tail.
+- [ ] BEFORE closing #3360 administratively, obtain a NEW normal reviewed ACTUAL merge
+  of the full direct ROOT Plan/Validation/Coordination intake, including truthful
+  scope-qualified production Done wording, then read back CURRENT FULL receiving
+  sections. Old #4357, a linked child plan or an unpublished proposal is not this
+  receipt.
+
+#### Continuing Coordination and Journal
+
+- [ ] Continue under the SAME Manager/public-engine owners and existing dated
+  Journal/open bounded-source claim process. Preserve current production, configuration,
+  recovery, profile, installation and #3124 owners; no source/resource custody transfers
+  by coalescence and no generic new ACK is required.
+- [ ] Journal the actual intake merge/readback, positive production delivery and
+  unresolved compatibility disposition; keep the effort Active and select the next
+  unfinished bounded Plan item. This intake performs no migration, test, runtime or
+  cleanup operation.
+
+<!-- backlog-reconciliation:7556:transfer:3586:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+### Direct retained Picker-preserving visible-terminal launch from #3586
+
+Receive directly in this EXISTING Active Manager ROOT's Plan and own Validation,
+preserving historical delivery, Phase 4a creation/recovery gates, every other phase and
+current presentation/provider/engine/source/resource custodians. The Draft
+creature-comforts document is background acceptance, not a replacement receiver.
+
+#### Plan
+
+- [ ] Preserve delivered local-row Open/Resume background dispatch, an original Picker
+  that does not exit and Manager-owned visible-window launch. Complete the explicit
+  operator option through ALL original Open, Resume AND New/create UI entrypoints;
+  backend modifier support alone does not qualify the create entrypoint.
+- [ ] Keep the original Picker process/window alive AND responsive for another selection
+  while the correct target session opens in a distinct visible supported
+  terminal/window/tab. Headless automation or takeover of the Picker's terminal is not
+  the requested result.
+- [ ] Reuse the existing relocated identical launch plan/backend/mux registration path
+  with exact project/worktree/conversation/CWD and lossless options. Do not restore the
+  retired independent headed verb or duplicate terminal-launch/status owners.
+- [ ] Preserve current exact New-worktree creation/progress/retry/rollback, cold-Resume
+  versus live-Open intent, authority and live/unknown fences. Failure/cancel must
+  preserve a usable Picker and truthful recoverable target, without duplicate
+  creation/session or silent parent exit.
+- [ ] Expose unsupported remote/AHP/window capabilities and failures honestly. Do not
+  fall back to stealing the current terminal, advertise unimplemented combinations as
+  working or require all providers/hosts to gain new capability merely to complete this
+  finite supported interaction.
+- [ ] Preserve #5936's separate host-loss observation/bulk recovery and independent
+  title, installer/runtime and broader provider acceptance. This finite per-worktree
+  interaction remains under the same Manager/engine owners.
+
+#### Validation
+
+- [ ] Exercise actual UI selections for Open, Resume AND New/create, original-window
+  responsiveness, correct visible target, cancellation/error and subsequent selection
+  through existing applicable contained/native lanes. An existing-row unit fixture or
+  successful backend spawn alone is not the full original interaction.
+- [ ] Verify identical plan/options and actual managed mux registration, correct
+  directory/conversation identity and current no-mux/provider refusals; preserve the
+  exact creation recovery/ownership contracts rather than loosening them for UI success.
+- [ ] Keep finite source, released-containing, installed/native observations separate at
+  the original applicable tiers. Do not add an all-host or whole-Manager completion
+  gate; do not manufacture native acceptance from a source flag.
+- [ ] BEFORE closing #3586 administratively, obtain a NEW normal reviewed ACTUAL merge
+  of this complete direct ROOT Plan/Validation/continuing Coordination, then read back
+  CURRENT FULL receiving sections. Existing #4593/#5232, Draft planning, a child link or
+  a proposal is not that receipt.
+
+#### Continuing Coordination and Journal
+
+- [ ] Continue the SAME presentation/launch/provider/engine custodians through this
+  ROOT's dated Journal and eligible open bounded-source claiming. Preserve current
+  overlapping UI/create/native/runtime claims and accepted boundaries without a new
+  generic ACK or resource transfer.
+- [ ] Journal the actual intake merge/readback, delivered Open/Resume baseline, exact
+  create/UI/native remainder and next bounded Plan item. Keep the effort Active; no
+  terminal, process, model, setting, runtime, test or native operation is authorized by
+  this intake.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #3586 Plan/Validation/continuing Coordination
+  clause above at its original finite scope and evidence tier, preserving alternatives,
+  same custodians and nonexpiring holds. Administrative intake is not implementation,
+  UI/native acceptance, deployment or unrelated parent completion.
+
+- [ ] Resolve every directly retained #3360 Plan/Validation/continuing Coordination
+  clause above at its original finite scope and evidence tier, preserving alternatives,
+  same custodians and nonexpiring holds. Administrative intake is not implementation,
+  UI/native acceptance, deployment or unrelated parent completion.
 
 - [ ] Complete every directly retained #2437 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
@@ -1508,6 +1658,17 @@ reservation, host, process or credential action is performed.
 
 ## Coordination
 
+The #3586 retained-Picker Open/Resume/New visible-terminal interaction continues under
+the same Manager presentation/launch, engine, provider and native owners. Preserve
+creation/recovery/registration fences and separate #5936 bulk recovery; existing
+Journal/open-source claiming continues without a new generic acknowledgement or custody
+transfer.
+
+The #3360 all-caller compatibility/dev/test disposition stays with the same
+Manager/public-engine and existing source custodians. The production Picker conversion
+remains Done; non-Picker callers, actual process/JSON qualification and call-frequency
+acceptance remain independently actionable, alongside the distinct #3124 work.
+
 The direct #2427 project-switch and #2437 same-machine AHP timeout lanes continue
 through this existing Journal and eligible open bounded-source coordination. Preserve
 current UI/provider/engine/installation/recovery claims; no relocation slice is reopened
@@ -1542,6 +1703,26 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3586
+
+- Added the complete #3586 direct retained acceptance to this ROOT Plan, its actual
+  global Validation and continuing Coordination. Every incumbent obligation,
+  alternative, historical outcome and custodian remains; controlled historical
+  identifier abstractions preserve their technical roles. A new normal reviewed actual
+  merge and complete current receiving-section readback must precede source
+  supersession. The effort stays Active; no implementation, test, native result, worker
+  activation, rollout or resource effect is claimed.
+
+### 2026-10-23 - Direct retained acceptance from #3360
+
+- Added the complete #3360 direct retained acceptance to this ROOT Plan, its actual
+  global Validation and continuing Coordination. Every incumbent obligation,
+  alternative, historical outcome and custodian remains; controlled historical
+  identifier abstractions preserve their technical roles. A new normal reviewed actual
+  merge and complete current receiving-section readback must precede source
+  supersession. The effort stays Active; no implementation, test, native result, worker
+  activation, rollout or resource effect is claimed.
 
 ### 2026-10-22 - Complete retained acceptance from #2437
 
@@ -2746,14 +2927,14 @@ claiming discipline alone.
   `housekeeping.py` as a reasoned exception instead of an accidental one.
 
 - **2026-09-27** — Fixed a real production regression discovered live during
-  facility diagnosis: since Phase 3b Sub-slice 3 (#3865), the companion
+  runtime diagnosis: since Phase 3b Sub-slice 3 (#3865), the companion
   `mux-daemon` only republished a live mux mapping to the resident
   status-monitor on a status-monitor lock **generation change** (i.e. only
   right after a monitor restart) -- never on an ongoing cadence. Because the
   monitor's own managed-mux cache treats a pushed mapping as stale after
   `mux_link.MAPPING_STALE_AFTER_SECONDS` (45s), every managed session's mux
   status bar silently went blank 45s after the last monitor restart and
-  stayed blank until the next one -- for hours, facility-wide, with no error
+  stayed blank until the next one -- for hours, across the affected installation, with no error
   anywhere. Root-caused live (process census, `py-spy dump`, direct
   `register`/`publish_live_observation` replay) rather than assumed from the
   symptom; confirmed by reproducing the exact "renders once after a restart,
