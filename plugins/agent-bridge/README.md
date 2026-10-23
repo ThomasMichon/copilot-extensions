@@ -479,8 +479,13 @@ Explicit version-1 Worktrees rows are decoded by the shared dependency-free
 identity codec: the owner reference must match the separate execution owner,
 not the physical host shared by native and guest environments. Physical and
 environment metadata remains unchanged. Malformed explicit tuples refuse
-before plugin-provider or transport effects; unversioned rows keep their
-historical owner interpretation. Standalone snapshots embed the codec and
+before plugin-provider or transport effects. Unversioned physical-machine rows
+with an explicit platform also match the equivalent qualified execution label
+through the shared machine/environment compatibility codec. For example,
+`machine: example-host` with `platform: wsl` matches `example-host-wsl`, not
+the native `example-host-win` execution. Missing platform metadata does not
+prove that equivalence, and an explicit versioned execution owner is never
+replaced by this legacy interpretation. Standalone snapshots embed the codec and
 do not require a sibling Worktrees runtime.
 Without declared ownership, an absolute existing `caller_worktree` directory
 is accepted without Worktrees adoption. With neither, legacy configured

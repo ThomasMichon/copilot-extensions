@@ -1,0 +1,9 @@
+{
+  "comment": "Match legacy controller machine/platform pairs with equivalent qualified execution labels without replacing explicit tuple owners",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

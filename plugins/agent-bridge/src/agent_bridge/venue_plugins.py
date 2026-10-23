@@ -7,6 +7,7 @@ import logging
 import shlex
 import asyncio
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 
 from plugin_resolve.reflection import build_plan, build_prepare_script, parse_prepared, selection_spec
@@ -131,6 +132,25 @@ def with_controller_origin(target, origin, *, caller_session_id=None):
     })
 
 
+def _controller_machine_matches(row: Mapping[str, object], owner_machine: str) -> bool:
+    from machine_transport import split_machine_environment
+
+    recorded = execution_machine_from_fields(row)
+    if (
+        "machine_identity_version" in row or not isinstance(recorded, str)
+        or not isinstance(row.get("platform"), str) or not row["platform"]
+    ):
+        return recorded == owner_machine
+    physical = split_machine_environment(recorded, row["platform"])
+    if recorded == owner_machine:
+        return True
+    requested = split_machine_environment(owner_machine)
+    return (
+        physical.machine.casefold() == requested.machine.casefold()
+        and physical.environment == requested.environment
+    )
+
+
 async def resolve_controller_cwd(
     caller, *, caller_session_id: str | None = None, affinity_id: str | None = None,
 ) -> str | None:
@@ -193,7 +213,7 @@ async def resolve_controller_cwd(
             raise ValueError("controller worktree is not tracked")
         row = rows[0]
         if (
-            row.get("repo") != project or execution_machine_from_fields(row) != machine
+            row.get("repo") != project or not _controller_machine_matches(row, machine)
             or row.get("status") in {"finalized", "complete", "completed", "archived"}
             or not isinstance(row.get("path"), str)
         ):

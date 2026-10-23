@@ -694,6 +694,57 @@ async def test_declared_owner_resolves_without_controller_path(controller, quali
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("recorded", "platform", "requested", "matches"), [
+    ("example-host", "wsl", "example-host-wsl", True),
+    ("Example-Host", "wsl", "example-host-wsl", True),
+    ("example-host-wsl", "wsl", "example-host-wsl", True),
+    ("example-host", "windows", "example-host-win", True),
+    ("example-host", "wsl", "example-host-win", False),
+    ("example-host", "windows", "example-host-wsl", False),
+    ("example-host", "linux", "example-host-wsl", False),
+    ("example-host", None, "example-host-wsl", False),
+    ("other-host", "wsl", "example-host-wsl", False),
+    ("example-host-wsl-copy", "wsl", "example-host-wsl", False),
+    ("example-host-wsl", "windows", "EXAMPLE-HOST-wsl", False),
+    ("example-host-wsl", "windows", "example-host-wsl", False),
+])
+async def test_controller_machine_pair_matches_qualified_execution_label(
+    controller, recorded, platform, requested, matches,
+):
+    from agent_bridge.venue_plugins import resolve_controller_cwd
+
+    caller, owner = controller
+    caller.caller_owner_ref = f"{requested}/control/controller"
+    row = owner.return_value["worktrees"][0]
+    row.update(machine=recorded, platform=platform)
+    if matches:
+        assert await resolve_controller_cwd(caller) == caller.caller_worktree
+    else:
+        with pytest.raises(RuntimeError, match="controller context"):
+            await resolve_controller_cwd(caller)
+    owner.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version", [1, 2])
+async def test_controller_pair_does_not_override_explicit_or_invalid_tuple(
+    controller, version,
+):
+    from agent_bridge.venue_plugins import resolve_controller_cwd
+
+    caller, owner = controller
+    caller.caller_owner_ref = "example-host-wsl/control/controller"
+    row = owner.return_value["worktrees"][0]
+    row.update(
+        machine_identity_version=version,
+        machine="example-host", environment="wsl", platform="wsl",
+        execution_machine="independent-guest",
+    )
+    with pytest.raises(RuntimeError, match="controller context"):
+        await resolve_controller_cwd(caller)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("session_id", [None, "other", "bad/session"])
 async def test_owner_session_mismatch_refuses_before_owner_query(controller, session_id):
     from agent_bridge.venue_plugins import resolve_controller_cwd
