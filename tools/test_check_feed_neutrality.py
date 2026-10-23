@@ -13,12 +13,112 @@ Run:  python -m pytest tools/test_check_feed_neutrality.py
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+
+import pytest
 
 _SCRIPT = Path(__file__).resolve().parent / "check-feed-neutrality.py"
 _spec = importlib.util.spec_from_file_location("check_feed_neutrality", _SCRIPT)
 guard = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(guard)
+
+
+def _legacy_candidates(repo):
+    files = {
+        path
+        for pattern in guard._SCAN_GLOBS
+        for path in repo.rglob(pattern)
+        if not guard._SCAN_DIR_EXCLUDE_PARTS.intersection(path.relative_to(repo).parts)
+    }
+    workflows = repo / ".github" / "workflows"
+    if workflows.is_dir():
+        for pattern in ("*.yml", "*.yaml"):
+            files.update(workflows.glob(pattern))
+    return sorted(files)
+
+
+def test_candidate_scan_preserves_patterns_and_diagnostics(tmp_path, monkeypatch):
+    text = "first\nhttps://pypi.org/simple\nhttps://registry.npmjs.org/\n"
+    relatives = (
+        "pyproject.toml", "uv.toml", ".npmrc", "package.json", "Dockerfile",
+        "nested/Dockerfile.worker", "nested/install.sh", "nested/install.ps1",
+        "nested/INSTALL.PS1", ".hidden/install.sh", ".git/install.ps1",
+        ".test-venvs/fixture/uv.toml", ".worktrees/pkg/package.json",
+        "node_modules-copy/package.json", "BUILD/package.json",
+        ".github/workflows/check.yml", ".github/workflows/check.yaml",
+        ".github/workflows/CHECK.YML", ".github/workflows/deep/ignored.yml",
+        "nested/not-a-workflow.yaml", "package-lock.json", "unrelated.txt",
+    )
+    for relative in relatives:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    for excluded in guard._SCAN_DIR_EXCLUDE_PARTS:
+        path = tmp_path / "nested" / excluded / "package.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    (tmp_path / "directory.ps1").mkdir()
+    monkeypatch.setattr(guard, "REPO", tmp_path)
+    legacy = _legacy_candidates(tmp_path)
+    expected = []
+    for path in legacy:
+        if path.is_file():
+            expected.extend(guard.scan_text(text, rel=path.relative_to(tmp_path).as_posix()))
+
+    assert guard._iter_candidate_files() == legacy
+    assert guard.verify() == expected
+    assert tmp_path / "directory.ps1" in legacy
+    assert tmp_path / ".github" / "workflows" / "deep" / "ignored.yml" not in legacy
+    assert tmp_path / "nested" / "not-a-workflow.yaml" not in legacy
+
+
+def test_candidate_scan_prunes_only_existing_exclusions(tmp_path, monkeypatch):
+    for directory in (*guard._SCAN_DIR_EXCLUDE_PARTS, ".hidden", ".test-venvs", ".worktrees"):
+        path = tmp_path / "nested" / directory / "deep" / "package.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    legacy = _legacy_candidates(tmp_path)
+    original = os.scandir
+    visited = set()
+
+    def scandir(path):
+        directory = Path(path)
+        assert not guard._SCAN_DIR_EXCLUDE_PARTS.intersection(
+            directory.relative_to(tmp_path).parts)
+        visited.add(directory)
+        return original(path)
+
+    monkeypatch.setattr(guard, "REPO", tmp_path)
+    monkeypatch.setattr(os, "scandir", scandir)
+    assert guard._iter_candidate_files() == legacy
+    for directory in (".hidden", ".test-venvs", ".worktrees"):
+        assert tmp_path / "nested" / directory / "deep" in visited
+
+
+def test_candidate_scan_fails_on_unreadable_directory(tmp_path, monkeypatch):
+    blocked = tmp_path / "docs"
+    blocked.mkdir()
+    original = os.scandir
+
+    def scandir(path):
+        if Path(path) == blocked:
+            raise PermissionError("unreadable guard directory")
+        return original(path)
+
+    monkeypatch.setattr(guard, "REPO", tmp_path)
+    monkeypatch.setattr(os, "scandir", scandir)
+    with pytest.raises(PermissionError, match="unreadable guard directory"):
+        guard._iter_candidate_files()
+
+
+@pytest.mark.parametrize("excluded", sorted(guard._SCAN_DIR_EXCLUDE_PARTS))
+def test_excluded_root_name_is_not_a_relative_exclusion(tmp_path, monkeypatch, excluded):
+    repo = tmp_path / excluded
+    repo.mkdir()
+    (repo / "install.sh").write_text("", encoding="utf-8")
+    monkeypatch.setattr(guard, "REPO", repo)
+    assert guard._iter_candidate_files() == _legacy_candidates(repo) == [repo / "install.sh"]
 
 
 def test_bare_dockerfile_pin_is_flagged():

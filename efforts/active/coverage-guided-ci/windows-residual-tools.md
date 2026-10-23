@@ -94,6 +94,32 @@ the specific already-merged findings below.
 
 ## Named retained batches and explicit blocked owners
 
+### Subsequent admission: G-FEED
+
+This candidate admits only S025/S026/S062/S063 (`b6682f6cbc29`,
+`46195f4b7025`, `a7dd046908d3`, `3cc22a6bba65`). Replace eight recursive
+candidate globs with one error-propagating walk, pruning only the existing
+excluded names. Retain the exact pattern set, relative-part exclusions,
+platform case matching, hidden/nonexcluded trees, directory candidates,
+deduplication and sorted output. The separate workflow scan remains shallow.
+Unlike G-DOC, an excluded name in the repository root or its ancestors is not
+a relative exclusion; tests preserve that distinction for all six names.
+
+The complete module passed 22 tests with no skips on native Windows,
+exactly two workers, together with the real whole-tree guard, in 23.81 seconds
+including preparation/cleanup. Legacy sorted candidates and exact diagnostics
+match, a scandir observer proves only the existing excluded trees are pruned,
+and unreadable enumeration raises. Original URL/default/comment exemptions
+and real-repository verification remain unchanged. Item deadline, diagnostic
+bound and containment caps are unchanged; Ruff and diff checks passed.
+
+This below-altitude guard change updates its module documentation, not a
+plugin payload or runtime/install contract, so it needs no changefile.
+Synthetic temporary trees and actual guard execution cover the lightweight
+integration and clean consumer path. No external venue, workflow policy,
+required-unit admission, rollout or parent timing qualification is changed.
+Review and required CI still gate merge.
+
 ### Subsequent admission: G-DOC
 
 This candidate admits only S023/S024/S060/S061 (`3a70b5997994`,

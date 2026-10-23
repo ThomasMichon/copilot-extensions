@@ -65,6 +65,13 @@ that fleet-manager can consume. Do not make the thin client install Docker or
 a controller. Container deployment uses the fleet's supervisor, not an
 additional host service or per-session reconnect loop.
 
+The [artifact-construction proposal](artifact-construction.md) extends the shared
+first-party artifact path and separately admits the exact runtime wheel closure
+at the image builder. Public release bundles remain first-party-only; no public
+build-toolchain exception becomes runtime feed authority. Its review and actual
+offline image validation are prerequisites, not completed by the native wheel
+or foreground-host tests.
+
 An explicit backend selection distinguishes native/local and fleet access.
 Fleet clients resolve the configured logical PR service through the Gateway,
 not a fixed machine name, arbitrary downstream URL or reused SSH alias.
@@ -164,7 +171,8 @@ substitutes for its separately scored client and presentation acceptance.
    Extend the PR-facing client/service seam and provider conformance without
    regressing native behavior or worktree publication policy.
 3. Build the independent service artifact/container and fleet role consumer.
-   Validate the same core in native and isolated container deployments.
+   Follow the [shared construction sequence](artifact-construction.md#delivery-sequence),
+   then validate the same core in native and isolated container deployments.
 4. Add explicit Gateway client and remote delivery integration. Preserve native
    callbacks and safe process fallback where appropriate; no remote argv relay.
 5. Exercise an explicitly approved fleet placement, real credential renewal and
@@ -199,7 +207,9 @@ substitutes for its separately scored client and presentation acceptance.
   consume and ACK using the real selected transport, not only mocked calls.
 - [ ] Fresh container: install/start without Copilot, register and complete a
   synthetic watch, restart with a persistent volume, gracefully terminate and
-  verify no lost pending registration or second writer.
+  verify no lost pending registration or second writer. Complete the
+  [artifact input and offline-image controls](artifact-construction.md#validation)
+  without treating public CI as governed-feed or deployment proof.
 - [ ] Lifecycle: exercise update, failed-candidate rollback, interrupted cutover
   and owned uninstall. Refuse unsafe cross-host movement and incompatible data
   rollback; do not touch shared live owners or unrelated volumes.
