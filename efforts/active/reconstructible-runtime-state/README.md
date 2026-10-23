@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PR worktrees targeting `dev`
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** closes `visions/agent-fabric/README.md` concepts
   `resource-accountability` and `trusted-cooperation-with-economical-evidence`;
   consumes `visions/plugins/agent-bridge/README.md` behaviors
@@ -19,16 +19,17 @@ surviving authorities and the minimum durable semantic facts. Missing cached
 provenance is not proof of a competing owner; neither is a missing record proof
 that obligations are settled. Preserve real effect-side authority and user work.
 
-This is a **design-only proposal**. Its merge does not admit implementation,
-change any guard, authorize a runtime reset, or permit deployment. The next gate
-is explicit campaign admission of the staged slices below. Force rebuild remains
-a design option requiring a separate operator decision and later scoped consent.
+The reviewed plan has **G1-only implementation admission**: disconnected
+facts/envelope/reader-preservation primitives and isolated durability fixtures.
+No live backfill, deletion, force mode, G2 claim writers, G4 projection loss,
+G5 Bridge/installer changes, runtime reset or deployment is admitted.
+Force rebuild remains a design option requiring a separate operator decision.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Recovery plan driver | Source plan and #7947 scope; no functional changes | Isolated source PR, public handle `threaded-compass` |
+| Recovery driver | #7947 G1 isolated primitives/fixtures only | Isolated source PR, public handle `threaded-compass` |
 | Worktree ground-state owner | Record transactions, claims, lineage and adoption | #3761 and its existing source claims |
 | Compatibility foundation owner | Bridge durable contracts and mixed-version evidence | #1460; prerequisite evidence #1915 |
 | Component owners | Installer custody, Dispatch task semantics and provider leases | Their existing issue/PR ownership; no takeover |
@@ -38,7 +39,7 @@ a design option requiring a separate operator decision and later scoped consent.
 
 - **Topology:** one planning PR; later independent PRs with actual dependency
   edges in [design.md](design.md), never a repository-wide merge lock.
-- **Host (owns PRs):** recovery plan driver owns only this proposal. Each
+- **Host (owns PRs):** recovery driver owns the proposal and admitted G1. Each
   implementation PR requires a fresh issue/task collision check and named owner.
 - **Delegates:** none for this plan. Any required independent review may use
   the repository's forge review or a newly owned native sub-agent.
@@ -109,6 +110,15 @@ writers, revision races, unsupported schema, bounded ordinary-read I/O and
 rebuild equivalence. The execution restriction in Coordination applies to the
 entire effort, including review and recovery qualification.
 
+### G1 admission
+
+The operator selected **`resource-markers-and-git-common-journal`**: a small
+gitignored marker inside each worktree plus the durable journal under the Git
+common directory. Admission is isolated fixtures only with lossless readers,
+foreign-path refusal, and relocation/backup semantics. Resource markers are
+evidence, not a competing semantic writer. The initial claim adapter remains
+proposed, with no #3761 takeover; later slices and live activation remain gated.
+
 ## Plan
 
 All mechanisms and names below are **agent-recommended proposals**, not
@@ -117,13 +127,17 @@ implemented APIs or accepted execution assignments.
 ### Phase 0 — Review and admission
 - [x] Trace the bounded current-source recovery and compatibility seams.
 - [x] Capture taxonomy, preservation, transaction and ownership contracts.
-- [ ] Publish and merge the source-only proposal through repository review.
-- [ ] Obtain campaign admission of implementation slices and resolve decisions
+- [x] Publish and merge the source-only proposal through repository review (#8025).
+- [x] Obtain G1-only campaign admission and approve resource-marker/Git-common placement.
+- [ ] Obtain campaign admission of remaining implementation slices and resolve decisions
       in [design.md](design.md#decisions-before-implementation).
 
 ### Phase 1 — Durable facts before disposable projections
+- [x] G1 admitted slice: disconnected envelope codecs, lossless candidate edits,
+      read-only marker/journal placement inspection and isolated durability fixtures.
 - [ ] G1: add versioned resource-local identity and surviving per-resource
-      semantic snapshots/journal, with a reader-first compatibility envelope.
+      semantic snapshots/journal to actual owner paths after further admission;
+      isolated codecs/fixtures do not complete production persistence.
 - [ ] G2: journal intent/result and tombstones at the owning mutation boundary;
       preserve accepted/uncertain outcomes before acknowledging recoverability.
 - [ ] Prove migration completeness before classifying any existing authoritative
@@ -149,7 +163,7 @@ implemented APIs or accepted execution assignments.
 
 - [x] Check plan structure, local references, public-safe scope and exact source
       anchors before publication.
-- [ ] Obtain independent source-plan review and required CI on the final head.
+- [x] Obtain independent source-plan review and required CI on the final head (#8025).
 - [ ] Execute [the isolated acceptance matrix](validation.md) with no real
       installation deletion, external mutation or contact with existing agents.
 - [ ] Prove semantic rebuild equivalence without a hidden old-database copy;
@@ -163,9 +177,8 @@ implemented APIs or accepted execution assignments.
 
 ## Proposal
 
-Review the failure-domain contract and G1–G6 dependencies, not an executable
-reset command. The first proposed implementation admission is **G1 plus isolated
-fixtures only**. G2 must precede any destructive loss test that assumes central
+G1 plus isolated fixtures is admitted; all remaining G1–G6 gates are not an
+executable reset command. G2 must precede any destructive loss test that assumes central
 records are disposable. Force-rebuild policy, durable-anchor placement and
 supported rollback-reader floor are explicit decisions, not implied approval.
 
@@ -180,3 +193,24 @@ supported rollback-reader floor are explicit decisions, not implied approval.
   restriction. No functional changes, live recovery, service work or rollout.
 - Captured the requested constraints against the source request; mechanisms and
   staged implementation assignments are explicitly recommendations.
+
+### 2026-10-23 — G1 admission
+- #8025 merged as `e4cabc9718077469a4b6ca6ef307a2114914f611`, with final-head
+  Copilot approval and green required CI; proposal/review checkboxes reconciled.
+- Recorded the explicit resource-marker/Git-common journal decision and G1-only
+  admission. No live writer, backfill, deletion or force mode is enabled.
+- Fresh #1915 read shows closure by consolidation into #1460, not completed
+  durable evidence. A supported durable rollback-runtime floor remains
+  unestablished; G1 uses explicit synthetic operation capabilities without
+  inventing a historical binary guarantee.
+- Implemented the disconnected G1 slice in `recovery_facts.py` and
+  `recovery_markers.py`, with no production caller or persistence/election API.
+  `tests/test_recovery_facts.py`: **50 passed** through the contained plugin
+  runner on Windows. This includes fsynced fixture bytes surviving close,
+  relocation/backup copies, interrupted-frame refusal, recursive preservation,
+  foreign-path refusal and two exact marker opens at 0/100/1,000 history files.
+- Fixed the initial fixture's overlong pytest parameter ID, which exceeded the
+  Windows environment-variable limit. The corrected full focused run is green.
+  Ruff F/E9, install-contract, effort structure and documentation consistency
+  checks pass. No historical binary, power-loss, production transaction or
+  Linux qualification is claimed.

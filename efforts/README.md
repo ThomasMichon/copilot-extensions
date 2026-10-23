@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Producer Work Reuse](active/producer-work-reuse/README.md) | Draft; code-grounded producer caching/batching/indexing plan only; execution admission pending | #7948/#7949/#7950 and retained #2110 declaration/health acceptance; no rollout |
-| [Reconstructible Runtime State](active/reconstructible-runtime-state/README.md) | Draft; source-only recovery and rollback-compatible reconstruction plan; implementation admission pending | #7947; preserves #1460/#1915 compatibility and #3761 ground-state ownership; no live rebuild or rollout |
+| [Reconstructible Runtime State](active/reconstructible-runtime-state/README.md) | Active; G1 disconnected facts/readers and isolated fixtures admitted; later slices gated | #7947; preserves #1460 compatibility (including consolidated #1915) and #3761 ground-state ownership; no live rebuild or rollout |
 | [Prompt Receipt Observation](active/prompt-receipt-observation/README.md) | Draft; bounded async non-provisioning first-prompt receipt plan before implementation | #7942; unchanged consumption authority; no installed rollout |
 | [Performance Telemetry](active/performance-telemetry/README.md) | Active; producer and optional OTLP source merged; native, structured-signal and rollout acceptance retained | #7935 / #5900; preserves #7938/#7943 production owners and #5215 readiness |
 | [Picker Pending Binding](active/picker-pending-binding/README.md) | Active; reviewed consumer startup implementation and native headless qualification, full cold budget remains open | #7938; preserves #7974 engine and #7788 native launch owners |

@@ -46,14 +46,15 @@ permission to delete it.
 | Reconstructible executable artifacts | Immutable runtime slots, build scratch, generated launch wrappers and derived receipt indexes | Reinstall/reselect through the installer owner, retaining approved source/consent and current custody. A sole authoritative receipt is not disposable merely because it sits under a runtime root |
 | Best-effort diagnostic data | Timed/rotated activity logs, trace samples and exported telemetry | Optional for diagnosis; never needed for logical replay or used to recreate user intent |
 
-**Proposed placement for decision:** one owned, gitignored resource folder such
-as `.agent-worktrees-recovery/` inside each actual worktree, plus a repository
+**Approved G1 placement:** one owned, gitignored resource folder
+`.agent-worktrees-recovery/` inside each actual worktree, plus a repository
 recovery anchor under its Git common administrative directory for facts that
 must outlive worktree removal. Non-Git resources need their owner's explicit
 durable data root, not an install slot. Bootstrap locators live in surviving
 configuration; they cannot be found only by querying the deleted index.
-Exact names, worktree-marker exclusion handling and cross-owner adapters require
-review before implementation. Existing user files at the selected path cause a
+The G1 source contract is in `plugins/agent-worktrees/docs/recovery-facts.md`;
+live exclusion handling and cross-owner adapters still require admission.
+Existing user files at the selected path cause a
 scoped conflict; use a reviewed alternative destination, never overwrite them.
 
 No promise extends to loss of the actual Git objects, conversation bytes,
@@ -178,10 +179,12 @@ go through the campaign admission owner, not existing agent conversations.
 
 ## Decisions before implementation
 
-1. Accept or revise the resource-local folder and surviving repository/non-Git
-   durable-anchor placement. Include backup/repository relocation semantics.
+1. Resource-local marker and Git-common journal placement is approved for G1
+   isolated fixtures. Backups preserve both roots; path relocation preserves
+   stable identities but never elects a writer. Non-Git adapters remain unadmitted.
 2. Name the supported rollback reader/writer floor and capability evolution
-   policy through #1460/#1915; package recency alone is never that policy.
+   policy through #1460 (including the consolidated, still-deferred #1915
+   inventory); package recency alone is never that policy.
 3. Select first semantic adapter (recommended: local claim add/release/settle)
    and agree transaction ownership with #3761 before touching its code.
 4. Decide whether force rebuild is needed at all. Default recommendation:
