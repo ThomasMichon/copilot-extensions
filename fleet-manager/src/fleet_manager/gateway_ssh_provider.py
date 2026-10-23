@@ -150,3 +150,49 @@ def project_gateway_profiles(
         "config": config, "excluded": excluded,
         "execution_authorized": False, "live_readiness_verified": False,
     }
+
+
+def project_gateway_authorization(
+    policy: GatewaySSHPolicy, directory, *, machine: str, environment: str,
+    local_public_key: str,
+):
+    """Select peer login keys, not Gateway forwarding or setup authority.
+
+    An explicitly selected target-local sshd consumes the dedicated output.
+    Gateway relay enrollment and host-mediated guest access are separate owners.
+    """
+    selected = directory_snapshot(directory, policy)
+    decision = policy.resolve(machine, environment).to_dict()
+    if decision["backend"] != "gateway" or decision["controller"] != selected["controller"]:
+        raise PlanError("Gateway authorization target differs from selected controller policy")
+    local = next((
+        row for row in selected["machines"]
+        if (row["machine"], row["environment"]) == (machine, environment)
+    ), None)
+    if local is None or public_key(local_public_key) != local["public_key"]:
+        raise PlanError("Gateway local identity is not the selected admitted directory key")
+    if decision["host_path"]:
+        raise PlanError("Gateway host-mediated target requires its owning mediation adapter")
+    peers = []
+    if decision["state"] == "configured" and decision["effective_inbound"]:
+        for row in selected["machines"]:
+            source = policy.resolve(row["machine"], row["environment"]).to_dict()
+            if source["state"] != "configured" or not source["effective_outbound"]:
+                continue
+            if source["host_path"]:
+                raise PlanError("Gateway host-mediated source requires its owning mediation adapter")
+            peers.append({
+                "machine": row["machine"], "environment": row["environment"],
+                "public_key": row["public_key"],
+            })
+    if len(peers) > MAX_PROFILES:
+        raise PlanError("Gateway authorization exceeds the existing reconciliation bound")
+    return {
+        "schema": "fleet-manager.gateway-ssh-authorization", "version": 1,
+        "target": {"machine": machine, "environment": environment},
+        "controller": selected["controller"], "directory_revision": selected["revision"],
+        "directory_digest": digest(selected), "policy_digest": policy.policy_digest,
+        "decision_digest": digest(decision), "state": decision["state"],
+        "user": local["user"], "peers": peers,
+        "execution_authorized": False, "live_readiness_verified": False,
+    }
