@@ -10,6 +10,7 @@ This document describes the implementation as it exists today. It intentionally 
 | Credential reader | `src/agent_vault/credential_reads.py` | Owns the cache-first `get` handler, pinned read-only behavior and authoritative cache reconciliation; the CLI retains its existing handler export and IPC/lifecycle seams. |
 | Service | `src/agent_vault/service.py` | Owns the in-memory KeePass master-password cache and credential-value cache, verifies/unlocks databases, handles entry operations, GCM delegation, KEK operations, endpoint advertisement, and shutdown. |
 | KeePassXC backend | `src/agent_vault/keepassxc.py` | Locates `keepassxc-cli` and maps service actions to `keepassxc-cli` commands. KeePassXC is the only secret-store backend today. |
+| SSH key preparation | `src/agent_vault/ssh_key.py` | Validates and reuses a whole Ed25519 pair; separately confirmed first creation uses one existing create-only protected-field write. Returns public metadata, not private material or enrollment authority. |
 | Config resolver | `src/agent_vault/config.py` | Resolves database, group, vault name, port, runtime paths, and config files from env, repo config, extension config, global named vaults, and defaults. |
 | Installer/bootstrap | `scripts/install.ps1`, `scripts/install.sh`, `scripts/bootstrap-check.*` | Creates/stamps the runtime, deploys binstubs, records a deploy manifest, installs platform supervision, and reconciles version drift. |
 | Extensions | `src/agent_vault/extensions.py`, `src/agent_vault/core_ext.py` | Provides opt-in hooks for unlock providers, daemon actions, transports, config/cache sources, CLI commands, startup hooks, and optional core delegation. |
@@ -91,6 +92,9 @@ The daemon supports the actions registered in `VaultService.handle_request`:
 
 - Entry reads and mutations: `get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv`.
 - SSH key attachment import/export: `import-key`, `export-key`.
+- Whole-pair preparation: `ssh-key-prepare`, exposed as
+  [`ssh-key prepare`](ssh-key-preparation.md); optional `ssh` cryptographic extra,
+  reuse-only by default, explicit initial creation and public-only response.
 - Service state: `ping`, `lock`, `unlock`, `stop`.
 - Git HTTPS credential helper: `git-credential`, delegated to local Git Credential Manager for `VAULT_GCM_HOSTS` (default GitHub and Azure DevOps hosts), independent of KeePass unlock state.
 - Envelope KEK: `seal`, `unseal`, `kek-list`, independent of KeePass unlock state.

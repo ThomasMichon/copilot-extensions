@@ -1613,6 +1613,20 @@ def main(argv: list[str] | None = None):
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=identity_key_command)
 
+    from .ssh_key import command as ssh_key_command
+
+    ssh_key = sub.add_parser("ssh-key", help="Prepare a create-only Vault-backed SSH key")
+    ssh_key_sub = ssh_key.add_subparsers(dest="ssh_key_command", required=True)
+    p = ssh_key_sub.add_parser("prepare", help="Reuse a validated SSH pair; output public metadata only")
+    p.add_argument("--entry", required=True)
+    p.add_argument("--initialize", action="store_true")
+    p.add_argument("--confirm-initialization", action="store_true")
+    p.add_argument("--prompt", action="store_true", help="Explicitly allow unlock prompting")
+    p.add_argument("--require-running", action="store_true",
+                   help="Require the selected service to be running; never activate it")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=ssh_key_command)
+
     p = sub.add_parser("get", help="Read a credential")
     p.add_argument("entry", help="Entry path")
     p.add_argument("field", nargs="?", default="password",
