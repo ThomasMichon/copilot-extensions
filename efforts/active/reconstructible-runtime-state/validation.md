@@ -134,11 +134,13 @@ as a substitute for an isolated loss test.
 ## G3 admitted evidence
 
 - `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_recovery_facts.py --test-file tests/test_recovery_report.py`:
-  **135 passed** on Windows (79 G1, 56 G3), through the contained runner.
+  **175 passed** on Windows (79 G1, 96 G3), through the contained runner.
 - G3 uses the real `doctor_cli_parser.add_parser` and
   `maintenance_cli.cmd_doctor` consumer, never a synthetic alternative framework.
   Actual `__main__.main` regressions cover explicit project spellings, relative
   request paths and mixed repair options before any registry/CWD discovery.
+  Accepted abbreviated report options are covered with both separated and `=`
+  values, across explicit project spellings and `--fix` refusal.
   Selected existing `test_cli_routing.py` cases: **9 passed**, 166 deselected
   (`extract_project_flag`, active-project, CWD-preservation and missing-project
   selectors). Unencodable paths are typed `invalid_root`.

@@ -269,3 +269,7 @@ supported rollback-reader floor are explicit decisions, not implied approval.
   Windows evidence: **135 recovery tests passed** (79 G1 + 56 G3), plus **9
   selected existing CLI-routing regressions passed** (166 deselected). Ruff
   F/E9 remains green. No actual rollback binary floor is inferred.
+- Covered argparse's accepted recovery-option abbreviations at the same
+  pre-resolution seam, with separated and `=` arguments. Final contained packet:
+  **175 recovery tests passed** (79 G1 + 96 G3); the same **9 legacy routing
+  regressions passed**, with Ruff F/E9 green.

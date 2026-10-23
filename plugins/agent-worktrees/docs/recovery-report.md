@@ -10,6 +10,8 @@ explicit project lookup: `--project`, `--project=...` and `-p` do not discover a
 registry or change CWD for this report. Relative request filenames therefore
 remain relative to the invoking CWD. Unencodable/surrogate paths produce
 `invalid_root`, not a filesystem traceback.
+The routing check includes argparse's currently accepted unique option
+abbreviations (`--rec` through `--recovery-report`), with separated or `=` values.
 
 The caller supplies an independently resolved, exact selection:
 

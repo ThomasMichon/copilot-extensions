@@ -357,8 +357,10 @@ def test_unencodable_request_filename_is_typed(tmp_path, capsys):
     ["--project", "fixture"], ["--project=fixture"], ["-p", "fixture"], [],
 ])
 @pytest.mark.parametrize("fix", [False, True])
+@pytest.mark.parametrize("option", ["--rec", "--recovery-rep", "--recovery-report"])
+@pytest.mark.parametrize("equals", [False, True])
 def test_actual_front_door_preserves_cwd_and_skips_project_discovery(
-    tmp_path, capsys, monkeypatch, project, fix,
+    tmp_path, capsys, monkeypatch, project, fix, option, equals,
 ):
     from agent_worktrees import __main__ as main
     request, _, _ = fixture(tmp_path)
@@ -370,7 +372,8 @@ def test_actual_front_door_preserves_cwd_and_skips_project_discovery(
     monkeypatch.setattr(main, "_resolve_active_project", forbidden)
     monkeypatch.setattr(main, "_cwd_is_inside_project", forbidden)
     monkeypatch.setattr(main.os, "chdir", forbidden)
-    argv = [*project, "doctor", "--recovery-report=request.json", "--json"]
+    selector = [f"{option}=request.json"] if equals else [option, "request.json"]
+    argv = [*project, "doctor", *selector, "--json"]
     if fix:
         argv.append("--fix")
     assert main.main(argv) == int(fix)

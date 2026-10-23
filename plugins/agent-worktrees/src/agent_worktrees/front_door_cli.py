@@ -43,8 +43,8 @@ def resolve_invocation_project(
 ) -> bool:
     """Select project identity and assumed CWD before structured dispatch."""
     if args_list[:1] == ["doctor"] and any(
-        arg == "--recovery-report" or arg.startswith("--recovery-report=")
-        for arg in args_list[1:]
+        option.startswith("--rec") and "--recovery-report".startswith(option)
+        for option in (arg.partition("=")[0] for arg in args_list[1:])
     ):
         return False
     if args_list and args_list[0] == "record":
