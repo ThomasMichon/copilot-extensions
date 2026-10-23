@@ -166,6 +166,43 @@ def test_cli_requires_an_explicit_decision_before_any_state_write(tmp_path, caps
     assert not list(root.iterdir()) and not (tmp_path / "not-created").exists()
 
 
+@pytest.mark.parametrize("as_string", [False, True])
+def test_relative_command_directory_refuses_before_custody_health_or_effects(
+    prepared, monkeypatch, as_string,
+):
+    root, old, staged, trusted, directory, namespace, _slot, decision, *_rest = prepared
+    before = states([*activation._targets(namespace), namespace / activation.ACTIVE,
+                     namespace / frontdoor.REGISTERED, *frontdoor._command_paths(directory)])
+    floor = database_bytes(root)
+    acquisitions, health_calls = [], []
+    owned = admission._owned
+
+    @contextmanager
+    def observed(path):
+        acquisitions.append(path)
+        with owned(path) as custody:
+            yield custody
+
+    def observed_health(*_args):
+        health_calls.append(True)
+        return {"unit_health_stub": True}
+
+    monkeypatch.chdir(directory.parent)
+    monkeypatch.setattr(admission, "_owned", observed)
+    monkeypatch.setattr(construction, "_health", observed_health)
+    supplied = directory.name if as_string else directory.relative_to(directory.parent)
+    with pytest.raises(PlanError, match="explicit absolute command directory"):
+        recovery.recover_client_release(
+            root, identity(), selection(old), staged, command_directory=supplied,
+            current_recovery=lambda: decision, current_policy=lambda: trusted,
+            current_target=lambda: target(old), clock=lambda: 150,
+        )
+    assert states(before) == before and database_bytes(root) == floor
+    assert not acquisitions and not health_calls
+    assert not (namespace / activation.PENDING).exists()
+    assert not (namespace / frontdoor.PENDING).exists()
+
+
 @pytest.mark.parametrize("change", [
     "custody", "active", "candidate", "runtime_sha256", "target_digest",
     "admitted", "recovery_decision_digest", "health",

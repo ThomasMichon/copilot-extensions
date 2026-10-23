@@ -34,6 +34,9 @@ directory scan. CLI file suppliers are reread at execution/publication
 checkpoints. API callers must provide fresh trusted `current_recovery`,
 `current_policy` and `current_target` suppliers; the API does not authenticate
 their source.
+The supplied command directory itself must be absolute and exactly match the
+decision. Relative input is refused before installation custody, health or
+selector effects rather than resolving it in only one phase.
 
 The exact `fleet-manager.client-recovery-decision`, version 1, has these fields:
 

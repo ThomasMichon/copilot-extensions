@@ -202,7 +202,10 @@ def recover_client_release(root, identity, selection, staged, *, command_directo
 
     identity = client_admission._identity(identity)
     decision = _decision(current_recovery, identity)
-    if str(Path(command_directory).absolute()) != decision["command_directory"]:
+    command_directory = Path(command_directory)
+    if not command_directory.is_absolute():
+        raise PlanError("client recovery requires an explicit absolute command directory")
+    if str(command_directory) != decision["command_directory"]:
         raise PlanError("client recovery command directory differs from its decision")
     selected = None
     try:
