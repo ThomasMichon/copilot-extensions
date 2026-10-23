@@ -57,7 +57,14 @@ def child_result(stdout: str, *, mode: str, returncode: int) -> dict:
                 or rows.keys() - set(SIGNALS)
             ):
                 raise ValueError("invalid requested signals")
+            from dataclasses import fields
+            required_signal_fields = {field.name for field in fields(SignalResult)} | {"generated_records"}
             for row in rows.values():
+                if (
+                    type(row) is not dict or not required_signal_fields <= row.keys()
+                    or row.keys() - (required_signal_fields | {"first_failure"})
+                ):
+                    raise ValueError("incomplete child signal accounting")
                 generated = row["generated_records"]
                 failure = row.get("first_failure")
                 if failure is not None and failure not in STATUSES:
@@ -107,6 +114,10 @@ def source_report(runs: list[dict], *, expected_per_mode: int) -> dict:
                     or any(
                         not telemetry.get("signals", {}).get(signal)
                         or telemetry["signals"][signal]["accepted_records"] != telemetry["signals"][signal]["generated_records"]
+                        or (signal in ("traces", "logs")
+                            and telemetry["signals"][signal]["generated_records"] != counts.get("written"))
+                        or (signal == "metrics" and counts.get("written", 0) > 0
+                            and telemetry["signals"][signal]["generated_records"] == 0)
                         for signal in telemetry.get("signals_requested", [])
                     )
                 )

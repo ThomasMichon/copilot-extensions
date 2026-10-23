@@ -48,6 +48,9 @@ def test_signal_readback_cannot_claim_a_signal_the_sender_did_not_request(tmp_pa
     {"schema": "manager.signal-batch.v1", "trace_id": "a" * 32, "signals": ["traces", "logs", "metrics"], "metrics": []},
     {"schema": "manager.signal-batch.v1", "trace_id": "a" * 32,
      "signals": {name: {"status": "not_requested"} for name in ("traces", "logs", "metrics")},
+     "metrics": []},
+    {"schema": "manager.signal-batch.v1", "trace_id": "a" * 32,
+     "signals": {name: {"status": "not_requested"} for name in ("traces", "logs", "metrics")},
      "metrics": [None]},
 ])
 def test_malformed_sender_rows_preserve_both_samples_and_final_report(tmp_path, monkeypatch, bad_row):
@@ -57,7 +60,14 @@ def test_malformed_sender_rows_preserve_both_samples_and_final_report(tmp_path, 
 
     def child(argv, **kwargs):
         config = json.loads(Path(argv[-1]).read_text())
-        raw = "[" * 1100 + "0" + "]" * 1100 if bad_row == "deep-json" else json.dumps(bad_row)
+        payload = bad_row
+        if type(bad_row) is dict and bad_row.get("metrics") == [None]:
+            from dataclasses import asdict
+            from process_telemetry.signals import SignalResult
+            payload = {**bad_row, "signals": {
+                name: asdict(SignalResult("not_requested")) for name in ("traces", "logs", "metrics")
+            }}
+        raw = "[" * 1100 + "0" + "]" * 1100 if bad_row == "deep-json" else json.dumps(payload)
         Path(config["events"]).write_text(raw + "\n", encoding="utf-8")
         result = {
             "mode": config["mode"], "outcome": "ok",

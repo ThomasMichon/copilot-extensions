@@ -245,11 +245,13 @@ def child_environment(home: Path) -> dict:
 
 
 def run(args) -> dict:
+    from dataclasses import fields
     from worktree_manager.performance_report import child_result, source_report, trace_readback, signal_readback
     from process_telemetry.otlp import validate_endpoint, validate_record
     from process_telemetry.signals import SignalEndpoints, SignalResult, validate_metric_points
 
     signal_config = None
+    signal_result_fields = {field.name for field in fields(SignalResult)}
     if getattr(args, "logs_endpoint", None) or getattr(args, "metrics_endpoint", None):
         from dataclasses import asdict
         signal_config = asdict(SignalEndpoints(
@@ -327,6 +329,8 @@ def run(args) -> dict:
                         if type(value["signals"]) is not dict or set(value["signals"]) != {"traces", "logs", "metrics"}:
                             raise ValueError("unexpected signal-batch keys")
                         for row in value["signals"].values():
+                            if type(row) is not dict or row.keys() != signal_result_fields:
+                                raise ValueError("incomplete sender signal accounting")
                             SignalResult(**row)
                         points = validate_metric_points(value["metrics"])
                         signal_batches.append(value)

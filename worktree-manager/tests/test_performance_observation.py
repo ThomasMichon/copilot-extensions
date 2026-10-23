@@ -114,6 +114,45 @@ def test_malformed_child_identity_is_not_accepted_for_later_sender_readback(iden
     assert result["outcome"] == "error" and result["error_code"] == "invalid_child_report"
 
 
+@pytest.mark.parametrize("missing", [
+    "status", "attempted_records", "accepted_records", "rejected_records", "unknown_records",
+    "not_attempted_records", "requests", "attempted_payload_bytes", "generated_records",
+])
+def test_sparse_signal_counters_cannot_escape_validation_and_abort_aggregation(missing):
+    from dataclasses import asdict
+    from process_telemetry.signals import SignalResult
+
+    row = {**asdict(SignalResult("accepted", attempted_records=1, accepted_records=1)), "generated_records": 1}
+    del row[missing]
+    value = {
+        "mode": "enabled", "outcome": "ok", "points_ns": {},
+        "telemetry": {"counts": {"queued": 1, "written": 1}, "identity": {},
+                      "signals_requested": ["logs"], "signals": {"logs": row},
+                      "sampled": True, "writer_started": True},
+    }
+    parsed = child_result("MANAGER_OBSERVATION " + json.dumps(value), mode="enabled", returncode=0)
+    assert parsed["outcome"] == "error"
+    result = source_report([parsed], expected_per_mode=1)
+    assert result["modes"]["enabled"]["completed"] == result["modes"]["enabled"]["failed"] == 1
+
+
+@pytest.mark.parametrize("signal", ["logs", "traces", "metrics"])
+def test_zero_signal_accounting_cannot_certify_nonempty_observations(signal):
+    from dataclasses import asdict
+    from process_telemetry.signals import SignalResult
+
+    value = {
+        "mode": "enabled", "outcome": "ok", "points_ns": {},
+        "telemetry": {"counts": {"queued": 1, "written": 1}, "identity": {},
+                      "signals_requested": [signal],
+                      "signals": {signal: {**asdict(SignalResult("accepted")), "generated_records": 0}},
+                      "sampled": True, "writer_started": True},
+    }
+    parsed = child_result("MANAGER_OBSERVATION " + json.dumps(value), mode="enabled", returncode=0)
+    result = source_report([parsed], expected_per_mode=1)
+    assert result["modes"]["enabled"]["telemetry_incomplete"] == 1
+
+
 def test_readback_scopes_logs_before_validating_foreign_batch_content():
     from copy import deepcopy
     from worktree_manager.performance_report import signal_readback
