@@ -18,7 +18,9 @@ from agent_pull_requests.watch_contract import PRSnapshot
 from agent_pull_requests.watch_gateway import WatchScopeBinding
 from agent_pull_requests.watch_observer import NativeObservationBinding
 from agent_pull_requests.watch_replay import ConsumerScope
-from agent_pull_requests.watch_replay_store import ReplayStore
+from agent_pull_requests.watch_replay_store import (
+    ReplayServiceIdentity, ReplayStore, ReplayStoreInvalid,
+)
 from agent_pull_requests.watch_service import WatchService
 
 SCOPE = ConsumerScope("consumer-a", "account-a", "example/project")
@@ -57,7 +59,7 @@ def setup(tmp_path, monkeypatch):
 
     def make(**kwargs):
         return WatchService(
-            store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
+            kwargs.pop("store", store), fleet="fleet-a", gateway="gateway-a", slot="service-a",
             bindings=(WatchScopeBinding("caller-a", "project", SCOPE),),
             observations=(NativeObservationBinding(SCOPE.account, SCOPE.repo, sys.executable),),
             gateway_origin="https://gateway.invalid", access_token_callback=access,
@@ -89,6 +91,34 @@ async def wait_for(predicate):
 
 def contender(store):
     return SingleInstance(store.root, service="agent-pull-requests-watch")
+
+
+@pytest.mark.parametrize("field", ["fleet", "gateway", "slot"])
+def test_service_construction_refuses_a_different_bound_identity(setup, field):
+    store, make, _ = setup
+    store.service_identity = replace(
+        ReplayServiceIdentity("fleet-a", "gateway-a", "service-a"), **{field: "other"},
+    )
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="storage binding"):
+        make()
+    assert store.path.read_bytes() == before
+
+
+def test_bound_service_refuses_legacy_store_before_starting_owned_units(setup):
+    store, make, _ = setup
+    store.service_identity = ReplayServiceIdentity("fleet-a", "gateway-a", "service-a")
+    before = store.path.read_bytes()
+
+    async def scenario():
+        service = make()
+        with pytest.raises(ReplayStoreInvalid):
+            await service.start()
+        assert not service.connector.entered.is_set()
+        assert not service.status()["writer_held"]
+
+    asyncio.run(scenario())
+    assert store.path.read_bytes() == before
 
 
 def test_adopts_before_readiness_and_releases_after_both_units_exit(setup):

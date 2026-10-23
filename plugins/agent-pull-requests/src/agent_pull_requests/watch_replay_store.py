@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
@@ -15,6 +16,27 @@ from .watch_replay import ConsumerScope, ObservationTarget, WatchReplay
 from .watch_storage import _atomic_write_json
 
 _T = TypeVar("_T")
+SERVICE_SCHEMA = "agent-pull-requests.watch-service-store/v1"
+
+
+@dataclass(frozen=True)
+class ReplayServiceIdentity:
+    """Trusted storage binding, not authentication or placement authority."""
+
+    fleet: str
+    gateway: str
+    slot: str
+
+    def __post_init__(self) -> None:
+        for value in (self.fleet, self.gateway, self.slot):
+            if (
+                not isinstance(value, str) or not value or len(value) > 256
+                or any(ord(char) < 32 for char in value)
+            ):
+                raise ValueError("invalid replay service identity")
+
+    def document(self) -> dict[str, str]:
+        return {"fleet": self.fleet, "gateway": self.gateway, "slot": self.slot}
 
 
 class ReplayStoreInvalid(ValueError):
@@ -54,18 +76,42 @@ class ReplayStore:
 
     def __init__(
         self, root: Path, namespace: str, *, clock: Callable[[], float] = time.time,
+        service_identity: ReplayServiceIdentity | None = None,
     ) -> None:
+        if service_identity is not None and not isinstance(service_identity, ReplayServiceIdentity):
+            raise ValueError("typed replay service identity required")
         self.root = Path(root)
         if not self.root.is_absolute() or self.root.resolve() != self.root:
             raise ValueError("replay store requires an absolute canonical root")
         self.namespace = namespace
         self.clock = clock
+        self.service_identity = service_identity
         self.path = self.root / "watch-replay.json"
         # Validate the namespace without reading or provisioning any state.
         WatchReplay(namespace, state=None, commit=lambda _state: None, clock=clock)
 
     def _lock(self) -> OperationLock:
         return OperationLock(self.root / "watch-replay.lock")
+
+    def _encode(self, state: dict) -> dict:
+        if self.service_identity is None:
+            return state
+        return {
+            "schema": SERVICE_SCHEMA, "service": self.service_identity.document(),
+            "replay": state,
+        }
+
+    def _decode(self, state: dict) -> dict:
+        if self.service_identity is None:
+            return state
+        if (
+            set(state) != {"schema", "service", "replay"}
+            or state["schema"] != SERVICE_SCHEMA
+            or state["service"] != self.service_identity.document()
+            or not isinstance(state["replay"], dict)
+        ):
+            raise ValueError("replay service storage binding mismatch")
+        return state["replay"]
 
     def provision(self) -> None:
         """Explicit first creation; never replace existing or corrupt state."""
@@ -76,7 +122,7 @@ class ReplayStore:
             core = WatchReplay(
                 self.namespace, state=None, commit=lambda _state: None, clock=self.clock,
             )
-            _atomic_write_json(self.path, core.snapshot())
+            _atomic_write_json(self.path, self._encode(core.snapshot()))
 
     def check_current(self, expires_at: int, checkpoint: Callable[[], None] | None) -> None:
         """Check the embedding owner's current authority, including between reads."""
@@ -98,16 +144,17 @@ class ReplayStore:
             def commit(state: dict) -> None:
                 lock.assert_owned()
                 self.check_current(expires_at, checkpoint)
-                _atomic_write_json(self.path, state)
+                _atomic_write_json(self.path, self._encode(state))
 
             if self.path.is_symlink():
                 raise ReplayStoreInvalid("linked replay state")
             raw = self.path.read_bytes()  # Missing state is not first provisioning.
             try:
                 core = WatchReplay(
-                    self.namespace, state=json_object(raw), commit=commit, clock=self.clock,
+                    self.namespace, state=self._decode(json_object(raw)),
+                    commit=commit, clock=self.clock,
                 )
-            except (ValueError, UnicodeError, RecursionError):
+            except (TypeError, ValueError, UnicodeError, RecursionError):
                 raise ReplayStoreInvalid("invalid persisted replay state") from None
             self.check_current(expires_at, checkpoint)
             result = operation(core)

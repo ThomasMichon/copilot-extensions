@@ -195,6 +195,18 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(tmp_p
                 assert await send("pending") == pending
             finally:
                 await close(owner)
+            # Remounting the same namespace does not rebind the retained volume.
+            # The real installed host must refuse before attachment/observation.
+            retained = (state / "watch-replay.json").read_bytes()
+            assert json.loads(retained)["service"] == {
+                name: config[name] for name in ("fleet", "gateway", "slot")
+            }
+            for field in ("fleet", "gateway", "slot"):
+                path.write_text(json.dumps(dict(config, **{field: "other"})))
+                assert (await command("serve", "--config", str(path)))[0] == 1
+                assert (state / "watch-replay.json").read_bytes() == retained
+                assert calls.read_text() == settled_reads
+            path.write_text(json.dumps(config))
             successor = await launch()
             try:
                 await eventually(lambda: ready(status), timeout=10)

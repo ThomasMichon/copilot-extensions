@@ -294,11 +294,17 @@ _Operator-required scope; agent-recommended implementation and validation._
   explicit credential/configuration references, separate provisioning, passive
   readiness and existing `container.service` role inputs (source confirmed by
   #8196). Actual image construction, deployment lifecycle, live providers and
-  slow-target fairness remain open; the source recipe is not an installed role.
-- [ ] Land bounded concurrent native observation with completion-order replay
+  representative performance remain open; the source recipe is not an installed role.
+- [x] Land bounded concurrent native observation with completion-order replay
   application, ongoing deadline sweeps and actual-read drain custody. Preserve
   exact authorized groups and original registration/event identities; this
-  source leaf does not close representative production performance or fleet proof.
+  source leaf does not close representative production performance or fleet proof
+  (source confirmed by #8209).
+- [ ] Bind the standalone replay volume to its exact fleet/Gateway/slot and
+  namespace on every transaction, preserving original identities and refusing
+  unbound/foreign formats without implicit migration or downgrade. This source
+  safeguard does not close image construction, cross-host fencing or update/
+  rollback acceptance.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -660,6 +666,71 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-23 - Bind the retained service volume before broader container lifecycle
+
+- Trace Fleet's artifact preflight, authenticated retained staging and public
+  client construction/activation contracts. Byte admission is not activation;
+  the current constructor supports only its single-wheel client closure.
+  The Komodo role adapter projects typed references, not a container executor.
+  Do not stretch those APIs into PR installation permission or introduce a
+  second controller/installer.
+- Close a concrete PR-owned source gap first: the disk adapter previously
+  checked only the namespace. Add an optional typed fleet/Gateway/slot binding
+  to the complete atomic envelope, checked under existing transaction custody.
+  The standalone host always selects it; the Gateway adapter refuses a
+  differing identity. Keep unbound native/core bytes and remote protocol
+  unchanged. Bound/unbound and unknown formats refuse without mutation or
+  automatic migration, including older readers encountering the bound shape.
+- The initial corruption test exposed a null nested replay being passed as the
+  core's explicit empty-provisioning input. Require a dictionary before core
+  restoration and retain null/list/scalar regressions. This is not accepted
+  partial-state recovery. Original-ID restart, uncertain commit and exact ACK
+  remain unchanged.
+- Final local affected store/replay/service/Gateway/observer selection passes
+  246 cases; rebuilt independent installed-host acceptance passes 25. Fatal
+  lint, diff, thirteen-plugin install contract and documentation consistency
+  checks pass. Current-head hosted Linux/Windows acceptance and required CI/
+  review remain pending.
+- This serves the PR vision's separated scopes and reliable single-owner
+  state, using existing disk/lease/foreground lifecycle primitives. Documentation
+  impact covers host configuration/storage, corruption/refusal, compatibility,
+  upgrade/downgrade and testing. No new CLI flag, remote route, credential,
+  supervisor, publication selector or fleet action is introduced.
+- Fresh-state source tests and the installed process exercise provisioning,
+  changed-identity refusal and same-volume restart/replay/ACK with synthetic
+  Gateway/provider inputs. No Docker or authorized live fleet venue is available
+  here; actual image build, migration, writer movement/fencing, candidate
+  activation/rollback, provider/installed rollout and the full parent gates
+  remain open. Source tests are not a substitute for those tiers.
+
+### 2026-10-23 - Merge bounded observation fairness and retain deployment gates
+
+- #8209 merged as `bf32acce7ec792b6e5fb9dcc0308a68746035b30` at
+  `2026-10-23T12:22:45Z`, from head
+  `981b86f86bd93fb9e9f5946240922ef2da168968`. Copilot review `5628091662`
+  approved that exact head with no open issues. The earlier sweep-write
+  finding is fixed and its thread is resolved; full review, thread/comment
+  pagination and issue comments were read. Required CI `39951794405` and
+  `39952129058`, attribution/lockdown and exact-head native Linux/Windows
+  acceptance `39952160900` passed. The native jobs include the core lifecycle
+  and independent installed foreground process, using synthetic issuer/provider
+  inputs. Local affected selection passed 206 cases; refreshed standalone
+  acceptance passed 25. No CI/feedback bypass was used; managed self-merge
+  used only the authorized additional CODEOWNER-vote exception.
+- Re-read the parent goal, Coordination, full Plan and Validation Plan after
+  merge. Close only the bounded-observation source leaf. All directly retained
+  client/reviewer/migration/idle-record/nonevent clauses and broader provider,
+  installed adoption, image/container/lifecycle and fleet acceptance remain
+  open. Closing references were empty; #7188 remains open. No production
+  credential, deployment, runtime update or finalization follows from this merge.
+- Preserve a backup of the reviewed head. Managed `pr-complete` confirmed the
+  squash-merged content, dropped only its two redundant local commits and
+  fast-forwarded this source worktree to the merged `dev` tip.
+- Next: inspect the remaining service contract's artifact/container and
+  deployment-lifecycle checklist, then close the next bounded source gap under
+  the existing placement/lifecycle owners. Do not reopen the accepted reader
+  residual or treat an unavailable authorized fleet lane as source completion.
 
 ### 2026-10-23 - Bound native observation IO without adding another owner
 
