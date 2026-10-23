@@ -9,6 +9,9 @@
   concurrency, and compatible atomic heartbeat generation fencing.
 - **Current boundary:** [exact authority proposal and counter evidence](s3ab-authority-proposal.md).
   Proposal/evidence only; shared functional API changes remain unadmitted.
+- **Latest decision packet:** [boundary-only schedule and lower bound](s3ab-boundary-decision.md).
+  Pure reads do not need repeated full revalidation; strict true-effect and
+  publication admission still exceed the retained total-work baseline.
 
 ## Request
 
