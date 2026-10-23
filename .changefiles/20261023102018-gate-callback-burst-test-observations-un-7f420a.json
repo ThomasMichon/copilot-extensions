@@ -1,0 +1,9 @@
+{
+  "comment": "Gate callback-burst test observations until all durable subscriptions are registered.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

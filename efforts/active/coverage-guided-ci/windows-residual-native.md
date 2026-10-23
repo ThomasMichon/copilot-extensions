@@ -223,6 +223,27 @@ reconciliation blocks admission rather than expanding a batch.
 
 ## Continuation hunk ledger
 
+### Subsequent admission: W4-WATCH-BURST
+
+This candidate admits only `9de716138927` and `8e164df76d48` in the original
+Pull Requests `test_watch_delivery.py`. The fixture holds its snapshot fetch
+until all 20 subscribers are registered, asserts that no callback has started,
+then releases the burst. The existing eight-worker limit, exact peak of eight,
+20 unique delivered identities and empty subscriber registry remain asserted.
+Both gates are released in `finally`, including on a registration failure.
+No runtime, timeout, test selection, skip or containment policy changes.
+
+The complete existing delivery module passed 88 tests with no skips on native
+Windows, exactly two workers, 12.70 seconds including preparation and cleanup.
+It retained the 30-second item limit, 240-second diagnostic group bound and
+default process, memory and temporary-space caps. This exercises the real
+daemon, durable registration and callback scheduler, not a mocked scheduling
+proxy. There is no installer/bootstrap or fresh-machine behavior change, and
+no external venue is needed for this local threading contract. Existing plugin
+usage documentation remains accurate; this ledger records the test setup
+change. Review and required CI still gate merge. Wider residual disposition
+and repeated complete-plugin timing qualification remain open.
+
 ### Subsequent admission: W4-ATTR-ENCODING
 
 This candidate admits only `f4aafb2aa54f`, `978cd04361f6`, `ba6c4547c0e7`
