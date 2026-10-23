@@ -14,6 +14,7 @@ class _Counter:
     def __init__(self):
         self._events = count()
         self._reads = count()
+        self._reader_lock = threading.Lock()
 
     def __next__(self):
         return next(self._events)
@@ -21,7 +22,8 @@ class _Counter:
     def read(self):
         # Reading advances the iterator too; subtract those advances rather than
         # depending on the deprecated itertools pickle/copy representation.
-        return max(0, next(self._events) - next(self._reads))
+        with self._reader_lock:
+            return next(self._events) - next(self._reads)
 
 
 def snapshot(event: dict, *, max_bytes: int = 4096) -> dict:

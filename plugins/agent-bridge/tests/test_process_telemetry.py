@@ -9,7 +9,7 @@ import pytest
 
 from agent_bridge import telemetry
 from process_telemetry import SinkSlot
-from process_telemetry.buffer import BufferedSink, snapshot
+from process_telemetry.buffer import BufferedSink, _Counter, snapshot
 from process_telemetry.measurement import TraceContext, begin
 from process_telemetry.report import summarize
 
@@ -258,6 +258,42 @@ def test_contended_and_invalid_producers_return_without_wait():
     finally:
         writer.close()
         assert writer.join(5)
+
+
+def test_concurrent_counter_readers_cannot_manufacture_events():
+    counter = _Counter()
+    entered, release, overtook = threading.Event(), threading.Event(), threading.Event()
+    events = counter._events
+    values = []
+
+    class PausingIterator:
+        def __next__(self):
+            value = next(events)
+            if value == 0:
+                entered.set()
+                assert release.wait(3)
+            else:
+                overtook.set()
+            return value
+
+    counter._events = PausingIterator()
+    first = threading.Thread(target=lambda: values.append(counter.read()))
+    second = threading.Thread(target=lambda: values.append(counter.read()))
+    first.start()
+    try:
+        assert entered.wait(2)
+        second.start()
+        assert not overtook.wait(.1)
+    finally:
+        release.set()
+        first.join(3)
+        if second.ident is not None:
+            second.join(3)
+    assert not first.is_alive() and not second.is_alive()
+    assert values == [0, 0]
+    assert counter.read() == 0
+    next(counter)
+    assert counter.read() == 1
 
 
 def test_summary_retains_missing_lossy_and_failed_samples():
