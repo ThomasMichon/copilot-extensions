@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-23
-- **Status:** Done
+- **Status:** Draft
 - **Vision:** [Picker](../../../visions/picker/README.md), responsive-by-budget
 - **Umbrella issue:** #7939
-- **Sub-issues:** #7940 (shared configuration dependency; not absorbed)
+- **Sub-issues:** #7940 (new configuration-freshness episode)
 
 ## Guiding Intent
 
@@ -33,12 +33,14 @@ native acceptance targets, not claims inferred from helper tests.
 - **Delegates:** none; existing owners retain their separate scopes.
 - **Handoff:** reviewed source changes and functional evidence remain distinct
   from native measurement, release and authorized rollout.
-- Only `engine_worktree_actions.py`, `engine_dialogs.py` and their focused tests
-  are admitted for functional changes here. No startup composition, scalar
-  binding, telemetry reporter, authoritative row-feed or protocol changes.
-- `project_config.py` changes require an explicit shared-seam agreement with
-  the startup integration owner before implementation. #7940 remains open;
-  this effort does not choose manual-only semantics or invent another cache.
+- Phases 1–3 own only `engine_worktree_actions.py`, `engine_dialogs.py` and their
+  focused tests. That finite Actions source episode is complete.
+- Phase 4 separately admits the exact file-store and derived-consumer hooks in
+  the [configuration amendment](configuration-cache-seam.md#execution-amendment).
+  Startup composition, scalar binding/API/epoch logic, pending binding,
+  telemetry, authoritative row-feed and protocol ownership remain unchanged.
+- Shared `harness_state` supplier extraction is proposal-only until separately
+  admitted. No other phase gains that authority by implication.
 
 ## Context
 
@@ -73,6 +75,9 @@ effort is the finite Actions consumer slice, not completion of a wider campaign.
 
 ## Plan
 
+The completed Actions episode remains recorded below. Phase 4 is a new #7940
+episode requiring its own reviewed source amendment before implementation.
+
 ### Phase 1 — Review the consumer contract
 
 - [x] Review and merge this source plan before functional implementation.
@@ -105,7 +110,25 @@ effort is the finite Actions consumer slice, not completion of a wider campaign.
 - [x] Deferred to `#7939`: Record release/rollout and native qualification separately; do not change
   installed payloads, services or production UI as part of this source slice.
 
+### Phase 4 — Bounded configuration freshness
+
+- [ ] Review and merge the execution amendment before functional changes.
+- [ ] Replace the three indefinite file memoizers with demand-driven scoped
+  snapshots, real binding identity, TTL and single-flight changed-input reads.
+- [ ] Add only the admitted derived-map/manual-reload/accepted-revision hooks;
+  preserve unrelated selection and current setup/source generation.
+- [ ] Qualify the complete amended matrix, including cancellation, error
+  retry, manual clear/rebind races and zero-work warm reads.
+- [ ] Obtain supplier-API admission before editing `harness_state`; then qualify
+  the actual selected-supplier path without unrelated-project discovery.
+- [ ] Pass review and required checks, merge source PRs and explicitly retain
+  native/release/installed obligations. Do not close #7940 with a production
+  supplier or derived-view gap.
+
 ## Validation Plan
+
+Phase 4's additional matrix is in the
+[configuration amendment](configuration-cache-seam.md#execution-amendment).
 
 - [x] First-open work-count test: block provider/config/path lookup and show
   that modal push occurs first, with zero such work on the input thread.
@@ -222,3 +245,16 @@ interfaces. Do not create a general request broker or shared polling layer.
   release/installed acceptance remains #7939, native timing remains #7935 and
   the unimplemented configuration freshness seam remains #7940. No campaign,
   release, installed-runtime or native-budget completion is asserted.
+
+### 2026-10-23 — Configuration episode admission
+
+- Fresh issue/PR and task collision checks found no competing #7940 owner.
+  The retained source worktree is clean and remains a managed workspace.
+- The integration owner admitted the exact file-store surfaces and existing
+  derived-consumer hooks in the amendment, not scalar/bootstrap changes.
+- Public-safe requested constraints: preserve real binding identity and bounded
+  obsolete scopes; no UI waits/I/O or stale-empty authority; preserve public
+  value/exception compatibility; propose the owner-selected supplier API first;
+  no invented template syntax, saturated-host benchmark or installed rollout.
+- Shared supplier extraction remains unapproved. The source amendment is
+  proposed, not already implemented.
