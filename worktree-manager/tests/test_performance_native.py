@@ -92,6 +92,32 @@ def test_job_admission_failure_keeps_prior_samples_and_final_report(tmp_path, mo
     assert saved["modes"]["enabled"]["samples"][0]["error_code"] == "RuntimeError"
 
 
+def test_bad_child_duration_still_saves_complete_run_accounting(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    module = probe_module()
+    monkeypatch.setattr(module, "source_identity", lambda _: ("a" * 40, True))
+    def capture(argv, *, cwd, **kwargs):
+        mode = "enabled" if cwd.name.endswith("enabled") else "disabled"
+        value = {
+            "mode": mode, "outcome": "ok",
+            "points_ns": {"source_entry": 0, "first_refresh": "invalid" if mode == "enabled" else 1,
+                          "input_ack": 1, "fixture_rows": 2},
+        }
+        return subprocess.CompletedProcess(argv, 0, "MANAGER_OBSERVATION " + json.dumps(value), "")
+    monkeypatch.setattr(module, "captured_child", capture)
+    root = tmp_path / "bad-duration-run"
+    module.run(SimpleNamespace(
+        run_dir=str(root), endpoint=None, samples=1, timeout=1,
+        receiver_jsonl=None, readback_timeout=0,
+    ))
+    saved = json.loads((root / "report.json").read_text())
+    assert saved["modes"]["disabled"]["completed"] == 1
+    assert saved["modes"]["disabled"]["failed"] == 0
+    assert saved["modes"]["enabled"]["completed"] == saved["modes"]["enabled"]["failed"] == 1
+    assert saved["modes"]["enabled"]["samples"][0]["error_code"] == "invalid_child_report"
+
+
 def test_git_overrides_cannot_redirect_source_identity(tmp_path, monkeypatch):
     from agent_procutil import no_window_kwargs
 

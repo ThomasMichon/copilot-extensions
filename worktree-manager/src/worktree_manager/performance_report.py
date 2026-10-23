@@ -9,6 +9,10 @@ from process_telemetry.report import summarize
 POINTS = ("source_entry", "first_refresh", "input_ack", "fixture_rows")
 
 
+def _duration(value):
+    return value is None or (type(value) is int and 0 <= value < 2**63)
+
+
 def child_result(stdout: str, *, mode: str, returncode: int) -> dict:
     """Keep a malformed/missing child report as a failed sample, not a lost run."""
     import json
@@ -22,6 +26,24 @@ def child_result(stdout: str, *, mode: str, returncode: int) -> dict:
             or type(value.get("points_ns")) is not dict
         ):
             raise ValueError("invalid child report")
+        if any(not _duration(item) for item in value["points_ns"].values()):
+            raise ValueError("invalid child duration")
+        if not _duration(value.get("source_process_cpu_ns")) or not _duration(value.get("owner_drain_ns")):
+            raise ValueError("invalid child resource duration")
+        telemetry = value.get("telemetry")
+        if telemetry is not None:
+            if type(telemetry) is not dict or type(telemetry.get("counts")) is not dict:
+                raise ValueError("invalid child telemetry")
+            if any(type(item) is not int or not 0 <= item < 2**63 for item in telemetry["counts"].values()):
+                raise ValueError("invalid child counter")
+            for key in ("queued_remaining", "abandoned", "unwritten", "owner_drain_ns"):
+                if key in telemetry and (
+                    type(telemetry[key]) is not int or not 0 <= telemetry[key] < 2**63
+                ):
+                    raise ValueError("invalid child telemetry duration")
+            for key in ("sampled", "writer_started", "writer_alive", "export_requested"):
+                if key in telemetry and type(telemetry[key]) is not bool:
+                    raise ValueError("invalid child telemetry flag")
     except (ValueError, IndexError, TypeError):
         value = {"mode": mode, "outcome": "error", "error_code": "invalid_child_report"}
     value["exit_code"] = returncode

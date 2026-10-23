@@ -325,6 +325,19 @@ def test_nonzero_process_exit_cannot_be_overridden_by_a_child_report():
     assert value["outcome"] == "error" and value["exit_code"] == 3
 
 
+@pytest.mark.parametrize("duration", [True, -1, "slow", {}, 1.5, float("nan")])
+def test_malformed_child_durations_are_failed_samples(duration):
+    value = child_result(
+        "MANAGER_OBSERVATION " + json.dumps({
+            "mode": "disabled", "outcome": "ok", "points_ns": {"first_refresh": duration},
+        }),
+        mode="disabled", returncode=0,
+    )
+    report = source_report([value], expected_per_mode=1)
+    assert report["modes"]["disabled"]["completed"] == report["modes"]["disabled"]["failed"] == 1
+    assert value["error_code"] == "invalid_child_report"
+
+
 def test_overhead_distinguishes_paired_deltas_from_difference_of_medians():
     runs = []
     for mode, values in (("disabled", [1, 10, 20]), ("enabled", [5, 6, 30])):
