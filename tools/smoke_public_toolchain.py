@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from build_python_artifacts import build_plugin_artifacts
 from build_toolchain_lock import resolve_toolchain_lock
@@ -39,16 +40,25 @@ def nested_standalone_export(directory: Path) -> dict:
     commit = _run(["git", "rev-parse", "HEAD"], cwd=fixture).strip()
     tree = _run(["git", "rev-parse", "HEAD^{tree}"], cwd=fixture).strip()
     export = directory / "nested-export"
-    index = export_artifacts(
-        repo=fixture, commit=commit, content_tree=tree, dev_head=commit, main_before=commit,
-        out_dir=export, source_policy="seasoned-public",
-    )
+    with (
+        patch("reuse_promotion_artifacts.reuse_artifacts", return_value=None),
+        patch.dict(os.environ, {
+            "GITHUB_WORKFLOW_SHA": commit, "GITHUB_SHA": commit, "GITHUB_REF": "refs/heads/main",
+        }),
+    ):
+        index = export_artifacts(
+            repo=fixture, commit=commit, content_tree=tree, dev_head=commit, main_before=commit,
+            out_dir=export, source_policy="seasoned-public", reuse_repository="example/fixture",
+        )
     validate_artifacts(
         export, content_tree=tree, dev_head=commit, main_before=commit,
         projects=candidate_projects(fixture), candidate_root=fixture,
         source_policy="seasoned-public",
     )
     assert {entry["component"] for entry in index["artifacts"]} == set(COMPONENTS)
+    assert index["admission"] == {
+        "signer_digest": commit, "source_digest": commit, "source_ref": "refs/heads/main",
+    }
     assert len(_run(["git", "worktree", "list", "--porcelain"], cwd=fixture).split("worktree ")) == 2
     assert not _run(["git", "status", "--porcelain"], cwd=fixture).strip()
     return index

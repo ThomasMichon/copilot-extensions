@@ -212,11 +212,11 @@ def export_artifacts(
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix="python-artifacts-", dir=out_dir.parent))
     scratch = None
-    source = None
+    source_checkout = None
     try:
         scratch = promotion.add_scratch_worktree(commit, repo=repo)
-        source = tempfile.TemporaryDirectory(prefix="promotion-artifact-source-")
-        candidate = Path(source.name).resolve() / "inputs" / "source"
+        source_checkout = tempfile.TemporaryDirectory(prefix="promotion-artifact-source-")
+        candidate = Path(source_checkout.name).resolve() / "inputs" / "source"
         candidate.mkdir(parents=True)
         _run(
             ["git", f"--attr-source={content_tree}", "checkout-index", "--all",
@@ -278,8 +278,8 @@ def export_artifacts(
         staging.rename(out_dir)
         return index
     finally:
-        if source is not None:
-            source.cleanup()
+        if source_checkout is not None:
+            source_checkout.cleanup()
         if scratch is not None:
             promotion.remove_scratch_worktree(scratch, repo=repo)
         if staging.exists():

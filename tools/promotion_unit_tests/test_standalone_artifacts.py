@@ -76,7 +76,7 @@ def test_static_admission_allows_only_exact_selected_hook(tmp_path, kind):
             validate_static_build(tmp_path, trusted_setup=approved)
 
 
-@pytest.mark.parametrize("outcome", ["built", "reused", "failed"])
+@pytest.mark.parametrize("outcome", ["built", "reused", "reuse-miss", "failed", "invalid-admission"])
 def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypatch, outcome):
     scratch = tmp_path / ".promote-scratch" / "promote-fixture"
     scratch.mkdir(parents=True)
@@ -86,7 +86,11 @@ def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypa
     monkeypatch.setitem(sys.modules, "promote_release", SimpleNamespace(
         add_scratch_worktree=lambda *a, **kw: scratch,
         remove_scratch_worktree=lambda path, **kw: events.append(("remove", path)),
+        _is_ancestor=lambda *a, **kw: True,
     ))
+    monkeypatch.setenv("GITHUB_WORKFLOW_SHA", commit)
+    monkeypatch.setenv("GITHUB_SHA", "c" * 40 if outcome == "invalid-admission" else commit)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
 
     def run(argv, *, cwd):
         nonlocal candidate
@@ -118,12 +122,18 @@ def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypa
         assert kwargs["candidate_root"] == candidate
         assert kwargs["content_tree"] == tree and kwargs["repo"] == tmp_path
         events.append(("reuse", candidate))
-        return {"reused": True}
+        return {"reused": True} if outcome == "reused" else None
 
     def validate(directory, **kwargs):
         assert kwargs["candidate_root"] == candidate and kwargs["projects"] == {}
         assert kwargs["content_tree"] == tree and kwargs["dev_head"] == commit
-        assert json.loads((directory / artifacts.INDEX_NAME).read_text())["content_tree"] == tree
+        assert (candidate / "canonical.txt").read_bytes() == b"attribute-normalized\r\n"
+        index = json.loads((directory / artifacts.INDEX_NAME).read_text())
+        assert index["content_tree"] == tree
+        if outcome == "reuse-miss":
+            assert index["admission"] == {
+                "signer_digest": commit, "source_digest": commit, "source_ref": "refs/heads/main",
+            }
         events.append(("validate", candidate))
 
     monkeypatch.setattr(artifacts, "_run", run)
@@ -135,18 +145,25 @@ def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypa
     kwargs = dict(
         repo=tmp_path, commit=commit, content_tree=tree, dev_head=commit, main_before=commit,
         out_dir=tmp_path / "export",
-        reuse_repository="example/plugins" if outcome == "reused" else None,
+        reuse_repository=(
+            "example/plugins" if outcome in {"reused", "reuse-miss", "invalid-admission"} else None
+        ),
     )
-    if outcome == "failed":
-        with pytest.raises(artifacts.PromotionArtifactError, match="builder failed"):
+    if outcome in {"failed", "invalid-admission"}:
+        with pytest.raises(
+            artifacts.PromotionArtifactError,
+            match="builder failed" if outcome == "failed" else "source artifact admission",
+        ):
             artifacts.export_artifacts(**kwargs)
     else:
         artifacts.export_artifacts(**kwargs)
     assert [event[0] for event in events] == {
         "built": ["checkout", "build", "validate", "remove"],
         "reused": ["checkout", "reuse", "remove"],
+        "reuse-miss": ["checkout", "reuse", "build", "validate", "remove"],
         "failed": ["checkout", "build", "remove"],
+        "invalid-admission": ["checkout", "reuse", "build", "remove"],
     }[outcome]
     assert candidate is not None and not candidate.parent.parent.exists()
-    assert (tmp_path / "export").exists() == (outcome != "failed")
+    assert (tmp_path / "export").exists() == (outcome not in {"failed", "invalid-admission"})
     assert not list(tmp_path.glob("python-artifacts-*"))
