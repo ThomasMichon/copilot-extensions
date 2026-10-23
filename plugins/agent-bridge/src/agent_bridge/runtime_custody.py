@@ -112,25 +112,20 @@ def producer_id(installation: str, epoch: int, producer: RuntimeProducer) -> str
     return hashlib.sha256(encode([installation, epoch, asdict(producer)]).encode()).hexdigest()
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Install additive storage; do not enroll or qualify an existing runtime."""
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS bridge_runtime_epoch ("
+def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+    tables = {
+        "bridge_runtime_epoch": "CREATE TABLE IF NOT EXISTS bridge_runtime_epoch ("
         "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
         "installation TEXT NOT NULL, epoch INTEGER NOT NULL CHECK(epoch>0),"
         "revision INTEGER NOT NULL CHECK(revision>0),"
-        "state TEXT NOT NULL CHECK(state IN ('open','closed')), transition_json TEXT)"
-    )
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS bridge_runtime_producers ("
+        "state TEXT NOT NULL CHECK(state IN ('open','closed')), transition_json TEXT)",
+        "bridge_runtime_producers": "CREATE TABLE IF NOT EXISTS bridge_runtime_producers ("
         "id TEXT PRIMARY KEY, installation TEXT NOT NULL, epoch INTEGER NOT NULL,"
-        "producer_json TEXT NOT NULL)"
-    )
+        "producer_json TEXT NOT NULL)",
+    }
+    triggers = {}
     for table in ("sessions", "turns"):
-        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
-        if "runtime_custody_json" not in columns:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN runtime_custody_json TEXT")
-        conn.execute(
+        triggers[f"{table}_runtime_admission"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_admission "
             f"BEFORE INSERT ON {table} BEGIN "
             "SELECT CASE WHEN EXISTS (SELECT 1 FROM bridge_runtime_epoch WHERE state='closed') "
@@ -150,20 +145,74 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "AND p.id=json_extract(NEW.runtime_custody_json,'$.producer'))) "
             "THEN RAISE(ABORT,'bridge_runtime_association_invalid') END; END"
         )
-        conn.execute(
+        triggers[f"{table}_runtime_association_immutable"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_association_immutable "
             f"BEFORE UPDATE OF runtime_custody_json ON {table} "
             "WHEN NEW.runtime_custody_json IS NOT OLD.runtime_custody_json "
             "BEGIN SELECT RAISE(ABORT,'bridge_runtime_association_immutable'); END"
         )
-        conn.execute(
+        triggers[f"{table}_runtime_history_retained"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_history_retained "
             f"BEFORE DELETE ON {table} WHEN OLD.runtime_custody_json IS NOT NULL "
             "BEGIN SELECT RAISE(ABORT,'bridge_runtime_custody_retained'); END"
         )
         for operation in ("INSERT", "UPDATE", "DELETE"):
-            conn.execute(
+            triggers[f"{table}_runtime_revision_{operation.lower()}"] = (table,
                 f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_revision_{operation.lower()} "
                 f"AFTER {operation} ON {table} BEGIN "
                 "UPDATE bridge_runtime_epoch SET revision=revision+1 WHERE singleton=1; END"
+            )
+    return tables, triggers
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    """Prepare custody storage through the writable schema owner only."""
+    tables, triggers = _schema_definitions()
+    for statement in tables.values():
+        conn.execute(statement)
+    for table in ("sessions", "turns"):
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if "runtime_custody_json" not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN runtime_custody_json TEXT")
+    for _table, statement in triggers.values():
+        conn.execute(statement)
+
+
+def _normalized_schema(statement: str) -> str:
+    return " ".join(statement.split()).replace(" IF NOT EXISTS ", " ")
+
+
+def validate_schema(conn: sqlite3.Connection) -> None:
+    """Refuse incomplete custody storage without provisioning or migration."""
+    tables, triggers = _schema_definitions()
+    expected = {
+        name: ("table", name, statement) for name, statement in tables.items()
+    }
+    expected.update({
+        name: ("trigger", table, statement) for name, (table, statement) in triggers.items()
+    })
+    for table, names in (
+        ("sessions", ("runtime_custody_json",)),
+        ("turns", ("runtime_custody_json", "acquisition_delivery_id", "native_admission_json")),
+    ):
+        columns = {row[1]: row for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name in names:
+            column = columns.get(name)
+            if (
+                column is None or column[2].upper() != "TEXT"
+                or column[3] != 0 or column[5] != 0
+            ):
+                raise RuntimeCustodyError(
+                    f"Runtime custody schema requires supported writable preparation: {table}.{name}"
+                )
+    for name, (kind, table, statement) in expected.items():
+        row = conn.execute(
+            "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,),
+        ).fetchone()
+        if (
+            row is None or row[0] != kind or row[1] != table or not isinstance(row[2], str)
+            or _normalized_schema(row[2]) != _normalized_schema(statement)
+        ):
+            raise RuntimeCustodyError(
+                f"Runtime custody schema requires supported writable preparation: {name}"
             )

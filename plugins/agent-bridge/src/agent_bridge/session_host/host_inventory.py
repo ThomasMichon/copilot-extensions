@@ -57,6 +57,13 @@ def _invalid_constant(value: str) -> None:
     raise HostInventoryError(f"Nonfinite host inventory value: {value}")
 
 
+def _finite_float(value: str) -> float:
+    number = float(value)
+    if not math.isfinite(number):
+        raise HostInventoryError("Nonfinite host inventory float")
+    return number
+
+
 def read_inventory(path: Path) -> HostInventory:
     from .host_index import HostRecord
 
@@ -85,7 +92,8 @@ def read_inventory(path: Path) -> HostInventory:
             raise HostInventoryError("Host inventory changed or exceeds its bound")
     try:
         raw = json.loads(
-            wire.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_invalid_constant,
+            wire.decode("utf-8"), object_pairs_hook=_unique,
+            parse_constant=_invalid_constant, parse_float=_finite_float,
         )
     except (ValueError, UnicodeError) as exc:
         raise HostInventoryError("Host inventory is not valid strict JSON") from exc

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -102,6 +103,39 @@ def test_legacy_absent_fields_are_not_synthesized(tmp_path):
     write(path, {"session-a": row})
     with pytest.raises(HostInventoryError, match="Incomplete"):
         HostIndex(path, load=False).locked_inventory()
+
+
+@pytest.mark.parametrize("token", ["1e400", "-1e400"])
+@pytest.mark.parametrize("location", ["extra", "endpoint", "extra-array", "endpoint-array"])
+def test_exponent_overflow_refuses_at_every_nesting_without_mutation(tmp_path, token, location):
+    path = tmp_path / "hosts.json"
+    write(path)
+    index = HostIndex(path)
+    cached = index.all()
+    row = asdict(record())
+    field = location.split("-")[0]
+    row[field] = {"value": ["__number__"] if location.endswith("-array") else "__number__"}
+    raw = json.dumps({"version": 1, "hosts": {"session-a": row}}).replace('"__number__"', token)
+    path.write_text(raw, encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(HostInventoryError):
+        index.locked_inventory()
+    assert path.read_bytes() == before
+    assert index.all() == cached
+
+
+@pytest.mark.parametrize("token", ["1e308", "-1e308", "1e-308", "-0.0"])
+def test_finite_nested_float_controls_remain_supported(tmp_path, token):
+    path = tmp_path / "hosts.json"
+    row = asdict(record())
+    row["extra"] = {"value": ["__number__"]}
+    raw = json.dumps({"version": 1, "hosts": {"session-a": row}}).replace('"__number__"', token)
+    path.write_text(raw, encoding="utf-8")
+    observed = HostIndex(path, load=False).locked_inventory()
+    value = observed.records[0].extra["value"][0]
+    assert type(value) is float and math.isfinite(value)
+    assert value == float(token)
+    assert observed.storage_complete and not observed.native_custody_verified
 
 
 def test_linked_or_hardlinked_index_is_not_read(tmp_path):

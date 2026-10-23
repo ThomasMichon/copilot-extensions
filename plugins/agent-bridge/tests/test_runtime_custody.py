@@ -276,15 +276,11 @@ def test_read_only_inspection_does_not_initialize_legacy_custody(tmp_db):
     owner = installation(tmp_db)
     tmp_db.execute_write("DROP TABLE bridge_runtime_producers")
     tmp_db.execute_write("DROP TABLE bridge_runtime_epoch")
-    observer = Database(tmp_db.db_path, read_only=True)
-    try:
-        report = observer.runtime_custody_inventory(owner)
-        assert report["epoch"] is None
-        assert "missing-or-legacy-table:bridge_runtime_epoch" in report["blockers"]
-        with pytest.raises(PermissionError):
-            observer.initialize_runtime_epoch(owner)
-        assert observer.execute_read(
-            "SELECT 1 FROM sqlite_master WHERE name='bridge_runtime_epoch'"
-        ) == []
-    finally:
-        observer.close()
+    report = tmp_db.runtime_custody_inventory(owner)
+    assert report["epoch"] is None
+    assert "missing-or-legacy-table:bridge_runtime_epoch" in report["blockers"]
+    with pytest.raises(RuntimeCustodyError, match="preparation"):
+        Database(tmp_db.db_path, read_only=True)
+    assert tmp_db.execute_read(
+        "SELECT 1 FROM sqlite_master WHERE name='bridge_runtime_epoch'"
+    ) == []

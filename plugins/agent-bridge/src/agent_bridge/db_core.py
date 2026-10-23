@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -326,7 +326,13 @@ class _CoreMixin:
                     raise sqlite3.OperationalError("unable to open database file") from exc
                 rows = self.execute_read("SELECT version FROM schema_version")
                 if len(rows) != 1 or rows[0]["version"] != SCHEMA_VERSION:
-                    raise ValueError("Read-only database requires the current schema")
+                    raise ValueError(
+                        "Read-only database requires the current schema; "
+                        "supported writable preparation or migration is needed"
+                    )
+                from .runtime_custody import validate_schema
+
+                validate_schema(self._get_conn())
                 after = self._db_path.stat()
                 if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
                     raise ValueError("Read-only database changed during preparation")

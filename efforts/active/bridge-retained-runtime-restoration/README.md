@@ -175,6 +175,23 @@ This establishes the reviewed plan, not implementation or running adoption.
 
 ## Journal
 
+### 2026-10-23 - Require prepared custody storage and finite host metadata
+- Schema 28 explicitly versions the required storage. The canonical writable
+  migration prepares it before publication; read-only and existing-only writable
+  adoption reject older or partial layouts without hidden migration. The frozen
+  pre-custody-v27 SQL fixture preserves independent old histories without needing
+  today's constructor or local Git objects.
+- Host inventory rejects exponent-overflow floats at any JSON nesting while
+  retaining existing duplicate-key, path, size, mutex and cache guards.
+- The focused DB/adoption/host/custody/delete cohort passed 240 cases with two
+  skips. Required-shape refusal and finite decoding remain bounded foundation
+  repairs, not complete producer enrollment, restoration or Phase 1 completion.
+- The full canonical contract checker passed for two contracts and 456 fixtures.
+  Existing HTTP/native-admission/result replays passed 229 cases with two skips.
+  Only four registered source fingerprints/classifications were refreshed;
+  every historical fixture, capture provenance, HTTP generation and floor was
+  preserved.
+
 ### 2026-10-23 - Bound the first DB/storage foundation
 - The assigned first source slice adds explicit DB epoch/producer observations,
   serial session/turn insertion fencing, original-history retention and

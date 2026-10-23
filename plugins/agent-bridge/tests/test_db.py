@@ -727,41 +727,22 @@ def test_ensure_columns_backfills_usage_cols_stamped_past_gate(tmp_path) -> None
     """
     import sqlite3
 
-    from agent_bridge.db import SCHEMA_VERSION, Database, _SESSIONS_ENSURE_COLUMNS
+    from agent_bridge.db import Database, _SESSIONS_ENSURE_COLUMNS
 
     path = tmp_path / "legacy.db"
+    prepared = Database(path)
+    prepared.close()
     conn = sqlite3.connect(str(path))
-    conn.executescript(
-        f"""
-        CREATE TABLE schema_version (version INTEGER NOT NULL);
-        INSERT INTO schema_version (version) VALUES ({SCHEMA_VERSION});
-        CREATE TABLE sessions (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            agent_name TEXT,
-            caller_id TEXT,
-            target_dir TEXT,
-            target_type TEXT NOT NULL DEFAULT 'local',
-            target_json TEXT,
-            status TEXT NOT NULL DEFAULT 'created',
-            pid INTEGER,
-            acp_session_id TEXT,
-            config_json TEXT,
-            predecessor_id TEXT,
-            successor_id TEXT,
-            handoff_at REAL,
-            created_at REAL NOT NULL DEFAULT 0,
-            updated_at REAL NOT NULL DEFAULT 0
-        );
-        """
-    )
+    for column in ("context_size", "context_used", "usage_model", "last_usage_at"):
+        conn.execute(f"ALTER TABLE sessions DROP COLUMN {column}")
     conn.commit()
     before = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
     conn.close()
     assert "context_size" not in before  # precondition: the #815 shape
 
     # Opening the Database runs _init_schema -> _ensure_columns.
-    Database(str(path))
+    reopened = Database(path)
+    reopened.close()
 
     check = sqlite3.connect(str(path))
     after = {r[1] for r in check.execute("PRAGMA table_info(sessions)")}

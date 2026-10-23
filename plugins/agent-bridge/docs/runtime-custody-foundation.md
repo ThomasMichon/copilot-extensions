@@ -19,6 +19,16 @@ are exact observations supplied by the owning caller. These methods neither
 authenticate that caller nor resolve provenance or acquire native custody.
 No public route or ordinary application startup calls them automatically.
 
+Local storage schema 28 requires the custody tables, nullable associations,
+ordinary turn-admission columns and canonical guards. The existing writable
+migration owner prepares older databases before publishing that schema version;
+the frozen pre-custody-v27 test fixture is independent of current constructors
+and Git history. Read-only preparation and existing-only writable adoption
+validate version and physical shape without bootstrap, migration or writer
+startup. An already-current incomplete custody layout refuses instead of
+silently recreating potentially missing closure state. These checks do not
+qualify complete custody or retained-target compatibility.
+
 Actual `create_session` and `create_turn` writes accept an optional retained
 producer association. SQLite checks it against the open installation/epoch and
 enrolled frontend in the same insertion transaction. The ordered insertion
@@ -58,6 +68,9 @@ ordinary index mutations, without flushing, provisioning an index or replacing
 the caller's cached records. Missing index evidence remains incomplete.
 Malformed/duplicate/unknown fields, unsafe parents, linked/hard-linked/reparse
 files, unsupported record shapes and unstable reads refuse explicitly.
+The strict decoder rejects literal nonfinite constants and exponent-overflow
+floats at every nesting level, including opaque metadata arrays. Valid finite
+values are preserved rather than clamped, dropped or stringified.
 `assert_inventory_current` rechecks the observed file identity and private
 bytes under that mutex. These are strict storage observations, not monotonic
 host admission epochs or verified native host receipts; they always retain
