@@ -1047,8 +1047,9 @@ class TestRefreshLocalCache:
 
     @_requires_descendant_safety_net
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("owner_exit", [False, True], ids=["legacy-budget", "owner-exit"])
     async def test_grandchild_does_not_survive_when_direct_child_exits_first(
-        self, tmp_path: Path
+        self, tmp_path: Path, owner_exit: bool,
     ) -> None:
         """A distinct, narrower failure mode than the above: the direct
         child exits quickly, but a grandchild it spawned inherited its
@@ -1082,7 +1083,9 @@ class TestRefreshLocalCache:
         # timeout tree-kill fire before the grandchild ever existed.
         script.write_text(
             "import os, subprocess, sys, time\n"
-            f"subprocess.Popen([sys.executable, {str(grandchild_script)!r}])\n"
+            f"subprocess.Popen([sys.executable, {str(grandchild_script)!r}], "
+            "stdout=sys.stdout,stderr=sys.stderr,"
+            "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
             "deadline = time.monotonic() + 4.0\n"
             f"while not os.path.exists({str(pidfile)!r}) "
             "and time.monotonic() < deadline:\n"
@@ -1094,11 +1097,20 @@ class TestRefreshLocalCache:
         try:
             call_timeout = 5.0
             started = time.monotonic()
-            result = await lcr._run_bounded(
-                [sys.executable, str(script)], timeout=call_timeout,
-            )
+            if owner_exit:
+                result = await asyncio.wait_for(
+                    lcr._run_bounded_result(
+                        [sys.executable, str(script)], timeout=None, retire_group=True,
+                    ),
+                    timeout=call_timeout + lcr._CLEANUP_GRACE_S,
+                )
+                assert result.status == "completed" and result.returncode == 0
+            else:
+                result = await lcr._run_bounded(
+                    [sys.executable, str(script)], timeout=call_timeout,
+                )
+                assert result is None
             elapsed = time.monotonic() - started
-            assert result is None
             assert elapsed <= call_timeout + lcr._CLEANUP_GRACE_S + 2.0, (
                 f"tree-kill cleanup took {elapsed:.1f}s, past the "
                 f"documented timeout + _CLEANUP_GRACE_S ceiling"

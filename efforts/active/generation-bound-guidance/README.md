@@ -200,6 +200,10 @@ coordinate the smallest additive owner API before changing another slice.
   failing fresh/cached controls, handled resolution `RuntimeError` per provider
   and as invalid cached evidence, and retained explicit deadline propagation.
   Ten focused cyclic/missing-source/deadline controls passed.
+- Reproduced and corrected owner-exit cleanup waiting on descendant-held output
+  pipes. The owned observer now detects process exit independently of EOF and
+  is joined/cancelled within the finite command scope. Five focused controls
+  passed; native qualification limitations remain in the validation report.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

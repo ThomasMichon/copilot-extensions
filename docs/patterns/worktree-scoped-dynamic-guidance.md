@@ -210,6 +210,10 @@ On POSIX the Bridge-owned command uses the existing enclosing-process-group
 contract, so foreground Git stays in the group Bridge retires on cancellation
 or owner exit. Windows retains kill-on-close Job custody. Native Linux
 qualification explicitly removes test-only detachment suppression.
+The finite command scope observes the owner's public process return code
+independently of pipe EOF, then retires descendants; inherited stdout/stderr
+handles cannot postpone cleanup indefinitely. Its observer is joined or
+cancelled before the command returns and is not a resident poller.
 macOS group identity uses the public native birth-time reader from psutil,
 already supplied by Bridge's required `agent-procutil[metrics]` dependency.
 Readiness of that identity backend is checked before enabling the owner path;

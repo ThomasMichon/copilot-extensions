@@ -390,7 +390,20 @@ async def _run_bounded_result(
         with contextlib.suppress(Exception):
             await asyncio.wait_for(proc.wait(), timeout=_CLEANUP_GRACE_S)
         return _RunResult("failed", detail="mandatory Windows Job containment unavailable")
+    exit_watch: asyncio.Task[None] | None = None
+
+    async def retire_after_owner_exit() -> None:
+        nonlocal cleanup_attempted
+        # Process.wait() can itself await pipe closure on asyncio transports.
+        # The public returncode is updated independently when the owner exits.
+        while proc.returncode is None:
+            await asyncio.sleep(0.02)
+        cleanup_attempted = True
+        await _kill_tree(proc, job_handle, expected_group_identity)
+
     try:
+        if retire_group:
+            exit_watch = asyncio.create_task(retire_after_owner_exit())
         try:
             stdout, _stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
@@ -412,6 +425,11 @@ async def _run_bounded_result(
             _stderr.decode("utf-8", errors="replace").strip()[:1000],
         )
     finally:
+        if exit_watch is not None:
+            if not exit_watch.done():
+                exit_watch.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await exit_watch
         if job_handle is not None:
             with contextlib.suppress(Exception):
                 job_handle.close()

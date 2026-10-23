@@ -194,3 +194,13 @@ on Python 3.10–3.12. Fresh and previously cached self-linked providers now fai
 independently; invalid cached evidence is retried while `TimeoutError` still
 propagates. Both new controls failed before the correction. The cyclic,
 missing-source and actual receipt-deadline selection completed **10 passed**.
+
+An inherited-output-pipe control reproduced unbounded foreground preparation
+remaining blocked after its owner exited. The fixture explicitly preserves
+stdout/stderr while keeping Windows children headless; its original bounded
+control still times out as expected. Owner-exit observation now runs independently
+of pipe EOF, allowing identity/Job-bound descendant cleanup before communication
+finishes. Five focused cleanup/cancellation controls passed. Two asyncio
+transport-finalizer warnings were reported by the existing cancellation fixture;
+the process-retirement assertions passed, but these warnings are not represented
+as a warning-free native qualification.
