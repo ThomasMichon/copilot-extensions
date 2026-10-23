@@ -247,7 +247,7 @@ def child_environment(home: Path) -> dict:
 def run(args) -> dict:
     from worktree_manager.performance_report import child_result, source_report, trace_readback, signal_readback
     from process_telemetry.otlp import validate_endpoint, validate_record
-    from process_telemetry.signals import SignalEndpoints, SignalResult
+    from process_telemetry.signals import SignalEndpoints, SignalResult, validate_metric_points
 
     signal_config = None
     if getattr(args, "logs_endpoint", None) or getattr(args, "metrics_endpoint", None):
@@ -319,15 +319,18 @@ def run(args) -> dict:
             for line in lines:
                 try:
                     value = json.loads(line)
+                    if type(value) is not dict:
+                        raise ValueError("sender row is not an object")
                     if value.get("schema") == "manager.signal-batch.v1":
                         if value.get("trace_id") != (result.get("telemetry") or {}).get("trace_id"):
                             raise ValueError("unexpected signal-batch identity")
-                        if set(value["signals"]) != {"traces", "logs", "metrics"}:
+                        if type(value["signals"]) is not dict or set(value["signals"]) != {"traces", "logs", "metrics"}:
                             raise ValueError("unexpected signal-batch keys")
                         for row in value["signals"].values():
                             SignalResult(**row)
+                        points = validate_metric_points(value["metrics"])
                         signal_batches.append(value)
-                        expected_metrics.extend(value["metrics"])
+                        expected_metrics.extend(points)
                         continue
                     record = validate_record(value["span"])
                     key = (record["trace_id"], record["span_id"])
@@ -359,7 +362,7 @@ def run(args) -> dict:
                         "time_ns": record["start_time_ns"] + record["duration_ns"],
                     }
                     sender_count += 1
-                except (ValueError, KeyError, TypeError):
+                except (ValueError, KeyError, TypeError, AttributeError, OverflowError, RecursionError):
                     result["event_file_invalid"] = True
             identities.update(sender_ids)
             result["sender_records"] = sender_count

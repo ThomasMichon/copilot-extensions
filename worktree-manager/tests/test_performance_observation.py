@@ -104,6 +104,16 @@ def test_bad_signal_accounting_remains_a_failed_child_sample(mutation):
     assert result["outcome"] == "error" and result["error_code"] == "invalid_child_report"
 
 
+@pytest.mark.parametrize("identity", [None, [], {"source_revision": "private path"}, {"unknown": "x"}])
+def test_malformed_child_identity_is_not_accepted_for_later_sender_readback(identity):
+    value = {
+        "mode": "enabled", "outcome": "ok", "points_ns": {},
+        "telemetry": {"counts": {}, "identity": identity},
+    }
+    result = child_result("MANAGER_OBSERVATION " + json.dumps(value), mode="enabled", returncode=0)
+    assert result["outcome"] == "error" and result["error_code"] == "invalid_child_report"
+
+
 def test_readback_scopes_logs_before_validating_foreign_batch_content():
     from copy import deepcopy
     from worktree_manager.performance_report import signal_readback

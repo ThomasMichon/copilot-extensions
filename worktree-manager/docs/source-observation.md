@@ -147,6 +147,9 @@ Unknown resource/scope attributes, conflicting duplicates, extra owned points
 and malformed matching records fail qualification. No raw receiver rows are
 returned. A partial, failed or not-attempted sender makes the whole requested
 flow incomplete even if some receiver records match.
+Non-object, deeply nested or malformed sender rows and signal metadata are
+retained as invalid samples; they cannot abort creation of the final report or
+discard earlier samples.
 
 Only scoped isolated SDK/wire validation is supplied by the implementation.
 Actual native source Logs/Metrics receive/persist evidence requires a separate

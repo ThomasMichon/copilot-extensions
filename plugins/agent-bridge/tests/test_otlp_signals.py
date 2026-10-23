@@ -14,6 +14,7 @@ import pytest
 from process_telemetry.otlp import LocalOtlpSignalsSink
 from process_telemetry.signals import (
     BOUNDS, SignalEndpoints, SignalIdentity, SignalResult, metric_points, validate_source_records,
+    validate_metric_points,
 )
 
 
@@ -89,6 +90,26 @@ def test_fixed_metric_cardinality_units_and_unavailable():
             validate_source_records([{**source(), **extra}])
     with pytest.raises(ValueError):
         validate_source_records([source()] * 33)
+
+
+def test_sender_metric_metadata_has_closed_shapes_and_consistent_counts():
+    from copy import deepcopy
+
+    points = [{**p, "start_time_ns": 100, "time_ns": 200}
+              for p in metric_points([source("input_ack")])]
+    assert validate_metric_points(points) == points
+    for value in (None, {}, [None], ["text"], [{"name": "unknown"}]):
+        with pytest.raises(ValueError):
+            validate_metric_points(value)
+    for field, value in (
+        ("bounds", [True] * len(BOUNDS)), ("bucket_counts", [0] * (len(BOUNDS) + 1)),
+        ("sum", float("nan")), ("start_time_ns", 200), ("count", True),
+    ):
+        corrupted = deepcopy(points)
+        histogram = next(p for p in corrupted if p["name"] == "ce.source.duration")
+        histogram[field] = value
+        with pytest.raises(ValueError):
+            validate_metric_points(corrupted)
 
 
 @pytest.fixture

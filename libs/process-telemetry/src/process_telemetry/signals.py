@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import math
 import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -154,4 +155,52 @@ def metric_points(records: list[dict]) -> list[dict]:
             )
         points.append(point)
     assert len(points) <= 56
+    return points
+
+
+def validate_metric_points(points):
+    """Validate sender-side batch metadata before it can enter a run report."""
+    from .measurement import OUTCOMES
+
+    if type(points) is not list or len(points) > 56:
+        raise ValueError("invalid sender metric batch")
+    common = {"name", "unit", "stage", "outcome", "start_time_ns", "time_ns"}
+    histogram = {"count", "sum", "min", "max", "bounds", "bucket_counts"}
+    for point in points:
+        if type(point) is not dict:
+            raise ValueError("invalid sender metric point")
+        is_sum = point.get("name") == "ce.source.observations"
+        if (
+            point.keys() != common | ({"value"} if is_sum else histogram)
+            or point["name"] not in ("ce.source.observations", "ce.source.duration", "ce.source.queue_wait")
+            or point["unit"] != ("{observation}" if is_sum else "s")
+            or type(point["stage"]) is not str or point["stage"] not in STAGES
+            or type(point["outcome"]) is not str or point["outcome"] not in OUTCOMES
+        ):
+            raise ValueError("invalid sender metric schema")
+        if any(type(point[k]) is not int or not 0 <= point[k] < 2**64 for k in ("start_time_ns", "time_ns")):
+            raise ValueError("invalid sender metric timestamp")
+        if point["start_time_ns"] >= point["time_ns"]:
+            raise ValueError("invalid sender metric interval")
+        if is_sum:
+            if type(point["value"]) is not int or not 1 <= point["value"] <= 32:
+                raise ValueError("invalid sender metric count")
+            continue
+        if point["name"] == "ce.source.duration" and (
+            point["stage"] not in ("first_refresh", "input_ack") or point["outcome"] == "unavailable"
+        ):
+            raise ValueError("unmeasured sender duration")
+        if type(point["count"]) is not int or not 1 <= point["count"] <= 32:
+            raise ValueError("invalid sender histogram count")
+        if any(type(point[k]) not in (int, float) or not math.isfinite(point[k]) or point[k] < 0
+               for k in ("sum", "min", "max")) or point["min"] > point["max"]:
+            raise ValueError("invalid sender histogram measurement")
+        bounds, buckets = point["bounds"], point["bucket_counts"]
+        if (
+            type(bounds) is not list or any(type(v) not in (int, float) for v in bounds)
+            or bounds != list(BOUNDS) or type(buckets) is not list or len(buckets) != len(BOUNDS) + 1
+            or any(type(v) is not int or not 0 <= v <= 32 for v in buckets)
+            or sum(buckets) != point["count"]
+        ):
+            raise ValueError("invalid sender histogram buckets")
     return points

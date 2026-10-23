@@ -43,6 +43,45 @@ def test_signal_readback_cannot_claim_a_signal_the_sender_did_not_request(tmp_pa
         probe.run(args)
 
 
+@pytest.mark.parametrize("bad_row", [
+    None, [], 7, True, "text", "deep-json",
+    {"schema": "manager.signal-batch.v1", "trace_id": "a" * 32, "signals": ["traces", "logs", "metrics"], "metrics": []},
+    {"schema": "manager.signal-batch.v1", "trace_id": "a" * 32,
+     "signals": {name: {"status": "not_requested"} for name in ("traces", "logs", "metrics")},
+     "metrics": [None]},
+])
+def test_malformed_sender_rows_preserve_both_samples_and_final_report(tmp_path, monkeypatch, bad_row):
+    from types import SimpleNamespace
+    module = probe_module()
+    monkeypatch.setattr(module, "source_identity", lambda root: ("a" * 40, True))
+
+    def child(argv, **kwargs):
+        config = json.loads(Path(argv[-1]).read_text())
+        raw = "[" * 1100 + "0" + "]" * 1100 if bad_row == "deep-json" else json.dumps(bad_row)
+        Path(config["events"]).write_text(raw + "\n", encoding="utf-8")
+        result = {
+            "mode": config["mode"], "outcome": "ok",
+            "points_ns": {key: 0 for key in ("source_entry", "first_refresh", "input_ack", "fixture_rows")},
+            "telemetry": {
+                "trace_id": "a" * 32, "counts": {"queued": 0, "written": 0},
+                "sampled": True, "writer_started": True, "writer_alive": False,
+            },
+        }
+        return subprocess.CompletedProcess(argv, 0, "MANAGER_OBSERVATION " + json.dumps(result), "")
+
+    monkeypatch.setattr(module, "captured_child", child)
+    args = SimpleNamespace(
+        run_dir=str(tmp_path / "result"), endpoint=None, samples=1, timeout=1,
+        receiver_jsonl=None, readback_timeout=0,
+    )
+    report = module.run(args)
+    assert (Path(args.run_dir) / "report.json").is_file()
+    for mode in ("enabled", "disabled"):
+        assert report["modes"][mode]["completed"] == 1
+        assert report["modes"][mode]["samples"][0]["event_file_invalid"]
+    assert report["modes"]["enabled"]["telemetry_incomplete"] == 1
+
+
 def test_key_receipt_excludes_later_handler_settling():
     import asyncio
     from types import SimpleNamespace

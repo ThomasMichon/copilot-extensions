@@ -44,7 +44,11 @@ def child_result(stdout: str, *, mode: str, returncode: int) -> dict:
             for key in ("sampled", "writer_started", "writer_alive", "export_requested"):
                 if key in telemetry and type(telemetry[key]) is not bool:
                     raise ValueError("invalid child telemetry flag")
-            from process_telemetry.signals import SIGNALS, STATUSES, SignalResult
+            from process_telemetry.signals import SIGNALS, STATUSES, SignalResult, SignalIdentity
+            identity = telemetry.get("identity", {})
+            if type(identity) is not dict:
+                raise ValueError("invalid child identity")
+            SignalIdentity(**identity)
             requested = telemetry.get("signals_requested", [])
             rows = telemetry.get("signals", {})
             if (
@@ -61,7 +65,7 @@ def child_result(stdout: str, *, mode: str, returncode: int) -> dict:
                 signal = SignalResult(**{k: v for k, v in row.items() if k not in ("generated_records", "first_failure")})
                 if type(generated) is not int or generated != signal.generated_records:
                     raise ValueError("invalid signal generated count")
-    except (ValueError, IndexError, TypeError, KeyError):
+    except (ValueError, IndexError, TypeError, KeyError, RecursionError):
         value = {"mode": mode, "outcome": "error", "error_code": "invalid_child_report"}
     value["exit_code"] = returncode
     if returncode != 0:
