@@ -174,6 +174,9 @@ implementation and validation choices remain proposed means.
 - [x] Prove graphical original-request retention before execution, restart and
   row-independent receipt recovery, with separately confirmed identical retry
   through the existing owner; retain the full rendered terminal comparison.
+- [x] Complete the bounded rendered shared-draft editing and original-request
+  recovery journey across native and independent graphical clients against one
+  isolated owner, without answering, waking or changing task status while editing.
 - [ ] Reuse the existing command-emitter task-output contract for mapped
   external records. Extend only demonstrated gaps in stable record identity,
   column/field mapping, deduplication and acceptance receipts.
@@ -229,6 +232,9 @@ All items below are **agent-recommended acceptance checks** for execution.
   recovery menus and the independent graphical renderer against one isolated
   owner; preserve full receipts, cancellation and confirmed replay without
   duplicate answers/wakes.
+- [x] Join rendered shared Save/Load/Reset across both category contributions
+  at 80x24 and 120x40; reject stale peer edits and replaced cards, retain local
+  text, and preserve shared state on cancelled Reset with no answer/wake effects.
 - [ ] Exercise mapped-record emission with missing/renamed columns, stable
   source identity, paging, repeated polls and lost responses. Prove malformed
   records remain visible and retries do not duplicate accepted work.
@@ -1431,3 +1437,33 @@ authorized installed proof remain distinct obligations.
   Full machine provisioning, another native OS and live external/installed/fleet
   lanes were not exercised: this change is tests/documentation only and no
   operational rollout or live effects were authorized.
+
+### 2026-10-23 - Rendered shared-draft editing acceptance completed
+
+- The independent consumer's tests-only shared-draft join merged after its exact
+  head received a clean review and passed required CI. Runtime behavior is
+  unchanged. Both native category forms at 80x24 and 120x40 now share a real
+  disposable queue/HTTP/CLI owner with an actual built graphical renderer.
+- Graphical Save is loaded and edited by the native form. Stale graphical Save
+  refuses a peer edit while retaining local text; explicit Load and a fresh
+  renderer recover the native draft. Stale native Save/Reset refuse a graphical
+  edit and retain durable local recovery. Cancelled native Reset preserves the
+  shared draft; acknowledged Reset clears it. Both clients reject a replaced
+  card, and fresh clients do not automatically restore an earlier card's draft.
+- All four rendered combinations passed, followed by the existing same-original-
+  request recovery proof and legacy/CAS/foreign-scope checks. Thirty coupled
+  consumer regressions passed. A forced graphical Save refusal fails at the
+  required acknowledgement as expected, rather than passing on old owner state.
+  Answer/wake logs and task status remain unchanged by all draft operations.
+- Re-read both canonical Plans and Validation Plans after merge. Checked only
+  bounded steering acceptance; #7141's retained owner, terminal draft/result and
+  original-request clauses are ready for finite tracker reconciliation after
+  journal publication. #7091 and this effort remain Active. Source/configuration,
+  history, template instantiation, process/evaluator and mapped production are
+  not completed by this proof.
+- Native list/subscription ensure remains suppressed on every fixture runtime.
+  Provider attribution and the graphical bridge are injected test seams, not
+  installed IPC or deployment proof. Native Windows and fresh isolated storage
+  were exercised. Full machine provisioning, another native OS, live external
+  sources and installed/fleet lanes were not exercised: no such behavior changed
+  and no live effects or rollout were authorized.
