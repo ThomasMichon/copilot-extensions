@@ -282,7 +282,7 @@ def run(args) -> dict:
                 if isinstance(error, bytes):
                     error = error.decode("utf-8", errors="replace")
                 (directory / "stderr.txt").write_text(error, encoding="utf-8")
-            except (OSError, RuntimeError) as exc:
+            except (OSError, RuntimeError, UnicodeError) as exc:
                 result = {"mode": mode, "outcome": "error", "error_code": type(exc).__name__, "exit_code": None}
             result["process_duration_ns"] = time.perf_counter_ns() - started
             result["process_clock_domain"] = "parent-perf-counter"

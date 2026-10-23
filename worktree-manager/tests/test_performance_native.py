@@ -65,13 +65,16 @@ def test_posix_capture_keeps_startup_stderr(tmp_path, monkeypatch):
     assert result.stderr == "synthetic startup traceback\n"
 
 
-def test_job_admission_failure_keeps_prior_samples_and_final_report(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure", ["RuntimeError", "UnicodeDecodeError"])
+def test_job_admission_failure_keeps_prior_samples_and_final_report(tmp_path, monkeypatch, failure):
     from types import SimpleNamespace
 
     module = probe_module()
     monkeypatch.setattr(module, "source_identity", lambda _: ("a" * 40, True))
     def capture(argv, *, cwd, **kwargs):
         if cwd.name.endswith("enabled"):
+            if failure == "UnicodeDecodeError":
+                raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "synthetic")
             raise RuntimeError("synthetic denied Job")
         value = {
             "mode": "disabled", "outcome": "ok",
@@ -89,7 +92,7 @@ def test_job_admission_failure_keeps_prior_samples_and_final_report(tmp_path, mo
     assert saved["modes"]["disabled"]["completed"] == 1
     assert saved["modes"]["disabled"]["failed"] == 0
     assert saved["modes"]["enabled"]["completed"] == saved["modes"]["enabled"]["failed"] == 1
-    assert saved["modes"]["enabled"]["samples"][0]["error_code"] == "RuntimeError"
+    assert saved["modes"]["enabled"]["samples"][0]["error_code"] == failure
 
 
 def test_bad_child_duration_still_saves_complete_run_accounting(tmp_path, monkeypatch):
