@@ -100,9 +100,55 @@ selected admitted public directory. Its read-only default and explicit
 `--apply` entry point preserve local identity, directory revision and the
 existing emitter; raw public data still cannot grant enrollment or execution.
 
+## Target-local login authorization
+
+The same installed `agent-ssh[fleet]` consumer exposes:
+
+```text
+agent-ssh gateway-authorization --policy policy.json --directory admitted.json --machine worker-a --environment linux --public-key-file <absolute-public-key-path> --state-dir <dedicated-absolute-directory> --json
+```
+
+Preview reads only public inputs and writes nothing. `--apply` explicitly
+publishes `authorized_keys.gateway` inside that dedicated directory. The
+selected target/controller/login user remain bound to the directory; it cannot
+be reused for another identity. A separately installed target-local sshd must
+explicitly select the returned path as its `AuthorizedKeysFile` and verify its
+login-user/environment binding. This command neither configures nor starts
+that service and never modifies the user's conventional `authorized_keys`.
+
+The target needs effective inbound permission, and each admitted source needs
+effective outbound permission under the same controller. The target's outbound
+permission and a source's inbound permission are independent. Client-only
+sources need no listener/host pin. Unsupported host mediation refuses for a
+selected target; an ineligible source grants no key. Every login entry uses
+`restrict,pty`: normal commands and terminals are permitted, but TCP, agent and
+X11 forwarding and user RC execution are not. This is not the Gateway's
+forwarding-only enrollment adapter or a host-mediated WSL grant.
+
+Publication requires an ordinary owner-private directory and unlinked files.
+Windows creates the final protected user/SYSTEM DACL before publishing public
+authorization data and verifies native descriptors on reuse; POSIX requires
+current-user ownership and modes700/600. Foreign files, changed owned bytes,
+missing owner binding, links and unsafe permissions refuse without repair.
+The existing accepted-directory revision helper fences rollback and
+equal-revision mutation before atomic replacement. An interrupted write retains
+the floor and permits the exact accepted retry. Identical authorization leaves
+file bytes and mtime unchanged. Newer admitted keys or withdrawal take effect
+on the sshd's next authentication without restarting it; existing sessions are
+not revoked by a key-file replacement.
+
+The explicit native test starts an isolated, non-elevated/current-user OpenSSH
+server with synthetic keys and strict host pinning. It proves real login,
+forwarding denial, old-key rejection, re-admission and inbound withdrawal under
+the same server process, then stops its owned fixture. This is local native
+consumer evidence, not a live fleet enrollment or installed connector proof.
+
+## Remaining setup integration
+
 This implements the outbound transport/profile part of
 [Gateway/SSH onboarding](../../../efforts/active/gateway-ssh-fleet-onboarding/README.md),
-not its remaining setup executor. Gateway selection, Vault key preparation,
+and target-local login-key convergence, not the full setup executor.
+Gateway selection, Vault key preparation,
 public-key enrollment, reverse-connector ownership, target sshd readiness,
 forwarding grants, bidirectional proof and automatic admitted-key catch-up
 remain with their existing setup and lifecycle owners. Do not call a machine

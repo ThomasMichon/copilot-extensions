@@ -1,5 +1,5 @@
 {
-  "comment": "Add strict Gateway profiles and optional Fleet policy/public-directory projection with retained monotonic revisions and repeat-safe inputs.",
+  "comment": "Add strict Gateway profiles, optional Fleet policy/public-directory projection, and dedicated target-local login authorization with retained monotonic revisions and repeat-safe inputs.",
   "changes": [
     {
       "plugin": "agent-ssh",

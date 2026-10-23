@@ -50,6 +50,44 @@ def projection(
     return value
 
 
+def _directory_floor(value: dict, sources: Path) -> tuple[Path, str]:
+    scope = json.dumps({
+        "target": value["target"], "controller": value["controller"],
+    }, sort_keys=True).encode("utf-8")
+    floor = sources / ("gateway-provider-" + hashlib.sha256(scope).hexdigest() + ".json")
+    accepted = {
+        "version": 1, "target": value["target"], "controller": value["controller"],
+        "directory_revision": value["directory_revision"],
+        "directory_digest": value["directory_digest"],
+    }
+    if floor.exists() or floor.is_symlink():
+        prior = json.loads(gateway_profile._read_owned_file(floor))
+        if (
+            not isinstance(prior, dict) or set(prior) != set(accepted)
+            or type(prior["version"]) is not int or prior["version"] != 1
+            or prior["target"] != accepted["target"] or prior["controller"] != accepted["controller"]
+            or type(prior["directory_revision"]) is not int or prior["directory_revision"] < 1
+            or not isinstance(prior["directory_digest"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", prior["directory_digest"]) is None
+        ):
+            raise ValueError("Gateway provider revision state is invalid; inspect it without resetting it")
+        if accepted["directory_revision"] < prior["directory_revision"]:
+            raise ValueError("Gateway public directory is older than the accepted revision")
+        if (
+            accepted["directory_revision"] == prior["directory_revision"]
+            and accepted["directory_digest"] != prior["directory_digest"]
+        ):
+            raise ValueError("Gateway public directory changed without a new revision")
+    return floor, gateway_profile._json(accepted)
+
+
+def accept_directory(value: dict, sources: Path) -> None:
+    """Retain the accepted input floor under the caller's directory lock."""
+    floor, data = _directory_floor(value, sources)
+    if not floor.exists() or gateway_profile._read_owned_file(floor) != data:
+        atomic_write_text(floor, data)
+
+
 def apply_projection(value: dict, *, config_d: Path | None, ssh_config: Path | None) -> Path:
     """Accept a monotonic public-directory revision, then use the sole profile writer."""
     selected = gateway_profile.validate_config(value["config"])
@@ -66,34 +104,8 @@ def apply_projection(value: dict, *, config_d: Path | None, ssh_config: Path | N
         raise ValueError("Gateway identity cannot be a managed configuration/source file")
     sources.mkdir(mode=0o700, parents=True, exist_ok=True)
     sources = ssh_profile._regular_config_directory(sources)
-    scope = json.dumps({
-        "target": value["target"], "controller": value["controller"],
-    }, sort_keys=True).encode("utf-8")
-    floor = sources / ("gateway-provider-" + hashlib.sha256(scope).hexdigest() + ".json")
-    accepted = {
-        "version": 1, "target": value["target"], "controller": value["controller"],
-        "directory_revision": value["directory_revision"],
-        "directory_digest": value["directory_digest"],
-    }
     with exclusive_file_lock(sources / "gateway-provider.lock"):
-        if floor.exists() or floor.is_symlink():
-            prior = json.loads(gateway_profile._read_owned_file(floor))
-            if (
-                not isinstance(prior, dict) or set(prior) != set(accepted)
-                or type(prior["version"]) is not int or prior["version"] != 1
-                or prior["target"] != accepted["target"] or prior["controller"] != accepted["controller"]
-                or type(prior["directory_revision"]) is not int or prior["directory_revision"] < 1
-                or not isinstance(prior["directory_digest"], str)
-                or re.fullmatch(r"[0-9a-f]{64}", prior["directory_digest"]) is None
-            ):
-                raise ValueError("Gateway provider revision state is invalid; inspect it without resetting it")
-            if accepted["directory_revision"] < prior["directory_revision"]:
-                raise ValueError("Gateway public directory is older than the accepted revision")
-            if (
-                accepted["directory_revision"] == prior["directory_revision"]
-                and accepted["directory_digest"] != prior["directory_digest"]
-            ):
-                raise ValueError("Gateway public directory changed without a new revision")
+        _directory_floor(value, sources)
         data = gateway_profile._json(selected)
         config = sources / ("gateway-provider-input-" + hashlib.sha256(data.encode()).hexdigest() + ".json")
         if config.exists() or config.is_symlink():
@@ -103,8 +115,7 @@ def apply_projection(value: dict, *, config_d: Path | None, ssh_config: Path | N
             atomic_write_text(config, data)
         # Accepted input is not applied-state proof. A failed emitter can retry
         # these exact bytes; it cannot roll back to a superseded directory.
-        if not floor.exists() or gateway_profile._read_owned_file(floor) != gateway_profile._json(accepted):
-            atomic_write_text(floor, gateway_profile._json(accepted))
+        accept_directory(value, sources)
         return gateway_profile.emit_profile(config, config_d=managed, ssh_config=ssh_config)
 
 
