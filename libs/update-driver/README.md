@@ -295,9 +295,39 @@ instead of pretending the execution space is clear; settle that native record
 first, then separately apply the existing queue recovery when required.
 Deleting control files or rotating roots is not recovery.
 
+On Windows, the packaged `update_driver/foundation.ps1` provides the same
+progress protocol without Python. Load the canonical native operation lock
+first. `Start-NativeFoundationProgress -Custody <held-object> -Root <execution-root>
+-Plugin <absolute-update-driver-source>` hashes the fixed three-sibling
+non-generated inventory and publishes running progress under that exact lock.
+`Get-NativeFoundationProgress -Root <execution-root>` is read-only; it returns
+the validated JSON record or no record. It rejects duplicate/unknown fields,
+nonprimitive or invalid types, inconsistent outcomes, linked paths, invalid
+UTF-8, trailing content and records over 32 KiB. Native boot evidence comes
+directly from the same Windows kernel query as the Python implementation.
+
+`Complete-NativeFoundationProgress` takes the same custody, root and plugin,
+the exact admitted JSON as `-Operation`, an optional `-ExitCode` and a bounded
+`-Reason`. Zero requires unchanged source bytes; a nonzero code requires a
+reason; an absent exit status requires an uncertainty reason and leaves the
+interrupted fence. Only a trusted producer that has settled its entire owned
+child tree may certify an integer outcome. Persistence uses a flushed,
+write-through temporary and bounded atomic replacement; it never edits the
+queue or deletes foundation artifacts.
+
+This native entry is deliberately **cold-only**: any existing SQLite queue or
+WAL/SHM/journal sidecar requires the established queue-aware Python authority.
+It does not interpret SQLite, assume a free lock settles an old request, or
+rotate the execution root to evade queued/uncertain work. The Python
+`foundation_state.begin` remains the upgrade/enclosing-transaction path.
+Native inventory hashing binds bytes, not TOML semantics; the fixed builder
+still validates package names, dependencies and local references before staging.
+No acquisition or mutable construction is performed by these progress helpers.
+
 This is the producer/core contract and its qualification, not an enabled cold
-bootstrap. No ordinary entry point writes these records yet; native cold
-construction admission and first-use adapters remain separate work.
+bootstrap. No ordinary entry point writes these records yet; prerequisite
+acquisition, caller-independent producer orchestration and first-use adapters
+remain separate work.
 
 ### Fixed foundation construction participant
 

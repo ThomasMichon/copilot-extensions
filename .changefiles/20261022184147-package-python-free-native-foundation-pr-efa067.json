@@ -1,0 +1,13 @@
+{
+  "comment": "Package Python-free native foundation progress with exact execution custody, source inventory and fail-closed cold queue admission.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
