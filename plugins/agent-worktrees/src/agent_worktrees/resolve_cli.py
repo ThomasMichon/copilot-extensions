@@ -909,7 +909,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
 
     if last_session:
-        launch_cmd.append(f"--resume={last_session}")
+        from .native_arguments import append_native_arguments
+        launch_cmd = append_native_arguments(launch_cmd, [f"--resume={last_session}"])
     elif not no_resume:
         _emit_parent_context_hint(record, to_stderr=True)
 

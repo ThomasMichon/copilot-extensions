@@ -23,7 +23,7 @@ from agent_procutil import no_window_kwargs
 from work_coalescing_singleton import CoalescingServer
 from zdd.diagnostics import process_start_time
 
-from . import mux_daemon_cutover, mux_daemon_live, mux_daemon_process
+from . import mux_daemon_cutover, mux_daemon_live, mux_daemon_process, mux_discovery
 from .mux_child_process import run as run_mux_child
 from .mux_attached_clients import AttachedClientObserver
 from .mux_mapping_registry import (
@@ -293,6 +293,7 @@ def apply_status_options(entry: dict, values: dict) -> bool:
     returns ``True`` only if every write succeeded."""
     mux_bin = entry["mux_bin"]
     session = entry["mux_session"]
+    values = mux_discovery.initial_status_values(entry, values)
     all_ok = True
     for option, value in values.items():
         try:
@@ -370,8 +371,9 @@ def status_push_key(payload: dict) -> str:
         raise ValueError("mux-status-v1 push payload missing 'rendered_at'")
     if not isinstance(values, dict):
         raise ValueError("mux-status-v1 push payload missing 'values'")
+    content = mux_discovery.status_key_content(payload, values)
     values_digest = hashlib.sha256(
-        json.dumps(values, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return (
         f"{len(project)}:{project}:{len(worktree_id)}:{worktree_id}:"
@@ -380,15 +382,7 @@ def status_push_key(payload: dict) -> str:
 
 
 def _parse_rendered_at(value: str) -> float | None:
-    """Best-effort ISO-8601 -> epoch-seconds parse for ordering renders.
-    Returns ``None`` (never raises) for anything unparseable -- an
-    unorderable render is simply always treated as "not older" (applied),
-    matching this ordering check's fail-open contract: it exists to catch
-    an out-of-order write, not to add a NEW way to drop a render."""
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-    except (ValueError, TypeError):
-        return None
+    return mux_discovery.parse_rendered_at(value)
 
 
 def build_compute(
@@ -455,6 +449,8 @@ def build_compute(
             finally:
                 runtime._end_control_request()
         if kind != KIND:
+            if kind == mux_discovery.KIND:
+                return mux_discovery.handle_discovery(registry, payload, runtime, handler_tracker)
             raise ValueError(f"mux_daemon does not serve kind={kind!r}")
         if runtime is not None and not runtime.accepting_requests():
             return {"applied": False, "reason": "draining"}
@@ -491,6 +487,9 @@ def build_compute(
             entry = registry.get(project, worktree_id)
             if entry is None or not entry["live"]:
                 return {"applied": False, "reason": "not-live"}
+            fence_failure = mux_discovery.status_fence_failure(entry, payload, registry=registry)
+            if fence_failure is not None:
+                return fence_failure
 
             # Discard a render older than the last one actually applied for
             # this mapping incarnation (Copilot review finding) -- fenced
@@ -511,19 +510,12 @@ def build_compute(
             # not still be treated as a valid write target. A dead session
             # invalidates the mapping so a later lookup does not repeat the
             # same probe forever.
-            if not _mux_session_alive(entry["mux_bin"], entry["mux_session"]):
-                # Guard with session identity too: a concurrent register()
-                # can replace this mapping at the same revision between the
-                # snapshot above and this call.
-                registry.remove(
-                    project, worktree_id,
-                    mapping_revision=entry["mapping_revision"], mux_session=entry["mux_session"],
-                    session_incarnation=entry.get("session_incarnation"),
-                )
-                tombstone = registry.get(project, worktree_id)
-                if tombstone is not None:
-                    mux_daemon_live.publish_live_observation(tombstone, ensure_monitor=False)
-                return {"applied": False, "reason": "not-live"}
+            # Discovered mappings already passed the identity-aware enumeration;
+            # only legacy mappings still need the name-only liveness probe.
+            if not entry.get("native_session_incarnation") and not _mux_session_alive(
+                entry["mux_bin"], entry["mux_session"],
+            ):
+                return mux_discovery.retire_missing_mapping(registry, entry)
 
             # Recheck immediately before the actual write (Copilot review
             # finding): a concurrent CLI register/remove could still have

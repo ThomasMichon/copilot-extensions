@@ -17,7 +17,7 @@ import os
 import platform
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import yaml
 
@@ -1698,10 +1698,14 @@ def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
     does not support it (rejected as an unknown session)."""
     return _mux_named_session_target(mux_session_name(worktree_id), mux_bin)
 
+def _is_psmux(mux_bin: str) -> bool:
+    return PureWindowsPath(mux_bin).stem.casefold() == "psmux"
+
+
 def _mux_named_session_target(session_name: str, mux_bin: str) -> str:
     """Return an exact mux target for an already-known session name."""
     sess = str(session_name)
-    return sess if mux_bin == "psmux" else f"={sess}"
+    return sess if _is_psmux(mux_bin) else f"={sess}"
 
 
 def current_mux_session(
@@ -1842,7 +1846,7 @@ def build_mux_new_window_argv(
     ``-P -F '#{pane_id}'`` prints the new pane id.
     """
     mux_bin = _mux_bin(mux)
-    is_tmux = mux_bin != "psmux"
+    is_tmux = not _is_psmux(mux_bin)
     target = (
         _mux_named_session_target(session_name, mux_bin)
         if session_name
@@ -1892,7 +1896,7 @@ def build_mux_new_session_argv(
     session is indistinguishable from a picker-launched one.
     """
     mux_bin = _mux_bin(mux)
-    is_tmux = mux_bin != "psmux"
+    is_tmux = not _is_psmux(mux_bin)
     sess = mux_session_name(worktree_id)
 
     argv = [mux_bin, "new-session", "-d", "-s", sess, "-P", "-F", "#{pane_id}"]
@@ -2067,12 +2071,9 @@ def headless_new_session(
 
     from agent_procutil import detached_kwargs
 
-    # Inlined rather than calling embody_resume.with_seed (the same one-line
-    # append): embody_resume imports this module, so a module-level import
-    # here would be circular, and a lazy import inside this function body
-    # would pull in a fresh platform.system() call under whatever
-    # subprocess.Popen a caller's test may have already monkeypatched.
-    argv = [*cmd, "--interactive", seed] if seed else list(cmd)
+    from .native_arguments import append_native_arguments
+
+    argv = append_native_arguments(cmd, ["--interactive", seed]) if seed else list(cmd)
 
     full_env = {**os.environ, **(env or {})}
     kwargs: dict[str, object] = {
@@ -2160,7 +2161,7 @@ def mux_active_pane_named(
 
     mux_bin = _mux_bin(mux)
     target = _mux_named_session_target(session_name, mux_bin)
-    if mux_bin != "psmux":
+    if not _is_psmux(mux_bin):
         # display-message takes a pane target, not a session-only target.
         target += ":"
     try:
@@ -2345,7 +2346,7 @@ def mux_binding_for_session(
             seen.add(cur)
             ancestry.add(cur)
             parent = table[cur]["ppid"]
-            if mux_bin == "psmux" and platform.system() == "Windows":
+            if _is_psmux(mux_bin) and platform.system() == "Windows":
                 child_started = _windows_process_start_time(cur)
                 parent_started = _windows_process_start_time(parent)
                 # Windows retains a creator PID after that process exits. If the

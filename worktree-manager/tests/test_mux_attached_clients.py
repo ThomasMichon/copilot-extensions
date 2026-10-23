@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import subprocess
 
-from worktree_manager import mux_attached_clients
+import pytest
+
+from worktree_manager import mux_attached_clients, mux_daemon_live, mux_discovery
 from worktree_manager.mux_mapping_registry import MuxMappingRegistry
 
 
@@ -254,10 +256,14 @@ def test_update_attached_clients_rejects_equal_revision_tombstone(tmp_path):
     assert registry.get("proj", "wt-1")["attached_clients"] == 2
 
 
-def test_observer_bounds_each_cycle_and_eventually_probes_all_31_mappings(tmp_path, monkeypatch):
+@pytest.mark.parametrize("native", [False, True])
+def test_observer_bounds_each_cycle_and_eventually_probes_all_31_mappings(tmp_path, monkeypatch, native):
     registry = MuxMappingRegistry(tmp_path / "mux-mapping.json")
     for i in range(31):
-        registry.register(_entry(worktree_id=f"wt-{i:02}", mux_session=f"session-{i:02}"))
+        registry.register(_entry(
+            worktree_id=f"wt-{i:02}", mux_session=f"session-{i:02}",
+            native_session_incarnation="$1:100" if native else None,
+        ))
     now = [0.0]
     calls = []
 
@@ -267,7 +273,15 @@ def test_observer_bounds_each_cycle_and_eventually_probes_all_31_mappings(tmp_pa
         return None
 
     monkeypatch.setattr(mux_attached_clients.time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(mux_attached_clients, "mux_attached_clients", probe)
+    if native:
+        monkeypatch.setattr(mux_attached_clients, "mux_attached_clients",
+                            lambda *args: pytest.fail("native observation must replace the legacy probe"))
+        monkeypatch.setattr(mux_discovery, "confirm_native_session", lambda entry, **kw: (
+            probe(entry["mux_bin"], entry["mux_session"], kw["timeout_s"])
+            or {"applied": False, "reason": "enumeration-unavailable"}
+        ))
+    else:
+        monkeypatch.setattr(mux_attached_clients, "mux_attached_clients", probe)
     observer = mux_attached_clients.AttachedClientObserver()
     for _ in range(16):
         before = len(calls)
@@ -280,10 +294,13 @@ def test_observer_bounds_each_cycle_and_eventually_probes_all_31_mappings(tmp_pa
     assert all(0 < timeout <= 1.0 for _, timeout in calls)
 
 
-def test_observer_reserves_only_the_remaining_shared_budget(tmp_path, monkeypatch):
+@pytest.mark.parametrize("native", [False, True])
+def test_observer_reserves_only_the_remaining_shared_budget(tmp_path, monkeypatch, native):
     registry = MuxMappingRegistry(tmp_path / "mux-mapping.json")
-    registry.register(_entry(worktree_id="a"))
-    registry.register(_entry(worktree_id="b"))
+    for worktree_id in ("a", "b"):
+        registry.register(_entry(
+            worktree_id=worktree_id, native_session_incarnation="$1:100" if native else None,
+        ))
     now = [0.0]
     timeouts = []
 
@@ -293,9 +310,143 @@ def test_observer_reserves_only_the_remaining_shared_budget(tmp_path, monkeypatc
         return None
 
     monkeypatch.setattr(mux_attached_clients.time, "monotonic", lambda: now[0])
-    monkeypatch.setattr(mux_attached_clients, "mux_attached_clients", probe)
+    if native:
+        monkeypatch.setattr(mux_attached_clients, "mux_attached_clients",
+                            lambda *args: pytest.fail("native observation must replace the legacy probe"))
+        monkeypatch.setattr(mux_discovery, "confirm_native_session", lambda entry, **kw: (
+            probe(entry["mux_bin"], entry["mux_session"], kw["timeout_s"])
+            or {"applied": False, "reason": "enumeration-unavailable"}
+        ))
+    else:
+        monkeypatch.setattr(mux_attached_clients, "mux_attached_clients", probe)
     mux_attached_clients.AttachedClientObserver().observe(registry)
     assert timeouts == [1.0, 0.25]
+
+
+def _native_observer_fixture(monkeypatch, tmp_path, *, binary="tmux"):
+    registry = MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    entry = _entry(
+        mux_bin=binary, mux_session="wt-one", worktree_path=str(tmp_path),
+        session_incarnation="$1:100", native_session_incarnation="$1:100",
+        attached_clients=3,
+    )
+    registry.register(entry)
+    published = []
+    monkeypatch.setattr(mux_attached_clients, "mux_attached_clients",
+                        lambda *args: pytest.fail("native entries must not add a legacy probe"))
+    monkeypatch.setattr(mux_daemon_live, "publish_live_observation",
+                        lambda entry, **kwargs: published.append(dict(entry)) or {"applied": True})
+    return registry, entry, published
+
+
+@pytest.mark.parametrize("code,listing,diagnostic", [
+    (0, "", ""),
+    (0, "other\t0\t$2:200\telsewhere\n", ""),
+    (1, "", "no server running on /run/user/1000/tmux/default\n"),
+    (1, "", "error connecting to /run/user/1000/tmux/default (No such file or directory)\n"),
+])
+def test_observer_retires_absence_without_any_render_request(
+    monkeypatch, tmp_path, code, listing, diagnostic,
+):
+    registry, _, published = _native_observer_fixture(monkeypatch, tmp_path)
+    probes = []
+    monkeypatch.setattr(mux_discovery, "run_mux_child", lambda argv, **kwargs: (
+        probes.append((argv, kwargs))
+        or subprocess.CompletedProcess(argv, code, listing, diagnostic)
+    ))
+    mux_attached_clients.AttachedClientObserver().observe(registry)
+    assert len(probes) == 1
+    assert probes[0][0][1] == "list-sessions" and probes[0][1]["timeout"] <= 1.0
+    assert not registry.has_any_live()
+    assert len(published) == 1 and not published[0]["live"]
+
+
+@pytest.mark.parametrize("binary,code,listing,diagnostic", [
+    ("tmux", 1, "", "error connecting to /run/tmux (Permission denied)"),
+    ("tmux", 1, "", "error connecting to /run/tmux (Connection refused)"),
+    ("tmux", 1, "", "no sessions"),
+    ("tmux", 1, "", ""),
+    ("tmux", 127, "", "no server running on /run/tmux"),
+    ("tmux", 1, "", "bad option\nno server running on /run/tmux"),
+    ("tmux", 1, "partial output", "no server running on /run/tmux"),
+    ("psmux", 1, "", "no server running on /run/tmux"),
+    ("other-program", 1, "", "no server running on /run/tmux"),
+    ("tmux", 0, "bad listing", ""),
+    ("tmux", 0, "wt-one\t0\t$2:200\tforeign\n", ""),
+    ("tmux", 1, b"partial output", "no server running on /run/tmux"),
+    ("tmux", 1, "", b"no server running on /run/tmux"),
+])
+def test_observer_preserves_unknown_or_replaced_ownership(
+    monkeypatch, tmp_path, binary, code, listing, diagnostic,
+):
+    registry, _, published = _native_observer_fixture(monkeypatch, tmp_path, binary=binary)
+    before = registry.snapshot()
+    monkeypatch.setattr(mux_discovery, "run_mux_child",
+                        lambda argv, **kw: subprocess.CompletedProcess(argv, code, listing, diagnostic))
+    mux_attached_clients.AttachedClientObserver().observe(registry)
+    assert registry.snapshot() == before
+    assert published == []
+
+
+@pytest.mark.parametrize("failure", [
+    FileNotFoundError("fixture mux unavailable"), subprocess.TimeoutExpired("tmux", 1),
+])
+def test_native_probe_failure_keeps_mapping_and_completion_cadence(monkeypatch, tmp_path, failure):
+    registry, _, published = _native_observer_fixture(monkeypatch, tmp_path)
+    before = registry.snapshot()
+    now = [100.0]
+    calls = []
+
+    def failed_probe(argv, **kwargs):
+        calls.append(kwargs["timeout"])
+        now[0] += 1.0
+        raise failure
+
+    monkeypatch.setattr(mux_attached_clients.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(mux_discovery, "run_mux_child", failed_probe)
+    observer = mux_attached_clients.AttachedClientObserver()
+    observer.observe(registry)
+    now[0] = 120.0
+    observer.observe(registry)
+    assert calls == [1.0]
+    now[0] = 121.0
+    observer.observe(registry)
+    assert calls == [1.0, 1.0]
+    assert registry.snapshot() == before and published == []
+
+
+@pytest.mark.parametrize("revision,incarnation", [(2, "$1:100"), (1, "$2:200")])
+@pytest.mark.parametrize("absent", [False, True])
+def test_observer_native_result_cannot_overwrite_a_concurrent_mapping(
+    monkeypatch, tmp_path, revision, incarnation, absent,
+):
+    registry, entry, published = _native_observer_fixture(monkeypatch, tmp_path)
+
+    def replacement_during_probe(argv, **kwargs):
+        registry.register(dict(
+            entry, mapping_revision=revision, session_incarnation=incarnation,
+            native_session_incarnation=incarnation, attached_clients=7,
+        ))
+        listing = "" if absent else f"wt-one\t0\t$1:100\t{tmp_path}\n"
+        return subprocess.CompletedProcess(argv, 0, listing, "")
+
+    monkeypatch.setattr(mux_discovery, "run_mux_child", replacement_during_probe)
+    mux_attached_clients.AttachedClientObserver().observe(registry)
+    current = registry.get("proj", "wt-1")
+    assert current["live"] and current["attached_clients"] == 7
+    assert (current["mapping_revision"], current["session_incarnation"]) == (revision, incarnation)
+    assert published == []
+
+
+def test_observer_native_zero_clients_is_presence_not_absence(monkeypatch, tmp_path):
+    registry, _, published = _native_observer_fixture(monkeypatch, tmp_path)
+    monkeypatch.setattr(mux_discovery, "run_mux_child", lambda argv, **kw: subprocess.CompletedProcess(
+        argv, 0, f"wt-one\t0\t$1:100\t{tmp_path}\n", "",
+    ))
+    mux_attached_clients.AttachedClientObserver().observe(registry)
+    current = registry.get("proj", "wt-1")
+    assert current["live"] and current["attached_clients"] == 0
+    assert published == []
 
 
 def test_observer_attempt_cadence_does_not_depend_on_publication_success(tmp_path, monkeypatch):

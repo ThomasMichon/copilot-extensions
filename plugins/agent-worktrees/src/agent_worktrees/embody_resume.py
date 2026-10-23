@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from . import sessions
+from .native_arguments import append_native_arguments
 from .session_liveness import session_liveness
 
 
@@ -33,7 +34,7 @@ def resume_target(
 
 def with_resume(launch_cmd, target: str | None) -> list[str]:
     """``launch_cmd`` resuming ``target`` (unchanged when there is none)."""
-    return [*launch_cmd, f"--resume={target}"] if target else list(launch_cmd)
+    return append_native_arguments(launch_cmd, [f"--resume={target}"]) if target else list(launch_cmd)
 
 
 def with_seed(launch_cmd, seed: str | None) -> list[str]:
@@ -52,7 +53,7 @@ def with_seed(launch_cmd, seed: str | None) -> list[str]:
     --resume=<id> --interactive "<prompt>"` resumes full history and
     auto-executes the prompt as the next turn).
     """
-    return [*launch_cmd, "--interactive", seed] if seed else list(launch_cmd)
+    return append_native_arguments(launch_cmd, ["--interactive", seed]) if seed else list(launch_cmd)
 
 
 def live_head_refusal(target: str | None, worktree_id: str) -> str | None:

@@ -42,9 +42,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
     name: foundation construction (Ubuntu)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +65,7 @@ jobs:
           python tools/seasoned_uv.py --uv uv -- --system pytest psutil setuptools
           python -m pytest -q libs/single-instance-lease/tests/test_operation.py libs/single-instance-lease/tests/test_native_operation_linux.py
           python -m pytest -q libs/agent-procutil/tests/test_native_child.py libs/agent-procutil/tests/test_caller_owned.py libs/agent-procutil/tests/test_caller_owned_native.py
+          python -m pytest -q libs/agent-procutil/tests/test_native_owned_shell.py libs/agent-procutil/tests/test_native_daemon_shell.py
       - name: Qualify actual immutable foundation construction and custody
         run: >-
           python tools/run-plugin-tests.py update-driver
@@ -78,6 +80,11 @@ jobs:
           --test-file tests/test_native_participant.py
           --test-file tests/test_foundation_build_process.py
           --test-timeout 300 --timeout 600
+      - name: Qualify Python-free Linux genesis and retained upgrade
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_foundation_linux_genesis.py
+          --test-timeout 900 --timeout 1080
   foundation-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
     name: foundation construction (Windows)

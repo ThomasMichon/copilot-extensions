@@ -12,6 +12,7 @@ import time
 
 from agent_procutil import no_window_flags
 
+from . import mux_discovery
 from .mux_mapping_registry import MuxMappingRegistry
 
 
@@ -54,11 +55,12 @@ def mux_attached_clients(mux_bin: str, session: str, timeout_s: float = 1.0) -> 
 def refresh_attached_clients(
     registry: MuxMappingRegistry, current: dict, timeout_s: float = 1.0
 ) -> dict:
-    """Opportunistically refresh ``current``'s registry-tracked
-    ``attached_clients`` via a real :func:`mux_attached_clients` probe.
+    """Refresh ``attached_clients`` with one bounded probe. Legacy entries
+    use ``list-clients``; discovered entries use identity-aware enumeration
+    and retire confirmed absence even when no new status render arrives.
     Returns the (possibly updated) mapping dict; a probe failure (``None``)
-    or an unchanged count is a no-op, per :func:`mux_attached_clients`'s own
-    docstring.
+    or an unchanged count is a no-op. A retired or superseded mapping may
+    leave the returned snapshot stale; the registry remains authoritative.
 
     The actual persist goes through
     :meth:`~worktree_manager.mux_mapping_registry.MuxMappingRegistry.
@@ -72,7 +74,17 @@ def refresh_attached_clients(
     ``update_attached_clients`` re-verifies identity and persists only the
     one field, atomically, so a superseded refresh is correctly abandoned
     instead."""
-    observed = mux_attached_clients(current["mux_bin"], current["mux_session"], timeout_s)
+    if current.get("native_session_incarnation"):
+        native = mux_discovery.confirm_native_session(
+            current, connected_only=False, timeout_s=timeout_s,
+        )
+        if not native.get("applied"):
+            if native.get("reason") == "session-absent":
+                mux_discovery.retire_missing_mapping(registry, current)
+            return current
+        observed = native["attached_clients"]
+    else:
+        observed = mux_attached_clients(current["mux_bin"], current["mux_session"], timeout_s)
     if observed is None or observed == current.get("attached_clients"):
         return current
     result = registry.update_attached_clients(

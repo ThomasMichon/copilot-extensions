@@ -115,6 +115,18 @@ def test_mutations_refuse_without_actual_fd_custody(native_source, area, tools):
     assert not (root / fs.FILENAME).exists() and not (root / "frozen").exists()
 
 
+def test_producer_without_canonical_process_observation_refuses_before_creating_state(area, tools):
+    root = area / "absent"
+    producer = Path(__file__).resolve().parents[1] / "scripts" / "foundation-produce.sh"
+    result = subprocess.run(
+        [str(tools / "bash"), str(producer), str(root), "b" * 64],
+        env=dict(os.environ, PATH=str(tools)), stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0 and "requires native ps observation" in result.stderr
+    assert not root.exists()
+
+
 @pytest.mark.parametrize("name", [
     "queue.sqlite3", "queue.sqlite3-wal", "queue.sqlite3-shm", "queue.sqlite3-journal",
 ])

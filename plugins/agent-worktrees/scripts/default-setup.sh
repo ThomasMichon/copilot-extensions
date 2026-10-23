@@ -23,21 +23,45 @@ SETUP_HOOK=""
 SESSION_PATH=""
 ENV_SCRIPT=""
 COPILOT_PATH_OVERRIDE=""
+EXECUTION_DIRECTORY=""
 CONFIG_ROOT=""
 RUNTIME_PYTHON=""
 LAUNCH_SEED_RECORD=""
 LAUNCH_SEED_ID=""
 LAUNCH_SEED_RUNTIME_PYTHON=""
 COPILOT_ARGS=()
-
-while [[ $# -gt 0 ]]; do
+native_value_option() {
     case "$1" in
+        -C|-i|--interactive|-p|--prompt|--model|--reasoning-effort|\
+        --context|--auto-tier|--agent|-n|--name|--session-id|\
+        --log-dir|--extension-sdk-path|--log-level|--stream|--output-format|\
+        --add-dir|--attachment|--disable-mcp-server|--add-github-mcp-toolset|\
+        --add-github-mcp-tool|--plugin-dir|--additional-mcp-config|--mcp-github-auth|\
+        --max-autopilot-continues|--mode|--environment-host|--environment-compute-id|\
+        --dynamic-retrieval|--enable-mcp-server|--max-ai-credits|--usage-output-file)
+            return 0 ;;
+    esac
+    return 1
+}
+while [[ $# -gt 0 ]]; do
+    if native_value_option "$1"; then
+        if [[ $# -lt 2 ]]; then
+            printf 'Native Copilot option %s requires a value\n' "$1" >&2
+            exit 2
+        fi
+        COPILOT_ARGS+=("$1" "$2")
+        shift 2
+        continue
+    fi
+    case "$1" in
+        --)             COPILOT_ARGS+=("$@"); break ;;
         --machine)      MACHINE="$2"; shift 2 ;;
         --recovery)     RECOVERY=true; shift ;;
         --setup-hook)   SETUP_HOOK="$2"; shift 2 ;;
         --session-path) SESSION_PATH="$2"; shift 2 ;;
         --env-script)   ENV_SCRIPT="$2"; shift 2 ;;
         --copilot-path) COPILOT_PATH_OVERRIDE="$2"; shift 2 ;;
+        --execution-directory) EXECUTION_DIRECTORY="$2"; shift 2 ;;
         --config-root)  CONFIG_ROOT="$2"; shift 2 ;;
         --runtime-python) RUNTIME_PYTHON="$2"; shift 2 ;;
         --launch-seed-record) LAUNCH_SEED_RECORD="$2"; shift 2 ;;
@@ -46,6 +70,9 @@ while [[ $# -gt 0 ]]; do
         *)              COPILOT_ARGS+=("$1"); shift ;;
     esac
 done
+if [[ -n "$EXECUTION_DIRECTORY" ]]; then
+    COPILOT_ARGS=(-C "$EXECUTION_DIRECTORY" "${COPILOT_ARGS[@]}")
+fi
 
 # In --stdio (ACP) mode, stdout is the JSON-RPC channel; keep all human-facing
 # output (banner, hook output) off it. `say` and the hook redirect to stderr.

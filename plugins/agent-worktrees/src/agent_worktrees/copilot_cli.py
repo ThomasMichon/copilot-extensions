@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 from . import handoff_cli, output, sessions
@@ -90,8 +91,9 @@ def cmd_copilot(args: argparse.Namespace) -> int:
 
     Ensures a durable, mux-wrapped Copilot session exists (identical
     create-or-resume semantics to `embody`), then hands THIS process's own
-    controlling terminal to it, replaced via exec so no wrapper is left
-    holding the TTY; refuses without one. For a caller that must keep
+    controlling terminal to it. POSIX replaces the caller; Windows keeps
+    the caller waiting until its foreground client exits. Refuses without
+    a terminal. For a caller that must keep
     running while a session becomes visible elsewhere (e.g. the Worktree
     Manager Picker's "Launch in new window"), use the Manager's own
     launch-plan ``new_window`` modifier instead (Phase 9, #5210) -- opening
@@ -139,6 +141,25 @@ def cmd_copilot(args: argparse.Namespace) -> int:
     mux_bin = sessions._mux_bin(getattr(args, "mux", None))
     argv = [mux_bin, "attach-session", "-t", session_name]
     try:
+        if sys.platform == "win32":
+            # headless-guard: allow interactive client inherits the caller's terminal
+            client = subprocess.Popen(argv)
+            try:
+                return client.wait()
+            except KeyboardInterrupt:
+                try:
+                    return client.wait(timeout=30)
+                except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                    killed = False
+                    while True:
+                        try:
+                            if not killed:
+                                client.kill()
+                                killed = True
+                            client.wait()
+                            return 130
+                        except KeyboardInterrupt:
+                            continue
         os.execvp(mux_bin, argv)  # never returns on success
     except OSError as exc:
         output.err(f"copilot: could not attach to {session_name!r}: {exc}")

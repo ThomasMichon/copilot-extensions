@@ -456,13 +456,13 @@ def _capture_set(monkeypatch):
 def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    m._register_session_for_monitor("wt-b", "/w/b")
-    m._register_session_for_monitor("wt-gone", "/w/g")
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    m._register_session_for_monitor("wt-b", "/w/b", session_incarnation="$1:100")
+    m._register_session_for_monitor("wt-gone", "/w/g", session_incarnation="$1:100")
 
     # wt-a + wt-b are live; wt-gone is not; a non-wt session is ignored.
     monkeypatch.setattr(
-        m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1, "wt-b": 0, "other": 1}
+        m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100"), "wt-b": (0, "$1:100"), "other": (1, "$1:100")}
     )
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
@@ -487,9 +487,9 @@ def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
 def test_sweep_reuses_project_config_cache_for_served_sessions(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    m._register_session_for_monitor("wt-b", "/w/b")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1, "wt-b": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    m._register_session_for_monitor("wt-b", "/w/b", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100"), "wt-b": (1, "$1:100")})
 
     def _activate(path, *, force=False):
         m.cfg.set_active_project("proj")
@@ -559,8 +559,8 @@ def test_sweep_unions_managed_mux_cache_into_served_sessions(tmp_path, monkeypat
             tracking_dir=lambda: tmp_path,
         ),
     )
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -617,8 +617,8 @@ def test_sweep_unions_managed_mux_cache_into_served_sessions(tmp_path, monkeypat
 def test_sweep_without_managed_mux_cache_observes_only_the_direct_scan(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -645,8 +645,8 @@ def test_sweep_routes_manager_owned_status_through_mux_status_v1(tmp_path, monke
             tracking_dir=lambda: tmp_path,
         ),
     )
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -700,8 +700,8 @@ def test_sweep_prunes_manager_owned_registry_entries_from_the_unmanaged_lane(tmp
     from agent_worktrees import mux_link
 
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-managed", "/w/managed")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-managed": 1})
+    m._register_session_for_monitor("wt-managed", "/w/managed", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-managed": (1, "$1:100")})
     monkeypatch.setattr(
         m,
         "_monitor_mux_set",
@@ -760,8 +760,8 @@ def test_sweep_treats_stale_managed_cache_entries_as_unmanaged_again(tmp_path, m
             tracking_dir=lambda: tmp_path,
         ),
     )
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -807,8 +807,8 @@ def test_sweep_keeps_unmanaged_sessions_on_the_direct_writer_path(tmp_path, monk
             tracking_dir=lambda: tmp_path,
         ),
     )
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -1073,8 +1073,8 @@ def test_sweep_prefers_live_managed_entry_when_session_names_collide(tmp_path, m
 def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -1093,8 +1093,8 @@ def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
 def test_sweep_reuses_segment_and_skips_unchanged_mux_values(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
@@ -1120,8 +1120,8 @@ def test_sweep_reuses_segment_and_skips_unchanged_mux_values(tmp_path, monkeypat
 def test_sweep_reuses_session_project_resolution(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
     monkeypatch.setattr(m, "_monitor_mux_set", lambda *a, **k: True)
@@ -1155,7 +1155,7 @@ def test_sweep_skips_invalid_paths_when_pruning_project_cache(tmp_path, monkeypa
     reg.mkdir()
     (reg / "wt-a").write_text("bad\0path", encoding="utf-8")
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_monitor_mux_set", lambda *a, **k: True)
     monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
     projects = {"stale": "repo-a"}
@@ -1164,7 +1164,7 @@ def test_sweep_skips_invalid_paths_when_pruning_project_cache(tmp_path, monkeypa
         m._monitor_sweep(
             "tmux", "T", "P", set(), segment_cache=object(), session_projects=projects
         )
-        == 1
+        == 0
     )
     assert projects == {}
 
@@ -1172,8 +1172,8 @@ def test_sweep_skips_invalid_paths_when_pruning_project_cache(tmp_path, monkeypa
 def test_sweep_retries_failed_mux_publish(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -1195,8 +1195,8 @@ def test_sweep_retries_failed_mux_publish(tmp_path, monkeypatch):
 def test_sweep_republishes_for_recreated_mux_session(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    incarnation = ["100"]
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    incarnation = ["$1:100"]
     monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, incarnation[0])})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
@@ -1208,7 +1208,8 @@ def test_sweep_republishes_for_recreated_mux_session(tmp_path, monkeypatch):
     ctx_done = set()
 
     m._monitor_sweep("tmux", "T", "P", ctx_done, published=published, incarnations=incarnations)
-    incarnation[0] = "200"
+    incarnation[0] = "$2:200"
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$2:200")
     m._monitor_sweep("tmux", "T", "P", ctx_done, published=published, incarnations=incarnations)
 
     assert len([call for call in calls if call[1] == "@aw_seg"]) == 2
@@ -1447,11 +1448,11 @@ def test_resident_agent_bridge_policy_denies_guarded_write(tmp_path, monkeypatch
 def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/p1/a")
-    m._register_session_for_monitor("wt-b", "/p1/b")
-    m._register_session_for_monitor("wt-c", "/p2/c")
+    m._register_session_for_monitor("wt-a", "/p1/a", session_incarnation="$1:100")
+    m._register_session_for_monitor("wt-b", "/p1/b", session_incarnation="$1:100")
+    m._register_session_for_monitor("wt-c", "/p2/c", session_incarnation="$1:100")
     monkeypatch.setattr(
-        m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1, "wt-b": 1, "wt-c": 1}
+        m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100"), "wt-b": (1, "$1:100"), "wt-c": (1, "$1:100")}
     )
 
     project_by_path = {"/p1/a": "p1", "/p1/b": "p1", "/p2/c": "p2"}
@@ -1477,9 +1478,9 @@ def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
 def test_sweep_publishes_each_served_session_to_pane_reconciler(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    m._register_session_for_monitor("wt-b", "/w/b")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux: {"wt-a": 1, "wt-b": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    m._register_session_for_monitor("wt-b", "/w/b", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux: {"wt-a": (1, "$1:100"), "wt-b": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -1529,7 +1530,7 @@ def test_sweep_without_mux_preserves_registered_sessions(tmp_path, monkeypatch):
 def test_sweep_transient_mux_failure_holds(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
     # None == the mux couldn't be enumerated -> transient; must NOT prune/exit.
     monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: None)
     calls = _capture_set(monkeypatch)
@@ -1570,8 +1571,8 @@ def test_sweep_mux_failure_labels_all_published_and_initial_demanded_rosters(tmp
 def _wire_monitor_handoff_session(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -2733,8 +2734,8 @@ def test_sweep_triggers_pending_handoff_cutover_for_dormant_record(tmp_path, mon
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
     monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **kw: 0)
@@ -2955,8 +2956,8 @@ def test_sweep_leaves_sessions_without_pending_handoff_untouched(tmp_path, monke
     monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
@@ -4158,7 +4159,7 @@ def _elect_monitor_for_one_iteration(monkeypatch):
 
     retired = iter([False, True, True])
     monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
-    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: next(retired))
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: next(retired, True))
 
 
 @pytest.mark.parametrize("first_failure", ["sqlite", "election", "persistent"])
@@ -4460,12 +4461,12 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: _FakeHookClient())
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     _elect_monitor_for_one_iteration(monkeypatch)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
-    runtime_states = iter([False, True])
-    monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: False)
     monkeypatch.setattr(
         m,
         "_monitor_sweep",
@@ -4495,6 +4496,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     monkeypatch.setattr(resident_push, "bind", _spy_bind)
 
     dial_results = []
+    wake_at_reply = []
 
     class _DialingServer(hook_ipc.HookIpcServer):
         def start(self) -> None:
@@ -4508,11 +4510,16 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
             super().start()
             endpoint_lock = tmp_path / "dial-endpoint.json"
             endpoint_lock.write_text(json.dumps(self.rendezvous()), encoding="utf-8")
+            wake_event = bound[0][0]
+            # Isolate this request from the producer's initial startup wake.
+            wake_event.clear()
+            before = wake_event.is_set()
             dial_results.append(
                 hook_ipc.send_best_effort(
                     "handoffWake", {"worktree_id": "wt-1"}, lock_path=endpoint_lock,
                 )
             )
+            wake_at_reply.append((before, wake_event.is_set()))
 
     monkeypatch.setattr(hook_ipc, "HookIpcServer", _DialingServer)
 
@@ -4520,8 +4527,8 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
 
     assert dial_results == [True], "the real wire round-trip must be accepted"
     assert len(bound) == 1
-    wake_event, _segment_cache = bound[0]
-    assert wake_event.is_set(), (
+    # The loop may legitimately consume the event while draining after start().
+    assert wake_at_reply == [(False, True)], (
         "a real handoffWake request through the actual HookIpcServer must "
         "set the real wake_event the sweep loop waits on, not just satisfy "
         "the _kind_wakes_sweep predicate in isolation"
@@ -4747,8 +4754,8 @@ def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generat
 ):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_monitor_maybe_trigger_handoff_cutover", lambda *_a: None)
@@ -4786,8 +4793,8 @@ def test_sweep_rechecks_before_render_status_and_retains_registered_session(
 ):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_monitor_maybe_trigger_handoff_cutover", lambda *_a: None)
@@ -4821,8 +4828,8 @@ def test_sweep_proceeds_when_iteration_and_pre_mutation_checks_stay_current(
 ):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a")
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1})
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
     monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
