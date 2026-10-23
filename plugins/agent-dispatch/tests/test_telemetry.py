@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from agent_dispatch import telemetry
 
 
@@ -221,7 +223,32 @@ def test_load_sink_from_config_default_path_is_convention(monkeypatch) -> None:
 
 # --- built-in spool sink (dependency-free, out-of-process drain) ------------
 
-import json  # noqa: E402
+
+def test_spool_uses_one_encoded_append_and_preserves_input(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(telemetry, "append_bytes", lambda path, data: calls.append((path, data)))
+    event = {"name": "雪é", "ts": 123}
+    path = tmp_path / "雪.jsonl"
+    telemetry.make_spool_sink(path)(event)
+    assert len(calls) == 1
+    assert calls[0][0] == path
+    assert calls[0][1].endswith(b"\n")
+    assert json.loads(calls[0][1]) == event
+    assert event == {"name": "雪é", "ts": 123}
+
+
+def test_spool_append_failure_is_fail_open(tmp_path, monkeypatch):
+    def fail(*args):
+        raise OSError("synthetic short append")
+
+    monkeypatch.setattr(telemetry, "append_bytes", fail)
+    telemetry.make_spool_sink(tmp_path / "s.jsonl")({"kind": "event"})
+
+
+def test_spool_does_not_create_parent(tmp_path):
+    parent = tmp_path / "absent"
+    telemetry.make_spool_sink(parent / "s.jsonl")({"kind": "event"})
+    assert not parent.exists()
 
 
 def _read_spool(path) -> list[dict]:

@@ -338,5 +338,10 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #8298 merged into `dev`: fleet preparation and local diagnostic-spool intent
+  are reviewed documentation, not a deployed controller or Grafana service.
+  #8323 follows up only the existing Bridge/Dispatch JSONL append correctness.
+  This effort remains Active; all controller, placement, monitoring/Grafana and
+  live validation items in the plan remain outstanding under their existing owners.
 - [2026-10-22 - Client lifecycle](journal/2026/10.22-client-lifecycle.md)
 - [2026-10-10 through 2026-10-21 - Foundation and client admission](journal/2026/10.10-foundation.md)

@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-23
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -767,6 +767,14 @@ through that same authority rather than repairing one another's live work.
 An unfinished transition is not automatically abandoned: recovery establishes
 that its owner is gone or has yielded before changing the serving generation,
 releasing its drain, or retiring its candidate.
+An explicitly operator-approved installer repair can instead take bounded
+control of that installation, terminating its prior installers and older
+managed daemons when cooperation fails. Stale lifecycle markers cannot veto
+the repair. Successful repair leaves only the selected generation serving and
+old activation paths inert; unrelated services and application data are outside
+its retirement scope. The
+[installer's normal/repair contract](../installer/README.md#normal-and-repair-installation)
+owns mode selection and installer coordination.
 
 ### crash-tolerant-service-recovery
 Consumers tolerate momentary unavailability, dropped replies and truncated

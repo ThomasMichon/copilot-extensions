@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from process_telemetry import SinkSlot
+from process_telemetry.append import append_bytes
 
 from .install_paths import install_dir
 
@@ -225,10 +226,9 @@ def make_spool_sink(spool: str | os.PathLike[str] | None = None) -> TelemetrySin
             rec = dict(event)
             rec.setdefault("ts", int(time.time() * 1000))
             line = json.dumps(rec, separators=(",", ":"), default=str)
-            with open(spool_path, "a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
+            append_bytes(spool_path, (line + "\n").encode("utf-8"))
         except Exception:  # a sink is best-effort, never fatal
-            log.debug("spool sink write failed; dropping event", exc_info=True)
+            log.debug("spool sink write failed; record may be partial", exc_info=True)
 
     return sink
 
