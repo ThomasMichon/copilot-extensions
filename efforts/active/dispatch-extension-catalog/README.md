@@ -168,6 +168,9 @@ implementation and validation choices remain proposed means.
 - [x] Review and implement the bounded terminal receipt/recovery and
   draft-provenance contract below through generic contributions and existing
   owner APIs; retain independent graphical adoption and cross-client proof.
+- [x] Prove independent graphical shared-draft adoption against both native
+  contribution formatter/read/acknowledgement boundaries; retain graphical
+  original-request durability and the full rendered cross-client journey.
 - [ ] Reuse the existing command-emitter task-output contract for mapped
   external records. Extend only demonstrated gaps in stable record identity,
   column/field mapping, deduplication and acceptance receipts.
@@ -1288,3 +1291,32 @@ authorized installed proof remain distinct obligations.
   operations, followed by common-fixture comparison. Normal promotion and
   separately authorized installed proof remain open; no live task, source
   activation, producer handoff or installed rollout occurred.
+
+### 2026-10-23 - Independent graphical shared drafts adopted
+
+- The independent graphical consumer now uses the existing scoped card-draft
+  owner for explicit Save, Load and Reset. Queue, installation, machine, card
+  and draft revisions remain owner facts; conflicts and unverifiable responses
+  preserve local text. Incomplete/hidden fields and exact multiline/choice
+  values survive sharing without steering, status changes or wakes.
+- Isolated real-owner HTTP/CLI/subprocess evidence exercised both native
+  category contributions' actual formatter, read and acknowledgement paths
+  with fresh graphical clients. Stale overwrite was refused. A native client
+  saved 17,000-character text which the graphical client could read and reset,
+  while its smaller outgoing Save limit remained enforced. Current- and
+  earlier-card oversized drafts also have task-detail/Reset regressions.
+- Graphical validation passed 16 rendered theme/engine/window cases, a fresh
+  renderer reload, focused tests, a complete 1,713-test serial suite and one
+  launch-owner lifecycle test. Review found and fixed update-restart gating
+  and incoming-versus-outgoing size validation before source merge; current-head
+  review then had no open issues and required consumer CI passed.
+- Re-read the Plan and Validation Plan. Marked only the bounded shared-draft
+  interchange evidence complete. The native side was exercised through its
+  contribution boundary, not a rendered terminal journey. Shared drafts are
+  not original submitted-request retention, acceptance or consumption truth.
+- Next is graphical adoption of the existing prepared-request and scoped
+  receipt operations with durable client retention, followed by identical
+  rendered cross-client fixtures. #7141, #7091 and this effort remain Active.
+  Broader source/configuration actions, history, templates, process/evaluator,
+  mapped records, normal promotion and authorized installed proof remain open.
+  No live task, source activation or installed/fleet rollout occurred.
