@@ -346,3 +346,42 @@ No shared procutil, new broker or SDK-shell fallback is included.
    work; this plan neither audits nor rewrites unrelated lifecycle behavior.
 4. Plan source review/CI and refreshed claims clear before functional edits.
    None of these decisions authorizes installed-state changes or rollout.
+
+## Trusted subject producer amendment
+
+The integration owner has admitted this narrow follow-on source slice.
+Automated source-plan review precedes its implementation. It closes the existing
+subject-delivery prerequisite, not the backend/Node or installed acceptance gates.
+
+- Extend only `handoff_diagnostics.stamp_session_state_worktree_binding` with
+  optional keyword-only `worktree_record=None`, and the existing
+  `session_binding_cli.cmd_register_session` post-registration stamp block.
+  Preserve all legacy fields/callers, best-effort `OSError` behavior, atomic
+  replacement and the rule that the session directory is never created.
+- Add `project` from the actual record's `repo` and `creationNonce` from its
+  existing `creation_nonce` only when exact worktree/incarnation, owning
+  registration project and legitimate session association are qualified.
+  Registered non-head sessions and exact pending candidates remain valid;
+  current head, controller, path and PR repository are not identity sources.
+- Leave the existing registration critical transaction unchanged. For the
+  optional stamp use its exact existing record path and
+  `_RecordLock(blocking=False, require_sidecar=True)`, check `acquired`, and
+  skip stamping on contention. The default blocking lock can wait and degrade
+  without a sidecar; neither behavior is valid admission here.
+- Under the acquired guard, reread using existing `_load_record_uncached` /
+  record-I/O machinery, not cached `load_record`. Compare the supplied snapshot's
+  project/worktree/nonce and lifecycle/head revisions against that fresh record,
+  and validate the actual registered session or exact pending candidate.
+  Keep the guard through validation and atomic stamp. No retry, new wait,
+  provider lookup, nonce creation or lock/cache implementation change.
+- Known invalid/stale snapshots and legacy rewrites must omit trusted fields
+  rather than retain old `project`/`creationNonce`. Unknown contention must
+  neither invent freshness nor overwrite a newer qualified binding.
+
+Focused caller-and-writer tests must cover acquired-false/no-stamp admission,
+stale cache versus uncached record, valid non-head/pending subjects, wrong
+project/worktree/nonce/session, stale lifecycle/head revisions, removed
+association, missing nonce, legacy callers, absent directory, write failure and
+stale trusted-field removal. Tests exercise the actual registration caller and
+writer, not just a fabricated projection. Source review/required CI/merge and
+delivery of the exact contract to the receipt owner complete this slice.
