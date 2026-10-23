@@ -933,6 +933,8 @@ than hypothetical:
       caller-side session/mux enrichment, and Group C reconcile overlays.
       The execution detail is agent-recommended and must clear review before
       implementation; live-daemon errors never authorize direct computation.
+      The plan cleared review and merged as #5748; that planning milestone
+      did not complete the authority/feed/consumer-acceptance checklists.
 - [ ] **Schema-bounded read-side acceptance:** integrate the coupled
       [current-state contract](../per-worktree-activity-state/schema-bounded-read-contract.md)
       into 6d. Push claims-derived state through the existing write authority;
@@ -1341,6 +1343,12 @@ documentation amendment, and neither effort is complete.
 
 ### 2026-10-08 — Phase 6d: scoped the remaining authority/stream cutover
 
+The execution plan merged as #5748, including separate Windows/Linux/macOS
+coverage, advisory durable reads distinct from fresh recomputation, bounded
+recovery after a failed start, and explicit going-away notices before planned
+feed closure. At this checkpoint, only the planning gate was cleared;
+6d.1 implementation was next.
+
 Source tracing after #5743 confirmed that the gap is larger than the git
 fallback: normal classified reads may serve whole-payload cache, cache-only
 paints use record hints, streaming computes locally, and the production local
@@ -1355,7 +1363,14 @@ nor the already-merged repairs are a substitute for its consumer acceptance.
 
 The shared-wrapper implementation and its structural/freshness tests merged
 as #5743 (merge commit `9a09837d699600b47888bf053769f8a89654752f`).
-Its promotion/deployment remains a separate pending obligation.
+At this 2026-10-08 checkpoint, its promotion was verified in the released
+source. Local unified deployment was blocked on another process's build lease
+for 1.24.26-dev1: the update refused to race that builder after refreshing
+payloads, while the active runtime remained 1.24.25-dev1. Retrying the unified
+flow after that build finished remained an obligation; neither the new
+runtime nor its activation had been verified at this checkpoint. This records
+the historical observation, not the current installed generation or a new
+deployment instruction.
 The implementation worktree is retained for Phase 6d, not finalized merely
 because this slice landed.
 
