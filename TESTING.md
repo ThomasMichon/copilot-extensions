@@ -19,6 +19,13 @@ these alongside the local callback contracts on Linux and Windows. No new job,
 production credential or fleet placement is added. This does not qualify the
 unimplemented installed consumer lifecycle or production fleet budgets.
 
+The shared-maintenance cardinality case in `test_waiter_maintenance.py` retains
+real cold SQLite schema creation, 40 durable waiter preparations and a bounded
+32-row replay cycle. It has a 120-second item watchdog on Windows: hosted
+acceptance exhausted the default 30 seconds during the initial schema commit,
+before waiter preparation began. Other items, non-Windows item limits and the
+runner/workflow budgets are unchanged; this is not a production database change.
+
 ## Optional diagnostic telemetry
 
 The shared `libs/process-telemetry` contract is exercised by its real Bridge

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from unittest.mock import AsyncMock
 
 import pytest
@@ -43,6 +44,7 @@ async def finish_cycle(maintenance):
     assert maintenance._replay_task is None
 
 
+@pytest.mark.timeout(120 if os.name == "nt" else 30)
 def test_shared_tick_starts_one_cycle_for_many_waiters(tmp_path):
     async def run():
         queue, service, gate, _, maintenance, _ = owner(tmp_path)
