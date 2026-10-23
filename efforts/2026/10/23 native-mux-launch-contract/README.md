@@ -6,8 +6,8 @@ _This proposal was prepared with GitHub Copilot._
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential managed proposal and implementation PRs against `dev`
 - **Created:** 2026-10-22
-- **Status:** Active
-- **Vision:** closes [session-hosting](../../../visions/session-hosting/README.md) host-owned presentation and exact initial context; preserves [architecture invariants](../../../docs/patterns/README.md)
+- **Status:** Done
+- **Vision:** closes [session-hosting](../../../../visions/session-hosting/README.md) host-owned presentation and exact initial context; preserves [architecture invariants](../../../../docs/patterns/README.md)
 - **Umbrella issue:** #7962
 
 ## Guiding Intent
@@ -96,8 +96,8 @@ workspace." The implementation and validation decomposition below is
 
 - [x] Exercise focused tests and native Windows consumer boundaries; record
   exact evidence and any unavailable platform or interactive tier.
-- [ ] Land the repair through genuine current-head review and required CI.
-- [ ] Resolve every Plan and Validation Plan item, journal the result and
+- [x] Land the repair through genuine current-head review and required CI.
+- [x] Resolve every Plan and Validation Plan item, journal the result and
   archive this effort. Release and productive rollout remain explicitly
   separate, and no updater is authorized by this source-fix request.
 
@@ -118,7 +118,7 @@ workspace." The implementation and validation decomposition below is
   native-CI obligation without representing Windows compatibility as POSIX proof.
 - [x] Run touched-code lint, install/resource contracts and the relevant
   focused regression portfolios without adding a broad promotion matrix.
-- [ ] Review final documentation and graceful-cutover impact; verify actual
+- [x] Review final documentation and graceful-cutover impact; verify actual
   source merge before reporting completion. No running-state claim follows
   from source tests or a merge.
 
@@ -456,3 +456,30 @@ restarted or updated to force acceptance. No productive rollout is performed.
   default flags and preference deduplication, excluding setup values and
   Bash command-name slots. Genuine ACP transport remains unchanged.
   All 162 launch cases pass in 66.44 seconds.
+
+### 2026-10-23 - Source accepted and effort concluded
+
+- Source repair #8031 actually merged to `dev` as
+  `5fbce0760c22c22d3970898f4ec5ca56a1e1f115`. The exact published head
+  received a current-head Copilot Comment with no open inline findings;
+  all review threads were resolved and required CI was green.
+- Investigated the final nonspecific late-composition concern with a separate
+  read-only code check: every late resume/seed consumer, the deferred
+  split-process path, both normalized Bash tail cases and 81 adversarial
+  PowerShell quote combinations were checked without a reproducible defect.
+  The repository's owner-authored clean-Comment policy satisfied source review.
+  Managed head-pinned merge used the authorized additional CODEOWNER-vote exception,
+  not a CI bypass or an override of a concrete unresolved finding.
+- Re-read and resolved the complete Plan and Validation Plan. Durable launch
+  and status truth is in the CLI and Manager references; this record archives
+  the bounded source repair rather than becoming runtime documentation.
+- Human keyboard/mux acceptance, real Copilot conversation/CWD acceptance,
+  native POSIX qualification, any additional PSMux absence qualification,
+  release observation and an explicitly authorized rollout remain with #7962.
+  The normalized Bash exact chained resume-plus-seed subprocess case is also
+  retained there as a coverage opportunity; the individual native boundaries
+  and chained pure-code probe passed. No installed payload, service or user
+  mux was changed, and no updater is authorized by this conclusion.
+- Pulled forward the provider-confirmed merged head onto current `dev`,
+  retaining its complete local backup. This effort is Done for source
+  delivery and is archived on the completion date.
