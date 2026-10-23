@@ -104,6 +104,22 @@ def test_compile_retained_resolver_drift_refuses_before_execution(tmp_path, monk
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("option", ["-r", "--requirement", "--requirements", "-c", "--constraint", "--constraints"])
+def test_compile_include_paths_are_canonicalized_before_text_remapping(tmp_path, option):
+    original = tmp_path / "original" / "nested.in"
+    retained = tmp_path / "retained" / "nested.in"
+    seen = []
+
+    def mirror(path):
+        seen.append(path.resolve())
+        return retained
+
+    text = option + " \\\n" + original.parent.as_posix() + "/./nested.in # include comment\n"
+    result = policy._configuration.compile_requirement_includes(text, original.parent / "root.in", mirror)
+    assert seen == [original]
+    assert result == option + " " + retained.as_posix() + "\n"
+
+
 def test_compile_retains_project_and_nested_requirements_but_not_output(tmp_path, monkeypatch):
     project = source_project(tmp_path / "source")
     manifest = project / "pyproject.toml"
@@ -181,7 +197,7 @@ def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp
 @pytest.mark.parametrize("source_kind", ["project", "requirements"])
 @pytest.mark.parametrize("missing_age", [False, True])
 def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
-    tmp_path, monkeypatch, source_kind, missing_age, alias,
+    tmp_path, monkeypatch, source_kind, missing_age, alias, nested_alias=False,
 ):
     artifacts = {}
     projects = {}
@@ -258,7 +274,8 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         roots = (project,)
     else:
         operand = tmp_path / "requirements.in"
-        operand.write_text("-r nested.in\n", encoding="utf-8")
+        nested = tmp_path.as_posix() + "/./nested.in" if nested_alias else "nested.in"
+        operand.write_text("-r " + nested + "\n", encoding="utf-8")
         roots = ()
     operand_argument = str(operand.parent) + os.sep + "." + os.sep + operand.name if alias else str(operand)
     included = tmp_path / "nested.in"
@@ -319,3 +336,10 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_native_compile_nested_absolute_include_cannot_reopen_original(tmp_path, monkeypatch):
+    test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
+        tmp_path, monkeypatch, source_kind="requirements", missing_age=False, alias=False,
+        nested_alias=True,
+    )

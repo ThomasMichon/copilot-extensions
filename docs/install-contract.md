@@ -2984,6 +2984,8 @@ ambient file redirection, package omissions, index-URL emission, directory
 dependencies (editable or not), local artifact mappings and unsupported compile
 options refuse. Metadata-only project inputs remain supported; every positional
 input is canonicalized into the retained graph, including absolute path aliases.
+Recursive requirement/constraint include targets are likewise rewritten by
+canonical identity rather than lexical text substitution.
 `prepare_uv_compile` is only
 preflight. This is candidate lock construction, not target-profile approval,
 wheel acquisition, feed qualification or runtime activation.
