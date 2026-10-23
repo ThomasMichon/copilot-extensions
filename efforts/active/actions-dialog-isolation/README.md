@@ -162,7 +162,7 @@ interfaces. Do not create a general request broker or shared polling layer.
 - The modal now owns a row snapshot and dispatch maps. Path/locality work moved
   behind modal push, with exact lifetime/source/setup/project completion checks
   and a visibly unverified fallback. No shared config-cache or startup code changed.
-- Contained Windows functional run: 39 Actions/menu tests passed, including
+- Contained Windows functional run: 40 Actions/menu tests passed, including
   blocked tracking lookup plus Escape, repeated out-of-order completions and a
   real headless modal's LOCK/header/verb refresh. Corrected the regression
   fixture's noncanonical source ID and removed unrelated body-focus timing from
@@ -172,3 +172,7 @@ interfaces. Do not create a general request broker or shared polling layer.
   no installed runtime, production UI, service or benchmark was changed/run.
 - Native timing, release/rollout and #7940's separate configuration/supplier
   contract remain open. Source review and actual implementation merge are next.
+- Required CI caught the Actions mixin crossing its 1,000-line source cap.
+  Dialog lifetime, dispatch-map ownership and worker-only verification helpers
+  were moved into the existing `SubMenuScreen` component, within the admitted
+  two-file consumer boundary. The guard is retained unchanged.

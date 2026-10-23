@@ -334,6 +334,53 @@ class SubMenuScreen(ModalScreen[tuple]):
         local = getattr(engine, "_source_local", None)
         return local is not None and (rec.get("machine"), rec.get("env")) == local
 
+    @classmethod
+    def open_for(cls, engine, rec, *, loading=False):
+        """Own one Actions lifetime and its accepted dispatch maps."""
+        acts, ext = engine._wt_submenu_verbs(rec)
+        engine._wt_submenu_ext = ext
+        engine._wt_submenu_epoch = getattr(engine, "_wt_submenu_epoch", 0) + 1
+        epoch = engine._wt_submenu_epoch
+        source = engine.src
+        setup_epoch = getattr(engine, "_setup_epoch", None)
+        menu = cls(rec, acts, loading=loading, engine=engine)
+        menu._action_extensions = ext
+        menu._action_workers = dict(getattr(engine, "_wt_submenu_workers", {}) or {})
+
+        def dismissed(result):
+            if (
+                engine._wt_submenu_epoch != epoch
+                or engine.src is not source
+                or getattr(engine, "_setup_epoch", None) != setup_epoch
+            ):
+                return
+            engine._wt_submenu_epoch += 1
+            engine._wt_submenu_dispatch(
+                rec, result, ext=menu._action_extensions, workers=menu._action_workers,
+            )
+
+        engine.app.push_screen(menu, dismissed)
+        return menu
+
+    @staticmethod
+    def verify_liveness(rec, source, project):
+        """Worker-only eligibility and liveness refinement."""
+        try:
+            from .. import project_config, engine_group_c
+
+            wt_id = rec["raw"]["id"]
+            local = getattr(source, "LOCAL", None)
+            is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
+            if not is_local or not (project_config.tracking_dir(project) / f"{wt_id}.yaml").exists():
+                return None, is_local
+            batch = engine_group_c.picker_reconcile_local(project, worktree_ids=[wt_id])
+            for row in batch.rows:
+                if isinstance(row, dict) and row.get("id") == wt_id:
+                    return row, is_local
+            return None, is_local
+        except Exception:
+            return None, None
+
     def __init__(self, rec, actions, *, loading=False, engine=None) -> None:
         super().__init__()
         self._rec = rec
@@ -515,6 +562,15 @@ class SubMenuScreen(ModalScreen[tuple]):
             ol.highlighted = min(prev, count - 1)
         self._set_desc(ol.highlighted or 0)
         ol.focus()
+
+    def refine(self, rec, *, status=""):
+        engine = self._engine
+        if engine.app.screen is not self or self._rec is not rec:
+            return
+        acts, ext = engine._wt_submenu_verbs(rec)
+        engine._wt_submenu_ext = self._action_extensions = ext
+        self._action_workers = dict(getattr(engine, "_wt_submenu_workers", {}) or {})
+        self.refresh_actions(acts, status=status)
 
     def _set_desc(self, i) -> None:
         if i == self._nomux_index:

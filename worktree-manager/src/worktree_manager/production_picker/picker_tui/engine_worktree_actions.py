@@ -239,24 +239,7 @@ class PickerScreenWorktreeActionsMixin:
             return
 
         def _verify():
-            try:
-                from .. import project_config as _config
-                from .. import engine_group_c as _engine_group_c
-
-                local = getattr(source, "LOCAL", None)
-                is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
-                if not is_local or not (_config.tracking_dir(project) / f"{_wt_id}.yaml").exists():
-                    return None, is_local
-                batch = _engine_group_c.picker_reconcile_local(
-                    project,
-                    worktree_ids=[_wt_id],
-                )
-                for row in batch.rows:
-                    if isinstance(row, dict) and row.get("id") == _wt_id:
-                        return row, is_local
-                return None, is_local
-            except Exception:
-                return None, None
+            return menu.verify_liveness(rec, source, project)
 
         def _done(result):
             if (
@@ -379,39 +362,7 @@ class PickerScreenWorktreeActionsMixin:
         """Return the one exact loaded controller target, if navigable."""
         return target_row(rec, self.data)
     def _push_wt_submenu(self, rec, *, loading=False):
-        """Open the native ``SubMenuScreen`` for ``rec`` IMMEDIATELY from its
-        current (cached) liveness -- never blocking the render flow. When an
-        authoritative re-verify is in flight (``loading=True``), the modal shows the
-        footer spinner and the verb set is refined in place by
-        :meth:`_refresh_wt_submenu` when the probe lands."""
-        acts, ext = self._wt_submenu_verbs(rec)
-        self._wt_submenu_ext = ext
-        self._wt_submenu_epoch = getattr(self, "_wt_submenu_epoch", 0) + 1
-        epoch = self._wt_submenu_epoch
-        source = self.src
-        setup_epoch = getattr(self, "_setup_epoch", None)
-        menu = SubMenuScreen(rec, acts, loading=loading, engine=self)
-        menu._action_extensions = ext
-        menu._action_workers = dict(getattr(self, "_wt_submenu_workers", {}) or {})
-
-        def dismissed(result):
-            if (
-                self._wt_submenu_epoch != epoch
-                or self.src is not source
-                or getattr(self, "_setup_epoch", None) != setup_epoch
-            ):
-                return
-            self._wt_submenu_epoch += 1
-            self._wt_submenu_dispatch(
-                rec, result, ext=menu._action_extensions, workers=menu._action_workers,
-            )
-        # Migrated to a native Textual ``ModalScreen`` (#88 F4): the modal returns
-        # the chosen ``(action_label, no_mux, ahp)`` via ``dismiss`` (or ``None`` on
-        # cancel); ``_wt_submenu_dispatch`` runs the selected verb.
-        self.app.push_screen(
-            menu, dismissed,
-        )
-        return menu
+        return SubMenuScreen.open_for(self, rec, loading=loading)
     def _refresh_wt_submenu(self, rec, *, screen=None, status=""):
         """Refine the OPEN Actions menu's verbs in place after the async liveness
         verify lands (and drop its footer spinner). A no-op if the operator already
@@ -421,11 +372,7 @@ class PickerScreenWorktreeActionsMixin:
             return
         if screen is not None and scr is not screen:
             return
-        acts, ext = self._wt_submenu_verbs(rec)
-        self._wt_submenu_ext = ext
-        scr._action_extensions = ext
-        scr._action_workers = dict(getattr(self, "_wt_submenu_workers", {}) or {})
-        scr.refresh_actions(acts, status=status)
+        scr.refine(rec, status=status)
     def _wt_submenu_dispatch(self, rec, result, *, ext=None, workers=None):
         """Run the chosen worktree Actions verb (the ``SubMenuScreen`` dismiss
         callback). Native dialogs supply their own accepted-revision maps;
