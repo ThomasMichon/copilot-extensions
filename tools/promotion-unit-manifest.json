@@ -1123,7 +1123,12 @@
     "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_newer_failed_or_pending_head_qualification_cannot_be_hidden_by_old_success[in_progress-None]",
     "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_newer_failed_or_pending_head_qualification_cannot_be_hidden_by_old_success[queued-None]",
     "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_duplicate_provider_runs_do_not_authorize_reuse",
-    "tools/promotion_unit_tests/test_ci_contract.py::test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reruns"
+    "tools/promotion_unit_tests/test_ci_contract.py::test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reruns",
+    "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_lower_id_failed_retry_invalidates_a_higher_id_success",
+    "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_truncated_head_history_cannot_authorize_an_unknown_failure_epoch",
+    "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_actual_cli_requires_zero_children_on_hit_and_one_real_runner_on_miss[rerun-fresh-0]",
+    "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_checkout_validation_is_mandatory_when_toolchain_binding_is_unavailable[False]",
+    "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_checkout_validation_is_mandatory_when_toolchain_binding_is_unavailable[True]"
   ],
   "sources": {
     "tools/artifact_source_build.py": "bd7079c5ac69199305b5aa949976ccf184e3cb6ffcf068521f17cd53cbc0e508",
@@ -1230,8 +1235,8 @@
     "libs/peer-launch/peer_launch.py": "fcd646b8a52156b8cfbf1189ac74855249f1ac1fcaeff4e25c920e1df758c8b8",
     "libs/peer-launch/tests/test_peer_environment.py": "8edc52ef1254c99ead6877cbe9906cb352b93bdb9aa95d22c9ea04d20553413a",
     "tools/promotion_unit_tests/test_peer_environment.py": "e816bedb5935365405818dabb0a12116c6965d0d40104763b9c8cb9630567cae",
-    "tools/ci_pr_unit_reuse.py": "ca5fac2b12b6055b7d747dfd59765eb3e4b3c68dc582488f3564347c86722024",
-    "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py": "60846b1af71659160097498b1f12e99bbce4be172cd919b3c7c7f349f58b8107"
+    "tools/ci_pr_unit_reuse.py": "3944a1717dbe1e8ece787f3721d5bacf68af8d472a4782c73fb87dc64d402508",
+    "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py": "b69bcdf694beba1d8ce4818c018ef8ef4f58f1db5490d0fc87b24be050a46ab1"
   },
   "coverage_targets": [
     "tools/artifact_source_build.py",

@@ -129,7 +129,11 @@ def case(packet_case):
     result.raw = archive(directory)
     result.artifact = {
         "id": 60,
-        "name": reuse.artifact_name(identity, 20, 2),
+        "name": reuse.artifact_name(
+            {**identity, "qualification_epoch": [["attempt", 20, 2]]},
+            20,
+            2,
+        ),
         "expired": False,
         "digest": "sha256:" + hashlib.sha256(result.raw).hexdigest(),
         "size_in_bytes": len(result.raw),
@@ -147,7 +151,7 @@ def case(packet_case):
 def read_provider(case, path, binary=False):
     case.calls.append((path, binary))
     if "workflows/ci.yml/runs?" in path:
-        return {"workflow_runs": [case.run]}
+        return {"total_count": 1, "workflow_runs": [case.run]}
     if path.endswith("runs/20/artifacts?per_page=100"):
         return {"total_count": 1, "artifacts": [case.artifact]}
     if path.endswith("runs/20/attempts/2/jobs?per_page=100"):
@@ -298,6 +302,7 @@ def test_archive_bytes_must_match_the_immutable_provider_digest(case):
 
 
 def test_current_run_or_future_run_is_never_reused(case):
+    case.run["run_attempt"] = 1
     for run_id in (100, 101):
         case.run["id"] = run_id
         before = len(case.calls)
@@ -323,16 +328,13 @@ def test_newer_failed_or_pending_head_qualification_cannot_be_hidden_by_old_succ
 
     def read(path, binary=False):
         if "workflows/ci.yml/runs?" in path:
-            return {"workflow_runs": [case.run, newer]}
-        raise AssertionError(
-            "lookup must not download old success past a newer unresolved result"
-        )
+            return {"total_count": 2, "workflow_runs": [case.run, newer]}
+        assert not binary, "old proof must not be downloaded after the epoch changes"
+        return read_provider(case, path, binary)
 
     result = reuse.resolve(case.identity, case.manifest, case.root, 100, read, case.now)
-    assert result == {
-        "mode": "executed",
-        "reason": "prior-head-qualification-not-successful",
-    }
+    assert result["mode"] == "executed"
+    assert result["reason"] == "no-qualified-completed-packet"
 
 
 def test_duplicate_provider_runs_do_not_authorize_reuse(case):
@@ -342,7 +344,40 @@ def test_duplicate_provider_runs_do_not_authorize_reuse(case):
             case.manifest,
             case.root,
             100,
-            lambda *_: {"workflow_runs": [case.run, case.run]},
+            lambda *_: {"total_count": 2, "workflow_runs": [case.run, case.run]},
+            case.now,
+        )
+
+
+def test_lower_id_failed_retry_invalidates_a_higher_id_success(case):
+    retry = {
+        **case.run,
+        "id": 10,
+        "run_attempt": 3,
+        "status": "completed",
+        "conclusion": "failure",
+        "run_started_at": "2026-01-01T00:00:50Z",
+        "updated_at": "2026-01-01T00:00:55Z",
+    }
+
+    def read(path, binary=False):
+        if "workflows/ci.yml/runs?" in path:
+            return {"total_count": 2, "workflow_runs": [case.run, retry]}
+        assert not binary, "retry epoch must invalidate the old higher-ID artifact"
+        return read_provider(case, path, binary)
+
+    result = reuse.resolve(case.identity, case.manifest, case.root, 100, read, case.now)
+    assert result["mode"] == "executed"
+
+
+def test_truncated_head_history_cannot_authorize_an_unknown_failure_epoch(case):
+    with pytest.raises(reuse.ReuseUnavailable, match="invalid-provider-run-inventory"):
+        reuse.resolve(
+            case.identity,
+            case.manifest,
+            case.root,
+            100,
+            lambda *_: {"total_count": 11, "workflow_runs": [case.run]},
             case.now,
         )
 
@@ -436,6 +471,7 @@ def test_unknown_toolchains_and_non_pr_events_cannot_reuse(case, field, value):
         ("workflow_dispatch", "executed", 0),
         ("future-event", "executed", 0),
         ("pull_request", "late", 0),
+        ("pull_request", "retry", 0),
     ],
     ids=[
         "reused-0",
@@ -444,6 +480,7 @@ def test_unknown_toolchains_and_non_pr_events_cannot_reuse(case, field, value):
         "manual-executed-0",
         "unknown-executed-0",
         "late-proof-executed-0",
+        "rerun-fresh-0",
     ],
 )
 def test_actual_cli_requires_zero_children_on_hit_and_one_real_runner_on_miss(
@@ -469,7 +506,7 @@ def test_actual_cli_requires_zero_children_on_hit_and_one_real_runner_on_miss(
         "GITHUB_EVENT_PATH": str(event_path),
         "GITHUB_OUTPUT": str(output),
         "GITHUB_RUN_ID": "100",
-        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_RUN_ATTEMPT": "2" if mode == "retry" else "1",
         "GH_TOKEN": "synthetic-credential",
     }
     calls = []
@@ -495,6 +532,7 @@ def test_actual_cli_requires_zero_children_on_hit_and_one_real_runner_on_miss(
 
     def lookup(*_):
         assert event == "pull_request"
+        assert mode != "retry", "reruns must not try to consume old success"
         if mode == "executed":
             raise reuse.ReuseUnavailable("provider-unavailable")
         return {"mode": "reused", "origin_run": "20", "packet_sha256": "1" * 64}
@@ -518,7 +556,7 @@ def test_actual_cli_requires_zero_children_on_hit_and_one_real_runner_on_miss(
         ],
     )
     assert reuse.main() == child_code
-    expected_mode = "executed" if mode == "late" else mode
+    expected_mode = "executed" if mode in ("late", "retry") else mode
     assert len([argv for argv, _ in calls if argv[0] != "git"]) == (
         expected_mode == "executed"
     )
@@ -559,6 +597,55 @@ def test_current_checkout_contradictions_fail_instead_of_relabelling_fresh_proof
     monkeypatch.setattr(reuse, "ROOT", case.root)
     monkeypatch.setattr(reuse.os, "environ", environment)
     monkeypatch.setattr(reuse, "runtime_identity", lambda: case.runtime)
+    monkeypatch.setattr(reuse, "_process", process)
+    monkeypatch.setattr(
+        reuse.sys,
+        "argv",
+        [
+            "ci_pr_unit_reuse.py",
+            "--source-sha",
+            SOURCE,
+            "--output-dir",
+            str(tmp_path / "proof"),
+        ],
+    )
+    with pytest.raises(RuntimeError, match="current checkout"):
+        reuse.main()
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+def test_checkout_validation_is_mandatory_when_toolchain_binding_is_unavailable(
+    case,
+    tmp_path,
+    monkeypatch,
+    dirty,
+):
+    (case.root / "tools/promotion-unit-manifest.json").write_text(
+        json.dumps(case.manifest)
+    )
+    output = tmp_path / "outputs"
+    environment = {
+        **case.environment,
+        "GITHUB_OUTPUT": str(output),
+        "GITHUB_RUN_ID": "100",
+        "GITHUB_RUN_ATTEMPT": "1",
+    }
+
+    def process(arguments, **_):
+        assert arguments[0] == "git", "wrong checkout must never execute units"
+        if "rev-parse" in arguments:
+            return SimpleNamespace(
+                stdout=((SOURCE if dirty else "e" * 40) + "\n").encode()
+            )
+        return SimpleNamespace(stdout=b" M tools/example.py\n" if dirty else b"")
+
+    def unavailable():
+        raise reuse.ReuseUnavailable("unavailable-toolchain")
+
+    monkeypatch.setattr(reuse, "ROOT", case.root)
+    monkeypatch.setattr(reuse.os, "environ", environment)
+    monkeypatch.setattr(reuse, "runtime_identity", unavailable)
     monkeypatch.setattr(reuse, "_process", process)
     monkeypatch.setattr(
         reuse.sys,

@@ -393,10 +393,50 @@ def verify_download(
         )
 
 
+def qualification_epoch(runs: list[dict], current_run: int) -> list[list]:
+    """Retry/outcome revisions fence old success without inferring chronology from IDs."""
+    revisions = []
+    for run in runs:
+        attempt = run.get("run_attempt")
+        if not _positive(attempt):
+            raise ReuseUnavailable("invalid-provider-attempt")
+        if run["id"] == current_run:
+            if attempt != 1:
+                raise ReuseUnavailable("rerun-requires-fresh-execution")
+            continue
+        if attempt > 1:
+            revisions.append(["attempt", run["id"], attempt])
+        status, conclusion = run.get("status"), run.get("conclusion")
+        if status not in (
+            "queued",
+            "in_progress",
+            "completed",
+            "waiting",
+            "requested",
+            "pending",
+        ):
+            raise ReuseUnavailable("unknown-provider-status")
+        if status == "completed" and conclusion not in (
+            "success",
+            "failure",
+            "neutral",
+            "cancelled",
+            "skipped",
+            "timed_out",
+            "action_required",
+            "stale",
+            "startup_failure",
+        ):
+            raise ReuseUnavailable("unknown-provider-conclusion")
+        if status != "completed" or conclusion != "success":
+            revisions.append(["outcome", run["id"], attempt, status, conclusion])
+    return sorted(revisions)
+
+
 def resolve(
     identity: dict, manifest: dict, root: Path, current_run: int, read, now: datetime
 ) -> dict:
-    """Search at most ten completed runs and three artifacts; never wait for a producer."""
+    """Fence complete bounded head history, then inspect at most three artifact inventories."""
     prefix = "repos/" + identity["repository"] + "/actions/"
     listing = read(
         prefix
@@ -408,21 +448,29 @@ def resolve(
     if (
         not isinstance(runs, list)
         or len(runs) > 10
+        or type(listing.get("total_count")) is not int
+        or listing["total_count"] != len(runs)
         or any(
             not isinstance(run, dict) or not _positive(run.get("id")) for run in runs
         )
         or len({run["id"] for run in runs}) != len(runs)
     ):
         raise ReuseUnavailable("invalid-provider-run-inventory")
+    identity = {
+        **identity,
+        "qualification_epoch": qualification_epoch(runs, current_run),
+    }
+    current_attempt = next(
+        (run["run_attempt"] for run in runs if run["id"] == current_run),
+        1,
+    )
+    fresh_name = artifact_name(identity, current_run, current_attempt)
     inspected = 0
     for run in sorted(runs, key=lambda value: value["id"], reverse=True):
         if run["id"] == current_run:
             continue
         if run.get("status") != "completed" or run.get("conclusion") != "success":
-            return {
-                "mode": "executed",
-                "reason": "prior-head-qualification-not-successful",
-            }
+            continue
         if run["id"] > current_run:
             continue
         artifacts = read(prefix + f"runs/{run['id']}/artifacts?per_page=100")
@@ -464,7 +512,11 @@ def resolve(
         inspected += 1
         if inspected == 3:
             break
-    return {"mode": "executed", "reason": "no-qualified-completed-packet"}
+    return {
+        "mode": "executed",
+        "artifact_name": fresh_name,
+        "reason": "no-qualified-completed-packet",
+    }
 
 
 def _process(arguments: list[str], **kwargs):
@@ -495,15 +547,15 @@ def main() -> int:
         }
     )
     result = {"mode": "executed", "artifact_name": "promotion-unit-evidence"}
-    try:
-        if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
-            raise ReuseUnavailable("not-a-source-pr")
-        event = decode_json(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
-        identity = context(dict(os.environ), event, manifest, runtime_identity())
-        if args.source_sha != identity["source_sha"]:
+    attempt = 1
+    if is_pr:
+        if args.source_sha != source_sha(os.environ.get("GITHUB_SHA", "")):
             raise RuntimeError(
                 "current source argument conflicts with the workflow source"
             )
+        workspace = os.environ.get("GITHUB_WORKSPACE")
+        if not workspace:
+            raise RuntimeError("current checkout workspace is unavailable")
         head = (
             _process(
                 ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
@@ -520,19 +572,24 @@ def main() -> int:
             check=True,
             timeout=5,
         ).stdout
-        if (
-            head != args.source_sha
-            or dirty
-            or Path(identity["source_root"]).resolve() != ROOT
-        ):
+        if head != args.source_sha or dirty or Path(workspace).resolve() != ROOT:
             raise RuntimeError(
                 "current checkout is modified or differs from the workflow source"
             )
-        result["artifact_name"] = artifact_name(
-            identity,
+        run_id, attempt = (
             int(os.environ["GITHUB_RUN_ID"]),
             int(os.environ["GITHUB_RUN_ATTEMPT"]),
         )
+        if not _positive(run_id) or not _positive(attempt):
+            raise RuntimeError("current provider execution is invalid")
+        result["artifact_name"] = f"pr-unit-evidence-unqualified-{run_id}-{attempt}"
+    try:
+        if not is_pr:
+            raise ReuseUnavailable("not-a-source-pr")
+        if attempt > 1:
+            raise ReuseUnavailable("rerun-requires-fresh-execution")
+        event = decode_json(Path(os.environ["GITHUB_EVENT_PATH"]).read_bytes())
+        identity = context(dict(os.environ), event, manifest, runtime_identity())
         if not os.environ.get("GH_TOKEN"):
             raise ReuseUnavailable("missing-read-only-provider-token")
         deadline = time.monotonic() + MAX_LOOKUP_SECONDS

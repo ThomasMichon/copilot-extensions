@@ -43,13 +43,18 @@ A bounded lookup verifies the original successful run/attempt/job, actual
 fresh qualification and upload, immutable provider archive and unchanged
 three-file coverage packet. Missing, incompatible, expired, failed or
 unavailable proof executes fresh units; it never manufactures skipped success.
-An intervening failed, cancelled or pending qualification on the same head
-also retains fresh execution rather than searching past it for old success.
+The complete bounded current-head inventory contributes a qualification epoch:
+retry attempts and non-success outcomes change the key even on lower-ID runs.
+Unknown or truncated history retains fresh execution. This does not infer
+attempt chronology from run IDs or mutable update timestamps.
 Only fresh execution uploads a reusable artifact, preventing reuse chains.
 Artifact names include their producing run/attempt. A failed-job-only retry
 may retain an already-successful unit job from an earlier attempt of that
 same immutable run; future attempts and another run's unverified outputs
 remain rejected.
+Whenever a rerun actually invokes the qualifier, it executes fresh units
+without looking up old success. Mandatory checkout validation precedes every
+optional reuse/toolchain fallback.
 Current guards/metadata, base-retarget handling and the required aggregate
 remain independent. Manual CI and every Main release still execute units;
 this PR-only reuse neither changes nor supplies promotion qualification.

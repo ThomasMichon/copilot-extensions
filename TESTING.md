@@ -387,8 +387,11 @@ Producing-run/attempt artifact names avoid retry collisions. The aggregate
 preserves GitHub's successful-unit-job retention on failed-job-only retries
 of the same immutable run, without accepting future-attempt evidence.
 Unknown or incompatible evidence retains fresh execution. The provider
-inventory includes failures and pending runs: newer unresolved head
-qualification prevents replay of an older success. The pure synthetic
+inventory includes failures, pending runs and retry revisions in a complete
+bounded qualification epoch. A later retry of a lower-ID run changes that
+epoch rather than hiding behind ID ordering; incomplete history cannot reuse.
+Reruns that invoke the helper always execute fresh units, and PR checkout
+validation remains mandatory when toolchain binding is unavailable. The pure synthetic
 tests in `tools/promotion_unit_tests/test_ci_pr_unit_reuse.py` exercise provider,
 attempt, archive, coverage, dependency-byte and environment refusals without
 network, Git or child actors. Real CLI/provider execution is complementary
