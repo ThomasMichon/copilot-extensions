@@ -7,6 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -43,6 +45,36 @@ def test_fixed_request_is_durable_coalesced_and_not_a_recipe(owning_payload, are
     assert one.runner.context_keys == tuple(sorted(provision.CONTEXT_KEYS))
     assert "_execute" in one.runner.argv and "provision" not in one.runner.argv
     assert not installation.exists()
+
+
+@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+def test_pinned_active_recipe_shares_one_canonical_result(owning_payload, area, installer_action):
+    payload, installation, project = owning_payload
+    root = area / "queue"
+    first = provision.enqueue(
+        payload, installation, project, root=root, installer_action=installer_action,
+    )
+    started, release = threading.Event(), threading.Event()
+
+    def execute(transaction):
+        started.set()
+        assert release.wait(15), "fixture release missing"
+        return provision.core._execute(transaction)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(drain, root=root, executor=execute)
+        try:
+            assert started.wait(10), "fixture did not start"
+            second = provision.enqueue(
+                payload, installation, project, root=root, installer_action=installer_action,
+            )
+            assert second.id == first.id and second.state == "running"
+            assert len(status(root=root)) == 1
+        finally:
+            release.set()
+        assert future.result(timeout=30) == 0
+    assert status(first.id, root=root).exit_code == 7
+    assert (installation / "executed").read_text() == installer_action
 
 
 def test_explicit_client_only_recipe_is_distinct_and_reaches_native_installer(owning_payload, area):

@@ -202,7 +202,7 @@ def enqueue(
         runner=core.TrustedRunner(
             argv, str(project), env=tuple(imports.items()), context_keys=CONTEXT_KEYS,
         ),
-        root=root,
+        root=root, coalesce_running=True,
     )
 
 

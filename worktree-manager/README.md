@@ -696,8 +696,10 @@ create a driver, fetch source or run installers. `--supervised-debug` keeps
 supervision in the foreground but uses the same queue and exclusive authority;
 it cannot bypass an active transaction. The engine exposes the same options.
 Equivalent pending requests can coalesce; a request arriving after execution
-starts remains separate. Explicit options, invocation context, installation
-scope and pinned runner identity are retained rather than collapsed.
+starts remains separate. These requests may refer to moving source refs, so
+identical arguments do not establish the pinned target required for the shared
+driver's active-request opt-in. Explicit options, invocation context,
+installation scope and pinned runner identity are retained rather than collapsed.
 The engine resolves the caller's marketplace context before submission, so a
 queued engine-to-Manager-to-engine round trip cannot replace it with anchor
 settings. Accepted provider argv and the explicit

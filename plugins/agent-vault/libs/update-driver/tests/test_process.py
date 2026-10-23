@@ -119,15 +119,18 @@ def test_each_queued_scope_is_applied_before_product_routing(area, monkeypatch):
         }
 
 
-def test_real_active_request_does_not_swallow_arrival_and_streams(area):
+@pytest.mark.parametrize("coalesce_running", [False, True])
+def test_real_active_request_respects_target_admission_and_streams(area, coalesce_running):
     root = area / "state"
     first = enqueue(RequestSpec("fixture"), runner=runner(area, delay=".7", code="23"), root=root)
     process = worker(area)
     try:
         eventually(lambda: first.log_path.exists() and "fixture-start" in first.log_path.read_text())
         assert process.poll() is None
-        second = enqueue(first.spec, runner=first.runner, root=root)
-        assert second.id != first.id
+        second = enqueue(
+            first.spec, runner=first.runner, root=root, coalesce_running=coalesce_running,
+        )
+        assert (second.id == first.id) is coalesce_running
         output = io.StringIO()
         result = wait(first.id, root=root, timeout=10, output=output)
         assert result.exit_code == 23
@@ -135,7 +138,29 @@ def test_real_active_request_does_not_swallow_arrival_and_streams(area):
         assert wait(second.id, root=root, timeout=10).exit_code == 23
     finally:
         collect(process)
-    assert len((area / "effects").read_text().splitlines()) == 4
+    assert len((area / "effects").read_text().splitlines()) == (2 if coalesce_running else 4)
+
+
+def test_real_active_request_queues_distinct_arrival(area):
+    root = area / "state"
+    first = enqueue(RequestSpec("fixture"), runner=runner(area, delay=".7"), root=root)
+    process = worker(area)
+    try:
+        eventually(lambda: first.log_path.exists() and "fixture-start" in first.log_path.read_text())
+        second = enqueue(
+            RequestSpec("fixture", source="different-target"), runner=first.runner, root=root,
+            coalesce_running=True,
+        )
+        assert second.id != first.id
+        assert second.state == "pending"
+        assert wait(first.id, root=root, timeout=10).exit_code == 0
+        assert wait(second.id, root=root, timeout=10).exit_code == 0
+    finally:
+        collect(process)
+    lines = (area / "effects").read_text().splitlines()
+    assert len(lines) == 4
+    assert all(lines[i].startswith("start ") and lines[i + 1].startswith("end ")
+               for i in range(0, 4, 2))
 
 
 def test_cross_process_enqueue_coalesces_pending(area):
@@ -159,6 +184,59 @@ def test_cross_process_enqueue_coalesces_pending(area):
         identifiers.append(out.decode().strip())
     assert identifiers == [request.id] * 3
     assert len(status(root=root)) == 1
+
+
+def test_cross_process_enqueue_shares_running_request(area):
+    root = area / "state"
+    started, release = area / "started", area / "release"
+    command = (
+        "import pathlib,sys,time\n"
+        "started,release=map(pathlib.Path,sys.argv[1:])\n"
+        "started.write_text('started')\n"
+        "deadline=time.monotonic()+15\n"
+        "while not release.exists():\n"
+        " if time.monotonic()>=deadline: raise TimeoutError('fixture release missing')\n"
+        " time.sleep(.02)\n"
+        "sys.exit(37)\n"
+    )
+    request = enqueue(
+        RequestSpec("fixture"),
+        runner=TrustedRunner(
+            (sys.executable, "-c", command, str(started), str(release)), str(area),
+            timeout=20, env=(("PYTHONPATH", environment()["PYTHONPATH"]),),
+        ),
+        root=root,
+    )
+    process = worker(area)
+    clients = []
+    try:
+        eventually(started.exists)
+        script = (
+            "import sys; from pathlib import Path; from update_driver import *; "
+            "root=Path(sys.argv[1]); r=status(sys.argv[2],root=root); "
+            "print(enqueue(r.spec,runner=r.runner,root=root,coalesce_running=True).id)"
+        )
+        clients = [
+            subprocess.Popen(
+                [sys.executable, "-c", script, str(root), request.id],
+                env=environment(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                **agent_procutil.no_window_kwargs(),
+            )
+            for _ in range(3)
+        ]
+        for client in clients:
+            out, err = client.communicate(timeout=10)
+            assert client.returncode == 0, err
+            assert out.decode().strip() == request.id
+        rows = status(root=root)
+        assert len(rows) == 1 and rows[0].state == "running"
+    finally:
+        release.write_text("release")
+        for client in clients:
+            if client.poll() is None:
+                client.communicate(timeout=10)
+        collect(process)
+    assert wait(request.id, root=root, timeout=1).exit_code == 37
 
 
 def test_submitter_exit_does_not_own_worker_lifetime(area):

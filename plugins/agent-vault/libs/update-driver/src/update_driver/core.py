@@ -332,10 +332,15 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
         raise StateError("malformed durable request") from error
 
 
-def enqueue(spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None) -> Request:
-    """Commit acceptance before returning; only equivalent pending work coalesces."""
+def enqueue(
+    spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None,
+    coalesce_running: bool = False,
+) -> Request:
+    """Commit acceptance; only trusted adapters with pinned targets may share active work."""
     root = _root(root)
     spec, runner = _spec(spec), _runner(runner)
+    if type(coalesce_running) is not bool:
+        raise InvalidRequestError("active coalescing must be an explicit boolean")
     spec_json, runner_json = _json(asdict(spec)), _json(asdict(runner))
     identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
     _reconcile_lost_owner(root)
@@ -344,9 +349,15 @@ def enqueue(spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = Non
         db.execute("BEGIN IMMEDIATE")
         if _has_fence(db):
             raise InterruptedError("installation queue fenced; explicit positive settlement required")
-        row = db.execute(
-            "SELECT * FROM requests WHERE identity=? AND state='pending'", (identity,),
-        ).fetchone()
+        row = None
+        if coalesce_running:
+            row = db.execute(
+                "SELECT * FROM requests WHERE identity=? AND state='running' LIMIT 1", (identity,),
+            ).fetchone()
+        if row is None:
+            row = db.execute(
+                "SELECT * FROM requests WHERE identity=? AND state='pending'", (identity,),
+            ).fetchone()
         if row is None:
             identifier = uuid.uuid4().hex
             db.execute(

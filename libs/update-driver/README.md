@@ -58,7 +58,7 @@ creation, not an implicit permission migration or a read-only status side effect
   clears every declared key and restores only the request's saved values.
   This happens before module import and project routing, not just inside an
   eventual command handler. Absent keys cannot leak from the caller that
-  happened to start the shared worker. The declaration participates in pending
+  happened to start the shared worker. The declaration participates in request
   equivalence; driver capability and Python import keys cannot be projected.
   Adapters must retain the original invocation directory as the runner cwd
   when their front door changes directory during project resolution.
@@ -69,10 +69,17 @@ creation, not an implicit permission migration or a read-only status side effect
   A completion marker, managed `versions` slot, or bootstrap directory makes
   a missing retention launcher an explicit failure. Linked/reparse-point
   bootstraps refuse rather than degrading to an unretained launch.
-- `enqueue(spec, *, runner, root=None) -> Request` commits acceptance using
+- `enqueue(spec, *, runner, root=None, coalesce_running=False) -> Request` commits acceptance using
   SQLite `synchronous=FULL`. Only byte-equivalent normalized **pending**
   requests coalesce; runner and source/provenance participate in identity.
-  Requests arriving after acquisition began always receive a later execution.
+  A trusted adapter whose existing identity binds a fully pinned target may
+  explicitly set `coalesce_running=True`: equivalent active arrivals then
+  follow the same request, output and outcome, including a nonzero result.
+  A moving ref or identical update arguments alone do not establish that target;
+  Manager and engine retain the default later execution for active arrivals.
+  Distinct inputs/options stay separate, and completed requests never debounce
+  a new attempt. This does not yet resolve a central desired target, order
+  versions, or bound worker-launch fan-out. The opt-in changes no journal schema.
   Existing unsettled global fences refuse admission with `InterruptedError`;
   a detached caller cannot receive an apparently healthy receipt behind one.
 - `status(request_id=None, *, root=None)` reads one Request or a tuple.
@@ -663,7 +670,10 @@ installation/publication readers. Raw development inputs with external local
 dependencies refuse; the existing materialization owner must supply the
 self-contained payload. Its canonical full-input fingerprint, source identity,
 runtime root, originating project and selected installation generations become
-the existing `RequestSpec` identity. Only equivalent pending requests coalesce.
+the existing `RequestSpec` identity. This fully fingerprinted adapter opts into
+sharing equivalent pending or running requests, including their canonical
+nonzero result. A changed input fingerprint, context, installation or action
+remains a separate request.
 The trusted runner is reconstructed internally as that foundation's retained
 module, never a caller-supplied executable, installer name or argument recipe.
 
