@@ -123,3 +123,39 @@ def test_native_rejects_unowned_paths(tmp_path, kind):
     assert result.returncode == 7, result.stderr
     if kind == "missing-parent":
         assert not path.parent.exists()
+
+
+def test_native_read_only_assertion_never_transfers_owner_thread_authority(tmp_path):
+    path = tmp_path / "execution.lock"
+    result = invoke(
+        r"""
+Add-Type -TypeDefinition @'
+using System;
+using System.Threading;
+public static class AssertionThread {
+    public static string Run(Action action) {
+        string result = null;
+        var thread = new Thread(delegate() {
+            try { action(); result = "owned"; }
+            catch (InvalidOperationException) { result = "refused"; }
+        });
+        thread.Start();
+        if (!thread.Join(3000)) throw new Exception("assertion thread did not settle");
+        return result;
+    }
+}
+'@
+"""
+        + f"$l = Enter-NativeOperationLock {quoted(path)}; "
+        f"$proof = $l.CreateWitnessAssertion({quoted(path)}); "
+        "$assert = [Delegate]::CreateDelegate([Action], $l, 'AssertOwned'); "
+        "$release = [Delegate]::CreateDelegate([Action], $l, 'Dispose'); "
+        "try { "
+        "if ([AssertionThread]::Run($proof) -ne 'owned') { throw 'proof did not retain custody' }; "
+        "if ([AssertionThread]::Run($assert) -ne 'refused') { throw 'thread asserted ownership' }; "
+        "if ([AssertionThread]::Run($release) -ne 'refused') { throw 'thread released ownership' }; "
+        "$l.AssertOwned(); $l.Dispose(); "
+        "if ([AssertionThread]::Run($proof) -ne 'refused') { throw 'proof survived owner release' } "
+        "} finally { $l.Dispose() }"
+    )
+    assert result.returncode == 0, result.stderr

@@ -103,14 +103,31 @@ namespace CopilotExtensions {
             }
         }
 
+        private void CheckOwned() {
+            if (stream == null || !Holders.Contains(identity))
+                throw new InvalidOperationException("operation custody is absent");
+            CheckOpenPath();
+            if (OpenIdentity() != identity)
+                throw new IOException("operation lock identity changed");
+        }
+
         public void AssertOwned() {
             lock (Guard) {
-                if (stream == null || thread != Thread.CurrentThread.ManagedThreadId ||
-                    !Holders.Contains(identity))
+                if (thread != Thread.CurrentThread.ManagedThreadId)
                     throw new InvalidOperationException("operation custody is absent or belongs to another thread");
-                CheckOpenPath();
-                if (OpenIdentity() != identity)
-                    throw new IOException("operation lock identity changed");
+                CheckOwned();
+            }
+        }
+
+        // Issue read-only proof on the owner thread; it never acquires or releases custody.
+        public Action CreateWitnessAssertion(string expectedPath) {
+            lock (Guard) {
+                AssertOwned();
+                if (!String.Equals(expectedPath, path, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("operation witness path differs from held custody");
+                return delegate {
+                    lock (Guard) { CheckOwned(); }
+                };
             }
         }
 

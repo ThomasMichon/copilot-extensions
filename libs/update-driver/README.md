@@ -301,6 +301,29 @@ construction admission and first-use adapters remain separate work.
 
 ### Fixed foundation construction participant
 
+On Windows, `update_driver/participant.ps1` supplies the native owner side of
+the existing version-1 participant protocol without Python. After loading the
+canonical `single_instance_lease/operation.ps1`, call
+`New-NativeParticipantWitness -Custody <held-object> -Root <execution-root>
+-RequestId <operation-id>`. It requires that actual native object to hold the
+root's `execution.lock`; a PID, boolean, environment flag or other lock path
+is not custody. Owner-thread issuance creates a retained read-only assertion;
+each authenticated exchange rechecks the original handle, path and identity.
+Release or owner death invalidates joined and future participants.
+
+`Environment()` returns the ephemeral `UPDATE_DRIVER_WITNESS` value for only
+the fixed trusted construction child. Do not persist or log it, or expose it
+to prerequisite downloads or arbitrary subprocesses. The unchanged Python
+participant consumes the inherited capability before package children.
+Close the witness with `Dispose()` before releasing the operation lock, in
+`finally`. Same-user named-pipe ACLs, bounded pickle-free JSON/HMAC exchanges,
+and independent joined clients preserve the Python protocol. Invalid clients
+lose their connection, not the genuine owner's custody; listener failure is
+reported by export/close rather than granting alternate authority. This is
+cooperative same-user custody, not a sandbox against process-memory access.
+The bridge does not launch construction, publish progress, acquire prerequisites
+or enable a cold producer.
+
 `scripts/foundation-build.py` constructs only this library plus the canonical
 `agent-procutil` and `single-instance-lease` sibling packages. The fixed
 manifests, local references and complete non-generated source inventory must
@@ -333,6 +356,15 @@ venv and are not removed by this participant.
 This is the bounded construction participant, not yet a Python-free native
 producer or first-use integration. It does not acquire a bootstrap interpreter,
 write admission/completion records or modify a plugin publisher.
+
+`tests/test_native_participant.py` exercises the real stock-PowerShell owner
+against unchanged Python participants: simultaneous joins, consumed environment,
+kernel-lock contention, forged/mismatched and malformed/oversized messages,
+owner release/death, same-path replacement, closed witnesses and absent custody.
+`libs/single-instance-lease/tests/test_native_operation.py` independently proves
+that an IPC thread may only invoke the issued read-only assertion, not assert
+or release ownership. These are native interoperability controls, not a cold
+foundation installation or non-Windows native bootstrap claim.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;

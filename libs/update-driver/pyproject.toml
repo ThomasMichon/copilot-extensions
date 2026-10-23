@@ -24,6 +24,9 @@ agent-single-instance-lease = { path = "../single-instance-lease", editable = tr
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+update_driver = ["participant.ps1"]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 99

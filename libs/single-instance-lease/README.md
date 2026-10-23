@@ -58,6 +58,14 @@ deletion, and final-path/file-identity checks detect redirected ownership.
 It neither discovers Python nor installs anything. Like the Python API, owner
 death releases only the lock, not a consumer's interrupted-work fence.
 
+The acquiring thread may issue `CreateWitnessAssertion(expectedPath)`. Its
+returned .NET `Action` retains this exact lock object and rechecks its live
+handle, identity and path under the same guard from an IPC thread. Issuance
+requires owned custody and an exact matching path. This read-only assertion
+never acquires, releases or transfers the lock; `AssertOwned()` and `Dispose()`
+remain owner-thread-only. Disposing the original owner revokes every assertion,
+even if a new owner later acquires the same path.
+
 ### `lease` -- the single-instance lease
 
 `SingleInstance` takes an OS-level, exclusive, non-blocking lock on a lock file
