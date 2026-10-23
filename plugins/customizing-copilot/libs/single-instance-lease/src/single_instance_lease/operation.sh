@@ -31,7 +31,7 @@ assert_native_operation_lock() {
 
 enter_native_operation_lock() {
     local path="${1:-}" parent code
-    if [[ "$(uname -s)" != Linux || "$path" != /* || -L "$path" || -e /proc/self/fd/9 ]]; then
+    if [[ "$(uname -s)" != Linux || "$path" != /* || -L "$path" || -L /proc/self/fd/9 ]]; then
         printf '%s\n' 'Native operation admission requires Linux, a plain absolute lock and free FD 9.' >&2
         return 1
     fi
@@ -67,10 +67,31 @@ enter_native_operation_lock() {
         exec 9>&-
         return 1
     fi
+    __single_instance_native_identity="$(stat -Lc '%d:%i' /proc/self/fd/9)" || {
+        exec 9>&-
+        return 1
+    }
+    __single_instance_native_evidence="$(LC_ALL=C grep '^lock:' /proc/self/fdinfo/9)" || {
+        exec 9>&-
+        return 1
+    }
 }
 
 leave_native_operation_lock() {
-    assert_native_operation_lock "${1:-}" || return 1
+    local identity evidence code
+    identity="$(stat -Lc '%d:%i' /proc/self/fd/9)" || return 1
+    evidence="$(LC_ALL=C grep '^lock:' /proc/self/fdinfo/9)" || {
+        printf '%s\n' 'Native cleanup refuses a descriptor without its acquired lock evidence.' >&2
+        return 1
+    }
+    if [[ -z "${__single_instance_native_identity:-}" || -z "${__single_instance_native_evidence:-}" ||
+        "$identity" != "$__single_instance_native_identity" || "$evidence" != "$__single_instance_native_evidence" ]]; then
+        printf '%s\n' 'Native cleanup refuses an unrelated descriptor reference.' >&2
+        return 1
+    fi
+    if assert_native_operation_lock "${1:-}"; then code=0; else code=$?; fi
     # Closing this reference must not unlock an outstanding inherited reference.
     exec 9>&-
+    unset __single_instance_native_identity __single_instance_native_evidence
+    return "$code"
 }

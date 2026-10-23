@@ -150,3 +150,18 @@ def test_inherited_owner_refuses_replaced_lock_file(tmp_path):
             owned.assert_owned()
     finally:
         owned.release()
+
+
+@pytest.mark.parametrize("mode", ["cleanup", "foreign"])
+def test_native_cleanup_closes_only_its_owned_reference_after_path_invalidation(tmp_path, mode):
+    lock = tmp_path / "execution.lock"
+    fixture = Path(__file__).with_name("fixture_linux_native_owner.sh")
+    result = subprocess.run(
+        ["bash", str(fixture), str(SOURCE), str(lock), mode],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    for path in (lock, lock.with_name(lock.name + ".old")):
+        if path.exists():
+            with OperationLock(path) as owned:
+                owned.assert_owned()

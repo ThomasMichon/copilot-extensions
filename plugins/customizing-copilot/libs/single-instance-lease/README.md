@@ -73,8 +73,11 @@ must be normalized and unlinked; FD 9 must be free. The descriptor stays open
 without any file deletion, age/PID lease or Python prerequisite.
 `assert_native_operation_lock` checks the current path/inode and Linux's
 per-descriptor `/proc/self/fdinfo/9` exclusive whole-file flock evidence.
-`leave_native_operation_lock` closes that reference, never explicitly unlocks
-other inherited references.
+`leave_native_operation_lock` checks that FD 9 still names the acquired
+reference using its recorded inode and kernel lock evidence. It closes that
+reference even when the pathname was removed or replaced, while preserving
+the path-validation error. A substituted unrelated FD 9 is left alone.
+Cleanup never explicitly unlocks other inherited references.
 
 After a deliberate native `exec` handoff, the Python successor can consume
 the same open-file description with
