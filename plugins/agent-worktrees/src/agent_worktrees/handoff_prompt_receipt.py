@@ -209,17 +209,28 @@ def resident_prompt_receipt(
                 revalidate()
                 check()
                 budget = _ScanBudget(pre_effect_deadline)
+                received_path = path
                 received = budget.match(path, worktree_id, locator, session_id, creation_nonce)
                 if not received:
                     from . import config as cfg
 
+                    received_path = cfg.install_dir() / "logs" / "activity.jsonl"
                     received = budget.match(
-                        cfg.install_dir() / "logs" / "activity.jsonl",
+                        received_path,
                         worktree_id, locator, session_id, creation_nonce,
                     )
                 revalidate()
                 check()
                 if received:
+                    # A readable row can survive a failed append fsync. Confirm
+                    # durability under the same lock before clearing uncertainty.
+                    may_have_committed = True
+                    with received_path.open("r+b", buffering=0) as handle:
+                        revalidate()
+                        check()
+                        os.fsync(handle.fileno())
+                    if time.monotonic() >= deadline:
+                        return result("unknown", "completion-after-deadline")
                     return result("received", "exact-replay", True)
                 if not record:
                     return result("absent", "exact-query-absent")

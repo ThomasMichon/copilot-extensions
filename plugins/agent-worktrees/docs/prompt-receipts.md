@@ -44,3 +44,9 @@ unavailable. Once append may have occurred, an error or late completion is
 unknown; the control owner keeps in-flight ownership through settlement.
 Queries while a mutation is still in flight must remain unknown. The legacy
 CLI compatibility reader is not the resident authority/admission contract.
+
+A complete readable row alone is not proof of durability after a failed
+append/fsync. Exact resident queries and recording replays synchronize the
+matching existing trace under the same admission and trace locks before
+reporting `received`. A failed or late synchronization remains `unknown`;
+reconciliation does not append another receipt.

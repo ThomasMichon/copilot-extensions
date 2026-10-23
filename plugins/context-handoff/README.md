@@ -109,6 +109,8 @@ same live session later; an already-known identity is never replaced.
 Shutdown destroys the local socket but retains uncertain identity for a later
 registration. It does not claim server rollback or cancellable fsync. Server
 in-flight ownership lasts until settlement; a local timeout is not completion.
+An exact replay is acknowledged only after the backend successfully synchronizes
+the existing receipt; a row left readable by a failed fsync stays uncertain.
 Unsettled local file reads retain a single-flight fence rather than admitting
 more reads. These receipts are
 observational evidence, not ownership or consumption authorization.

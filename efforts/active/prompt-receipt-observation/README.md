@@ -288,3 +288,57 @@ new authority or ownership behavior requires a separate proposal.
   deployment, restart or broad test batch was started after that checkpoint.
   The staged immutable provider/client fixture is retained for the exact next
   targeted integration run; no fixture server or helper remains running.
+
+### Actual-server continuation and replay durability correction
+
+- Refreshed the retained provider fixture from immutable #8224 checkpoint
+  `75a4dc1068b5872bd2bc69eab2c5ccc6120527b4`. The first actual-server run passed
+  six cases and exposed a fixture-only missing `SessionHandoff.state`; the
+  corrected exact pending-successor selector passed. The production head-only
+  restriction was not weakened.
+- Expanded real ControlServer/backend/Node coverage for trace-lock contention,
+  total history byte/row/elapsed limits, oversized records, cancellation,
+  storage failure, exact cutover reconciliation, removed associations,
+  independent locators and unavailable identity/route/token/capability inputs.
+  One expanded run passed 16 cases and exposed a test-only record/query count
+  expectation; the corrected selector and ten new identity controls passed.
+  These finite results do not establish complete native acceptance.
+- Confirmed the provider adapter and ControlServer files are byte-identical
+  between that checkpoint and merged #8224 commit
+  `eab0a4909575caf9cbd3f09ba7e56831d55c5b92`; refreshed only the test-owned
+  provider copy from the merged commit. No mutable owner worktree was copied.
+- Independent source review found a real durability defect: a row left readable
+  after failed fsync could be acknowledged on replay without another successful
+  sync. Exact resident query/record replays now synchronize the matching existing
+  history under the same record/trace locks, retain uncertainty on failed/late
+  sync, and never append a replacement. Updated the backend and actual-server
+  regressions and both consumer/backend docs.
+- Fresh post-fix validation: 61 trace/deadline/backend tests pass; the two
+  actual-server storage-failure and cancellation controls pass. The latter now
+  cancels on a fixture-owned fsync-admission notification, not an arbitrary
+  500 ms assumption about server startup. No production timer or workload was
+  relaxed. Both the Node and resident paths still report zero helper starts.
+- A monitored windowless run passed its two receipt cycles and delayed-fsync
+  drain control, with zero observed owned windows/foreground transitions.
+  Its fourth case cancelled before admission at 500 ms and therefore did not
+  exercise the intended post-admission path. The harness also sampled two
+  descendants during final process exit; a subsequent exact-PID check found
+  neither running. Preserve the failed report rather than calling this a fully
+  green windowless qualification.
+- The host was observed at 100% CPU. Do not turn another blind broad rerun into
+  a latency claim. The remaining quiet gate is the unchanged full native
+  27-case selector followed by the windowless two-cycle/timeout/cancellation
+  selector, with recorded non-saturated host conditions and the original
+  strict 2,000 ms assertions. No performance acceptance is claimed here.
+- Raw local results remain in the untracked
+  `.resident-integration-validation/` directory: `run-75a4dc106-first.log`,
+  `run-pending-fix.log`, `run-expanded-native.log`,
+  `run-identity-controls.log`, `windowless-native.log`,
+  `windowless-report.json`, `provider-merged-byte-comparison.log`,
+  `run-durability-backend.log`, `run-trace-deadline-durability.log` and
+  `run-durability-and-cancel-fix.log`. They are retained test material, not
+  publication artifacts.
+- `RESIDENT_RECEIPT_CONTRACT` remains absent. The separately owned real
+  project/creation-nonce registration producer is admitted but not implemented
+  or qualified by this slice. Full producer/control/Node qualification, final
+  source review/CI/merge, installed/native-host proof and rollout remain open.

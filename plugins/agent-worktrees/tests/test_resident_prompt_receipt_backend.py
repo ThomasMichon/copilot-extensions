@@ -146,25 +146,41 @@ def test_removed_association_before_append_is_unavailable(store):
 def test_late_fsync_remains_unknown_then_exact_query_reconciles(store, monkeypatch):
     clock = [time.monotonic()]
     fsync = receipt.os.fsync
+    attempts = []
 
     def late_sync(fd):
         fsync(fd)
-        clock[0] += 3
+        attempts.append(fd)
+        if len(attempts) == 1:
+            clock[0] += 3
 
     monkeypatch.setattr(receipt, "time", SimpleNamespace(monotonic=lambda: clock[0]))
     monkeypatch.setattr(receipt.os, "fsync", late_sync)
     first = invoke(record=True, deadline=clock[0] + 2)
     assert first["status"] == "unknown"
     assert invoke(deadline=clock[0] + 2)["status"] == "received"
+    assert len(attempts) == 2
     assert len(handoff_trace.read_trace("project", "worktree")) == 1
 
 
 def test_fsync_error_never_reports_absent_or_safe_retry(store, monkeypatch):
+    fsync = receipt.os.fsync
+    attempts = []
+
     def fail(_fd):
+        attempts.append(_fd)
         raise OSError("controlled failure with private details")
 
     monkeypatch.setattr(receipt.os, "fsync", fail)
-    assert invoke(record=True) == {"status": "unknown", "reason": "commit-unknown", "replayed": False}
+    for record in (True, False, True):
+        assert invoke(record=record) == {
+            "status": "unknown", "reason": "commit-unknown", "replayed": False,
+        }
+    assert len(attempts) == 3
+    assert len(handoff_trace.read_trace("project", "worktree")) == 1
+    monkeypatch.setattr(receipt.os, "fsync", fsync)
+    assert invoke()["status"] == "received"
+    assert len(handoff_trace.read_trace("project", "worktree")) == 1
 
 
 def test_expired_admission_has_no_effect(store):

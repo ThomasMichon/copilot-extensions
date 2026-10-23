@@ -71,7 +71,7 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
     fsync = os.fsync
     hold_sync, release_sync = threading.Event(), threading.Event()
     state = SimpleNamespace(drop_reply=False, delay_sync=False, hold_sync=hold_sync,
-                            release_sync=release_sync, counts=counts)
+                            release_sync=release_sync, counts=counts, cancel_path=None)
     popen = subprocess.Popen
 
     def guarded_popen(*args, **kwargs):
@@ -87,6 +87,8 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         counts["fsync"] += 1
         if state.delay_sync:
             hold_sync.set()
+            if state.cancel_path is not None:
+                state.cancel_path.write_text("admitted", encoding="utf-8")
             assert release_sync.wait(8), "fixture fsync was not released"
         fsync(fd)
 
@@ -154,11 +156,17 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
     )
     driver = Path(__file__).with_name("receipt_node_driver.mjs")
 
-    def observe(*, pending=None, locator="task:native-fixture", concurrent=0):
+    def observe(*, pending=None, locator="task:native-fixture", concurrent=0,
+                cancel_before=False, cancel_on_fsync=False):
         request_file = tmp_path / "node-request.json"
+        state.cancel_path = tmp_path / "cancel-after-admission" if cancel_on_fsync else None
+        if state.cancel_path is not None:
+            state.cancel_path.write_text("", encoding="utf-8")
         request_file.write_text(json.dumps({
             "sessionDir": str(session_dir), "sessionId": sid,
             "locator": locator, "pending": pending or {}, "concurrent": concurrent,
+            "cancelBefore": cancel_before,
+            **({"cancelFile": str(state.cancel_path)} if state.cancel_path is not None else {}),
         }), encoding="utf-8")
         result = run_caller_owned(
             [node, str(driver), str(request_file)], timeout=6,
@@ -166,6 +174,11 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         )
         assert result.returncode == 0, result.stderr
         value = json.loads(result.stdout)
+        print(json.dumps({
+            "observation": value["status"], "reason": value.get("reason"),
+            "elapsedMs": value["elapsedMs"], "helperCalls": value["helperCalls"],
+            "active": runtime.active_count(), "counts": dict(counts),
+        }), flush=True)
         assert value["helperCalls"] == 0
         assert value["elapsedMs"] < 2000
         return value
@@ -180,6 +193,7 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
     state.route_path = route_path
     state.token_path = token_path
     state.session_dir = session_dir
+    state.owner = owner
     threads_before = {thread.ident for thread in threading.enumerate()}
     server.start()
     try:
@@ -205,7 +219,7 @@ def test_actual_control_real_backend_node_two_cycles(resident, cycle):
     assert resident.observe(pending=first["pending"])["status"] == "logged"
     rows = handoff_trace.read_trace(resident.record.repo, resident.record.worktree_id)
     assert len(rows) == 1 and rows[0]["creation_nonce"] == resident.record.creation_nonce
-    assert resident.counts["fsync"] == 1
+    assert resident.counts["fsync"] == 2
     assert resident.counts["record"] == 2
     assert resident.counts["helpers"] == 0
     assert resident.counts["maxActive"] <= 4
@@ -220,7 +234,7 @@ def test_lost_reply_after_fsync_reconciles_exact_identity_without_second_write(r
     replay = resident.observe(pending=first["pending"])
     assert replay["status"] == "logged"
     assert resident.counts["record"] == 1 and resident.counts["query"] == 1
-    assert resident.counts["fsync"] == 1
+    assert resident.counts["fsync"] == 2
 
 
 def test_concurrent_node_observers_record_one_exact_receipt(resident):
@@ -229,7 +243,7 @@ def test_concurrent_node_observers_record_one_exact_receipt(resident):
     for result in batch["results"]:
         if result["status"] != "logged":
             assert resident.observe(pending=result["pending"])["status"] == "logged"
-    assert resident.counts["fsync"] == 1
+    assert resident.counts["fsync"] == 2
     assert len(handoff_trace.read_trace(resident.record.repo, resident.record.worktree_id)) == 1
     assert resident.counts["maxActive"] <= 4
 
@@ -238,7 +252,7 @@ def test_exact_pending_successor_is_supported_without_head_promotion(resident):
     resident.record.sessions = [tracking.SessionEntry("different-head", "2026-01-02")]
     resident.record.handoffs = [tracking.SessionHandoff(
         ordinal=1, token="fixture-handoff", predecessor="different-head",
-        opened_at="2026-01-02", candidate=resident.subject["sessionId"],
+        state="pending", opened_at="2026-01-02", candidate=resident.subject["sessionId"],
     )]
     tracking.save_record(resident.record, resident.record_path)
     assert resident.observe()["status"] == "logged"
@@ -260,7 +274,7 @@ def test_disconnected_client_drain_keeps_real_fsync_owned_until_settlement(resid
         time.sleep(0.01)
     resident.runtime.open_admission()  # Fixture owner, never a client action.
     assert resident.observe(pending=first["pending"])["status"] == "logged"
-    assert resident.counts["record"] == 1 and resident.counts["fsync"] == 1
+    assert resident.counts["record"] == 1 and resident.counts["fsync"] == 2
 
 
 def test_actual_control_refuses_wrong_nonce_and_missing_association(resident):
@@ -270,3 +284,164 @@ def test_actual_control_refuses_wrong_nonce_and_missing_association(resident):
     binding.write_text(json.dumps({**resident.subject, "sessionId": "foreign"}), encoding="utf-8")
     assert resident.observe()["status"] == "unavailable"
     assert resident.counts["fsync"] == 0
+
+
+def test_removed_registered_association_has_no_effect(resident):
+    resident.record.sessions = [tracking.SessionEntry("different-head", "2026-01-02")]
+    tracking.save_record(resident.record, resident.record_path)
+    assert resident.observe()["status"] == "unknown"
+    assert resident.counts["fsync"] == 0
+    assert resident.runtime.active_count() == 0
+
+
+def test_actual_lock_contention_expires_without_append_or_queued_waiter(resident):
+    path = handoff_trace.trace_path(resident.record.repo, resident.record.worktree_id)
+    with handoff_trace._append_lock(path.with_suffix(path.suffix + ".lock")):
+        first = resident.observe()
+        assert first["status"] == "unknown"
+        assert first["reason"] == "lock-admission-timeout"
+        assert resident.runtime.active_count() == 0
+        assert resident.counts["fsync"] == 0
+    assert resident.observe(pending=first["pending"])["status"] == "absent"
+    assert resident.counts["record"] == 1
+    assert resident.observe()["status"] == "logged"
+
+
+@pytest.mark.parametrize("limit", ["rows", "bytes", "record", "elapsed"])
+def test_total_scan_budgets_through_actual_server(resident, monkeypatch, limit):
+    path = handoff_trace.trace_path(resident.record.repo, resident.record.worktree_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    reason = "scan-limit"
+    if limit == "rows":
+        path.write_bytes(b"{}\n" * (handoff_prompt_receipt.MAX_SCAN_ROWS + 1))
+    elif limit == "bytes":
+        row = json.dumps({"noise": "x" * 500}).encode() + b"\n"
+        path.write_bytes(row * 1100)
+        (resident.root / "logs" / "activity.jsonl").write_bytes(row * 1100)
+    elif limit == "record":
+        path.write_bytes(b"x" * (64 * 1024 + 1))
+        reason = "record-limit"
+    else:
+        path.write_bytes(b"{}\n")
+        loads = handoff_prompt_receipt.json.loads
+
+        def slow_loads(data, *args, **kwargs):
+            if threading.current_thread() is not threading.main_thread() and data == b"{}\n":
+                time.sleep(0.21)
+            return loads(data, *args, **kwargs)
+
+        monkeypatch.setattr(handoff_prompt_receipt.json, "loads", slow_loads)
+        reason = "scan-timeout"
+    first = resident.observe()
+    assert first["status"] == "unknown" and first["reason"] == reason
+    assert resident.counts["fsync"] == 0
+    assert resident.runtime.active_count() == 0
+
+
+def test_cancel_before_send_has_no_request_or_effect(resident):
+    assert resident.observe(cancel_before=True)["status"] == "unavailable"
+    assert resident.requests == []
+    assert resident.counts["record"] == resident.counts["fsync"] == 0
+
+
+def test_cancel_after_admission_retains_uncertain_commit(resident):
+    resident.delay_sync = True
+    first = resident.observe(cancel_on_fsync=True)
+    assert resident.hold_sync.is_set() and first["status"] == "unknown"
+    assert resident.runtime.active_count() == 1
+    # An exact query cannot report absent while this append still owns fsync.
+    assert resident.observe(pending=first["pending"])["status"] == "unknown"
+    assert resident.counts["record"] == 1 and resident.runtime.active_count() == 1
+    resident.release_sync.set()
+    resident.runtime.wait_idle()
+    assert resident.observe(pending=first["pending"])["status"] == "logged"
+    assert resident.counts["fsync"] == 2
+
+
+def test_storage_failure_is_unknown_and_never_blindly_retried(resident, monkeypatch):
+    fsync = handoff_prompt_receipt.os.fsync
+
+    def fail(_fd):
+        raise OSError("fixture-private-detail")
+
+    monkeypatch.setattr(handoff_prompt_receipt.os, "fsync", fail)
+    first = resident.observe()
+    assert first["status"] == "unknown" and first["reason"] == "commit-unknown"
+    assert "fixture-private-detail" not in json.dumps(first)
+    assert resident.observe(pending=first["pending"])["status"] == "unknown"
+    assert resident.counts["record"] == resident.counts["query"] == 1
+    monkeypatch.setattr(handoff_prompt_receipt.os, "fsync", fsync)
+    assert resident.observe(pending=first["pending"])["status"] == "logged"
+    assert resident.counts["record"] == 1 and resident.counts["query"] == 2
+    assert len(handoff_trace.read_trace(resident.record.repo, resident.record.worktree_id)) == 1
+
+
+def test_same_installation_cutover_reconciles_but_new_incarnation_refuses(resident):
+    resident.drop_reply = True
+    first = resident.observe()
+    assert first["status"] == "unknown"
+    resident.drop_reply = False
+    resident.owner["routeGeneration"] = 2
+    resident.owner["runtimeGeneration"] = "replacement-runtime"
+    route = json.loads(resident.route_path.read_text(encoding="utf-8"))
+    route["active"]["generation"] = 2
+    resident.route_path.write_text(json.dumps(route), encoding="utf-8")
+    assert resident.observe(pending=first["pending"])["status"] == "logged"
+    resident.record.creation_nonce = "replacement-incarnation"
+    tracking.save_record(resident.record, resident.record_path)
+    assert resident.observe(pending=first["pending"])["status"] == "unknown"
+    assert resident.counts["record"] == 1 and resident.counts["query"] == 2
+    assert resident.counts["fsync"] == 2
+
+
+@pytest.mark.parametrize("fault", [
+    "missing-token", "wrong-token", "missing-nonce", "previous-only", "non-loopback",
+    "source-switch", "unsupported-contract", "missing-capability",
+])
+def test_unavailable_inputs_have_no_effect_or_wake(resident, monkeypatch, fault):
+    if fault == "missing-token":
+        resident.token_path.unlink()
+    elif fault == "wrong-token":
+        resident.token_path.write_text("incorrect-token", encoding="utf-8")
+    elif fault == "missing-nonce":
+        binding = {key: value for key, value in resident.subject.items() if key != "creationNonce"}
+        (resident.session_dir / "worktree-binding.json").write_text(json.dumps(binding), encoding="utf-8")
+    elif fault in {"previous-only", "non-loopback"}:
+        route = json.loads(resident.route_path.read_text(encoding="utf-8"))
+        if fault == "previous-only":
+            route["previous"] = route.pop("active")
+        else:
+            route["active"]["bind"] = "example.invalid"
+        resident.route_path.write_text(json.dumps(route), encoding="utf-8")
+    elif fault == "source-switch":
+        resident.owner["sourceFingerprint"] = "replacement-source"
+    else:
+        health = resident.runtime.health()
+        if fault == "unsupported-contract":
+            health["promptReceipt"]["contractVersion"] = 2
+        else:
+            health["capabilities"] = []
+        monkeypatch.setattr(resident.runtime, "health", lambda: health)
+    assert resident.observe()["status"] == "unavailable"
+    assert resident.counts["record"] == resident.counts["query"] == resident.counts["fsync"] == 0
+    assert all(action == "health" for action in resident.requests)
+
+
+def test_independent_locators_record_independently(resident):
+    assert resident.observe(locator="task:first")["status"] == "logged"
+    assert resident.observe(locator="file:second")["status"] == "logged"
+    assert resident.counts["record"] == resident.counts["fsync"] == 2
+    assert len(handoff_trace.read_trace(resident.record.repo, resident.record.worktree_id)) == 2
+
+
+def test_unqualified_legacy_receipt_is_not_backfilled(resident):
+    path = handoff_trace.trace_path(resident.record.repo, resident.record.worktree_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "event": handoff_prompt_receipt.EVENT, "worktree_id": resident.record.worktree_id,
+        "session_id": resident.subject["sessionId"], "locator": "task:native-fixture",
+    }) + "\n", encoding="utf-8")
+    before = path.read_bytes()
+    first = resident.observe()
+    assert first["status"] == "unknown" and first["reason"] == "legacy-incarnation-unavailable"
+    assert path.read_bytes() == before and resident.counts["fsync"] == 0
