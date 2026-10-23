@@ -94,6 +94,44 @@ the specific already-merged findings below.
 
 ## Named retained batches and explicit blocked owners
 
+### Subsequent admission: G-DOC
+
+This candidate admits only S023/S024/S060/S061 (`3a70b5997994`,
+`eac47c7b012d`, `5f0b597c128c`, `7799a745b199`). Replace the whole-tree
+Markdown glob with a walk that never enters the two already-excluded exact
+directory names, `.worktrees` and `node_modules`. All other candidates remain:
+hidden trees, virtual environments, similarly named directories, platform case
+matching, Markdown directories and file/directory links. Directory links are
+not traversed. Excluded ancestors still suppress the entire scan. Enumeration
+failures propagate rather than silently reducing coverage.
+
+Tests compare both sorted candidates and exact diagnostics against the legacy
+glob/count loop, including file/pattern/match order and line numbers, directory
+diagnostics, encoding/read failures and native links. A scandir observer proves
+that excluded descendants are never enumerated while hidden and nonexcluded
+descendants remain visited. Existing count suffix prefilters and navigation
+checks are unchanged; the legacy comparator is reconciled to the current
+three-field pattern records rather than replacing those prior improvements.
+
+The complete module passed 131 tests without skips on native Windows with
+exactly two workers; the actual repository guard also passed. The combined
+run took 11.88 seconds including preparation and cleanup, retaining the
+30-second item deadline, 240-second diagnostic bound and default containment
+caps. Ruff and diff checks passed. These are focused functional results,
+not complete-plugin or repeated same-head qualification.
+
+Required CI initially refused the changed docs source bytes before execution.
+Refresh only their two declared source hashes in the existing unit manifest;
+its admitted node inventory and coverage targets remain unchanged. The new
+filesystem traversal/link tests are not added to required unit-only CI.
+
+This is a below-altitude guard implementation change, with no plugin payload,
+installer or runtime behavior change and no changefile needed. The guard's own
+module documentation records the traversal boundary. Fresh temporary-tree
+tests and the actual repository guard exercise the simple integration and
+clean consumer paths; no external service or development venue is involved.
+Review and required CI still gate merge. This is not parent timing evidence.
+
 ### Subsequent admission: F-ALLOC
 
 This candidate admits only S002-S019 in `test_allocation_release.py`.
