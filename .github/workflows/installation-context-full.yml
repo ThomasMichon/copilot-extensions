@@ -65,6 +65,7 @@ jobs:
           --test-file tests/test_foundation_native_process.py
           --test-file tests/test_foundation_progress_process.py
           --test-file tests/test_foundation_producer_process.py
+          --test-file tests/test_foundation_upgrade_process.py
           --test-file tests/test_foundation_genesis_process.py
           --test-file tests/test_native_participant.py
           --test-file tests/test_foundation_build_process.py
@@ -73,7 +74,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
     name: foundation construction (Windows)
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
@@ -97,7 +98,8 @@ jobs:
           --test-file tests/test_foundation_native_process.py
           --test-file tests/test_foundation_progress_process.py
           --test-file tests/test_foundation_producer_process.py
+          --test-file tests/test_foundation_upgrade_process.py
           --test-file tests/test_foundation_genesis_process.py
           --test-file tests/test_native_participant.py
           --test-file tests/test_foundation_build_process.py
-          --test-timeout 600 --timeout 780
+          --test-timeout 1200 --timeout 1380

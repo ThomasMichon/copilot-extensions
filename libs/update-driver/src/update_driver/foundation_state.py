@@ -15,6 +15,7 @@ from pathlib import Path
 from single_instance_lease.operation import OperationLock
 
 from . import boot
+from .participant import BorrowedCustody
 
 SCHEMA = "copilot-extensions.installation-foundation-operation"
 VERSION = 1
@@ -179,9 +180,13 @@ def read(root: Path) -> FoundationOperation | None:
         raise FoundationStateError(f"foundation state unavailable: {type(error).__name__}") from error
 
 
-def _owned(root: Path, custody: OperationLock) -> Path:
+def _owned(root: Path, custody: OperationLock | BorrowedCustody) -> Path:
     root = _root(root)
-    if not isinstance(custody, OperationLock) or custody.path != root / "execution.lock":
+    if isinstance(custody, BorrowedCustody):
+        matches = custody.root == root
+    else:
+        matches = isinstance(custody, OperationLock) and custody.path == root / "execution.lock"
+    if not matches:
         raise FoundationStateError("foundation requires the installation execution lock")
     custody.assert_owned()
     return root
@@ -219,7 +224,9 @@ def _publish(temporary: Path, path: Path) -> None:
         os.close(directory)
 
 
-def _write(root: Path, value: FoundationOperation, custody: OperationLock) -> FoundationOperation:
+def _write(
+    root: Path, value: FoundationOperation, custody: OperationLock | BorrowedCustody,
+) -> FoundationOperation:
     root = _owned(root, custody)
     document = {"schema": SCHEMA, "version": VERSION, **asdict(value)}
     value = _validate(document)
@@ -243,13 +250,19 @@ def _write(root: Path, value: FoundationOperation, custody: OperationLock) -> Fo
     return value
 
 
-def _admit_queue(root: Path, custody: OperationLock) -> None:
+def _admit_queue(root: Path, custody: OperationLock | BorrowedCustody) -> None:
     from . import core
 
     path = root / "queue.sqlite3"
     try:
         identity = path.lstat()
     except FileNotFoundError:
+        for suffix in ("-wal", "-shm", "-journal"):
+            try:
+                path.with_name(path.name + suffix).lstat()
+            except FileNotFoundError:
+                continue
+            raise FoundationStateError("foundation queue sidecar exists without its database")
         return
     current = core._active_transaction.get()
     enclosing = (
@@ -268,7 +281,9 @@ def _admit_queue(root: Path, custody: OperationLock) -> None:
             raise FoundationStateError("foundation fenced by unsettled queue transaction")
 
 
-def begin(root: Path, source_hash: str, custody: OperationLock) -> FoundationOperation:
+def begin(
+    root: Path, source_hash: str, custody: OperationLock | BorrowedCustody,
+) -> FoundationOperation:
     """Admit only an explicitly owned new bootstrap, never replay an uncertain one."""
     root = _owned(root, custody)
     if not isinstance(source_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", source_hash):

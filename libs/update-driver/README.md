@@ -262,7 +262,8 @@ Missing progress alongside existing `foundation/` artifacts is a readiness
 error, never permission to fall back to a legacy installer.
 
 Trusted producers use `foundation_state.begin`/`finish` only while holding the
-actual canonical `OperationLock` for this execution root. Acceptance is
+actual canonical `OperationLock` for this execution root, or a live authenticated
+`BorrowedCustody` for that same root. Acceptance is
 published before mutable foundation staging; writes flush data and use
 write-through replacement on Windows or directory fsync on POSIX. An integer
 outcome certifies the producer's complete cleanup boundary. Unknown settlement
@@ -274,7 +275,8 @@ Admission also reads any existing SQLite queue without creating one. Unsettled
 running, interrupted or blocked plugin work refuses foundation construction.
 Only the exact currently executing transaction under the same live lock may
 enclose foundation work; an abandoned running row is not that authority.
-Windows readers share deletion; write-through publication retries bounded
+Orphaned SQLite sidecars without their database also refuse, rather than
+creating an apparently empty replacement. Windows readers share deletion; write-through publication retries bounded
 reader-sharing conflicts under custody. A persistent conflict fails explicitly
 without reporting completion or discarding the prior progress.
 
@@ -324,10 +326,9 @@ Native inventory hashing binds bytes, not TOML semantics; the fixed builder
 still validates package names, dependencies and local references before staging.
 No acquisition or mutable construction is performed by these progress helpers.
 
-This is the producer/core contract and its qualification, not an enabled cold
-bootstrap. No ordinary entry point writes these records yet; prerequisite
-acquisition, caller-independent producer orchestration and first-use adapters
-remain separate work.
+These progress helpers are not ordinary plugin entry points. The finite producer
+below owns prerequisite acquisition and construction; first-use adapters remain
+separate work.
 
 ### Fixed foundation construction participant
 
@@ -456,11 +457,32 @@ rebuilds nor executes queued work, and ordinary startup never calls it.
 A second caller can reuse only a completed matching operation, its exact
 source-qualified current slot and successful retained installed health.
 It neither starts another bootstrap nor edits pending request history.
-Without that healthy exact selection, an existing queue still requires
-queue-aware upgrade/repair authority; this cold producer never interprets or
-deletes SQLite. It does not enroll maintenance or enable ordinary first-use
-publishers. Queue-aware foundation upgrades, native Linux/macOS genesis and
-the remaining first-use integrations stay explicit, separate boundaries.
+Without that healthy exact selection, any existing queue artifact or selected
+foundation requires queue-aware admission. The native owner invokes only
+`update_driver.foundation_admission` from the exact retained selected slot,
+through its retention launcher, in a strict bounded owned child. This fixed
+module consumes a fresh same-root witness, checks installed execution health
+and calls the existing `foundation_state.begin` queue reader. It neither
+executes a submitted recipe nor implements another SQLite reader. The native
+owner retains the original kernel lock across admission, acquisition,
+construction, selection and outcome persistence.
+
+A live transaction therefore finishes before native upgrade admission can
+acquire custody. Unsettled abandoned work still refuses; a free lock alone
+does not settle it. Pending requests and already-started workers remain at the
+same execution root, with their pinned old runtime retained, and execute only
+after the producer releases custody. An installed foundation lacking this
+admission module is an explicit readiness/repair failure, even when its queue
+is empty; empty history does not prove that an unaware legacy executor is fenced.
+Missing/corrupt selectors and incompatible queues refuse before bootstrap
+staging or prerequisites, preserving queue bytes and the healthy selection.
+No native branch reads, edits or deletes SQLite.
+
+The producer does not enroll maintenance or enable ordinary first-use
+publishers. Native Linux/macOS genesis and the remaining first-use integrations
+stay explicit, separate boundaries. The single foundation progress snapshot
+is not durable ordinary-request history: future publication adapters still
+need canonical queued request receipts.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;

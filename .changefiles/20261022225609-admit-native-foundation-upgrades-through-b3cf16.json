@@ -1,0 +1,13 @@
+{
+  "comment": "Admit native foundation upgrades through the retained canonical queue authority, preserving active requests, pending workers and explicit legacy refusal.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -164,6 +164,10 @@ def test_real_cold_callers_converge_after_submitter_job_loss_and_source_removal(
                 assert result.returncode == 0, result.stdout + result.stderr
             result = wait(queued.id, root=root, timeout=5)
             assert result.state == "completed" and result.exit_code == 7
+            qualify_real_upgrade(
+                area=area, library=library, root=root, slot=slot, env=env,
+                parents=parents, diagnostics=diagnostics,
+            )
         finally:
             for worker in workers:
                 try:
@@ -181,3 +185,100 @@ def test_real_cold_callers_converge_after_submitter_job_loss_and_source_removal(
                 parent.wait(timeout=10)
         assert observation.surfaced == {}
         assert observation.focus_changes == {}
+
+
+def qualify_real_upgrade(*, area, library, root, slot, env, parents, diagnostics):
+    """Upgrade real installed packages while the old immutable worker remains usable."""
+    from test_foundation_producer_process import command
+    from test_foundation_upgrade_process import worker_command
+
+    inputs = area / "upgrade-inputs"
+    for name in PACKAGES:
+        shutil.copytree(
+            library / name, inputs / name,
+            ignore=shutil.ignore_patterns(*GENERATED, "*.egg-info", "*.dist-info", "*.pyc", "*.pyo"),
+        )
+    plugin = inputs / "update-driver"
+    (plugin / "upgrade.txt").write_text("same package version, distinct qualified inputs")
+    previous = foundation_status(root=root)
+    digest = inspect(plugin).digest
+    assert digest != previous.source_hash
+    marker = (slot / ".install-complete.json").read_bytes()
+    script = (
+        "from pathlib import Path; import time\n"
+        f"root=Path({str(root)!r})\n"
+        "(root/'upgrade-active').touch()\n"
+        "deadline=time.monotonic()+90\n"
+        "while not (root/'upgrade-release').exists():\n"
+        " assert time.monotonic()<deadline\n"
+        " time.sleep(.02)\n"
+        "raise SystemExit(11)\n"
+    )
+    active = enqueue(
+        RequestSpec("installed-upgrade-active"), root=root,
+        runner=TrustedRunner((sys.executable, "-c", script), str(area)),
+    )
+    with (root / "upgrade-processes.log").open("w") as log:
+        old_worker = subprocess.Popen(
+            worker_command(slot, root), stdin=subprocess.DEVNULL,
+            stdout=log, stderr=log, **pu.no_window_kwargs(),
+        )
+        parents.append(old_worker)
+        observe(lambda: (root / "upgrade-active").exists(), 30, diagnostics)
+        producer = subprocess.Popen(
+            command(plugin, root, digest), env=env, stdin=subprocess.DEVNULL,
+            stdout=log, stderr=log, **pu.no_window_kwargs(),
+        )
+        parents.append(producer)
+        time.sleep(2)
+        assert producer.poll() is None and foundation_status(root=root) == previous
+        (root / "upgrade-release").touch()
+        assert old_worker.wait(timeout=30) == 0, diagnostics()
+        assert wait(active.id, root=root, timeout=5).exit_code == 11
+        observe(
+            lambda: foundation_status(root=root).operation_id != previous.operation_id
+            or producer.poll() is not None,
+            60, diagnostics,
+        )
+        admitted = foundation_status(root=root)
+        assert admitted.state == "running" and admitted.source_hash == digest, diagnostics()
+        pending = enqueue(
+            RequestSpec("installed-upgrade-pending"), root=root,
+            runner=TrustedRunner((sys.executable, "-c", "raise SystemExit(13)"), str(area)),
+        )
+        retained_worker = subprocess.Popen(
+            worker_command(slot, root), stdin=subprocess.DEVNULL,
+            stdout=log, stderr=log, **pu.no_window_kwargs(),
+        )
+        parents.append(retained_worker)
+        assert producer.wait(timeout=600) == 0, diagnostics()
+        assert retained_worker.wait(timeout=60) == 0, diagnostics()
+    completed = foundation_status(root=root)
+    assert completed.operation_id == admitted.operation_id and completed.state == "completed"
+    assert (root / "foundation" / "current-version").read_text().strip() == "foundation-" + digest
+    assert (slot / ".install-complete.json").read_bytes() == marker
+    result = wait(pending.id, root=root, timeout=5)
+    assert result.state == "completed" and result.exit_code == 13
+    # Remove both source closures again; only installed slots and required interpreter files remain.
+    inputs.rename(area / "removed-upgrade-inputs")
+    (root / "bootstrap" / admitted.operation_id / "inputs").rename(area / "removed-upgrade-frozen")
+    for current in (slot, root / "foundation" / "versions" / ("foundation-" + digest)):
+        python = current / "Scripts" / "python.exe"
+        launcher = current / ".runtime-bootstrap" / "runtime_launcher.py"
+        result = subprocess.run(
+            [str(python), "-I", "-S", "-B", "-X", "utf8", str(launcher),
+             "-m", "update_driver.foundation_inputs"],
+            capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    later = enqueue(
+        RequestSpec("installed-upgrade-later"), root=root,
+        runner=TrustedRunner((sys.executable, "-c", "raise SystemExit(17)"), str(area)),
+    )
+    result = subprocess.run(
+        worker_command(root / "foundation" / "versions" / ("foundation-" + digest), root),
+        capture_output=True, text=True, timeout=30, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    result = wait(later.id, root=root, timeout=5)
+    assert result.state == "completed" and result.exit_code == 17

@@ -245,6 +245,64 @@ def test_foundation_admission_refuses_existing_unsupported_queue(space):
     assert foundation_status(root=space) is None
 
 
+@pytest.mark.parametrize("suffix", ["-wal", "-shm", "-journal"])
+def test_foundation_admission_refuses_orphaned_queue_sidecars(space, suffix):
+    sidecar = space / ("queue.sqlite3" + suffix)
+    sidecar.write_bytes(b"retained queue sidecar")
+    with custody(space) as owned:
+        with pytest.raises(fs.FoundationStateError, match="sidecar"):
+            fs.begin(space, DIGEST, owned)
+    assert sidecar.read_bytes() == b"retained queue sidecar"
+    assert foundation_status(root=space) is None
+    assert not (space / "queue.sqlite3").exists()
+
+
+@pytest.mark.parametrize("state", ["pending", "completed", "running", "interrupted", "blocked"])
+def test_retained_admission_consumes_verified_custody_and_preserves_queue(space, monkeypatch, state):
+    from update_driver.foundation_admission import admit
+    from update_driver.participant import Witness
+
+    queued = request(space)
+    with sqlite3.connect(space / "queue.sqlite3") as db:
+        db.execute("UPDATE requests SET state=? WHERE id=?", (state, queued.id))
+    before = (space / "queue.sqlite3").read_bytes()
+    with custody(space) as owned:
+        witness = Witness(space, "b" * 32)
+        try:
+            monkeypatch.setenv("UPDATE_DRIVER_WITNESS", witness.environment()["UPDATE_DRIVER_WITNESS"])
+            if state in {"running", "interrupted", "blocked"}:
+                with pytest.raises(fs.FoundationStateError, match="unsettled queue"):
+                    admit(root=space, source_hash=DIGEST)
+                assert foundation_status(root=space) is None
+            else:
+                admitted = admit(root=space, source_hash=DIGEST)
+                assert admitted == foundation_status(root=space)
+                assert admitted.state == "running" and admitted.source_hash == DIGEST
+                fs.finish(space, admitted, owned, exit_code=0)
+            assert "UPDATE_DRIVER_WITNESS" not in os.environ
+        finally:
+            witness.close()
+    assert (space / "queue.sqlite3").read_bytes() == before
+
+
+def test_retained_admission_requires_inherited_matching_custody(space, monkeypatch):
+    from update_driver.foundation_admission import admit
+    from update_driver.participant import ParticipantError, Witness
+
+    monkeypatch.delenv("UPDATE_DRIVER_WITNESS", raising=False)
+    with pytest.raises(fs.FoundationStateError, match="inherited custody"):
+        admit(root=space, source_hash=DIGEST)
+    with custody(space):
+        witness = Witness(space, "b" * 32)
+        try:
+            monkeypatch.setenv("UPDATE_DRIVER_WITNESS", witness.environment()["UPDATE_DRIVER_WITNESS"])
+            with pytest.raises(ParticipantError, match="execution space mismatch"):
+                admit(root=space / "other", source_hash=DIGEST)
+        finally:
+            witness.close()
+    assert foundation_status(root=space) is None
+
+
 def test_explicit_recovery_requires_new_native_boot_and_never_replays(space, monkeypatch):
     with custody(space) as owned:
         running = fs.begin(space, DIGEST, owned)

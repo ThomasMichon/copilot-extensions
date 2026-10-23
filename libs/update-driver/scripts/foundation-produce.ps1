@@ -89,9 +89,54 @@ try {
             }
         }
     }
-    $operation = Start-NativeFoundationProgress -Custody $owned -Root $Root -Plugin $plugin -ExpectedSourceHash $SourceHash
+    $target = Join-Path $Root 'foundation'
+    $selector = Join-Path $target 'current-version'
+    $queueAware = [CopilotExtensions.NativeFoundationState]::CheckPath($selector, $false, $true)
+    foreach ($name in @('queue.sqlite3', 'queue.sqlite3-wal', 'queue.sqlite3-shm', 'queue.sqlite3-journal')) {
+        if ([CopilotExtensions.NativeFoundationState]::CheckPath((Join-Path $Root $name), $false, $true)) {
+            $queueAware = $true
+        }
+    }
+    if ($queueAware) {
+        $reason = 'queue_admission_unavailable'
+        $null = [CopilotExtensions.NativeFoundationState]::CheckPath($selector, $false, $false)
+        if ((Get-Item -LiteralPath $selector).Length -gt 128) { throw 'Malformed foundation selector.' }
+        $selected = [IO.File]::ReadAllText($selector).Trim()
+        if ($selected -cnotmatch '\Afoundation-[0-9a-f]{64}\z') { throw 'Malformed foundation selector.' }
+        $slot = Join-Path $target ('versions\' + $selected)
+        $python = Join-Path $slot 'Scripts\python.exe'
+        $launcher = Join-Path $slot '.runtime-bootstrap\runtime_launcher.py'
+        foreach ($path in @($python, $launcher, (Join-Path $slot '.install-complete.json'))) {
+            $null = [CopilotExtensions.NativeFoundationState]::CheckPath($path, $false, $false)
+        }
+        $admissionLog = Join-Path $Root ('foundation-admission-' + [Guid]::NewGuid().ToString('N') + '.log')
+        $witness = New-NativeParticipantWitness -Custody $owned -Root $Root -RequestId ([Guid]::NewGuid().ToString('N'))
+        $witnessSettled = $false
+        try {
+            $env:UPDATE_DRIVER_WITNESS = $witness.Environment()
+            $code = Invoke-FoundationChild -Executable $python -Arguments @(
+                '-I', '-S', '-B', '-X', 'utf8', $launcher, '-m', 'update_driver.foundation_admission',
+                '--root', $Root, '--source-hash', $SourceHash
+            ) -Log $admissionLog -Timeout 30000
+        } finally {
+            Remove-Item Env:UPDATE_DRIVER_WITNESS -ErrorAction SilentlyContinue
+            $witness.Dispose()
+            $witnessSettled = $true
+            $witness = $null
+        }
+        if ($code -ne 0) { throw "Queue-aware foundation admission unavailable; see $admissionLog" }
+        $operation = Get-NativeFoundationProgress -Root $Root
+        if (-not $operation) { throw 'Queue-aware foundation admission did not persist progress.' }
+        if ([IO.File]::ReadAllText($selector).Trim() -cne $selected) {
+            throw 'Selected foundation changed during queue admission.'
+        }
+    } else {
+        $operation = Start-NativeFoundationProgress -Custody $owned -Root $Root -Plugin $plugin -ExpectedSourceHash $SourceHash
+    }
     $admitted = $operation | ConvertFrom-Json
-    if ($admitted.source_hash -cne $SourceHash) { throw 'Foundation source changed during admission.' }
+    if ($admitted.state -cne 'running' -or $admitted.source_hash -cne $SourceHash) {
+        throw 'Foundation progress differs from its requested admission.'
+    }
     $bootstrap = Join-Path $Root ('bootstrap\' + $admitted.operation_id)
     $null = [CopilotExtensions.NativeFoundationState]::CheckPath($bootstrap, $true, $true)
     [IO.Directory]::CreateDirectory($bootstrap) | Out-Null
