@@ -139,6 +139,63 @@ def _nudge_text(calls: int, minutes: int) -> str:
     )
 
 
+def _worker_definitely_gone(owner: object) -> bool:
+    if (
+        not isinstance(owner, dict) or type(owner.get("pid")) is not int
+        or not 0 < owner["pid"] <= 0xFFFFFFFF or not isinstance(owner.get("start_time"), str)
+    ):
+        return False
+    try:
+        runtime = sys.modules.get("agent_worktrees.locks")
+        if runtime is not None and not runtime.lock_is_live(owner):
+            return True
+        pid = owner["pid"]
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.WaitForSingleObject.restype = wintypes.DWORD
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.OpenProcess(0x100000, False, pid)  # SYNCHRONIZE, no mutation rights
+            if not handle:
+                return ctypes.get_last_error() == 87  # absent PID, not access denial
+            try:
+                return kernel.WaitForSingleObject(handle, 0) == 0
+            finally:
+                kernel.CloseHandle(handle)
+        os.kill(pid, 0)
+        if sys.platform.startswith("linux"):
+            fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+            return fields[0] == "Z" or fields[19] != owner["start_time"]
+    except ProcessLookupError:
+        return True
+    except (OSError, ValueError, IndexError, AttributeError, OverflowError):
+        pass
+    return False
+
+
+def _publication_revision(directory: Path, root: str) -> str:
+    try:
+        path = directory / "publication.json"
+        if not path.is_file() or path.stat().st_size > 4096:
+            return ""
+        value = json.loads(path.read_text(encoding="utf-8"))
+        revision = value.get("revision")
+        if (
+            value.get("version") == 1 and value.get("root") == root
+            and isinstance(revision, str) and re.fullmatch(r"[0-9a-f]{32}", revision)
+        ):
+            return revision
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return ""
+
+
 def _late_guidance_notice(payload: dict, home: Path) -> str | None:
     session_id = payload.get("sessionId")
     if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
@@ -153,22 +210,27 @@ def _late_guidance_notice(payload: dict, home: Path) -> str | None:
             or not Path(payload.get("cwd") or "").resolve().is_relative_to(Path(watch["root"]).resolve())
         ):
             return None
-        request = Path(watch["metadata"]) / "request.json"
+        metadata = Path(watch["metadata"])
+        request = metadata / "request.json"
         if not request.is_file() or request.stat().st_size > 256 * 1024:
             return None
         state = json.loads(request.read_text(encoding="utf-8"))
-        if (
-            state.get("version") != 1 or state.get("root") != watch["root"]
-            or state.get("phase") not in ("done", "failed")
-            or state.get("completed_at", 0) < watch["started_at"]
-        ):
+        if state.get("version") != 1 or state.get("root") != watch["root"]:
             return None
-        result = state["result"]
+        if state.get("phase") in ("spawning", "queued", "running"):
+            if not _worker_definitely_gone(state.get("owner")):
+                return None
+            result = {"status": "failed", "counts_known": False}
+        else:
+            if state.get("phase") not in ("done", "failed") or state.get("completed_at", 0) < watch["started_at"]:
+                return None
+            result = state["result"]
         status = result.get("status")
         if status not in ("ready", "partial", "skipped", "failed", "timeout"):
             return None
         watch_path.unlink()
-        revision = result.get("publication_revision")
+        latest = _publication_revision(metadata, watch["root"])
+        revision = latest or result.get("publication_revision")
         changed = result.get("restart_required") is True or (
             isinstance(revision, str) and revision and revision != watch.get("publication_revision", "")
         )
@@ -189,6 +251,12 @@ def _late_guidance_notice(payload: dict, home: Path) -> str | None:
                 if status == "partial"
                 else "Static guidance was revalidated after a possible late file change."
             )
+            if latest and latest != result.get("publication_revision"):
+                description = (
+                    "Static guidance preparation is incomplete; files may have changed after its last validation."
+                    if status == "partial"
+                    else "Static guidance may have changed after its last validation; reprepare it first."
+                )
             fallback = "Retain reviewed fallback for unresolved sources. " if status == "partial" else ""
             return (
                 f"[local-guidance] {description} "

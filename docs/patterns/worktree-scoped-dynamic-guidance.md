@@ -245,6 +245,13 @@ The watch timestamp precedes the probe as well, so a worker finishing during
 the probe is not discarded as an older completion. Abnormal worker exits
 persist a terminal timestamp and failure result for the same post-tool
 consumer; existing completed results are preserved.
+The consumer also compares the current publication revision, not just the
+backup's returned revision, so a later foreground publication is not missed.
+It can report a provably exited worker even when the short-lived queueing
+process and its reaper thread have already exited. The resident path reuses
+the loaded identity-aware observer; the standalone hook uses read-only kernel
+exit checks and retains the watch on access denial or other uncertainty.
+It neither kills a process nor rewrites another worker's request.
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
 purely checked-in: a gitignored, locally re-rendered cache of auto-discovered

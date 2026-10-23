@@ -186,6 +186,71 @@ def test_reaper_preserves_completed_partial_result(tmp_path, monkeypatch):
     assert (tmp_path / "refresh.log").read_text() == "original partial result\n"
 
 
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_short_lived_queue_parent_does_not_hide_worker_failure(tmp_path, monkeypatch):
+    from pathlib import Path
+    from test_nudge_status import nudge
+    import subprocess
+    import sys
+    import time
+
+    home, root = tmp_path / "home", tmp_path / "checkout"
+    (root / ".git").mkdir(parents=True)
+    session = home / ".copilot/session-state/orphan-worker"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    worker.watch_completion(root, "orphan-worker")
+    directory = worker.metadata_directory(root)
+    staged = tmp_path / "child-runtime" / "agent_worktrees"
+    staged.mkdir(parents=True)
+    (staged / "__init__.py").write_text(
+        f"__path__.append({str(Path(worker.__file__).parent)!r})\n", encoding="utf-8",
+    )
+    (staged / "local_cache_worker.py").write_text(
+        "import os,time\nfrom agent_worktrees import locks\n"
+        "parent={'pid':int(os.environ['TEST_PARENT_PID']),'start_time':os.environ['TEST_PARENT_START']}\n"
+        "until=time.monotonic()+5\n"
+        "while locks.lock_is_live(parent) and time.monotonic()<until: time.sleep(.01)\n"
+        "os._exit(17)\n",
+        encoding="utf-8",
+    )
+    driver = (
+        "import os,pathlib,sys\n"
+        "from agent_worktrees import local_cache_worker as w,status_monitor_runtime as r,locks\n"
+        "assert os.environ.get('COPILOT_EXTENSIONS_TEST_CONTAINED')=='1'\n"
+        "env=dict(os.environ,PYTHONPATH=sys.argv[3],TEST_PARENT_PID=str(os.getpid()),"
+        "TEST_PARENT_START=locks.process_start_time(os.getpid()))\n"
+        "r._daemon_environment=lambda:env\nr._daemon_cwd=lambda:sys.argv[1]\n"
+        "assert w.queue(pathlib.Path(sys.argv[1]),pathlib.Path(sys.argv[2])).status=='queued'\n"
+        "os._exit(0)\n"
+    )
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+    parent = subprocess.run(
+        [sys.executable, "-c", driver, str(root), str(directory), str(staged.parent)],
+        env=env, capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert parent.returncode == 0, parent.stderr
+    state = worker._read(directory / "request.json")
+    until = time.monotonic() + 6
+    while not nudge._worker_definitely_gone(state["owner"]) and time.monotonic() < until:
+        time.sleep(.02)
+    assert nudge._worker_definitely_gone(state["owner"]), "bounded worker did not exit"
+    assert worker._read(directory / "request.json")["phase"] == "queued", "parent reaper unexpectedly survived"
+    script = Path(__file__).resolve().parents[1] / "scripts/nudge_status.py"
+    result = subprocess.run(
+        [sys.executable, str(script)], env=dict(env, AGENT_WORKTREES_NUDGE="off"),
+        input=json.dumps({"sessionId": "orphan-worker", "cwd": str(root)}),
+        capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Backup refresh failed" in json.loads(result.stdout)["additionalContext"]
+    assert not (session / "local-guidance-watch.json").exists()
+
+
 def test_latest_result_is_a_bounded_utf8_snapshot(tmp_path):
     worker._log(tmp_path, chr(233) * 20_000)
     path = tmp_path / "refresh.log"

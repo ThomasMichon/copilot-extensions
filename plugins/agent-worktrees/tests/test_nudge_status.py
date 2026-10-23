@@ -27,6 +27,30 @@ nudge = _load()
 _WID = "examplehost-20260101-000000-abcd"
 
 
+@pytest.mark.parametrize("error,expected", [(5, False), (87, True), (6, False)])
+def test_worker_probe_does_not_mistake_access_denial_for_exit(monkeypatch, error, expected):
+    import ctypes
+    from types import SimpleNamespace
+
+    class Api:
+        def __call__(self, *args):
+            return 0
+
+    kernel = SimpleNamespace(OpenProcess=Api(), WaitForSingleObject=Api(), CloseHandle=Api())
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **kw: kernel, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: error, raising=False)
+    monkeypatch.setattr(nudge, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(nudge, "sys", SimpleNamespace(modules={}))
+    assert nudge._worker_definitely_gone({"pid": 123, "start_time": "fixture"}) is expected
+
+
+def test_worker_probe_retains_a_genuinely_live_owner():
+    import os
+    from agent_worktrees import local_cache_worker
+
+    assert not nudge._worker_definitely_gone(local_cache_worker._owner(os.getpid()))
+
+
 def _make_home(tmp_path: Path, *, project="dotfiles", state="active",
                note_at="2026-01-01T00:00:00+00:00") -> tuple[Path, str]:
     """Create a fake home with one tracked worktree; return (home, cwd)."""

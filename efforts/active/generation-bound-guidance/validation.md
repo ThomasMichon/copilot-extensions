@@ -180,3 +180,11 @@ evidence no longer follows a missing link target merely to revalidate a failed
 provider; healthy providers still publish, and healthy linked inputs retain
 content-hash validation. Both dangling controls failed before the correction;
 the focused broken/healthy source-link selection then passed **7 cases**.
+
+The final notification ordering controls cover a foreground publication after
+the backup has already returned its unchanged result, and a real queueing
+process that exits before its admitted worker fails. The standalone post-tool
+consumer still reports failure without relying on the vanished reaper. Native
+read-only exit observation retains live or access-denied owners; it does not
+terminate processes or rewrite worker state. Those two integration controls
+plus four liveness controls completed **6 passed**.

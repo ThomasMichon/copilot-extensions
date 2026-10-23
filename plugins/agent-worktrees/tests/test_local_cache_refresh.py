@@ -289,6 +289,27 @@ def test_probe_timeout_still_admits_bounded_backup(copy_workspace, monkeypatch):
     assert (session / "local-guidance-watch.json").is_file()
 
 
+def test_notice_observes_publication_after_backup_result(copy_workspace):
+    from agent_worktrees import local_cache_worker
+    from test_nudge_status import nudge
+
+    root, home = copy_workspace
+    template, _ = provider(root, home)
+    initial = lcr.prepare_for_launch(root)
+    session = home / ".copilot/session-state/later-publication"
+    session.mkdir(parents=True)
+    local_cache_worker.watch_completion(root, "later-publication", initial_revision=initial.publication_revision)
+    assert local_cache_worker.run(root, lcr._worker_directory(root)) == 0
+    template.write_bytes(b"published after the backup returned its unchanged result")
+    assert lcr.prepare_for_launch(root).changed == 1
+    notice = nudge.decide(
+        {"sessionId": "later-publication", "cwd": str(root)},
+        home=home, env={"AGENT_WORKTREES_NUDGE": "off"},
+    )
+    assert "Restart/new context is required" in notice
+    assert "reprepare" in notice
+
+
 def test_probe_timeout_rechecks_remaining_hook_budget(copy_workspace, monkeypatch):
     root, _ = copy_workspace
     clock = [100.0]

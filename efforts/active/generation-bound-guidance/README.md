@@ -190,6 +190,12 @@ coordinate the smallest additive owner API before changing another slice.
   healthy linked-input hashing: failed providers retain metadata-only evidence,
   while safe independent sources publish. Two failing controls became green
   in a seven-case broken/healthy source-link selection.
+- Closed the later-publication and short-lived queue-parent notification gaps:
+  the consumer reads the current publication revision and can diagnose a
+  provably exited owner without the parent's reaper. Six focused integration/
+  liveness controls passed, including a real parent/worker exit sequence and
+  access-denial preservation. No process termination or request takeover is
+  performed by this advisory reader.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 
