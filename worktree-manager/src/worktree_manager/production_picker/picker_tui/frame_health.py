@@ -35,7 +35,8 @@ def source_observation_scope(reporter):
         yield reporter
     finally:
         try:
-            reporter.close(wait=True)
+            reporter.close()
+            reporter.drain()
         finally:
             with _scope_lock:
                 if _source_reporter is reporter:
@@ -110,6 +111,7 @@ class FrameHealthReporter:
         self._source_started = False
         self._source_writer_started = False
         self._source_closed = False
+        self._owner_drain_ns = 0
         self._lifecycle_lock = threading.RLock()
 
     observation = property(lambda self: self._observation)
@@ -225,8 +227,23 @@ class FrameHealthReporter:
         with self._lifecycle_lock:
             thread = self._thread
             self._request_close()
-        if wait and thread is not None:
-            thread.join(timeout=3 if self.observation is not None else 2)
+        if wait and thread is not None and self.observation is None:
+            thread.join(timeout=2)
+
+    def drain(self, timeout=3):
+        """Explicit off-UI owner wait; source close never honors a UI wait request."""
+        if self.observation is None or not self._source_closed:
+            raise RuntimeError("close the source reporter before draining")
+        if type(timeout) not in (int, float) or not 0 <= timeout <= 3:
+            raise ValueError("drain timeout must be between zero and three seconds")
+        thread = self._thread
+        started = time.perf_counter_ns()
+        try:
+            if thread is not None:
+                thread.join(timeout=timeout)
+        finally:
+            self._owner_drain_ns += time.perf_counter_ns() - started
+        return thread is None or not thread.is_alive()
 
     def _request_close(self):
         if self.observation is not None:
@@ -256,6 +273,7 @@ class FrameHealthReporter:
             event = self.observation.capture(event)
             if event is None:
                 return
+            event["enqueued_ns"] = time.perf_counter_ns()
         else:
             event = {"timestamp": _timestamp(), **event}
         try:
@@ -284,6 +302,7 @@ class FrameHealthReporter:
             **state, "writer_started": self._source_writer_started,
             "first_refresh_observed": self._source_started,
             "writer_alive": alive, "unwritten": unwritten,
+            "owner_drain_ns": self._owner_drain_ns,
             "abandoned": unwritten if self._source_closed and not alive else 0,
             "queued_remaining": self._queue.qsize(),
         }

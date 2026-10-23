@@ -17,6 +17,7 @@ import platform
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import tomllib
 import types
 
@@ -27,9 +28,16 @@ def captured_child(argv, *, cwd, env, timeout):
     """Reuse Manager/process-library custody, including timeout descendant cleanup."""
     if sys.platform != "win32":
         from worktree_manager.engine_posix_process import run as run_owned
-        result = run_owned(argv, cwd=cwd, env=env, timeout=timeout, text=True,
-                           stderr=subprocess.DEVNULL)
-        return subprocess.CompletedProcess(argv, result.returncode, result.stdout, "")
+        with tempfile.TemporaryFile(dir=cwd) as errors:
+            try:
+                result = run_owned(argv, cwd=cwd, env=env, timeout=timeout, text=True, stderr=errors)
+            except subprocess.TimeoutExpired as exc:
+                errors.seek(0)
+                exc.stderr = errors.read().decode("utf-8", errors="replace")
+                raise
+            errors.seek(0)
+            stderr = errors.read().decode("utf-8", errors="replace")
+        return subprocess.CompletedProcess(argv, result.returncode, result.stdout, stderr)
     from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
     process, job = spawn_sync_in_kill_on_close_job(
         argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -43,6 +51,39 @@ def captured_child(argv, *, cwd, env, timeout):
         if job is not None:
             job.close()
         process.communicate(timeout=5)
+
+
+def key_receipt_observer(original, event_type, pending, *, clock=time.perf_counter_ns):
+    """Time receipt, not the later completion of handler/Pilot settling."""
+    async def observed(app, event):
+        matching = (
+            isinstance(event, event_type) and event.key == "x"
+            and pending["sent"] is not None and pending["received"] is None
+        )
+        if matching:
+            pending["received"] = clock()
+        try:
+            await original(app, event)
+        finally:
+            if matching:
+                pending["handled"] = True
+    return observed
+
+
+def source_identity(root):
+    """Read one selected source, unaffected by ambient repository-selection overrides."""
+    from agent_procutil import no_window_kwargs
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    revision = subprocess.check_output(
+        ["git", "-c", "core.fsmonitor=false", "-C", str(root), "rev-parse", "HEAD"],
+        text=True, timeout=15, env=env, **no_window_kwargs(),
+    ).strip()
+    clean = not subprocess.check_output(
+        ["git", "-c", "core.fsmonitor=false", "-C", str(root),
+         "status", "--porcelain", "--untracked-files=normal"],
+        text=True, timeout=15, env=env, **no_window_kwargs(),
+    ).strip()
+    return revision, clean
 
 
 def child(config: dict) -> dict:
@@ -65,9 +106,11 @@ def child(config: dict) -> dict:
     ensure_engine_runtime()
     from worktree_manager.performance_observation import SourceObservation
     from worktree_manager.production_picker.picker_tui import derive, engine, frame_health
+    from textual import events
     substitutions = [
         "advisory update/orphan polls disabled", "isolated fixture source",
         "refresh timing wrapper; original callback executes",
+        "key-receipt timing wrapper; original event handler executes",
     ]
     for name in ("_poll_update_state", "_poll_manager_update_state", "_poll_orphan_state"):
         setattr(engine.PickerScreen, name, lambda self, *a, **kw: None)
@@ -79,6 +122,10 @@ def child(config: dict) -> dict:
         return original_refresh(screen)
 
     engine.PickerScreen._after_first_refresh = refresh
+    pending_input = {"sent": None, "received": None, "handled": False}
+    engine.PickerApp.on_event = key_receipt_observer(
+        engine.PickerApp.on_event, events.Key, pending_input,
+    )
     local = ("sample", "Win" if sys.platform == "win32" else "Linux")
     rows = [derive.norm({
         "id": f"sample-{index}", "title": f"Sample {index}", "status": "active",
@@ -108,7 +155,7 @@ def child(config: dict) -> dict:
         "points_ns": points, "substitutions": substitutions,
         "entry_boundary": "script entry before source Picker imports",
         "refresh_boundary": "real source Textual callback, not headed paint",
-        "input_boundary": "actual Key dispatch acknowledgement, not paint",
+        "input_boundary": "post_message to matching Key receipt, before handler settling; not paint",
         "roster_count": len(rows), "outcome": "ok",
         "cache_mode": "fresh-isolated-state; os-cache-uncontrolled",
         "python_version": platform.python_version(), "platform": sys.platform,
@@ -140,31 +187,33 @@ def child(config: dict) -> dict:
             if reporter is not None:
                 reporter.observe("fixture_rows", roster_count=len(screen.data))
             before = app._last_input_activity
-            started = time.perf_counter_ns()
-            await pilot.press("tab")
-            if app._last_input_activity <= before:
-                await pilot.pause(0)
+            pending_input["sent"] = time.perf_counter_ns()
+            app.post_message(events.Key("x", "x"))
+            deadline = time.perf_counter() + 3
+            while not pending_input["handled"] and time.perf_counter() < deadline:
+                await pilot.pause(.001)
             if app._last_input_activity <= before:
                 raise RuntimeError("input was not acknowledged")
-            points["input_ack"] = time.perf_counter_ns() - started
+            if pending_input["received"] is None or not pending_input["handled"]:
+                raise RuntimeError("input receipt was not observed")
+            points["input_ack"] = pending_input["received"] - pending_input["sent"]
             if reporter is not None:
-                reporter.observe("input_ack", duration_ns=points["input_ack"])
+                reporter.observe("input_ack", duration_ns=points["input_ack"],
+                                 observed_ns=pending_input["received"])
 
     from contextlib import nullcontext
-    drain_started = None
     try:
         with frame_health.source_observation_scope(reporter) if reporter is not None else nullcontext():
             if reporter is not None:
                 reporter.observe("source_entry", observed_ns=ENTRY_NS, duration_ns=0)
             asyncio.run(exercise())
-            drain_started = time.perf_counter_ns()
     except Exception as exc:
         result.update(outcome="error", error_code=type(exc).__name__)
     result["blocked_child_attempts"] = len(attempted)
     result["source_process_cpu_ns"] = max(0, time.process_time_ns() - ENTRY_CPU_NS)
     result["cpu_boundary"] = "process_time_ns from script entry to report; excludes descendants"
-    result["owner_drain_ns"] = time.perf_counter_ns() - drain_started if drain_started is not None else None
     result["telemetry"] = reporter.observation_summary() if reporter is not None else None
+    result["owner_drain_ns"] = result["telemetry"]["owner_drain_ns"] if reporter is not None else None
     return result
 
 
@@ -172,7 +221,7 @@ def child_environment(home: Path) -> dict:
     """Selected child-only isolated roots; never alter user-global configuration."""
     env = {
         key: value for key, value in os.environ.items()
-        if not key.startswith(("AGENT_", "COPILOT_", "WORKTREE_", "OTEL_", "GITHUB_", "GH_"))
+        if not key.startswith(("AGENT_", "COPILOT_", "WORKTREE_", "OTEL_", "GITHUB_", "GH_", "GIT_"))
     }
     env.update({
         "HOME": str(home), "USERPROFILE": str(home), "APPDATA": str(home / "appdata"),
@@ -193,7 +242,6 @@ def child_environment(home: Path) -> dict:
 
 
 def run(args) -> dict:
-    from agent_procutil import no_window_kwargs
     from worktree_manager.performance_report import child_result, source_report, trace_readback
     from process_telemetry.otlp import validate_endpoint, validate_record
 
@@ -201,15 +249,7 @@ def run(args) -> dict:
         validate_endpoint(args.endpoint)
     destination = Path(args.run_dir).resolve()
     destination.mkdir(parents=True, exist_ok=False)
-    revision = subprocess.check_output(
-        ["git", "-c", "core.fsmonitor=false", "-C", str(ROOT), "rev-parse", "HEAD"],
-        text=True, timeout=15, **no_window_kwargs(),
-    ).strip()
-    clean = not subprocess.check_output(
-        ["git", "-c", "core.fsmonitor=false", "-C", str(ROOT),
-         "status", "--porcelain", "--untracked-files=normal"],
-        text=True, timeout=15, **no_window_kwargs(),
-    ).strip()
+    revision, clean = source_identity(ROOT)
     version = tomllib.loads((ROOT / "worktree-manager/pyproject.toml").read_text(encoding="utf-8"))[
         "project"]["version"]
     runs = []
@@ -236,8 +276,12 @@ def run(args) -> dict:
                 )
                 result = child_result(process.stdout, mode=mode, returncode=process.returncode)
                 (directory / "stderr.txt").write_text(process.stderr, encoding="utf-8")
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
                 result = {"mode": mode, "outcome": "error", "error_code": "process_timeout", "exit_code": None}
+                error = exc.stderr or ""
+                if isinstance(error, bytes):
+                    error = error.decode("utf-8", errors="replace")
+                (directory / "stderr.txt").write_text(error, encoding="utf-8")
             except OSError as exc:
                 result = {"mode": mode, "outcome": "error", "error_code": type(exc).__name__, "exit_code": None}
             result["process_duration_ns"] = time.perf_counter_ns() - started

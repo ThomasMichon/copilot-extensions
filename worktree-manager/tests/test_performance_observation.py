@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import io
 import threading
 
 import pytest
@@ -86,6 +87,22 @@ def test_source_scope_reuses_one_queue_and_writer_and_removes_private_fields(tmp
             pass
 
 
+def test_queue_wait_uses_enqueue_not_backdated_observation(tmp_path, monkeypatch):
+    from worktree_manager import performance_observation
+
+    observation = SourceObservation({}, origin_ns=0, wall_ns=0)
+    reporter = frame_health.FrameHealthReporter(tmp_path / "events", observation=observation)
+    clock = iter((100, 200, 300))
+    monkeypatch.setattr(performance_observation.time, "perf_counter_ns", lambda: next(clock))
+    reporter.observe("source_entry", observed_ns=50, duration_ns=0)
+    record = reporter._queue.get_nowait()
+    observation.deliver(io.StringIO(), [record])
+    assert record["observed_ns"] == 50
+    assert record["enqueued_ns"] == 200
+    assert record["span"]["queue_wait_ns"] == 100
+    assert record["span"]["start_time_ns"] == 50
+
+
 def test_sampled_out_trace_creates_no_writer_or_file(tmp_path, monkeypatch):
     observation = admitted(sampled=False)
     reporter = frame_health.FrameHealthReporter(tmp_path / "events.jsonl", observation=observation)
@@ -130,7 +147,20 @@ def test_slow_export_does_not_hold_ui_and_cannot_create_a_second_writer(tmp_path
             for _ in range(256):
                 reporter.observe("input_ack", duration_ns=0)
             assert observation.counts()["queue_full"] > 0
-            reporter.close()
+            from types import SimpleNamespace
+            from worktree_manager.production_picker.picker_tui.engine_loading import PickerScreenLoadingMixin
+            screen = SimpleNamespace(
+                _bg_cancel=threading.Event(), _provider_loader_lock=threading.Lock(),
+                _provider_loader=None, _frame_health=reporter, _pivot_runtimes={},
+            )
+            original_join = reporter._thread.join
+            def forbidden_join(*args, **kwargs):
+                raise AssertionError("source UI unmount joined the exporter")
+            reporter._thread.join = forbidden_join
+            try:
+                PickerScreenLoadingMixin.on_unmount(screen)
+            finally:
+                reporter._thread.join = original_join
             assert reporter._thread.is_alive()
             other = frame_health.FrameHealthReporter(tmp_path / "other", observation=admitted())
             with pytest.raises(RuntimeError):
@@ -141,7 +171,8 @@ def test_slow_export_does_not_hold_ui_and_cannot_create_a_second_writer(tmp_path
             release.set()
     finally:
         release.set()
-        reporter.close(wait=True)
+        reporter.close()
+        reporter.drain()
     assert not reporter.observation_summary()["writer_alive"]
 
 
@@ -260,6 +291,23 @@ def test_readback_requires_expected_labels_and_reports_duplicates():
     matched = trace_readback(lines, {("owned", "one")},
                              expected_labels={("owned", "one"): {"ce.stage": "first_refresh"}})
     assert matched["matched"] == 1 and matched["complete"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_one_bad_duplicate_cannot_be_hidden_by_a_good_match(reverse):
+    def line(stage):
+        return json.dumps({"resourceSpans": [{"scopeSpans": [{"spans": [{
+            "traceId": "owned", "spanId": "one",
+            "attributes": [{"key": "ce.stage", "value": {"stringValue": stage}}],
+        }]}]}]})
+    lines = [line("first_refresh"), line("input_ack")]
+    report = trace_readback(
+        list(reversed(lines)) if reverse else lines, {("owned", "one")},
+        expected_labels={("owned", "one"): {"ce.stage": "first_refresh"}},
+    )
+    assert report["matched"] == report["label_mismatches"] == 1
+    assert report["duplicates"] == 1
+    assert not report["complete"]
 
 
 def test_manager_uses_canonical_vendored_dependency():

@@ -137,7 +137,7 @@ class SourceObservation:
     def deliver(self, stream, records: list[dict]):
         """Called by the existing frame writer only; no additional queue or thread."""
         for record in records:
-            record["span"]["queue_wait_ns"] = max(0, time.perf_counter_ns() - record["observed_ns"])
+            record["span"]["queue_wait_ns"] = max(0, time.perf_counter_ns() - record["enqueued_ns"])
             stream.write(json.dumps(record, separators=(",", ":")) + "\n")
             self.increment("written")
         if self.endpoint is None:

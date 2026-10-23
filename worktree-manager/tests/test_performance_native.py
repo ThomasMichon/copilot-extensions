@@ -20,6 +20,72 @@ pytestmark = [
     pytest.mark.timeout(90),
 ]
 
+def probe_module():
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "manager_probe_contract", root / "tools/performance/manager_native_probe.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_key_receipt_excludes_later_handler_settling():
+    import asyncio
+    from types import SimpleNamespace
+
+    module = probe_module()
+    clock = [200]
+    pending = {"sent": 100, "received": None, "handled": False}
+    async def original(app, event):
+        clock[0] = 1_000_000
+        await asyncio.sleep(0)
+    wrapped = module.key_receipt_observer(
+        original, SimpleNamespace, pending, clock=lambda: clock[0],
+    )
+    asyncio.run(wrapped(None, SimpleNamespace(key="x")))
+    assert pending["received"] == 200 and pending["handled"]
+    assert pending["received"] - pending["sent"] == 100
+
+
+def test_posix_capture_keeps_startup_stderr(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from worktree_manager import engine_posix_process
+
+    module = probe_module()
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="linux"))
+    def failed(argv, **kwargs):
+        kwargs["stderr"].write(b"synthetic startup traceback\n")
+        return subprocess.CompletedProcess(argv, 1, "", None)
+    monkeypatch.setattr(engine_posix_process, "run", failed)
+    result = module.captured_child(["sample"], cwd=tmp_path, env={}, timeout=1)
+    assert result.returncode == 1
+    assert result.stderr == "synthetic startup traceback\n"
+
+
+def test_git_overrides_cannot_redirect_source_identity(tmp_path, monkeypatch):
+    from agent_procutil import no_window_kwargs
+
+    module = probe_module()
+    root = Path(__file__).resolve().parents[2]
+    expected = module.source_identity(root)
+    other = tmp_path / "other"
+    other.mkdir()
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    subprocess.run(["git", "init", "-q", str(other)], env=env, check=True, timeout=15, **no_window_kwargs())
+    subprocess.run(
+        ["git", "-C", str(other), "-c", "user.name=Sample", "-c", "user.email=sample@example.com",
+         "-c", "commit.gpgsign=false", "-c", f"core.hooksPath={tmp_path / 'empty-hooks'}",
+         "commit", "--allow-empty", "-qm", "fixture"],
+        env=env, check=True, timeout=15, **no_window_kwargs(),
+    )
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(other / ".git/index"))
+    assert module.source_identity(root) == expected
+
 
 def test_real_source_picker_observation_processes(tmp_path):
     root = Path(__file__).resolve().parents[2]

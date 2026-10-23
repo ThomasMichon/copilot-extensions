@@ -19,7 +19,7 @@ Every substitution and blocked child attempt is recorded.
 |---|---|
 | `source_entry` | Script-entry zero-offset marker before Picker imports; not an OS first instruction |
 | `first_refresh` | Script entry to the actual source Textual refresh callback; not headed paint |
-| `input_ack` | Injected Key dispatch to the real application's acknowledgement; not paint latency |
+| `input_ack` | Posted Key to matching application receipt, before handler/Pilot settling; not paint latency |
 | `fixture_rows` | Script entry to observed headless fixture viewport; not production authority |
 | `ui_stop` | Point observation that the UI reporter was asked to stop |
 | `owner_drain_ns` | Off-UI diagnostic owner cleanup, measured separately |
@@ -27,6 +27,7 @@ Every substitution and blocked child attempt is recorded.
 | `source_process_cpu_ns` | Process CPU from script entry to report, including threads but not descendants |
 
 The parent admits source revision/dirty state and selected package version once.
+Both Git reads exclude repository-selection environment overrides.
 The child records its executing package version, Python/platform and source
 module match. Installed payload identity is explicitly unavailable.
 Root/control process invocation counts do not claim a complete descendant census.
@@ -96,7 +97,11 @@ content fields are omitted. Native stage names remain distinct from headed
 `first_frame` or authoritative `current_rows`.
 
 Source reporters are single-use. UI `close()` never waits; only the explicit
-off-UI source owner performs a bounded join. After a scope closes, late source
+off-UI source owner calls the separate bounded `drain()`. This remains true
+when the existing unmount caller supplies `close(wait=True)`.
+The drain is timed independently, including failure paths. Event observation
+and enqueue timestamps are separate, so delayed capture is not queue wait.
+After a scope closes, late source
 callbacks are dropped instead of falling back to synchronous legacy file
 writes. A subsequent explicit source scope may replace the owner only after
 its prior writer stops. Failed writes, incomplete drain, SDK absence, sampled
@@ -113,3 +118,6 @@ Set `MANAGER_OBSERVATION_WINDOWS_E2E=1` only for the explicit desktop observatio
 it runs two source cycles from a windowless parent and observes owned windows/
 foreground transitions. Session-zero desktop evidence is unavailable, not passed.
 These native controls remain outside required unit-only CI.
+Readback refuses conflicting labels on any duplicate owned ID. POSIX capture
+retains startup stderr through a parent-owned file while using the existing
+process-group owner.

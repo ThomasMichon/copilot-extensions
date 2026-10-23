@@ -151,6 +151,7 @@ def trace_readback(lines, identities: set[tuple[str, str]], *, expected_labels=N
     import json
 
     matched = set()
+    mismatched = set()
     seen = {}
     invalid = 0
     for line in lines:
@@ -169,14 +170,16 @@ def trace_readback(lines, identities: set[tuple[str, str]], *, expected_labels=N
                             expected = (expected_labels or {}).get(key, {})
                             if all(labels.get(name) == value for name, value in expected.items()):
                                 matched.add(key)
+                            else:
+                                mismatched.add(key)
         except (ValueError, TypeError, AttributeError, KeyError):
             invalid += 1
     return {
         "expected": len(identities), "matched": len(matched),
-        "identity_matches": len(seen), "label_mismatches": len(set(seen) - matched),
+        "identity_matches": len(seen), "label_mismatches": len(mismatched),
         "duplicates": sum(value - 1 for value in seen.values()),
         "missing": [{"trace_id": trace, "span_id": span}
                     for trace, span in sorted(identities - matched)],
         "invalid_matching_lines": invalid,
-        "complete": bool(identities) and matched == identities and invalid == 0,
+        "complete": bool(identities) and matched == identities and invalid == 0 and not mismatched,
     }
