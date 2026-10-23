@@ -114,7 +114,7 @@ agent-update-telemetry = { path = "../../libs/update-telemetry", editable = true
 agent-update-driver = { path = "../../libs/update-driver", editable = true }
 
 [project.scripts]
-agent-worktrees = "agent_worktrees.__main__:console_entry"
+agent-worktrees = "agent_worktrees.current_roster_entry:console_entry"
 
 [project.optional-dependencies]
 dev = [

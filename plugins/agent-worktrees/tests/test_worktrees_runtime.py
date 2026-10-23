@@ -23,7 +23,7 @@ def request(**selection):
     [
         {},
         request(contract_version=True),
-        request(contract_version=2),
+        request(contract_version=3),
         request(project="../project"),
         request(include_missing=1),
         request(worktree_id=""),

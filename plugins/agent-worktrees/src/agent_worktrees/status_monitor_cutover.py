@@ -65,10 +65,11 @@ _DEFAULT_DRAIN_TIMEOUT_S = _env_timeout("AGENT_WORKTREES_STATUS_MONITOR_DRAIN_TI
 
 
 def routing_dir(runtime_home: Path | None = None) -> Path:
-    from . import status_monitor_runtime as smr
+    if runtime_home is None:
+        from . import status_monitor_runtime as smr
 
-    root = runtime_home if runtime_home is not None else smr._aw_runtime_home()
-    return Path(root) / "status-monitor-routing"
+        runtime_home = smr._aw_runtime_home()
+    return Path(runtime_home) / "status-monitor-routing"
 
 
 def pick_free_port(bind: str = _BIND) -> int:

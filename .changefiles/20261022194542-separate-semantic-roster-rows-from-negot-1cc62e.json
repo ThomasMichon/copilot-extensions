@@ -1,0 +1,9 @@
+{
+  "comment": "Separate semantic roster rows from negotiated observation metadata while preserving v1 and compatible older writers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

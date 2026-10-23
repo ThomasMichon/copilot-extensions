@@ -75,8 +75,9 @@ The bounded current identity fields include string `creation_nonce` and Boolean
 `head_yielded`, preserving creation identity and resumable yielded-head semantics
 without carrying the creation or session-transition histories.
 
-The resident publishes complete project replacements into its SQLite WAL
-store, then swaps the in-memory publication. It claims the writer generation
+The resident publishes complete project transactions into its SQLite WAL
+store, changing only semantic rows whose values changed, then swaps the
+in-memory publication. It claims the writer generation
 only after monitor election. Drained/superseded endpoints refuse current reads;
 a late predecessor cannot reclaim the durable owner. Failure retains the
 last complete publication with explicit `availability.status: stale`.
@@ -113,6 +114,96 @@ and selected row count, `worktree` frames from that same publication, then
 `done`. The Manager admits a complete barrier before replacing its rows and
 rejects mixed revisions, duplicates and incomplete snapshots. This one-shot
 contract remains one-shot for existing consumers.
+
+### Explicit-project held-feed entry
+
+Canonical `--project NAME list ... --follow` invocations share an early entry
+between `python -m agent_worktrees` and the package's console declaration.
+The syntactic selector performs no configuration, filesystem or process work.
+Duplicates, abbreviations, implicit routing, help, unknown options and missing
+values decline to the existing dispatcher exactly once. Both paths use the
+same list argument declaration; accepted feeds retain canonical project/CWD,
+registry and installation-cell resolution, demand registration, authentication
+and shutdown behavior.
+
+The healthy current-roster client supplies its canonical runtime root to the
+existing control path helpers rather than loading monitor recovery machinery
+to discover that root. Recovery remains lazy and retains its existing
+unavailable/advisory behavior. Library import of `agent_worktrees.__main__`
+never runs the early selector. This is import/dispatch separation, not a new
+read authority, a new receipt operation, or a latency guarantee.
+
+### Negotiated observation contract (v2)
+
+The owner additionally advertises `worktrees-observations-v2`. A consumer
+that has discovered that capability may request `contract_version: 2` with
+the **same bounded selection fields** on `worktrees-read` or `worktrees-feed`.
+`worktrees_observation_contract.negotiate(request, capabilities)` selects v2
+only from already-observed capability evidence; it performs no discovery,
+ownership probe or read. Old strict request parsers must receive v1. Existing
+CLI flags and Manager loaders still select v1; the v2 parsers are available
+for separately staged consumer integration, not an implicit wire upgrade.
+
+V2 retains the existing projection fields and **schema_version: 1**. The wire
+contract version, durable schema version and opaque elected-writer generation
+are distinct. Every row adds `semantic_revision` (last semantic change in the
+current generation). Its `fact_provenance` retains quality, with observation
+times moved into a separate `observations` list:
+
+```json
+{
+  "id": "tree",
+  "facts": {
+    "session": {
+      "quality": "current",
+      "observed_at": 1000.0,
+      "observation_revision": 11
+    }
+  },
+  "derivations": {
+    "closure": {
+      "computed_at": "2026-10-22T12:00:00",
+      "observation_revision": 11
+    }
+  }
+}
+```
+
+There is exactly one observation entry per selected row, including an empty
+`facts` object for rows without fact provenance. The fact groups are `record`,
+`git`, `mux` and `session`. An unavailable fact has a null `observed_at`;
+timestamps and revisions are validated, not truthiness-coerced. Optional
+`derivations.closure` carries the closure descriptor's computation time,
+which is also observation metadata; its domain facts remain in the semantic
+row. No arbitrary `*_at` fields are removed: activity/lifecycle timestamps
+remain semantic. Unchanged fact observations retain their observation revision.
+
+The v2 feed adds one bounded `observation` frame per changed observation entry,
+with the same `projection` and `observation` object above. Initial observations
+follow their semantic rows; updates retain the full order frames. Receivers
+stage both kinds until done/commit. Duplicate, unknown, mismatched-quality,
+future or regressing observations are rejected. A heartbeat changes neither
+facts nor observation time; publication revision may advance without a
+semantic row delta. Manager parsers expose admitted metadata as `_observations`
+and `_observation_derivations` alongside `_projection`; source-store/UI
+integration is separate. A publication cursor is not a point-row floor.
+
+Durability remains backward-compatible: additive observation tables are bound
+to a project generation/revision; the original schema-1 row/head/index tables
+and election mechanism remain usable by older supported writers. The semantic
+row keeps its last changed v1-shaped payload. Current v1 reads reconstruct
+latest actual observation timestamps from the matching side data; an older
+reader can still read the valid, conservatively older timestamps. If an older
+elected writer publishes, its generation/revision no longer matches the side
+data: its complete v1 payload wins and no stale metadata is overlaid.
+No new source-version election rule or per-read owner attestation is added.
+
+Rows, observations, deletion, head and order/index changes commit in one
+transaction before live visibility or notification. Failed writes preserve
+the prior complete publication. V1 retains truthful whole-row deltas, including
+observation changes; zero semantic-row deltas are the negotiated v2 guarantee.
+Neither protocol implements targeted observation requests or mutation receipts
+yet; those remain separate owner operations.
 
 ### Held current-roster feed and cutover
 

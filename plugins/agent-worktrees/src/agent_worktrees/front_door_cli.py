@@ -6,14 +6,22 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
-from agent_procutil import no_window_kwargs
+from agent_procutil import no_window_kwargs  # noqa: F401 -- compatibility override seam
 
 from . import config as cfg
 from . import git_ops, sessions
 from . import installer as inst
+from .invocation_project import (
+    _anchor_for_project as _anchor_for_project,
+    _cwd_is_inside_project as _cwd_is_inside_project,
+    _extract_project_flag as _extract_project_flag,
+    _git_toplevel as _git_toplevel,
+    _resolve_active_project as _resolve_active_project,
+    _safe_cwd as _safe_cwd,
+    resolve_invocation_project as resolve_invocation_project,
+)
 from .project_routing import (
     _NO_PROJECT_COMMANDS as _NO_PROJECT_COMMANDS,
 )
@@ -33,72 +41,6 @@ def _core_helper(name: str, local):
     if callable(candidate) and candidate is not local:
         return candidate
     return local
-
-
-def resolve_invocation_project(
-    args_list: list[str], explicit: str | None,
-    resolve_project: Callable[[str | None], tuple[str | None, Path | None]],
-    contains_cwd: Callable[[Path], bool],
-    is_no_project: Callable[[list[str]], bool],
-) -> bool:
-    """Select project identity and assumed CWD before structured dispatch."""
-    if args_list[:1] == ["doctor"] and any(
-        option.startswith("--rec") and "--recovery-report".startswith(option)
-        for option in (arg.partition("=")[0] for arg in args_list[1:])
-    ):
-        return False
-    if args_list and args_list[0] == "record":
-        from .record_config import metadata_project
-
-        cfg.set_active_project(metadata_project(explicit))
-        return bool(cfg.active_project())
-    needs_project = not is_no_project(args_list)
-    optional_project = (
-        bool(args_list) and args_list[0] in {"config-root", "launch-update"}
-        and is_no_project(args_list)
-    )
-    if explicit:
-        project, assumed = resolve_project(explicit)
-    elif needs_project or optional_project:
-        project, assumed = resolve_project(None)
-    else:
-        project, assumed = None, None
-    if project:
-        cfg.set_active_project(project)
-        # An explicit project acts like Git -C; an existing task CWD wins.
-        if explicit and assumed is not None and not contains_cwd(assumed):
-            try:
-                os.chdir(assumed)
-            except OSError:
-                pass
-    return bool(cfg.active_project())
-
-
-def _extract_project_flag(args_list: list[str]) -> tuple[list[str], str | None]:
-    """Pop a global --project/-p flag from args, returning (remaining, value).
-
-    Supports ``--project NAME``, ``--project=NAME``, ``-p NAME``. Only the
-    first occurrence is consumed; the rest pass through to the subcommand.
-    """
-    out: list[str] = []
-    project: str | None = None
-    i = 0
-    while i < len(args_list):
-        arg = args_list[i]
-        if project is None and arg in ("--project", "-p"):
-            if i + 1 < len(args_list):
-                project = args_list[i + 1]
-                i += 2
-                continue
-            i += 1
-            continue
-        if project is None and arg.startswith("--project="):
-            project = arg.split("=", 1)[1]
-            i += 1
-            continue
-        out.append(arg)
-        i += 1
-    return out, (project.strip() if project else None)
 
 
 # ── `<repo> <slug>` command-surface router ───────────────────────────────────
@@ -292,68 +234,6 @@ def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) ->
     return subprocess.run(cmd, env=child_env, cwd=cwd).returncode
 
 
-def _safe_cwd() -> Path | None:
-    """Return ``Path.cwd()``, or ``None`` if the current directory is gone.
-
-    ``os.getcwd()`` raises ``FileNotFoundError`` when the process's working
-    directory has been removed out from under it. This happens when a plugin
-    hook re-invokes this CLI during ``copilot plugin update``: Copilot deletes
-    and re-vendors the payload directory the hook inherited as its cwd, so the
-    hook subprocess ends up with a vanished cwd. Treat that as "no project
-    context" rather than crashing startup (dotfiles#989).
-    """
-    override = _core_helper("_safe_cwd", _safe_cwd)
-    if override is not _safe_cwd:
-        return override()
-    try:
-        return Path.cwd()
-    except OSError:
-        return None
-
-
-def _git_toplevel(path: Path | None) -> Path | None:
-    """Return the git toplevel of ``path`` resolved to its anchor, or None.
-
-    ``path`` may be ``None`` (e.g. ``_safe_cwd()`` returned ``None`` because the
-    caller's cwd was deleted); in that case there is nothing to resolve.
-    """
-    override = _core_helper("_git_toplevel", _git_toplevel)
-    if override is not _git_toplevel:
-        return override(path)
-    if path is None:
-        return None
-    def _rev_parse(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-C", str(path), "rev-parse", *args],
-            capture_output=True, text=True, timeout=5,
-            env=git_ops.repository_identity_env(), stdin=subprocess.DEVNULL,
-            **no_window_kwargs(),
-        )
-
-    try:
-        r = _rev_parse("--show-toplevel")
-        if r.returncode == 0 and r.stdout.strip():
-            return git_ops.resolve_to_anchor(Path(r.stdout.strip()).resolve())
-    except Exception:
-        pass
-    # ``--show-toplevel`` always fails for a *bare* anchor (agent-worktrees'
-    # own pattern once worktrees are attached) -- mirror git_ops.py's
-    # credential-helper pin and use ``--git-dir`` so it still resolves as its
-    # own project rather than "not inside an adopted repo".
-    try:
-        r = _rev_parse("--is-bare-repository", "--git-dir")
-        lines = r.stdout.strip().splitlines()
-        if r.returncode == 0 and len(lines) == 2 and lines[0].strip() == "true":
-            git_dir = Path(lines[1].strip())
-            if not git_dir.is_absolute():
-                git_dir = (path / git_dir).resolve()
-            root = git_dir.parent if git_dir.name == ".git" else git_dir
-            return git_ops.resolve_to_anchor(root)
-    except Exception:
-        pass
-    return None
-
-
 
 _PROJECT_IRRELEVANT_COMMANDS = frozenset(
     {
@@ -410,26 +290,6 @@ def _guard_project_scope(project_override: str | None, command: str | None) -> N
     )
 
 
-def _anchor_for_project(name: str) -> Path | None:
-    """Return the anchor checkout path for project *name*, or ``None``."""
-    try:
-        projects = inst.read_projects_registry().get("projects", {})
-        entry = projects.get(name)
-        if isinstance(entry, dict) and entry.get("anchor"):
-            p = Path(entry["anchor"])
-            if p.is_dir():
-                return p.resolve()
-    except Exception:
-        pass
-    try:
-        anchor = cfg._resolve_anchor_from_registry(name, cfg.detect_platform())
-        if anchor and Path(anchor).is_dir():
-            return Path(anchor).resolve()
-    except Exception:
-        pass
-    return None
-
-
 def _reverse_lookup_project(anchor: Path) -> str | None:
     """Map an anchor checkout path back to its adopted project name, or ``None``."""
     target = git_ops._normalize_wt_path(str(anchor))
@@ -453,28 +313,6 @@ def _reverse_lookup_project(anchor: Path) -> str | None:
     except Exception:
         pass
     return None
-
-
-def _cwd_is_inside_project(anchor: Path) -> bool:
-    """Return True if the current directory belongs to the repo at *anchor*."""
-    top = _git_toplevel(_safe_cwd())
-    if top is None:
-        return False
-    return git_ops._normalize_wt_path(str(top)) == git_ops._normalize_wt_path(str(anchor))
-
-
-def _resolve_active_project(
-    project_override: str | None,
-) -> tuple[str | None, Path | None]:
-    """Resolve ``(project, anchor)`` the way git resolves its repo."""
-    if project_override:
-        return project_override, _anchor_for_project(project_override)
-    cwd_anchor = _git_toplevel(_safe_cwd())
-    if cwd_anchor is not None:
-        name = _reverse_lookup_project(cwd_anchor)
-        if name:
-            return name, None
-    return None, None
 
 
 def cmd_help_unrouted(requested: str | None = None) -> int:

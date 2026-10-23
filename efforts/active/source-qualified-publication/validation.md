@@ -41,8 +41,10 @@ git diff --check
 python tools\run-plugin-tests.py agent-worktrees -k "worktrees_current_rows or worktrees_projection or worktrees_producer or worktrees_feed or worktrees_runtime or worktrees_client or worktrees_recovery or worktrees_observe"
 
 # F3/F4: the standalone containment runner has no -k passthrough.
-# Run its supported Manager selection once, not one full run per case.
+# Its supported PYTEST_ADDOPTS environment selects one combined parser lane.
+$env:PYTEST_ADDOPTS='-k "worktree_observations or current_worktrees_feed or current_roster_reads"'
 python tools\run-standalone-tests.py worktree-manager
+Remove-Item Env:PYTEST_ADDOPTS
 
 python tools\check-install-contract.py
 ```
@@ -91,3 +93,344 @@ inspected source baseline. Unit/native/clean-room/live implementation tests
 are intentionally not run before there is implementation. Source PR review
 and required narrative CI remain mandatory. Do not claim the three issues
 fixed, close them, or mark the effort Done on a plan-only merge.
+
+## F1 execution evidence
+
+- The plan merged in #8021. F1 code is locally implemented, not yet source-merged.
+- The contained Worktrees selection passes 145 tests with the separately
+  failing native CLI startup test explicitly deselected. This is **not** an
+  all-green source qualification.
+- Actual producer/materializer, durable SQLite triggers and v2 feed receiver
+  prove 1,000 rows × ten observation-only publications yield zero semantic
+  writes/deltas; one title change yields exactly one update/delta. The new
+  deliberately high-volume fixture has a 180-second containment timeout, not
+  a runtime latency allowance.
+- Native authenticated socket controls pass for both v1 and v2. The existing
+  subprocess CLI full-roster test repeatedly fails its unchanged two-second
+  initial deadline, including when run alone: zero frames, zero control
+  requests, child still running, empty stderr. This blocks source completion;
+  it is not waived as “pre-existing” or covered by the passing socket test.
+- Manager's contained parser/feed selection passes 83 tests (3,482 deselected).
+  An initial native startup-budget control failed during concurrent dependency
+  preparation/testing; the complete selection subsequently passed twice with
+  no test or deadline relaxation. This does not erase the independent,
+  reproducible Worktrees CLI failure above.
+- `ruff check --select F,E9`, the targeted effort-structure check and the
+  install-contract guard (13 plugins) pass.
+- No CLI startup, Manager startup, or deadline expansion was made. A broader
+  startup diagnosis needs separate admission. F2/F3/F4 and live rollout remain
+  outside this implementation slice.
+
+### Bounded startup diagnosis (2026-10-23)
+
+The separately admitted diagnosis compared the exact same native case,
+1,100-row payload, contained environment, prepared CPython 3.12 test
+interpreter and original two-second verdict. The command remained
+`python -m agent_worktrees --project project list --json --current --stream
+--follow --include-other-platforms --all`. Only failing-test diagnostics
+continued collecting phase events for up to ten seconds; missing two seconds
+still failed, unconditionally.
+
+| Source | First health request | Feed request | stdout begin | stdout done |
+|---|---:|---:|---:|---:|
+| F1 `ee0baacc4` | 8.640 s | 8.656 s | 8.844 s | 8.859 s |
+| Exact pre-F1 source `e53d8d24e` | 6.110 s | 6.110 s | 6.297 s | 6.328 s |
+| F1, separate child-only import-profile observation | 5.828 s | 5.859 s | 6.078 s | 6.094 s |
+
+For the baseline comparison, only F1-changed Worktrees source files were
+temporarily restored from the committed parent in the same owned worktree;
+the identical diagnostic test and interpreter were retained, and all F1 source
+bytes were restored afterward. No reset, shared runtime or other worktree was
+used. Parent publication happens before the child-start clock, so that
+materialization is not the measured pre-control interval.
+
+The standard Windows total-processor counter sampled 100% before and after
+both unprofiled observations. These are **uncontrolled loaded-host samples**,
+not a worst-case bound or evidence assigning the between-run delta to F1.
+Both source versions fail before any owner request; actual owner/feed transfer
+then completes in roughly 0.2–0.3 seconds in these samples.
+
+Child-only import profiling (`WORKTREES_FEED_IMPORT_PROFILE=1` on the contained
+test) attributes cumulative import costs to `agent_worktrees.activity`
+(1.056 s), `agent_procutil` (0.889 s, including `asyncio` at 0.825 s),
+`agent_worktrees.config` (0.646 s) and `worktrees_client` (0.560 s).
+Cumulative timings overlap and must not be summed. F1's added
+`worktrees_observation_contract` is 0.072 s cumulative and 0.0035 s self;
+its dependency work is also needed by projection/index admission. This does
+not support blaming F1 materialization or claiming that lazifying its tiny
+self cost would repair the multi-second pre-control failure.
+
+The CLI entry's eager import/dispatch boundary is
+`plugins/agent-worktrees/src/agent_worktrees/__main__.py`. Live forge file
+inventories show both #8045 and #8031 modifying that exact file; #7788 also
+owns its eagerly imported `update_stage.py`. Those claims are preserved.
+No functional entry/import-chain change was made and no existing agent was
+contacted. This is a concrete baseline plus ownership blocker, not a deadline
+exception; F1 publication remains held for an admitted owner-respecting
+startup solution or reviewed gate disposition.
+
+### Admitted entry repair qualification
+
+The entry amendment merged as #8139 (`e8108d45955506268282881c0097dcfba8fed959`)
+before functional work. Original F1/evidence commits remain on
+`backup/f1-before-entry-plan-1ab`; their rebased candidates remain on the
+implementation branch. The source plan was reviewed on a documentation-only
+branch in the same owned worktree, not by publishing the blocked code.
+
+Targeted selector/context/client checks ran before the native case. The final
+combined selection reported **62 passed, 1 failed, 72 deselected**; the failure
+was the actual console's unchanged two-second deadline. Earlier context
+fixtures named “outside repo” inherited the enclosing source checkout because
+this execution environment requires scratch beneath the checkout. An owned
+invalid Git marker at the scratch boundary prevented ancestor discovery;
+the affected context selection then passed without changing production code
+or protected test files. Selector-effect test instrumentation was also fixed
+to restore patched builtins before pytest reporting. These are test-fixture
+corrections, not runtime deadline exceptions.
+
+| Entry into the same 1,100-row case | First health | Feed request | stdout begin | stdout done |
+|---|---:|---:|---:|---:|
+| `python -m agent_worktrees` | 4.844 s | 4.891 s | 5.110 s | 5.141 s |
+| Guarded `-m` (rejects broad command/recovery imports) | 3.828 s | 3.843 s | 4.062 s | 4.078 s |
+| Actual console executable from the source-owned test environment | 3.953 s | 3.953 s | 4.141 s | 4.187 s |
+
+Each verdict remains **FAIL at two seconds**, even though bounded failure-only
+diagnostics capture eventual completion. The console test verifies the actual
+installed declaration before invoking its generated executable, not merely a
+Python function. The guarded child refuses `activity`, `front_door_cli`,
+`list_cli`, `status_monitor_runtime` and a second dispatcher import. Its empty
+stderr and completed snapshot prove those forbidden imports were not required
+by the repaired healthy path. This does not qualify the latency gate or prove
+full post-initial-feed cancellation under that failing case.
+
+Processor samples around the initial repaired native group were again 100%.
+No controlled-load/worst-case conclusion is drawn, and neither the threshold
+nor the owner/server/shared-library scope was expanded. The earlier 145-test
+Worktrees, 83-test Manager, native-socket and 1,000-row F1 packet is retained,
+not claimed rerun against the latest rebase.
+
+Install-contract validation still passes for 13 plugins. Touched-file
+`ruff 0.11.13 check --select F,E9` reports two F811 `procs` shadow findings in `__main__.py`
+outside the admitted early hunk. A stdin check of the exact pre-entry `HEAD`
+reports the same two findings (baseline lines 4818/4965; candidate +10).
+No suppression or unauthorized modification was made; these findings and the
+native failure remain explicit source-publication blockers.
+
+### Integration with merged #8045
+
+After confirming merge `419a12d054193e3253f91a8395444608116fa1e3`, the
+candidate rebased cleanly to `60f2e37ee`; its only `__main__.py` delta versus
+that base remains the ten-line early selector. The open #8031 head was
+rechecked as `a3f34952706fe1020558c7181daacd0555d50f67`, with disjoint
+import/launch/sweep hunks; #7788 remained open at
+`afb2d47f7ab156c3e6ab9ba6d31624c46a91eda9`.
+
+Only the original module case was rerun, not the full suite or a new
+benchmark: **1 failed, 35 deselected**. It recorded health/feed at 2.703 s,
+stdout begin at 2.875 s and done at 2.907 s. Zero frames arrived within the
+unchanged two-second verdict. A preceding total-processor sample was again
+100%; this is not a controlled-load or worst-case claim. The console/guarded
+and broader F1 packets remain the explicitly earlier evidence above.
+No further import/library/owner change was made after this failing gate.
+
+### Bounded inert controls and original evidence retention
+
+Source candidate: `f45fe9696d89b5f4abf77b84514ff5f175ba646e`.
+Exactly three serial children ran `python -c
+"print('F1-INERT-READY', flush=True)"`, with no explicit imports and normal
+implicit site/pth startup. This is an **inert workload, not the Worktrees CLI**.
+The prepared interpreter was CPython 3.12.14, using the same source-owned test
+environment and canonical `run-plugin-tests.py` containment/conftest
+construction. All three inherited the same environment fingerprint.
+Fixture paths were newly allocated; the old full-roster raw environment was
+not retained, so no byte-for-byte equality with that old environment is
+claimed. No roster producer/control server ran for the inert children.
+
+The measurement starts at parent `time.monotonic()` immediately before
+`Popen`, with the same captured-pipe/DEVNULL/UTF-8/CREATE_NO_WINDOW boundary
+as the native case. Each control had a ten-second deadline. Raw floating-point
+timestamps and outputs remain in the bundle; this table rounds seconds:
+
+| Control | Spawn returned | First stdout | Process exited | Exit / stderr |
+|---|---:|---:|---:|---|
+| 1 | 0.015 | 0.328 | 0.359 | 0 / empty |
+| 2 | 0.015 | 0.343 | 0.359 | 0 / empty |
+| 3 | 0.000 | 0.234 | 0.250 | 0 / empty |
+
+All readers joined; no errors or timeouts occurred. The diagnostic pytest
+case passed once. It was not rerun and no actual full-roster case was retried.
+Fresh preceding `Get-Counter '\Processor(_Total)\% Processor Time'`
+samples at one-second cadence were 99.6133542160198%, 100.0% and
+99.52040752984144%, each status 0. They precede the controls by roughly nine
+seconds and are not instantaneous per-child utilization or a worst-case proof.
+
+These samples do **not** support an unavoidable two-second interpreter/host
+floor. They also do not isolate application cost from scheduling variation
+across the longer CLI workload. Do not subtract these values from another
+run or add cumulative import spans to fabricate an application budget.
+
+The source graph still retains `config`, canonical registry/CWD handling and
+authenticated control-client imports. In particular,
+`status_monitor_cutover.py:20` imports `agent_procutil`; its shared
+`libs/agent-procutil/src/agent_procutil/__init__.py:52` eagerly imports
+`asyncio`. The synchronous `no_window_flags`/`no_window_kwargs` functions at
+625/638 do not use it; the executable asyncio uses in that module are in
+`spawn_in_kill_on_close_job` at 427/434 (plus its annotation at 411).
+This is a concrete owner dependency, not measured proof that moving it will
+pass the CLI deadline. A shared-library owner may investigate lazy async
+loading while preserving async APIs, annotations/introspection and process
+semantics; F1 must not copy the primitive or edit that excluded owner surface.
+Otherwise qualification needs an explicitly coordinated quiet lane. Neither
+path is an automatic retry or authorization to weaken the gate.
+
+**Raw receipt:** twelve original artifacts, 20,534-byte JSON bundle,
+SHA-256 `a70331db3c056ac8b6989e65839f2fd7aa8188c36d058d3fd7290fff889aa145`.
+Each artifact retains its original bytes and individual digest. Samples and
+metadata were exported outside the runner's cleanup root before that cleanup;
+the diagnostic source was copied before execution. The full compressed capsule
+is stored on the owning task's evidence card, and decompression/readback
+verified the exact bundle hash before the temporary diagnostic source was
+removed. The original local bundle is also retained; it is not a public-source
+artifact because it contains environment/interpreter paths.
+
+**Lint clarification:** raw Ruff 0.11.13 candidate and baseline logs are in
+the same bundle. Candidate `__main__.py:4830` is the `procs` parameter of
+`select_orphan_launcher_shells`; line 4977 is the `procs` local in
+`_enumerate_launcher_shells_windows`. Both F811 findings refer to the imported
+compatibility re-export at line 110. Baseline
+`240c97586b80e8a3d8ed3d41e0aae5a751c08c83` reports the corresponding
+4820/4967 sites and import 100. All are outside the admitted early selector
+at 51–60. No rename, removed re-export or suppression was made.
+Required CI uses a seasoned, unpinned Ruff installation (`ci.yml:41`) and
+`ruff check --select F,E9 --output-format=github .` (`ci.yml:158`).
+These local older-tool findings are **not an observed failing required-CI
+result for this unpublished candidate**; canonical-tool disposition remains
+unverified. The independent native deadline still blocks qualification.
+
+### Integration of L/E/G3 and retained complete native output
+
+Dependencies are actual merged ancestors: #8190
+`72be3f01d934901d4dc891baf46f6866fc484879`, #8045
+`419a12d054193e3253f91a8395444608116fa1e3`, and #8163
+`80b1b0415c765dd440c2c05f5e7fa3e8e6fccaad`.
+The G3 conflict was reconciled, not discarded: the exact `doctor`
+recovery-report recognition now precedes configuration import in
+`invocation_project.resolve_invocation_project`; the front-door symbol
+re-exports that same implementation. Targeted tests prove no project lookup,
+active-project mutation or CWD change, including G3's existing actual
+front-door parameter matrix.
+
+Before the permitted Ruff fix, the full open-PR file inventory was read with
+pagination completed for every truncated result. The main-file claims in
+#6009, #7611 and #8031 had disjoint hunks. Only the unused import binding
+changed (`procs as _procs_module`, followed by `procs = _procs_module`);
+no function logic, public module name or `procs` parameter changed.
+The same Ruff 0.11.13, now with explicit canonical plugin configuration and
+`--select F,E9`, passes. A regression asserts module identity and the public
+selector's parameter name. No suppression, gate change or active owner-hunk
+modification was used.
+
+At source `a870063da3abd3222974dbdd0dd52948817adc92`:
+
+- Targeted parity/client and actual release-materializer import controls:
+  **100 passed, 48 deselected**. The materializer copied the complete
+  canonical package, retained byte-identical `_async.py`, and the isolated
+  materialized child proved synchronous imports do not load asyncio while
+  the private async export remains available. This is a contract control,
+  not a latency benchmark; L's separate wheel/full packet is retained,
+  not claimed rerun.
+- The **one** unchanged actual module 1,100-row case:
+  **1 passed, 35 deselected**, including initial snapshot, one-row update,
+  cutover, zero exit and joined readers. First health 1.157 s, feed 1.172 s,
+  begin 1.328 s, done 1.360 s, subsequent commit 1.594 s.
+- Pre-invocation Get-Counter samples were 57.0289088731416%,
+  71.59050634114806%, 69.40754776458643% at one-second intervals.
+  This differs from earlier loaded-host observations: no causal speedup
+  or worst-case latency conclusion is inferred.
+
+Only test-counter export changed afterward, at
+`f60649ebc705908c7f48aa4f17d5a5d5bbf578b5`; production source is identical.
+Combined F1 selectors excluded the already-run module case:
+**272 passed, 1 failed, 1 deselected**.
+
+| Entry | Health | Feed | Begin | Done | Outcome |
+|---|---:|---:|---:|---:|---|
+| Actual generated console executable | 1.531 s | 1.531 s | 1.703 s | 1.734 s | Pass; later commit 2.031 s, cutover/exit/join passed |
+| Instrumented guarded-module harness | 1.938 s | 1.953 s | 2.156 s | 2.188 s | Fail at unchanged initial two-second gate |
+
+The guarded case emitted no import-refusal error. Its extra `-c` harness
+imports `importlib.abc`/`runpy` before installing the finder; that is not the
+plain `-m` workload. A possible next *test-only* investigation is whether
+the finder needs its ABC import at all (Python's finder protocol uses
+`find_spec`). It was **not changed or retried** after this failure.
+No instrumentation-overhead attribution or deadline exception is asserted.
+Latest Manager-wide parser selection was not repeated after the failing
+combined gate; the earlier 83-case packet remains explicitly earlier evidence.
+
+The real producer counter export records ten publications of 1,000 rows:
+every observation-only publication has zero semantic frames and zero
+semantic writes; the one title change records exactly
+`UPDATE tree-0017`. The current combined packet also retains compatibility,
+atomic publication, recovery and v1/v2 control tests.
+
+**New raw receipt:** 37 original artifacts, 2,885,776-byte bundle,
+SHA-256 `eb64d3a0ac0c8fe3482e776194b1194b4616b0e6e774b4f3525d739dc00f744c`.
+It contains full native stdout/stderr, phase/outcome records, interpreter and
+source identities, load samples, semantic counters, materialized import output,
+test-source copies, original runner logs and fresh claim/lint evidence.
+Exports occur outside automatic fixture cleanup, in test `finally` paths for
+native results. The parity JUnit file was subsequently located at a mangled
+drive-relative path: backslashes in the ambient pytest option had been
+interpreted during argument splitting. It records 100 tests with zero
+errors/failures/skips. Its original bytes were copied and stored as a separate
+22,112-byte raw supplement, SHA-256
+`9910e85f482b7726a6fe2b302cb0602278ea77c8a6251b6bb720f2d04747dee2`,
+on the owning task card; decompressed readback was verified before the
+misplaced generated file was removed. The earlier claim that XML was not
+emitted was incorrect; the main 37-artifact bundle remains immutable and the
+supplement adds the recovered original rather than rewriting that bundle.
+The bundle includes the prior task-card capsule and is stored in a proposed,
+**non-runnable evidence-only carrier**, with complete payload readback and
+decompressed hash verification. The owning F1 task points to that receipt;
+it is not marked complete. Original local artifacts remain retained.
+
+### Plain finder protocol: guard-only qualification
+
+The [Python meta-path protocol](https://docs.python.org/3/reference/import.html#the-meta-path)
+requires an object implementing `find_spec(name, path, target=None)` and
+propagates exceptions to abort import. No ABC behavior was used by this
+guard. At `e8a597bb47f1bd849d83fc619fbbcc1de35ea57a`, only the test changes:
+the child no longer imports/inherits `importlib.abc.MetaPathFinder`.
+The guard remains a plain class with the same method, counter and all
+forbidden-module predicates. No proxy framework or product change was added.
+
+An AST proof compares the original script/native function at `764e90601`:
+after normalizing only the removed ABC dependency, both script ASTs and the
+entire native function AST are identical. Observer initialization still runs
+inside the timed child. Invocation, 1,100-row workload, `Popen` timing
+boundary, two-second assertion and output/error checks did not move or weaken.
+
+- **6 passed, 36 deselected:** real import attempts for each of the four
+  forbidden modules and the second dispatcher lookup are blocked before a
+  following finder's effect; the allowed-import control succeeds.
+- **1 passed, 41 deselected:** the actual guarded native case, using that
+  same class, completes health/feed at 1.266 s, begin at 1.438 s, initial
+  done at 1.469 s and update commit at 1.734 s. Cutover, zero exit and
+  reader cleanup also pass.
+- **39 passed, 3 deselected:** the affected feed contracts, excluding the
+  three already-measured actual CLI variants. No broad blind rerun.
+- Targeted Ruff and the 13-plugin install-contract check pass.
+
+Fresh preceding total-processor samples were 96.05507957853825%,
+97.05381662420625%, 99.34442998043427%. These are not controlled equal-load
+comparisons or worst-case qualification. The prior actual module 1.360 s and
+console 1.734 s passes remain their own finite evidence; full GUI/installed
+and remaining campaign acceptance stays open.
+
+**Passing raw receipt:** 17 original artifacts, 812,457-byte bundle,
+SHA-256 `ba1be0186c7ee5aea71092b00141d9dbe7b77cede5a0da1ab86c2d01dbe343ee`.
+It includes the exact guard source/diff/AST proof, raw control logs, native
+stdout/stderr/phases/interpreter/source/outcome, load samples and guards.
+It is retained in a proposed **EVIDENCEONLY** carrier with exact decompressed
+readback verification. The prior carrier and prototype remain preserved and
+non-runnable; no queue/spawn/execute action was used.

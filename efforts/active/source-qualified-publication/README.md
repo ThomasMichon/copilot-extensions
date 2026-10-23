@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, dependency-ordered PRs against `dev`
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees/README.md`, resident authoritative live-state database; `visions/picker/README.md`, consumer presentation
 - **Umbrella issue:** #7937
 - **Sub-issues:** #7936 · #7946
@@ -24,7 +24,7 @@ new service, alternate authority, or operator-specific integration.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Plan author | Source-grounded proposal and plan PR only | This effort and #7936/#7937/#7946 |
-| Projection implementer (unassigned) | F1 semantic storage and negotiated observation protocol | Separate managed source worktree after admission |
+| Projection implementer | F1 semantic storage and negotiated observation protocol only | Existing isolated source worktree; #7946 |
 | Receipt implementer (unassigned) | F2 targeted owner observation and receipts | Separate managed source worktree after F1 contract |
 | Manager implementer (unassigned) | F3 source store and F4 maintenance convergence | Separate managed source worktree after contract admission |
 | Existing owners | #7938, #7974, #7788 and publisher/recovery work | Read-only issue/PR/task state; ownership retained |
@@ -92,12 +92,14 @@ or additional execution authorization.
 ### P0 — Reviewed plan
 - [x] Trace the three issues through actual producer, feed, loader and screen.
 - [x] Specify interfaces, compatibility, ownership exclusions and staged graph.
-- [ ] Obtain plan review and merge through the source contribution gates.
+- [x] Obtain plan review and merge through the source contribution gates (#8021).
 
 ### F1 — Semantic publications
-- [ ] Implement the negotiated observation/semantic split and changed-row
+- [x] Implement the negotiated observation/semantic split and changed-row
   persistence from [implementation.md](implementation.md).
-- [ ] Preserve atomic head, row, order, observation and deletion publication.
+- [x] Preserve atomic head, row, order, observation and deletion publication.
+- [ ] Complete the scoped F1 source review/merge and transfer remaining
+  consumer, effect and installed qualification to their existing owners.
 
 ### F2 — Owner receipts
 - [ ] Implement bounded targeted owner observation and post-effect receipt
@@ -139,7 +141,7 @@ or additional execution authorization.
 
 ## Proposal
 
-**Agent-recommended; awaiting source review.** Keep one owner and one
+**Reviewed in #8021; F1 execution admitted separately.** Keep one owner and one
 source-qualified consumer store. Add an explicitly negotiated bounded
 observation/receipt contract, not an optimistic row cache or second writer.
 Separate fact revisions, observation freshness and transport heartbeat.
@@ -147,10 +149,139 @@ Detailed design: [implementation.md](implementation.md).
 
 The bounded [current-feed entry amendment](startup-entry-proposal.md) addresses
 the pre-control CLI startup gate while preserving existing command semantics
-and exact shared-file owners. It requires source review before implementation;
+and exact shared-file owners. Its source review merged in #8139;
 it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
+
+### 2026-10-23 — Plan merged; F1 admitted
+- #8021 merged after current-head Copilot approval and required green CI.
+- F1 alone is admitted: semantic storage/observation wire contract and Manager
+  parsers, with no F2 effects, F3 loader/UI or reserved startup integration.
+- Compatibility refinement: keep the existing durable schema and election
+  usable by an older supported writer. Additive observation tables are
+  generation/revision-qualified; stale extension data never overrides a
+  complete publication from a compatible older elected writer. Wire version
+  is not elected-writer incarnation or durable-schema version.
+- Functional validation is in progress. Parent issues and all remaining
+  source/consumer qualification obligations remain open; no rollout authorized.
+
+### 2026-10-23 — F1 source qualification blocker
+- Local F1 implementation retains schema-1 writer usability and exposes the
+  negotiated v2 protocol without enabling loader/UI adoption.
+- Contained Worktrees tests: 145 passed with the one separately failing native
+  CLI startup test deselected; Manager parser/feed selection: 83 passed.
+  Lint and the 13-plugin install-contract guard passed.
+- The native CLI test fails even alone before any owner control request.
+  Its two-second bound is unchanged. Source publication/merge is held pending
+  a separately admitted startup diagnosis or a reviewed tracked disposition;
+  there is no accepted exception and no claim of complete F1 qualification.
+- Detailed evidence and preserved remaining gates: [validation.md](validation.md).
+
+### 2026-10-23 — Admitted bounded startup diagnosis
+- Compared the exact unchanged two-second native case against pre-F1 source:
+  both fail before the owner control request. Source bytes were restored from
+  the retained F1 commit after comparison.
+- Recorded phase timing, command/interpreter identity, sampled host load and
+  child-only import attribution in [validation.md](validation.md). Loaded-host
+  observations are not a worst-case or causal attribution of run-to-run delta.
+- The next meaningful CLI entry/import change overlaps exact-file live claims:
+  `__main__.py` in #8045/#8031 and `update_stage.py` in #7788. Stopped that
+  expansion; no agent contact, deadline waiver, startup fix or F1 source merge.
+
+### 2026-10-23 — Exact entry proposal, awaiting admission
+- Refreshed the live PR heads and actual entry hunks; the proposed pre-import
+  insertion is hunk-disjoint, not globally unclaimed.
+- [Startup-entry proposal](startup-entry-proposal.md) identifies the minimal
+  selected-command entry, shared parser/context preservation, necessary console
+  declaration and healthy-read monitor-import back-edge removal.
+- Existing diagnosis was reused without benchmarks or suite reruns. No
+  functional code changed; the implementation task remains suspended.
+
+### 2026-10-23 — Amendment reviewed; bounded repair still misses native gate
+- #8139 merged after current-head Copilot approval and required green checks.
+  The documentation-only PR excluded the retained F1 implementation commits.
+- Implemented only the admitted selector, console declaration, canonical
+  parser/context extraction, lazy client recovery and conditional routing
+  import. Existing launch/lifecycle/import-115, installer, server ownership,
+  cutover/drain and shared-library owner scopes remain untouched.
+- New targeted parity tests pass, including library-import/decline behavior,
+  legitimate context overrides, invalid installation cell and vanished CWD.
+  The actual local test-environment console wrapper uses the new declaration;
+  no shared installed payload was modified.
+- The unchanged two-second native gate still fails before first health:
+  module 4.844 s, guarded module 3.828 s, console 3.953 s. The guarded child
+  rejects broad dispatcher/recovery imports; it reached a complete snapshot
+  without triggering those refusals. No further import/library expansion.
+- The retained F1 packet and exact new evidence/gates are in
+  [validation.md](validation.md). F1 remains unmerged and the effort Blocked.
+
+### 2026-10-23 — Merged guidance-owner integration
+- Rebased the retained candidate onto `dev` containing #8045 merge
+  `419a12d054193e3253f91a8395444608116fa1e3`; the rebase was conflict-free.
+  The original candidate remains on `backup/f1-entry-before-merged-e`.
+- Fresh #8031 head `a3f34952706fe1020558c7181daacd0555d50f67` still changes
+  import 115, launch and monitor-sweep hunks, not the admitted early selector.
+  #7788 remains open at `afb2d47f7ab156c3e6ab9ba6d31624c46a91eda9`.
+- Re-ran only the unchanged native module gate against this integration:
+  first health 2.703 s, complete snapshot 2.907 s, still FAIL at two seconds.
+  No deadline or scope expansion; source publication remains held.
+
+### 2026-10-23 — Three inert controls; raw receipt retained
+- Reused the existing phase/import evidence first. Ran exactly three serial,
+  default-site inert-print controls through the same prepared interpreter and
+  canonical containment/fixture construction; no full-roster retry.
+- First stdout was 0.328/0.343/0.234 s, with zero exit codes and empty stderr.
+  The different workload does not qualify the CLI or establish an unavoidable
+  interpreter/scheduler floor. No timings were added or subtracted into a
+  synthetic budget.
+- Exported all original samples, environment/version metadata, load data,
+  diagnostic source and lint logs before automatic sandbox cleanup. The
+  complete raw bundle was attached to the owning task and read-back verified;
+  the local artifact copy is retained. See [validation.md](validation.md).
+- No specific sufficient F1-owned optimization is established. The retained
+  eager `asyncio` dependency belongs to shared `agent-procutil`, outside the
+  admitted scope. Await owner-scoped investigation or a coordinated quiet lane,
+  not automatic retries or a deadline exception.
+
+### 2026-10-23 — L/E/G3 integrated; real entries pass, guarded control remains red
+- Integrated #8190 (`72be3f01`), #8045 (`419a12d0`) and #8163
+  (`80b1b041`). The context-extraction conflict was resolved by retaining
+  G3's exact recovery-report early return in the shared implementation:
+  no project discovery or CWD mutation. Original commits remain backed up.
+- Fresh complete main-file claim inventory found no claim on the `procs`
+  binding. The permitted minimal binding change keeps `core.procs` the same
+  module and preserves function/parameter names; canonical plugin Ruff
+  configuration now passes without suppression.
+- Targeted context/client/materialized-import checks passed 100 cases.
+  The single unchanged actual module case then passed at 1.360 s initial
+  completion. Actual generated-console qualification passed at 1.734 s.
+  Different observed load prevents attributing the timing difference to L.
+- Combined contracts passed 272 cases, with the already-run module case
+  excluded. The instrumented guarded-module case alone missed the unchanged
+  two-second initial deadline (health 1.938 s, complete 2.188 s). No retry,
+  threshold change or additional scope followed.
+- Full raw stdout, phases, counters, source/interpreter/load evidence and
+  claim/lint results were exported before fixture cleanup and placed in
+  verified durable evidence storage. The prior raw capsule is preserved.
+  Source publication remains blocked; see [validation.md](validation.md).
+
+### 2026-10-23 — Plain protocol guard qualifies; source review pending
+- The documented meta-path protocol requires `find_spec`, not ABC inheritance.
+  Removed only the guarded child's unused `importlib.abc` import/base.
+  Five deliberate forbidden imports still fail before a downstream finder
+  effect; an allowed import succeeds. The same native guard class is exercised.
+- AST comparison against `764e90601` proves the native function is unchanged
+  except that dependency: all predicates, invocation, 1,100 rows, timer
+  start/stop, two-second assertion and completeness/error checks are retained.
+- Six negative/allowed controls and 39 affected feed contracts pass.
+  The guarded native case now passes at 1.469 s initial completion, including
+  update, cutover, clean exit and joined readers. Load differed; this remains
+  finite source-fixture evidence, not causal/worst-case/GUI/installed proof.
+- All original raw evidence is durably retained and verified before cleanup;
+  previous prototype and evidence carriers remain preserved. Product source
+  did not change in this guard-only correction. Scoped source publication is
+  now pending its normal review/required-CI gates; root goals remain open.
 
 ### 2026-10-22 — Bounded planning
 - Read the three live issue bodies and their empty prior comment/assignment

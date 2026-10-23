@@ -89,7 +89,7 @@ def test_worktrees_client_real_transport_uses_existing_auth_only(
             base_url=f"http://127.0.0.1:{server.port}",
         ),
     )
-    monkeypatch.setattr(control, "control_token_path", lambda: token_path)
+    monkeypatch.setattr(control, "control_token_path", lambda runtime_home=None: token_path)
     monkeypatch.setattr(
         control, "load_or_create_control_token", lambda: pytest.fail("reader minted auth")
     )

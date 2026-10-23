@@ -48,6 +48,16 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 
 from __future__ import annotations
 
+if __name__ == "__main__":
+    import sys as _entry_sys
+    from .current_roster_entry import select_current_feed as _select_current_feed
+
+    _current_feed_entry = _select_current_feed(_entry_sys.argv[1:])
+    if _current_feed_entry is not None:
+        from ._shutdown_exit import run_and_exit as _run_current_feed_entry
+
+        _run_current_feed_entry(_current_feed_entry)
+
 import argparse
 import contextlib
 import dataclasses
@@ -97,7 +107,7 @@ from . import (
     permissions as permissions,
     pr_config,
     pr_ops,
-    procs as procs,
+    procs as _procs_module,
     profile_assignment,
     prune,
     reciprocal_presentation,
@@ -106,6 +116,8 @@ from . import (
     sessions_pane_retire,  # noqa: F401 -- compatibility re-export (handoff_cutover.py tests patch m.sessions_pane_retire)
     terminal_identity, tracking, tracking_lifecycle,
 )
+procs = _procs_module
+
 from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
