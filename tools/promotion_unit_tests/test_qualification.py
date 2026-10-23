@@ -24,6 +24,41 @@ MANIFEST = ".github/promotion-units.json"
 NODE = "tools/promotion_unit_tests/test_example.py::test_example"
 
 
+@pytest.mark.parametrize("include_pr", [False, True])
+def test_native_inventory_tracks_explicit_pr_registration_without_effects(monkeypatch, include_pr):
+    import materialized_candidate_inventory as inventory
+
+    required = {"worktree-manager", "fleet-manager", "services/index", "services/dispatch",
+                "services/chat"}
+    if include_pr:
+        required.add("services/pr")
+    observed = []
+
+    def regular(root, relative):
+        observed.append(relative.as_posix())
+        return root / relative
+
+    monkeypatch.setattr(inventory, "regular", regular)
+    monkeypatch.setattr(inventory, "python_suites", lambda _root: {"agent-worktrees"})
+    monkeypatch.setattr(inventory, "plugin_minutes", lambda *_args: 2)
+    monkeypatch.setattr(inventory, "fleet_partitions", lambda _root: {"fixture": "fixture"})
+    rows = inventory.matrix(Path("fixture"), {"agent-worktrees"}, required)["include"]
+    assert {row["os"] for row in rows if row["component"] == "pr"} == (
+        {"ubuntu-latest", "windows-latest"} if include_pr else set()
+    )
+    assert ("services/pr/pyproject.toml" in observed) is include_pr
+    assert all(row["job_minutes"] <= 360 for row in rows)
+    if include_pr:
+        import validate_materialized_candidate as candidate
+
+        monkeypatch.setattr(candidate, "_regular", regular)
+        recipe = candidate.recipes(Path("fixture"), "pr")
+        assert len(recipe) == 1
+        assert recipe[0][0][2:] == [
+            "services/pr", "--prepare", "--admission-wait", "60", "--timeout", "180",
+        ]
+
+
 @pytest.fixture
 def inline_readback(monkeypatch):
     lifecycle = []

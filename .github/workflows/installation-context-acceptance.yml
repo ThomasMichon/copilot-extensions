@@ -211,6 +211,10 @@ jobs:
           --test-file tests/test_watch_gateway_transport.py
           --test-file tests/test_watch_observer.py
           --max-files-per-sub-suite 2
+      - name: Independent installed PR service and real process transport
+        run: >-
+          python tools/run-standalone-tests.py services/pr
+          --prepare --timeout 180 --admission-wait 30
 
   pr-service-windows:
     if: ${{ inputs.pr_service }}

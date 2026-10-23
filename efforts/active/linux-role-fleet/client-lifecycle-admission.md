@@ -26,7 +26,7 @@ malformed legacy proof remains a refusal. Retained-good policy and the complete 
 lifecycle remain serial obligations, not delivered behavior or permission for
 live activation.
 The operator selected explicit retained-good recovery with the admitted floor
-unchanged; its next review-gated proposal is
+unchanged; its contract reviewed in #8106 is
 [retained-good recovery](client-retained-good-recovery.md).
 Owned selector withdrawal merged in #7891 and is documented in
 [runtime activation](../../../fleet-manager/docs/client-runtime-activation.md#owned-selector-withdrawal).

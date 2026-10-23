@@ -20,6 +20,13 @@ current_target=...)`; the suppliers provide current trusted policy and target
 configuration, not cached verification reports. The CLI rereads those files at
 checkpoints.
 
+For an explicitly [recovered retained client](client-retained-recovery.md),
+add `--recovery-decision <file>` (API: `current_recovery=...`). The same current
+decision, exact unchanged higher admission, recovered active context and
+compatible target must still validate on registration and reuse. This is not
+a registration-only downgrade flag; an ordinary active candidate cannot acquire
+recovery authority through it.
+
 ## Commands and ownership
 
 The directory must be absolute, ordinary, privately owned and separate from the

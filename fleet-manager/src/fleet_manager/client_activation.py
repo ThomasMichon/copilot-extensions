@@ -1,6 +1,6 @@
 """Owned client runtime selectors, not frontdoor registration or fleet activation."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from dataclasses import asdict
 import hashlib
 import os
@@ -174,6 +174,17 @@ def _prepare(namespace, active, previous, publication):
 def activate_client_runtime(root, identity, selection, staged, *,
                             current_policy, current_target, clock=lambda: int(time.time())):
     """Select an already constructed client under fresh policy, bytes and local health."""
+    return _activate_client_runtime(
+        root, identity, selection, staged, current_policy=current_policy,
+        current_target=current_target, clock=clock,
+    )
+
+
+def _activate_client_runtime(root, identity, selection, staged, *, current_policy,
+                             current_target, clock, recovery=None, current_recovery=None,
+                             ownership=None):
+    from . import client_recovery
+
     identity, selection, binding = construction._request(
         identity, selection, staged, current_policy, current_target,
     )
@@ -181,7 +192,8 @@ def activate_client_runtime(root, identity, selection, staged, *,
     publishing = False
     try:
         with (
-            client_admission._owned(root) as (path, database_root, unchanged),
+            (client_admission._owned(root) if ownership is None else nullcontext(ownership))
+            as (path, database_root, unchanged),
             client_admission._connection(
                 path, database_root=database_root, readonly=False,
             ) as connection,
@@ -189,15 +201,42 @@ def activate_client_runtime(root, identity, selection, staged, *,
             ExitStack() as retained,
         ):
             connection.execute("BEGIN IMMEDIATE")
+            namespace = path / construction.NAMESPACE
+            if recovery is not None:
+                command_directory, _anchor, commands_unchanged = retained.enter_context(
+                    client_admission._root(recovery["command_directory"]),
+                )
+                if any(command_directory.is_relative_to(other) or other.is_relative_to(command_directory)
+                       for other in (path, staged._root)):
+                    raise PlanError("client recovery commands require a separate private directory")
 
             def checkpoint():
+                if recovery is not None:
+                    from . import client_frontdoor
+
+                    commands_unchanged()
+                    client_frontdoor._commands(command_directory, slot)
+                    registered = client_frontdoor._receipt(
+                        namespace, identity, command_directory, publication,
+                    )
+                    if registered is None and any(
+                        os.path.lexists(command)
+                        for command in client_frontdoor._command_paths(command_directory)
+                    ):
+                        raise PlanError("client recovery preserves unattributed command objects")
+                    return client_recovery._checkpoint(
+                        connection, identity, selection, binding, staged,
+                        current_policy, current_target, clock, unchanged,
+                        namespace=namespace, primitive=primitive, publication=publication,
+                        decision=recovery, current_recovery=current_recovery, completion=completion,
+                    )
                 return construction._checkpoint(
                     connection, identity, selection, binding, staged,
                     current_policy, current_target, clock, unchanged,
                 )
 
-            checkpoint()
-            namespace = path / construction.NAMESPACE
+            if recovery is None:
+                checkpoint()
             artifact_staging._directory(namespace)
             construction._namespace(path, identity)
             construction._not_removing(namespace)
@@ -211,6 +250,7 @@ def activate_client_runtime(root, identity, selection, staged, *,
                 publication = primitive._runtime_component("versioned_runtime_publication")
                 # The canonical selector lease spans validation, health and publication.
                 with primitive._publication_lease(namespace):
+                    checkpoint()
                     _not_removing(namespace)
                     pending = None
                     if os.path.lexists(namespace / PENDING):
@@ -238,6 +278,10 @@ def activate_client_runtime(root, identity, selection, staged, *,
                     elif _active(namespace, identity, publication) != previous:
                         raise PlanError("client active receipt changed before publication")
                     reused = pending is None and previous is not None and previous["candidate"] == version
+                    if reused and recovery is not None:
+                        reused = os.path.lexists(
+                            namespace / HISTORY / previous["publication"] / client_recovery.CONTEXT,
+                        ) and client_recovery._context(namespace, previous, recovery)
                     if reused and previous["runtime_sha256"] != completion["runtime_sha256"]:
                         raise PlanError("active client bytes differ from their activation receipt")
                     if not reused:
@@ -258,6 +302,8 @@ def activate_client_runtime(root, identity, selection, staged, *,
 
                         if pending is None:
                             directory = _prepare(namespace, active, previous, publication)
+                            if recovery is not None:
+                                construction._write(directory / client_recovery.CONTEXT, recovery)
                             attempts = 0
                         if attempts >= MAX_ATTEMPTS:
                             raise PlanError("client selector publication exhausted its bounded retries")
@@ -293,13 +339,25 @@ def activate_client_runtime(root, identity, selection, staged, *,
                         client_admission._sync_directory(namespace)
                         (namespace / PENDING).unlink()
                         client_admission._sync_directory(namespace)
-                        publishing = False
+                    else:
+                        active = previous
+                    checkpoint()
+                    _check_publication(namespace, active, publication)
+                    acknowledged = namespace / HISTORY / active["publication"] / client_recovery.ACKNOWLEDGED
+                    acknowledged_now = not os.path.lexists(acknowledged)
+                    if acknowledged_now:
+                        construction._write(acknowledged, active)
+                    elif construction._read(acknowledged) != active:
+                        raise PlanError("client acknowledged activation differs from its active owner")
+                    publishing = False
                     return {
                         "schema": "fleet-manager.client-runtime-activation", "version": 1,
                         "identity": identity, "candidate": version, "admitted": admitted,
                         "runtime_sha256": completion["runtime_sha256"],
                         "target_digest": digest(target), "health": health,
-                        "active": True, "reused": reused, "mutations_performed": not reused,
+                        "active": True, "reused": reused,
+                        "mutations_performed": not reused or acknowledged_now,
+                        **({"recovery_decision_digest": digest(recovery)} if recovery is not None else {}),
                         "frontdoor_registered": False, "live_readiness_verified": False,
                     }
     except PlanError:

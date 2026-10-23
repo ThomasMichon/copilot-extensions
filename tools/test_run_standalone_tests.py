@@ -234,7 +234,7 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("component", [
     "fleet-manager", "worktree-manager", "services/index", "services/dispatch",
-    "services/chat",
+    "services/chat", "services/pr",
 ])
 def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch, component):
     projects = {
@@ -243,8 +243,10 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         "services/index": "agent-index-service",
         "services/dispatch": "agent-dispatch-service",
         "services/chat": "agent-chat-service",
+        "services/pr": "agent-pull-requests-service",
         "plugins/agent-index": "agent-index",
         "plugins/agent-dispatch": "agent-dispatch",
+        "plugins/agent-pull-requests": "agent-pull-requests",
         "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
         "libs/zdd": "agent-zdd",
         "libs/agent-procutil": "agent-procutil",
@@ -259,7 +261,8 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         (project / "pyproject.toml").write_text(
             '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
             f'[project]\nname="{name}"\nversion="1.0"\n'
-            '[project.optional-dependencies]\ndev=[]\nnative=[]\ntest=[]\nstore=[]\nserver=[]\n',
+            '[project.optional-dependencies]\ndev=[]\nnative=[]\ntest=[]\nstore=[]\nserver=[]\n'
+            'fleet=[]\nservice-gateway=[]\n',
             encoding="utf-8",
         )
         with (project / "pyproject.toml").open("a", encoding="utf-8") as manifest:
@@ -271,7 +274,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             'agent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
         )
     (tmp_path / "libs" / "versioned-runtime").mkdir()
-    if component == "fleet-manager":
+    if component in {"fleet-manager", "services/pr"}:
         (tmp_path / "libs" / "installer-engine").mkdir()
         (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil").mkdir()
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -284,7 +287,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     def prepare(uv, arguments, **kwargs):
         assert kwargs["trusted_source_roots"] == (tmp_path,)
         expected_resources = (tmp_path / "libs" / "versioned-runtime",)
-        if component == "fleet-manager":
+        if component in {"fleet-manager", "services/pr"}:
             expected_resources += (
                 tmp_path / "libs" / "installer-engine",
                 tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",
@@ -313,7 +316,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
     extra = "[test]" if component == "services/index" else "[dev]"
     assert any(argument.endswith(component.replace("/", os.sep) + extra) for argument in installs[0])
-    if component in ("services/index", "services/dispatch"):
+    if component in ("services/index", "services/dispatch", "services/pr"):
         assert "--override" in installs[0]
 
 
@@ -337,6 +340,7 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
 @pytest.mark.parametrize("legacy,canonical", [
     ("agent-dispatch-service", "services/dispatch"),
     ("agent-chat-service", "services/chat"),
+    ("agent-pull-requests-service", "services/pr"),
 ])
 def test_service_alias_uses_canonical_preparation_lease_and_tests(
     tmp_path, monkeypatch, legacy, canonical,

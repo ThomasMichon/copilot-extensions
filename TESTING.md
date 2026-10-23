@@ -37,6 +37,19 @@ TLS/PoP reconnect, restart and drain, with synthetic issuer/provider inputs.
 It adds no required-PR process matrix and does not qualify a production
 credential provider, installed artifact or fleet placement.
 
+The same manual selector also runs `tools/run-standalone-tests.py services/pr
+--prepare --timeout 180`. Its independent environment installs this checkout's
+PR/Fleet dependencies and the standalone wheel without Copilot. Tests build a
+normal source-independent wheel, validate the existing reference-only
+`container.service` declaration, and drive an installed foreground service in
+a separate process over Fleet's real TLS/PoP Gateway fixture. Provision,
+duplicate writer refusal, register/observe, token-file reread on reconnect,
+durable restart and exact ACK use synthetic identities/provider snapshots.
+Windows uses the public embedding stop event; Linux exercises CLI SIGTERM.
+Windows passive-reader rename sharing is tested at the actual file boundary.
+These controls do not qualify a live provider, built container or fleet
+placement, and do not close the remaining slow-target fairness/update gates.
+
 ## Optional diagnostic telemetry
 
 Manager's source-native consumer lane is documented in
@@ -126,6 +139,20 @@ same 120-second caller bound; it is not a function-only timeout exemption. A mis
 stage deadline is still a failure, not a reason to omit health, skip an
 assertion or extend the timeout. Ordinary ownership/fault cases remain in
 `test_client_frontdoor.py`; the periodic standalone suite discovers both files.
+
+`fleet-manager/tests/test_client_recovery_native.py` separately exercises the
+real construction prerequisite, installed `recover-retained` CLI, actual
+platform commands/exact repeat, and concurrent independent installed owners.
+The CLI uses independently signed synthetic evidence valid at the real wall
+clock; no health, constructor, publication, clock or registration primitive is
+mocked. Existing build/constructor/owner/command/test/caller deadlines remain
+unchanged. On slower native hosts, select `construction_prerequisite` together
+with one of `cli_transition`, `commands_and_exact_rerun` or
+`independent_installed_retained_recovery_owners` per bounded invocation.
+`test_client_recovery.py` contains separate real-trust/physical-proof behavioral
+and fault controls, using explicitly labelled unit health stubs rather than
+claiming native proof. Split large behavioral selections into disjoint bounded
+groups when needed; an earlier timeout remains a failure, not a waived gate.
 
 `libs/versioned-runtime/tests/test_receipt_header_publication.py` exercises
 unpublished empty/partial/synced header attempts, abrupt producer death, a

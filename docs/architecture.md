@@ -38,6 +38,14 @@ mechanism does not enroll recurring maintenance or make Manager a dependency of
 standalone plugins. Individual installers and remaining native plan-action adapters keep
 their existing custody until their separately tracked migration.
 
+The standalone [PR watch service](../services/pr/README.md) hosts the existing
+PR replay/Gateway/native-observation core in an explicitly launched process.
+It supplies a normal wheel, external credential-reference configuration,
+separate first provisioning, passive bounded-age readiness and graceful drain,
+without Copilot or marketplace hooks. Its offline non-root container recipe
+and existing `container.service` role references do not themselves construct,
+place or activate a fleet workload. Native PR operation remains independent.
+
 The standalone [agent-chat-service](../services/chat/README.md) currently
 provides dependency-free conversation state and a callable RPC core, plus an
 explicit optional `service` role for independently installed foreground hosting.

@@ -368,6 +368,14 @@ def _checkpoint(connection, identity, selection, binding, staged, current_policy
     admitted = client_admission._read_state(connection, identity)
     if not admitted or admitted["selection_digest"] != binding["selection_digest"]:
         raise PlanError("client construction requires the exact durably admitted selection")
+    policy, target = _verified(
+        identity, selection, staged, current_policy, current_target, clock,
+    )
+    unchanged()
+    return policy, target, admitted
+
+
+def _verified(identity, selection, staged, current_policy, current_target, clock):
     policy = decode(canonical(current_policy()))
     evidence = staged.reverify(policy, clock=clock)
     if (
@@ -378,8 +386,7 @@ def _checkpoint(connection, identity, selection, binding, staged, current_policy
         raise PlanError("client construction release differs from its admitted selection")
     manifest = validate_release(decode(staged.read_manifest(policy, clock=clock)))
     target = _compatible(manifest, current_target(), identity)
-    unchanged()
-    return policy, target, admitted
+    return policy, target
 
 
 def _completion(primitive, namespace, version, binding):

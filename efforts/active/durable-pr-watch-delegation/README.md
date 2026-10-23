@@ -284,12 +284,12 @@ _Operator-required scope; agent-recommended implementation and validation._
   after interrupted cycles. This source seam does not configure a production
   caller, attest its namespace, activate a backend or close service/fleet proof
   (source confirmed by #8124).
-- [ ] Land the existing-core serving/observation lifecycle seam: adopt persisted
+- [x] Land the existing-core serving/observation lifecycle seam: adopt persisted
   replay state under native lifetime exclusion, own one connector and observer,
   withdraw later admission/effects on disconnect, and join actual serving and
   native/disk work before releasing the writer. Failed drain retains custody.
-  This prerequisite is not standalone packaging, fleet activation, cross-host
-  fencing or slow-target fairness acceptance.
+  Source confirmed by #8157. This prerequisite is not standalone packaging,
+  fleet activation, cross-host fencing or slow-target fairness acceptance.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -651,6 +651,78 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-23 - Prepare the independent foreground service package
+
+- Add `services/pr`, a normal standalone distribution over the existing
+  `WatchService`, with explicit trusted host configuration, separate first
+  provisioning, foreground serve and passive bounded-age readiness. Native
+  commands remain independent. The host requires an explicit scoped credential
+  command; no ambient account fallback, remote callback argv, new issuer,
+  deployment controller or per-session supervisor is introduced.
+- Factor Fleet's bounded credential-reference reader without changing typed
+  worker renewal, and expose an external P-256 key/current-token callback for
+  standalone service connectors. Local launch/stop bounds local work; actual
+  Gateway and credential-worker admission remain separate. Neither a deadline,
+  token label, local lock nor readiness snapshot is a placement permit.
+- Add an offline wheel-only non-root container recipe and a reference-only
+  example of the existing `container.service` role. Register the distribution,
+  exact-source test preparation, native candidate recipe and existing manual
+  Linux/Windows service selector. These are source artifacts, not a constructed
+  image, installed fleet role or activation result.
+- Contained validation passed 25 standalone cases, 10 focused runner/candidate
+  cases and 16 Fleet credential/worker cases. The installed-process test uses
+  real TLS/PoP Gateway transport, synthetic provider snapshots, an actual native
+  child, disk state, duplicate-writer refusal, reconnect, restart and exact ACK.
+  Windows uses the public embedding stop event; Linux CLI SIGTERM remains for
+  the exact-head hosted lane. A real Windows passive-reader rename conflict
+  now skips a status publication without extending old freshness or stopping
+  the writer.
+- Store contention can cause a native result to be reread before its commit
+  succeeds. The process test retries only an explicitly busy pending read,
+  never an ambiguous registration/ACK. It verifies terminal read stability,
+  not a one-read performance claim under contention. Slow-target fairness and
+  representative workload budgets remain open.
+- Keep the parent Active and all broad artifact/fleet and direct client,
+  presentation, reviewer, migration, idle-record and nonevent gates unchecked.
+  Real image construction, fresh-container lifecycle, safe update/rollback,
+  interrupted cutover, owned uninstall, live providers, authorized placement,
+  release and installed adoption still require their actual proofs.
+
+### 2026-10-23 - Merge the core service lifecycle and continue standalone delivery
+
+- #8157 merged as `e92711cc1e303d12c9a81983bd03194ac8c41f41` at
+  `2026-10-23T09:08:14Z`, from published head
+  `1701fd87e8600e4371933eaf9856b4d1fd45f547`. Current-head Copilot
+  review `5626157491` approved with no open issues. Read its full body and
+  every thread; the only earlier thread is resolved and outdated. All required
+  checks passed. Managed completion used only the documented additional
+  CODEOWNER exception, not a CI or feedback bypass. #7188 remains open.
+- Exact-head hosted acceptance `39928959332` passed both selected Linux and
+  Windows jobs. Final contained service/Gateway/observer validation passed
+  112 cases, fatal lint and all 13 install contracts. The full workflow-scope
+  audit passed 58 checks. Real isolated TLS/PoP, native child, disk, lease,
+  reconnect, restart and ACK tests are source integration, not production
+  provider, installed artifact or fleet qualification.
+- Review and hosted execution exposed startup-cancellation, queued-close
+  budget, pre-lock admission withdrawal and stop-during-adoption gaps. The
+  final source reserves startup ownership before scheduling, withdraws before
+  waiting for the close mutex, observes stop concurrently with adoption and
+  counts owned cleanup against one shutdown budget. A timed-out drain retains
+  actual unfinished work and native writer custody; no cancellation is treated
+  as rollback or permission for a replacement owner.
+- Read this entire parent after merge and close only the core lifecycle source
+  leaf. All direct client, presentation, migration, reviewer, idle-record and
+  nonevent acceptance remains, alongside installed adoption, credential/provider,
+  release/authorized rollout and the complete fleet plan.
+- Next: deliver the independently installable PR artifact and declared container
+  role through existing standalone-service, credential and fleet lifecycle
+  contracts. Reuse this core rather than another registrar, provider, supervisor
+  or fleet controller. Missing shared source seams use normal reviewed changes,
+  not an owner-ACK rendezvous; credentials, actual placement and activation keep
+  their separate authorization boundaries.
+- The parent stays Active. No runtime update, production credential acquisition,
+  activation, new capacity or worktree finalization follows from this source merge.
 
 ### 2026-10-23 - Merge shared scheduling and continue independent service delivery
 

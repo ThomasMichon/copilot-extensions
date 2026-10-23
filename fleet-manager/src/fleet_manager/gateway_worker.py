@@ -8,9 +8,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .credential_references import read_credential_reference as _file
 from .gateway_client import CredentialMaterial, Discovery, GatewayClient, consume_credential
 from .gateway_contract import (
-    MAX_WIRE, ForgeScope, GatewayError, credential, fields, number, parse, require, text, validate_jwks,
+    ForgeScope, GatewayError, credential, fields, number, parse, require, text, validate_jwks,
 )
 from .planning import digest
 
@@ -65,18 +66,6 @@ class CredentialWorker:
             require(result["state"] in ("PENDING", "DISPATCHED"), "credential-unavailable")
             time.sleep(min(0.1, max(0, deadline - time.monotonic())))
         raise GatewayError("credential-unavailable")
-
-
-def _file(path: Any) -> bytes:
-    filename = Path(text(path, 2048)).expanduser()
-    require(filename.is_absolute(), "absolute-reference-required")
-    try:
-        with filename.open("rb") as stream:
-            raw = stream.read(MAX_WIRE + 1)
-    except OSError:
-        raise GatewayError("credential-reference-unavailable") from None
-    require(len(raw) <= MAX_WIRE, "wire-limit")
-    return raw
 
 
 def _configured_provider(
