@@ -82,6 +82,9 @@ class _SessionPromptMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .cold_outages import assert_prompt_allowed
+
+        assert_prompt_allowed(self._db, session_id, delivery_id)
         if session.status not in (SessionStatus.IDLE, SessionStatus.STOPPED):
             raise ValueError(
                 f"Session {session_id} is {session.status.value}, not idle"
@@ -486,13 +489,24 @@ class _SessionPromptMixin:
                 tool_calls_json=json.dumps(result.get("tool_calls", [])),
                 completed_at=time.time(),
             )
+            from .cold_outages import provider_result
+
+            provider_result(self, session, turn_index, result)
 
             session.status = SessionStatus.IDLE
             self._db.update_session_status(
                 session.session_id, SessionStatus.IDLE.value, time.time()
             )
 
+        except asyncio.CancelledError:
+            from .cold_outages import provider_result
+
+            provider_result(self, session, turn_index, None)
+            raise
         except Exception as exc:
+            from .cold_outages import provider_result
+
+            provider_result(self, session, turn_index, None)
             log.error(
                 "Prompt failed for session %s turn %d: %s",
                 session.session_id, turn_index, exc,

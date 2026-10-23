@@ -1,0 +1,9 @@
+{
+  "comment": "Reserve HTTP generation 47 for negotiated cold drain and preserve startup observations during same-native recovery.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

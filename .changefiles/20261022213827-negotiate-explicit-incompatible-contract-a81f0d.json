@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate explicit incompatible-contract cold drain and reconnect the same native conversation once after confirmed owned execution exit.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
