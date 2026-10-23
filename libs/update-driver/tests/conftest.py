@@ -1,8 +1,10 @@
 """Keep mutable fixtures out of source retained by concurrent installer checks."""
 
 import json
+import os
 from pathlib import Path
 import shutil
+import time
 
 import pytest
 
@@ -13,6 +15,33 @@ from update_driver import first_use as provision
 @pytest.fixture
 def area(tmp_path_factory):
     return tmp_path_factory.mktemp("ud")
+
+
+@pytest.fixture
+def rename_source():
+    def rename(source, destination):
+        for attempt in range(5):
+            try:
+                return source.rename(destination)
+            except OSError as error:
+                if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 4:
+                    raise
+                time.sleep(.05 * (attempt + 1))
+
+    return rename
+
+
+@pytest.fixture
+def native_window_observation():
+    if os.name != "nt":
+        yield
+        return
+    from test_foundation_genesis_process import window_observer
+
+    with window_observer(Path(__file__).resolve().parents[2]) as observation:
+        yield
+        assert observation.surfaced == {}
+        assert observation.focus_changes == {}
 
 
 @pytest.fixture
@@ -44,16 +73,14 @@ def native_source(area):
 
 
 @pytest.fixture
-def owning_payload(area, monkeypatch):
-    library = Path(__file__).resolve().parents[2]
+def owning_context(area, monkeypatch):
     profile = area / "profile"
     profile.mkdir()
     project = area / "project"
     project.mkdir()
     marketplace = area / "market"
     payload = marketplace / "plugins" / "agent-vault"
-    scripts = payload / "scripts"
-    scripts.mkdir(parents=True)
+    payload.mkdir(parents=True)
     catalog = marketplace / ".github" / "plugin" / "marketplace.json"
     catalog.parent.mkdir(parents=True)
     catalog.write_text(json.dumps({
@@ -61,6 +88,19 @@ def owning_payload(area, monkeypatch):
             {"name": "agent-vault", "source": "./plugins/agent-vault"},
         ],
     }), encoding="utf-8")
+    for key in (*provision.CONTEXT_KEYS, "AGENT_VAULT_VALIDATED_CONTEXT", "UPDATE_DRIVER_WITNESS"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    return payload, profile / ".agent-vault", project
+
+
+@pytest.fixture
+def owning_payload(owning_context):
+    library = Path(__file__).resolve().parents[2]
+    payload, installation, project = owning_context
+    scripts = payload / "scripts"
+    scripts.mkdir()
     (payload / "plugin.json").write_text(
         '{"name":"agent-vault","version":"1.0.0"}', encoding="utf-8",
     )
@@ -81,12 +121,14 @@ def owning_payload(area, monkeypatch):
         ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"),
     )
     (scripts / "install.ps1").write_text(
-        "param([string]$Action,[string]$InstallDir)\n"
+        "param([string]$Action,[string]$InstallDir,[switch]$NoService)\n"
         "if ($Action -cne 'provision') { exit 90 }\n"
         "if ($env:UPDATE_DRIVER_WITNESS -or $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) { exit 91 }\n"
         "[IO.Directory]::CreateDirectory($InstallDir) | Out-Null\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'executed'), 'provision')\n"
         "[IO.File]::WriteAllText((Join-Path $InstallDir 'source-path'), $PSScriptRoot)\n"
+        "[IO.File]::AppendAllText((Join-Path $InstallDir 'client-only'), "
+        "([string][int][bool]$NoService + [Environment]::NewLine))\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'downgrade-history'), "
         "('[' + [string]$env:AGENT_VAULT_ALLOW_DOWNGRADE + ']' + [Environment]::NewLine))\n"
         "exit 7\n", encoding="utf-8",
@@ -96,12 +138,9 @@ def owning_payload(area, monkeypatch):
         '[[ -z "${UPDATE_DRIVER_WITNESS:-}" && -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]\n'
         'mkdir -p -- "$3"\nprintf provision >>"$3/executed"\n'
         'dirname -- "${BASH_SOURCE[0]}" >"$3/source-path"\n'
+        'if [[ "${4:-}" == --no-service ]]; then echo 1; else echo 0; fi >>"$3/client-only"\n'
         'printf "[%s]\\n" "${AGENT_VAULT_ALLOW_DOWNGRADE:-}" >>"$3/downgrade-history"\n'
         'exit 7\n',
         encoding="utf-8",
     )
-    for key in (*provision.CONTEXT_KEYS, "AGENT_VAULT_VALIDATED_CONTEXT"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("HOME", str(profile))
-    monkeypatch.setenv("USERPROFILE", str(profile))
-    return payload, profile / ".agent-vault", project
+    return payload, installation, project

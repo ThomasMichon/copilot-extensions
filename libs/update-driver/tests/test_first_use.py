@@ -4,12 +4,13 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
 import pytest
 
-from update_driver import ParticipantError, drain, status
+from update_driver import ParticipantError, RequestSpec, TrustedRunner, drain, enqueue, status
 from update_driver import first_use as provision
 from agent_procutil import no_window_kwargs
 
@@ -42,6 +43,25 @@ def test_fixed_request_is_durable_coalesced_and_not_a_recipe(owning_payload, are
     assert one.runner.context_keys == tuple(sorted(provision.CONTEXT_KEYS))
     assert "_execute" in one.runner.argv and "provision" not in one.runner.argv
     assert not installation.exists()
+
+
+def test_explicit_client_only_recipe_is_distinct_and_reaches_native_installer(owning_payload, area):
+    payload, installation, project = owning_payload
+    root = area / "queue"
+    ordinary = provision.enqueue(payload, installation, project, root=root)
+    client = provision.enqueue(payload, installation, project, root=root, client_only=True)
+    assert client.id != ordinary.id and client.spec.argv == ("--client-only",)
+    drain(root=root)
+    assert all(status(item.id, root=root).exit_code == 7 for item in (ordinary, client))
+    assert (installation / "client-only").read_text().splitlines() == ["0", "1"]
+
+
+@pytest.mark.parametrize("value", ["yes", 1, None])
+def test_nonboolean_client_only_refuses_before_writes(owning_payload, area, value):
+    payload, installation, project = owning_payload
+    with pytest.raises(provision.ProvisionError, match="must be a boolean"):
+        provision.enqueue(payload, installation, project, root=area / "queue", client_only=value)
+    assert not (area / "queue").exists() and not installation.exists()
 
 
 def test_source_inspection_never_writes_payload_or_installation(owning_payload):
@@ -188,3 +208,99 @@ def test_downgrade_permission_belongs_to_each_request_not_the_worker(
     drain(root=root)
     assert (installation / "downgrade-history").read_text().splitlines() == ["[]", "[1]"]
     assert all(status(item.id, root=root).exit_code == 7 for item in (ordinary, permitted))
+
+
+@pytest.mark.parametrize("witness", ["", "malformed", "{}"])
+def test_nested_evidence_never_accepts_first_use(owning_payload, area, monkeypatch, witness):
+    payload, installation, project = owning_payload
+    root = area / "unopened"
+    monkeypatch.setenv("UPDATE_DRIVER_WITNESS", witness)
+    with pytest.raises(provision.ProvisionError, match="nested first-use submission"):
+        provision.enqueue(payload, installation, project, root=root)
+    assert not root.exists() and not installation.exists()
+
+
+@pytest.mark.parametrize("same_root", [False, True])
+def test_live_owner_cannot_recursively_submit_first_use(owning_payload, area, monkeypatch, same_root):
+    payload, installation, project = owning_payload
+    root = area / "owner"
+    destination = root if same_root else area / "foreign"
+    request = enqueue(
+        RequestSpec("nested-admission-control"), root=root,
+        runner=TrustedRunner((sys.executable, "-c", "pass"), str(project)),
+    )
+
+    def executor(transaction):
+        with monkeypatch.context() as context:
+            context.setenv("UPDATE_DRIVER_WITNESS", transaction.participant_env()["UPDATE_DRIVER_WITNESS"])
+            with pytest.raises(provision.ProvisionError, match="nested first-use submission"):
+                provision.enqueue(payload, installation, project, root=destination)
+        assert len(status(root=root)) == 1
+        if not same_root:
+            assert not destination.exists()
+        transaction.assert_owned()
+        return 0
+
+    drain(root=root, executor=executor)
+    assert status(request.id, root=root).state == "completed"
+    assert not installation.exists()
+
+
+def test_owned_native_installer_discovers_executing_python_without_caller_path(
+    owning_payload, area, monkeypatch,
+):
+    payload, installation, project = owning_payload
+    if os.name == "nt":
+        path = payload / "scripts" / "install.ps1"
+        probe = (
+            "$python = Get-Command python -CommandType Application -ErrorAction Stop\n"
+            "& $python.Source -I -c 'import sys; print(sys.executable)' | "
+            "Set-Content (Join-Path $InstallDir 'python-path')\n"
+            "if ($LASTEXITCODE -ne 0) { exit 93 }\nexit 7"
+        )
+        monkeypatch.setenv("PATH", str(Path(os.environ["SystemRoot"]) / "System32"))
+    else:
+        tools = area / "native-tools"
+        tools.mkdir()
+        for name in ("bash", "dirname", "mkdir"):
+            (tools / name).symlink_to(shutil.which(name))
+        path = payload / "scripts" / "install.sh"
+        probe = 'python -I -c "import sys; print(sys.executable)" >"$3/python-path"\nexit 7'
+        monkeypatch.setenv("PATH", str(tools))
+    assert shutil.which("python") is None
+    path.write_text(path.read_text().replace("exit 7", probe), encoding="utf-8")
+    root = area / "queue"
+    request = provision.enqueue(payload, installation, project, root=root)
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.exit_code == 7, result.log_path.read_text()
+    assert Path((installation / "python-path").read_text().strip()).samefile(
+        sys.executable,
+    )
+
+
+def test_scoped_nested_admission_refuses_without_ambient_witness(
+    owning_payload, area, monkeypatch,
+):
+    payload, installation, project = owning_payload
+    root = area / "owner"
+    request = enqueue(
+        RequestSpec("scoped-nested-admission-control"), root=root,
+        runner=TrustedRunner((sys.executable, "-c", "pass"), str(project)),
+    )
+
+    def executor(transaction):
+        with monkeypatch.context() as context:
+            context.setenv("UPDATE_DRIVER_WITNESS", transaction.participant_env()["UPDATE_DRIVER_WITNESS"])
+            custody = provision.borrowed_custody(root=root)
+            with custody, custody.execution_scope():
+                assert "UPDATE_DRIVER_WITNESS" not in os.environ
+                with pytest.raises(provision.ProvisionError, match="nested first-use submission"):
+                    provision.enqueue(payload, installation, project, root=root)
+        assert len(status(root=root)) == 1
+        transaction.assert_owned()
+        return 0
+
+    drain(root=root, executor=executor)
+    assert status(request.id, root=root).state == "completed"
+    assert not installation.exists()

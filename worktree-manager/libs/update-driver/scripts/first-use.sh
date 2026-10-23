@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
-[[ "$(uname -s)" == Linux && ( "$#" == 4 || "$#" == 6 ) ]] || exit 2
+if [[ -v UPDATE_DRIVER_WITNESS ]]; then
+    printf 'Nested first-use submission is unsupported; retain the current installation owner.\n' >&2
+    exit 1
+fi
+[[ "$(uname -s)" == Linux && ( "$#" == 4 || "$#" == 5 || "$#" == 6 || "$#" == 7 ) ]] || exit 2
 root="$1" payload="$2" runtime="$3" project="$4"
+service_mode=()
+if [[ "$#" == 5 || "$#" == 7 ]]; then
+    [[ "${!#}" == --client-only ]] || exit 2
+    service_mode=(--client-only)
+fi
 foundation="$(CDPATH= cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$foundation/src/update_driver/foundation.sh"
 for path in "$root" "$payload" "$runtime" "$project"; do
@@ -63,14 +72,14 @@ source_id="$(query "$provenance" sourceFingerprint)"
     "$(query "$provenance" marketplaceId)" == "$(query "$admission" marketplaceId)" ]] || {
     printf 'Owning first-use publication admission is incomplete or names another installation.\n' >&2; exit 1;
 }
-if [[ "$#" == 4 ]]; then
+if [[ "$#" == 4 || "$#" == 5 ]]; then
     source "${foundation%/*}/agent-procutil/src/agent_procutil/native_daemon.sh"
     _native_foundation_outside_sources "$root" "$foundation"
     mkdir -p -m 700 -- "$root"
     check_native_foundation_execution_root "$root" "$foundation"
     log="$root/first-use-$(cat /proc/sys/kernel/random/uuid).log"
     start_native_daemon "$foundation/scripts/first-use.sh" "$root" "$log" \
-        "$root" "$payload" "$runtime" "$project" --run-owner "$source_id"
+        "$root" "$payload" "$runtime" "$project" --run-owner "$source_id" "${service_mode[@]}"
     # This line acknowledges only the positively launched finite supervisor.
     printf 'launched:%s log:%s\n' "$__native_daemon_pid" "$log"
     exit 0
@@ -98,4 +107,4 @@ for path in "$slot/.runtime-bootstrap/runtime_launcher.py" "$slot/.install-compl
 done
 exec "$slot/bin/python" -I -S -B -X utf8 "$slot/.runtime-bootstrap/runtime_launcher.py" \
     -m update_driver.first_use submit --payload "$payload" --runtime-root "$runtime" \
-    --project "$project" --root "$root" --expected-source "$source_id" --wait
+    --project "$project" --root "$root" --expected-source "$source_id" --wait "${service_mode[@]}"
