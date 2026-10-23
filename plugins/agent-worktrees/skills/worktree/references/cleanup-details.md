@@ -39,6 +39,14 @@ outbound resource obligations. It deliberately bypasses dirty/WIP,
 inbound-claimant, follow-up and branch-merge checks, not responsibility for
 unfinished PRs or owned children.
 
+Before physical removal, cleanup also checks for live processes whose current
+directory is inside the checkout. Any observed holder defers removal, including
+with `--force`: the checkout, branch, trust and tracking record stay intact.
+Finalize can mark landed work finalized while retaining its checkout and branch
+for the same reason. Neither path kills mux sessions or cwd-matched processes.
+A matching cwd shows use, not teardown ownership; let the process owner stop it,
+then retry ordinary cleanup.
+
 Open PRs override `finalized` tracking and Git-completed content. The same
 obligation check runs before retiring a missing checkout and before archiving
 its tracking record. A stale open PR remains a hold until `--reconcile-prs`

@@ -15,11 +15,11 @@ pytestmark = pytest.mark.usefixtures("git_only_mux")
 
 
 class TestPRFinalize(PRWorkflowSetup):
-    @pytest.mark.parametrize("disposition", ["retained", "failed-removal", "removed"])
+    @pytest.mark.parametrize("disposition", ["retained", "live-process", "failed-removal", "removed"])
     def test_trust_lives_until_checkout_is_actually_removed(
         self, published_pr_repo, monkeypatch, disposition,
     ):
-        from agent_worktrees import finalize as fin, permissions
+        from agent_worktrees import finalize as fin, permissions, sessions
 
         config, wid, wt_path, _ = published_pr_repo
         self._simulate_squash_merge(config, wid, "feature/add-feature-aaaa")
@@ -29,7 +29,16 @@ class TestPRFinalize(PRWorkflowSetup):
         permissions.ensure_trusted_folder(str(wt_path))
         monkeypatch.setattr(fin, "_has_live_session", lambda record: False)
         monkeypatch.setattr(fin.git_ops, "is_cwd_inside", lambda path: disposition == "retained")
-        monkeypatch.setattr(fin.procs, "terminate_processes_under", lambda path: [])
+        monkeypatch.setattr(
+            fin.procs, "processes_with_cwd_under",
+            lambda path: [{"pid": 12345, "name": "holder"}] if disposition == "live-process" else [],
+        )
+
+        def unexpected_teardown(*args, **kwargs):
+            pytest.fail("Preservation-oriented finalize must not terminate processes or mux sessions")
+
+        monkeypatch.setattr(fin.procs, "terminate_processes_under", unexpected_teardown)
+        monkeypatch.setattr(sessions, "kill_tmux_session", unexpected_teardown)
         if disposition == "failed-removal":
             monkeypatch.setattr(fin.git_ops, "remove_worktree", lambda *a, **k: False)
             monkeypatch.setattr(fin.shutil, "rmtree", lambda *a, **k: None)
@@ -40,6 +49,9 @@ class TestPRFinalize(PRWorkflowSetup):
         present = disposition != "removed"
         assert wt_path.exists() is present
         assert (str(wt_path.resolve()) in data["trustedFolders"]) is present
+        if disposition == "live-process":
+            assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
+            _git("show-ref", "--verify", f"refs/heads/{rec.branch}", cwd=wt_path)
 
     def test_precondition_fails_before_push(self, pr_repo):
         from agent_worktrees import finalize as fin
@@ -147,17 +159,17 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is False
         assert (wt_path / "raced_in.txt").exists()
 
-    def test_finalize_catches_race_commit_landing_during_process_termination(
+    def test_finalize_catches_race_commit_landing_during_process_inspection(
         self, published_pr_repo, monkeypatch,
     ):
         # #4400 round 15: round 14's re-check ran ONCE, immediately after the
         # finalize lock was acquired -- but further code (record reload,
-        # pointer reconciliation, live-session checks, process termination)
+        # pointer reconciliation, live-session checks, process inspection)
         # still ran AFTER that point and BEFORE the actual destructive
         # removal, leaving a residual window. The re-check must run as the
         # LAST possible step, immediately before the destructive git
-        # operation -- proven here by racing a commit in AFTER process
-        # termination, later than round 14's check point.
+        # operation -- proven here by racing a commit during process
+        # inspection, later than round 14's check point.
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _ = published_pr_repo
         feature = "feature/add-feature-aaaa"
@@ -166,16 +178,13 @@ class TestPRFinalize(PRWorkflowSetup):
         rec.pr.state = "merged"
         tracking.save_record(rec)
 
-        real_terminate = fin.procs.terminate_processes_under
-
-        def racing_terminate(worktree_path):
-            result = real_terminate(worktree_path)
+        def racing_inspection(worktree_path):
             (wt_path / "raced_in_late.txt").write_text("landed during cleanup\n")
             git_ops.git("add", "-A", cwd=str(wt_path))
             git_ops.git("commit", "-m", "late race window commit", cwd=str(wt_path))
-            return result
+            return []
 
-        monkeypatch.setattr(fin.procs, "terminate_processes_under", racing_terminate)
+        monkeypatch.setattr(fin.procs, "processes_with_cwd_under", racing_inspection)
 
         ok = fin.validate_and_finalize(wid, config)
         assert ok is False

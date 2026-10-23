@@ -1637,14 +1637,25 @@ def validate_and_finalize(
         _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
         from .finalized_checkout import optional_snapshot
         finalized_identity = optional_snapshot(worktree_path) if Path(worktree_path).exists() else None
-        if not checkout_managed or inside_worktree or has_live_session:
+        holders = (
+            procs.processes_with_cwd_under(worktree_path)
+            if checkout_managed and not inside_worktree and not has_live_session
+            and Path(worktree_path).exists()
+            else []
+        )
+        if not checkout_managed or inside_worktree or has_live_session or holders:
             reason = (
                 "the checkout is owned by an external session host"
                 if not checkout_managed
                 else (
                     "this shell is running inside the worktree"
                     if inside_worktree
-                    else "a live session or guidance worker is still using the worktree"
+                    else (
+                        "a live session or guidance worker is still using the worktree"
+                        if has_live_session
+                        else "live process(es) still use the checkout: "
+                        + ", ".join(f"{p['name'] or '?'}({p['pid']})" for p in holders)
+                    )
                 )
             )
             output.ok(
@@ -1665,7 +1676,7 @@ def validate_and_finalize(
                     f"{reason}. Finalize never deletes the git branch or the "
                     f"folder of an active worktree -- that's expected, not a "
                     f"failure. They'll be removed by 'agent-worktrees cleanup' "
-                    f"once the session ends (this is the normal outcome when you "
+                    f"once its users exit (this is the normal outcome when you "
                     f"finalize from inside the session)."
                 )
             activity.log_event(
@@ -1675,25 +1686,14 @@ def validate_and_finalize(
                 reason=(
                     "external_checkout"
                     if not checkout_managed
-                    else ("inside_worktree" if inside_worktree else "live_session")
+                    else (
+                        "inside_worktree" if inside_worktree
+                        else ("live_session" if has_live_session else "live_process")
+                    )
                 ),
             )
         else:
             print("Removing worktree...")
-            # Tear down the mux session and terminate any process still rooted
-            # in the worktree before removing it, so directory locks don't leave
-            # an empty shell behind (issue dotfiles#139).
-            sessions.kill_tmux_session(worktree_id)
-            try:
-                killed = procs.terminate_processes_under(worktree_path)
-            except Exception:
-                killed = []
-            if killed:
-                names = ", ".join(
-                    f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
-                if names:
-                    output.info(f"Terminated lingering process(es): {names}")
-
             # PR mode (#4400 rounds 14-16): re-validate as the LAST possible
             # step before removal -- narrows, but per reviewer feedback can't
             # fully eliminate, the TOCTOU window absent a write-blocking hook.

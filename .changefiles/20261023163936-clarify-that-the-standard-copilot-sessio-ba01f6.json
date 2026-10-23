@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify that the standard Copilot-Session commit trailer is allowed public provenance and should not be stripped.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

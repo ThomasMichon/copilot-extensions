@@ -761,8 +761,8 @@ def terminate_processes_under(
     """Terminate every process whose cwd is at or under ``root``.
 
     Returns the list of ``{"pid", "name", "killed": bool}`` that were targeted.
-    Used by worktree cleanup to release directory locks before ``rmtree`` so a
-    reaped worktree directory can actually be removed.
+    Only explicit process-owner teardown may use this API. Preservation-oriented
+    finalize and cleanup inspect holders and defer instead.
     """
     targets = processes_with_cwd_under(root, exclude_pids=exclude_pids)
     if not targets:
