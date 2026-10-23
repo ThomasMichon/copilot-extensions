@@ -21,10 +21,15 @@ def _function(shell: str, name: str) -> str:
     return text[start:text.index("\n}\n", start) + 2]
 
 
-def _run(tmp_path: Path, shell: str, script: str, *args: str):
+def _shell_executable(shell: str) -> str:
     executable = shutil.which("bash" if shell == "sh" else "pwsh")
     if not executable or (shell == "sh" and os.name == "nt"):
         pytest.skip(f"{shell} is unavailable in this environment")
+    return executable
+
+
+def _run(tmp_path: Path, shell: str, script: str, *args: str):
+    executable = _shell_executable(shell)
     path = tmp_path / f"exercise.{shell}"
     path.write_text(script, encoding="utf-8")
     prefix = [] if shell == "sh" else ["-NoProfile", "-NonInteractive", "-File"]
@@ -54,6 +59,7 @@ def test_required_cutover_argument_is_bound_and_validated(tmp_path, shell, actio
 
 
 def _helper_script(tmp_path: Path, shell: str, output: str, rc: int) -> str:
+    _shell_executable(shell)
     if shell == "sh":
         (tmp_path / "bin").mkdir(exist_ok=True)
         (tmp_path / "bin" / "python").symlink_to(sys.executable)
@@ -77,6 +83,22 @@ def _helper_script(tmp_path: Path, shell: str, output: str, rc: int) -> str:
         _function(shell, "Invoke-RequiredGracefulCutover"),
         "try { Invoke-RequiredGracefulCutover; 'accepted' } catch { Write-Host $_; 'rejected' }",
     ])
+
+
+@pytest.mark.parametrize("unavailable", ["windows", "missing-shell"])
+def test_helper_checks_shell_before_creating_files(tmp_path, monkeypatch, unavailable):
+    from types import SimpleNamespace
+
+    module = sys.modules[__name__]
+    if unavailable == "windows":
+        monkeypatch.setattr(module, "os", SimpleNamespace(name="nt"))
+    else:
+        monkeypatch.setattr(shutil, "which", lambda _: None)
+    before = set(tmp_path.iterdir())
+    with pytest.raises(pytest.skip.Exception):
+        _helper_script(tmp_path, "sh", '{"ok":true}', 0)
+    assert set(tmp_path.iterdir()) == before
+    assert not (tmp_path / "bin").exists()
 
 
 @pytest.mark.parametrize("shell", ["sh", "ps1"])
