@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import time
 
 import pytest
 
@@ -14,6 +15,20 @@ from update_driver import first_use as provision
 @pytest.fixture
 def area(tmp_path_factory):
     return tmp_path_factory.mktemp("ud")
+
+
+@pytest.fixture
+def rename_source():
+    def rename(source, destination):
+        for attempt in range(5):
+            try:
+                return source.rename(destination)
+            except OSError as error:
+                if os.name != "nt" or getattr(error, "winerror", None) not in (5, 32, 33) or attempt == 4:
+                    raise
+                time.sleep(.05 * (attempt + 1))
+
+    return rename
 
 
 @pytest.fixture

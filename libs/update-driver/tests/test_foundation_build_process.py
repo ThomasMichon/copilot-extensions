@@ -20,7 +20,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_real_foundation_reuses_completion_and_survives_source_removal(area, monkeypatch):
+def test_real_foundation_reuses_completion_and_survives_source_removal(area, monkeypatch, rename_source):
     uv = shutil.which("uv")
     if uv is None:
         pytest.fail("foundation construction qualification requires canonical uv")
@@ -94,7 +94,7 @@ def test_real_foundation_reuses_completion_and_survives_source_removal(area, mon
                 target / "versions" / ("foundation-" + admitted_hash) / ".install-complete.json"
             ).exists()
             assert fs.read(root).state == "failed"
-    inputs.rename(area / "removed-source")
+    rename_source(inputs, area / "removed-source")
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     health = subprocess.run(
         [str(python), "-I", "-B", "-c",
