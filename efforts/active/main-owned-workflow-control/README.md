@@ -348,7 +348,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
   same-repository, owner-authored generated cleanup PR. Preserve its existing
   owner, merge gates, cadence and wait budget. Qualified Main adoption and
   natural duplicate-prevention acceptance remain separate.
-- [ ] Land bounded periodic selection/preparation-failure reporting using the
+- [x] Land bounded periodic selection/preparation-failure reporting (#8078) using the
   existing portfolio tracker and owner. Genuine Dev provenance must survive
   missing selection outputs; other manual refs remain inspection-only, and
   preparation failure cannot imply executed Linux or Windows coverage.
@@ -485,6 +485,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Actual hosted source CI executes all 869 admitted cases in 12.971 seconds.
   Real process settlement, native Windows, full census and every-release
   acceptance remain separate.
+- [ ] Land the thirteen original remote-shell callable cases through five exact
+  function objects and unchanged parameterization, preserving all prior packet
+  identities/hashes, actual call coverage and the 300-second budget. Keep the
+  original constant-only vocabulary assertion as an explicit unmapped policy
+  residual; bounded source qualification is not full-census or Main acceptance.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this

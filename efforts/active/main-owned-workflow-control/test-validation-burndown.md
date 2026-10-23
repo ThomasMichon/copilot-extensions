@@ -294,6 +294,35 @@ performs `ctypes.dlopen`. No production preload, effect exemption or import
 rewrite was used to manufacture eligibility. This is an explicit first-touch
 residual, not two passing cases or permission to delete the original tests.
 
+### Bounded remote-shell callable cohort and constant-only residual
+
+Independent original collection finds fourteen cases in
+`libs/remote-login-shell/tests/test_remote_login_shell.py`. Fresh observed
+execution passes all 42 phases with zero effects in 0.821 seconds. Thirteen
+cases contribute real production call contexts; the original
+`test_posix_login_shells_vocabulary` asserts only the exported tuple and has
+none. It remains explicitly unmapped under the current admission policy.
+No dummy production call, preload, assertion rewrite or observer exemption is
+used to manufacture eligibility, and the original case is not deleted.
+
+The remote-shell adapter re-exports the other five exact function objects and
+their unchanged parameterization. Replacing only the original file prefix maps
+the thirteen cases injectively. Candidate
+`ebc653a989f0bdcf56b60d40226f8d5add26a2aa` preserves all 877 prior nodes in
+order, every prior source hash and the 300-second bound. Its canonical
+890-node/2,670-phase packet passes with zero effects in 37.703 seconds.
+The three-file packet independently verifies against 97 source files and 44
+production targets. Full collection matches the manifest; actual original
+object/code/global identity and all parameter IDs are preserved. Four real
+runner controls refuse an unadmitted original test, changed production bytes,
+a duplicate node and an omitted original function without emitting passing
+proofs. Native Windows executes the thirteen aliases in 0.39 seconds.
+
+This is bounded source qualification, not a controlled performance comparison,
+full historical census, shell-process integration or every-Main-release
+acceptance. The constant-only policy residual requires an explicit subsequent
+decision rather than quietly treating the original module as fully admitted.
+
 ### Scheduled execution is real; repair initiation is not yet established
 
 The current Dev and Main snapshots carry byte-identical periodic workflow and

@@ -877,7 +877,20 @@
     "tools/promotion_unit_tests/test_ci_contract.py::test_unit_job_omits_only_push_allocation[-True]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_push_only_allocation_exclusion_is_required",
     "tools/promotion_unit_tests/test_ci_contract.py::test_unit_selection_budget_and_outcome_cannot_be_weakened[change3]",
-    "tools/promotion_unit_tests/test_ci_contract.py::test_unit_selection_budget_and_outcome_cannot_be_weakened[change4]"
+    "tools/promotion_unit_tests/test_ci_contract.py::test_unit_selection_budget_and_outcome_cannot_be_weakened[change4]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_wrap_login_shell_defaults_to_bash",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_wrap_login_shell_uses_configured_shell[bash]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_wrap_login_shell_uses_configured_shell[sh]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_wrap_login_shell_uses_configured_shell[zsh]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_wrap_login_shell_quotes_special_characters",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_true_for_documented_shells[bash]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_true_for_documented_shells[sh]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_true_for_documented_shells[zsh]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_false_for_everything_else[pwsh]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_false_for_everything_else[powershell]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_false_for_everything_else[]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_false_for_everything_else[fish]",
+    "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_false_for_everything_else[cmd]"
   ],
   "sources": {
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
@@ -973,7 +986,10 @@
     "libs/single-instance-lease/src/single_instance_lease/operation.py": "a40f356e2b9d40a816998b3d61ce5a722e3d4991f65076011b0fd5ed93bf6f69",
     "libs/single-instance-lease/src/single_instance_lease/reaper.py": "c34e06d3a3f7bb71ae0cd3eb7b6e596d190c948d27c90f7064fb13e41f10bda2",
     "libs/single-instance-lease/src/single_instance_lease/supersession.py": "45c22d0633c4df6599864bd5112fd2b0f240ce981e370dffbb54ab82e93a1b73",
-    "tools/promotion_unit_tests/test_activation_preservation.py": "bb6c7de539254571e2635424ac06b5772714d860ba490aca668d02a0731c8a92"
+    "tools/promotion_unit_tests/test_activation_preservation.py": "bb6c7de539254571e2635424ac06b5772714d860ba490aca668d02a0731c8a92",
+    "libs/remote-login-shell/src/remote_login_shell/__init__.py": "339e08c120b8310de198a3fa675e1089c2229e985e9389cc2f507eabd0b6ffe6",
+    "libs/remote-login-shell/tests/test_remote_login_shell.py": "c58b26541adaef6eed1d64e9a7a16fd827ff52045881021d9c1f9b26ac1d11ca",
+    "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0"
   },
   "coverage_targets": [
     "libs/config-migrate/src/config_migrate/core.py",
@@ -1018,7 +1034,8 @@
     "tools/verify_promotion_workflows.py",
     "tools/check-docs-consistency.py",
     "libs/plugin-activation/src/plugin_activation/preservation.py",
-    "libs/plugin-activation/src/plugin_activation/state.py"
+    "libs/plugin-activation/src/plugin_activation/state.py",
+    "libs/remote-login-shell/src/remote_login_shell/__init__.py"
   ],
   "max_seconds": 300
 }

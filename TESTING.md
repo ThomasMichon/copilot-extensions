@@ -285,6 +285,17 @@ canonical pure-stdlib parser from `plugin_resolve.remote_identity`; both source
 files are hash-bound in that existing import closure. This adds no unit nodes,
 coverage targets, effects or budget, and does not enroll SSH dispatch tests.
 
+`tools/promotion_unit_tests/test_remote_login_shell.py` re-exports five original
+functions and their unchanged parameterization from
+`libs/remote-login-shell/tests/test_remote_login_shell.py`. Replacing only the
+file prefix maps thirteen callable cases to release identities. The original
+test, canonical production module and adapter are hash-bound; each admitted
+case must contribute actual production call coverage under the unchanged
+observer, root and budget. No shell process is launched. The fourteenth original
+case, `test_posix_login_shells_vocabulary`, asserts only a constant and has no
+production call context. It remains an explicit unmapped policy residual, not
+deleted coverage, a relaxed admission rule or a completed historical census.
+
 ## Tracking-write source guard
 
 The source tracking-write guard still parses every sibling-plugin Python file,
