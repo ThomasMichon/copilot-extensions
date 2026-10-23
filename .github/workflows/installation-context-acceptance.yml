@@ -206,6 +206,7 @@ jobs:
       - name: Writer, drain, observation and real Gateway reconnect
         run: >-
           python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_watch_replay_store.py
           --test-file tests/test_watch_service.py
           --test-file tests/test_watch_gateway.py
           --test-file tests/test_watch_gateway_transport.py

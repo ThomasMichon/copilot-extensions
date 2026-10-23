@@ -30,7 +30,7 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 The manual `installation-context-acceptance.yml` selector `pr_service=true`
 runs the focused PR serving/observation lifecycle on Linux and Windows:
-`test_watch_service.py`, `test_watch_gateway.py`,
+`test_watch_replay_store.py`, `test_watch_service.py`, `test_watch_gateway.py`,
 `test_watch_gateway_transport.py` and `test_watch_observer.py`, through the
 existing contained plugin runner. It exercises real locks/disk/native children,
 TLS/PoP reconnect, restart and drain, with synthetic issuer/provider inputs.
