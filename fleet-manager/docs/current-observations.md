@@ -36,7 +36,9 @@ scopes' activity or counts.
 The explicit [scoped point-reader](scoped-observation-reader.md) composes local
 admission and this store under a mandatory participating owner fence. It returns
 only selected state and defined entity-local metadata, never these internal
-cursors. It does not change the trusted raw API below or wire a resident consumer.
+cursors. Its separate bounded snapshot method composes the trusted point-set
+read below. Neither changes this raw API's trust boundary or wires a resident
+consumer.
 
 ## Origin and sequence boundaries
 
@@ -105,6 +107,17 @@ selects one indexed current slot and returns its current admitted binding,
 nullable row and snapshot cursor. A missing row means **unobserved**, not
 confirmed absence. Each row retains its source revision, availability and
 central accepted position.
+
+`read_points(points)` requires a tuple of one to 64 distinct exact
+`(origin, project, entity)` keys. Every key is validated before opening one
+query-only read transaction. It reuses the point reader's indexed lookup,
+binding and whole-row validation and returns a tuple of `{binding, row}` values
+from that same committed snapshot, in input order. There is no cursor in the
+batch result; raw rows still contain trusted internal metadata and must not be
+sent to scoped clients. A failure on any key fails the entire call. This is a
+point-set snapshot, not an enumeration of all entities or complete source
+coverage. The authorized reader projects only its granted fields and defined
+entity-local metadata after whole-request admission.
 
 `page(origin=..., project=..., limit=...)` returns up to 64 present rows in
 entity-key order, without scanning a journal or returning a total fleet count.

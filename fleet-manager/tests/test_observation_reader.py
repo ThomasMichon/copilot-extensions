@@ -349,6 +349,7 @@ verifier = IdentityVerifier(
     trust_valid_until=now + 3600, clock=lambda: now,
 )
 scope = ObservationScope("origin-a", "project-a", "entity-a", ("status",))
+other = ObservationScope("origin-a", "project-a", "entity-b", ("title",))
 policy = AuthoritySnapshot(
     authority="gateway-a", fleet="fleet-a", issuer=issuer, audience=audience,
     revision=1, valid_from=now - 1, valid_until=now + 3600,
@@ -356,7 +357,7 @@ policy = AuthoritySnapshot(
     enrollments=tuple(Enrollment(
         subject=subject, principal=subject, account=subject, kind="operator",
         role="client", installation="client-a", generation=1, status="active", reads=reads,
-    ) for subject, reads in (("first", (scope,)), ("second", ()))),
+    ) for subject, reads in (("first", (scope, other)), ("second", ()))),
 )
 fence = threading.RLock()
 owner = AdmissionAuthority(snapshot=lambda: policy, clock=lambda: now, capacity=1, fence=fence)
@@ -369,14 +370,22 @@ store.apply(CurrentUpdate.from_dict({
     "observed_at": now, "availability": "current", "reason": None,
     "state": {"status": "active", "title": "never-returned"},
 }))
+store.apply(CurrentUpdate.from_dict({
+    "schema": "fleet-manager.current-update", "version": 1, **asdict(binding),
+    "project": "project-a", "entity": "entity-b", "sequence": 2, "source_revision": 2,
+    "observed_at": now, "availability": "current", "reason": None,
+    "state": {"title": "selected-title", "status": "never-returned"},
+}))
 lookups = []
-original = store.read
-def read(**scope):
-    lookups.append(scope)
-    return original(**scope)
-store.read = read
+original = store._point
+def read(connection, origin, project, entity, head):
+    lookups.append((origin, project, entity))
+    return original(connection, origin, project, entity, head)
+store._point = read
 adapter = ScopedObservationReader(authority=owner, store=store, fence=fence)
-for index, subject in enumerate(("first", "second")):
+for index, (method, subject) in enumerate(
+    (method, subject) for method in ("read", "snapshot") for subject in ("first", "second")
+):
     token = jwt.encode(
         {"alg": "ES256", "typ": "at+jwt", "kid": "issuer-1"},
         {"iss": issuer, "sub": subject, "aud": audience, "iat": now, "exp": now + 3600,
@@ -390,16 +399,23 @@ for index, subject in enumerate(("first", "second")):
     )
     identity = verifier.verify(token, proof, method="GET", target_uri=target)
     try:
-        result = adapter.read(identity, ObservationRead("fleet-a", (scope,)),
-                              role="client", installation="client-a")
+        result = getattr(adapter, method)(
+            identity, ObservationRead("fleet-a", (scope,) if method == "read" else (scope, other)),
+            role="client", installation="client-a",
+        )
     except AdmissionError as error:
         assert subject == "second" and error.code == "forbidden-scope"
     else:
-        assert subject == "first" and result.state == (("status", "active"),)
-        assert "never-returned" not in json.dumps(asdict(result))
-assert len(lookups) == 1 and not owner._issued
+        assert subject == "first"
+        points = (result,) if method == "read" else result
+        assert points[0].state == (("status", "active"),)
+        if method == "snapshot":
+            assert points[1].state == (("title", "selected-title"),)
+        encoded = json.dumps([asdict(point) for point in points])
+        assert "never-returned" not in encoded and "cursor" not in encoded
+assert len(lookups) == 3 and not owner._issued
 assert not any(name.startswith("test_") for name in sys.modules)
-print(json.dumps({"authorized_reads": 1, "foreign_reads": 0}))
+print(json.dumps({"authorized_reads": 2, "foreign_reads": 0, "point_lookups": 3}))
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path / "consumer.db")],
@@ -407,11 +423,14 @@ print(json.dumps({"authorized_reads": 1, "foreign_reads": 0}))
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"authorized_reads": 1, "foreign_reads": 0}
+    assert json.loads(result.stdout) == {
+        "authorized_reads": 2, "foreign_reads": 0, "point_lookups": 3,
+    }
 
 
 @pytest.mark.parametrize("inverted", [False, True])
-def test_mixed_direct_and_reader_calls_have_one_lock_order(reader, tmp_path, inverted):
+@pytest.mark.parametrize("method", ["read", "snapshot"])
+def test_mixed_direct_and_reader_calls_have_one_lock_order(reader, tmp_path, inverted, method):
     identities = tmp_path / "verified-identities.json"
     identities.write_text(json.dumps([
         asdict(reader.identity()), asdict(reader.identity()),
@@ -478,8 +497,11 @@ adapter = ScopedObservationReader(authority=owner, store=store, fence=fence)
 outcomes, failures = [], []
 def read():
     try:
-        assert adapter.read(identities[0], selection, role="client",
-                            installation="client-a").state == (("status", "active"),)
+        result = getattr(adapter, sys.argv[4])(
+            identities[0], selection, role="client", installation="client-a",
+        )
+        point = result if sys.argv[4] == "read" else result[0]
+        assert point.state == (("status", "active"),)
         outcomes.append("reader")
     except Exception as error:
         failures.append(str(error))
@@ -507,7 +529,7 @@ print(json.dumps({"deadlock": deadlock, "completed": len(outcomes)}))
     source = Path(__file__).resolve().parents[1] / "src"
     result = subprocess.run(
         [sys.executable, "-c", script, str(reader.store.path), str(identities),
-         "inverted" if inverted else "normal"],
+         "inverted" if inverted else "normal", method],
         env={**os.environ, "PYTHONPATH": str(source)},
         capture_output=True, text=True, timeout=15,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),

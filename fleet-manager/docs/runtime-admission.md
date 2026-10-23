@@ -102,8 +102,11 @@ its real execution/emission boundary, not simply check once and queue forever.
 
 `complete(permit, original_request)` applies that same fresh checkpoint but
 consumes the handle without retaining a replacement. The
-[isolated point-reader](scoped-observation-reader.md) uses it at read completion,
-including after a storage failure. Proof evidence stays consumed. Existing
+[isolated observation reader](scoped-observation-reader.md) uses it at point or
+bounded point-set snapshot completion, including after a storage failure.
+The snapshot authorizes all branches before lookup and uses one finite permit
+for its complete tuple; it adds no pagination, replay or wire grant.
+Proof evidence stays consumed. Existing
 `revalidate` callers retain their unchanged replacement-handle semantics.
 
 An authority may explicitly bind a reentrant `fence` at construction. All its
