@@ -5,6 +5,13 @@ Names below describe required semantics, not installed commands or a committed
 wire/storage schema. [#7268](https://github.com/ThomasMichon/copilot-extensions/issues/7268)
 coordinates the generic work.
 
+The proposed [Bridge participant specialization](../bridge-retained-runtime-restoration/custody-contract.md)
+and its [retained installer lifecycle](../bridge-retained-runtime-restoration/installer-contract.md)
+apply these semantics to #8063 through existing Bridge owners. They do not
+introduce another generic protocol or turn Bridge-local qualification into
+Dispatch/adopter acknowledgement. Their design and implementation have separate
+review and operational gates.
+
 ## Scope and authority
 
 An execution scope is selected by an authorized control-plane owner from the

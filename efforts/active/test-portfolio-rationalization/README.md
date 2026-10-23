@@ -55,6 +55,13 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The complete #3991 retained finite family continues through this existing Active ROOT's
+reviewed Plan, actual global Validation and Journal/open bounded-source process under
+the SAME declared and source-specific custodians. Preserve every incumbent alternative,
+native/source/resource reservation and independent acceptance gate. Closed source
+trackers are historical provenance, never required live claim tokens; no assignment,
+claim expiry or new blanket ACK is created.
+
 The finite #3497 historical-Git fixture/policy family uses the existing Phase 7
 migration-intake gate and Phase 4 Bridge/repository wave. Preserve OPEN #1303, all
 incumbent body inheritances, #1349 native, #2721/#584 mock and #3093 order-leak
@@ -494,7 +501,85 @@ complete scope/intake/custody cannot be verified, RETAIN #3497. The source's tec
 policy remains open after administrative consolidation; no
 tests/imports/collection/checkers/clone/runtime effects occur here.
 
+<!-- backlog-reconciliation:7556:transfer:3991:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+Add this COMPLETE finite THREE-case historical Vault Linux family DIRECTLY to the SAME
+existing normally reviewed ACTIVE ROOT Phase 4 Vault wave Plan, local Validation and
+continuing Coordination, preserving the WHOLE incumbent ROOT Plan/Validation/Journal,
+OPEN #1303 and every actual audit/source/cohort/periodic-failure/native/release
+custodian and 1349/2721-584/3093/3497 family. Use existing migration intake and serial
+source ownership, not a new test programme, effect runner, agent or assignment.
+
+### Three original Vault Linux baseline failures retained from #3991
+- [ ] Recover ALL THREE original test identities, failure signatures and historical
+  source/profile from public source history or an existing owner-recorded report. The
+  original has no names/traces/pin; keep these unknown until evidenced. Never nominate
+  three plausible current tests, assume unchanged failures or count unrelated later
+  green suites as original correspondence.
+- [ ] Classify EACH recovered case against genuine Linux behavior, Windows-only
+  contract, WSL boundary, fixture/environment leakage or actual product regression.
+  Preserve its distinct assertion and cause. A legitimate approved domain
+  correction/unsupported outcome is not a positive Linux capability pass; retain the
+  applicable supported-domain coverage elsewhere rather than dropping the contract.
+- [ ] Map EACH actual repair/supersession/domain treatment to current causal code and a
+  REAL merged/source witness with exact scope. Credit #5651's specific have_uv=False
+  multi-PATH fixture fix and #3085's separate Windows readiness work without declaring
+  either a match for the unnamed trio. No prospective SHA, guessed original PR or
+  touched-file/count association is proof.
+- [ ] Preserve all original assertions through faithful isolated fixtures OR an
+  explicitly documented approved domain treatment. No blanket skip/xfail, deleted cases,
+  success-shaped fallback, weaker production credential/identity/publication boundary or
+  arbitrary timeout/retry makes an unknown baseline complete.
+- [ ] Record the appropriate existing/owned native-Linux or faithful contained
+  qualification for EACH mapped case, with exact source/profile/node/domain and
+  historical versus new outcomes. No Windows/WSL/synthetic/installed evidence
+  conflation, current-failure claim or unexecuted-as-green result. Keep least expensive
+  faithful CURRENT unit/contained/periodic/explicit tier and existing budgets; no
+  restored mandatory whole integration suite or whole-portfolio gate.
+- [ ] Preserve host-safe source/fixture/history investigation. Any further reproduction
+  needs the existing owner's separately admitted isolated lane and synthetic data. Do
+  NOT read real vault inventory/database/credential/token stores, login/unlock,
+  contacts/endpoints or services; no test/import/collection/probe is performed by
+  intake. If original evidence remains unrecoverable, preserve the exact all-three
+  unknown as a named tracked UNRESOLVED family with explicit owner disposition, not
+  closure-by-age or a claimed repair.
+
+### Local Validation and continuing Coordination for #3991
+- [ ] Resolve all THREE original identities/signatures/profile or preserve their exact
+  tracked unknown; for each recovered case, record real causal/domain disposition,
+  preserved assertion and appropriate bounded Linux/supported-domain positives/negatives
+  with exact source/merged witness. A later unrelated test count/green job, skipped
+  lane, same version or broad source hardening is insufficient.
+- [ ] Keep every incumbent ROOT/native/mock/order-leak/history and
+  #1303/audit/source/cohort/failure claim unchanged; no owner expiry, generic ACK,
+  production credential feature or resource takeover. This finite family can finish
+  independently of unrelated portfolio phases while every unresolved original case
+  remains represented.
+
+ The preceding exact global bullet MUST be inserted in the ROOT's REAL '## Validation
+Plan', not only this child/local subsection, a Journal note or an inline
+cross-reference. Continue through existing ROOT Coordination/migration intake and
+journal accepted routing without implying tests ran.
+
+Receiving gate: BEFORE administratively superseding #3991, a NEW normal reviewed ACTUAL
+MERGE must deliver the ENTIRE direct unchecked Plan/local Validation/continuing
+Coordination AND actual GLOBAL ROOT Validation entry. Then FULL CURRENT Active ROOT
+Plan/Validation/Coordination/Journal, source/1303 eligibility and actual same-owner/hold
+readback must verify every clause/unknown/alternative/custodian survives. Old creation
+or #8113's unrelated prior family intake, title/link, Draft/Done/closed token,
+child-only note or this proposal is NOT receipt. If full scope/ownership/intake cannot
+be verified, RETAIN #3991. Original technical reconciliation stays unresolved after
+administrative intake; no test, checker, collection, import, native,
+Vault/credential/service/provider or source effect is authorized.
+
 ## Validation Plan
+
+- [ ] Resolve EVERY direct #3991 three-case historical Vault Linux Plan/Validation
+  clause at its original scope/evidence tier and alternatives, including all-three
+  identity/cause/domain/assertion/qualification OR explicitly preserved unresolved
+  evidence, with same custodians and current test-tier/containment bounds. Tracker
+  consolidation is not a Linux pass, native/credential qualification, implementation or
+  whole-parent completion.
 
 - [ ] Resolve ALL direct3497 Plan/Validation clauses and its original alternatives
   through existing migration intake and owning Bridge/repository portfolio wave,
@@ -542,6 +627,15 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3991
+
+- Retained the complete #3991 acceptance directly in this ROOT Plan, its actual global
+  Validation and continuing Coordination. Every incumbent obligation, historical
+  outcome, alternative and custodian remains; neutral historical privacy/coordination
+  corrections change no substantive gate. New normal review, actual merge and complete
+  current readback precede source supersession. The effort stays Active; no
+  implementation, tests, native result or rollout is claimed.
 
 ### 2026-10-23 - Direct retained acceptance from #3497
 

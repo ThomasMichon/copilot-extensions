@@ -38,6 +38,13 @@ another product or a change to service-supervision ownership.
 
 ## Coordination
 
+The complete #4010 retained finite family continues through this existing Active ROOT's
+reviewed Plan, actual global Validation and Journal/open bounded-source process under
+the SAME declared and source-specific custodians. Preserve every incumbent alternative,
+native/source/resource reservation and independent acceptance gate. Closed source
+trackers are historical provenance, never required live claim tokens; no assignment,
+claim expiry or new blanket ACK is created.
+
 The direct #2822 installed-output/LKG family continues under the same #5472/#7028/#7029
 source-managed, adopter, native, and deployment owners. Candidate-health and
 retained-good-generation qualification remain distinct from best-effort handoff and
@@ -333,7 +340,93 @@ continuity does not make an unhealthy candidate or corrupt current/LKG evidence
 acceptable. This records the existing reviewed direction; it authorizes no live force,
 service, runtime, or deployment operation.
 
+<!-- backlog-reconciliation:7556:transfer:4010:to:efforts/active/source-managed-runtime-installs/README.md -->
+
+### Direct legacy existing-slot version/freshness acceptance from #4010
+
+#### Continuing Coordination
+
+Keep the SAME Active ROOT Plan/Validation/Coordination, complete dated Journal and OPEN
+#7028 with actual eligible bounded-source coordination. Preserve all2822
+installed-output/LKG clauses and real global
+Validation,5472/7029/source-selection/adopter/native/deployment/maintenance/7758
+execution-driver holders and every unreleased source claim. Existing source-isolation,
+artifact-admission, version-authority and installation owners remain separate; this
+tracking intake neither assigns their work nor reads private installed configuration.
+Closed12 and eventual closed4010 are historical provenance, NOT live ownership tokens.
+Normal current reviewed Dev workflow remains mandatory; no new universal ACK.
+
+#### Unchecked Plan
+
+- [ ] Retain the original installX -> updateY -> SAME existing venv slot ->
+  version-command reproduction and its real distribution metadata freshness.12's
+  independent version-counter alignment explicitly excluded this case; do not reopen
+  that completed scope or call this one complete by association.
+- [ ] Reconcile expected installed-version output with the accepted independent
+  marketplace payload/package/runtime-source/selected-generation contract. Prove a real
+  intended runtime update refreshes actual executable/metadata output OR obtain an
+  explicit reviewed supported-migration/disposition for the legacy reused-slot path.
+  Source-qualified slots alone do not authorize silently weakening the old expectation.
+- [ ] Keep actual CLI interpreter/module origin, package metadata, payload delivery,
+  source/build/profile and serving-daemon identity distinguishable. A newer payload
+  label cannot make an unchanged old runtime current; a CLI print is not proof which
+  daemon serves. Intentionally independent selected-source behavior remains supported
+  and explainable.
+- [ ] Use the actual canonical installer/resolver/installed version-command consumers
+  with precise success, stale/incomplete slot, metadata mismatch, failed update,
+  unsupported legacy/migration and truthful error outcomes. Avoid source-only
+  import/provenance checks masquerading as native installed freshness.
+- [ ] Preserve current2822 health and failure safety: actual candidate/selected output
+  CLI health before candidate completion/promotion, a VERIFIED retained previous-good
+  generation, safe selectors/redirects, failed construction/cutover preservation and
+  explicit corrupt/unknown/LKG recovery. Never rewrite a completed slot or merely
+  display a healthy-looking newer label.
+- [ ] Preserve accepted best-effort compatible handoff and bounded identity-checked
+  old-owner shutdown/cold takeover when handoff is broken, refused or hung. Cold
+  fallback may establish old-owner exclusion before incoming readiness. Temporary
+  outage/stream cut-off, durable recovery and client/child retries remain explicit; no
+  zero-outage, compatibility veto or incoming-ready-before-every-retirement rule is
+  reinstated.
+- [ ] Keep this finite legacy/version outcome independent of full
+  runtime/adopter/maintenance/driver or every-host completion. Preserve the original
+  supported evidence tiers and all separately owned parent obligations; no test,
+  installer, runtime or deployment is authorized by this intake.
+
+#### Unchecked Validation Plan
+
+- [ ] Record original/current consumer mapping and actual X/Y existing-slot result, or
+  the explicit owner-reviewed migration/disposition and supported replacement proof.
+  Verify installed command/module/distribution identity and truthful selected source
+  rather than comparing only two manifest strings.
+- [ ] Cover intended runtime update versus payload-only movement/independent older
+  runtime, same-package different-source identity, stale/incomplete metadata and
+  failed/refused update without confusing CLI output with serving-daemon evidence.
+- [ ] Preserve actual output health, correct current/LKG advancement, a verified healthy
+  retained predecessor and corrupt/unavailable prior/LKG refusal/recovery. Best-effort
+  handoff cannot waive unhealthy-candidate refusal, durable ownership or recoverable
+  progress.
+- [ ] Attribute source/contract/native-installed/serving/release evidence and unknown
+  capacity separately through the current bounded portfolio and authorized native
+  owners. Do not demand unrelated all-adopter/whole-parent completion, fabricate a
+  passing repro or add a new blanket ACK.
+
+Receiving gate: a NEW ordinary reviewed ACTUAL MERGE must deliver this COMPLETE direct
+unchecked Plan AND Validation/continuing Coordination, including the actual global
+Validation entry. FULL CURRENT Active ROOT Plan/Validation/Coordination AND the linked
+dated Journal, OPEN7028 and real source holds must be read back BEFORE4010 supersession.
+Old creation,7080 foundations,2822 intake, a title/link/child-only note, an unmerged
+amendment or this proposal is not receipt. If any original limit, identity distinction,
+owner or health/recovery gate cannot be preserved, RETAIN #4010. No product/version
+command, tests/imports/collection/checkers, installer, runtime, service or
+credential/configuration effect occurs here.
+
 ## Validation Plan
+
+- [ ] Resolve EVERY directly retained4010 Plan/Validation clause above at its original
+  finite scope, preserving literal existing-slot acceptance or explicit reviewed
+  migration, truthful identity, actual CLI health, VERIFIED retained-good recovery and
+  all incumbent2822/parent/custodian gates. Administrative intake is not implementation,
+  native acceptance or rollout.
 
 - [ ] Resolve every directly retained #2822 Plan/Validation clause above at its original
   finite scope and evidence tier, preserving alternatives, same owners, holds, and

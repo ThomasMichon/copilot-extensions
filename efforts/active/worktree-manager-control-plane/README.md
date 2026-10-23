@@ -1589,7 +1589,136 @@ creature-comforts document is background acceptance, not a replacement receiver.
   terminal, process, model, setting, runtime, test or native operation is authorized by
   this intake.
 
+<!-- backlog-reconciliation:7556:transfer:3838:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+### Direct retained stale-teardown/new-live-mapping acceptance from #3838
+
+Add this complete finite case DIRECTLY to the EXISTING Active Manager ROOT Plan, its own
+Validation, actual global Validation Plan and continuing Coordination/Journal. Preserve
+every incumbent phase, accepted compatibility decision, historical outcome and
+engine/Manager/native/source/resource custodian. This is not a production fix or new
+cleanup authority.
+
+#### Plan
+
+- [ ] Preserve #3906's delivered locked session/incarnation mismatch guard,
+  same-name/new-incarnation regression, CLI/wrapper argument routing and
+  monitor/environment corrections. Do not describe known-token removal as unfixed or
+  reopen completed presentation relocation.
+- [ ] Complete the exact A-registers -> B-supersedes -> delayed-A-teardown contract: old
+  removal cannot tombstone B or publish a mux-live removal, including absent revision
+  and reused deterministic display-name cases. Keep monotonic tombstones/revisions and
+  existing stale-update refusal.
+- [ ] Trace actual launcher, POSIX/PowerShell pane wrapper, canonical Manager callback,
+  CLI/remove wrapper and registry identity end-to-end. Prove supplied identity is the
+  exiting caller's actual native session/incarnation, not merely the currently mapped
+  successor, a display-name guess or a late observation silently promoted to CAS
+  authority.
+- [ ] Explicitly settle missing/failed/ambiguous native lookup for AUTOMATIC teardown
+  versus admitted legacy/manual optional-identity compatibility. Preserve truthful
+  supported compatibility; unknown automatic teardown cannot silently gain authority
+  over a newer live mapping. Select the existing owner's safe refusal/qualified identity
+  contract rather than impose a blanket breaking API change.
+- [ ] Preserve canonical bounded callback dispatch, current managed/unmanaged routing
+  and actual original ownership. Keep connected-status, launch/prompt and other recovery
+  work independent; no new daemon, lease expiry or general process-retirement policy.
+
+#### Validation
+
+- [ ] Qualify actual supported POSIX/tmux and PowerShell/psmux caller paths for old/new
+  distinct identity, reused display name, missing/failed/ambiguous lookup, delayed
+  callback, absent/stale revision and allowed legacy behavior. Keep static/known-token
+  fixtures separate from the retained actual native caller qualification; do not invent
+  every-host or whole-parent acceptance.
+- [ ] Verify mismatch yields applied=false/session_mismatch without tombstone or removal
+  publication, successful matching teardown preserves revision ordering, and a delayed
+  register cannot resurrect retired state. Preserve current behavior outside this finite
+  case.
+- [ ] BEFORE closing #3838 as superseded, obtain a NEW normal reviewed ACTUAL merge of
+  this full direct ROOT Plan/Validation/Coordination/Journal intake, including the
+  actual global row below, and read back CURRENT FULL receiving sections. Old
+  #3906/#8156, a title, child link or this proposal is not receipt.
+
+#### Continuing Coordination and Journal
+
+- [ ] Continue through the SAME Manager mux/presentation, engine-observation, native and
+  existing callback/source owners, this dated Journal and eligible OPEN bounded-source
+  claims. Preserve all real overlapping reservations without inventing a new generic ACK
+  or transferring a mapping/process/resource.
+- [ ] Journal the new reviewed intake merge/current full readback, positive delivered
+  guard and precise remaining caller-identity/compatibility qualification; select the
+  next bounded unfinished item. Keep the effort Active and every prior
+  Plan/Validation/Journal obligation intact.
+
+<!-- backlog-reconciliation:7556:transfer:3935:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+### Direct retained codename embody -> confirmed ACTIVE Picker row from #3935
+
+Receive this exact finite producer/consumer case DIRECTLY in the EXISTING Active Manager
+ROOT Plan, own Validation and actual global Validation Plan, with continuing
+Journal/Coordination. Preserve all current engine origin/status, Manager
+presentation/mux, producer/feed, native and source/resource custodians; this does not
+revive completed relocation or seize lifecycle work.
+
+#### Plan
+
+- [ ] Credit canonical codename resolution, actual managed-mux registration/publication,
+  bounded current roster/held feed and liveness-first ACTIVE derivation. Trace the
+  ACTUAL direct embody --codename path for an idle canonical worktree, not only Picker
+  Open/Resume or a different visible-window modifier.
+- [ ] Make the confirmed live admitted observation reach the correct current Picker row
+  as ACTIVE regardless of the supported launch front door. Preserve exact
+  project/worktree/execution machine/session/incarnation and source generation/freshness
+  across producer -> owner publication -> current feed -> UI derivation.
+- [ ] Reconcile present resident/cache/feed ownership against the historical
+  cached-active hypothesis; do not create another poller/resolver/writer, infer a
+  Copilot from a mux-shaped name, or manufacture liveness from
+  unknown/launch-in-progress protection merely to align labels.
+- [ ] Preserve correct unknown/unavailable/stale/foreign/native-guest behavior and
+  existing action/ownership fences. Keep #5909's uncertainty presentation, connected-mux
+  status, lifecycle/enrollment and all source-specific reservations independent; this
+  source does not absorb those gates.
+
+#### Validation
+
+- [ ] Qualify the actual supported direct codename launch -> canonical admitted live
+  session/incarnation -> owner/current projection -> CORRECT row ACTIVE path, including
+  the historical idle-worktree transition and ordinary Picker-launch comparison. Record
+  real output and applicable native UI observation separately from source flags, a unit
+  row, mux existence or a different launch front door's registration test.
+- [ ] Cover unknown/foreign/stale/recreated identity and missing publication without
+  false positive ACTIVE or weakened protection. Preserve current finite workload/read
+  bounds; no new all-host/whole-Manager/first-paint gate or permission to run a launch
+  is introduced.
+- [ ] BEFORE administrative closure, obtain a NEW normal reviewed ACTUAL merge carrying
+  this complete direct ROOT intake and actual global row, then read back CURRENT FULL
+  Plan/Validation/Coordination/Journal. Old #3825/#6595/#8156 or a proposed/link-only
+  case is not receiving delivery.
+
+#### Continuing Coordination and Journal
+
+- [ ] Continue through this existing Journal and eligible OPEN bounded-source
+  coordination under the SAME engine-observation/current-producer, Manager
+  presentation/mux and native owners. Coordinate actual overlapping edits without a new
+  generic ACK, source reassignment or resource transfer; superseded #3935 is history,
+  not a live claim token.
+- [ ] Journal reviewed intake merge/current full readback, existing positive components
+  and exact remaining launch-to-row qualification. Keep this ROOT Active with every
+  incumbent Plan/Validation/Journal clause unchanged and name the next bounded
+  unfinished item.
+
 ## Validation Plan
+
+- [ ] Resolve EVERY directly retained #3935 Plan/Validation/continuing Coordination
+  clause above at its original finite source/native tier, preserving same custodians,
+  exact positive-versus-unknown distinction and independent source holds. Consolidation
+  is neither the native result nor completion of other Manager/daemon work.
+
+- [ ] Resolve EVERY directly retained #3838 Plan/Validation/continuing Coordination
+  clause above at its original finite evidence tier, preserving compatibility
+  alternatives, same custodians and all existing native/source holds. Administrative
+  coalescence is not implementation, universal teardown qualification, deployment or
+  unrelated parent completion.
 
 - [ ] Resolve every directly retained #3586 Plan/Validation/continuing Coordination
   clause above at its original finite scope and evidence tier, preserving alternatives,
@@ -1658,6 +1787,20 @@ creature-comforts document is background acceptance, not a replacement receiver.
 
 ## Coordination
 
+The complete #3935 retained finite family continues through this existing Active ROOT's
+reviewed Plan, actual global Validation and Journal/open bounded-source process under
+the SAME declared and source-specific custodians. Preserve every incumbent alternative,
+native/source/resource reservation and independent acceptance gate. Closed source
+trackers are historical provenance, never required live claim tokens; no assignment,
+claim expiry or new blanket ACK is created.
+
+The complete #3838 retained finite family continues through this existing Active ROOT's
+reviewed Plan, actual global Validation and Journal/open bounded-source process under
+the SAME declared and source-specific custodians. Preserve every incumbent alternative,
+native/source/resource reservation and independent acceptance gate. Closed source
+trackers are historical provenance, never required live claim tokens; no assignment,
+claim expiry or new blanket ACK is created.
+
 The #3586 retained-Picker Open/Resume/New visible-terminal interaction continues under
 the same Manager presentation/launch, engine, provider and native owners. Preserve
 creation/recovery/registration fences and separate #5936 bulk recovery; existing
@@ -1703,6 +1846,24 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3935
+
+- Retained the complete #3935 acceptance directly in this ROOT Plan, its actual global
+  Validation and continuing Coordination. Every incumbent obligation, historical
+  outcome, alternative and custodian remains; neutral historical privacy/coordination
+  corrections change no substantive gate. New normal review, actual merge and complete
+  current readback precede source supersession. The effort stays Active; no
+  implementation, tests, native result or rollout is claimed.
+
+### 2026-10-23 - Direct retained acceptance from #3838
+
+- Retained the complete #3838 acceptance directly in this ROOT Plan, its actual global
+  Validation and continuing Coordination. Every incumbent obligation, historical
+  outcome, alternative and custodian remains; neutral historical privacy/coordination
+  corrections change no substantive gate. New normal review, actual merge and complete
+  current readback precede source supersession. The effort stays Active; no
+  implementation, tests, native result or rollout is claimed.
 
 ### 2026-10-23 - Direct retained acceptance from #3586
 

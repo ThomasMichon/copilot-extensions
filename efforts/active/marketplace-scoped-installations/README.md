@@ -56,6 +56,13 @@ remain outside this namespacing model.
 
 ## Coordination
 
+The complete #3943 simultaneous-registration/metadata/lookup consumer lane continues
+through Phase 2/8 and assigned OPEN #1096 under the SAME
+source/registration/activation/installation/native custodians. Ordinary supported
+non-cell registration includes payload-only plugins without extending runtime-cell
+eligibility. Preserve all body inheritances, #2701, claims/authority fences, native
+waivers and disposable-only activation; this intake reassigns and activates nothing.
+
 The directly retained #2701 Logger scheduled/direct-installer lane is the concrete Phase
 8 out-of-session case under the SAME assigned #1096 implementation/native custodian.
 Preserve held claims, the host/guest authority fence, diagnostic prerequisites,
@@ -442,7 +449,7 @@ direction reconciliation; coordinated under #1096 and #1103._
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
-_Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review)._
+_Correlated via a repository-wide sweep of open `bug`-labeled issues against active efforts (VEI + direct review)._
 
 - [x] **#107** agent-index installer: Register-ScheduledTask 'Access is denied' without elevation -- need a user-level logon task
   - Triaged 2026-09-27: still open, unclaimed, not obsolete. Routed to Phase 3
@@ -516,7 +523,85 @@ Plan/Validation/coordination amendment receives ordinary review, actually merges
 fully read back. Otherwise retain the source. Closed sources are historical provenance,
 never live claim tokens.
 
+<!-- backlog-reconciliation:7556:transfer:3943:to:efforts/active/marketplace-scoped-installations/README.md -->
+
+Append the COMPLETE following unchecked registration/lookup family DIRECTLY to assigned
+final-OPEN #1096 BODY, preserving EVERY incumbent original/inherited
+#1103/#1104/#1110/#2352/#1230/#2268/#3480 row and actual ROOT/#2701 scope, assignee,
+claims/host-guest fence, native/all-copy/release/diagnostic custody, supported default
+legacy, narrow documented waivers and clean-room-only activation. This is not parent
+closure, registration execution or an implementation assignment.
+
+### Simultaneous multi-marketplace registration and lookup retained from #3943
+- [ ] Support two independent marketplace registrations exposing the SAME plugin name
+  simultaneously, preserving exact registration source/provenance/plugin identity and
+  metadata. Display labels, aliases or stableId alone do not prove ownership; same
+  version/name must not collapse independent sources.
+- [ ] State and enforce the actual lookup priority: native versus alternate settings
+  convention, local override versus base, directory/staged/installed/remote source and
+  explicit selected source/installation. Preserve explicit
+  malformed/ambiguous/unavailable/foreign refusal instead of arbitrary
+  namespace/PATH/last-writer choice. Document the actual contract rather than inventing
+  one new global active registry.
+- [ ] Credit #6157's explicit local registration-to-manifest mapping and #7375's real
+  raw/loaded activation-guard integration. Keep valid mapped registration keys distinct
+  from manifest identity; unmapped sources and remote origins retain their existing
+  checks. No stableId/alias mismatch bypass or pretend whole-workstream completion.
+- [ ] Preserve operator-authored registrations and unchanged-operation-owned
+  reconciliation, complete prepared origin/completion/manifest evidence, source
+  trust/containment, linked-file refusal and independent source scope/cache behavior.
+  Registration changes cannot capture or overwrite another installation's incumbent
+  state/callable command/lifecycle.
+- [ ] Qualify the REAL registration -> source resolution/activation decision -> intended
+  callable consumer chain through applicable local/directory/staged/remote/installed,
+  reload/payload-replacement and simultaneous same-name cases. Library/declaration
+  counts, a single mapping fixture or one process-local integration is not complete
+  installed/native consumer acceptance; preserve the original appropriate
+  source/platform tiers and honest unavailable outcomes.
+- [ ] Preserve ordinary default-legacy/non-cell operation and OPTIONAL coexistence.
+  Supported ordinary registration, including supported payload-only plugin registration,
+  remains valid OUTSIDE runtime cells; this intake must NOT namespace
+  unrelated/payload-only plugins, force every host into a cell or shrink the original
+  registration scope to only runtime plugins. If the existing owner cannot carry that
+  whole distinction here, retain #3943 rather than narrowing it.
+- [ ] Keep canonical general unreadable/read-trust #3789 and existing
+  Bridge/staging/registration/provider/native owners separate; do not duplicate their
+  implementation or declare their unknowns closed. No blanket new ACK, activation,
+  credential or source/resource handoff is introduced.
+
+### Direct Validation, required ROOT/global entry and continuing Coordination
+- [ ] Preserve complete original/current same-name metadata/priority/ambiguity,
+  incumbent-origin/key ownership, exact callable source and applicable
+  local/remote/staged/installed/reload/negative cases. Map each bounded provider and
+  actual consumer to its proper source/native/installed tier under existing bounded
+  unit/periodic policy, without reviving an obsolete whole integration gate or adding
+  all hosts/parent validation as a finite-case prerequisite.
+- [ ] Through the existing migration-intake/Phase 2/8 owner, materialize any necessary
+  directly named #3943 ROOT Plan/continuing Coordination amendment AND a REAL GLOBAL
+  Validation Plan entry: '- [ ] Resolve every direct #3943
+  simultaneous-registration/metadata/lookup/consumer clause at its original scope and
+  evidence tier, preserving supported ordinary non-cell registration, optional
+  coexistence, all incumbent owner/waiver/native/diagnostic/activation holds; tracker
+  intake is not implementation or installed qualification.' This actual global entry,
+  not only an inline/child cross-reference, must receive NEW normal review, ACTUAL merge
+  and FULL current ROOT Plan/Validation/Coordination/Journal readback BEFORE source
+  supersession.
+
+Receiving gate: only after complete direct BODY delivery to eligible final-OPEN/unlocked
+#1096, the required reviewed ROOT/global Validation receipt and FULL CURRENT body/ROOT
+readback with unchanged custody may unassigned #3943 be administratively superseded.
+Otherwise retain. Keep assigned #1096 OPEN: its own closure still needs the SAME actual
+assignee's merged Dev provider and explicit unconditional WHOLE finite completion. Old
+creation/mapping PRs, title/link/proposal or an incomplete child note are not receiving
+receipts; no actual registration, settings, namespace or native operation is authorized.
+
 ## Validation Plan
+
+- [ ] Resolve every direct #3943 simultaneous-registration/metadata/lookup/consumer
+  clause at its original scope and evidence tier, preserving supported ordinary non-cell
+  registration, optional coexistence, all incumbent
+  owner/waiver/native/diagnostic/activation holds; tracker intake is not implementation
+  or installed qualification.
 
 - [ ] Complete every directly retained #2701 Plan/Validation clause above at its original scope and evidence
   tier, preserving original alternatives, same owners, holds and current
@@ -566,6 +651,15 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-10-23 - Direct retained acceptance from #3943
+
+- Retained the complete #3943 acceptance directly in this ROOT Plan, its actual global
+  Validation and continuing Coordination. Every incumbent obligation, historical
+  outcome, alternative and custodian remains; neutral historical privacy/coordination
+  corrections change no substantive gate. New normal review, actual merge and complete
+  current readback precede source supersession. The effort stays Active; no
+  implementation, tests, native result or rollout is claimed.
 
 ### 2026-10-22 - Complete retained acceptance from #2701
 
@@ -1274,7 +1368,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   exemplars) — `agent-vault` runs legacy-only today regardless of host
   config, so `vault-askpass`'s hardcoded `$HOME/.local/bin/agent-vault` is
   *currently correct, not a bug*. This backs live `sudo -A` elevation
-  facility-wide; converting it now, before `agent-vault` itself gains
+  across the adopter's environment; converting it now, before `agent-vault` itself gains
   cell-awareness (a Phase-3-scale undertaking on its own), would add
   complexity to a safety-critical path for zero present benefit. **Left
   untouched, explicitly deferred** — documented so a future session doesn't
@@ -2076,7 +2170,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   2026-09-26T23:13 PT (mid-session, by someone/something else) adding a
   NEW required status check, "identifier leak guard," to `dev`'s branch
   protection. That check's own log said it was misconfigured --
-  `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` repo secrets weren't set,
+  `<private-input-family-a>`/`<private-input-family-b>` repo secrets weren't set,
   so it always failed -- meaning EVERY PR to `dev` (not just this
   effort's) was blocked from merging, including one that had already
   merged minutes earlier under the SAME failing check (before the

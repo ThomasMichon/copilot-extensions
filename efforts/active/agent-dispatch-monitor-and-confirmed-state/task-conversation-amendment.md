@@ -18,7 +18,9 @@ worktree and PR; this planning worktree owns documentation only.
 Consume rather than supersede:
 
 - #1376: existing bounded structured task results.
-- #3681: this campaign's lifecycle coordination issue.
+- #3681: historical lifecycle umbrella after reviewed supersession; continuing
+  coordination is this Active ROOT's Plan/Validation/Journal and eligible OPEN
+  bounded-source claims under the same existing owners.
 - #5701: open idempotent steering acceptance/retry implementation. Coordinate
   with its owner; after merge, prove the remaining timing and receipt gaps.
 - #2057, #3002, #2453: existing cold-resume and steering-delivery issues. Re-check

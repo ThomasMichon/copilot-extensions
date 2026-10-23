@@ -7,6 +7,7 @@
 - **Status:** Active
 - **Vision:** [Dispatch execution handoff](../../../visions/plugins/agent-dispatch/README.md#acknowledged-execution-handoff), preserving [reviewer lineage](../../../visions/plugins/agent-dispatch/reviewer/README.md#one-review-one-lineage)
 - **Umbrella issue:** [#7268](https://github.com/ThomasMichon/copilot-extensions/issues/7268)
+- **Related implementation issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063), Bridge participant custody and retained restoration
 
 ## Guiding Intent
 
@@ -55,6 +56,14 @@ and proportionate safeguards against concrete stale-writer races.
 Adjacent work is distinct: #6677 concerns manual task-session exit/resume;
 #3208 concerns atomic Bridge end-and-reclaim; #5930 concerns remote-driver
 mutation ownership. None is permission to replace an active owner.
+
+The proposed [Bridge retained-runtime sub-effort](../bridge-retained-runtime-restoration/README.md)
+specializes this contract for Bridge's existing admission, inbox/native-send,
+host and installer owners under #8063. This effort remains the canonical
+generic execution/effect handoff contract; the sub-effort does not establish
+complete Dispatch enrollment, adopter effects or a global acknowledgement.
+Its widened Bridge design has local architecture acceptance; normal proposal
+review/landing and a specific source-slice assignment precede implementation.
 
 ## Request
 
@@ -112,6 +121,10 @@ grants.
       durable coordinator admission and adopter mutation wiring remain open.
 - [ ] Implement durable recovery, observation and explicit handback using the
       same tasks, workspaces and recorded session lineage.
+- [ ] Review and integrate the [Bridge participant specialization](../bridge-retained-runtime-restoration/custody-contract.md)
+      as an independently gated dependency under #8063. Bridge-local custody
+      and restoration cannot substitute for the coordinator/supervisor and
+      adopter-effect obligations above.
 
 ### Phase 3 - Validate and qualify adoption
 - [ ] Exercise the [validation matrix](contract.md#validation-matrix) with focused
@@ -153,6 +166,18 @@ do not treat a validated adapter response as complete task admission or live
 handoff support.
 
 ## Journal
+
+### 2026-10-23 - Propose the Bridge custody specialization
+- Linked the #8063 Bridge retained-runtime sub-effort to this generic contract.
+  Its proposal extends existing Bridge admission, inbox/native-send and host
+  owners rather than introducing another scheduler or execution ledger.
+- Bridge-local inventory and compatibility cannot establish complete Dispatch
+  runtime enrollment or adopter-effect acknowledgement. Those parent gates
+  remain open; widened Bridge implementation awaits normal proposal
+  review/landing and a specific source-slice assignment after local architecture
+  acceptance.
+- This records a proposal only, not source implementation, testing or running
+  adoption.
 
 ### 2026-10-22 - Serialize physical cooling with resume admission
 - Further review of #7836 found that a fresh snapshot cannot exclude a later
