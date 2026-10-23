@@ -91,6 +91,10 @@ The shared `libs/process-telemetry` contract is exercised by its real Bridge
 consumer. Run the bounded runner for `agent-bridge` with
 `--test-file tests/test_process_telemetry.py --test-file tests/test_telemetry.py`
 and for `agent-dispatch` with `--test-file tests/test_telemetry.py`.
+Add `--test-file tests/test_spool_append.py` to Bridge for the shared synchronous
+append contract: native thread/process contention, Unicode paths/bytes,
+one append-only Windows handle per record, and failed/short-write cleanup
+without suffix retries. All inputs are synthetic and use runner-owned files.
 These tests prove bounded producer behavior and compatibility, not native
 startup latency or OpenTelemetry export. Threaded blocked/throwing sink controls
 belong to the on-demand integration portfolio, not required unit-only CI.

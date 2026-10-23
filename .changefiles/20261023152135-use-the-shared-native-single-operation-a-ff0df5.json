@@ -1,0 +1,9 @@
+{
+  "comment": "Use the shared native single-operation append for synchronous diagnostic JSONL spools.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

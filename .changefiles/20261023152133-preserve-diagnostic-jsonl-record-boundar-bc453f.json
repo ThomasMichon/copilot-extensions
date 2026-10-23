@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve diagnostic JSONL record boundaries with native single-operation append across concurrent local-file writers.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
