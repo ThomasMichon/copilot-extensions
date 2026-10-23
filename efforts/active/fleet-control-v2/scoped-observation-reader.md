@@ -25,6 +25,9 @@ wire cursor, subscription, command execution or automatic activation is added.
   Policy/enrollment/revocation writers must use this same fence. The reader
   cannot authenticate an arbitrary callback or force an unrelated writer to
   participate; the eventual serving integration must prove that contract.
+  The authority must bind this exact reentrant fence at construction and acquire
+  it before its internal lock on every admission/checkpoint path, including
+  direct callers. A reader refuses unbound or differently fenced authorities.
 - While holding the fence, authorize the exact request immediately before its
   one indexed storage lookup. Check the store's authority against the permit.
   A denied principal, actor/fleet mismatch or forbidden correlated branch
@@ -77,7 +80,7 @@ those larger Plan and Validation Plan gates remain open.
 ## Local execution record
 
 The contract was reviewed and merged in #8041 before implementation. The
-owned reader/admission/store selection passes 121 tests in 62.59 seconds under
+owned reader/admission/store selection passes 123 tests in 48.21 seconds under
 the unchanged 120-second containment limit, including the real independent
 consumer and lock cases. An initial new-test collection error used pytest's
 reserved `request` parameter name; renaming that parameter fixed collection
@@ -89,3 +92,20 @@ The [implemented API](../../../fleet-manager/docs/scoped-observation-reader.md)
 keeps the trusted full-row parser distinct from selected result projection.
 Current-head hosted review and required CI remain the independent merge gate
 above, not a result inferred from this local run.
+
+The first implementation review found an opposing lock order between a reader
+and direct callers whose snapshot callback acquires the owner fence. The
+authority now explicitly binds the same fence and acquires it before its
+internal lock on every admission/checkpoint path; the reader rejects an
+unbound or differently fenced authority. A bounded subprocess regression
+exercises mixed direct/reader calls with a fence-acquiring callback, plus an
+inverted-order negative control that reproduces the deadlock. Existing unfenced
+callers keep their original lock semantics.
+
+Current PR CI deliberately executes eligible units and guards, not the former
+native full-Fleet matrix. Its green result is not evidence that the new
+identity/SQLite/concurrency integration ran on Linux. The available periodic
+container workflow covers plugin portfolios, not this standalone reader, and
+its native Windows lane is explicitly unenrolled. This slice therefore records
+native Windows contained integration and the independent consumers above,
+without claiming unavailable hosted integration or expanding shared CI.

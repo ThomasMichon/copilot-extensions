@@ -1,21 +1,14 @@
 """Explicit fenced point reads, not a serving adapter or wire authorization."""
 
 from dataclasses import dataclass
-from typing import Protocol
-
 from .observation_store import ObservationStore
 from .runtime_admission import (
-    AdmissionAuthority, AdmissionError, ObservationRead, ObservationScope,
+    AdmissionAuthority, AdmissionError, AdmissionFence, FENCE_WAIT_SECONDS,
+    ObservationRead, ObservationScope,
 )
 from .runtime_identity import VerifiedIdentity
 
-FENCE_WAIT_SECONDS = 1
 StateValue = str | bool | None
-
-
-class _ReadFence(Protocol):
-    def acquire(self, *, timeout: float) -> bool: ...
-    def release(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -38,9 +31,10 @@ class ScopedObservationReader:
     """
 
     def __init__(self, *, authority: AdmissionAuthority, store: ObservationStore,
-                 fence: _ReadFence):
+                 fence: AdmissionFence):
         if (not isinstance(authority, AdmissionAuthority)
                 or not isinstance(store, ObservationStore)
+                or authority.fence is not fence
                 or not callable(getattr(fence, "acquire", None))
                 or not callable(getattr(fence, "release", None))):
             raise AdmissionError("invalid-record")

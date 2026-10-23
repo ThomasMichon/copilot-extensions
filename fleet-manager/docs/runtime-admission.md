@@ -106,6 +106,12 @@ consumes the handle without retaining a replacement. The
 including after a storage failure. Proof evidence stays consumed. Existing
 `revalidate` callers retain their unchanged replacement-handle semantics.
 
+An authority may explicitly bind a reentrant `fence` at construction. All its
+admission and checkpoint calls then acquire that fence before its internal lock,
+including direct callers outside a reader, with a one-second acquisition bound.
+The scoped reader requires the exact same configured fence. Unfenced existing
+authorities keep their original synchronization semantics.
+
 Permits last at most 30 seconds and never outlive policy, identity trust or
 the access token. Revalidation cannot extend them. Silent authorized renewal
 uses a fresh proof/identity and keeps the original operation ID/content.

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import re
 import threading
+from typing import Protocol
 
 from .observations import STATE_FIELDS
 from .operations import COMMAND_FIELDS, OperationIntent
@@ -17,6 +19,12 @@ MAX_GRANTS = 256
 MAX_PERMITS = 4096
 PERMIT_SECONDS = 30
 REQUEST_SECONDS = 90
+FENCE_WAIT_SECONDS = 1
+
+
+class AdmissionFence(Protocol):
+    def acquire(self, *, timeout: float) -> bool: ...
+    def release(self) -> None: ...
 
 
 class AdmissionError(ValueError):
@@ -244,9 +252,13 @@ class AdmissionAuthority:
     """
 
     def __init__(self, *, snapshot: Callable[[], AuthoritySnapshot | None],
-                 clock: Callable[[], int], capacity: int = MAX_PERMITS):
+                 clock: Callable[[], int], capacity: int = MAX_PERMITS,
+                 fence: AdmissionFence | None = None):
         if (not callable(snapshot) or not callable(clock) or type(capacity) is not int
-                or not 1 <= capacity <= MAX_PERMITS):
+                or not 1 <= capacity <= MAX_PERMITS
+                or (fence is not None and (
+                    not callable(getattr(fence, "acquire", None))
+                    or not callable(getattr(fence, "release", None))))):
             raise AdmissionError("invalid-record")
         self._snapshot = snapshot
         self._clock = clock
@@ -256,6 +268,22 @@ class AdmissionAuthority:
         self._issued: dict[int, _Issued] = {}
         self._evidence: dict[str, int] = {}
         self._lock = threading.Lock()
+        self._fence = fence
+
+    @property
+    def fence(self) -> AdmissionFence | None:
+        return self._fence
+
+    @contextmanager
+    def _guard(self):
+        if self._fence is not None and not self._fence.acquire(timeout=FENCE_WAIT_SECONDS):
+            raise AdmissionError("authority-busy")
+        try:
+            with self._lock:
+                yield
+        finally:
+            if self._fence is not None:
+                self._fence.release()
 
     def _now(self):
         now = self._clock()
@@ -365,7 +393,7 @@ class AdmissionAuthority:
         _name(role)
         _name(installation)
         action, request_digest = _request(request)
-        with self._lock:
+        with self._guard():
             now = self._now()
             for key in [
                 key for key, item in self._issued.items() if now >= item.permit.expires_at
@@ -412,7 +440,7 @@ class AdmissionAuthority:
         self._checkpoint(permit, request, retain=False)
 
     def _checkpoint(self, permit: Permit, request: Request, *, retain: bool) -> Permit:
-        with self._lock:
+        with self._guard():
             issued = self._issued.get(id(permit))
             if issued is None or issued.permit is not permit:
                 raise AdmissionError("unknown-permit")

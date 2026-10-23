@@ -448,6 +448,13 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Live provider/serving validation remains outside this explicitly isolated
   assignment. Current-head platform review and required hosted CI are still
   required before implementation merge; the full parent remains Active.
+- The implementation review identified an opposing owner-fence/authority-lock
+  order for mixed direct and reader calls. Bound the exact shared reentrant
+  fence to the authority so every admission/checkpoint acquires it first;
+  a reader refuses an unbound or differently fenced authority. A separate
+  process proves both successful mixed calls and reproduction with the
+  deliberately inverted legacy ordering. The full owned selection then passes
+  123 cases in 48.21 seconds under the unchanged 120-second limit.
 
 ### 2026-10-16 - Immutable-release index fixture repair prepared
 - Normal promotion #6938 merged `6b2fa0ac2887a8fda669dfb8356e5c6083f6729d`

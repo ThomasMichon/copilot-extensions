@@ -11,11 +11,16 @@ optional cryptography dependency.
 
 The caller supplies an existing `AdmissionAuthority`, `ObservationStore` and
 mandatory shared owner fence. The fence supports `acquire(timeout=...)` and
-`release()`; a `threading.RLock` is suitable. Acquisition waits at most one second
+`release()` and must be reentrant; a `threading.RLock` is suitable.
+Configure the authority with this exact same fence. Acquisition waits at most one second
 for a participating lock before refusing `authority-busy`.
 
-Every policy, enrollment and revocation writer must use that same fence. The
-admission callback still has to independently authenticate **current** source
+Every policy, enrollment and revocation writer must use that same fence.
+For a fenced authority, **all** direct admission, revalidation and completion
+calls acquire the fence before the authority's internal lock. A reader refuses
+an authority configured with no fence or a different fence; direct callers
+cannot invert that lock order. Existing unfenced authority callers are unchanged.
+The admission callback still has to independently authenticate **current** source
 policy and provider/issuer revocation freshness. An arbitrary lock or constructed
 snapshot establishes neither provenance nor protection against an uncooperative
 writer. Durable policy/enrollment generations and real provider integration
@@ -24,9 +29,10 @@ remain the serving owner's responsibility.
 ```python
 import threading
 from fleet_manager.observation_reader import ScopedObservationReader
-from fleet_manager.runtime_admission import ObservationRead, ObservationScope
+from fleet_manager.runtime_admission import AdmissionAuthority, ObservationRead, ObservationScope
 
 fence = threading.RLock()
+authority = AdmissionAuthority(snapshot=current_policy, clock=clock, fence=fence)
 reader = ScopedObservationReader(authority=authority, store=store, fence=fence)
 selection = ObservationRead("example-fleet", (
     ObservationScope("origin-a", "project-a", "entity-a", ("status",)),
@@ -34,10 +40,11 @@ selection = ObservationRead("example-fleet", (
 point = reader.read(verified_identity, selection, role="client", installation="client-a")
 ```
 
-`authority`, `store` and `verified_identity` in this example are trusted,
+`current_policy`, `clock`, `store` and `verified_identity` in this example are trusted,
 explicitly configured objects, not records deserialized from a caller.
 Participating writers acquire `fence` before modifying the policy source.
-Use a reentrant lock if the snapshot callback itself acquires this fence.
+Reentrancy is required because the reader and authority acquire the same fence;
+a snapshot callback may also acquire it without changing lock order.
 
 ## One explicit correlated point
 

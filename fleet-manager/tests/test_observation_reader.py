@@ -15,7 +15,9 @@ from fleet_manager.observation_reader import FENCE_WAIT_SECONDS, ScopedObservati
 from fleet_manager.observation_store import ObservationStore
 from fleet_manager.observations import CurrentUpdate, OriginBinding
 from fleet_manager.planning import PlanError
-from fleet_manager.runtime_admission import AdmissionError, ObservationRead, ObservationScope
+from fleet_manager.runtime_admission import (
+    AdmissionAuthority, AdmissionError, ObservationRead, ObservationScope,
+)
 from test_runtime_admission import A, B, Harness, actor, intent, policy, refuses
 from test_runtime_identity import NOW
 from test_runtime_identity import keys as keys
@@ -49,7 +51,8 @@ def update(binding, branch, *, sequence=1, **changes):
 
 class ReaderHarness(Harness):
     def __init__(self, keys, path, monkeypatch):
-        super().__init__(keys, capacity=1)
+        self.fence = Fence()
+        super().__init__(keys, capacity=1, fence=self.fence)
         self.store = ObservationStore(path, authority="gateway-a", installation="gateway-a")
         self.bindings = {}
         for branch in (A, B):
@@ -57,7 +60,6 @@ class ReaderHarness(Harness):
             self.bindings[branch.origin] = binding
             self.store.bind_origin(binding)
             self.store.apply(update(binding, branch))
-        self.fence = Fence()
         self.reader = ScopedObservationReader(
             authority=self.owner, store=self.store, fence=self.fence,
         )
@@ -155,6 +157,11 @@ def test_fence_is_required_and_cannot_be_replaced_by_an_unusable_record(reader):
         ScopedObservationReader(authority=reader.owner, store=reader.store)
     refuses("invalid-record", ScopedObservationReader,
             authority=reader.owner, store=reader.store, fence=object())
+    unfenced = AdmissionAuthority(snapshot=reader.snapshot, clock=reader.clock)
+    refuses("invalid-record", ScopedObservationReader,
+            authority=unfenced, store=reader.store, fence=reader.fence)
+    refuses("invalid-record", ScopedObservationReader,
+            authority=reader.owner, store=reader.store, fence=Fence())
     assert not reader.lookups
 
 
@@ -219,7 +226,7 @@ def test_final_checkpoint_withholds_read_after_authority_changes(reader, monkeyp
     monkeypatch.setattr(reader.store, "read", changed)
     refuses(code, reader.read)
     assert not reader.owner._issued
-    assert reader.fence.releases == 1
+    assert reader.fence.releases == len(reader.fence.timeouts)
 
 
 def test_storage_and_final_callback_failures_are_errors_not_empty_success(reader, monkeypatch):
@@ -351,7 +358,8 @@ policy = AuthoritySnapshot(
         role="client", installation="client-a", generation=1, status="active", reads=reads,
     ) for subject, reads in (("first", (scope,)), ("second", ()))),
 )
-owner = AdmissionAuthority(snapshot=lambda: policy, clock=lambda: now, capacity=1)
+fence = threading.RLock()
+owner = AdmissionAuthority(snapshot=lambda: policy, clock=lambda: now, capacity=1, fence=fence)
 store = ObservationStore(sys.argv[1], authority="gateway-a", installation="gateway-a")
 binding = OriginBinding("origin-a", "installation", 1, "producer")
 store.bind_origin(binding)
@@ -367,7 +375,7 @@ def read(**scope):
     lookups.append(scope)
     return original(**scope)
 store.read = read
-adapter = ScopedObservationReader(authority=owner, store=store, fence=threading.RLock())
+adapter = ScopedObservationReader(authority=owner, store=store, fence=fence)
 for index, subject in enumerate(("first", "second")):
     token = jwt.encode(
         {"alg": "ES256", "typ": "at+jwt", "kid": "issuer-1"},
@@ -400,3 +408,111 @@ print(json.dumps({"authorized_reads": 1, "foreign_reads": 0}))
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"authorized_reads": 1, "foreign_reads": 0}
+
+
+@pytest.mark.parametrize("inverted", [False, True])
+def test_mixed_direct_and_reader_calls_have_one_lock_order(reader, tmp_path, inverted):
+    identities = tmp_path / "verified-identities.json"
+    identities.write_text(json.dumps([
+        asdict(reader.identity()), asdict(reader.identity()),
+    ]), encoding="utf-8")
+    script = """
+from contextlib import contextmanager
+import json, sys, threading
+from pathlib import Path
+from fleet_manager.observation_reader import ScopedObservationReader
+from fleet_manager.observation_store import ObservationStore
+from fleet_manager.runtime_admission import (
+    AdmissionAuthority, AuthoritySnapshot, Enrollment, ObservationRead, ObservationScope,
+)
+from fleet_manager.runtime_identity import VerifiedIdentity
+identities = [VerifiedIdentity(**value) for value in json.loads(
+    Path(sys.argv[2]).read_text(encoding="utf-8"))]
+now = identities[0].verified_at
+entered, release, attempted = (threading.Event() for _ in range(3))
+class Fence:
+    def __init__(self):
+        self.lock = threading.RLock()
+        self.paused = False
+    def acquire(self, *, timeout):
+        name = threading.current_thread().name
+        if name == "direct":
+            attempted.set()
+        acquired = self.lock.acquire(timeout=timeout)
+        if acquired and name == "reader" and not self.paused:
+            self.paused = True
+            entered.set()
+            if not release.wait(3):
+                self.lock.release()
+                raise RuntimeError("fixture-release-missing")
+        return acquired
+    def release(self):
+        self.lock.release()
+fence = Fence()
+scope = ObservationScope("origin-a", "project-a", "entity-a", ("status",))
+selection = ObservationRead("fleet-a", (scope,))
+snapshot = AuthoritySnapshot(
+    authority="gateway-a", fleet="fleet-a",
+    issuer=identities[0].issuer, audience=identities[0].audience, revision=1,
+    valid_from=now - 1, valid_until=now + 3600, identity_trust_until=now + 3600,
+    enrollments=(Enrollment(
+        subject=identities[0].subject, principal="actor-a", account="account-a",
+        kind="operator", role="client", installation="client-a",
+        generation=1, status="active", reads=(scope,),
+    ),),
+)
+def current():
+    if threading.current_thread().name == "direct":
+        attempted.set()
+    with fence.lock:
+        return snapshot
+owner = AdmissionAuthority(snapshot=current, clock=lambda: now, fence=fence)
+if sys.argv[3] == "inverted":
+    @contextmanager
+    def legacy_order():
+        with owner._lock:
+            yield
+    owner._guard = legacy_order
+store = ObservationStore(sys.argv[1], authority="gateway-a", installation="gateway-a")
+adapter = ScopedObservationReader(authority=owner, store=store, fence=fence)
+outcomes, failures = [], []
+def read():
+    try:
+        assert adapter.read(identities[0], selection, role="client",
+                            installation="client-a").state == (("status", "active"),)
+        outcomes.append("reader")
+    except Exception as error:
+        failures.append(str(error))
+def direct():
+    try:
+        permit = owner.authorize(identities[1], selection, role="client", installation="client-a")
+        owner.complete(permit, selection)
+        outcomes.append("direct")
+    except Exception as error:
+        failures.append(str(error))
+reading = threading.Thread(target=read, name="reader", daemon=True)
+writing = threading.Thread(target=direct, name="direct", daemon=True)
+reading.start()
+assert entered.wait(3)
+writing.start()
+assert attempted.wait(3)
+release.set()
+reading.join(0.5)
+writing.join(0.5)
+deadlock = reading.is_alive() and writing.is_alive()
+if not deadlock:
+    assert not failures and sorted(outcomes) == ["direct", "reader"] and not owner._issued
+print(json.dumps({"deadlock": deadlock, "completed": len(outcomes)}))
+"""
+    source = Path(__file__).resolve().parents[1] / "src"
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(reader.store.path), str(identities),
+         "inverted" if inverted else "normal"],
+        env={**os.environ, "PYTHONPATH": str(source)},
+        capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "deadlock": inverted, "completed": 0 if inverted else 2,
+    }
