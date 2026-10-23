@@ -974,15 +974,14 @@ def _resolve_extends_tracking_cwd_origin(
         # finishes (the same as an un-inherited cwd always was).
         pending_cwd_origin = None
     merged = deep_merge(filled_template, overrides)
-    if global_identity_default:
+    origins = _path_origins(
+        overrides, _base_resource or base_dir, origins,
+        execution_repo=merged.get("execution_repo"), params=scalar_params,
+    )
+    if global_identity_default and "worker_identity" not in overrides:
+        # A newly adopted context has the merged field's current value. Unlike
+        # inherited fields, this hop's raw overrides are not substituted yet.
         origins["worker_identity"] = identity_context_origin(
             _base_resource or base_dir, merged.get("execution_repo"),
         )
-    return (
-        merged,
-        pending_cwd_origin,
-        _path_origins(
-            overrides, _base_resource or base_dir, origins,
-            execution_repo=merged.get("execution_repo"), params=scalar_params,
-        ),
-    )
+    return merged, pending_cwd_origin, origins

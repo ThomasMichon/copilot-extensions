@@ -346,6 +346,46 @@ def test_direct_global_identity_default_honors_execution_repository(tmp_path, mo
     assert config["worker_guidance"] == "TOOLS-DEFAULT"
 
 
+@pytest.mark.parametrize("authored", [False, True])
+@pytest.mark.parametrize("leaf_override", [False, True])
+def test_identity_origin_substitutes_at_the_same_hop_as_its_execution_field(
+    tmp_path, monkeypatch, authored, leaf_override,
+):
+    roots = {name: tmp_path / name for name in ("supplier", "leaf", "early", "final", "other")}
+    selector = "worker" if authored else "goal-driven"
+    for name, root in roots.items():
+        _identity(root, f"RULES-{name}", name=selector)
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository",
+        lambda name, **kwargs: (roots[name], "worktree"),
+    )
+    base_data = {
+        **_config(execution_repo="{target}"),
+        "params": {"target": "early"},
+    }
+    if authored:
+        base_data["extends"] = "global:repository-issue-loop"
+        base_data["worker_identity"] = selector
+    else:
+        base_data["extends"] = "global:goal-driven"
+    base = _write(
+        roots["supplier"] / ".copilot-extensions" / "agent-dispatch" / "registrar" / "base.json",
+        base_data,
+    )
+    leaf_data = {"extends": str(base), "params": {"target": "final"}}
+    if leaf_override:
+        leaf_data["execution_repo"] = "other"
+    leaf = _write(roots["leaf"] / "loop.json", leaf_data)
+    source, _ = read_declaration_file_set(leaf, repo_root=roots["leaf"])
+    assert source.spec["worker_identity_cwd"] == "repo:final:."
+    assert source.spec["cwd"] == f"repo:{'other' if leaf_override else 'final'}:."
+    config = validate_config(
+        source.spec["repository_issue_loop"], cwd=source.spec["cwd"],
+        worker_identity_cwd=source.spec["worker_identity_cwd"],
+    )
+    assert config["worker_guidance"] == "RULES-final"
+
+
 def test_cli_discovery_reads_supplier_only_identity_without_live_effects(
     tmp_path, monkeypatch, capsys,
 ):
