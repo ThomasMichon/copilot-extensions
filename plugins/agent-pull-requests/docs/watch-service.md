@@ -81,6 +81,9 @@ connector, observer, actual shielded native/disk task and every already-admitted
 Gateway operation before releasing the lease. Timeouts and cancellation never
 release writer custody or advertise successful drain; retry `close` on the
 same instance and event loop. A foreign process/event loop cannot release it.
+One monotonic deadline includes waiting behind another close and the remaining
+drain work. A queued caller's timeout/cancellation cannot release the active
+drain's lock or writer custody.
 Instances are single-use; construct a new one only after the old owner settled.
 
 This is the service-side graceful boundary, not a complete cutover protocol.

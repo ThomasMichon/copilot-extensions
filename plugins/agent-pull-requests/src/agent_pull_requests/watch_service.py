@@ -158,29 +158,47 @@ class WatchService:
             self._loop is not None and asyncio.get_running_loop() is not self._loop
         ):
             raise RuntimeError("watch service belongs to another execution owner")
-        async with self._closing:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        acquisition = asyncio.create_task(self._closing.acquire())
+        try:
+            await asyncio.wait_for(acquisition, timeout=timeout)
+        except BaseException:
+            if acquisition.done() and not acquisition.cancelled() and (
+                acquisition.exception() is None and acquisition.result()
+            ):
+                self._closing.release()
+            raise
+        drain = None
+        try:
             self._stopping.set()
             self.gateway.stop_admission()
             self._stop.set()
             tasks = set(self._tasks)
             if self._disk is not None:
                 tasks.add(self._disk)
-            drain = asyncio.create_task(self.gateway.drain(timeout=timeout))
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("watch service is not drained")
+            drain = asyncio.create_task(self.gateway.drain(timeout=remaining))
             tasks.add(drain)
+            _, pending = await asyncio.wait(tasks, timeout=max(0, deadline - loop.time()))
+            if pending:
+                raise TimeoutError("watch service is not drained")
+            # Consume failures after every unit settled; none permits early release.
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await drain
+            self._lease.release()
+            self._closed = True
+        finally:
+            # The gateway retains its disk-task set; don't leak a drain waiter.
             try:
-                _, pending = await asyncio.wait(tasks, timeout=timeout)
-                if pending:
-                    raise TimeoutError("watch service is not drained")
-                # Consume failures after every unit settled; none permits early release.
-                await asyncio.gather(*tasks, return_exceptions=True)
-                await drain
-                self._lease.release()
-                self._closed = True
+                if drain is not None:
+                    if not drain.done():
+                        drain.cancel()
+                    await asyncio.gather(drain, return_exceptions=True)
             finally:
-                # The gateway retains its disk-task set; don't leak a drain waiter.
-                if not drain.done():
-                    drain.cancel()
-                await asyncio.gather(drain, return_exceptions=True)
+                self._closing.release()
 
     async def run(self, stop: asyncio.Event, *, drain_timeout: float = 60) -> None:
         """Foreground entry for the existing placement/supervision owner."""
