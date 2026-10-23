@@ -212,15 +212,23 @@ def export_artifacts(
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix="python-artifacts-", dir=out_dir.parent))
     scratch = None
+    source = None
     try:
         scratch = promotion.add_scratch_worktree(commit, repo=repo)
-        projects = candidate_projects(scratch)
+        source = tempfile.TemporaryDirectory(prefix="promotion-artifact-source-")
+        candidate = Path(source.name).resolve() / "inputs" / "source"
+        candidate.mkdir(parents=True)
+        _run(
+            ["git", f"--attr-source={content_tree}", "checkout-index", "--all",
+             f"--prefix={candidate}{os.sep}"], cwd=scratch,
+        )
+        projects = candidate_projects(candidate)
         if reuse_repository is not None:
             from reuse_promotion_artifacts import reuse_artifacts
 
             reused = reuse_artifacts(
                 staging, repository=reuse_repository, dev_head=dev_head, main_before=main_before,
-                content_tree=content_tree, candidate_root=scratch, repo=repo,
+                content_tree=content_tree, candidate_root=candidate, repo=repo,
                 source_policy=source_policy, min_age_days=min_age_days,
             )
             if reused is not None:
@@ -228,7 +236,7 @@ def export_artifacts(
                 return reused
         argv = [
             sys.executable, str(Path(__file__).resolve()),
-            "--repo", str(scratch), "--out-dir", str(staging), "--toolchain-source", source_policy,
+            "--repo", str(candidate), "--out-dir", str(staging), "--toolchain-source", source_policy,
         ]
         if min_age_days is not None:
             argv += ["--toolchain-min-age-days", str(min_age_days)]
@@ -264,12 +272,14 @@ def export_artifacts(
         validate_artifacts(
             staging, content_tree=content_tree, dev_head=dev_head, main_before=main_before,
             projects=projects,
-            candidate_root=scratch,
+            candidate_root=candidate,
             source_policy=source_policy, min_age_days=min_age_days,
         )
         staging.rename(out_dir)
         return index
     finally:
+        if source is not None:
+            source.cleanup()
         if scratch is not None:
             promotion.remove_scratch_worktree(scratch, repo=repo)
         if staging.exists():

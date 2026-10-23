@@ -34,9 +34,11 @@ wheel construction and verification on Linux and Windows through
 build-toolchain lock with the existing plugin builds, validates PR/Fleet
 standalone bundles against their source/resource closure, and installs only
 those built wheels offline into a fresh environment outside the checkout.
+It also exports both standalone projects through a real nested promotion
+scratch worktree, validates the canonical source bundles, and checks cleanup.
 This is packaging evidence, not runtime dependency admission or image proof.
 `tools/test_standalone_python_artifacts.py` retains the fuller synthetic
-builder/bundle refusal matrix; fifteen pure identity, inventory and exact-hook
+builder/bundle refusal matrix; pure identity, inventory, exact-hook and export
 controls in `tools/promotion_unit_tests/test_standalone_artifacts.py` join the
 required no-actor unit packet without adding native builds to required CI.
 

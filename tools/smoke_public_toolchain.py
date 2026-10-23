@@ -4,14 +4,54 @@ from __future__ import annotations
 import json
 import argparse
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 from build_python_artifacts import build_plugin_artifacts
 from build_toolchain_lock import resolve_toolchain_lock
-from promotion_python_artifacts import INDEX_NAME, SCHEMA, _run, bundle_wheels, validate_artifacts
+from promotion_python_artifacts import (
+    INDEX_NAME, SCHEMA, _run, bundle_wheels, candidate_projects, export_artifacts, validate_artifacts,
+)
 from standalone_python_artifacts import COMPONENTS, artifact_label, build_standalone_artifacts, project_key
+
+
+def nested_standalone_export(directory: Path) -> dict:
+    """Exercise the actual nested promotion layout, not only direct builds."""
+    source = Path(__file__).resolve().parent.parent
+    fixture = directory / "nested-export-repository"
+    fixture.mkdir()
+    paths = _run([
+        "git", "ls-files", "--", ".gitattributes", "fleet-manager", "services/pr",
+        "libs/versioned-runtime", "libs/installer-engine", "libs/agent-procutil",
+    ], cwd=source).splitlines()
+    for relative in paths:
+        destination = fixture / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / relative, destination)
+    _run(["git", "init", "-q"], cwd=fixture)
+    _run(["git", "-c", "core.autocrlf=false", "add", "--all"], cwd=fixture)
+    _run([
+        "git", "-c", "user.name=Artifact Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-qm", "Canonical standalone export fixture",
+    ], cwd=fixture)
+    commit = _run(["git", "rev-parse", "HEAD"], cwd=fixture).strip()
+    tree = _run(["git", "rev-parse", "HEAD^{tree}"], cwd=fixture).strip()
+    export = directory / "nested-export"
+    index = export_artifacts(
+        repo=fixture, commit=commit, content_tree=tree, dev_head=commit, main_before=commit,
+        out_dir=export, source_policy="seasoned-public",
+    )
+    validate_artifacts(
+        export, content_tree=tree, dev_head=commit, main_before=commit,
+        projects=candidate_projects(fixture), candidate_root=fixture,
+        source_policy="seasoned-public",
+    )
+    assert {entry["component"] for entry in index["artifacts"]} == set(COMPONENTS)
+    assert len(_run(["git", "worktree", "list", "--porcelain"], cwd=fixture).split("worktree ")) == 2
+    assert not _run(["git", "status", "--porcelain"], cwd=fixture).strip()
+    return index
 
 
 def main(*, standalone: bool = False) -> None:
@@ -86,10 +126,12 @@ def main(*, standalone: bool = False) -> None:
                 "'_construction_procutil.py']; "
                 "assert all(root.joinpath(name).is_file() for name in names)",
             ], cwd=directory)
+        nested = nested_standalone_export(directory) if standalone else None
         print(json.dumps({
             "plugins": [manifest["plugin"] for manifest in manifests if "plugin" in manifest],
             "projects": [project_key(manifest) for manifest in manifests],
             "standalone_installed_offline": standalone,
+            "nested_export_artifacts": nested["artifacts"] if nested else [],
             "artifacts": [
                 {"project": project_key(manifest), "version": manifest["version"],
                  "artifact_id": manifest["artifact_id"], "payload_hash": manifest["payload_hash"]}
