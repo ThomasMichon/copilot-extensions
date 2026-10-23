@@ -18,6 +18,7 @@ registry plus a transport `module.yaml` it writes one managed SSH fragment:
 
 ```powershell
 agent-ssh emit-profile registry.yaml --module transports\direct\module.yaml
+agent-ssh gateway-profile selected-gateway.json --json
 agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
@@ -33,6 +34,12 @@ agent-ssh copilot my-machine --stop
 The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
+
+The supported [Gateway transport](docs/gateway-transport.md) projects explicitly
+approved peer names, finite reverse-listener ports and public host pins through
+an existing Gateway SSH alias. It retains source-independent local inputs and
+uses the same profile writer; it does not enroll peers, fetch keys, open a
+connection or start another controller.
 
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates

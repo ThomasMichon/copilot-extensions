@@ -1,0 +1,9 @@
+{
+  "comment": "Add supported strict Gateway peer profiles with durable local registry and host-pin snapshots.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
