@@ -25,16 +25,27 @@ def _admitted_source(codespace, account, token, remaining):
 
     class OwnerSource(CodespaceSource):
         def _fetch_gh_config(self):
+            from ssh_manager.dial_log import Dial, account_of
+
             # The general source deliberately retries cold starts. An observer
             # has no such authority: one attempt, bounded by its Available proof.
-            result = subprocess.run(
-                ["gh", "codespace", "ssh", "--config", "-c", codespace],
-                capture_output=True, text=True, env=self.gh_env,
-                timeout=min(30.0, remaining()), **no_window_kwargs(),
-            )
-            if result.returncode != 0:
-                raise RuntimeError("Owner config fetch failed")
-            return result.stdout
+            budget = min(30.0, remaining())
+            with Dial(codespace, "config_fetch", attempt=1, account=account_of(self.gh_env)) as dial:
+                try:
+                    result = subprocess.run(
+                        ["gh", "codespace", "ssh", "--config", "-c", codespace],
+                        capture_output=True, text=True, env=self.gh_env,
+                        timeout=budget, **no_window_kwargs(),
+                    )
+                except subprocess.TimeoutExpired:
+                    dial.outcome, dial.reason = "timeout", f"no answer in {budget}s"
+                    raise
+                if result.returncode != 0:
+                    dial.outcome, dial.reason = "error", f"rc={result.returncode}"
+                    dial.stderr = result.stderr or ""
+                    raise RuntimeError("Owner config fetch failed")
+                dial.outcome = "ok"
+                return result.stdout
 
     return OwnerSource(codespace, account=account, token=token)
 
@@ -45,10 +56,10 @@ def _admitted_manager(admit):
     class OwnerManager(ConnectionManager):
         async def _start_control_master(self, *args, **kwargs):
             # The shared manager may retry: each dial must re-enter admission.
-            budget = await admit()
-            return await bounded_operation(
-                super()._start_control_master(*args, **kwargs), timeout=budget,
-            )
+            await admit()
+            # Stay in the connecting task: a live process must reach the
+            # manager's registry before cancellation can lose its return value.
+            return await super()._start_control_master(*args, **kwargs)
 
     return OwnerManager()
 
@@ -112,6 +123,17 @@ class RemoteMuxProbe:
 
     async def begin_wave(self, generation: int) -> OwnerInventory:
         return await joined_thread(self.inventory_reader, generation)
+
+    async def admitted(self, codespace, inventory, generation, current) -> bool:
+        try:
+            scope = await joined_thread(self.scope_reader)
+            row = inventory.lookup(
+                codespace, wave=generation, scope=scope,
+                now=self.clock(), max_age=self.max_age,
+            )
+            return current() and row is not None and row.state.lower() == "available"
+        except Exception:
+            return False
 
     async def __call__(self, codespace: str, targets: list[str]) -> dict[str, bool | None]:
         try:

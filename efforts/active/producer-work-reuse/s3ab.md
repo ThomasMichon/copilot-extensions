@@ -103,6 +103,12 @@ defers to the next due wave, with no hidden per-venue refresh.
   listing-only provider compatibility, contended-registry sibling progress,
   same-inventory/separate-manager bridge proof and actual bridge config-child
   cancellation. All product and test deadlines remain unchanged.
+- Second provider review corrected cached mux authority after awaited bridge
+  work and the successful-ControlMaster handoff cancellation race; retained the
+  existing redacted config-fetch dial diagnostics and updated the legacy opener's
+  off-loop test. Extended final selection: **217 tests passed**, including the
+  existing `test_owner_never_blocks.py` suite. No shared telemetry adapter or
+  transport borrowing was introduced.
 
 ## Reproduction and remaining cells
 

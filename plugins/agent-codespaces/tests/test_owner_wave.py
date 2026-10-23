@@ -615,3 +615,102 @@ async def test_default_bridge_reuses_inventory_not_transport(store, monkeypatch)
     assert len(acquisitions) == 1
     assert operations == ["mux", "bridge"]
     assert closed == ["cs", "cs"]
+
+
+@pytest.mark.parametrize("change", ["scope", "expiry"])
+async def test_bridge_await_invalidates_cached_mux_verdict(store, change):
+    first = owner.hold("cs", "t", mux_session="m", daemon_port=12345)
+    scope, clock, mirrors = [SCOPE], [1], []
+
+    class Manager:
+        async def exec_command(self, *a, **k):
+            return SimpleNamespace(exit_code=0, stdout="ACMUX1\t0\tpresent\nACMUX1\tDONE\t1\n")
+
+        async def disconnect(self, name):
+            pass
+
+    async def opener(name):
+        return Manager()
+
+    async def bridge(name, port):
+        if change == "scope":
+            scope[0] = replace(SCOPE, source="replacement")
+        else:
+            clock[0] = 31
+        return None
+
+    async def mirror(name):
+        mirrors.append(name)
+
+    probe = mux.RemoteMuxProbe(
+        inventory_reader=lambda wave: inventory(wave), scope_reader=lambda: scope[0],
+        clock=lambda: clock[0], open_manager=opener,
+    )
+    forwards = sf.SessionForwards(
+        lambda *a: None, probe, bridge_probe=bridge, transcript_mirror=mirror,
+    )
+    forwards._channels["cs"] = (12345, SimpleNamespace(is_alive=True))
+    await forwards.probe([first])
+    assert not forwards._mirroring and mirrors == []
+    assert owner.get_hold("cs").tenants == first.tenants
+
+
+async def test_control_master_result_reaches_owner_before_cancellation(monkeypatch):
+    import ssh_manager
+
+    opened, disposed = [], []
+
+    class Base:
+        async def _start_control_master(self, *a, **k):
+            resource = object()
+            opened.append(resource)
+            asyncio.current_task().cancel()
+            return resource
+
+        async def ensure_connected(self):
+            self.resource = await self._start_control_master()
+
+        async def disconnect(self):
+            disposed.append(self.resource)
+
+    async def admit():
+        return 1
+
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", Base)
+    manager = mux._admitted_manager(admit)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await inv.bounded_operation(manager.ensure_connected(), 1)
+    finally:
+        await inv.finish_cleanup(manager.disconnect())
+    assert opened == disposed and len(opened) == 1
+
+
+@pytest.mark.parametrize("outcome", ["ok", "error", "timeout"])
+def test_owner_config_fetch_retains_dial_diagnostics(monkeypatch, tmp_path, outcome):
+    import subprocess
+    from ssh_manager import dial_log
+
+    records = []
+    monkeypatch.setattr(dial_log, "record", lambda *a, **k: records.append(k))
+
+    def run(args, **kwargs):
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+        return SimpleNamespace(
+            returncode=0 if outcome == "ok" else 1,
+            stdout="Host fixture\n  HostName fixture\n", stderr="fixture failure",
+        )
+
+    monkeypatch.setattr(mux.subprocess, "run", run)
+    source = mux._admitted_source("cs", "a", "fixture", lambda: 1)
+    source._config_dir = tmp_path
+    if outcome == "ok":
+        source.get_ssh_config()
+    else:
+        with pytest.raises((RuntimeError, subprocess.TimeoutExpired)):
+            source.get_ssh_config()
+    assert len(records) == 1
+    assert records[0]["kind"] == "config_fetch"
+    assert records[0]["outcome"] == outcome
+    assert records[0]["attempt"] == 1 and records[0]["account"] == "pinned"

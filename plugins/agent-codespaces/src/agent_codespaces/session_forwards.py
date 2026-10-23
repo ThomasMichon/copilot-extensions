@@ -458,6 +458,10 @@ class SessionForwards:
                 await self._check_bridge(hold.codespace, probe=bridge)
                 if not await owned():
                     return
+                if inventory is not None and not await self._probe.admitted(
+                    hold.codespace, inventory, generation, current,
+                ):
+                    return
                 self._live_seen[hold.codespace] = now
                 if not self._start_mirror(hold.codespace):
                     # Its slot was busy: probe again next tick, so the pass only
