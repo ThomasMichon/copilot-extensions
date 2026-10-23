@@ -43,6 +43,16 @@ class ConsumerScope:
                 raise ValueError("invalid replay scope")
 
 
+@dataclass(frozen=True)
+class ObservationTarget:
+    """One account-scoped read and the registrations present before it starts."""
+
+    account: str
+    repo: str
+    number: int
+    registration_ids: frozenset[str]
+
+
 def _timestamp(value: object) -> float:
     try:
         normalized = positive_seconds(value)
@@ -307,12 +317,38 @@ class WatchReplay:
             record = self._find(scope, request_id, issued_at)
             return self._receipt(record) if record else {"status": "uncertain"}
 
-    def observe(self, account: str, repo: str, number: int, snapshot: PRSnapshot) -> dict:
+    def observation_targets(self) -> tuple[ObservationTarget, ...]:
+        """Coalesce waiting subscriptions, excluding already pending delivery."""
+        with self._lock:
+            groups: dict[tuple[str, str, int], set[str]] = {}
+            for record in self._records:
+                if record["outcome"] != "active":
+                    continue
+                scope = ConsumerScope(**record["scope"])
+                registry = self._registries[(scope.account, scope.repo)]
+                sub = registry.subscriber(
+                    WatchKey(scope.repo, record["number"]), record["registration_id"],
+                )
+                if sub.pending is None:
+                    groups.setdefault((scope.account, scope.repo, record["number"]), set()).add(
+                        record["registration_id"],
+                    )
+            return tuple(
+                ObservationTarget(*key, frozenset(identities))
+                for key, identities in sorted(groups.items())
+            )
+
+    def observe(
+        self, account: str, repo: str, number: int, snapshot: PRSnapshot, *,
+        registration_ids: frozenset[str] | None = None,
+    ) -> dict:
         """Apply one already-authorized observation to all matching subscriptions."""
         def apply(staged: WatchReplay) -> dict:
             registry = staged._registries.get((account, repo))
             if registry is not None:
-                fired = registry.apply_snapshot(WatchKey(repo, number), snapshot)
+                fired = registry.apply_snapshot(
+                    WatchKey(repo, number), snapshot, registration_ids=registration_ids,
+                )
                 for event in fired:
                     _check_event_size(event.frozen_payload)
             return {"status": "observed"}

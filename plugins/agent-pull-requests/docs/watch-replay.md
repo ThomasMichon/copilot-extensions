@@ -40,8 +40,52 @@ This library neither advertises health capabilities nor extends the existing
 watch daemon's register/unregister wire contract. The optional
 [Gateway adapter](watch-gateway.md) supplies configured scope mapping, bounded
 operations and disk transaction custody around this core. Service activation,
-authorized provider observation, coordinator consumption and
+production provider authorization, coordinator consumption and
 installation/cutover integration remain separate work.
+
+## Finite native observation adapter
+
+`watch_observer.ReplayObserver` connects the disk-backed `ReplayStore` to the
+existing native snapshot bridge. It is an owner-invoked **single cycle**, not
+another poller, service, credential issuer or activation path. The embedding
+lifecycle owns scheduling, process-level single-writer authority, renewal and
+drain. Its local nonblocking cycle guard refuses overlapping invocations of
+the same adapter; it does not establish distributed ownership.
+
+Trusted deployment configuration supplies immutable
+`NativeObservationBinding(account, repo, command, prefix, credential_command)`
+values, at most one per exact account/repository pair. Commands are attributable
+absolute executables/interpreters, not remote registration fields. An optional
+credential command selects the existing per-request native credential path;
+omitting it retains the native alternative. Account labels are not
+authentication or proof that a credential is downscoped: the embedding owner
+still supplies the authorized account/source/forge policy described in
+[the credential adapter](watch-gateway.md#explicit-native-observation-credential-command).
+There is no cross-account/repository credential or provider fallback.
+
+Each cycle durably sweeps elapsed deadlines, loads coalesced waiting targets,
+and releases transaction custody before native reads. It performs one read
+per bound account/repository/PR, shared across that group's consumers. Already
+pending subscriptions do not trigger more reads. Unbound groups remain
+untouched except for deadline sweeps; the cycle reports their count rather than
+selecting another binding. The existing replay record bound limits each pass.
+Every native read retains the bridge's time/output bounds.
+
+Apply reloads the current durable envelope under the same operation lock.
+Only the exact registration IDs captured before that read can receive the
+snapshot. Concurrent cancellation is preserved; a registration arriving during
+the read waits for the next cycle rather than adopting an older result.
+Pending event IDs, original deadlines and completion receipts are unchanged.
+Provider unavailability does not cancel, reset or replace any subscription,
+and each attempted read is followed by an independent deadline sweep.
+
+The caller supplies the cycle's finite authority expiry and optional current
+lifetime checkpoint. Checks occur between reads and at lookup, commit and
+result boundaries, including after provider failure. Known loss stops later
+reads and application; an already-started write can still finish uncertain,
+using the same disconnect/reconcile-original-identity contract as the Gateway
+adapter. Never wait for remote rollback or arm a second waiter.
+These owner-only methods are not added to the Gateway operation allowlist.
 
 ## Reconciliation and retention
 
@@ -110,7 +154,7 @@ does not replay it, and the compact receipt reconciles its lost response.
 Run through the repository's bounded plugin-test supervisor:
 
 ```text
-python tools/run-plugin-tests.py agent-pull-requests --test-file tests/test_watch_replay.py --test-file tests/test_watch_registry.py --test-file tests/test_watch_delivery.py
+python tools/run-plugin-tests.py agent-pull-requests --test-file tests/test_watch_replay.py --test-file tests/test_watch_registry.py --test-file tests/test_watch_delivery.py --test-file tests/test_watch_observer.py --test-file tests/test_watch_credential_transport.py
 ```
 
 The replay suite covers scoped reconciliation, account-separated observation,
@@ -120,6 +164,14 @@ that commits an idempotent synthetic effect before or after ACK. It also drives
 the actual native callback scheduler alongside a pending pull event to prove
 that pull records are not executed or acknowledged by that adapter.
 
-These are domain/persistence/process checks, not authenticated serving,
-Gateway, container, credential or installed-lifecycle acceptance. Those remain
-required before advertising a fleet service or enabling its dispatch consumer.
+The observer tests exercise native subprocess reads and a real
+restarted consumer's exact event/ACK, account isolation, concurrent registration
+and cancellation, expiry/disconnect and pre/post-replace failure. Synthetic
+TLS/PoP/controller/recipient-ACK tests feed native credential-backed results
+through the real observation cycle into durable replay state, including provider
+loss before another forge command.
+
+These are source-domain, synthetic transport, persistence and process checks,
+not production credential enrollment, installed-service, container placement,
+first-provision or real fleet acceptance. Those remain required before
+advertising a fleet service or enabling its dispatch consumer.

@@ -154,12 +154,14 @@ Never accept argv, keys, credential references or provider endpoint selection
 from a remote watch registration. None is added to the Gateway wire contract,
 subscription/replay state or emitted snapshot. This source-level adapter does
 not configure or activate an observation daemon, production provider or fleet
-placement.
+placement. The owner-invoked [finite replay observation adapter](watch-replay.md#finite-native-observation-adapter)
+consumes this bridge with trusted account/repository bindings, releases disk
+custody across reads and applies only pre-read registration identities.
 
 Synthetic process/TLS tests exercise the PR bridge, native Worktrees driver,
 real Fleet credential CLI and recipient-sealed exchange together, including
-per-command renewal and refusal before another forge command after provider
-loss. Separate native CLI tests exercise snapshot configuration and scope
+per-command renewal, durable replay observation and refusal before another forge
+command after provider loss. Separate native CLI tests exercise snapshot configuration and scope
 mismatch refusal.
 
 These synthetic checks are not installed-service, production forge-credential, Dispatch,

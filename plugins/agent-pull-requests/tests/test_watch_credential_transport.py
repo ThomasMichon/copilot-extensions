@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -14,8 +15,9 @@ from agent_pull_requests import watch_provider
 
 
 @pytest.mark.parametrize("lose_provider", [False, True])
+@pytest.mark.parametrize("replay", [False, True])
 def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
-    tmp_path, monkeypatch, lose_provider,
+    tmp_path, monkeypatch, lose_provider, replay,
 ):
     repository = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(repository / "fleet-manager" / "tests"))
@@ -43,7 +45,8 @@ def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
         "url=sys.argv[-1]\n"
         "assert url.startswith('https://api.github.com/repos/project/repository/')\n"
         "if url.endswith('/pulls/7'):\n"
-        "    value={'state':'open','head':{'sha':'head'},'title':'Fixture'}\n"
+        f"    value={{'state':{'closed' if replay else 'open'!r},'merged':{replay!r},"
+        "'head':{'sha':'head'},'title':'Fixture'}\n"
         "elif url.endswith('/status'):\n"
         "    value={'total_count':0,'statuses':[]}\n"
         "elif '/check-runs?' in url:\n"
@@ -92,7 +95,47 @@ def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
                     credential_command=credential_command, runner=run,
                 )
 
-            if lose_provider:
+            if replay:
+                from agent_pull_requests.watch_observer import (
+                    NativeObservationBinding, ReplayObserver,
+                )
+                from agent_pull_requests.watch_replay import ConsumerScope
+                from agent_pull_requests.watch_replay_store import ReplayStore
+
+                store = ReplayStore(tmp_path.resolve(), "fleet/service/credential-test")
+                store.provision()
+                consumer = ConsumerScope("consumer", parameters["account"], "project/repository")
+                expires = int(time.time()) + 60
+                original = {
+                    "request_id": "request", "issued_at": time.time(), "number": 7,
+                    "until": ("merged",),
+                }
+                receipt = store.execute(consumer, "register", original, expires_at=expires)
+                owner = ReplayObserver(store, bindings=(NativeObservationBinding(
+                    consumer.account, consumer.repo, sys.executable,
+                    prefix=(sys.executable, str(native)),
+                    credential_command=tuple(credential_command),
+                ),))
+                result = owner.cycle(expires_at=expires)
+                assert result == {
+                    "status": "observed", "observed": int(not lose_provider),
+                    "unavailable": int(lose_provider), "unbound": 0,
+                }
+                assert store.execute(consumer, "register", original, expires_at=expires) == receipt
+                events = store.execute(consumer, "pending", {}, expires_at=expires)["events"]
+                if lose_provider:
+                    assert events == []
+                    assert len(source.calls) == 2 and requests.read_text().splitlines() == ["request"]
+                else:
+                    assert len(events) == 1 and events[0]["transitions"] == ["merged"]
+                    assert events[0]["registration_id"] == receipt["registration_id"]
+                    restored = ReplayStore(store.root, store.namespace)
+                    assert restored.execute(
+                        consumer, "pending", {}, expires_at=expires,
+                    )["events"] == events
+                    assert owner.cycle(expires_at=expires)["observed"] == 0
+                    assert len(source.calls) == len(requests.read_text().splitlines()) == 4
+            elif lose_provider:
                 with pytest.raises(ValueError, match="native snapshot command failed"):
                     fetch()
                 assert len(source.calls) == 2 and requests.read_text().splitlines() == ["request"]

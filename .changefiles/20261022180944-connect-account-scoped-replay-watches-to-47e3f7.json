@@ -1,0 +1,9 @@
+{
+  "comment": "Connect account-scoped replay watches to finite native observation cycles without holding disk custody across provider reads.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

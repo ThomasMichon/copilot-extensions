@@ -6,11 +6,15 @@ import json
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 from single_instance_lease import OperationLock
 
-from .watch_replay import ConsumerScope, WatchReplay
+from .watch_contract import PRSnapshot
+from .watch_replay import ConsumerScope, ObservationTarget, WatchReplay
 from .watch_storage import _atomic_write_json
+
+_T = TypeVar("_T")
 
 
 class ReplayStoreInvalid(ValueError):
@@ -74,25 +78,26 @@ class ReplayStore:
             )
             _atomic_write_json(self.path, core.snapshot())
 
-    def _current(self, expires_at: int, checkpoint: Callable[[], None] | None) -> None:
+    def check_current(self, expires_at: int, checkpoint: Callable[[], None] | None) -> None:
+        """Check the embedding owner's current authority, including between reads."""
         if type(expires_at) is not int or expires_at <= self.clock():
             raise ReplayCallerExpired("caller context expired")
         if checkpoint is not None:
             checkpoint()
 
-    def execute(
-        self, scope: ConsumerScope, operation: str, payload: dict, *, expires_at: int,
+    def _transaction(
+        self, operation: Callable[[WatchReplay], _T], *, expires_at: int,
         checkpoint: Callable[[], None] | None = None,
-    ) -> dict:
+    ) -> _T:
         if checkpoint is not None and not callable(checkpoint):
             raise ValueError("invalid request checkpoint")
-        self._current(expires_at, checkpoint)
+        self.check_current(expires_at, checkpoint)
         with self._lock() as lock:
-            self._current(expires_at, checkpoint)
+            self.check_current(expires_at, checkpoint)
 
             def commit(state: dict) -> None:
                 lock.assert_owned()
-                self._current(expires_at, checkpoint)
+                self.check_current(expires_at, checkpoint)
                 _atomic_write_json(self.path, state)
 
             if self.path.is_symlink():
@@ -104,7 +109,42 @@ class ReplayStore:
                 )
             except (ValueError, UnicodeError, RecursionError):
                 raise ReplayStoreInvalid("invalid persisted replay state") from None
-            self._current(expires_at, checkpoint)
+            self.check_current(expires_at, checkpoint)
+            result = operation(core)
+            self.check_current(expires_at, checkpoint)
+            return result
+
+    def observation_targets(
+        self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
+    ) -> tuple[ObservationTarget, ...]:
+        return self._transaction(
+            lambda core: core.observation_targets(), expires_at=expires_at, checkpoint=checkpoint,
+        )
+
+    def observe(
+        self, target: ObservationTarget, snapshot: PRSnapshot, *, expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> dict:
+        """Trusted owner-only input, never a serving operation."""
+        return self._transaction(
+            lambda core: core.observe(
+                target.account, target.repo, target.number, snapshot,
+                registration_ids=target.registration_ids,
+            ), expires_at=expires_at, checkpoint=checkpoint,
+        )
+
+    def sweep_timeouts(
+        self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
+    ) -> dict:
+        return self._transaction(
+            lambda core: core.sweep_timeouts(), expires_at=expires_at, checkpoint=checkpoint,
+        )
+
+    def execute(
+        self, scope: ConsumerScope, operation: str, payload: dict, *, expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> dict:
+        def dispatch(core: WatchReplay) -> dict:
             if operation == "pending":
                 swept = core.sweep_timeouts()
                 if swept["status"] == "uncertain":
@@ -132,5 +172,6 @@ class ReplayStore:
                 }
             else:
                 raise ValueError("unsupported replay operation")
-            self._current(expires_at, checkpoint)
             return result
+
+        return self._transaction(dispatch, expires_at=expires_at, checkpoint=checkpoint)

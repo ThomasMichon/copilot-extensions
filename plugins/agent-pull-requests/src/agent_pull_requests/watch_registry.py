@@ -302,6 +302,7 @@ class WatchRegistry(RegistryState):
 
     def apply_snapshot(
         self, key: WatchKey, snap: PRSnapshot, *, fetch_revision: int | None = None,
+        registration_ids: frozenset[str] | None = None,
     ) -> tuple[FiredEvent, ...]:
         """Diff ``snap`` against every subscriber; retain opted-in fired events.
 
@@ -319,6 +320,8 @@ class WatchRegistry(RegistryState):
             now = time.monotonic()
             for subscriber_id in list(bucket.keys()):
                 sub = bucket[subscriber_id]
+                if registration_ids is not None and sub.registration_id not in registration_ids:
+                    continue
                 if (
                     key.worktrees_command and fetch_revision is not None
                     and fetch_revision < sub.registered_revision
