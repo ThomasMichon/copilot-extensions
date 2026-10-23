@@ -916,13 +916,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         from . import permissions, worktree_trust
 
         try:
-            worktree_trust.ensure_record_trusted(record, config)
+            worktree_trust.prepare_for_launch(
+                record, config, defer_projections=getattr(state.args, "defer_projections", False),
+            )
         except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
             return output._json_error(str(exc), exit_code=3)
-        if not getattr(state.args, "defer_projections", False):
-            local_cache_refresh.prepare_for_launch(
-                record.worktree_path, compose_pair=True, config=config,
-            )
     if seed_pending:
         launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
     else:

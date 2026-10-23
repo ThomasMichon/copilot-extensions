@@ -93,7 +93,10 @@ def _permission_state(worktree_path: str) -> dict:
         _, data = permissions._read_config_jsonc(config_path)
         if not isinstance(data, dict) or not isinstance(data.get("trustedFolders", []), list):
             raise ValueError("Copilot trusted-folder configuration is invalid")
-        trusted = worktree_path in data.get("trustedFolders", [])
+        trusted = any(
+            path in data.get("trustedFolders", [])
+            for path in (worktree_path, str(Path(worktree_path).resolve()))
+        )
     else:
         trusted = False
     approvals_path = permissions._permissions_path()

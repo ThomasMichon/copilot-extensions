@@ -279,17 +279,27 @@ def test_creation_never_repairs_resume_or_handed_off_new(creation, capsys, hando
     assert launch_seed_state.state_path(creation.record.yaml_path).read_bytes() == before
 
 
-@pytest.mark.parametrize("repeat", ["idempotent", "companion_permissions"])
+@pytest.mark.parametrize("repeat", ["idempotent", "companion_permissions", "lexical"])
 def test_creation_restores_native_pair_permissions_and_is_idempotent(
     native_creation, capsys, repeat,
 ):
     creation = native_creation
+    canonical = Path(creation.record.worktree_path)
+    if repeat == "lexical":
+        creation.record.worktree_path = str(canonical / ".." / canonical.name)
+        tracking.save_record(creation.record)
     assert cfg.tracking_dir.__module__ == cfg.__name__
     path = creation.record.yaml_path
     seed_before = launch_seed_state.state_path(path).read_bytes()
     code, report = _run(creation, capsys, fix=True)
     assert code == 0 and report["prepared"] and report["repaired"]
     assert all(report["checks"].values())
+    if repeat == "lexical":
+        saved = json.loads(permissions._permissions_path().read_text())
+        assert creation.record.worktree_path in saved["locations"]
+        assert str(canonical) not in saved["locations"]
+        _, config = permissions._read_config_jsonc(permissions._config_path())
+        assert str(canonical.resolve()) in config["trustedFolders"]
     assert report["projection_status"] == "ready"
     record = tracking.load_record(path)
     pair = state_root.resolve_pair(creation.configs["harness"], cwd=record.worktree_path)

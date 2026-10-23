@@ -615,15 +615,13 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         from . import permissions, worktree_trust
 
         try:
-            worktree_trust.ensure_record_trusted(record, config)
+            worktree_trust.prepare_for_launch(
+                record, config, defer_projections=getattr(args, "defer_projections", False),
+            )
         except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
             output.err(str(exc))
             _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
             return 3
-        if not getattr(args, "defer_projections", False):
-            local_cache_refresh.prepare_for_launch(
-                record.worktree_path, compose_pair=True, config=config,
-            )
     if seed_pending:
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,

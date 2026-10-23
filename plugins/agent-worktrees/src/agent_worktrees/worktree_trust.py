@@ -18,3 +18,16 @@ def ensure_record_trusted(record: tracking.WorktreeRecord, config: Config | None
     }:
         raise permissions.FolderTrustError("Refusing folder trust for a terminal managed worktree")
     return permissions.ensure_trusted_folder(record.worktree_path)
+
+
+def prepare_for_launch(
+    record: tracking.WorktreeRecord, config: Config, *, defer_projections: bool,
+) -> None:
+    """Establish trust before guidance without coupling it to cache deferral."""
+    ensure_record_trusted(record, config)
+    if not defer_projections:
+        from . import local_cache_refresh
+
+        local_cache_refresh.prepare_for_launch(
+            record.worktree_path, compose_pair=True, config=config,
+        )
