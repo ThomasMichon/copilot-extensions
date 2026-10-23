@@ -5,7 +5,9 @@ import struct
 import pytest
 
 from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
-from fleet_manager.gateway_ssh_provider import directory_snapshot, project_gateway_profiles
+from fleet_manager.gateway_ssh_provider import (
+    directory_snapshot, project_gateway_authorization, project_gateway_profiles,
+)
 from fleet_manager.planning import PlanError
 
 
@@ -144,3 +146,43 @@ def test_host_mediation_is_not_silently_treated_as_native_egress():
     )
     with pytest.raises(PlanError, match="mediation"):
         project(policy, directory, environment="wsl")
+
+
+@pytest.mark.parametrize("inbound,outbound", [(False, False), (True, False), (False, True), (True, True)])
+def test_login_authorization_uses_target_inbound_and_source_outbound_independently(inbound, outbound):
+    policy, directory = fixtures(inbound=inbound, outbound=outbound)
+    value = project_gateway_authorization(
+        policy, directory, machine="worker-a", environment="linux", local_public_key=key(1),
+    )
+    assert [row["machine"] for row in value["peers"]] == (
+        ["worker-a", "worker-b"] if inbound and outbound else ["worker-b"] if inbound else []
+    )
+    assert not value["execution_authorized"] and not value["live_readiness_verified"]
+
+
+def test_client_only_source_may_log_in_without_its_own_inbound_service():
+    policy, directory = fixtures(role="client-only", inbound=False)
+    directory["machines"][0].update(host_key=None, reverse_port=None)
+    value = project_gateway_authorization(
+        policy, directory, machine="worker-b", environment="linux", local_public_key=key(2),
+    )
+    assert [row["machine"] for row in value["peers"]] == ["worker-a", "worker-b"]
+    with pytest.raises(PlanError, match="identity"):
+        project_gateway_authorization(
+            policy, directory, machine="worker-b", environment="linux", local_public_key=key(1),
+        )
+
+
+def test_authorization_refuses_unimplemented_host_mediation():
+    policy, directory = fixtures(
+        environment="wsl", gateway_egress=False,
+        host_hop={"machine": "worker-b", "environment": "linux"},
+    )
+    with pytest.raises(PlanError, match="mediation"):
+        project_gateway_authorization(
+            policy, directory, machine="worker-a", environment="wsl", local_public_key=key(1),
+        )
+    value = project_gateway_authorization(
+        policy, directory, machine="worker-b", environment="linux", local_public_key=key(2),
+    )
+    assert [row["machine"] for row in value["peers"]] == ["worker-b"]

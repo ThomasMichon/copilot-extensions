@@ -49,7 +49,16 @@ Output includes a normal `agent-ssh.gateway-profile` configuration and its
 target/controller, policy/decision/directory digests, directory revision and
 exclusions. `execution_authorized` and `live_readiness_verified` remain false.
 This closes provider projection, not the distinct enrollment, target-local
-authorization, connector supervision or bidirectional SSH proof.
+listener lifecycle, connector supervision or bidirectional SSH proof.
+
+`project_gateway_authorization` selects the corresponding target-local login
+keys from the same exact snapshot: target inbound and source outbound are
+independent, disabled/offline targets yield no keys, and client-only sources
+can authenticate without an inbound listener. It returns the selected login
+user for the target-local service owner to verify. The installed
+[`gateway-authorization`](../../plugins/agent-ssh/docs/gateway-transport.md#target-local-login-authorization)
+consumer explicitly converges its dedicated key file, with no global
+authorization-file adoption, service restart or Gateway forwarding grant.
 
 ## Installed consumer
 
@@ -91,6 +100,10 @@ client-only records, strict public-directory validation and snapshot isolation.
 revision rollback/mutation refusal, unchanged repeat, policy withdrawal and
 native OpenSSH configuration consumption. These native filesystem cases belong
 to the explicit integration tier, not a new exhaustive required-CI matrix.
+The native authorization fixture additionally authenticates real SSH sessions
+against an unchanged isolated server while admitted keys and inbound policy
+change. Source parsing/selection still does not authenticate the directory
+producer or qualify a production enrollment.
 
 This realizes Machine Fleet's driver-selected reachability and the existing
 Gateway/SSH onboarding provider phase. It preserves the transport-provider

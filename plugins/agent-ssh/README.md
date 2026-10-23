@@ -20,6 +20,7 @@ registry plus a transport `module.yaml` it writes one managed SSH fragment:
 agent-ssh emit-profile registry.yaml --module transports\direct\module.yaml
 agent-ssh gateway-profile selected-gateway.json --json
 agent-ssh gateway-provider --policy policy.json --directory admitted.json --machine worker-a --environment linux --gateway chosen-gateway --identity-file <absolute-key> --public-key-file <absolute-public-key> --json
+agent-ssh gateway-authorization --policy policy.json --directory admitted.json --machine worker-a --environment linux --public-key-file <absolute-public-key> --state-dir <dedicated-absolute-directory> --json
 agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
@@ -32,7 +33,7 @@ agent-ssh copilot my-machine --detach --seed-file task.md
 agent-ssh copilot my-machine --stop
 ```
 
-The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
+The profile core manages SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
 
@@ -48,6 +49,14 @@ The optional `fleet` extra adds the
 the same writer and refuses superseded or equal-revision/changed directories.
 Missing SDK support is actionable, not a fallback to unfiltered peer routes.
 Ordinary standalone profile commands remain SDK-free.
+
+The same optional extra supplies `gateway-authorization`: a read-only preview,
+or explicit `--apply` of a dedicated target-local `AuthorizedKeysFile` for a
+separately owned sshd. It grants only source-outbound/target-inbound logins
+selected by the same public directory and policy; forwarding remains disabled.
+It does not edit the user's ordinary key file, enroll a Gateway, fetch a secret,
+start a listener, or create a reconciliation loop. See the
+[native authorization contract](docs/gateway-transport.md#target-local-login-authorization).
 
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates

@@ -1,5 +1,5 @@
 {
-  "comment": "Project selected admitted Gateway public bindings through existing directional SSH policy and the canonical installed profile consumer",
+  "comment": "Project selected admitted Gateway public bindings through existing directional SSH policy for canonical profiles and independent target-inbound/source-outbound native login authorization",
   "changes": [
     {
       "plugin": "fleet-manager",
