@@ -8,6 +8,8 @@ import sqlite3
 import time
 from typing import TYPE_CHECKING, Any
 
+from .runtime_custody import RuntimeAdmission, admission_document
+
 if TYPE_CHECKING:
     from .native_keyed_admission import KeyedNativePrompt
 
@@ -87,7 +89,9 @@ class _EventsMixin:
         *, delivery_id: str | None = None,
         pending_prompt_id: int | None = None,
         native_admission: KeyedNativePrompt | None = None,
+        runtime_admission: RuntimeAdmission | None = None,
     ) -> dict | None:
+        custody = admission_document(runtime_admission)
         if native_admission is not None:
             if pending_prompt_id is not None or self.read_only:
                 raise ValueError("keyed_native_admission_unavailable")
@@ -105,8 +109,9 @@ class _EventsMixin:
                         return {"inserted": False, "receipt": saved}
                     conn.execute(
                         "INSERT INTO turns (session_id,turn_index,prompt,started_at,"
-                        "acquisition_delivery_id,native_admission_json) VALUES (?,?,?,?,?,?)",
-                        (session_id, turn_index, prompt, now, delivery_id, encoded),
+                        "acquisition_delivery_id,native_admission_json,runtime_custody_json) "
+                        "VALUES (?,?,?,?,?,?,?)",
+                        (session_id, turn_index, prompt, now, delivery_id, encoded, custody),
                     )
                     conn.commit()
                     return {"inserted": True, "receipt": receipt}
@@ -117,10 +122,10 @@ class _EventsMixin:
                     conn.rollback()
                     raise
         sql = (
-            "INSERT INTO turns (session_id, turn_index, prompt, started_at, acquisition_delivery_id) "
-            "VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO turns (session_id, turn_index, prompt, started_at, "
+            "acquisition_delivery_id,runtime_custody_json) VALUES (?, ?, ?, ?, ?, ?)"
         )
-        params = (session_id, turn_index, prompt, now, delivery_id)
+        params = (session_id, turn_index, prompt, now, delivery_id, custody)
         if pending_prompt_id is None:
             self.execute_write(sql, params)
             return

@@ -23,13 +23,15 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd.claims import ClaimConflict, decide_acquire
+
+from .host_inventory import HostInventory, HostInventoryError
 
 __all__ = ["ClaimConflict", "HostIndex", "HostRecord"]
 
@@ -187,17 +189,14 @@ class HostIndex:
                 os.unlink(tmp)
 
     @contextmanager
-    def _locked_reload(self):
-        """Hold a cross-process lock for one reload -> mutate -> flush cycle.
+    def _locked_index(self, *, create_parent: bool = True) -> Iterator[None]:
+        """Share the existing native mutex between mutation and strict reads."""
+        if create_parent:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            from .host_inventory import plain_parents
 
-        ``single_instance_lease.SingleInstance`` is normally a whole-process
-        lease; here it is acquired and released around a single short
-        operation, retried (blocking, bounded by ``_LOCK_TIMEOUT_S``) on
-        contention rather than failing immediately -- a mutation should wait
-        out a few milliseconds of contention from a concurrent writer, not
-        refuse outright.
-        """
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+            plain_parents(self._path.absolute())
         lease = SingleInstance(
             self._path.parent, service="agent-bridge-host-index",
             lock_name=self._path.name + ".lock",
@@ -212,11 +211,32 @@ class HostIndex:
                     raise
                 time.sleep(self._LOCK_POLL_S)
         try:
+            yield
+        finally:
+            lease.release()
+
+    @contextmanager
+    def _locked_reload(self):
+        """Reload, mutate and flush under the existing cross-process mutex."""
+        with self._locked_index():
             self._load_or_raise()
             yield
             self._flush()
-        finally:
-            lease.release()
+
+    def locked_inventory(self) -> HostInventory:
+        """Observe fresh strict storage without refreshing cache or flushing."""
+        from .host_inventory import read_inventory
+
+        with self._locked_index(create_parent=False):
+            return read_inventory(self._path.absolute())
+
+    def assert_inventory_current(self, expected: HostInventory) -> None:
+        """Recheck storage identity only; this does not verify a native host."""
+        if type(expected) is not HostInventory or not expected.storage_complete:
+            raise HostInventoryError("A missing index cannot establish inventory continuity")
+        current = self.locked_inventory()
+        if (current.file_identity, current._wire) != (expected.file_identity, expected._wire):
+            raise HostInventoryError("Host inventory changed after observation")
 
     # -- mutation ----------------------------------------------------------
     def refresh(self) -> None:

@@ -74,6 +74,9 @@ class _SchemaMixin:
                 " WHERE idempotency_key IS NOT NULL"
             )
             self._ensure_live_session_aliases(conn)
+            from .runtime_custody import ensure_schema
+
+            ensure_schema(conn)
             conn.commit()
 
     def _ensure_live_session_aliases(self, conn: sqlite3.Connection) -> None:

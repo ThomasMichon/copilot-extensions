@@ -572,9 +572,13 @@ class _CoreMixin:
             raise PermissionError("Read-only database cannot execute writes")
         conn = self._get_conn()
         with self._write_lock:
-            cursor = conn.execute(sql, params)
-            conn.commit()
-            return cursor
+            try:
+                cursor = conn.execute(sql, params)
+                conn.commit()
+                return cursor
+            except BaseException:
+                conn.rollback()
+                raise
 
     def execute_read(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
         """Execute a read query (no lock needed with WAL)."""
