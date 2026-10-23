@@ -56,6 +56,13 @@ remain outside this namespacing model.
 
 ## Coordination
 
+The directly retained #2701 Logger scheduled/direct-installer lane is the concrete Phase
+8 out-of-session case under the SAME assigned #1096 implementation/native custodian.
+Preserve held claims, the host/guest authority fence, diagnostic prerequisites,
+native/all-copy/release custody, supported default legacy and clean-room-only
+activation. #5941 named-config freshness and #2706 machine-wide listing remain
+independent; administrative intake releases no hold.
+
 - **Topology:** independent per-phase PRs, sequenced by this effort and #1096.
 - **Host (owns sequencing):** the active cross-platform implementation driver;
   Phase 1 is owned by the Linux/WSL lane.
@@ -448,7 +455,72 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
     underlying installer fix is unimplemented; only its placement is
     resolved.
 
+### Plan addendum: exact Logger scheduled/direct-installer context tail (#2701)
+
+<!-- backlog-reconciliation:7556:transfer:2701:to:efforts/active/marketplace-scoped-installations/README.md -->
+
+Place this once as the concrete Logger service-identity follow-on within the existing
+Phase8 out-of-session invocation contract, preserving Phase4 history and every current
+Plan/Validation row. The assigned #1096 custodian and existing
+Windows/POSIX/native/release/activation/source owners remain unchanged. This is not
+parent completion or an implementation handoff.
+
+- [ ] Give actual generated systemd and Windows scheduled compaction execution an
+  attributable current installation-context-aware entrypoint: owning payload-local shim
+  OR an equivalent validated selected-runtime/installation-aware stable launcher.
+  Preserve supported default legacy behavior and selected immutable runtime/deployment
+  ownership, not only interactive invocation.
+- [ ] Audit EVERY installer-launched runtime child: config migration,
+  provisioning/bootstrap, health/status/readback, scheduled/background and any other
+  direct command. Record which already inherit valid context and which fresh-process
+  boundaries lose it; direct syntax alone is not a defect.
+- [ ] Carry/revalidate selected source, payload, runtime root, cell, generation and
+  deployment policy through those actual boundaries. Do not adopt an arbitrary session
+  file, persist an unverified last-writer pointer, infer command directories from
+  runtimeRoot, capture an ambient peer or force managed selection through a newer
+  payload self-provisioner.
+- [ ] Preserve #2697's delivered compaction caller: explicit context selects only the
+  validated same-cell Worktrees peer; genuine optional absence,
+  malformed/refused/stale/foreign context and unresolved protective sets remain
+  distinct, with existing local versus hub safety behavior. Caller conversion alone is
+  not scheduler identity conversion.
+- [ ] Keep #5941's independently owned execution-time named-config freshness and #2706's
+  separately scoped listing behavior intact. Correct scheduled source identity does not
+  complete either objective.
+
+### Validation addendum for #2701
+
+- [ ] Prove actual scheduled/service and direct-installer fresh-child contexts on the
+  original supported Windows and POSIX boundaries: correct source/cell/runtime peer,
+  legacy behavior, foreign/absent/refused/stale evidence and protective-set failure.
+  Interactive shim tests alone are insufficient.
+- [ ] Verify every mapped direct child against actual inherited
+  source/generation/policy, selected immutable runtime, payload replacement and
+  managed/legacy behavior; no ambient cross-installation escape or implicit
+  self-provisioning.
+- [ ] Preserve original real Windows/POSIX qualification separately from unit fixtures,
+  source publication and installed effects. Narrow Index/Machines exemplar Windows
+  waivers do not waive this Logger requirement. All namespaced mutation/use remains in
+  approved disposable clean-room scope; this intake authorizes no persistent diagnostic,
+  task/unit registration, activation, compaction or pruning.
+
+### Continuing coordination and acceptance record for #2701
+
+Keep the current assigned #1096 implementation/native/all-copy/release custody, held
+claims and host/guest authority fence, diagnostic prerequisite and clean-room-only
+activation restrictions EXACTLY in force. Reviewed additive planning is not permission
+to cross that fence, reassign code or release the parent. Follow the existing
+migration-intake deduplication/ownership contract, journal accepted administrative
+routing and preserve all old scope. Close #2701 only after the COMPLETE direct root
+Plan/Validation/coordination amendment receives ordinary review, actually merges and is
+fully read back. Otherwise retain the source. Closed sources are historical provenance,
+never live claim tokens.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2701 Plan/Validation clause above at its original scope and evidence
+  tier, preserving original alternatives, same owners, holds and current
+  portfolio bounds. Tracker intake is not implementation or native acceptance.
 
 - [ ] At each operative phase boundary, use read-only status/doctor checks to
   confirm every persistent development and production machine remains in legacy
@@ -494,6 +566,13 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2701
+
+- Materialized the complete #2701 scope directly in Plan and Validation,
+  retaining incumbent coordination, source/resource custody and all old rows.
+  Normal reviewed merge and full current readback precede administrative
+  source supersession. No behavior, test, native result or rollout is claimed.
 
 ### 2026-10-14 — Native diagnostic slice merged; wrapper acceptance continues
 

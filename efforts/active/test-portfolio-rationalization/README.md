@@ -55,6 +55,12 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The directly retained #2721 quota/reclaim and inherited #584 fixture family belongs to
+the existing Phase 4 CodeSpaces wave. Preserve OPEN #1303, its active
+audit/source/cohort/failure claims, #6237/#3336 and every existing native family,
+containment and current-tier obligation. This intake changes neither fixtures nor test
+admission or budgets.
+
 - **Topology:** one reviewed plan PR, followed by serial safety, tooling, and
   per-plugin waves.
 - **Host (owns PRs):** primary maintainer.
@@ -237,8 +243,9 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 
 - [ ] **#3497** tests: discourage real git subprocess calls against the ambient checkout (fragile across clone depths)
   - Directly about discouraging real git subprocess calls in tests -- core test-portfolio scope.
-- [ ] **#2721** agent-codespaces: quota lifecycle tests bypass the mocked reclaim path
-  - Tests bypassing a mocked path is a test-quality/portfolio issue.
+- [ ] **#2721** agent-codespaces: complete quota/reclaim mock and inherited fixtures
+  - The narrow create/reclaim/retry path is already reached; complete retained
+    fixture isolation and mock sensitivity remain in the direct Plan below.
 - [ ] **#1052** agent-worktrees: full plugin suite can hang indefinitely without progress output
   - A suite hang without progress output is a test-reliability/portfolio issue.
 
@@ -278,7 +285,65 @@ the receiver is no longer Active, delivery is only a link, or custody/scope cann
 preserved, retain1349. Preserve immutable first-pass history and do not claim the
 fixture repaired merely by moving its tracker.
 
+### Direct complete CodeSpaces quota/reclaim mock and inherited #584 fixture family from #2721
+
+<!-- backlog-reconciliation:7556:transfer:2721:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+Add this exact named family to the SAME existing reviewed ACTIVE ROOT CodeSpaces
+wave/Plan AND corresponding Validation, preserving every incumbent row (including
+existing native families), owner/claim, Journal and OPEN #1303 coordination. This is a
+documentation/acceptance intake only, not a test execution, quota probe, native PASS or
+permission to change production reclaim behavior.
+
+- [ ] Preserve and explicitly map the actual quota-error create -> _reclaim_for_quota ->
+  conditional second create route and no-reclaim failure. Current --force-create
+  intentionally bypasses the unrelated pool-pressure planner, NOT quota reclaim; do not
+  repeat the disproved narrow-bypass assertion or remove the right production branch.
+- [ ] Make fixtures assert/mock the actual owning reclaim seam and prove the relevant
+  failure is detected when reclaim is bypassed, ignored or incorrect. Preserve exact
+  retry/no-retry outcomes/call counts and real helper decision coverage, not only a
+  return code or a mocked success. Do not silently bypass the branch under test.
+- [ ] Carry ALL inherited #584 acceptance: broader create-path pool/core/lease/owner
+  cases deterministic without live providers, including hostile ambient provider/project
+  configuration; quota exhaustion through create/reclaim/actual retry with no-reclaim
+  preserved; owner-reference environment and subprocess-isolation regressions alongside
+  the lifecycle family.
+- [ ] Map current fixture stores and actual RUNNER-owned
+  HOME/USERPROFILE/XDG/Copilot/plugin roots, effect declarations and lock/live-user
+  boundaries. Credit default isolated_environment and explicit host-state opt-in rather
+  than falsely declaring host writes solely from a missing local HOME patch. Conversely,
+  a broad sandbox/tier flag or collection result is not mock sensitivity or actual
+  consumer qualification.
+- [ ] Preserve supported owner-reference override/no-environment/blank-environment and
+  subprocess decision regressions, status/lease/launch state isolation, real
+  target-lock/live-user boundary where intentionally retained, and known-current source
+  versus old implementation aliases. No ambient provider/account/quota, unrelated
+  process census or host state is implicitly authorized.
+- [ ] Keep the family at the least expensive correct CURRENT tier, with pure
+  deterministic mocks in the admitted unit contract and owned real process/native cases
+  only in their proper explicit contained/periodic lanes. Moving a family out of
+  required CI or skipping it is not a passing repair; do not restore obsolete full
+  integration gates, weaken assertions/budgets or require the whole portfolio to finish
+  this finite family.
+- [ ] Record original-node/current-consumer mapping, exact evidence/unknown outcomes and
+  bounded relevant future validation through the owning runner when separately
+  authorized. No code import, collection, test, fault run or actual quota/lifecycle
+  operation is performed by this intake.
+
+Receiving gate: a NEW normal reviewed ACTUAL source merge must materialize every
+original/inherited unchecked requirement directly in this existing ROOT Plan AND
+Validation/continuing Coordination, not only its old #2721 bug-title link or an old
+creation PR. Fully read back the CURRENT complete merged ROOT
+Plan/Validation/Coordination and unchanged owners before superseding #2721. If the ROOT
+is not Active, scope/custody is not accepted or delivery is partial, retain the source.
+No test deletion, source/resource handoff, new generic ACK or whole-parent qualification
+is introduced.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #2721 Plan/Validation clause above at its original scope and evidence
+  tier, preserving original alternatives, same owners, holds and current
+  portfolio bounds. Tracker intake is not implementation or native acceptance.
 
 - [ ] Complete every directly retained #1349 Plan/Validation row above at its
   original evidence tier and bounds, preserving existing owners and holds.
@@ -312,6 +377,13 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #2721
+
+- Materialized the complete #2721 scope directly in Plan and Validation,
+  retaining incumbent coordination, source/resource custody and all old rows.
+  Normal reviewed merge and full current readback precede administrative
+  source supersession. No behavior, test, native result or rollout is claimed.
 
 ### 2026-10-22 - Complete retained acceptance from #1349
 

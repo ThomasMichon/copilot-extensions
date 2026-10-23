@@ -27,6 +27,11 @@ lossy observations, never durable recovery facts or ownership authority.
 
 ## Coordination
 
+The directly retained #8036 host/native whole-dispatch lane stays with the existing
+performance campaign coordinator under #7935/#5900. The finished import-only claim
+remains released; future host work requires its own bounded claim. Parser #3677 and all
+existing producer, process, maintenance, collector and rollout owners remain separate.
+
 - **Topology:** independent source PRs; one writer per slice.
 - **Host (owns PRs):** Telemetry implementation owner.
 - **Delegates:** no nested execution delegates.
@@ -115,7 +120,75 @@ startup/new-resume, then hooks.
 - [x] Complete producer/export source review, required checks and merge.
 - [ ] Verify release and authorized installed-serving rollout separately (#7935).
 
+### Plan addendum: retained Windows mention-guard whole-dispatch qualification (#8036)
+
+<!-- backlog-reconciliation:7556:transfer:8036:to:efforts/active/performance-telemetry/README.md -->
+
+Accept this exact remaining native/host-boundary slice under the existing performance
+campaign coordinator, leaving all current Plan/Validation/Coordination and independent
+producer owners unchanged. #8049's bounded import lane is actually merged and its source
+owner explicitly released that lane; strict whole-dispatch acceptance is not complete.
+
+- [ ] Credit #8006's relevance/shared-decision-budget/cleanup controls and #8049's
+  deferred subprocess import. Preserve repository/plugin provenance, publication/body
+  validation, original decision semantics and normal standalone behavior; a narrower
+  scope probe, fail-open body or increased timeout is not an optimization.
+- [ ] Measure the ACTUAL Windows preToolUse hooks.json wrapper from host invocation
+  through process return and descendant cleanup. Attribute shell startup, interpreter
+  selection/import, Git, decision, body I/O and cleanup without summing overlapping
+  spans. Source inspection, Python helper duration, unit count and a configured timeout
+  are not whole-dispatch observations.
+- [ ] Preserve normally-instant1-2second intent and the original honest host/shell-floor
+  condition. If an unavoidable floor prevents the target within this plugin, report it
+  with the unmet cases and responsible host boundary; a floor report is not a passing
+  two-second result or an invented waiver of the retained qualification.
+- [ ] Obtain the actual hook host's pre-spawn elapsed/remaining-budget and
+  descendant-cleanup accounting contract plus an explicitly owned controlled
+  representative native lane. Name unavailable capabilities and owner dependencies; do
+  not invent an API or infer permission from this intake.
+- [ ] Consider shell-startup avoidance only through an actually supported host-owned
+  direct-argv/interpreter-resolution contract that preserves plugin/source provenance,
+  stdin, cwd, environment, exact argv and decision parsing. No plugin-local resident
+  daemon, unreviewed shared bootstrap/launcher change or second reporter is authorized.
+- [ ] Preserve #3677 parser/GraphQL independence, other-hook exclusions,
+  source/installed distinction and existing rollout/host/process owners. Any future host
+  implementation needs its own bounded eligible claim; the released source lane is not a
+  new broad claim.
+
+### Validation addendum for #8036
+
+- [ ] Keep matched baseline/candidate shell/interpreter/source/workload identities,
+  cold/warm/first-touch controls and complete original samples/errors. The existing n=3
+  observations and shared-host noise are insufficient tail qualification; unavailable
+  measurements remain unavailable.
+- [ ] Qualify irrelevant, relevant-safe and deny outcomes plus actual blocked-Git and
+  slow-body wrapper cases, including descendant cleanup and unchanged scope/body
+  decisions. Retain the reported3.312s/2.789s over-budget observations as unresolved,
+  not replaced by candidate fast-case maxima or72 unit passes.
+- [ ] Report actual end-to-end p50/p95/p99/max with sample/quantile sufficiency,
+  expected/completed counts, roster/cardinality, source/installed identities and
+  attributable descendant CPU/spawns. No double-counted spans, missing-child-as-zero
+  result or unmeasured host-floor claim.
+- [ ] Prove normally-instant/ceiling behavior at the actual supported host boundary OR
+  explicitly preserve the measured unavoidable floor, unresolved strict cases and
+  missing host dependency without claiming qualification. Any budget/contract revision
+  requires its existing reviewed owner process, not a silent local weakening.
+
+### Continuing coordination for #8036
+
+The current performance campaign coordinator retains this planned native/host
+qualification. Existing collector, process, Manager, entry, maintenance and parser
+owners remain unchanged. No live hook, benchmark, process, service or deployment is
+authorized by this text. Close #8036 only after this COMPLETE unchecked additive
+Plan/Validation/coordination intake is normally reviewed, actually merged and fully read
+back with all existing root scope preserved. Until then the source remains OPEN;
+afterward it is provenance, not a closed live implementation claim.
+
 ## Validation Plan
+
+- [ ] Complete every directly retained #8036 Plan/Validation clause above at its original scope and evidence
+  tier, preserving original alternatives, same owners, holds and current
+  portfolio bounds. Tracker intake is not implementation or native acceptance.
 
 - [x] Pure tests: disabled zero effects, schema privacy/bounds, context,
   sampling, clock behavior, honest missing metrics and incomplete reports.
@@ -145,6 +218,13 @@ independently of shared collector deployment. Missing deployment authorization
 blocks that acceptance item, not pure implementation.
 
 ## Journal
+
+### 2026-10-22 - Complete retained acceptance from #8036
+
+- Materialized the complete #8036 scope directly in Plan and Validation,
+  retaining incumbent coordination, source/resource custody and all old rows.
+  Normal reviewed merge and full current readback precede administrative
+  source supersession. No behavior, test, native result or rollout is claimed.
 
 ### 2026-10-22 — Scope accepted
 
