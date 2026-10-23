@@ -168,7 +168,6 @@ def _prepare(namespace, active, previous, publication):
     publication.create_context(directory / "context.json", namespace, bindings)
     client_admission._sync_directory(directory)
     client_admission._sync_directory(history)
-    construction._write(namespace / PENDING, active)
     return directory
 
 
@@ -257,7 +256,6 @@ def activate_client_runtime(root, identity, selection, staged, *,
                                 raise PlanError("client target changed during selector publication")
                             return current, admitted
 
-                        publishing = True
                         if pending is None:
                             directory = _prepare(namespace, active, previous, publication)
                             attempts = 0
@@ -267,8 +265,17 @@ def activate_client_runtime(root, identity, selection, staged, *,
                         receipt = directory / (
                             "publication.jsonl" if attempts == 0 else f"publication.{attempts}.jsonl"
                         )
+
+                        def before_effects():
+                            nonlocal publishing
+                            publication_checkpoint()
+                            client_admission._sync_directory(directory)
+                            publishing = True
+                            if pending is None:
+                                construction._write(namespace / PENDING, active)
+
                         publication.publish_selectors(
-                            namespace, version, receipt, None,
+                            namespace, version, receipt, None, before_effects=before_effects,
                         )
                         client_admission._sync_directory(namespace)
                         # Recheck before acknowledging the separate, non-atomic selector writes.

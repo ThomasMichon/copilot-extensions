@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
+import errno
 import hashlib
 import importlib.util
 import json
@@ -164,6 +165,33 @@ def target_leases(root: Path, targets: list[Path], *,
         yield
 
 
+def _publish_receipt(source: Path, target: Path) -> None:
+    if os.name == "nt":
+        os.rename(source, target)
+        return
+    import ctypes
+
+    library = ctypes.CDLL(None, use_errno=True)
+    if sys.platform.startswith("linux"):
+        rename = getattr(library, "renameat2", None)
+        if rename is None:
+            raise OSError(errno.ENOTSUP, "Atomic no-replace receipt publication is unavailable")
+        rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+        arguments = (-100, os.fsencode(source), -100, os.fsencode(target), 1)
+    elif sys.platform == "darwin":
+        rename = getattr(library, "renamex_np", None)
+        if rename is None:
+            raise OSError(errno.ENOTSUP, "Atomic no-replace receipt publication is unavailable")
+        rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        arguments = (os.fsencode(source), os.fsencode(target), 0x00000004)
+    else:
+        raise OSError(errno.ENOTSUP, "Atomic no-replace receipt publication is unavailable")
+    rename.restype = ctypes.c_int
+    if rename(*arguments) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(target))
+
+
 class Receipt:
     """Append and fsync created-stage records before their corresponding rename."""
 
@@ -171,8 +199,8 @@ class Receipt:
         self.path, self.root = absolute(path), absolute(root)
         self.targets = [absolute(target) for target in targets]
         _plain_parents(self.path)
-        fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR |
-                     getattr(os, "O_NOFOLLOW", 0), 0o600)
+        fd, name = tempfile.mkstemp(prefix=".receipt-", dir=self.path.parent)
+        temporary = Path(name)
         created = os.fstat(fd)
         self.stream = os.fdopen(fd, "r+b", buffering=0)
         self.sequence = 0
@@ -183,6 +211,23 @@ class Receipt:
                 "targets": [str(target) for target in self.targets], "producer": producer,
                 "file_identity": [created.st_dev, created.st_ino],
             })
+            expected = state_fd(self.stream.fileno())
+            self.stream.close()
+            _publish_receipt(temporary, self.path)
+            if os.name != "nt":
+                directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
+            fd = os.open(self.path, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0) |
+                         getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+            self.stream = os.fdopen(fd, "r+b", buffering=0)
+            if state_fd(self.stream.fileno()) != expected or state_path(
+                self.path, private=True,
+            ) != expected:
+                raise PublicationProofError("Receipt changed before producer append custody")
+            self.stream.seek(0, os.SEEK_END)
         except BaseException:
             self.stream.close()
             raise
@@ -525,6 +570,7 @@ class CopyPublication:
     def __init__(
         self, root: Path, workspace: Path, bindings: list[CopyBinding],
         validate_inputs: Callable[[], None] | None = None,
+        *, before_effects: Callable[[], None] | None = None,
     ) -> None:
         self.root, self.workspace = absolute(root), absolute(workspace)
         self.bindings = [
@@ -540,6 +586,7 @@ class CopyPublication:
                     or os.path.normcase(str(item.source)) in targets):
                 raise PublicationProofError("Invalid declared source/target copy binding")
         self.validate_inputs = validate_inputs or (lambda: None)
+        self.before_effects = before_effects or (lambda: None)
         self.context = self.workspace / "copy-context.json"
         self.receipts = [self.workspace / "copy-forward.jsonl"]
         self.expected = [[str(item.target), item.digest] for item in self.bindings]
@@ -607,6 +654,7 @@ class CopyPublication:
                                      before.digest if before else ""])
                 create_context(self.context, self.root, bindings)
                 receipt = Receipt(self.receipts[0], self.root, list(self.baseline), "files")
+                self.before_effects()
                 for item in self.bindings:
                     source, data = sources[item.source]
                     if state_path(item.source, owned=False) != source or state_path(item.target) != self.baseline[item.target]:
@@ -686,11 +734,16 @@ class CopyPublication:
             self._release()
 
 
-def publish_selectors(root: Path, version: str, receipt_path: Path | None, last_good: Any) -> None:
+def publish_selectors(
+    root: Path, version: str, receipt_path: Path | None, last_good: Any,
+    *, before_effects: Callable[[], None] | None = None,
+) -> None:
     """Publish while activate/release_dev already holds the existing selector lease."""
     targets = [root / "current-version", root / "last-known-good"]
     receipt = Receipt(receipt_path, root, targets, "activate") if receipt_path else None
     try:
+        if before_effects is not None:
+            before_effects()
         for index, target in enumerate(targets):
             if index and receipt is None:
                 last_good(root, version)

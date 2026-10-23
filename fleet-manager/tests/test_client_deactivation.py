@@ -181,9 +181,13 @@ def test_first_activation_can_be_withdrawn_without_inventing_previous_ownership(
             patch.setattr(publication, "publish_selectors", fail_publication)
         else:
             patch.setattr(os, "replace", fail_replace)
-        with pytest.raises(PlanError, match="outcome is unknown"):
+        expected = ("could not establish owned selectors"
+                    if boundary == "before-publication" else "outcome is unknown")
+        with pytest.raises(PlanError, match=expected):
             activate(root, fixture, staged, trusted)
-    assert (namespace / activation.PENDING).is_file()
+    assert (namespace / activation.PENDING).is_file() == (boundary != "before-publication")
+    if boundary == "before-publication":
+        assert not any(path.exists() for path in activation._targets(namespace))
     floor = database_bytes(root)
     assert deactivate(root)["selectors_absent"]
     assert slot.is_dir() and database_bytes(root) == floor

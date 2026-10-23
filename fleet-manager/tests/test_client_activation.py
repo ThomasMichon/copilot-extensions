@@ -246,7 +246,7 @@ def test_policy_revoked_by_health_cannot_publish(selected, monkeypatch):
 
 
 @pytest.mark.parametrize("boundary", ["before-publication", "after-publication"])
-def test_compatible_target_cannot_change_under_a_recorded_publication_intent(
+def test_compatible_target_change_refuses_before_intent_or_reports_unknown_after_effects(
     selected, primitive, monkeypatch, boundary,
 ):
     root, fixture, staged, trusted, namespace, _slot = selected
@@ -262,9 +262,11 @@ def test_compatible_target_cannot_change_under_a_recorded_publication_intent(
         return result
 
     monkeypatch.setattr(owner, name, changed)
-    with pytest.raises(PlanError, match="outcome is unknown"):
+    expected = ("client target changed during selector publication"
+                if boundary == "before-publication" else "outcome is unknown")
+    with pytest.raises(PlanError, match=expected):
         activate(root, fixture, staged, trusted, current_target=lambda: current)
-    assert (namespace / activation.PENDING).is_file()
+    assert (namespace / activation.PENDING).is_file() == (boundary == "after-publication")
     assert not (namespace / activation.ACTIVE).exists()
     assert any(path.exists() for path in activation._targets(namespace)) == (
         boundary == "after-publication"

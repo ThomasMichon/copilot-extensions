@@ -135,6 +135,16 @@ are preserved and refused. This journal change does not repair a missing or
 unframed created-object publication receipt header, relax acknowledged-owner
 proofs, or complete installation retirement.
 
+Command and selector producers now initialize their context and complete native
+receipt header before publishing the durable pending intent, and persist that
+intent before the first target effect. A failure during initial producer setup
+therefore leaves only unreferenced retained history, not a pending owner whose
+required proof was never completed. New receipt headers publish atomically under
+their final name without replacing a collision or introducing a second hard
+link. This prevents new incomplete-header publication; it does not repair or
+adopt an existing missing/unframed proof. Once pending intent exists, failures
+remain explicit unknown outcomes and require the existing owned recovery path.
+
 ## Reports and remaining transitions
 
 A successful `fleet-manager.client-construction`, version `1`, reports

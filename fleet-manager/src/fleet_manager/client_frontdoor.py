@@ -230,7 +230,6 @@ def register_client_frontdoor(root, identity, selection, staged, *, command_dire
                         first = True
 
                         def validate():
-                            nonlocal first
                             current, _admitted = checkpoint()
                             if digest(current) != value["target_digest"]:
                                 raise PlanError("client target changed during command registration")
@@ -239,11 +238,18 @@ def register_client_frontdoor(root, identity, selection, staged, *, command_dire
                                     raise PlanError("client command owner changed before registration")
                                 if previous is None and any(os.path.lexists(command) for command in commands):
                                     raise PlanError("client command directory gained foreign commands")
-                                construction._write(namespace / PENDING, value)
-                                first = False
 
-                        copy = publication.CopyPublication(namespace, workspace, copies, validate)
-                        publishing = True
+                        def before_effects():
+                            nonlocal first, publishing
+                            validate()
+                            client_admission._sync_directory(workspace)
+                            publishing = True
+                            construction._write(namespace / PENDING, value)
+                            first = False
+
+                        copy = publication.CopyPublication(
+                            namespace, workspace, copies, validate, before_effects=before_effects,
+                        )
                         acknowledging = False
                         try:
                             copy.publish()

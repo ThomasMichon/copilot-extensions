@@ -406,6 +406,7 @@ with client_admission._owned(Path(value["root"])) as (root,database,unchanged):
                     os.replace=stop_after_selector
                     publication.publish_selectors(
                         namespace,active["candidate"],workspace/"publication.jsonl",lambda *_args:None,
+                        before_effects=lambda:construction._write(namespace/activation.PENDING,active),
                     )
 """
     request = {"root": str(root), "identity": identity(), "active": active}

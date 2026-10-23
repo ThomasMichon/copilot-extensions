@@ -80,10 +80,23 @@ On slower native Windows hosts, run each native case as a separate
 `construction_prerequisite`, `owners_serialize_and_reuse` and
 `commands_and_exact_rerun` in separate invocations. Each registration/command
 case still constructs its real prerequisite through the shared fixture; the
-separate construction case asserts the prerequisite's own contract. A missed
+separate construction case asserts the prerequisite's own contract. An owner
+selection may instead include `construction_prerequisite or owners_serialize_and_reuse`
+so the first test owns construction's existing 90-second clock before the
+independent-owner case's own 90-second clock begins. That pair still has the
+same 120-second caller bound; it is not a function-only timeout exemption. A missed
 stage deadline is still a failure, not a reason to omit health, skip an
 assertion or extend the timeout. Ordinary ownership/fault cases remain in
 `test_client_frontdoor.py`; the periodic standalone suite discovers both files.
+
+`libs/versioned-runtime/tests/test_receipt_header_publication.py` exercises
+unpublished empty/partial/synced header attempts, abrupt producer death, a
+concurrent foreign final-name winner, identity-checked append reopening and the
+pre-effect callback boundary. `fleet-manager/tests/test_client_first_publication.py`
+checks that initial failures leave no pending owner and that an interrupted
+later header cannot poison a previously pending selector retry. Existing strict
+receipt/parser and pending-withdrawal suites still cover malformed legacy proof;
+the new constructor must not repair it.
 
 ## Unit-only promotion packet
 

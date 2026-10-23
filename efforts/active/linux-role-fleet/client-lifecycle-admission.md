@@ -19,8 +19,9 @@ retry and no runtime rollback, merged in #7882. Exact completed-runtime removal
 with durable physical custody, interrupted-deletion recovery and reconstruction
 generation fencing merged in #7900. Withdrawal from intact unfinished pending
 producer proofs merged in #7958 for commands and selectors; acknowledged owners,
-activation and forward retry retain strict receipt handling. Initial journal/
-first-touch publication recovery, retained-good policy and the complete managed
+activation and forward retry retain strict receipt handling. Attempt-local
+metadata journals and staged namespace retry merged in #8038. Initial publication
+receipt-header recovery, retained-good policy and the complete managed
 lifecycle remain serial obligations, not delivered behavior or permission for
 live activation.
 Owned selector withdrawal merged in #7891 and is documented in

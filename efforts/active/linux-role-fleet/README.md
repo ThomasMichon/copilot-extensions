@@ -178,7 +178,8 @@ Implementation sequencing below is **agent-recommended**:
   deletion recovery and reconstruction-generation fencing is merged in #7900.
   Owned pending command/selector withdrawal from intact unfinished producer
   proofs is merged in #7958; acknowledged-owner and execution proofs stay strict.
-  Initial journal/first-touch publication recovery, retained-good policy,
+  Attempt-local metadata journals and staged namespace retry are merged in #8038.
+  Initial publication receipt-header recovery, retained-good policy,
   identity retirement/reinstall fencing and a managed installer remain open.
   None of these local prerequisites authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
