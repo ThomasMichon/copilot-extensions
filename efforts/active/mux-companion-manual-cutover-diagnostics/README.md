@@ -30,6 +30,16 @@ the precedent `agent-worktrees handoffs-check --execute` already set for the
 retire half, and adds no new behavior when the operator does not press the
 button.
 
+## Coordination
+
+The direct #2696 app-input/dismissal lane continues under the SAME Companion source/UI
+custodian through this existing Plan, Validation and Journal plus eligible open
+bounded-source coordination. The Mux-bind Relay ROOT independently owns its direct
+wrapper/popup lane; BOTH complete reviewed intakes and current full readbacks precede
+source supersession. Preserve #4369's manual-only/human-gated cutover and actual
+source/head/background-work/provider holds. Closing a popup does not trigger cutover,
+consume a baton or retire a session.
+
 ## Context
 
 ### Prior art (directly reused, not rebuilt)
@@ -175,7 +185,54 @@ view highlighting whether resolved head matches the just-resumed session).
       quiesced correctly (observed completion; unconditional stop) before
       composing this handoff.
 
+### Direct Companion input and dismissal acceptance from #2696
+
+<!-- backlog-reconciliation:7556:transfer:2696:to:efforts/active/mux-companion-manual-cutover-diagnostics/README.md -->
+
+Add directly to this existing Active ROOT Plan/Validation, preserving every original
+manual-mode/cutover/head-verification/background-work clause and current source/provider
+claim. This app lane does not take the separate Mux-bind Relay implementation. Existing
+Exit/Cut over/Refresh and historical prototype observations are baseline, not current
+full popup qualification.
+
+#### Plan
+
+- [ ] Choose and document the Companion's Escape policy. IF Escape should dismiss, bind
+  it explicitly; Textual has no default Escape-to-quit behavior. Preserve the
+  conditional choice rather than inventing a requirement that every key must exit.
+- [ ] Deliberately define/document Ctrl+C, Ctrl+Q and keyboard/button activation.
+  Preserve the empirical Ctrl+C-toast versus Ctrl+Q/Exit clean-exit distinction unless
+  an actual reviewed behavior change supersedes it; a stale relay comment is not proof
+  of the chosen input contract.
+- [ ] Ensure all chosen clean exit paths terminate only the on-demand Companion, retain
+  no persistent Companion state and allow the owning display-popup -E to close without
+  another key. Preserve focus/pane return and error/cancellation behavior; dismissal
+  never invokes Cut over, consumes a baton or retires a worktree/session.
+- [ ] Coordinate the boundary with the relay ROOT's direct2696 wrapper/popup lane under
+  the existing owners. No change to explicit human-gated cutover, source/target
+  identity, held reservations or provider lifetime is implied; normal source review and
+  concrete conflict resolution, not a new generic ACK gate.
+
+#### Validation
+
+- [ ] Exercise the actual app's selected Escape/Ctrl+C/Ctrl+Q/button behavior, clean
+  shutdown, error/cancel and focus-return contract. Keep source/inherited
+  defaults/prototype results distinct from current real supported popup evidence; no
+  unrelated whole-cutover/Manager completion gate is added to this finite exit lane.
+- [ ] Preserve the original native/popup observations and explicitly identify any
+  unavailable current lane without inferring a fresh installed-build diagnosis. Do not
+  use key injection as proof of real mux-client key dispatch.
+- [ ] Before administrative source closure, a NEW normal reviewed merge must accept this
+  entire direct app section AND the complementary relay ROOT section, followed by
+  CURRENT FULL Plan/Validation readback in both roots and continuing Journal
+  coordination. A child link, old4371/4405 receipt or proposal is not delivery.
+
+No app launch, native input, popup, handoff, process, runtime, service or configuration
+action is authorized by this intake.
+
 ## Validation Plan
+
+- [ ] Complete every direct #2696 Plan/Validation clause above at its original supported evidence tier. Preserve the complementary root's separate lane and all original owners/holds; administrative consolidation is not implemented popup acceptance.
 
 - [ ] Live-tested in this operator's own manual-mode worktree: press "Cut
       over" on a genuinely pending handoff, confirm a real successor spawns
@@ -220,6 +277,13 @@ view highlighting whether resolved head matches the just-resumed session).
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-22 - Direct retained #2696 acceptance
+
+- Retained this root's complete independent #2696 lane in Plan and
+  Validation under unchanged custody. Both complementary roots need
+  ordinary reviewed merge and complete current readback before any
+  source supersession; all original capability/native gates remain.
 
 ### 2026-10-06 (later) — Live-tested the quiesce step itself; closed its two quiesce-specific Validation Plan items
 Continuing the same day's work after PR #5491 merged: picked up the two

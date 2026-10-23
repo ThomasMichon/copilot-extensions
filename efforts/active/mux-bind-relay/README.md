@@ -23,6 +23,16 @@ This effort builds the actual relay: a Ctrl+K root-key-table binding (every
 muxed worktree session, psmux today) that pops the Companion, plus a
 clickable status-right region as a second, discoverable summon path.
 
+## Coordination
+
+The direct #2696 wrapper/quoting/popup lane continues under the SAME relay/source
+custodian through this existing Plan, Validation and Journal plus eligible open
+bounded-source coordination. The Companion ROOT independently owns its direct
+app-input/dismissal lane; BOTH complete reviewed intakes and current full readbacks
+precede source supersession. Preserve psmux per-session versus tmux shared-server scope,
+accepted tmux-parity/click deferrals and actual native/incident evidence. No pin,
+binding, server or maintenance operation follows from documentation review.
+
 ## Context
 
 ### Prior art (reused, not rebuilt)
@@ -119,7 +129,59 @@ diagnostics`.
       design constraint, promote Status Draft -> Active.
 - [x] This effort doc.
 
+### Direct wrapper, quoting and popup-lifetime acceptance from #2696
+
+<!-- backlog-reconciliation:7556:transfer:2696:to:efforts/active/mux-bind-relay/README.md -->
+
+Add directly to this existing Active ROOT Plan/Validation. Preserve relay-only
+implementation custody; app input/dismissal lives in the Companion ROOT's direct2696
+lane, not hidden here. Credit actual registration5435 and newer7446 constructed-runtime
+selection, without claiming that a multiword PowerShell runtime-helper invocation is the
+requested single bare mux-visible wrapper.
+
+#### Plan
+
+- [ ] Generate the real per-registered-command wrapper boundary so the mux-visible
+  command is a single bare script entry, hiding embedded multiword
+  invocation/options/quoting inside its owned wrapper rather than interpolating command
+  text into bind-key/display-popup. Preserve attributable runtime selection and existing
+  ownership; do not regress to ambient binstub/uv/source borrowing merely to simplify
+  text.
+- [ ] Preserve spaces, quoted values and parenthesized/title text across the actual
+  bind/source-file/popup launch path. The original shell-subexpression and re-splitting
+  failures must not be hidden by an immediately auto-closed error popup.
+- [ ] Verify display-popup -E closes after every chosen clean Companion exit without
+  another keypress, returns focus to the intended pane and leaves no orphan
+  popup/process or persistent Companion state. Consume the app lane's explicit input
+  policy rather than assuming q/Ctrl+C comments establish it.
+- [ ] Keep psmux per-session source-file ownership distinct from tmux shared-server
+  scope; never leak worktree bindings onto unrelated sessions. Preserve existing
+  click-binding deferral and Phase2 tmux-parity disposition, rather than imposing a new
+  universal platform gate or enabling unsafe mouse/root binds.
+- [ ] Keep historical pinned-build blank-content evidence attributed to its recorded
+  build/time, not a fresh diagnosis of the installed host. No pin change, unscoped
+  rebinding, server stop/upgrade or alternate summon activation follows from this
+  intake.
+
+#### Validation
+
+- [ ] Prove actual generated wrapper/argument/popup consumers with spaces/parenthesized
+  text, clean exit/auto-close and focus/pane return at the original supported evidence
+  tier. Real mux-client key/click dispatch is distinct from pty send-keys, registration
+  tables and directly invoked prototype commands.
+- [ ] Record current available/blocked native lanes honestly, preserving accepted
+  platform/maintenance deferrals. Wrapper/source/runtime receipts are not current live
+  popup acceptance or authorization for maintenance.
+- [ ] Before source closure, obtain a NEW normally reviewed merge accepting BOTH this
+  direct relay section and the Companion ROOT's complete app lane, then independently
+  read back CURRENT FULL Plan/Validation and continuing Journals in both existing Active
+  roots. Old5435/7446 or a link/proposal is not that acceptance delivery.
+
+No native/mux/popup/process/installer/runtime/configuration operation is authorized.
+
 ## Validation Plan
+
+- [ ] Complete every direct #2696 Plan/Validation clause above at its original supported evidence tier. Preserve the complementary root's separate lane and all original owners/holds; administrative consolidation is not implemented popup acceptance.
 
 - [x] Registration proof (automatable): `list-keys -T root` on a real psmux
       session shows the Ctrl+K bind after a fresh `agent-worktrees create`/
@@ -145,6 +207,13 @@ _Pending — submitted for review per the repo's `pr-self-merge` profile before
 implementation begins._
 
 ## Journal
+
+### 2026-10-22 - Direct retained #2696 acceptance
+
+- Retained this root's complete independent #2696 lane in Plan and
+  Validation under unchanged custody. Both complementary roots need
+  ordinary reviewed merge and complete current readback before any
+  source supersession; all original capability/native gates remain.
 
 ### 2026-10-05 — Kickoff
 Surfaced while driving `mux-companion-manual-cutover-diagnostics`' own
