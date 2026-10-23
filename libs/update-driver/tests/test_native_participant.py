@@ -206,3 +206,11 @@ def test_stalled_handshake_timeout_preserves_owner_and_genuine_participant(area)
             custody.assert_owned()
         with participant(root=root, witness=transport) as custody:
             custody.assert_owned()
+
+
+def test_native_directory_root_trailing_separator_matches_python_path(area):
+    with owner(area, "trailing-root") as (root, child):
+        transport = line(child)
+        assert json.loads(transport)["root"] == str(root)
+        with participant(root=root, witness=transport) as custody:
+            custody.assert_owned()

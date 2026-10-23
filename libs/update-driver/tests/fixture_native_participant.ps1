@@ -9,8 +9,10 @@ try {
     if ($Mode -eq 'wrong-lock') { $lockPath = Join-Path $Root 'other.lock' }
     $lease = Enter-NativeOperationLock $lockPath
     if ($Mode -eq 'disposed') { $lease.Dispose() }
+    $witnessRoot = $Root
+    if ($Mode -eq 'trailing-root') { $witnessRoot += '\' }
     try {
-        $witness = New-NativeParticipantWitness -Custody $lease -Root $Root -RequestId ('a' * 32)
+        $witness = New-NativeParticipantWitness -Custody $lease -Root $witnessRoot -RequestId ('a' * 32)
     } catch {
         if ($Mode -in @('wrong-lock', 'disposed')) {
             [Console]::Out.WriteLine('refused')

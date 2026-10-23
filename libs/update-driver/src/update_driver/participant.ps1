@@ -234,6 +234,10 @@ function New-NativeParticipantWitness {
     if (-not [IO.Path]::IsPathRooted($Root) -or [IO.Path]::GetFullPath($Root) -cne $Root) {
         throw 'Native participant root requires a normalized absolute path.'
     }
+    $anchor = [IO.Path]::GetPathRoot($Root)
+    while ($Root.Length -gt $anchor.Length -and $Root.EndsWith('\')) {
+        $Root = $Root.Substring(0, $Root.Length - 1)
+    }
     if ($RequestId -cnotmatch '^[0-9a-f]{32}$') { throw 'Invalid native participant operation identity.' }
     $assertion = $Custody.CreateWitnessAssertion([IO.Path]::Combine($Root, 'execution.lock'))
     return New-Object CopilotExtensions.NativeParticipantWitness -ArgumentList $assertion, $Root, $RequestId
