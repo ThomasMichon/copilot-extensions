@@ -163,6 +163,15 @@ test("native operator root and known version are checked when advertised", async
   assert.equal(result.status, "failed");
 });
 
+test("versionless Git requirements accept the independently acquired native version", async (t) => {
+  const f = fixture(t, [{
+    name: "hooks-only", marketplace: "alias", enabled: true, installed: true,
+    version: "2.0.0", source: "https://example.invalid/plugins.git",
+  }]);
+  assert.equal(Object.hasOwn(f.request.plugins[0], "version"), false);
+  assert.equal((await observePluginReadiness(f.session, f.request)).status, "ready");
+});
+
 for (const change of ["sid", "cwd", "claim", "rpc"]) {
   test(`stale ${change} observation cannot authorize delivery`, async (t) => {
     const f = fixture(t);

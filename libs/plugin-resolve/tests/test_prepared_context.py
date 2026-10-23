@@ -13,8 +13,9 @@ from plugin_resolve.reflection import (
     build_plan, build_prepare_python, build_prepare_script, parse_prepared, parse_prepared_context,
 )
 from plugin_resolve.registration import atomic_json
+from plugin_resolve.settings import read_repo_settings
 from test_plugin_preparation import init_checkout, local_plan
-from test_source_preserving_preparation import git_origin as git_origin_fixture
+from test_source_preserving_preparation import git, git_origin as git_origin_fixture
 
 git_origin = git_origin_fixture
 
@@ -79,9 +80,42 @@ def test_git_context_omits_private_acquisition_root(tmp_path, git_origin):
     )
     assert context["plugins"] == [{
         "projected_source": "helper@git-fixture", "logical_source": "helper@git-fixture",
-        "version": "1.0.0",
     }]
     assert context["logical_payloads"] == result
+
+
+def test_floating_git_context_does_not_pin_isolated_cached_version(tmp_path, git_origin):
+    origin, _first, _second = git_origin
+    target, native = tmp_path / "target", tmp_path / "native"
+    init_checkout(target)
+    init_checkout(native)
+    definition = {"source": {"source": "git", "url": origin.as_uri(), "ref": "HEAD", "path": "catalog-a"}}
+    plan = build_plan([{"source": "helper@git-fixture"}], [], marketplaces={"git-fixture": definition})
+    command = (sys.executable, str(Path(__file__).parent / "fixtures" / "structured_git_installer.py"))
+    context = {}
+    request = {"repo": str(target), **plan}
+    cached = prepare(request, copilot_command=command, prepared_context=context)
+    payload = Path(cached["helper@git-fixture"])
+    assert json.loads((payload / "plugin.json").read_text())["version"] == "1.0.0"
+
+    atomic_json(origin / "catalog-a" / "helper" / "plugin.json", {"name": "helper", "version": "2.0.0"})
+    catalog_path = origin / "catalog-a" / "marketplace.json"
+    catalog = json.loads(catalog_path.read_text())
+    catalog["plugins"][0]["version"] = "2.0.0"
+    atomic_json(catalog_path, catalog)
+    git(origin, "add", ".")
+    git(origin, "commit", "--quiet", "-m", "advance floating fixture")
+    native_payloads = prepare({"repo": str(native), **plan}, copilot_command=command)
+    native_payload = Path(native_payloads["helper@git-fixture"])
+    assert json.loads((native_payload / "plugin.json").read_text())["version"] == "2.0.0"
+
+    assert prepare(request, copilot_command=command, prepared_context=context) == cached
+    assert json.loads((payload / "plugin.json").read_text())["version"] == "1.0.0"
+    assert context["plugins"] == [{
+        "projected_source": "helper@git-fixture", "logical_source": "helper@git-fixture",
+    }]
+    for checkout in (target, native):
+        assert read_repo_settings(checkout).marketplaces["git-fixture"] == definition
 
 
 def test_failed_registration_does_not_publish_success_metadata(tmp_path):

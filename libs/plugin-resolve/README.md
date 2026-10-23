@@ -237,6 +237,13 @@ installation bookkeeping. Headed startup uses native repo-scoped activation
 with the original Git declarations; its launch owner must withhold productive
 task delivery until the required registered/enabled loadout is ready. Productive
 HOME, authentication and preference authority are not switched by preparation.
+The compiled readiness context includes manifest versions for local payloads,
+but not for remote marketplace declarations. A floating Git declaration can
+resolve to a newer version during independent native startup than the isolated
+preparation cache contains. That cache's version is not a native activation pin;
+the original origin, revision and location remain unchanged in target settings.
+Known local marketplace roots and local payload versions remain strict readiness
+expectations when native observation advertises them.
 
 Each complete preparation reads ownership and authored settings together under
 the checkout lock. Publication prunes unchanged owned enablement observed in

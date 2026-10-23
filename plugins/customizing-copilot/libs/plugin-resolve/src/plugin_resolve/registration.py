@@ -475,10 +475,15 @@ def register_prepared(
                 raise ValueError(f"Multiple physical payloads claim one logical identity: {logical}")
             logical_result[logical] = directory_path
             expected = {"projected_source": source, "logical_source": logical}
-            version = plugin_manifest(Path(directory_path)).get("version")
-            if isinstance(version, str) and version:
-                expected["version"] = version
             _name, marketplace = split_source(source)
+            remote = (
+                effective.marketplaces.get(marketplace, {}).get("source", {}).get("source")
+                in REMOTE_MARKETPLACE_SOURCE_KINDS
+            )
+            version = plugin_manifest(Path(directory_path)).get("version")
+            # Native Git acquisition follows its declaration, not an isolated cache's manifest version.
+            if isinstance(version, str) and version and not remote:
+                expected["version"] = version
             local = local_marketplace_path(marketplace, effective, repo_dir=repo)
             if local is not None:
                 expected["live_marketplace_root"] = str(local.resolve(strict=True))

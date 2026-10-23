@@ -8,8 +8,9 @@ plugins and never changes HOME, account selection, preferences or repository set
 
 A typed CLI acquisition can supply `plugin_readiness`:
 
-The following values illustrate request fields, not a generated projection
-output. Supply the exact prepared projected identity, version and root.
+The following values illustrate a local marketplace's request fields, not a
+generated projection output. Supply the compiled projected identity and only
+the version and root expectations preparation actually provides.
 
 ```json
 {
@@ -57,9 +58,13 @@ Preparation runs against the actual allocated checkout and merged child
 environment, before the child handshake. Its metadata is compiled under the
 canonical registration lock from the effective selection after operator
 origins/disables and alias projection. It contains projected and logical
-identities, available manifest versions, and known local marketplace roots;
-private Git acquisition homes are deliberately not reported as productive
-native marketplace roots. The directory return contract is unchanged.
+identities, local manifest versions, and known local marketplace roots.
+Remote marketplace requirements omit both the isolated acquisition-cache
+version and its private root: independent native startup may resolve a floating
+Git declaration to a newer version, and that cache does not pin native
+activation. Original Git origin/revision/location declarations remain intact
+in target settings. Local version/root comparisons remain unchanged when
+native observation advertises them. The directory return contract is unchanged.
 
 Persisted targets retain static argument provenance and the local-preparation
 flag inside the existing request-override metadata, not as new constructor

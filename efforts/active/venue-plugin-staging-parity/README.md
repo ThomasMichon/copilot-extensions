@@ -336,6 +336,33 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-23 - Diagnose native Git cache-version readiness mismatch
+
+- Confirmed publication of the headed SSH slice and its follow-up attachment
+  cleanup in Main `9489a0fe8e4284538c3e00d5aaad2ac0cf474f75`, recording
+  Dev `b2ed7bf3b24e47e82197f36db2ccd7a2292902fb`. Compared the production
+  closure, allowing only generated installer include expansion.
+- The operator authorized unified updates of the controller and disposable
+  parity venues, including managed service restarts, followed by bounded
+  current-user native checks. The controller update completed, and actual
+  running versions were checked. This does not authorize elevation or a
+  second-account launch.
+- A current native Codespace ACP check loaded the staged repository skill.
+  The combined target-user/staged-repository proof remains open. The subsequent
+  headed startup registered but withheld its seed. A registry comparison exposed
+  incompatible retained Git manifest-version expectations and newer native
+  versions; confirming that correction through the session's readiness RPC
+  still requires native revalidation. Global settings remained byte-for-byte
+  unchanged; no task or model turn was admitted. This is failed acceptance,
+  not a passing headed result.
+- Correct the compiled requirement rather than refresh productive globals,
+  bypass readiness or pin a floating Git declaration to an isolated cache.
+  A real local-Git regression advances the same origin/ref/location from v1
+  to v2 while reusing v1 preparation state; the native observer accepts the
+  versionless remote requirement while existing local root/version mismatches
+  still fail. Publication and controlled native revalidation of this correction
+  remain open, as do all unresolved Phase 3 acceptance rows.
+
 ### 2026-10-22 - Land headed SSH source and continue release acceptance
 
 - #7920 merged to Dev as `854229f1b7b9bffb226857361b7d73b5e3ae9973`
