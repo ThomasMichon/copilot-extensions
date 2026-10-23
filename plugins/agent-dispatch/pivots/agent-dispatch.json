@@ -23,6 +23,13 @@
   ],
   "group_field": "group",
   "empty_hint": "No active or recently-finished tasks for this machine.",
+  "view_actions": [
+    {
+      "key": "recover-forms", "kind": "internal", "verb": "recover-forms",
+      "label": "Retained responses",
+      "description": "Inspect original requests, check receipts or explicitly retry an identical request, even without a current task row."
+    }
+  ],
   "create_action": {
     "label": "New task\u2026",
     "fields": [
@@ -57,6 +64,13 @@
       "fields_from": "card.request_input",
       "title_from": "card.title",
       "body_from": "card.body",
+      "request": {
+        "prepare": ["agent-dispatch", "steer", "prepare", "{task_id}", "{fields}", "--expected-status", "{status}", "--expected-revision", "{steering_revision}", "--scope-json", "{json.draft_scope}", "--request-id", "{request_id}"],
+        "receipt": ["agent-dispatch", "steer", "receipt", "{task_id}", "--prepared-json", "{json.prepared_request}"],
+        "scope_from": "draft_scope",
+        "prepared_scope_from": "scope",
+        "identity_from": "request_id"
+      },
       "draft": {
         "save": ["agent-dispatch", "card", "draft", "save", "{task_id}", "{fields}", "--expected-revision", "{steering_revision}", "--expected-draft-revision", "{card_draft_revision}", "--expected-queue-id", "{draft_scope.queue}"],
         "clear": ["agent-dispatch", "card", "draft", "clear", "{task_id}", "--expected-revision", "{steering_revision}", "--expected-draft-revision", "{card_draft_revision}", "--expected-queue-id", "{draft_scope.queue}"],
@@ -67,8 +81,7 @@
         "values_from": "card_draft.fields"
       },
       "run": [
-        "agent-dispatch", "steer", "submit", "{task_id}", "{fields}",
-        "--expected-status", "{status}", "--expected-revision", "{steering_revision}"
+        "agent-dispatch", "steer", "submit", "{task_id}", "--prepared-json", "{json.prepared_request}"
       ],
       "when": {"group": "Blocked"},
       "description": "Read the card prose and answer its form, then wake the worker. The agent acts on your answer only — including casting a PR verdict solely when a card's form asks for one and you pick it (review cards), never autonomously."

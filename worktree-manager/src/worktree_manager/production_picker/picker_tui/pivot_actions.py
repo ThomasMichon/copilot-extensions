@@ -252,6 +252,12 @@ def format_form_template(
 
     class _FormFormatter(string.Formatter):
         def get_field(self, field_name, args, kwargs):  # type: ignore[override]
+            if field_name.startswith("json."):
+                import json
+                from worktree_manager.form_drafts import read_path
+                key = field_name[5:]
+                value = ctx[key] if key in ctx else read_path(ctx, key)
+                return (json.dumps(value, allow_nan=False), field_name)
             if field_name.startswith(field_prefix):
                 return (
                     _encode_field_value(fields.get(field_name[len(field_prefix):], "")),

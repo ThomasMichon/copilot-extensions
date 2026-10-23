@@ -3,9 +3,10 @@
 from worktree_manager.form_drafts import draft_ack, read_path, update_draft_context
 
 from .steering import SubmitErrorScreen
+from .engine_form_requests import PivotFormRequestActionsMixin
 
 
-class PivotFormDraftActionsMixin:
+class PivotFormDraftActionsMixin(PivotFormRequestActionsMixin):
     def _run_pivot_form_draft(self, reg, action, ctx, title, values, screen, *, clear=False):
         from . import pivots
 

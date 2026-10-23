@@ -279,6 +279,17 @@ def _rewrite_manifest_commands(
                 item["draft"] = draft
                 rewrite(draft, "save")
                 rewrite(draft, "clear")
+            if collection in {"actions", "view_actions"} and "request" in item:
+                from worktree_manager.form_requests import parse_request
+                try:
+                    request = parse_request(item["request"])
+                except ValueError as exc:
+                    raise ManifestError(str(exc)) from exc
+                if item.get("kind") != "form" or request is None:
+                    raise ManifestError("request requires a form action")
+                item["request"] = request
+                rewrite(request, "prepare")
+                rewrite(request, "receipt")
             if collection in {"actions", "view_actions"} and "preview" in item:
                 item.pop("_preview_error", None)
                 item["preview"] = list(_as_argv(item["preview"], where="`actions[].preview`"))

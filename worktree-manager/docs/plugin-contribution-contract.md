@@ -218,6 +218,90 @@ pivot. These operations do not submit answers or wake workers. Restoring an
 original submitted request after restart or a vanished row is a separate
 recovery contract, not inferred from a saved draft.
 
+### Original-request recovery
+
+A row or view-scoped form may declare `request` alongside its `run` command:
+
+```json
+{
+  "prepare": ["provider", "prepare", "{task_id}", "{request_id}", "{json.owner_scope}", "{fields}"],
+  "receipt": ["provider", "receipt", "{json.prepared_request}"],
+  "scope_from": "owner_scope",
+  "prepared_scope_from": "scope",
+  "identity_from": "request_id"
+}
+```
+
+All five keys are required; unknown keys or malformed commands/selectors are
+incompatible. The form's `run` consumes `{json.prepared_request}` rather than
+reconstructing the request from current defaults. `{json.<context-path>}` is a
+single-pass JSON data token, including nested mappings; values containing
+braces remain literal. Prepare and receipt commands are resolved to the
+contributing payload, like `run` and draft commands.
+Request forms are operational-pivot actions; Configuration rejects this
+declaration rather than silently bypassing it through its separate Apply/Cancel
+editor.
+
+After explicit Confirm, Manager generates one request identity and invokes
+read-only Prepare off the render flow. The provider returns a finite JSON
+object that freezes all wire fields, sender/default text and wake intent.
+Its declared identity and complete scope must match the original request and
+row. Before invoking Submit, Manager atomically retains that object, the
+original card/form binding and consent, submitted values and only referenced
+context in a new immutable record in the **existing** local draft directory.
+Failed preparation or retention invokes no Submit. A crash after retention
+is uncertain, not proof of acceptance.
+
+The provider must enforce original scope/installation and guarded ownership
+at every Submit and receipt read, refuse unsupported/downgraded owners and
+look up exact-request replays before new-card preconditions. It must not fall
+back to an unguarded operation. Manager does not interpret a domain's receipt
+schema or claim acceptance from an exit code.
+
+`Ctrl+Shift+R` opens **Retained responses** from any top-level view, including
+after restart or removal of the provider pane. Providers can also declare a
+view action with `kind: "internal", verb: "recover-forms"`; this works without
+any board rows. Both dispatch task categories expose it. Browsing reads local
+data and current registry attribution only, never invokes provider commands.
+Before offering receipt/retry and again before execution, Manager re-scans
+the current attributed contribution and matches the original source,
+installation-resolved list command and complete action/form contract.
+This execution lookup uses no last-known display snapshot: an indeterminate
+registry, activation or template read cannot authorize a command. The normal
+display cache may still preserve its rows during that temporary uncertainty.
+Saved command strings are comparison data, not executable authority.
+Unavailable/changed providers and legacy, corrupt or inconsistent records
+remain inspectable read-only; they are never adopted into another question.
+
+**Check original receipt** is an explicit read-only owner query. **Retry
+identical original request** requires a second confirmation, defaulting to
+Cancel, and retains the original identity, scope, wire values and consent;
+it never binds to a replacement card or selected machine. Missing/failed
+receipt reads retain uncertainty, never trigger an automatic send. Commands
+use the existing full plain-text result screen. Separate immutable command
+observations retain full outputs in the same directory; these are not a
+second acceptance authority. Cancel, closing a result and new-card Reset do
+not delete the original request or observations. Successful submission may
+retire that attempt's editable draft, but retains reachable original-request
+evidence. No service, poller, backend SDK or second task/draft registry is added.
+
+`tests/production_picker/test_form_requests.py` covers generic parser, current
+attribution, runtime, retention and native UI contracts; existing draft,
+steering and configuration suites remain regression coverage. The larger
+cross-consumer test is explicit opt-in:
+`tests/production_picker/test_native_form_requests.py`. Set
+`COPILOT_TEST_FORM_REQUEST_OWNER_PYTHON` to the already-prepared isolated
+agent-dispatch test interpreter, then select that file through the ordinary
+standalone runner (`PYTEST_ADDOPTS` supports `-k`/`--ignore`, as in `TESTING.md`).
+Without that explicit selection it skips rather than installing a provider.
+It creates only a disposable loopback owner/database with resident loops off,
+uses both native manifests through real CLI subprocesses and a fresh Manager
+process, loses a committed response and proves original acceptance, consumption,
+wake and duplicate-free replay after card replacement without any board row.
+It never uses live tasks, installs/activates a runtime or adds a required-CI
+subprocess matrix. Windows/Linux execution and installed-rollout proof remain
+separate evidence.
+
 ### Full command results
 
 A non-streaming command or row form may opt into `"result_view": "text"`.
@@ -235,8 +319,9 @@ finished work. Providers own receipt validation and acceptance/delivery facts.
 Both native dispatch task categories use it for steering and evidence inspection;
 their receipt output remains intact, including original acceptance, current
 original-wake state and consumption when reported. Failed form commands retain
-the existing local draft and show its recovery path. This does not add restart
-receipt recovery or card-bound/shared draft guarantees.
+the existing local draft and show its recovery path. Full-result presentation
+alone does not add restart recovery; forms opt into the separate request and
+draft contracts above.
 
 Actions without this field keep their status-line/progress behavior.
 Configuration actions retain their existing full-content result presentation,

@@ -29,12 +29,15 @@ PRIOR_TASKS_HASH = "ef0c01ef40c70500ec4ce4910abfea0927cb37ccdc6f69b8fec8f7ac18d5
 
 def _prior_tasks():
     prior = json.loads((PLUGIN / "pivots" / NAMES[0]).read_text(encoding="utf-8"))
+    prior.pop("view_actions", None)
     prior["list"] = prior["list"][:-2]
     prior["actions"] = [
         action for action in prior["actions"] if action["key"] != "inspect-evidence"
     ]
     steer = next(action for action in prior["actions"] if action["key"] == "steer")
     steer.pop("result_view", None)
+    steer.pop("draft", None)
+    steer.pop("request", None)
     steer["run"] = [
         "agent-dispatch", "steer", "submit", "{task_id}", "{fields}", "--expected-status", "{status}",
     ]
@@ -175,13 +178,26 @@ def test_dispatch_category_actual_total_order_preserves_builtin_owner_and_ids(tm
     for pivot in report.pivots:
         action = next(action for action in pivot.actions if action.key == "steer")
         assert action.form is not None
-        argv = format_form_template(
-            action.run,
-            {"task_id": "task-one", "status": "suspended", "steering_revision": "owner-snapshot"},
-            {"answer": "first\nsecond {steering_revision}"},
-        )
+        scope = {"queue": "original-queue", "installation": "original-install", "machine": "host"}
+        ctx = {
+            "task_id": "task-one", "status": "suspended", "steering_revision": "owner-snapshot",
+            "draft_scope": scope, "request_id": "original-request",
+        }
+        fields = {"answer": "first\nsecond {steering_revision}"}
+        argv = format_form_template(action.form["request"]["prepare"], ctx, fields)
         assert argv[argv.index("--expected-revision") + 1] == "owner-snapshot"
         assert argv[argv.index("--field") + 1] == "answer=first\nsecond {steering_revision}"
+        assert argv[argv.index("--request-id") + 1] == "original-request"
+        assert json.loads(argv[argv.index("--scope-json") + 1]) == scope
+        prepared = {
+            "scope": scope, "request_id": "original-request",
+            "fields": fields, "sender": None, "wake": False,
+        }
+        ctx["prepared_request"] = prepared
+        for template in (action.run, action.form["request"]["receipt"]):
+            resolved = format_form_template(template, ctx, fields)
+            assert "--field" not in resolved and "--expected-revision" not in resolved
+            assert json.loads(resolved[resolved.index("--prepared-json") + 1]) == prepared
     if pointers_before is not None:
         assert {name: (registry / name).read_bytes() for name in NAMES} == pointers_before
     again = pivots.scan_pivot_registry(registry, activation_report=_activation(root))

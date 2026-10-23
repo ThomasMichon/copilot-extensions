@@ -109,6 +109,9 @@ def _parse_contribution(
         if "list" in data
         else None
     )
+    if pivot is not None:
+        from dataclasses import replace
+        pivot = replace(pivot, source_owner=owner)
     worktree_actions = parse_worktree_actions(data, name=path.stem)
     config_sections = parse_config_sections(data, name=path.stem)
     if pivot is None and not worktree_actions and not config_sections:
@@ -860,5 +863,4 @@ def ensure_pivots(
         else resolve_active_plugins()
     )
     return _materialize_active_pivots(pivots_dir(base), activation)
-
 

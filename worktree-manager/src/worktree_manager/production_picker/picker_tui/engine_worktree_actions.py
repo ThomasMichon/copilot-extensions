@@ -767,6 +767,9 @@ class PickerScreenWorktreeActionsMixin:
                 ctx.get("worktree_id") or ctx.get("worktree") or ctx.get("id"),
                 ctx.get("source_id"),
             )
+        if verb == "recover-forms":
+            self.action_recover_forms()
+            return True, "Opened retained form responses"
         if verb == "open-cli":
             return self._open_worktree_cli(
                 ctx.get("worktree") or ctx.get("id"),
