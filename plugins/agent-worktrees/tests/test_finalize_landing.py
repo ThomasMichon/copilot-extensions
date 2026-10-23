@@ -97,7 +97,7 @@ def _topology_snapshot(root: Path) -> dict[Path, bytes]:
 @pytest.mark.parametrize(
     "seed_fixture", [
         "_landing_seed", "_merged_landing_seed", "_handmade_landing_seed",
-        "_cross_dev_reset_seed", "_cross_main_reset_seed",
+        "_cross_dev_reset_seed", "_cross_main_reset_seed", "_synced_landing_seed",
     ],
 )
 def test_landing_copies_preserve_topology_and_isolate_mutations(tmp_path, request, seed_fixture):
@@ -119,6 +119,27 @@ def test_landing_copies_preserve_topology_and_isolate_mutations(tmp_path, reques
             assert _git("rev-parse", "HEAD", cwd=env_copy.clone) == main == dev
             assert branch == f"worktree/{env_copy.worktree_id}"
             assert not (env_copy.tmp_path / "published-head").exists()
+        elif seed_fixture == "_synced_landing_seed":
+            head = (env_copy.tmp_path / "published-head").read_text(encoding="ascii")
+            tip = (env_copy.tmp_path / "reset-tip").read_text(encoding="ascii")
+            assert branch == env_copy.slug
+            assert _git("rev-parse", "HEAD", cwd=env_copy.clone) == head
+            assert _git("rev-parse", f"worktree/{env_copy.worktree_id}", cwd=env_copy.clone) == tip == main
+            assert _git("rev-parse", f"{head}~2", cwd=env_copy.clone) == _git(
+                "rev-parse", f"{tip}^", cwd=env_copy.clone,
+            )
+            assert main != dev
+            assert (env_copy.clone / "a.txt").read_text() == SQUASHED
+            assert not (env_copy.clone / "c.txt").exists()
+            history = _git(
+                "reflog", "show", "--format=%gs",
+                f"worktree/{env_copy.worktree_id}", cwd=env_copy.clone,
+            )
+            assert history.splitlines()[-1] == "branch: Created from origin/main"
+            assert history.splitlines()[0] == "branch: Reset to origin/main"
+            assert finalize_ref.creation_point(
+                f"worktree/{env_copy.worktree_id}", str(env_copy.clone),
+            ) == tip
         elif seed_fixture in ("_cross_dev_reset_seed", "_cross_main_reset_seed"):
             head = (env_copy.tmp_path / "published-head").read_text(encoding="ascii")
             tip = (env_copy.tmp_path / "reset-tip").read_text(encoding="ascii")
@@ -555,6 +576,29 @@ def _sync_worktree_branch_to_a_newer_main(env) -> str:
     return tip
 
 
+@pytest.fixture(scope="session")
+def _synced_landing_seed(tmp_path_factory, _landing_seed) -> Path:
+    with _seed_directory(tmp_path_factory, "finalize-synced-landing") as (root, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory):
+                copied = _copy_landing_env(_landing_seed, root)
+                head = _two_commit_change(copied.clone)
+                _git("checkout", "-q", "-b", copied.slug, cwd=copied.clone)
+                _squash_onto(copied.seed, "dev", SQUASHED)
+                tip = _sync_worktree_branch_to_a_newer_main(copied)
+                (root / "published-head").write_text(head, encoding="ascii")
+                (root / "reset-tip").write_text(tip, encoding="ascii")
+        return root
+
+
+@pytest.fixture
+def synced_landing_env(tmp_path, _synced_landing_seed) -> SimpleNamespace:
+    copied = _copy_landing_env(_synced_landing_seed, tmp_path)
+    copied.head = (tmp_path / "published-head").read_text(encoding="ascii")
+    copied.tip = (tmp_path / "reset-tip").read_text(encoding="ascii")
+    return copied
+
+
 def test_a_branch_only_synced_to_newer_remote_tips_carries_no_work(env, provider):
     """Like the creation point, a sync that only reset the branch to a later tip of
     its source (named in that source's own reflog) is published history; main is
@@ -576,12 +620,10 @@ def test_a_branch_only_synced_to_newer_remote_tips_carries_no_work(env, provider
 
 @pytest.mark.parametrize("later_work", ["none", "commit", "empty", "revert", "other-pr-branch"])
 def test_a_proven_remote_reset_after_merged_work_is_published(
-    env: SimpleNamespace, provider: SimpleNamespace, later_work: str,
+    synced_landing_env: SimpleNamespace, provider: SimpleNamespace, later_work: str,
 ) -> None:
-    head = _two_commit_change(env.clone)
-    _git("checkout", "-q", "-b", env.slug, cwd=env.clone)
-    _squash_onto(env.seed, "dev", SQUASHED)
-    tip = _sync_worktree_branch_to_a_newer_main(env)
+    env = synced_landing_env
+    head, tip = env.head, env.tip
     _git("checkout", "-q", f"worktree/{env.worktree_id}", cwd=env.clone)
     if later_work in ("commit", "revert"):
         _commit(env.clone, "mine.txt", "later local work\n", "after the published reset")
@@ -609,12 +651,10 @@ def test_a_proven_remote_reset_after_merged_work_is_published(
 
 
 def test_a_later_reset_without_remote_tip_proof_does_not_certify_work(
-    env: SimpleNamespace, provider: SimpleNamespace,
+    synced_landing_env: SimpleNamespace, provider: SimpleNamespace,
 ) -> None:
-    head = _two_commit_change(env.clone)
-    _git("checkout", "-q", "-b", env.slug, cwd=env.clone)
-    _squash_onto(env.seed, "dev", SQUASHED)
-    tip = _sync_worktree_branch_to_a_newer_main(env)
+    env = synced_landing_env
+    head, tip = env.head, env.tip
     _rewrite_main(env)
     _git("fetch", "-q", "-f", "origin", cwd=env.clone)
     _git("reflog", "expire", "--expire=now", "refs/remotes/origin/main", cwd=env.clone)

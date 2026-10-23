@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private pre-rewrite reset repositories while retaining each later-work mutation and missing-proof assertion.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

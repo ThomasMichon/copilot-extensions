@@ -87,6 +87,31 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-LANDING-SYNC private pre-rewrite reset inputs
+
+The five later-work variants and the missing-remote-proof case now copy one
+session-published real Git setup ending immediately after the worktree branch
+is reset to the newer remote main tip. The PR branch remains checked out in
+that seed. Each case still performs its own subsequent checkout, local commits
+(including empty/reverted/other-branch work), remote history rewrite, fetch,
+optional reflog expiration, creation-point query and finalization assertions.
+No mutation moves across the reset or rewrite boundary.
+
+The existing topology-copy guard also exercises this sixth seed: every copied
+non-config byte, both repaired origin URLs, main/dev/head/reset relationships,
+creation/reset reflog entries, checked-out file content, and creation inference.
+Mutating and publishing from one copy must leave the source and sibling
+byte-identical, with distinct object files and no alternates.
+
+Before this change, two representative cases spent 4.27-4.33 seconds each
+inside the identical two-commit, squash and sync setup helpers. With the new
+fixture, all twelve affected behavior/isolation cases pass in 75.11 seconds
+preparation/cleanup inclusive. The complete, unpartitioned landing module
+passes all 68 cases in 236.92 seconds inclusive (228.30 seconds pytest), with
+exactly two work-stealing workers and the original item, process, memory and
+native deadlines. This is module-level functional evidence, not qualification
+of an unchanged normal group or the complete native portfolio.
+
 ### C one fresh committed-config absence probe
 
 Each committed branch resolution first probes its literal candidate paths
