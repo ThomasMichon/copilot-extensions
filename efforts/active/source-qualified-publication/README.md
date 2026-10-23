@@ -297,6 +297,18 @@ it does not expand F1 into launch, installer or owner-side effects.
   Source review/merge and finalization are still outstanding; finite native
   success does not satisfy those separate gates.
 
+### 2026-10-23 — Exact size-compliant extraction proposed
+- [Entry/shutdown proposal](entry-size-extraction.md) names two related moves
+  into the existing owned entry module, preserving the root's public wrapper
+  and late-bound callback/exit-policy behavior.
+- Fresh file/hunk inventory is disjoint from current external main-file
+  claims. The in-memory projection on `f7a057618` is 6,773 → 6,760 lines;
+  no production file or baseline was changed.
+- Identified the existing shutdown test's stale console-mapping assertion as
+  a required coupled test update, without dropping its coverage.
+- The task stays blocked pending product-hunk admission. Prior raw carriers
+  remain proposed EVIDENCEONLY; no benchmark, queue, execution or wake occurred.
+
 ### 2026-10-22 — Bounded planning
 - Read the three live issue bodies and their empty prior comment/assignment
   state; inspected open PR titles and task searches before scoped plan claims.
