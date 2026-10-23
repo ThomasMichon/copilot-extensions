@@ -83,3 +83,27 @@ def test_malformed_selected_registry_does_not_become_absent(tmp_path):
     (root / "projects.yaml").write_text("projects: []\n")
     with pytest.raises(ValueError, match="mapping"):
         state.project_anchor_selection("selected", tmp_path)
+
+
+@pytest.mark.parametrize("kind", ["repos", "projects"])
+@pytest.mark.parametrize("value", [[], "", False, 0])
+def test_falsey_selected_entries_are_rejected(tmp_path, kind, value):
+    repos = {"selected": {"windows": "registered"}}
+    projects = {"selected": {"anchor": "override"}}
+    (repos if kind == "repos" else projects)["selected"] = value
+    write_registries(tmp_path, repos, projects)
+    with pytest.raises(ValueError, match="entries must be mappings"):
+        state.project_anchor_selection("selected", tmp_path)
+
+
+@pytest.mark.parametrize("repos,projects,expected", [
+    ({}, {}, None),
+    ({"selected": None}, {"selected": {"anchor": "override"}}, "override"),
+    ({"selected": {"windows": "registered"}}, {"selected": None}, "registered"),
+    ({}, {"selected": None}, None),
+    ({"selected": None}, {"selected": None}, None),
+])
+def test_selected_absent_and_null_entries_remain_compatible(tmp_path, monkeypatch, repos, projects, expected):
+    write_registries(tmp_path, repos, projects)
+    monkeypatch.setattr(state, "_platform_key", lambda: "windows")
+    assert state.project_anchor_selection("selected", tmp_path).anchor == expected

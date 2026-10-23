@@ -483,7 +483,9 @@ def project_anchor_selection(
     repos, projects = registries
     if name not in projects:
         return ProjectAnchorSelection(None, paths)
-    project_entry, repo_entry = projects[name] or {}, repos.get(name) or {}
+    project_entry, repo_entry = projects[name], repos.get(name)
+    project_entry = {} if project_entry is None else project_entry
+    repo_entry = {} if repo_entry is None else repo_entry
     if not isinstance(project_entry, dict) or not isinstance(repo_entry, dict):
         raise ValueError("Selected project and repository entries must be mappings")
     anchor = _selected_project_anchor(

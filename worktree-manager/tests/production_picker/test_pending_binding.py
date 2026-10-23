@@ -134,6 +134,8 @@ def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tm
         bucket = staticmethod(data_local.bucket)
         for_machine = staticmethod(data_local.for_machine)
         is_local = staticmethod(data_local.is_local)
+        host_cols = staticmethod(data_local.host_cols)
+        target_envs = staticmethod(data_local.target_envs)
 
         @staticmethod
         def machines():

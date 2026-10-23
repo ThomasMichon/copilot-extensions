@@ -242,6 +242,31 @@ def test_preferred_file_creation_is_visible_after_ttl(files):
     assert cfg.load_config().default_repo.default_branch == "preferred"
 
 
+@pytest.mark.parametrize("value", [[], "", False, 0, None])
+def test_falsey_repository_container_refuses_config_and_retries(files, monkeypatch, value):
+    path, repo, now = files
+    registry = path.parent / "repos.yaml"
+    registry.write_text(yaml.safe_dump({"repos": value}))
+    (repo / ".agent-worktrees" / "config.yaml").write_text("{}\n")
+    monkeypatch.setattr(harness_state, "_registry_path", lambda *a: registry)
+    for _ in range(2):
+        with pytest.raises(ValueError, match="entries must be a mapping"):
+            cfg.load_config()
+    registry.write_text("repos:\n  example:\n    default_branch: repaired\n")
+    now[0] = 60
+    assert cfg.load_config().default_repo.default_branch == "repaired"
+
+
+@pytest.mark.parametrize("document", ["{}\n", "repos: {}\n", "repos:\n  example: null\n"])
+def test_missing_repository_or_null_selected_entry_retains_empty_branch(files, monkeypatch, document):
+    path, repo, _ = files
+    registry = path.parent / "repos.yaml"
+    registry.write_text(document)
+    (repo / ".agent-worktrees" / "config.yaml").write_text("{}\n")
+    monkeypatch.setattr(harness_state, "_registry_path", lambda *a: registry)
+    assert cfg.load_config().default_repo.default_branch == ""
+
+
 def test_entries_are_bounded_and_retired_generation_has_no_chain(files, monkeypatch):
     path, _, now = files
     monkeypatch.setattr(cfg._FileGeneration, "capacity", 3)
@@ -604,3 +629,91 @@ def test_refusal_guard_pre_embodiment_does_not_dispatch(files):
     })
     assert success is False and "not ready" in message
     assert screen.app.result is None and screen.workers == []
+
+
+@pytest.mark.parametrize("action", ["headed", "resume", "embody", "decide"])
+def test_warm_config_cold_roster_refuses_real_launch(files, monkeypatch, action):
+    import subprocess
+    from worktree_manager.production_picker.picker_tui import data_local
+    from worktree_manager.production_picker.picker_tui.headed_actions import open_worktree_cli_headed
+
+    _, repo, _ = files
+    (repo / ".agent-worktrees" / "machines.yaml").write_text(
+        "machines:\n  remote:\n    hostname: Other-Host\n    execution_platform: windows\n"
+    )
+    monkeypatch.setattr(data_local, "LOCAL", ("Generated-Host", "Win"))
+    monkeypatch.setattr(data_local, "local_execution_platform", lambda: "windows")
+    assert cfg.load_config().machine == "host"
+    screen = refusal_screen()
+    screen.src = data_local
+    row = {"raw": {"id": "row"}, "machine": "host", "env": "Win", "source_kind": "machine-ssh"}
+    screen._find_internal_worktree = lambda *a: (row, None)
+    screen._current_tab = lambda: {"source_kind": "machine-ssh", "env": "Win"}
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("unknown locality performed I/O, dispatch or launched a subprocess")
+
+    monkeypatch.setattr(Path, "read_bytes", unexpected)
+    monkeypatch.setattr(Path, "stat", unexpected)
+    monkeypatch.setattr(cfg.engine_client, "get_value", unexpected)
+    monkeypatch.setattr(subprocess, "Popen", unexpected)
+    generation = cfg._file_generation
+    generation.lock.acquire()
+    try:
+        async def run():
+            if action == "headed":
+                open_worktree_cli_headed(screen, row)
+                assert "not ready" in screen.debug
+            elif action == "resume":
+                ok, detail = screen._resume_embodied_worktree_cli(
+                    "row", machine="host", env="Win", source_kind="machine-ssh",
+                )
+                assert not ok and "not ready" in detail
+            elif action == "embody":
+                ok, detail = screen._embody_task_cli({
+                    "id": "task", "machine": "host", "env": "Win", "source_kind": "machine-ssh",
+                })
+                assert not ok and "not ready" in detail
+            else:
+                decision = screen._resume_decision(row)
+                assert decision.get("deferred") and decision["is_local"] is None
+                assert screen._decide(decision) is False
+            assert screen.workers == [] and screen.app.result is None
+
+        asyncio.run(run())
+    finally:
+        generation.lock.release()
+        monkeypatch.undo()
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize("actual,env", [("windows", "Win"), ("linux", "Linux"), ("wsl", "WSL")])
+def test_existing_mapping_worker_prepares_locality_roster(
+    files, mapping_screen, monkeypatch, scoped, actual, env,
+):
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    _, repo, _ = files
+    screen, _ = mapping_screen
+    (repo / ".agent-worktrees" / "machines.yaml").write_text(
+        "machines:\n  remote:\n    hostname: Other-Host\n"
+        + (f"    execution_platform: {actual}\n" if scoped else "")
+    )
+    monkeypatch.setattr(data_local, "LOCAL", ("Generated-Host", env))
+    monkeypatch.setattr(data_local, "local_execution_platform", lambda: actual)
+    cfg.load_config()
+
+    async def unready():
+        with pytest.raises(RuntimeError, match="not ready"):
+            data_local.is_local("host", env)
+
+    asyncio.run(unready())
+    screen._prewarm_machine_key_map()
+    screen.complete()
+    assert screen._mkey_map_error is None
+
+    async def ready():
+        assert data_local.is_local("host", env) is (not scoped and actual != "wsl")
+        assert data_local.is_local("remote", env) is False
+
+    asyncio.run(ready())

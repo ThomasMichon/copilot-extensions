@@ -102,7 +102,9 @@ def is_local(machine: str, env: str) -> bool:
         entries = cfg.load_machines_yaml(config.default_repo.anchor)
     except AmbiguousMachineError:
         return False
-    except (FileNotFoundError, ValueError, KeyError, RuntimeError) as exc:
+    except RuntimeError as exc:
+        raise RuntimeError("Locality is not ready; refresh the machine registry before launching") from exc
+    except (FileNotFoundError, ValueError, KeyError) as exc:
         entries = {}
         registry_error = exc
     if revision is not None and cfg.ConfigCacheSession(ttl=60).revision is not revision:

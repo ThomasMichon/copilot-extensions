@@ -342,3 +342,24 @@ interfaces. Do not create a general request broker or shared polling layer.
   and every pre-existing `clear_caches` statement unchanged. Touched Python
   lint and the 13-plugin install contract pass.
 - Functional source review, required CI and actual merge remain the next gate.
+
+### 2026-10-23 — Current-head review corrections
+
+- Reproduced all three Medium source-review findings on #8286 before fixing
+  them. Four immediate launch callers and two worker-preparation controls
+  demonstrated the warm-config/cold-roster bypass. Not-ready roster errors now
+  propagate to the existing visible refusal guards instead of alias fallback.
+  The existing mapping worker prepares the real same-generation roster; no
+  worker, polling or startup-composition framework was added.
+- Supplier selected-entry validation now defaults only absent/null entries.
+  Falsey lists, strings, booleans and numbers are rejected. Default-branch
+  registry containers default only when absent; explicitly supplied null and
+  other non-mappings fail and can recover on a subsequent generation.
+- The non-live startup fixture now uses the real source's roster metadata
+  helpers on its existing collection worker. It no longer treats a project-only
+  warmup as locality authority. Scalar binding and original epoch statements
+  remain structurally unchanged.
+- The expanded combined packet passed 202 tests, including Windows/Linux/guest
+  preparation controls. Lint, module cap, install contract and the
+  11-helper AST proof passed. Original failures and correction logs are retained.
+  Current-head review/CI/merge and native/installed qualification remain separate.

@@ -1278,6 +1278,12 @@ readers do not expand external templates/includes.
 Known locality retains its Boolean behavior. Unavailable locality is a visible
 refusal, never a remote/SSH classification: ordinary resume, headed launch and
 internal embodiment/resume callers stop before exit or launch effects.
+A warm project configuration alone does not establish locality: the same file
+generation's roster must have been prepared by the existing background source
+or machine-mapping worker. Cold roster reads refuse even a configured native
+alias until that authority is available. Selected supplier entries retain
+absent/null compatibility, but other non-mappings are rejected; explicitly
+supplied non-mapping registry containers, including null, are invalid.
 
 ### Developing a pivot: render early, render often
 

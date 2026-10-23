@@ -548,7 +548,7 @@ def load_config() -> ProjectConfig:
             repo_dir = _repo_dir(project).strip()
             default_branch = str(repo_yaml.get("default_branch") or "").strip()
             if not default_branch:
-                repos = _read_yaml(harness_state._registry_path(None, "repos")).get("repos") or {}
+                repos = _read_yaml(harness_state._registry_path(None, "repos")).get("repos", {})
                 if not isinstance(repos, dict):
                     raise ValueError("Repository registry entries must be a mapping")
                 entry = repos.get(project)
