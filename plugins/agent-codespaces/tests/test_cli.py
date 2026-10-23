@@ -818,6 +818,40 @@ class TestNamespaceSeams:
         assert output.out == ""
         assert "account snapshot unavailable" in output.err
 
+    @pytest.mark.parametrize("failure", ["startup", "timeout", "refused"])
+    def test_namespace_list_retains_explicit_peer_failure(self, tmp_path, monkeypatch, capsys, failure):
+        import subprocess
+
+        from agent_codespaces import __main__ as cli, gh_account, worktrees
+
+        peer = tmp_path / "plugins" / "agent-worktrees"
+        peer.mkdir(parents=True)
+        own = {"cellRoot": str(tmp_path), "pluginRoot": str(tmp_path / "owner")}
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "validated-test-cell")
+        monkeypatch.setattr(worktrees, "validate_context", lambda: own)
+        monkeypatch.setattr(cli, "validate_context", lambda: own)
+        monkeypatch.setattr(worktrees, "launch_prefix", lambda *args: ["same-cell-peer"])
+
+        def run(*args, **kwargs):
+            if failure == "startup":
+                raise OSError("peer startup failed")
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired("same-cell-peer", 10)
+            return subprocess.CompletedProcess([], 126, "", "peer receipt refused")
+
+        monkeypatch.setattr(worktrees.subprocess, "run", run)
+
+        async def list_specs(self):
+            gh_account.account_inventory()
+            return []
+
+        monkeypatch.setattr("agent_codespaces.resolver.CodespaceResolver.list_specs", list_specs)
+        assert main(["namespace-list"]) != 0
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert "peer" in output.err
+        assert "reporting zero" not in output.err
+
     def test_namespace_resolve_json_and_argv(self, capsys):
         import json as _json
         seen = {}

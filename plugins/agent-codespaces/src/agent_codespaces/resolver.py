@@ -461,14 +461,16 @@ async def list_specs_tolerant() -> list[dict]:
     or a network failure must not prevent unrelated static-agent resolution.
     Warn and report an empty listing at this subprocess boundary rather than
     making every agent depend on successful CodeSpace discovery. A refused or
-    malformed bulk account snapshot remains an error for Bridge's existing
-    incomplete-namespace handling rather than attesting an empty namespace.
+    malformed bulk account snapshot or installation-context refusal remains
+    an error for Bridge's existing incomplete-namespace handling rather than
+    attesting an empty namespace.
     """
     from .gh_account import AccountInventoryError
+    from .worktrees import ContextRefused
 
     try:
         return await CodespaceResolver().list_specs()
-    except AccountInventoryError:
+    except (AccountInventoryError, ContextRefused):
         # Bridge's incomplete-namespace contract must retain unknown account scope.
         raise
     except Exception as exc:

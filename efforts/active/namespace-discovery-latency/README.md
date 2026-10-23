@@ -149,6 +149,20 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-22 - Explicit-context failure preservation
+
+- The next #7998 review identified a separate boundary: same-cell peer startup,
+  timeout and receipt failures raise `ContextRefused`, not `AccountInventoryError`.
+  The optional namespace wrapper now preserves both exception types.
+- Three CLI regressions exercise the real same-cell peer adapter with startup,
+  timeout and exit-126 failures. Each produces a nonzero namespace-list exit
+  without a successful JSON roster. The focused CLI/account/peer run passed
+  132 cases.
+- The carried strict-mapping finding was already corrected by `16ef16a14d`:
+  the strict reader rejects malformed stored mappings, seven real-storage
+  bulk-command cases passed, and native malformed-map qualification retained
+  incompleteness. This is an addressed finding, not another required source fix.
+
 ### 2026-10-22 - Routing review corrections and native requalification
 
 - Addressed both High findings and both newly reported Medium findings on
