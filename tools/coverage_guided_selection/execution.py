@@ -85,6 +85,22 @@ def build_execution_payload(
         )
     if not result.selected_tests:
         raise ValueError("coverage evidence produced an empty selection; refusing a guard-only pass")
+    if not result.baseline_generation:
+        raise ValueError("selected execution requires a measured baseline commit")
+    # Upstream test edits can retire measured node IDs without appearing in the
+    # PR diff. Whole-select only implicated modules with proven baseline drift.
+    prefix = f"plugins/{plugin}/"
+    selected_files = {prefix + node.split("::", 1)[0] for node in result.selected_tests}
+    baseline_changes = _git(
+        ["diff", "--no-renames", "--name-only", "-z",
+         result.baseline_generation, head_ref, "--", prefix + "tests/"],
+        cwd=repo_root,
+    ).split("\x00")
+    test_files = tuple(sorted(set(test_files) | {
+        file.removeprefix(prefix) for file in baseline_changes
+        if file in selected_files and (repo_root / file).is_file()
+    }))
+    payload["changed_test_files"] = list(test_files)
     payload["execution"] = "selected"
     payload["selection"] = {
         "version": 1, "plugin": plugin, "nodes": list(result.selected_tests),

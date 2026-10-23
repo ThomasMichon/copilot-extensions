@@ -2823,6 +2823,13 @@ are 200 intervening commits and seven days. Curation uses compact line bitsets
 and lazy marginal-gain ranking, with the same greedy score/cost/node-ID ties
 and hard budget as the original algorithm.
 
+Selected execution requires the baseline's actual measured commit. If a
+selected test module changed between that commit and the candidate, the
+producer adds the whole current module while retaining the originally requested
+node IDs. Upstream changes to unselected modules do not expand the selection.
+The collector emits repository-relative source keys with portable separators,
+including when measured on Windows.
+
 Diff attribution uses the merge-base's **old** changed line numbers, remapping
 the earned baseline to that fork point rather than invalidating it against the
 replacement being tested. Added lines, unrecognized/binary diff shapes, and
@@ -2880,7 +2887,10 @@ Focused contracts live in `tools/test_coverage_selected_execution.py`,
 `test_runtime_covered_regression_is_selected_and_fails` (`CGS_RUN_INTEGRATION_TEST=1`)
 earns real runtime coverage, proves smoke alone cannot afford the detecting
 test, and checks the selected clean/broken/repaired executions. The manual
-coverage integration job runs that proof alongside baseline round-trip tests.
+proof requires `coverage` and `pytest-json-report` in the test environment.
+Its private fixture reuses those declared dependencies while executing the real
+collector driver and contained runner, rather than resolving packages inside
+each test's deadline.
 
 ## Test portfolio invariants
 
