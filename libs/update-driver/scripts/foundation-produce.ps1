@@ -160,9 +160,7 @@ exit 0
         $result.python -cne (Join-Path $bootstrap 'venv\Scripts\python.exe')) {
         throw 'Prerequisite result differs from its owned operation.'
     }
-    foreach ($path in @($result.uv, $result.python)) {
-        $null = [CopilotExtensions.NativeFoundationState]::CheckPath($path, $false, $false)
-    }
+    $null = [CopilotExtensions.NativeFoundationState]::CheckPath($result.python, $false, $false)
     $reason = 'source_changed'
     if ([CopilotExtensions.NativeFoundationState]::SourceDigest($plugin) -cne $SourceHash) {
         throw 'Foundation source changed before construction.'

@@ -1,6 +1,7 @@
 """Native producer orchestration against fixed controlled inner helpers."""
 
 import json
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -91,6 +92,47 @@ def test_native_producer_source_mismatch_never_acquires_prerequisites(producer_s
     assert foundation_status(root=root) is None
     assert not (root / "bootstrap").exists()
     assert not (root / "prerequisite-started").exists()
+
+
+def test_native_producer_defers_working_linked_uv_to_canonical_physical_selection(producer_source, area):
+    helper = Path(__file__).parents[1] / "scripts" / "installer_dependency_config.py"
+    spec = importlib.util.spec_from_file_location("_foundation_linked_uv", helper)
+    config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config)
+    physical_uv = config.select_uv_executable("uv", error_type=RuntimeError)
+    link_dir = area / "linked-tools"
+    link_dir.mkdir()
+    logical_uv = link_dir / "uv.exe"
+    try:
+        logical_uv.symlink_to(physical_uv)
+    except OSError as error:
+        if error.winerror == 1314:
+            pytest.skip("native file symlink privilege unavailable")
+        raise
+    library = Path(__file__).resolve().parents[2]
+    canonical = (library / "installer-engine" / "installer-engine.ps1").read_text()
+    fixture = Path(__file__).with_name("fixture_foundation_prerequisites.ps1").read_text()
+    # Exercise real Ensure-Uv discovery/probing; only interpreter acquisition is controlled.
+    venv_control = "function New-SignedVenv" + fixture.split("function New-SignedVenv", 1)[1]
+    (producer_source / "scripts" / "installer-engine.ps1").write_text(canonical + "\n" + venv_control)
+    root = area / "state"
+    env = dict(
+        os.environ, PATH=str(link_dir) + os.pathsep + os.environ.get("PATH", ""),
+        FOUNDATION_FIXTURE_PYTHON=sys.executable, FOUNDATION_FIXTURE_CHECK_UV="1",
+        FOUNDATION_FIXTURE_UV_TARGET=physical_uv,
+    )
+    result = subprocess.run(
+        command(producer_source, root), env=env, stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=120, **pu.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    completed = foundation_status(root=root)
+    assert completed.state == "completed" and completed.exit_code == 0
+    prerequisites = json.loads((
+        root / "bootstrap" / completed.operation_id / "prerequisites.json"
+    ).read_text())
+    assert Path(prerequisites["uv"]) == logical_uv
+    assert Path((root / "uv-selected").read_text()).resolve() == Path(physical_uv).resolve()
 
 
 def test_native_producer_never_creates_control_state_inside_its_source(producer_source):

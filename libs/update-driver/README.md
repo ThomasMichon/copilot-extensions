@@ -432,6 +432,11 @@ signed base and otherwise uses its canonical managed-Python fallback.
 Foundation bootstrap requests Python 3.11 and a 3.11 minimum signed base for
 stdlib TOML support; other adopters retain their 3.10 defaults.
 
+The logical UV returned by canonical acquisition is handed to the construction
+SDK's existing physical-executable selector before strict path resolution.
+Working WinGet links/junctions are not confused with forbidden linked source
+or bootstrap-interpreter inputs; no different UV is substituted from PATH.
+
 Each operation retains its bootstrap venv, downloaded base interpreter and
 private cache under `<execution-root>/bootstrap/<operation-id>`. These files
 are not removed while completed foundations can depend on them. Prerequisite

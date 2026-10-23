@@ -5,11 +5,12 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import time
 
 source = Path(__file__).absolute().parent.parent
 sys.path[:0] = [
-    str(source / "src"), str(source.parent / "agent-procutil" / "src"),
+    str(source / "scripts"), str(source / "src"), str(source.parent / "agent-procutil" / "src"),
     str(source.parent / "single-instance-lease" / "src"),
 ]
 from update_driver import borrowed_custody  # noqa: E402
@@ -27,6 +28,18 @@ with borrowed_custody(root=args.root) as custody:
     assert "UPDATE_DRIVER_WITNESS" not in os.environ
     assert args.admitted_source != source
     assert inspect(source).digest == inspect(args.admitted_source).digest == args.source_hash
+    if os.environ.get("FOUNDATION_FIXTURE_CHECK_UV") == "1":
+        from installer_dependency_config import select_uv_executable
+        import agent_procutil as pu
+
+        selected_uv = select_uv_executable(args.uv, error_type=RuntimeError)
+        assert Path(selected_uv).resolve() == Path(os.environ["FOUNDATION_FIXTURE_UV_TARGET"]).resolve()
+        result = subprocess.run(
+            [selected_uv, "--version"], capture_output=True, text=True,
+            timeout=15, **pu.no_window_kwargs(),
+        )
+        assert result.returncode == 0 and result.stdout.startswith("uv "), result
+        (args.root / "uv-selected").write_text(selected_uv)
     progress = json.loads((args.root / "foundation-operation.json").read_text())
     assert progress["state"] == "running" and progress["source_hash"] == args.source_hash
     (args.root / "builder-started").write_text(str(os.getpid()))
