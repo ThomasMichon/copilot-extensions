@@ -9,12 +9,16 @@ fi
 root="$1" payload="$2" runtime="$3" project="$4"
 shift 4
 service_mode=()
+installer_action=provision
 wait_for_owner=0
 run_owner=0
 expected_source=""
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --client-only) service_mode=(--client-only); shift ;;
+        --installer-action)
+            [[ "$#" -ge 2 && ( "$2" == provision || "$2" == stamp ) ]] || exit 2
+            installer_action="$2"; shift 2 ;;
         --wait) wait_for_owner=1; shift ;;
         --run-owner)
             [[ "$#" -ge 2 && "$run_owner" == 0 ]] || exit 2
@@ -23,6 +27,9 @@ while [[ "$#" -gt 0 ]]; do
     esac
 done
 [[ "$run_owner" == 0 || "$wait_for_owner" == 0 ]] || exit 2
+[[ "$installer_action" == provision || "${#service_mode[@]}" == 0 ]] || {
+    printf 'Client-only selection requires the provision action.\n' >&2; exit 2;
+}
 foundation="$(CDPATH= cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$foundation/src/update_driver/foundation.sh"
 for path in "$root" "$payload" "$runtime" "$project"; do
@@ -90,7 +97,8 @@ if [[ "$run_owner" == 0 ]]; then
     check_native_foundation_execution_root "$root" "$foundation"
     log="$root/first-use-$(cat /proc/sys/kernel/random/uuid).log"
     start_native_daemon "$foundation/scripts/first-use.sh" "$root" "$log" \
-        "$root" "$payload" "$runtime" "$project" --run-owner "$source_id" "${service_mode[@]}"
+        "$root" "$payload" "$runtime" "$project" --run-owner "$source_id" \
+        --installer-action "$installer_action" "${service_mode[@]}"
     if [[ "$wait_for_owner" == 1 ]]; then
         code=0
         wait "$__native_daemon_pid" || code=$?
@@ -124,4 +132,5 @@ for path in "$slot/.runtime-bootstrap/runtime_launcher.py" "$slot/.install-compl
 done
 exec "$slot/bin/python" -I -S -B -X utf8 "$slot/.runtime-bootstrap/runtime_launcher.py" \
     -m update_driver.first_use submit --payload "$payload" --runtime-root "$runtime" \
-    --project "$project" --root "$root" --expected-source "$source_id" --wait "${service_mode[@]}"
+    --project "$project" --root "$root" --expected-source "$source_id" \
+    --installer-action "$installer_action" --wait "${service_mode[@]}"

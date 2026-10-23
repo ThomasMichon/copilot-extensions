@@ -12,7 +12,7 @@ import sys
 import pytest
 
 from agent_procutil import no_window_kwargs
-from update_driver import foundation_status, status
+from update_driver import drain, foundation_status, status
 from update_driver import first_use as provision
 from update_driver.foundation_inputs import GENERATED, PACKAGES
 from update_driver.foundation_inputs import inspect as inspect_foundation
@@ -64,6 +64,44 @@ def test_actual_materialized_vault_admits_without_external_source_or_installatio
     assert admission["plugin"] == "agent-vault" and admission["mode"] == "legacy"
     assert admission["source"]["kind"] == "directory"
     assert not installation.exists()
+    assert {str(path.relative_to(payload)): path.read_bytes()
+            for path in payload.rglob("*") if path.is_file()} == before
+
+
+def assert_stamp_only(installation):
+    pointer = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    for name in ("first-use.ps1", "first-use.sh"):
+        assert (pointer / "libs" / "update-driver" / "scripts" / name).is_file()
+    command = installation.parent / ".local" / "bin" / (
+        "agent-vault.ps1" if os.name == "nt" else "agent-vault"
+    )
+    assert command.is_file()
+    assert not (installation / "current-version").exists()
+    assert not list((installation / "versions").glob("*/pyvenv.cfg"))
+    assert not (installation / "service.ps1").exists()
+    assert not (installation.parent / ".config" / "systemd").exists()
+
+
+@pytest.mark.skipif(
+    os.name != "nt" and sys.platform != "linux",
+    reason="native stamp execution is qualified only on Windows and Linux",
+)
+def test_actual_materialized_stamp_uses_owned_queue_without_building_vault(
+    materialized_vault, area,
+):
+    payload, installation, project = materialized_vault
+    before = {str(path.relative_to(payload)): path.read_bytes()
+              for path in payload.rglob("*") if path.is_file()}
+    root = area / "queue"
+    request = provision.enqueue(
+        payload, installation, project, root=root, installer_action="stamp",
+    )
+    assert not installation.exists()
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "completed" and result.exit_code == 0, result.log_path.read_text()
+    assert json.loads(result.spec.source)["installer_action"] == "stamp"
+    assert_stamp_only(installation)
     assert {str(path.relative_to(payload)): path.read_bytes()
             for path in payload.rglob("*") if path.is_file()} == before
 
@@ -303,13 +341,22 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
             for path in root.rglob("*.log")
         )
 
-    def run_request():
+    def run_request(installer_action="provision"):
         worker = None
         descriptor = None
-        command = native_command(root, payload, installation, project, source=source, client_only=True)
+        command = native_command(
+            root, payload, installation, project, source=source,
+            client_only=installer_action == "provision",
+        )
         if os.name == "nt":
-            command[-1] = "Client-Only"
+            if installer_action == "provision":
+                command[-1] = "Client-Only"
             command += ["-Mode", "LaUnCh"]
+        if installer_action != "provision":
+            command += (
+                ["-InstallerAction", "StAmP"] if os.name == "nt"
+                else ["--installer-action", installer_action]
+            )
         launched = subprocess.run(
             command,
             env=env, cwd=project, stdin=subprocess.DEVNULL, capture_output=True,
@@ -340,10 +387,19 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
                 finally:
                     os.close(descriptor)
 
+    run_request("stamp")
+    stamped = status(root=root)
+    assert len(stamped) == 1, diagnostic()
+    stamp = stamped[0]
+    assert stamp.state == "completed" and stamp.exit_code == 0, diagnostic()
+    assert stamp.spec.argv == ("--installer-action", "stamp")
+    assert json.loads(stamp.spec.source)["installer_action"] == "stamp"
+    assert foundation_status(root=root).state == "completed"
+    assert_stamp_only(installation)
     run_request()
     requests = status(root=root)
-    assert len(requests) == 1, diagnostic()
-    request = requests[0]
+    assert len(requests) == 2, diagnostic()
+    request = next(item for item in requests if item.id != stamp.id)
     assert request.state == "completed" and request.exit_code == 0, diagnostic()
     assert request.spec.argv == ("--client-only",)
     assert "service skipped" in request.log_path.read_text(errors="replace")
@@ -370,8 +426,8 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
     )
     run_request()
     requests = status(root=root)
-    assert len(requests) == 2, diagnostic()
-    failed = next(item for item in requests if item.id != request.id)
+    assert len(requests) == 3, diagnostic()
+    failed = next(item for item in requests if item.id not in (stamp.id, request.id))
     assert failed.state == "completed" and failed.exit_code != 0, diagnostic()
     assert "fixture failed installed Vault entrypoint" in failed.log_path.read_text(errors="replace")
     assert selector.read_text().strip() == version and completion.read_bytes() == completed
@@ -400,6 +456,6 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
     assert origin.returncode == 0, origin.stdout + origin.stderr
     assert Path(json.loads(origin.stdout)).is_relative_to(slot)
     assert completion.read_bytes() == completed
-    assert len(status(root=root)) == 2, "healthy dispatch must not submit installation work"
+    assert len(status(root=root)) == 3, "healthy dispatch must not submit installation work"
     assert not (installation / "service.ps1").exists()
     assert not (profile / ".config" / "systemd").exists()

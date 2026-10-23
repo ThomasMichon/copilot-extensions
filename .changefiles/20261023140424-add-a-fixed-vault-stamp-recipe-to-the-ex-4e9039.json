@@ -1,0 +1,17 @@
+{
+  "comment": "Add a fixed Vault stamp recipe to the existing installation driver without adopting new publishers.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

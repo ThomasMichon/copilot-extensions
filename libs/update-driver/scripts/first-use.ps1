@@ -7,12 +7,17 @@ param(
     [string]$ExpectedSource,
     [string]$ReceiptLog,
     [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default',
+    [ValidateSet('provision', 'stamp')][string]$InstallerAction = 'provision',
     [switch]$Wait
 )
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $Mode = $Mode.ToLowerInvariant()
 $ServiceMode = $ServiceMode.ToLowerInvariant()
+$InstallerAction = $InstallerAction.ToLowerInvariant()
+if ($InstallerAction -ceq 'stamp' -and $ServiceMode -cne 'default') {
+    throw 'Client-only selection requires the provision action.'
+}
 if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
     throw 'Nested first-use submission is unsupported; retain the current installation owner.'
 }
@@ -106,7 +111,7 @@ if ($Mode -ceq 'launch') {
     $log = Join-Path $Root ('first-use-' + [Guid]::NewGuid().ToString('N') + '.log')
     [IO.File]::Open($log, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read).Dispose()
     $worker = Start-NativeDaemon -Script $PSCommandPath -Arguments @(
-        $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode
+        $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode, $InstallerAction
     ) -WorkingDirectory $Project -LogPath $log
     try {
         if ($Wait) {
@@ -164,6 +169,7 @@ try {
         '--root', $Root, '--expected-source', $source, '--wait'
     )
     if ($ServiceMode -ceq 'client-only') { $submit += '--client-only' }
+    if ($InstallerAction -cne 'provision') { $submit += @('--installer-action', $InstallerAction) }
     & $python @submit 2>&1 |
         ForEach-Object {
             try {
