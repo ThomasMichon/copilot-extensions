@@ -126,3 +126,39 @@ def test_anchor_confirmation_ignores_inherited_git_selector(tmp_path, monkeypatc
     ).stdout.strip()
     monkeypatch.setenv("GIT_DIR", git_dir)
     assert worktree_identity._confirmed_anchor_checkout(nested, anchor) is False
+
+
+def test_fast_record_ignores_an_enclosing_worktree_git_selector(tmp_path, monkeypatch):
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    git = worktree_identity.git_ops.git
+    git("init", cwd=anchor, isolated_repository=True)
+    git(
+        "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "fixture",
+        cwd=anchor, isolated_repository=True, no_hooks=True,
+    )
+    outer = tmp_path / "outer"
+    nested = outer / "nested"
+    for path, branch in ((outer, "outer"), (nested, "nested")):
+        git(
+            "worktree", "add", "-b", branch, str(path), cwd=anchor,
+            isolated_repository=True,
+        )
+    outer_git_dir = git(
+        "rev-parse", "--absolute-git-dir", cwd=outer, isolated_repository=True,
+    ).stdout.strip()
+    monkeypatch.setenv("GIT_DIR", outer_git_dir)
+    monkeypatch.setattr(worktree_identity.cfg, "project_dir", lambda project: tmp_path)
+    records = {
+        path.name: SimpleNamespace(repo="project", worktree_path=str(path))
+        for path in (outer, nested)
+    }
+    monkeypatch.setattr(tracking, "load_record_by_id", lambda wid, **kwargs: records[wid])
+    monkeypatch.setattr(
+        tracking, "find_worktree_id_by_cwd",
+        lambda *a, **k: pytest.fail("validated nested identity enumerated the roster"),
+    )
+    assert worktree_identity.tracked_invocation_record(
+        nested, project="project", anchor=anchor,
+    ) is records["nested"]

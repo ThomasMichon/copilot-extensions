@@ -42,7 +42,10 @@ def _worktree_id_from_git(cwd: Path) -> str | None:
     change (copilot-extensions#59).
     """
     try:
-        result = git_ops.git("rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10)
+        result = git_ops.git(
+            "rev-parse", "--git-dir", cwd=str(cwd), check=False, timeout=10,
+            isolated_repository=True,
+        )
     except Exception:
         return None
     if result.returncode != 0:
