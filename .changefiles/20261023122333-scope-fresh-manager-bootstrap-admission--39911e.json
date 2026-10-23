@@ -1,0 +1,9 @@
+{
+  "comment": "Scope fresh Manager bootstrap admission to Manager publication",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

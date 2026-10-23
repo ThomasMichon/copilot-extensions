@@ -111,6 +111,13 @@ construction, selection and mux activation use the canonical installer and the
 constructed Manager interpreter, retaining the previous runtime and restoring
 selectors on activation failure.
 
+Fresh update bootstrap validates only the Manager package, launchers and provider
+registration that it publishes. It does not compare installed Worktrees helper
+bytes with the current payload: payload refresh can legitimately leave older or
+damaged helpers awaiting repair. Worktrees source, installation-cell and
+environment admission remain with the subsequent engine repair and its own
+transactional publisher; Manager construction does not modify those helpers.
+
 The **One-line bootstrap** below remains the fresh-install entry, not a required
 manual migration step for an adopted Manager. Do not rewrite a deployed launcher,
 install application dependencies into ambient Python, or use update bypass flags
