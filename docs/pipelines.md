@@ -963,6 +963,17 @@ ever polls `main`. The promotion pipeline
 schedule** — there is a real wait between a merge landing on `dev` and a
 promotion actually shipping it to `main`, not an instant release.
 
+The source promotion trigger omits its ancestry-filter runner for successful
+`main`-push CI completions. Main-push CI itself remains unchanged. Manual CI
+on any ref, successful Dev CI, promotion-completion recovery (including failed
+or cancelled runs) and owner-closed Main PR wakes retain their existing paths.
+An admitted branch name is never ancestry evidence: the filter still checks
+actual Git ancestry and the dispatcher retains source, freshness and ownership
+checks. Identifier reporting and Dev baseline maintenance are unchanged.
+This omits a no-op job allocation, not the surrounding workflow invocation.
+Preserved Main control requires its own qualified adoption before this source
+condition changes live admission.
+
 ### Inert main-control preservation support
 
 The composer and trusted artifact recomposition share
