@@ -556,6 +556,7 @@ def _cmd_repository_issue_loop(args: argparse.Namespace) -> int:
                     ),
                     dry_run=True,
                     cwd=source["spec"].get("cwd"),
+                    worker_identity_cwd=source["spec"].get("worker_identity_cwd"),
                 )
             )
     except (DispatchError, OSError, ValueError) as exc:

@@ -10,6 +10,27 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from .registrar import ProfileDeclaration, RegistrarError, load_declaration
 
 
+def _identity_origin_root(origin: Path | str, leaf_root: Path) -> str:
+    """Select identity tiers at the defining source, not the execution root."""
+    from . import repo_config
+    from .repository_resources import is_repository_resource, split_repository_resource
+
+    if is_repository_resource(origin):
+        name, _ = split_repository_resource(origin)
+        return f"repo:{name}:."
+    directory = Path(origin).expanduser().resolve()
+    surface_root = repo_config.repo_root_from_surface_path(directory, "registrar")
+    if surface_root is not None:
+        return str(surface_root)
+    for candidate in (directory, *directory.parents):
+        if (
+            candidate == leaf_root or (candidate / ".git").exists()
+            or (candidate / "plugin.json").is_file()
+        ):
+            return str(candidate)
+    return str(directory)
+
+
 def qualify_supplier_context(
     declaration: ProfileDeclaration, repository: str, root: Path,
 ) -> ProfileDeclaration:
@@ -47,6 +68,8 @@ def qualify_supplier_context(
     spec = dict(declaration.spec)
     if declaration.kind == "emitter":
         spec["cwd"] = qualify(spec.get("cwd"))
+        if "worker_identity_cwd" in spec:
+            spec["worker_identity_cwd"] = qualify(spec["worker_identity_cwd"])
         loop = spec.get("repository_issue_loop")
         if isinstance(loop, Mapping) and isinstance(loop.get("forge"), Mapping):
             forge = dict(loop["forge"])
@@ -80,6 +103,7 @@ def expand_declaration_document(
     leaf_forge = leaf_forge if isinstance(leaf_forge, Mapping) else {}
     this_repo_root = Path(repo_root).expanduser() if repo_root is not None else directory
     inherited_script_fields = set()
+    path_origins: dict[str, Path | str] = {}
     if "extends" in data:
         from .repository_resources import RepositoryResourceSnapshot
 
@@ -104,10 +128,23 @@ def expand_declaration_document(
         from .registrar_recipes import resolve_extends
 
         base_dir = Path(repo_root).expanduser() if repo_root is not None else directory
-        data = resolve_extends(data, base_dir=base_dir, snapshot=snapshot)
+        data = resolve_extends(
+            data, base_dir=base_dir, snapshot=snapshot, path_origins=path_origins,
+        )
     if data.get("kind") == "reviewer-loop":
+        from .registrar_recipes import _absolutize_emitter_cwd
         from .reviewer_loops import expand_reviewer_loop
 
+        leaf_emitter = document.get("emitter")
+        if (
+            "emitter.cwd" in path_origins
+            and not (isinstance(leaf_emitter, Mapping) and "cwd" in leaf_emitter)
+        ):
+            normalized = _absolutize_emitter_cwd(
+                {"kind": "emitter", "spec": data["emitter"]},
+                directory=path_origins["emitter.cwd"],
+            )
+            data["emitter"] = normalized["spec"]
         declarations = expand_reviewer_loop(data)
     elif data.get("kind") == "repository-issue-loop":
         from .repository_issue_loops import expand_repository_issue_loop
@@ -115,6 +152,11 @@ def expand_declaration_document(
         declarations = expand_repository_issue_loop(
             data, repo_root=repo_root,
             inherited_script_fields=frozenset(inherited_script_fields),
+            worker_identity_cwd=(
+                _identity_origin_root(path_origins["worker_identity"], this_repo_root)
+                if "worker_identity" in path_origins and "worker_identity" not in document
+                else None
+            ),
         )
     elif data.get("kind") == "effort-driver-loop":
         from .effort_driver_loops import expand_effort_driver_loop

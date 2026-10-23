@@ -193,17 +193,15 @@ def validate_script_forge_config(
     cannot exec it directly.
 
     ``inherited_script_fields`` names which of ``command``/``cwd`` this
-    declaration inherited from an ``extends:`` base rather than declaring
-    itself. A *relative* inherited value cannot be resolved correctly here:
+    declaration inherited from a cross-repository defining hop rather than
+    declaring itself. A *relative* inherited value is not admitted here:
     ``repo_root`` is always the outer leaf declaration's own repo (see
     ``expand_repository_issue_loop``), never the directory of whichever hop
     in the chain actually supplied the field, so a cross-repo base's
     relative script path would silently execute (or fail to execute) at
-    the wrong location -- generalizing per-hop origin tracking to cover
-    this is a known, tracked limitation (`kind: emitter`'s own
-    ``spec.cwd`` already has it; this field does not). Rather than ship
-    that silent misresolution, refuse it outright: require an absolute
-    path for either field whenever it was inherited.
+    the wrong location. Resolution retains raw script fields for this
+    check, rather than absolutizing them and bypassing it. Require an
+    absolute path or named repository resource for either flagged field.
     """
     present = {key: forge[key] for key in SCRIPT_FORGE_KEYS if key in forge}
     if provider != "script":

@@ -1692,18 +1692,36 @@ the same resolved ref (`A` extends `B` extends `A`) raises a clear
 same way once it exceeds a fixed maximum depth. Placeholder substitution
 and the override deep-merge both apply correctly at every hop, in order.
 
-One known, narrower gap: per-hop directory tracking for *resolving a
-chain's own nested `extends:` refs* is unconditional, but per-hop
-provenance for a few **path-dependent declared fields** is not yet
-generalized beyond `kind: emitter`'s own `spec.cwd`. A `reviewer-loop`'s
-`emitter.cwd` and a `repository-issue-loop`'s `worker_identity`/
-`forge.command`/`forge.cwd` resolve against the chain's outermost leaf
-file, not the specific hop that actually supplied the field -- extending a
-cross-repo `reviewer-loop`/`repository-issue-loop` base through a chain
-and inheriting one of those fields *as a relative path* is refused outright
-at registration (a clear `RegistrarError`) rather than silently
-misresolving; declare the field directly, or with an absolute path, to
-work around it. Tracked as explicit follow-up work, not a silent gap.
+Supported path fields retain their nearest defining hop. Inherited
+`emitter.spec.cwd` and `reviewer-loop.emitter.cwd` resolve relative to that
+declaration's directory, including when a later hop finally fills a
+placeholder. An explicit field override starts a new origin.
+`repository-issue-loop.worker_identity` remains a named selector: its
+repository-local identity tiers come from the defining declaration's
+repository (or plugin payload), not the outer leaf's execution cwd.
+Canonical/legacy registrar directories and repository/plugin roots identify
+that context; an arbitrary standalone template without one uses its own
+directory. Shipped `global:` identity defaults bind in the declaration
+that first instantiates them, including its explicit `execution_repo`,
+preserving normal repository-local overrides. An authored selector likewise
+retains that defining declaration's effective identity context, even if a
+later hop selects a different execution repository.
+Pure `extends`/`params` aliases remain transparent: they carry an unbound
+global identity default until the first specializing declaration.
+Direct declarations retain their existing leaf-file/repository behavior.
+
+Expansion preserves the identity context separately as generated emitter
+`spec.worker_identity_cwd`; it does not load identity files during shape
+validation or change the loop's execution cwd. Named repository origins stay
+named through registration and resolve through the existing resource owner
+when the identity is actually used.
+
+Script-forge fields retain their raw values through resolution so admission
+still refuses an inherited *relative* `forge.command`/`forge.cwd` whose
+nearest defining hop is cross-repository. Absolute and named resource values,
+same-repository definitions and explicit leaf overrides retain their valid
+behavior. Provenance tracking is not permission to normalize a cross-repo
+relative script path before that refusal.
 
 **Cross-origin addressing (`plugin:<name>:<path>`) -- any registrar can
 extend any other, regardless of where each lives.** A reference's *origin*

@@ -14,6 +14,7 @@ def expand_repository_issue_loop(
     *,
     repo_root: str | Path | None = None,
     inherited_script_fields: frozenset[str] = frozenset(),
+    worker_identity_cwd: str | None = None,
 ) -> tuple[ProfileDeclaration, ...]:
     from .repository_issue_loops import validate_config
 
@@ -27,6 +28,8 @@ def expand_repository_issue_loop(
         "lease_scope": f"repository-issue-loop:{config['name']}",
         "repository_issue_loop": dict(data),
     }
+    if worker_identity_cwd is not None:
+        spec["worker_identity_cwd"] = worker_identity_cwd
     if data.get("execution_repo") is not None:
         spec["cwd"] = f"repo:{data['execution_repo']}:."
     elif repo_root is not None:
