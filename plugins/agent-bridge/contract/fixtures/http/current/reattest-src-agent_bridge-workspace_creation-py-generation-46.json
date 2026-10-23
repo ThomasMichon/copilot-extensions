@@ -44,7 +44,7 @@
     "required_provider_capability": "instance_pinned_exec"
   },
   "captured_from": {
-    "commit": "9dd6a394a4e9c19603e3c286a55eb8f6fa7148bc",
+    "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
     "source_git_blob": "e788a271b42a9f0894ca30f96409299710410efd",

@@ -62,7 +62,7 @@
     "sha256": "02db74cd05d1a2a951e575d9fcd6ccbed5162e8dc6712723f56a4d87c6f6a883"
   },
   "captured_from": {
-    "commit": "9dd6a394a4e9c19603e3c286a55eb8f6fa7148bc",
+    "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
     "source_git_blob": "dc4c9f20477c925d24547ef8b20941f424dea8ac",

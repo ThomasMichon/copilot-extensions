@@ -103,6 +103,32 @@
     "mutations": 0,
     "maximum_socket_timeout_seconds": 30
   },
+  "resume_acknowledgement": {
+    "session_id": "bridge-a",
+    "invalid_results": [
+      null,
+      {},
+      [],
+      {
+        "session_id": "bridge-a"
+      },
+      {
+        "status": "idle"
+      },
+      {
+        "session_id": "bridge-a",
+        "status": "starting"
+      },
+      {
+        "session_id": "other",
+        "status": "idle"
+      }
+    ],
+    "ready": false,
+    "reason": "resume_unknown",
+    "resume_posts": 1,
+    "prompt_posts": 0
+  },
   "prompt_request": {
     "method": "POST",
     "path": "/api/v1/sessions/bridge-a/turns",
@@ -138,10 +164,10 @@
   },
   "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-observation-generation-46.json",
-    "sha256": "7d91e40dba22d7de539318fec77633026077a48f8a835ae385626a76286caeb8"
+    "sha256": "e79f1cf4b53599fa05dfe4ae200691d611b2be765d28643f4c90a002a9763877"
   },
   "captured_from": {
-    "commit": "9dd6a394a4e9c19603e3c286a55eb8f6fa7148bc",
+    "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
     "source_git_blob": "b53bb235cd0ba4f36999a4f610805f7264a0111d",

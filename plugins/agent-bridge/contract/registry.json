@@ -514,7 +514,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/startup_observation.py",
-          "sha256": "1e8b9d8fcf0e8c4dc78181bfff79e3dc8e15a3d5dc65516c6d18079b290a7563",
+          "sha256": "8620e8b587e07d22e8234a5392ce07207759c8a474682b9b529cd3487ad6f9ae",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -3240,355 +3240,355 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-models-py-generation-46.json",
-          "sha256": "46aaf8736f6e6cdd89c166041c1a7c37a2b8c138b8c78bc878755219bdb73aa4",
+          "sha256": "e58ad7a0e9441b582ce579530cb9668af528d9b126631ba501a7c4efa535edcc",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-sessions-py-generation-46.json",
-          "sha256": "5fb1a59b02693c521784297b2159d478330a833baa7067e0162cdcd95d857ca0",
+          "sha256": "c80688551a31bb7caa7f7e5897637ca1aace05ef191647f675132f12242a6f75",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-remote-py-generation-46.json",
-          "sha256": "cad15ec07f402dabdc92f73ee2e8f6563b3658cf6020468d644e5e95a90f715e",
+          "sha256": "273de6605c5c5a9a6d173a10c7635fc39d59705d1ed808b76840cc770e05e393",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-agents-py-generation-46.json",
-          "sha256": "74112702105ca826eafba128f1c56d9872cf1680c9747bb4f58271fc13d00baf",
+          "sha256": "db8b8fa3cfb6dc93d657bbcc8af976d66388c83b781ed58f4417589b3ed572ab",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-prompt_models-py-generation-46.json",
-          "sha256": "a0b5a1089943104357245ef8c40b24a065f1ea9603eba0dec6c5da2d25b85d3c",
+          "sha256": "871f6a67d691457dc98a9e5e1fdf513d72562e5b82ff6484ea36c9c985ce7aa4",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-session_start_models-py-generation-46.json",
-          "sha256": "b65751d2e2cde75004513d572042ebe132816e5c1f43d0ac06fb4123873003f7",
+          "sha256": "f018df78512a1e7d97ca0f8ed9c338282190fd3642d9a6cc4180bff1a097e035",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-cli_mode_models-py-generation-46.json",
-          "sha256": "d92236b95284ed842ad19b24f4832ab860ec6e3db684b644930b20aa9a8e66cd",
+          "sha256": "995ee4712d3542722bcf4178900510e308ad173aaf20c451100c0f2028589e31",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-workspace_creation-py-generation-46.json",
-          "sha256": "c38e59af00428c0005346b3c559fe9c075c710699e65c433fd8ff93491ec1484",
+          "sha256": "cd5f4e8bc6a793cb656d23703a4e96578706ea9f11c766fc5186ab45e4ee8650",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-provider_creation-py-generation-46.json",
-          "sha256": "7269fde9fa9250b9d21d7ee04a2410277ceb4ac8196a823816db2d79e9ddf3cd",
+          "sha256": "77bb6194c6355d785d916bd5e9c0c78e86365494033fd7b18d717d70f97e95ac",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-session_resume-py-generation-46.json",
-          "sha256": "d09c0c79dbd0e5c0f1625e55e00d14fe88f8059ea73fe7d33c136f81fcec64a8",
+          "sha256": "5b1d37769945f8b485d90f51a21ac60a919ab60d9a8cdaa879f0cd091aa2a791",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-session_core-py-generation-46.json",
-          "sha256": "bfcf81d22b999553488e3d55cef7fed3372aedf166c1da984188237fb610448a",
+          "sha256": "ef38a24b05ec584cf6d3a99a6130799def64e303eac71bce71b371c36444d840",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-worktrees-py-generation-46.json",
-          "sha256": "29629ec0b2f1782058840ee6754a4f6b94702cf137df56551fb2b4816bd326e2",
+          "sha256": "0a9f899aee444ab925fba9f7bbe0f45f59623bc0915aef458b3369ecf51faf1f",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-worktree_refresh-py-generation-46.json",
-          "sha256": "6f8c22abcbc704c9a621d2a57f59940f4b2589964f90f6100191b02725a7e029",
+          "sha256": "a98d88251051a21a35d5b97ae0f234ce69166c57ecc3d2e9eed5279fa9cabbad",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-client_worktrees-py-generation-46.json",
-          "sha256": "744e756a8980c0a4319a19f9142d5ae90256dd90c628f54eee2371e8e20af189",
+          "sha256": "1e28e80cc1cd81b1de66cdc26cd9c0c52a2091631be5e06213bc929588ba2817",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-worktree_entry-py-generation-46.json",
-          "sha256": "dc90be57fd634bd2fd1185c98f8796cc6401b860f248e822fd2ad34bc6fd5730",
+          "sha256": "c210f2832333c7d5c61cea0856bcd43ff48a04d4f462e9d78c102b8b22efa940",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-client_session_start-py-generation-46.json",
-          "sha256": "390eec0265349e8b7112ef1e22421fc5d228704dfd052a6cd896327df03f9c29",
+          "sha256": "7b2beee5eafc7e95642323ed799dcbd7f8d943a218e8f5eaa708bc6736390c89",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-client_answers-py-generation-46.json",
-          "sha256": "0ac86c142d8568d3aa9ff9babb86c8de5fc03278d07aa01dc25b1624a75b5330",
+          "sha256": "7103b0a866025e00827d07357dc7a0d4ca0f33ac6dd4629541d364802db57628",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-answers-py-generation-46.json",
-          "sha256": "8ea4dbd3407aeabaf933e010859b78950e12d3108075b1fb2587bea4a4200483",
+          "sha256": "69c0ee9bd17fc6f2b525375e3c1790bb4ac5ec9964d0c09185d6719f8d693b23",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-remote_acp_sessions-py-generation-46.json",
-          "sha256": "eaf35c7ef52bcdf5e5f9e255e08626c23c45accaec1f3e85337c23a9b8878b05",
+          "sha256": "ee98180e7c4b1d86dfb554bf1cc552371cd70a630dbd6d20a31d8c9b2efac6aa",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-live_message_models-py-generation-46.json",
-          "sha256": "7e5fab7c84ce31465fece60111b44e9044c41e3e5aa930393c6c60b6adbd46b6",
+          "sha256": "e821051da37a89cb81eb8ebd23daf5b9c5bc44082792d4e74c7e6e7c9e786894",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-remote_operations-py-generation-46.json",
-          "sha256": "04e77bec400810b363a39aa86698e7f40541e3251c32ac085531932562af1293",
+          "sha256": "86da06aa37fde9433e9c7415c17cddf1315a62a7e0310611ad3654dee623ae64",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-remote_operation_versions-py-generation-46.json",
-          "sha256": "5af76b923bcc65066f1c23771ef68733a10e824ce584b4c70d0be121c08aca6c",
+          "sha256": "1b8ba1b00af03cdc01f2e344f3e4f472ca24134fceb941fb56be61826e300f39",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-worktree_native_resume-py-generation-46.json",
-          "sha256": "ac7177ad275596d0e0bad04d6c117a9fa69f06c66c95eb28d9e45300a9e4b895",
+          "sha256": "3397cf4b0a47b664526db042e9ceaa150647cc915cb222edb3121d302ed98c45",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-worktree_probe-py-generation-46.json",
-          "sha256": "821ed59dac8670d3b22b328b4078b9b9e695247dcf387a7c5ef97d9f71bbc116",
+          "sha256": "a7f2f788d7472c050a770f50df78ef3e2432c1db24c18a711a7f980309e96a88",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-client-py-generation-46.json",
-          "sha256": "aa7b2ac245ebff02d61c2ef1248016f72b9a1f031762e15f051c792a0014d3e8",
+          "sha256": "993c48e6aa5f792fc2d2ec3a289d745ffa429fd20b2500fbaad38235884664fd",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-singleton_resume-py-generation-46.json",
-          "sha256": "64feebfe269cef754566abafa6cba3bc8ed3ed0d0ba7fef5bbc33033c82211b8",
+          "sha256": "a29a5d65074e6735adfe906f6e674548775b766ecc14ee88861e61cb7e35db0f",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-remote_relationships-py-generation-46.json",
-          "sha256": "717ec3f395c03c725b2212871f25767a7338fed273a1483b3d23c05d788d9d9b",
+          "sha256": "83e049afda187fa697692cc1e55f54abac272555b64d91f9a8d08cafa6efa03c",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-relationships-py-generation-46.json",
-          "sha256": "034e550867ee8d7298a8c85f2c98345c4419f29876ec63e1c94be33f188b2642",
+          "sha256": "7dc07992032d87a83a6c952c1285b4fedf52cda04c9ad9280bdc6fdc30a73d37",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-plugin_readiness-py-generation-46.json",
-          "sha256": "bb75394021253bac9d1dc4810b57e43d910d7da317acdb9eeecb9ee52fcd5e08",
+          "sha256": "899b6aa23c3685810f921c80a0dc955a783fd499ca010f842caf7819231fb596",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-live_controls-py-generation-46.json",
-          "sha256": "09af15253e49fd98486179309a074eb4eacfa953645736b4816d8771676ef3a7",
+          "sha256": "826f74cd086d9c06d7980b547d2c3e718e1c0a7c90be7615b45f1e52bea3de27",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-acquisition_contract-py-generation-46.json",
-          "sha256": "3b5623ea04e7e1da7f257ee2c8b9909d6733cc3b4e86aa1bf05367e73e57bf32",
+          "sha256": "2897ccbf4c520713be1634deaaeceb55f62cd466f72934585402c5e007daed08",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-live_sessions-py-generation-46.json",
-          "sha256": "d05c48786a2baf49b7c8e4546a4e36e1c3ac004f852a41e9d627a7bf6e506973",
+          "sha256": "697e605f4d459aab929362ff5d18569ce3386d15bbf82b8f814445d3d5888523",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-extensions-agent-bridge-plugin-readiness-mjs-generation-46.json",
-          "sha256": "dd78ba2fcde06cb5d1b0a8d4eaa59df02ad7be15efdb7ca53007abed11253d1a",
+          "sha256": "e13f06556c9f5ce435bda78dad43221d36798deabe60182626626092715ea4c6",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-extensions-agent-bridge-delivery-mjs-generation-46.json",
-          "sha256": "250bfac24fc2f9a2dcad0803cc2a827872aab7ccbdbaa07ede3332bce0a5411f",
+          "sha256": "4acf6ab598de96e3750cf47722ff18a2c3ec2c60eb73bbe7cdcfb42464d0b9d0",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-client_cli_mode-py-generation-46.json",
-          "sha256": "f6f07067028d4222b7384b97f21ea17a02b9dabdf6f0cae72ab06a3dd63ac8b2",
+          "sha256": "c3261ed1f8540963948314ba52904f16e72091e87ec98fc345e1765ce4dd3826",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-live_startup_controls-py-generation-46.json",
-          "sha256": "69650c6993ffebb0e189720d55f4d98833d5c3a9a8d382f1deb6c5a458b74490",
+          "sha256": "644b5b965a7dd8d149d68a56d233f53d30e253b9068343307b79260438d657b3",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-admission-generation-46.json",
-          "sha256": "92ef40b98004b9d06dcfd772f6b7a9aea9b6537d373a10c037868039ce47e32e",
+          "sha256": "5a0c796f47d1c025408e96a3c6c5df6a9796c06847541ce9d9cb488af89ff521",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-acp-targets-generation-46.json",
-          "sha256": "2ab2979e7b8ace163c8ac01ce55ca075922eddfccaa0e727c0ea2218d98762a3",
+          "sha256": "82b31ea677d0c3a36022ce9e47f162854193cb6d39f10e4950b0770e342d15df",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-46.json",
-          "sha256": "1d35457237d209dff2b0915b2111822d5ad6d8a7ee176736cec08ec01ff1ff2c",
+          "sha256": "5b84e2b297209b90187299a52b684bb2b7c5e5551ec87be5a6b2d1071bc30a19",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/owned-remote-generation-46.json",
-          "sha256": "76dd485e5a01f2a7683fe3dda4f34f4c2a1cb9f4d041690b6855e7452ed6dc5b",
+          "sha256": "7e46d263ab37baf3eb16ce9c00141d4439c2f581693bcb38acdcf0a62295559c",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-native_keyed_client-generation-46.json",
-          "sha256": "493e0ef49f2ab82aa599d6bd42b44db4cbc34c65e7ddb04ab1e8cce6826cb445",
+          "sha256": "e368e2182314b08736580b88d32fd69c2b85a80ddbe83343b81ecee19c6c3d08",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-session_targeting_cli-generation-46.json",
-          "sha256": "67b831a8121154e966e631ead006adc0bebef53ed49e1377fa8165d27401220a",
+          "sha256": "9e1d24245269e106724df7f572bcaedbd82659097e916f244c04e1d1308e0240",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-routes-prompts-generation-46.json",
-          "sha256": "d9c9009d3f875eeca6de69980417cd3f25cfa9cdb8f67e72a2ef4ab305e84a1a",
+          "sha256": "261e4b727cb48d8d287de95d8328cf669841a96fd6263dc4957d350df3c8451a",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-session_prompts-generation-46.json",
-          "sha256": "13c5d642a794f67d7dcc709ecbcc7b44c4b48474987e36eaa870bae50aa22981",
+          "sha256": "7e10a8a49bc775489dff6baa4e2100aaaec31976bc5420d804b5fb4618f47b2e",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-db_schema-generation-46.json",
-          "sha256": "98f8d2380f4e7103fab6d38690e58e670bffe3a91de62e8d617418aaf20e26e2",
+          "sha256": "ce93927d26525c0fe5887223235b06fe53a6332d649a698b89080e1b5f1343bf",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-db_events-generation-46.json",
-          "sha256": "7c688c3b35bda1f5183537870c1701fd0df60bf7a77d46fbc0e01c16a9edc3e4",
+          "sha256": "0c1fc6b5b6afba250fc0851ff7adbd6310dda5aa33a5603aeb28e16df164bf65",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-cli-generation-46.json",
-          "sha256": "966cd2dfea1a9ee48ef69aa7e3fa47292735cbb5e98d88cf5c0dfdd7829b02c7",
+          "sha256": "c9b8703d1b8c6cdfc9cda193731fe37bcebc53e5ef70d2e18e7ca26ea2ed6894",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-46.json",
-          "sha256": "5bcb7ee09425320a23560785204d2c70a55a617fcb1356e1743f717e3ef9ab22",
+          "sha256": "7b3adfeb6b7a6d3c6f8c90db79ab4b6f65446a3aa52661c855cb5430f4fa89a4",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/managed-drain-generation-46.json",
-          "sha256": "b983a0fc2c09cb0f88423d2c4e2094ad0b0dd54942ca632c4f6632c075a757d1",
+          "sha256": "8c5a456a28a4a26a6bcd72d7ae564e0e5c2f1856e2604326cb8b0dd1153e4e93",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/provider-creation-refresh-generation-46.json",
-          "sha256": "9acd862b241bbc1f1189fbd8e5dacc4bdc32724af60475defd565a5c09f9d48c",
+          "sha256": "097912b66716433deee1586199b4625c6e42917b7fda2b313b7f8c2cc455dc69",
           "role": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-observation-generation-46.json",
-          "sha256": "7d91e40dba22d7de539318fec77633026077a48f8a835ae385626a76286caeb8",
+          "sha256": "e79f1cf4b53599fa05dfe4ae200691d611b2be765d28643f4c90a002a9763877",
           "role": "Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-protocol-generation-46.json",
-          "sha256": "818bd2365a0b1a21d009708e50dbc7adc9b6a8d7c4de07b6a5d602054a75c7e3",
+          "sha256": "bfe12996ca935602ede42405b9d1e5d6d27967353cf78ee3f3b127dec911acca",
           "role": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-client-generation-46.json",
-          "sha256": "cf0cb2fe47f034e77b20d6aed96a2461fb75aef92aa6e0caa30e7251807cb356",
+          "sha256": "5ace231230f67d3847f6e66f1bd25dba84b60b6cfb4f9e8cfbe403a36d186ddd",
           "role": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-client_prompt-generation-46.json",
-          "sha256": "9471f30d7267b84c1968c6159aae1986bf8f2ed27ebd4381719a3504f37322a1",
+          "sha256": "04a5035b40ea089083d2b0482929ce5962d45cab4d84a4659f7df4ba25704a01",
           "role": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-session_resume-generation-46.json",
-          "sha256": "aef1501d84d3065396ee26bc60ec0abb9fc1e142077a276a9c83758e68ae592a",
+          "sha256": "5349a37562f4b1db346cbdf37dababf222a725ffe65293b6b4401b8b22d3fb9a",
           "role": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-session_targeting_cli-generation-46.json",
-          "sha256": "e444623b9a9dd026975806be7a54cbbcbe7cf34e50e0fa355127538df75f54b4",
+          "sha256": "272d6007113f3cc05c484d281f669239068cefb36d1d171eb13e159c0ab74539",
           "role": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-startup_progress-generation-46.json",
-          "sha256": "df3260cee366ad7f5f788fc709e647d0b4bc81f23656450d428fd5382fe5b1de",
+          "sha256": "a8d4d38d52b66125f2fbb993d59dcd1b65c8d327c5af3516ed754d2df2f815bb",
           "role": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-send_outcome-generation-46.json",
-          "sha256": "6845e92fa1473baade91d55ff9de102c3a60c5570bfca8d9a21079a6f71ff23e",
+          "sha256": "a56618b20a8af83b6d7b5c971a87588ce6603e6aa81f60e9a213335cc5a62f5e",
           "role": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-__main__-generation-46.json",
-          "sha256": "077d04d438631706c95b286087fb066a50658a32f24379688eca1a66bbd8bc25",
+          "sha256": "05b051392b080cc20bfc7330164dd78c5406d5c778fa017848f598cea8dc0563",
           "role": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution.",
           "generation": 46
         }
@@ -9100,6 +9100,406 @@
         },
         {
           "commit": "9dd6a394a4e9c19603e3c286a55eb8f6fa7148bc",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/__main__.py",
+          "source_git_blob": "0d4a3d3b2e7b537afcfdf3307f7da5a5f9cdb9d3",
+          "capture_method": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "0f5cc84f3f7f7bbe3cc9b7fec2e3710629952553",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "5991aba8bc9074cc10065d615c045e91f6330153",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "e1cd7775e3ac5b39ef66d7c6f4badbf018ac3c51",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation.py",
+          "source_git_blob": "e788a271b42a9f0894ca30f96409299710410efd",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+          "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+          "source_git_blob": "1b374ada091e57067a196dc29d950b8a803679e6",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence. Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+          "source_git_blob": "716a3b825d056abf5fd5eeeda9363f366b60bab2",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+          "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+          "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+          "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+          "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+          "source_git_blob": "8be375f0a61713c7a7a810bcf104b4aa19fe3d3c",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+          "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+          "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+          "source_git_blob": "0425fcff2907612477d1a1f715aaae7bfd1cd76a",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "688e638d85cef69b4e4b285e1280bdba8cf02f5d",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+          "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
+          "source_git_blob": "318dad4ef2769d92a0e2c3d54bc4517dfb4d2f1a",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+          "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+          "source_git_blob": "549559cf0781113c6c0c6d7d385db53ab1ab3267",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence. Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+          "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_relationships.py",
+          "source_git_blob": "7c1c1ed66582315cafc9d6242846b81f283b0095",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/relationships.py",
+          "source_git_blob": "e81850ca0e0cb8091fe60fe93e771c1ac9ce0baf",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/plugin_readiness.py",
+          "source_git_blob": "fd51388e8fd1b97f6374e61a7a8acd78b98799d3",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_controls.py",
+          "source_git_blob": "c55f500d6b1568ebf05153008d82b497d2544a2b",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/acquisition_contract.py",
+          "source_git_blob": "331f5b16d971e5069b8b9f9070ada176128c6478",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_sessions.py",
+          "source_git_blob": "37d905572259c17d5d2c501aee74176534c6fe0f",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/extensions/agent-bridge/plugin-readiness.mjs",
+          "source_git_blob": "441e130f19f486c5d69be71f9f82d770e988a542",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs",
+          "source_git_blob": "dd7d21971b3b224528428ff1c6b8529de9257185",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py",
+          "source_git_blob": "d70a74c51ba3733a8210838deab704203aa508f3",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
+          "source_git_blob": "8b1f74d379be0c4f56871f553fdf546c0127627b",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
+          "source_git_blob": "fce4792c6e54c321181ff68e9314af13cddf5ce6",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "b53bb235cd0ba4f36999a4f610805f7264a0111d",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence. Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/native_keyed_client.py",
+          "source_git_blob": "142ca2e35db995444ef7775bff391af341dd1bd0",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py",
+          "source_git_blob": "fe7e80206e16070fdf515268daf35d0ade110043",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence. Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "4d5a40d53b8846ad584765f7d3561d8441efe490",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
+          "source_git_blob": "dc4c9f20477c925d24547ef8b20941f424dea8ac",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
+          "source_git_blob": "34fbd4bae0effaa5398e352574012ff08fbe2b1d",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/db_events.py",
+          "source_git_blob": "d92e67f51a7ba2bc2c8fbd5b5e350b9818eaefd6",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
+          "source_git_blob": "e34368a3bc620f55c3d0e97032ccf8c1e117c9f3",
+          "capture_method": "Linked same-source HTTP-45 family re-attestation against committed HTTP-46 source; all predecessor packet bytes/advertisements/floors remain frozen. Not an independent HTTP-46 runtime capture; current advertisement and new behavior have separate operation evidence."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/startup_observation.py",
+          "source_git_blob": "69e14738b0224ec360de53bd2c12e5060bdea6f3",
+          "capture_method": "Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/client_prompt.py",
+          "source_git_blob": "785145f6a33fea8b23f0588abfd7d066bcbc5958",
+          "capture_method": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/startup_progress.py",
+          "source_git_blob": "99511d5e059cd68fd1d4bceb73f9b272c43049f0",
+          "capture_method": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 46,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/send_outcome.py",
+          "source_git_blob": "1c0ad4cd79206d28d2f91de1f7d7eb66c818a6c7",
+          "capture_method": "Shared new startup operation evidence, not an independent capture. Independently authored HTTP-46 startup operation expectations replayed through the production parser, progress producer/observer, client GET preflight and PromptClientMixin, and JSON/non-JSON send renderer. Synthetic peer/clock; no daemon or model execution."
+        },
+        {
+          "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
           "plugin_version": "0.4.1-dev3",
           "generation": 46,
           "source_path": "plugins/agent-bridge/src/agent_bridge/__main__.py",

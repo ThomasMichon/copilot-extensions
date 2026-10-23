@@ -58,7 +58,7 @@
   "scope": "Independently authored synthetic HTTP vectors, replayed through ASGI and the real turn journal with a mock SDK. Admission is not execution or native-source qualification.",
   "evidence_family": "ordinary-native-keyed-admission-v1",
   "captured_from": {
-    "commit": "9dd6a394a4e9c19603e3c286a55eb8f6fa7148bc",
+    "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
     "source_git_blob": "fce4792c6e54c321181ff68e9314af13cddf5ce6",
