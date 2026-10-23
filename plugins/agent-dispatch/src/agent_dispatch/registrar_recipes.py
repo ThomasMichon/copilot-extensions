@@ -5,8 +5,8 @@ for the full design (why this sits ahead of ``registrar_discovery.py``'s
 ``kind``-dispatch rather than adding a new branch to it, the three
 reference kinds, and merge semantics). In short: an ``extends:``-bearing
 declaration resolves to an ordinary ``kind:``-shaped mapping *before*
-anything else sees it, so every existing validate/expand function needs
-zero changes -- this module's only job is that one resolution step.
+anything else sees it. Kind-specific expansion can also consume the
+nearest defining directories without adding provenance keys to authored data.
 """
 
 from __future__ import annotations
@@ -750,6 +750,7 @@ def _absolutize_emitter_cwd(
 def resolve_extends(
     data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...] = (),
     snapshot: RepositoryResourceSnapshot | None = None,
+    path_origins: dict[str, Path | str] | None = None,
 ) -> dict[str, Any]:
     """Expand an ``extends:``-bearing declaration mapping into its fully
     resolved, ordinary ``kind:``-shaped form.
@@ -796,18 +797,47 @@ def resolve_extends(
     ``extends:`` key, even ``null``, is never silently treated as absent
     (that would bypass validation and surface as a misleading unrelated
     error further down the pipeline).
+
+    When supplied, ``path_origins`` receives each supported field's nearest
+    defining directory (a ``Path`` or named repository directory). Filling a
+    placeholder does not move its origin; an explicit field override does.
     """
-    resolved, _pending_cwd_origin = _resolve_extends_tracking_cwd_origin(
+    resolved, _pending_cwd_origin, origins = _resolve_extends_tracking_cwd_origin(
         data, base_dir=base_dir, _chain=_chain, _snapshot=snapshot,
     )
+    if path_origins is not None:
+        path_origins.clear()
+        path_origins.update(origins)
     return resolved
+
+
+def _path_origins(
+    data: Mapping[str, Any], directory: Path | str,
+    inherited: Mapping[str, Path | str] | None = None,
+) -> dict[str, Path | str]:
+    origins = dict(inherited or {})
+    for field in ("spec.cwd", "emitter.cwd", "worker_identity", "forge.command", "forge.cwd"):
+        parts = field.split(".")
+        current = data
+        for part in parts:
+            if part not in current:
+                break
+            value = current[part]
+            if part == parts[-1]:
+                origins[field] = directory
+            elif not isinstance(value, Mapping):
+                origins.pop(field, None)
+                break
+            else:
+                current = value
+    return origins
 
 
 def _resolve_extends_tracking_cwd_origin(
     data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...],
     _snapshot: RepositoryResourceSnapshot | None = None,
     _base_resource: str | None = None,
-) -> tuple[dict[str, Any], Path | str | None]:
+) -> tuple[dict[str, Any], Path | str | None, dict[str, Path | str]]:
     """:func:`resolve_extends`'s actual implementation, additionally
     returning the directory a still-unresolved inherited ``spec.cwd``
     placeholder *originated* from (``None`` once resolved, not pending, or
@@ -825,23 +855,14 @@ def _resolve_extends_tracking_cwd_origin(
     provenance to that hop -- correctly left for the existing downstream
     leaf-file rebase to handle, same as an un-inherited `cwd` always was).
 
-    **Scope, stated plainly rather than overclaimed:** this origin-tracking
-    covers exactly one path-dependent field on exactly one kind --
-    ``kind: emitter``'s own ``spec.cwd``. Other kinds resolve their own
-    path-dependent fields against the *outer* leaf file/`repo_root`
-    entirely outside this function (`reviewer_loops.expand_reviewer_loop`'s
-    own `emitter.cwd` handling; `repository_issue_loops.expand_repository_issue_loop`'s
-    `worker_identity` resolution via the caller's `repo_root`), and this
-    recursive resolver's internal per-hop directory tracking is discarded
-    once it returns a plain merged dict -- it does not and cannot reach
-    those later, kind-specific expansion steps. Extending a cross-repo
-    `reviewer-loop`/`repository-issue-loop` base through a chain may
-    therefore still misattribute one of *those* fields to the wrong repo
-    today; this is a known, tracked gap (see the effort's own Plan), not a
-    blanket guarantee that every field of every kind is chain-safe.
+    The third result retains the nearest raw definition of supported path
+    fields for kind-specific expansion. Substitution does not change that
+    origin, even when a placeholder is filled several hops later. Script
+    fields stay unmodified here so expansion can apply its admission checks
+    to the original relative values.
     """
     if "extends" not in data:
-        return dict(data), None
+        return dict(data), None, _path_origins(data, _base_resource or base_dir)
     ref = data["extends"]
     if not isinstance(ref, str) or not ref:
         raise RegistrarError(f"extends: expected a non-empty string ref, got {ref!r}")
@@ -897,11 +918,23 @@ def _resolve_extends_tracking_cwd_origin(
         name, relative = split_repository_resource(ref)
         next_base_resource = f"repo:{name}:{PurePosixPath(relative).parent}"
     pending_cwd_origin: Path | str | None = None
+    origins: dict[str, Path | str] = {}
     if "extends" in template:
-        template, pending_cwd_origin = _resolve_extends_tracking_cwd_origin(
+        template, pending_cwd_origin, origins = _resolve_extends_tracking_cwd_origin(
             template, base_dir=next_base_dir, _chain=(*_chain, identity), _snapshot=snapshot,
             _base_resource=next_base_resource,
         )
+    elif _path_origins(template, base_dir):
+        # Unlike spec.cwd normalization, provenance also applies to high-level
+        # declarations and partial bases that acquire their kind at a later hop.
+        directory = next_base_resource or (
+            resolved_path.parent if resolved_path is not None else _plugin_payload_root()
+        )
+        origins = _path_origins(template, directory)
+        if ref.startswith("global:") and "worker_identity" in origins:
+            # A shipped identity selector is a default instantiated in the
+            # adopting declaration's repository, retaining repo-local overrides.
+            origins["worker_identity"] = _base_resource or base_dir
     if pending_cwd_origin is None and next_base_dir is not None:
         # This hop's own (non-inherited, or no-longer-pending) template
         # may itself carry a relative spec.cwd -- that field was written
@@ -953,4 +986,8 @@ def _resolve_extends_tracking_cwd_origin(
         # leaf-file rebase already handles correctly once merging
         # finishes (the same as an un-inherited cwd always was).
         pending_cwd_origin = None
-    return deep_merge(filled_template, overrides), pending_cwd_origin
+    return (
+        deep_merge(filled_template, overrides),
+        pending_cwd_origin,
+        _path_origins(overrides, _base_resource or base_dir, origins),
+    )

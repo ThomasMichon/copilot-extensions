@@ -61,12 +61,14 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> N
         or any(not isinstance(part, str) or not part for part in command)
     ):
         raise EmitterError("'command' must be a non-empty list of non-empty strings")
-    for key in ("cwd", "lease_scope", "holder_session"):
+    for key in ("cwd", "lease_scope", "holder_session", "worker_identity_cwd"):
         value = spec.get(key)
         if value is not None and (not isinstance(value, str) or not value):
             raise EmitterError(f"'{key}' must be a non-empty string")
     try:
-        validate_resource_arguments([*(command or []), spec.get("cwd")])
+        validate_resource_arguments([
+            *(command or []), spec.get("cwd"), spec.get("worker_identity_cwd"),
+        ])
     except ValueError as exc:
         raise EmitterError(str(exc)) from exc
     if builtin is not None:
@@ -80,7 +82,10 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> N
         from ..repository_issue_loops import validate_config
 
         try:
-            validate_config(builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources)
+            validate_config(
+                builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources,
+                worker_identity_cwd=spec.get("worker_identity_cwd"),
+            )
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     if effort_builtin is not None:
@@ -533,6 +538,7 @@ def run_tick(
                 spec["repository_issue_loop"],
                 clock=clock,
                 cwd=cwd,
+                worker_identity_cwd=spec.get("worker_identity_cwd"),
             )
             return {
                 "held": True,

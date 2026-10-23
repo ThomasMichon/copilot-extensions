@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve nearest declaration origins for inherited reviewer cwd and worker identities without weakening script admission.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

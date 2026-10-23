@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Protocol
 
 from .ado_discovery_scope import (
@@ -171,16 +171,32 @@ def validate_config(
     cwd: str | Path | None = None,
     inherited_script_fields: frozenset[str] = frozenset(),
     resolve_resources: bool = True,
+    worker_identity_cwd: str | None = None,
 ) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override.
     ``inherited_script_fields`` (``"command"``/``"cwd"``, or both) names
     which `script`-provider forge fields were inherited from an `extends:`
     base rather than declared by this file itself -- see
-    ``validate_script_forge_config``'s own handling."""
+    ``validate_script_forge_config``'s own handling. Generated emitters may
+    retain a separate ``worker_identity_cwd`` from an inherited declaration;
+    it selects identity tiers only, never script execution context."""
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
-    from .repository_resources import RepositoryResourceSnapshot, execution_root
+    from .repository_resources import (
+        RepositoryResourceSnapshot, execution_root, is_repository_resource,
+        validate_resource_arguments,
+    )
+
+    if worker_identity_cwd is not None:
+        if not isinstance(worker_identity_cwd, str) or not worker_identity_cwd:
+            raise RegistrarError("worker_identity_cwd: expected a non-empty source root")
+        validate_resource_arguments([worker_identity_cwd])
+        if not is_repository_resource(worker_identity_cwd) and not any(
+            cls(worker_identity_cwd).is_absolute()
+            for cls in (Path, PurePosixPath, PureWindowsPath)
+        ):
+            raise RegistrarError("worker_identity_cwd: expected an absolute or named source root")
 
     extra = sorted(set(data) - _KNOWN_KEYS)
     if extra:
@@ -369,7 +385,14 @@ def validate_config(
         )
     identity_name = ""
     if worker_identity and resolve_resources:
-        identity = load_worker_identity(worker_identity, cwd=Path(cwd) if cwd else None)
+        identity_cwd = cwd
+        if worker_identity_cwd is not None:
+            identity_cwd = snapshot.resolve(
+                worker_identity_cwd, directory=True, execution=False,
+            )
+        identity = load_worker_identity(
+            worker_identity, cwd=Path(identity_cwd) if identity_cwd else None,
+        )
         guidance = identity.rules
         identity_name = identity.name
     if not isinstance(allow_self_config, bool):
@@ -1307,11 +1330,12 @@ def run_tick(
     clock: Callable[[], float] = time.time,
     dry_run: bool = False,
     cwd: str | Path | None = None,
+    worker_identity_cwd: str | None = None,
 ) -> dict[str, Any]:
     """Run one issue-source occurrence with visible reserve/create/reconcile.
     ``cwd`` (declaring repo root, if known) re-threads ``worker_identity``
     to its repo-local override rather than the daemon process's own cwd."""
-    config = validate_config(config, cwd=cwd)
+    config = validate_config(config, cwd=cwd, worker_identity_cwd=worker_identity_cwd)
     provider = provider or _forge_provider_for(config, cwd=cwd)
     now = clock()
     discovered = plan(client, config, provider=provider, now=now)
