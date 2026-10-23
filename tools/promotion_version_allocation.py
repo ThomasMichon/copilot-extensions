@@ -124,14 +124,13 @@ def allocate_versions(scratch: Path, *, repo: Path, accumulator) -> dict[str, tu
 def apply_version_reservations(
     scratch: Path, repo: Path, accumulator,
     computed: dict[str, tuple[str, str]], applied: list[str],
+    promotion_error: type[RuntimeError],
 ) -> None:
     """Apply reservations while keeping the original Main baseline in the summary."""
-    from promote_release import PromotionError
-
     try:
         reserved = allocate_versions(scratch, repo=repo, accumulator=accumulator)
     except VersionReservationError as exc:
-        raise PromotionError(str(exc)) from exc
+        raise promotion_error(str(exc)) from exc
     for consumer, (old, new) in reserved.items():
         computed[consumer] = computed.get(consumer, (old, old))[0], new
         if consumer not in applied:

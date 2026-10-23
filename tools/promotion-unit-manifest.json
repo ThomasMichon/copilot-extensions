@@ -1002,7 +1002,7 @@
     "libs/remote-login-shell/src/remote_login_shell/__init__.py": "339e08c120b8310de198a3fa675e1089c2229e985e9389cc2f507eabd0b6ffe6",
     "libs/remote-login-shell/tests/test_remote_login_shell.py": "c58b26541adaef6eed1d64e9a7a16fd827ff52045881021d9c1f9b26ac1d11ca",
     "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
-    "tools/promotion_version_allocation.py": "6f3274ceb44fe2779cae5e1dd7f7d5a5a2ea711bd086c999f65b901ad8bf13b6",
+    "tools/promotion_version_allocation.py": "8bb64908ccecf49c8326aa60b0f336caced8782288608bf2797ab67b52312aeb",
     "tools/promotion_unit_tests/test_version_reservations.py": "15434c96e0ddd427560498deab3b73009e7cda4f3bff872d68a2287552001790"
   },
   "coverage_targets": [

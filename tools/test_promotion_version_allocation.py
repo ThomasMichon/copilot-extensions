@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -168,6 +171,15 @@ def test_noncommit_reservation_is_an_explicit_refusal_not_an_unused_version(repo
         promotion.promote(repo=repo, dev_ref="dev", main_ref="main")
     assert _git(["rev-parse", "demo-plugin-v0.1.1-dev1"], repo) == blob
     assert _git(["status", "--porcelain"], repo) == before
+    command = subprocess.run(
+        [sys.executable, promotion.__file__, "--repo", str(repo),
+         "--dev-ref", "dev", "--main-ref", "main", "--dry-run"],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert command.returncode == 1
+    assert "cannot allocate immutable versions" in command.stderr
+    assert "Traceback" not in command.stderr
 
 
 def test_unrelated_source_preserves_an_unchanged_shipped_plugin_version(repo):
