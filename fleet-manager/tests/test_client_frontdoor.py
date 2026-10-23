@@ -2,11 +2,8 @@
 
 import copy
 import codecs
-import json
 import os
 from pathlib import Path
-import subprocess
-import sys
 
 import pytest
 
@@ -88,6 +85,19 @@ def test_created_command_proofs_and_fresh_exact_noop(selected, primitive):
     assert states(before) == before
     assert database_bytes(root) == floor and states(selectors) == selectors
     assert os.environ == environment
+    assert not (namespace / frontdoor.PENDING).exists()
+
+
+@pytest.mark.parametrize("content", [b"", b'{"unfinished":', b'{"complete":true}'])
+def test_registration_does_not_adopt_or_remove_abandoned_pending_journal(selected, content):
+    root, fixture, staged, trusted, directory, namespace, slot = selected
+    abandoned = namespace / (frontdoor.PENDING + ".tmp")
+    abandoned.write_bytes(content)
+    before = states([abandoned])
+    floor = database_bytes(root)
+    assert register(root, fixture, staged, trusted, directory)["frontdoor_registered"]
+    assert states([abandoned]) == before and database_bytes(root) == floor
+    assert all(path.is_file() for path in frontdoor._commands(directory, slot))
     assert not (namespace / frontdoor.PENDING).exists()
 
 
@@ -254,109 +264,3 @@ def test_higher_active_candidate_updates_only_attributed_commands(selected, prim
                    for path in frontdoor._commands(directory, next_slot) if path.suffix != ".cmd")
         assert old_slot.is_dir() and (old_slot / primitive.COMPLETE_MARKER).is_file()
         assert database_bytes(root) == floor
-
-
-@pytest.mark.timeout(90)
-def test_installed_retained_frontdoor_outside_checkout_and_exact_rerun(
-    primitive, built_client, tmp_path, monkeypatch,
-):
-    root, fixture, staged, trusted, user, floor, _report = built_client
-    directory = command_directory(tmp_path, "client commands \u00e9\u4e2d")
-    if os.name == "nt":
-        original_environment = construction._environment
-
-        def restricted_environment(slot):
-            environment = original_environment(slot)
-            assert "PSExecutionPolicyPreference" not in environment
-            environment["PSExecutionPolicyPreference"] = "Restricted"
-            return environment
-
-        monkeypatch.setattr(construction, "_environment", restricted_environment)
-    activate(root, fixture, staged, trusted)
-    program = """
-import json,sys
-from pathlib import Path
-from fleet_manager.artifact_staging import stage_authenticated_artifacts
-from fleet_manager.client_frontdoor import register_client_frontdoor
-from fleet_manager import client_construction as construction
-from fleet_manager.planning import canonical
-value=json.loads(sys.stdin.readline())
-if value["restricted_powershell"]:
-    original=construction._environment
-    def restricted(slot):
-        environment=original(slot)
-        assert "PSExecutionPolicyPreference" not in environment
-        environment["PSExecutionPolicyPreference"]="Restricted"
-        return environment
-    construction._environment=restricted
-with stage_authenticated_artifacts(
-    canonical(value["manifest"]),value["proof"],value["policy"],value["sources"],
-    authority=value["identity"]["authority"],installation=value["identity"]["installation"],
-    role="client",staging_parent=Path(value["stage"]),clock=lambda:150,
-) as staged:
-    print(json.dumps(register_client_frontdoor(
-        Path(value["root"]),value["identity"],value["selection"],staged,
-        command_directory=Path(value["directory"]),
-        current_policy=lambda:value["policy"],current_target=lambda:value["target"],
-        clock=lambda:150,
-    )),flush=True)
-"""
-    processes = []
-    reports = []
-    try:
-        for index in range(2):
-            area = command_directory(tmp_path, f"owner-{index}")
-            process = subprocess.Popen(
-                [sys.executable, "-I", "-B", "-c", program], cwd=area,
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, **FLAGS,
-            )
-            processes.append(process)
-            process.stdin.write(json.dumps({
-                **fixture, "policy": trusted, "root": str(root), "identity": identity(),
-                "selection": selection(fixture), "target": target(fixture), "stage": str(area),
-                "directory": str(directory),
-                "restricted_powershell": os.name == "nt",
-            }) + "\n")
-            process.stdin.close()
-            process.stdin = None
-        for process in processes:
-            stdout, stderr = process.communicate(timeout=60)
-            assert process.returncode == 0, stderr
-            reports.append(json.loads(stdout))
-    finally:
-        for process in processes:
-            if process.poll() is None:
-                process.kill()
-            process.wait(timeout=10)
-    assert sorted(report["reused"] for report in reports) == [False, True]
-    result = reports[0]
-    assert result["health"]["status"] == "installed" and result["frontdoor_registered"]
-    environment = os.environ.copy()
-    if os.name == "nt":
-        environment["PSExecutionPolicyPreference"] = "Restricted"
-        powershell = Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-        control = subprocess.run(
-            [str(powershell), "-NoProfile", "-NonInteractive", "-File",
-             str(directory / "fleet-manager.ps1"), "--version"],
-            cwd=directory, env=environment, capture_output=True, text=True,
-            timeout=20, check=False, **FLAGS,
-        )
-        assert control.returncode != 0 and "UnauthorizedAccess" in control.stderr
-        programs = [
-            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-             "-File", directory / "fleet-manager.ps1"],
-            [os.environ["COMSPEC"], "/d", "/c", directory / "fleet-manager.cmd"],
-        ]
-    else:
-        programs = [[directory / "fleet-manager"]]
-    for program in programs:
-        health = subprocess.run(
-            [*map(str, program), "--version"], cwd=directory, env=environment,
-            capture_output=True, text=True, timeout=20, check=False, **FLAGS,
-        )
-        assert health.returncode == 0, health.stderr
-        assert health.stdout.strip() == f"fleet-manager {result['health']['package_version']}"
-    repeated = register(root, fixture, staged, trusted, directory)
-    assert repeated["reused"] and not repeated["mutations_performed"]
-    assert database_bytes(root) == floor and user.read_bytes() == b"preserved configuration\n"

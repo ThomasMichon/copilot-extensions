@@ -176,8 +176,11 @@ Implementation sequencing below is **agent-recommended**:
   #7891; it preserves every runtime and the admission floor.
   Exact completed-runtime removal with durable physical custody, interrupted
   deletion recovery and reconstruction-generation fencing is merged in #7900.
-  Torn-producer-journal recovery, retained-good recovery and a managed installer
-  remain open. None of these local prerequisites authorizes a live rollout.
+  Owned pending command/selector withdrawal from intact unfinished producer
+  proofs is merged in #7958; acknowledged-owner and execution proofs stay strict.
+  Initial journal/first-touch publication recovery, retained-good policy,
+  identity retirement/reinstall fencing and a managed installer remain open.
+  None of these local prerequisites authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
   source implementation is merged in #6944; fresh-environment/native acceptance

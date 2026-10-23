@@ -120,6 +120,21 @@ input receipt. The durable accepted floor and previous active selectors,
 retained-good references and user configuration are never reduced or rewritten.
 An uncertain completion outcome requires a fresh owned retry/reread.
 
+Client lifecycle JSON journals share an attempt-local durable writer: each
+exclusive temporary is fully written and fsynced before replacing the intended
+journal and syncing its parent. Empty, truncated or complete abandoned attempts,
+including legacy `<journal>.tmp` files, neither block retry nor supply ownership
+or successful completion. They are not adopted or removed by a journal retry.
+Existing candidate-discard and exact owned runtime-removal contracts still
+govern deletion inside their captured runtime trees.
+
+Initial namespace ownership is written and synced inside the existing staged
+initialization directory before that directory is renamed into place. Its
+recognized ordinary owner-file recovery names remain unchanged; unknown entries
+are preserved and refused. This journal change does not repair a missing or
+unframed created-object publication receipt header, relax acknowledged-owner
+proofs, or complete installation retirement.
+
 ## Reports and remaining transitions
 
 A successful `fleet-manager.client-construction`, version `1`, reports

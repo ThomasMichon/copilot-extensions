@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import uuid
 import zipfile
 
 from . import artifact_staging, client_admission
@@ -31,13 +32,26 @@ def _not_removing(namespace):
         raise PlanError("client runtime removal is unsettled; exact owned removal retry is required")
 
 
+def _write_exclusive(path, value):
+    descriptor = os.open(
+        path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_BINARY", 0), 0o600,
+    )
+    try:
+        content = canonical(value)
+        while content:
+            written = os.write(descriptor, content)
+            if written <= 0:
+                raise OSError("client journal write made no progress")
+            content = content[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _write(path, value):
-    temporary = path.with_name(path.name + ".tmp")
-    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(canonical(value))
-        stream.flush()
-        os.fsync(stream.fileno())
+    # Abandoned attempts remain evidence, never a shared retry prerequisite.
+    temporary = path.with_name("." + path.name + ".write-" + uuid.uuid4().hex)
+    _write_exclusive(temporary, value)
     os.replace(temporary, path)
     client_admission._sync_directory(path.parent)
 
@@ -69,7 +83,8 @@ def _namespace(root, identity):
             entry.unlink()
         temporary.rmdir()
     temporary.mkdir(mode=0o700)
-    _write(temporary / OWNER, expected)
+    _write_exclusive(temporary / OWNER, expected)
+    client_admission._sync_directory(temporary)
     os.rename(temporary, namespace)
     client_admission._sync_directory(root)
     return namespace
@@ -294,10 +309,6 @@ def _construction_intent(namespace, version, slot, binding):
         artifact_staging._directory(slot)
         if any(slot.iterdir()):
             raise PlanError("unfinished client candidate has no owned construction intent")
-    temporary = intent.with_name(intent.name + ".tmp")
-    if os.path.lexists(temporary):
-        client_admission._ordinary_file(temporary)
-        temporary.unlink()
     _write(intent, binding)
     return intent
 

@@ -319,22 +319,7 @@ def _directory(path):
 
 
 def _write(path, value):
-    # Each attempt owns only its exclusive temporary. An interrupted or
-    # truncated older attempt remains evidence, not a permanent retry blocker.
-    temporary = path.with_name("." + path.name + ".write-" + uuid.uuid4().hex)
-    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        content = canonical(value)
-        while content:
-            written = os.write(descriptor, content)
-            if written <= 0:
-                raise OSError("client removal journal write made no progress")
-            content = content[written:]
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-    os.replace(temporary, path)
-    client_admission._sync_directory(path.parent)
+    construction._write(path, value)
 
 
 def _binding(namespace, identity, candidate, value):

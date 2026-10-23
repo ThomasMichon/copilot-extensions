@@ -1,0 +1,9 @@
+{
+  "comment": "Make client lifecycle journal writes retryable after abandoned attempts without adopting or deleting their evidence.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
