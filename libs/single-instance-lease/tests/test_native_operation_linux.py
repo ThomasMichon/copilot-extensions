@@ -152,6 +152,28 @@ def test_inherited_owner_refuses_replaced_lock_file(tmp_path):
         owned.release()
 
 
+def test_inherited_directory_refusal_does_not_leak_a_duplicated_lock(tmp_path):
+    import fcntl
+
+    directory = tmp_path / "directory"
+    directory.mkdir()
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        before = len(os.listdir("/proc/self/fd"))
+        with pytest.raises(IsADirectoryError):
+            OperationLock.from_inherited(directory, fd)
+        assert len(os.listdir("/proc/self/fd")) == before
+        assert os.fstat(fd).st_ino == directory.stat().st_ino
+    finally:
+        os.close(fd)
+    probe = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        os.close(probe)
+
+
 @pytest.mark.parametrize("mode", ["cleanup", "foreign"])
 def test_native_cleanup_closes_only_its_owned_reference_after_path_invalidation(tmp_path, mode):
     lock = tmp_path / "execution.lock"

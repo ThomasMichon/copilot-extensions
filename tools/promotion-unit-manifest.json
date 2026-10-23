@@ -1010,7 +1010,7 @@
     "libs/plugin-activation/tests/test_preservation.py": "91d46757d8af89c5685bba1556484dc9b26cbd026eec34658098617dc686c898",
     "libs/single-instance-lease/src/single_instance_lease/__init__.py": "be9bdd78ca0093a72b68f8f2fd6098166a737e1b5c2bd3b94c08c866807702b9",
     "libs/single-instance-lease/src/single_instance_lease/lease.py": "1ae1f78c4a00ac0e7245cb3dde381c5bafae8716626f2ee90d4cb0d2a44f4104",
-    "libs/single-instance-lease/src/single_instance_lease/operation.py": "dcf45419912a3d8368bec88ce09b887a1ca1ec2837c251a047717301e912c18c",
+    "libs/single-instance-lease/src/single_instance_lease/operation.py": "12cbc0f45e2a80bb4be84d41c87fc6cea2eea43d168447edb4c7c71361b0dd19",
     "libs/single-instance-lease/src/single_instance_lease/reaper.py": "c34e06d3a3f7bb71ae0cd3eb7b6e596d190c948d27c90f7064fb13e41f10bda2",
     "libs/single-instance-lease/src/single_instance_lease/supersession.py": "45c22d0633c4df6599864bd5112fd2b0f240ce981e370dffbb54ab82e93a1b73",
     "tools/promotion_unit_tests/test_activation_preservation.py": "bb6c7de539254571e2635424ac06b5772714d860ba490aca668d02a0731c8a92",

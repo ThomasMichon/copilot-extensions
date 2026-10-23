@@ -118,7 +118,12 @@ class OperationLock:
         with _guard:
             if not holder.path.is_absolute() or holder.path.parent.resolve(strict=True) != holder.path.parent:
                 raise OperationOwnershipError("operation lock requires an absolute, unlinked parent")
-            stream = os.fdopen(os.dup(fd), "r+b", buffering=0)
+            duplicate = os.dup(fd)
+            try:
+                stream = os.fdopen(duplicate, "r+b", buffering=0)
+            except BaseException:
+                os.close(duplicate)
+                raise
             try:
                 info = holder._assert_file(stream)
                 _assert_linux_flock(stream)
