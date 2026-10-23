@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Native Mux Launch Contract](2026/10/23%20native-mux-launch-contract/README.md) | Done for bounded source delivery; terminal custody, connected status and selected-directory repairs merged in #8031 | #7962 retains human/native qualification, release and authorized rollout; no installed changes |
 | [Bridge Retained Runtime Restoration](active/bridge-retained-runtime-restoration/README.md) | Draft; local architecture accepted, normal proposal review/landing before implementation | #8063; specializes #7268 without substituting for Dispatch/adopter acknowledgement; no rollout |
 | [Actions Dialog Isolation](active/actions-dialog-isolation/README.md) | Draft amendment; Actions source complete, new configuration-freshness episode | #7940 exact file-store/consumer admission; #7939 release and #7935 native gates remain |
 | [Producer Work Reuse](active/producer-work-reuse/README.md) | Draft; code-grounded producer caching/batching/indexing plan only; execution admission pending | #7948/#7949/#7950 and retained #2110 declaration/health acceptance; no rollout |
@@ -136,6 +135,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Native Mux Launch Contract](2026/10/23%20native-mux-launch-contract/README.md) | Done for bounded source delivery; terminal custody, connected status and selected-directory repairs merged in #8031 | #7962 retains human/native qualification, release and authorized rollout; no installed changes |
 | [Generation-Bound Guidance](2026/10/23%20generation-bound-guidance/README.md) | Done for bounded source delivery; generation reuse, protected partial publication and late notices merged in #8045 | #7943 retains full native entry, cold-bootstrap, release and installed acceptance; no rollout |
 | [Telemetry Measurement Contract](2026/10/22%20telemetry-measurement-contract/README.md) | Done; QoS/Engagement contract, 58-entry catalog and future instrumentation plan merged; no runtime adoption | #8102; existing Performance Telemetry and production owners retain implementation/rollout |
 | [Picker Pending Binding](2026/10/22%20picker-pending-binding/README.md) | Done for the admitted source increments; consumer and config-dir producer merged, two scalar queries retained | #7938 remains open for full cold/native, remote, release and installed acceptance |
