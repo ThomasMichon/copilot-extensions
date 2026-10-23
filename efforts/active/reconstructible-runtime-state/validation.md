@@ -130,3 +130,24 @@ as a substitute for an isolated loss test.
   checks passed. Linux/native Git adoption, process-crash/power-loss, actual old
   runtime and external-venue qualification remain unexecuted: G1 has no live
   integration/installer/default writer, and those effects are not admitted.
+
+## G3 admitted evidence
+
+- `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_recovery_facts.py --test-file tests/test_recovery_report.py`:
+  **123 passed** on Windows (79 G1, 44 G3), through the contained runner.
+- G3 uses the real `doctor_cli_parser.add_parser` and
+  `maintenance_cli.cmd_doctor` consumer, never a synthetic alternative framework.
+  Fixtures forbid project/session/registry scans, provisioning, Git subprocesses
+  and the repair body; mixed mutation/target options refuse before input reads.
+- Protected synthetic index/stash/untracked/ignored/checkpoint/credential and
+  record bytes retain exact bytes/mtime. Unknown optional data is untouched.
+  Missing cache, missing/foreign anchors and unsupported/malformed/truncated
+  facts remain typed evidence; caller assertions cannot mark G2 migration complete.
+- Ordinary reports open exactly the request and two marker files, with
+  `6 * fixture-root-depth + 11` lstat calls and no enumeration at 0/100/1,000
+  history files. Explicit file selection opens at most the declared 0–32 budget
+  and labels omitted counts; it never replays facts or discovers directories.
+- Ruff F/E9, install-contract, docs consistency and effort structure passed.
+  Full-process/native Git, Linux, installed/runtime and live-resource tests are
+  not claimed: execution is explicitly limited to isolated synthetic resources,
+  and no later mutation/rollback/installer capability is admitted.

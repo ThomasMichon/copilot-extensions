@@ -48,6 +48,11 @@ def add_parser(sub) -> None:
     )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
     sp.add_argument(
+        "--recovery-report", metavar="REQUEST_JSON",
+        help="Report only exact recovery inputs from a bounded request file; "
+        "no discovery, repair, migration or ownership admission.",
+    )
+    sp.add_argument(
         "--guest-distribution", metavar="NAME",
         help="Inspect only the designated WSL guest/default. With --fix, register "
         "a verified named guest entry; never change the host default or repair records.",

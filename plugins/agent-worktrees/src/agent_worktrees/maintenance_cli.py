@@ -357,6 +357,9 @@ def cmd_backfill_sessions(args) -> int:
 
 def cmd_doctor(args) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
+    if getattr(args, "recovery_report", None) is not None:
+        from .recovery_doctor import targeted_report
+        return targeted_report(args)
     if (
         getattr(args, "repair_machine_record", None) is not None
         or getattr(args, "from_machine", None) is not None

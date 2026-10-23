@@ -1,9 +1,10 @@
 # Recovery facts: isolated G1 primitives
 
-`recovery_facts.py` and `recovery_markers.py` are disconnected qualification
-primitives. No CLI, session hook, record transaction, installer or service calls
-them. They do not backfill a live marker, append a production journal, activate
-a writer, delete state or rebuild a projection.
+`recovery_facts.py` and `recovery_markers.py` began as disconnected G1
+qualification primitives. The explicit G3 [report-only doctor](recovery-report.md)
+now consumes them for diagnostics. No session hook, record transaction,
+installer or service calls them. They do not backfill a live marker, append a
+production journal, activate a writer, delete state or rebuild a projection.
 
 The approved placement contract is a small gitignored
 `.agent-worktrees-recovery/identity.json` in each actual worktree, and

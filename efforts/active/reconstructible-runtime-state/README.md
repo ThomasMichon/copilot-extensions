@@ -19,8 +19,9 @@ surviving authorities and the minimum durable semantic facts. Missing cached
 provenance is not proof of a competing owner; neither is a missing record proof
 that obligations are settled. Preserve real effect-side authority and user work.
 
-The reviewed plan has **G1-only implementation admission**: disconnected
-facts/envelope/reader-preservation primitives and isolated durability fixtures.
+The reviewed plan has **G1 plus G3 report-only admission**: facts/envelope/
+reader-preservation primitives and bounded exact-input reporting, qualified
+only against isolated fixtures.
 No live backfill, deletion, force mode, G2 claim writers, G4 projection loss,
 G5 Bridge/installer changes, runtime reset or deployment is admitted.
 Force rebuild remains a design option requiring a separate operator decision.
@@ -29,7 +30,7 @@ Force rebuild remains a design option requiring a separate operator decision.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Recovery driver | #7947 G1 isolated primitives/fixtures only | Isolated source PR, public handle `threaded-compass` |
+| Recovery driver | #7947 G3 report-only consumer and isolated fixtures | Isolated source PR, public handle `tidy-cog`; prior G1 `threaded-compass` finalized |
 | Worktree ground-state owner | Record transactions, claims, lineage and adoption | #3761 and its existing source claims |
 | Compatibility foundation owner | Bridge durable contracts and mixed-version evidence | #1460; prerequisite evidence #1915 |
 | Component owners | Installer custody, Dispatch task semantics and provider leases | Their existing issue/PR ownership; no takeover |
@@ -39,7 +40,7 @@ Force rebuild remains a design option requiring a separate operator decision.
 
 - **Topology:** one planning PR; later independent PRs with actual dependency
   edges in [design.md](design.md), never a repository-wide merge lock.
-- **Host (owns PRs):** recovery driver owns the proposal and admitted G1. Each
+- **Host (owns PRs):** recovery driver owns the proposal and admitted G1/G3. Each
   implementation PR requires a fresh issue/task collision check and named owner.
 - **Delegates:** none for this plan. Any required independent review may use
   the repository's forge review or a newly owned native sub-agent.
@@ -121,14 +122,16 @@ proposed, with no #3761 takeover; later slices and live activation remain gated.
 
 ## Plan
 
-All mechanisms and names below are **agent-recommended proposals**, not
-implemented APIs or accepted execution assignments.
+G1's disconnected slice is merged; G3 report-only implementation is admitted.
+Unchecked later mechanisms remain **agent-recommended proposals**, not accepted
+execution assignments or implemented APIs.
 
 ### Phase 0 — Review and admission
 - [x] Trace the bounded current-source recovery and compatibility seams.
 - [x] Capture taxonomy, preservation, transaction and ownership contracts.
 - [x] Publish and merge the source-only proposal through repository review (#8025).
 - [x] Obtain G1-only campaign admission and approve resource-marker/Git-common placement.
+- [x] Obtain G3 exact report-only admission against G1 read fixtures while G2 remains gated.
 - [ ] Obtain campaign admission of remaining implementation slices and resolve decisions
       in [design.md](design.md#decisions-before-implementation).
 
@@ -144,8 +147,11 @@ implemented APIs or accepted execution assignments.
       record/table as disposable. See [store taxonomy](design.md#store-taxonomy).
 
 ### Phase 2 — Scoped observation and reconstruction
+- [x] G3 admitted source/fixture slice: bounded exact-input diagnostics through the existing
+      doctor report-first consumer, without changing legacy guards.
+- [ ] Merge the G3 source slice through final-head review and required CI.
 - [ ] G3: add report-first candidate discovery and typed completeness without
-      claiming ownership; preserve ordinary observation on a missing cache.
+      claiming ownership; broader adoption/guard integration needs fresh admission.
 - [ ] G4: rebuild an inactive compatible projection from surviving anchors,
       check equivalence, then fence/quiesce or defer before selecting it.
 - [ ] Keep legacy adoption and missing-record cleanup paths under their
@@ -177,7 +183,7 @@ implemented APIs or accepted execution assignments.
 
 ## Proposal
 
-G1 plus isolated fixtures is admitted; all remaining G1–G6 gates are not an
+G1 and G3 report-only with isolated fixtures are admitted; remaining G1–G6 gates are not an
 executable reset command. G2 must precede any destructive loss test that assumes central
 records are disposable. Force-rebuild policy, durable-anchor placement and
 supported rollback-reader floor are explicit decisions, not implied approval.
@@ -228,3 +234,29 @@ supported rollback-reader floor are explicit decisions, not implied approval.
 - Kept marker I/O failures distinct from corrupt metadata and bounded nested
   marker parsing after final classification review. Final contained Windows
   run: **79 passed**; Ruff F/E9 green.
+
+### 2026-10-23 — G3 report-only admission
+- G1 #8101 merged as `51217c314541a8fa8cd9f835cc5a88e94932f0c6`, approved and
+  green; only its disconnected 79-fixture boundary was accepted. Its worktree
+  finalized; G3 uses a fresh independently claimed worktree.
+- The admitted seam is `doctor_cli_parser.add_parser` ->
+  `maintenance_cli.cmd_doctor` early report-only branch ->
+  `recovery_doctor.targeted_report` / `recovery_inventory.inventory`.
+  Fresh forge file/task reads found no overlapping owner for these files.
+- No `record_read`/`session_projection` guard changes, transaction-owner edits,
+  live session/lease reads, provision, automatic Git discovery or later-slice
+  activation. G2 migration completeness remains unknown even when markers exist.
+- The existing targeted-doctor report pattern is reused, not its repair body.
+  This realizes the reviewed G3 dependency edge on G1; no new daemon, cache,
+  attestation framework or standalone competing consumer is introduced.
+- Contained Windows packet: **123 passed** (79 retained G1 cases and 44 G3
+  cases), exercising the real doctor parser and consumer with exact synthetic
+  resources. Ordinary reports perform exactly three file opens and a fixed
+  path-depth-bound stat count with 0/100/1,000 historical files; no enumeration.
+- Protection assertions preserve bytes/mtime and forbid provisioning, Git
+  subprocesses, project/session/registry scans and repair calls. Missing cache,
+  absent/foreign markers, unsupported/malformed/truncated facts, bounded
+  explicit selection and caller-asserted completion all remain non-admitting.
+- Ruff F/E9, install-contract, documentation consistency and effort structure
+  passed. Full process/native Git, Linux, installed/runtime and live-resource
+  qualification are not claimed; execution admission remains synthetic only.

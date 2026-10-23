@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded exact-input report-only recovery diagnostics without migration or writer admission",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
