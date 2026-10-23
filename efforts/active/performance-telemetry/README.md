@@ -172,7 +172,7 @@ sample/drop/missing evidence and the later structured-signal/hook work.
   closed content/labels, optional SDK and legacy trace behavior.
 - [x] Implement and validate SDK Logs/Metrics protobuf and complete per-signal
   accounting through the existing source consumer, including isolated wire proof.
-- [ ] Pass source review/CI and merge; preserve complete raw validation packets.
+- [x] Pass source review/CI and merge; preserve complete raw validation packets.
 - [x] Deferred to `#7935`: obtain the separate collector-owner handshake,
   then qualify actual native source receive/persist and overhead before any
   installed rollout or native budget claim.
@@ -288,6 +288,38 @@ collector edits, installed enrollment, reserved callers or process-custody chang
 Actual native source Logs/Metrics receipt still awaits the collector handshake.
 
 ## Journal
+
+### 2026-10-23 — Structured-signal source slice merged
+
+- #8228 merged after approval at its exact head, no open findings and successful
+  required checks. The existing writer now supports the closed optional SDK
+  Logs/Metrics contract; no reserved caller, frame-health or custody file changed.
+- Final scoped selections passed 94 Manager tests (including Windows controls),
+  120 shared SDK/transport/compatibility tests and 24 Dispatch compatibility
+  tests. Install-contract and touched-code lint passed. SDK/proto/proto-common
+  1.45.1 was both the floor and current seasoned selection; base imports and
+  standalone dependency materialization remained SDK-independent.
+- A clean merged-source finite API fixture completed five expected conditions,
+  with 19/19 structured logs and 10/10 metric points independently matched in
+  its non-overloaded all-signal control, no queue loss, and explicit unknown
+  results under outage. A separate burst retained 128 observations with 875
+  queue drops and one attempted request per signal before outage deactivation.
+  All finite receiver sockets/threads and writer lifetimes were closed.
+- This is genuine SDK/protobuf **source-reporter API** evidence, not actual
+  native Picker Logs/Metrics receipt, an official shared collector, installed
+  enrollment, causal overhead or a native latency budget. Those gates remain.
+- Review corrections cover mixed owned/foreign records, actual metric types,
+  overlapping intervals, no-recorded-value flags, strict numeric semantics,
+  malformed/sparse sender accounting and binary-ID representation. Earlier
+  failing/superseded packets and all historical native reports remain retained.
+- The optional all-declaration diagnostic could not query four public npm
+  metadata entries because of certificate-verified TLS handshake failures;
+  its bounded retry also failed. The Python lane passed 343 declarations.
+  No dependency manifests changed, TLS was not weakened and that diagnostic
+  is not represented as a passing full metadata audit. Required source CI passed.
+- The campaign coordinator retains collector admission/retention, actual
+  native receive/persist and overhead, installed rollout, all hook qualification
+  and every retained #8036 clause under #7935/#5900.
 
 ### 2026-10-23 — Structured-signal source implementation admitted
 
