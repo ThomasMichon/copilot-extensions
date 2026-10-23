@@ -360,6 +360,7 @@ def test_stamp_uv_guard_rejects_and_records_any_invocation(tmp_path: Path) -> No
 def test_offline_uv_settings_preflight_is_read_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    global _UV_LAUNCHER_BYTES
     compilations = []
     run = subprocess.run
 
@@ -372,13 +373,17 @@ def test_offline_uv_settings_preflight_is_read_only(
         return run(command, **kwargs)
 
     if os.name == "nt":
-        monkeypatch.setitem(globals(), "_UV_LAUNCHER_BYTES", None)
+        _UV_LAUNCHER_BYTES = None
         monkeypatch.setattr(subprocess, "run", observe)
     env = _isolated_install_env(tmp_path / "home")
     provider = _offline_uv(tmp_path, env)
     if os.name == "nt":
-        assert len(compilations) == 1
         assert provider.read_bytes().startswith(b"MZ")
+        reused_root = tmp_path / "reused"
+        reused_root.mkdir()
+        reused = _offline_uv(reused_root, env.copy())
+        assert reused.read_bytes() == provider.read_bytes()
+        assert len(compilations) == 1
     result = subprocess.run(
         [str(provider), "pip", "install", "--show-settings", "unused-artifact"],
         env=env, capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,

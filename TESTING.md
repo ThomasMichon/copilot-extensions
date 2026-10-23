@@ -1814,7 +1814,8 @@ boundary before normalizing paths for ordering or retry comparisons.
 Vault's offline UV fixture builds its native PE directly with the Windows
 .NET Framework compiler, preferring Framework64 and falling back to Framework.
 Its existing preflight contract forces fresh compilation and executes the real
-provider, retaining headless execution and the 20-second native child deadline.
+provider, then proves byte-identical reuse without another compiler invocation.
+Headless execution and the 20-second native child deadline remain unchanged.
 This fixture does not alter snapshot copying or the separate NoService contract.
 
 Vault's two snapshot-provisioning integration cases explicitly allow 60 seconds
