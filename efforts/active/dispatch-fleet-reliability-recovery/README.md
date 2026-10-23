@@ -1115,6 +1115,23 @@ requested contract.
 - Implementation remains gated on this amendment's review and merge. Existing
   recovery, release and broader identity-contract ownership is unchanged.
 
+### 2026-10-14 - Native fixture-composition source validation merged
+
+- #6629 merged to dev at `2026-10-14T05:31:30Z` as
+  `697df793f896516733dab0823a9eb4492e8ed4ec`, from exact approved head
+  `c8b0a67221b945b67cf0d0608e63a6d256716bd7`. Actual Copilot review
+  `5513377617` approved that head with zero findings; all runnable checks,
+  including required CI and native Linux/Windows, passed, with no review threads.
+- [x] Resolve the native category fixture's aggregate budget-composition
+  validation: four independently scoped real CLI view cases, one-boundary
+  guard, controlled unchanged-budget experiment and semantic/evidence
+  preservation are source-validated and merged.
+- The original uninstrumented timeout's process/root cause remains unproven
+  and its diagnostic/integration gate stays open with the coordinator and
+  existing cleanup integration owner. This is not accepted-flake disposition,
+  original-hang resolution, release, deployment, adoption or overall Done.
+  The parent effort remains Active.
+
 ### 2026-10-14 - Native category contract budget composition
 
 - The native category fixture put four serial cold CLI calls, each permitted
