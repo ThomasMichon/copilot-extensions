@@ -649,6 +649,15 @@ fallback. Bootstrap does not adopt a checkout or rewrite tracking state.
 Bare-launch headless detection skips unrelated control-plane PR topology while
 preserving the normal layered headless setting.
 
+The JSON bootstrap also carries optional
+`project_config: {"config_dir":"<canonical-project-state-directory>"}`. It uses
+the same project-state path authority as `get config-dir` without loading layered
+configuration or machine topology. `repo_dir` and `machine` remain absent.
+The registry anchor used for bootstrap is not an effective `repo-dir` substitute:
+a machine-local repo anchor override can legitimately differ. Compatible
+consumers retain their existing effective repo-dir and machine queries, while
+older consumers may ignore the additive field.
+
 ## Pinned action verbs (the Picker's control plane)
 
 | Verb (as invoked) | Purpose |

@@ -975,6 +975,7 @@ def test_picker_bootstrap_json_reports_runner_decisions(
         "cwd": str(anchor.resolve()),
         "workspace": None,
         "default_live": False,
+        "project_config": {"config_dir": str(cfg.project_dir("myproj"))},
     }
 
 

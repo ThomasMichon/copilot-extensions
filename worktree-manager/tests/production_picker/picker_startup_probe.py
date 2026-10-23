@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 
 
@@ -16,6 +17,22 @@ def engine_main(root, count, batched, args):
         stream.write(json.dumps({"verb": verb, "args": args[3:]}) + "\n")
     if verb == "picker-bootstrap":
         time.sleep(2)
+        if batched == "config-dir":
+            from agent_worktrees import context_cli
+
+            context_cli.cfg.project_name = lambda: "example"
+            context_cli.cfg.project_dir = lambda project: root
+            context_cli._resolve_active_project = lambda project: (project, root)
+            context_cli._cwd_is_inside_project = lambda anchor: True
+            context_cli._in_ssh_session = lambda: False
+            context_cli._core = lambda: SimpleNamespace(_INVOCATION_CWD=root)
+
+            def forbidden(*args, **kwargs):
+                raise AssertionError("bootstrap must not load machine configuration or topology")
+
+            context_cli.cfg.load_config = forbidden
+            context_cli.cfg.load_machines_yaml = forbidden
+            return context_cli.cmd_picker_bootstrap(SimpleNamespace(json=True))
         payload = {
             "project": "example", "default_live": True,
             "should_switch_cwd": False, "cwd": None,
@@ -27,11 +44,15 @@ def engine_main(root, count, batched, args):
         print(json.dumps(payload))
         return 0
     if verb == "get":
-        print("host" if args[-1] == "machine" else str(root))
+        if batched == "config-dir" and args[-1] == "repo-dir":
+            print(str(root / "configured-anchor"))
+        else:
+            print("host" if args[-1] == "machine" else str(root))
         return 0
     if verb == "picker-paths":
         print(json.dumps({"version": 1, "install_dir": str(root)}))
         return 0
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
     from worktree_manager import demo, demo_engine
     if verb == "list":
         original = demo.list_envelope()
@@ -52,7 +73,10 @@ def consumer_main(root, count, batched):
     from worktree_manager.production_picker.picker_tui.engine_loading import PendingBindingScreen
 
     engine_client.set_engine_command([
-        sys.executable, __file__, "engine", str(root), str(count), str(int(batched)),
+        os.environ.get("WORKTREE_MANAGER_STARTUP_ENGINE_PYTHON", sys.executable)
+        if batched == "config-dir" else sys.executable,
+        __file__, "engine", str(root), str(count),
+        "config-dir" if batched == "config-dir" else str(int(batched)),
     ])
     # Synthetic provider roster; the real loader still owns one current/follow
     # process, transaction parsing, current revision and UI delivery.
@@ -117,6 +141,12 @@ def consumer_main(root, count, batched):
                         f"calls={(root / 'calls.jsonl').read_text()}"
                     )
                 observed["rows"] = time.perf_counter()
+                if batched == "config-dir":
+                    from worktree_manager.production_picker import project_config
+
+                    assert project_config.load_config().default_repo.anchor == str(
+                        root / "configured-anchor"
+                    )
                 app.exit()
         asyncio.run(drive())
 
@@ -143,7 +173,7 @@ if __name__ == "__main__":
     mode, directory, cardinality, batch, *rest = sys.argv[1:]
     root = Path(directory)
     count = int(cardinality)
-    batched = batch == "1"
+    batched = "config-dir" if batch == "config-dir" else batch == "1"
     raise SystemExit(
         engine_main(root, count, batched, rest)
         if mode == "engine" else consumer_main(root, count, batched)

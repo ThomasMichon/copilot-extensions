@@ -173,6 +173,27 @@ def test_optional_bootstrap_scalars_avoid_legacy_calls(monkeypatch, tmp_path):
         project_config.clear_caches(reset_binding=True)
 
 
+def test_config_dir_only_preserves_effective_repo_and_machine_queries(monkeypatch, tmp_path):
+    calls = []
+    configured_anchor = str(tmp_path / "configured-anchor")
+
+    def read(project, key):
+        calls.append((project, key))
+        return {"repo-dir": configured_anchor, "machine": "host"}[key]
+
+    monkeypatch.setattr(project_config.engine_client, "get_value", read)
+    project_config.bind_bootstrap("example", {"config_dir": str(tmp_path / "state")})
+    try:
+        for _ in range(2):
+            assert project_config._project_dir("example") == tmp_path / "state"
+            assert project_config._repo_dir("example") == configured_anchor
+            assert project_config._machine_name("example") == "host"
+            project_config.clear_caches()
+        assert calls == [("example", "repo-dir"), ("example", "machine")]
+    finally:
+        project_config.clear_caches(reset_binding=True)
+
+
 def test_legacy_scalars_are_single_flight_and_project_scoped(monkeypatch, tmp_path):
     calls = []
 

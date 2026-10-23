@@ -499,6 +499,7 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
         "default_live": not _in_ssh_session(),
     }
     if getattr(args, "json", False):
+        payload["project_config"] = {"config_dir": str(cfg.project_dir(resolved))}
         output._json_output(payload)
     else:
         print(payload["project"])

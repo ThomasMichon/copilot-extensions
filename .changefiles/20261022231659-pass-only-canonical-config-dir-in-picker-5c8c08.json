@@ -1,0 +1,13 @@
+{
+  "comment": "Pass only canonical config-dir in Picker bootstrap and verify effective repo-dir and machine remain worker queries",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -13,12 +13,58 @@ from agent_worktrees import context_cli, manager_launch_cli, tracking, worktree_
 def _bootstrap(monkeypatch, tmp_path, cwd):
     anchor = tmp_path / "anchor"
     monkeypatch.setattr(context_cli.cfg, "project_name", lambda: "project")
-    monkeypatch.setattr(context_cli.cfg, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(context_cli.cfg, "project_dir", lambda project=None: tmp_path)
     monkeypatch.setattr(context_cli, "_resolve_active_project", lambda project: (project, anchor))
     monkeypatch.setattr(context_cli, "_cwd_is_inside_project", lambda path: True)
     monkeypatch.setattr(context_cli, "_in_ssh_session", lambda: False)
     monkeypatch.setattr(context_cli, "_core", lambda: SimpleNamespace(_INVOCATION_CWD=cwd))
     return anchor
+
+
+@pytest.mark.parametrize("json_output", [True, False])
+def test_bootstrap_config_dir_handoff_does_not_load_configuration(
+    monkeypatch, tmp_path, capfd, json_output,
+):
+    _bootstrap(monkeypatch, tmp_path, tmp_path / "anchor")
+    monkeypatch.setattr(worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
+    monkeypatch.setattr(
+        context_cli.cfg, "load_config",
+        lambda *a, **k: pytest.fail("bootstrap must not load machine configuration"),
+    )
+    monkeypatch.setattr(
+        context_cli.cfg, "load_machines_yaml",
+        lambda *a, **k: pytest.fail("bootstrap must not discover topology"),
+    )
+    assert context_cli.cmd_picker_bootstrap(SimpleNamespace(json=json_output)) == 0
+    output = capfd.readouterr().out.strip()
+    if json_output:
+        assert json.loads(output)["project_config"] == {"config_dir": str(tmp_path)}
+    else:
+        assert output == "project"
+
+
+def test_bootstrap_does_not_substitute_registry_anchor_for_configured_repo(
+    monkeypatch, tmp_path, capfd,
+):
+    registry_anchor = _bootstrap(monkeypatch, tmp_path, tmp_path / "anchor")
+    configured_anchor = tmp_path / "configured-anchor"
+    monkeypatch.setattr(worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
+    loads = []
+    monkeypatch.setattr(
+        context_cli.cfg, "load_config",
+        lambda **kwargs: loads.append(kwargs) or SimpleNamespace(
+            default_repo=SimpleNamespace(anchor=str(configured_anchor)),
+        ),
+    )
+    assert context_cli.cmd_get(SimpleNamespace(key="repo-dir")) == 0
+    scalar = capfd.readouterr().out.strip()
+    assert scalar == str(configured_anchor) and scalar != str(registry_anchor)
+    assert context_cli.cmd_get(SimpleNamespace(key="config-dir")) == 0
+    config_dir = capfd.readouterr().out.strip()
+    assert context_cli.cmd_picker_bootstrap(SimpleNamespace(json=True)) == 0
+    fields = json.loads(capfd.readouterr().out)["project_config"]
+    assert fields == {"config_dir": config_dir}
+    assert len(loads) == 2
 
 
 @pytest.mark.parametrize("nested", [False, True])

@@ -363,6 +363,10 @@ workers. Bound scalars survive ordinary setup/reload file-cache invalidation;
 accepting a new project binding resets them. Environment-enabled mock operations
 still resolve implicit project selection and refuse ambiguity. This consumer
 support does not assert that every engine produces those optional fields.
+The current engine producer supplies **only `config_dir`**. Effective `repo-dir`
+and `machine` remain two memoized worker scalar queries; a registry anchor is
+never substituted for a layered machine-local anchor override. Older engines
+without the optional payload retain all three scalar queries.
 Binding replacement never waits for an older scalar read; late results stay in
 their original binding/epoch. Failed scalar lookups may retry after reload,
 without discarding accepted bootstrap values.
@@ -390,6 +394,15 @@ seconds, and verifies a rendered current row and one held subscription. Host
 startup latency is measured separately from that controlled delay; the
 under-two-second vision budget remains an independent qualification, not an
 assertion inferred from these protocol checks.
+
+For the `config-dir` cases, also prepare the isolated `agent-worktrees` test
+environment and set `WORKTREE_MANAGER_STARTUP_ENGINE_PYTHON` to its Python
+executable. Select `-k config-dir` with the command above. These cases execute
+the real source bootstrap handler in a separate engine process with resolved
+fixture inputs; configuration/topology reads are forbidden in that handler.
+The actual Manager consumer must retain the configured anchor override, render
+current rows and issue exactly the two remaining scalar commands. No installed
+runtime is selected or modified by this source fixture.
 
 Held-feed startup uses the source's existing bounded process/SSH budget
 (20 seconds by default). Once an initial snapshot or update starts, the
