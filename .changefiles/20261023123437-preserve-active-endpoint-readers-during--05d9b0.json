@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve active endpoint readers during native Windows rebind publication",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

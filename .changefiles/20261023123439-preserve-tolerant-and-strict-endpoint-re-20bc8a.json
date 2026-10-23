@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve tolerant and strict endpoint readers during native Windows rebind publication",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
