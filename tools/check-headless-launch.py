@@ -630,19 +630,42 @@ class _FlagFinder(_LaunchVisitor):
         super().__init__()
         self.hits: list[tuple[int, str]] = []
         self.aliases: dict[str, str] = {}
+        self.has_spawn_reference = False
+        self.has_popen_reference = False
+        self.has_detach_reference = False
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
+        if isinstance(node.value, ast.Name) and (
+            (node.value.id == "subprocess" and node.attr in _SPAWN_FUNCS)
+            or (node.value.id == "os" and node.attr == "system")
+        ):
+            self.has_spawn_reference = True
+        if node.attr == "Popen":
+            self.has_popen_reference = True
+        if node.attr in _DETACH_HELPERS:
+            self.has_detach_reference = True
         if node.attr in _FLAG_NAMES:
             self.hits.append((node.lineno, node.attr))
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
+        if node.id in _DETACH_HELPERS:
+            self.has_detach_reference = True
         flag = node.id if node.id in _FLAG_NAMES else self.aliases.get(node.id)
         if flag:
             self.hits.append((node.lineno, flag))
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         for alias in node.names:
+            if (
+                (node.module == "subprocess" and alias.name in _SPAWN_FUNCS)
+                or (node.module == "os" and alias.name == "system")
+            ):
+                self.has_spawn_reference = True
+            if node.module == "subprocess" and alias.name == "Popen":
+                self.has_popen_reference = True
+            if alias.name in _DETACH_HELPERS:
+                self.has_detach_reference = True
             if alias.name in _FLAG_NAMES:
                 self.aliases[alias.asname or alias.name] = alias.name
                 self.hits.append((node.lineno, alias.name))
@@ -743,13 +766,20 @@ def verify() -> list[str]:
             tree = ast.parse(text, filename=str(f))
             flags = _FlagFinder()
             flags.visit(tree)
-            spawns = _SpawnFinder(text)
-            spawns.visit(tree)
-            if f in daemon_sources:
+            # Necessary AST references admit later scans, including normalized identifiers.
+            spawn_hits = []
+            if flags.has_spawn_reference:
+                spawns = _SpawnFinder(text)
+                spawns.visit(tree)
+                spawn_hits = spawns.hits
+            if (
+                f in daemon_sources
+                and flags.has_popen_reference and flags.has_detach_reference
+            ):
                 daemons = _DetachedSpawnFinder(tree)
                 daemons.visit(tree)
                 detached[f] = sorted(daemons.hits)  # one hit per launch, even on one line
-            result = (text, sorted(set(flags.hits)), sorted(set(spawns.hits)))
+            result = (text, sorted(set(flags.hits)), sorted(set(spawn_hits)))
         except SyntaxError as exc:
             result = (text, [], [])
             if f not in parse_failures:
