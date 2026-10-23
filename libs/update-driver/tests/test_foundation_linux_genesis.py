@@ -50,7 +50,7 @@ def test_actual_private_genesis_and_queue_preserving_upgrade_after_caller_group_
     for name in (
         "bash", "dirname", "uname", "readlink", "stat", "find", "sort", "sha256sum", "iconv",
         "cat", "mkdir", "sync", "awk", "date", "mktemp", "mv", "rm", "cp", "flock", "grep",
-        "sleep", "setsid", "mkfifo", "rmdir", "curl", "tar", "head", "chmod", "sed", "tr",
+        "sleep", "setsid", "mkfifo", "rmdir", "curl", "tar", "gzip", "head", "chmod", "sed", "tr",
     ):
         executable = shutil.which(name)
         assert executable, f"native tool missing: {name}"

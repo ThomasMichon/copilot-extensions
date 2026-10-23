@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the shared native Linux foundation launch and acquisition custody helpers.",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}
