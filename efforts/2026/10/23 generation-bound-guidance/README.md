@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential managed PRs against `dev`
 - **Created:** 2026-10-22
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/harness-guidance` — closes `simple-local-static-delivery`, `generated-output-is-disposable-source-is-not`, and `resume-stable-context`
 - **Umbrella issue:** #7943
 
@@ -14,6 +14,13 @@ Publish the final complete static instruction set before first-prompt discovery.
 Reuse successful preparation across lifecycle boundaries while its actual inputs
 remain unchanged. A late backup refresh is file delivery, never proof that a
 running model received it.
+
+**Source-slice closeout:** #8045 merged at
+`419a12d054193e3253f91a8395444608116fa1e3` after current-head approval and green
+required CI. This closes the bounded source-delivery responsibility, not the
+parent acceptance gate. Native first-prompt/process qualification, cold-bootstrap
+repair, release observation and installed acceptance remain open under #7943
+with the coordinating campaign and existing maintenance owners.
 
 ## Participants
 
@@ -29,7 +36,8 @@ running model received it.
 - Do not contact, read, subscribe to or reuse pre-existing Bridge agents.
   No agent-chat or remote worker dispatch. Detect collisions through read-only
   forge/task state and escalate them to the coordinating owner.
-- **Handoff:** #7943 and this effort retain the incomplete objective.
+- **Handoff:** #7943 retains the incomplete native/installed objective; this
+  archived effort and its validation report retain source evidence.
 - #7694/#7788 retain native launch scripts and optional maintenance ownership.
 - #7974 retains bootstrap context and worktree identity ownership.
 - Manager loading/configuration/runner work remains outside this slice.
@@ -40,7 +48,7 @@ running model received it.
 
 ## Context
 
-The current Worktrees publisher resolves two complete source sets under its
+The pre-change Worktrees publisher resolved two complete source sets under its
 publication lock and repeats Git preflight at every invocation. Bridge's local
 prelaunch seam independently invokes the compatibility renderer with a shared
 five-second discovery/render budget. SessionStart already queues an honest
@@ -116,49 +124,69 @@ The following code mechanisms are **agent-recommended**.
   Update the startup pattern and relevant plugin docs, with changefiles.
 
 ### Phase 3 — Review and completion
-- [ ] Land coherent source and documentation through review and required CI.
-- [ ] Report source merge, release promotion and installed verification
+- [x] Land coherent source and documentation through review and required CI.
+- [x] Report source merge, release promotion and installed verification
   separately. Transfer deployment acceptance to the existing authorized
   maintenance owner rather than starting a competing update.
-- [ ] Resolve Plan/Validation items, journal results and archive this effort.
+- [x] Resolve Plan/Validation items, journal results and archive this effort.
 
 ## Validation Plan
 
 All checks below are **agent-recommended** mechanisms for #7943 acceptance.
 
-- [ ] Failing regressions first: unchanged create/resume/Bridge/SessionStart
-  chain publishes once; repeat reads neither render nor enqueue a worker.
-- [ ] Settings enable/disable, payload bytes/root/identity, pairing transition,
+- [x] Deferred to `ThomasMichon/copilot-extensions#7943`: Full native
+  create/resume/Bridge/SessionStart first-prompt chain qualification. Source
+  failing-first and unchanged-generation controls pass without regeneration
+  or backup enqueue; that is not installed model-admission proof.
+- [x] Settings enable/disable, payload bytes/root/identity, pairing transition,
   missing/corrupt receipts, modified output and tracked/staged deletion changes
   invalidate correctly; unsafe publication preserves user and reviewed files.
-- [ ] Missing enabled payloads retain unresolved outputs and reviewed fallback,
+- [x] Missing enabled payloads retain unresolved outputs and reviewed fallback,
   deliver safe independent sources, and expose partial rather than ready state.
-- [ ] Real independent-process contention proves current-generation selection
+- [x] Real independent-process contention proves current-generation selection
   wins, including a delayed old preparation and failed/incomplete composition.
-- [ ] Real consumer-order fixture records registration, publication, spawn and
-  first read; first touch works with an empty synthetic home and no prior cache.
-  Reused readiness is tested through the consumer, not only file existence.
-- [ ] Backup completion exposes refreshed/restart-required state; unchanged
-  backup is not falsely described as new model delivery. Timeout/failure,
-  owner contention and cancellation retain existing safety semantics.
-- [ ] Targeted contained Worktrees/Bridge suites, Python lint, install-contract
+- [x] Deferred to `ThomasMichon/copilot-extensions#7943`: Full native
+  registration/publication/spawn/first-read acceptance. Source consumer-order
+  controls and empty-home first-touch/cross-process reuse passed; the matched
+  Windows cold-bootstrap case still failed independently of this source slice.
+- [x] Blocked; transferred to `ThomasMichon/copilot-extensions#7943`: Native
+  Linux/macOS descendant retirement and installed backup-notice qualification.
+  Source controls cover late completion, no admission claim, failure, contention,
+  cancellation, short-lived parents and inherited output pipes; unavailable
+  native lanes and transport-finalizer warnings remain explicit.
+- [x] Targeted contained Worktrees/Bridge suites, Python lint, install-contract
   and relevant source guards pass. Add source-only first-touch integration
   without live service or operator-home mutation.
-- [ ] Record before/after publication count and elapsed timings separately
+- [x] Record before/after publication count and elapsed timings separately
   from broader launch latency. Preserve platform-specific skips explicitly.
-- [ ] Record whether native/live installed acceptance was run; it is not
+- [x] Record whether native/live installed acceptance was run; it is not
   authorized by this source task and must not be implied by unit success.
 
 ## Proposal
 
 Use generation-bound preparation at the existing owner boundary, not a new
-global cache or service. The receipt records successful file publication only.
+global cache or service. Only ready records permit reuse; partial records retain conservative ownership history.
 Revalidation must be cheaper than rebuilding and republishing the complete set,
 but no optimization may infer safety from a stale or incomplete input census.
 If the existing command/status contract cannot carry the required result,
 coordinate the smallest additive owner API before changing another slice.
 
 ## Journal
+
+### 2026-10-23 — Source merged; parent gates retained
+
+- #8045 actually merged at `419a12d054193e3253f91a8395444608116fa1e3`.
+  Copilot approved the exact final head with no blocking source-scope findings;
+  all required CI passed. No CI bypass or deployment was used.
+- Re-ran only the two independent-process reuse/freshness controls against the
+  merged version-2 source: 2 passed. No broad suite or contended entry benchmark
+  was repeated.
+- Release was separately inspected: Main
+  `2a1929032764cadccb08022222cebb80874b03aa` did not contain the new preparation
+  module at this observation. Installed state was neither changed nor verified.
+- Explicitly transferred full native entry, remaining process qualification,
+  cold-bootstrap and installed acceptance to #7943 and the coordinating owners.
+  Archived this source effort; #7943 remains open.
 
 ### 2026-10-22 — Review corrections
 

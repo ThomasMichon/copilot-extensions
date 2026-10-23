@@ -15,7 +15,6 @@ that pattern to this repository.
 | [Reconstructible Runtime State](active/reconstructible-runtime-state/README.md) | Active; G1 disconnected facts/readers and isolated fixtures admitted; later slices gated | #7947; preserves #1460 compatibility (including consolidated #1915) and #3761 ground-state ownership; no live rebuild or rollout |
 | [Prompt Receipt Observation](active/prompt-receipt-observation/README.md) | Draft; bounded async non-provisioning first-prompt receipt plan before implementation | #7942; unchanged consumption authority; no installed rollout |
 | [Performance Telemetry](active/performance-telemetry/README.md) | Active; producer and optional OTLP source merged; native, structured-signal and rollout acceptance retained | #7935 / #5900; preserves #7938/#7943 production owners and #5215 readiness |
-| [Generation-Bound Guidance](active/generation-bound-guidance/README.md) | Draft; reviewed preparation/reuse and late-refresh contract before implementation | #7943; preserves #7694/#7788 and #7974 owners; no installed rollout |
 | [Native Mux Launch Contract](active/native-mux-launch-contract/README.md) | Draft; reviewed proposal before terminal-custody, connected-status and resumed-directory repairs | #7962; preserves #4564 recovery and #352/#5961/#4496 host owners |
 | [Namespace Discovery Latency](active/namespace-discovery-latency/README.md) | Active; Windows source qualified within unchanged deadline; code publication, Linux lane and rollout acceptance open | #5761 latency slice; preserves #3963/#5559 owners and broader diagnostics |
 | [Coordinated Launch Maintenance](active/coordinated-launch-maintenance/README.md) | Active; source-only Windows broker amendment precedes implementation; release and rollout remain open | #7694; prerequisite #6859; preserves #6812/#6820/#7667 owners |
@@ -136,6 +135,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Generation-Bound Guidance](2026/10/23%20generation-bound-guidance/README.md) | Done for bounded source delivery; generation reuse, protected partial publication and late notices merged in #8045 | #7943 retains full native entry, cold-bootstrap, release and installed acceptance; no rollout |
 | [Telemetry Measurement Contract](2026/10/22%20telemetry-measurement-contract/README.md) | Done; QoS/Engagement contract, 58-entry catalog and future instrumentation plan merged; no runtime adoption | #8102; existing Performance Telemetry and production owners retain implementation/rollout |
 | [Picker Pending Binding](2026/10/22%20picker-pending-binding/README.md) | Done for the admitted source increments; consumer and config-dir producer merged, two scalar queries retained | #7938 remains open for full cold/native, remote, release and installed acceptance |
 | [Dynamic Reverse Reservations](2026/10/22%20dynamic-reverse-reservations/README.md) | Done; bounded coordinator/finite-forward composition and isolated SSH consumers merged; no rollout | #7719; remaining production integration explicitly transferred to #7238, source custodians retained |

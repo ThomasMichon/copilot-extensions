@@ -12,7 +12,18 @@ APIs. No shared installation, service restart or deployment was performed.
 
 - Pre-E source: `943e2ca139fd15e25003b6b4e863227afcabeaf1`.
 - Preserved implementation: `0f43df6a4`.
+- Merged source: #8045, `419a12d054193e3253f91a8395444608116fa1e3`;
+  exact-head approval and required CI were green.
 - These are source-validation identities, not release/installed receipts.
+
+Production scope is limited to Worktrees' `static_instructions`,
+`static_preparation`, `local_cache_refresh`, `local_cache_worker` and
+`nudge_status`, its SessionStart session-ID handoff, and Bridge's
+`local_static_preparation`, `local_cache_refresh` and local Session-Host
+prelaunch call. Related tests, ownership documentation, contract fingerprints
+and changefiles accompany those changes. The Worktrees `__main__.py` change is
+only the SessionStart handoff; no early-import or cold full-roster entry
+optimization is claimed.
 
 ## Completed checks
 
@@ -63,6 +74,22 @@ process entry, registration, first prompt, frame display or end-to-end launch.
 The earlier 1.50-second first touch and 141/78-millisecond reuse probe was
 unmatched; the table above supersedes it for comparison. Small local samples
 and shared-host variation do not establish a broader launch-speed claim.
+
+An additional matched run at candidate `6c894697df84a6c480d3bff8f0146fb871ebee91`
+retained the same baseline, fixture and sample counts:
+
+| Publisher / boundary | n | Median ms | Range ms | Desired-set builds/call | Git calls/call |
+|---|---:|---:|---:|---:|---:|
+| Pre-E first touch | 3 | 1484.0 | 954–2375 | 2 | 4 |
+| Candidate first touch | 3 | 1297.0 | 1281–1765 | 1 | 4 |
+| Pre-E unchanged | 6 | 1140.5 | 906–1532 | 2 | 4 |
+| Candidate unchanged | 6 | 101.5 | 46–157 | 0 | 0 |
+
+These measurements are bound to that source snapshot, not to later ownership
+metadata refinements or end-to-end entry. No broad benchmark was run under the
+later campaign contention. After merge, the two version-2 independent-process
+reuse/freshness controls were rerun and passed; that is functional evidence,
+not a new latency measurement.
 
 ## Cold-bootstrap comparison: independent, still failing
 
@@ -125,6 +152,12 @@ CI. The cold-bootstrap/native entry and installed acceptance obligations remain
 open under #7943 and the coordinating campaign. No failing required check may
 be bypassed. Source merge, release promotion, installed verification and actual
 model admission remain separate states.
+
+At source closeout on 2026-10-23, Main
+`2a1929032764cadccb08022222cebb80874b03aa` still lacked the new preparation
+module: release was pending at that observation. No installed runtime was
+updated, restarted or qualified by this slice. #7943 remains open for the
+transferred native/cold-bootstrap/installed obligations.
 
 ## Review corrections
 
