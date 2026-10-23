@@ -350,7 +350,7 @@ def _account_inventory() -> AccountInventory:
         raise AccountInventoryError("agent-worktrees returned malformed account inventory") from exc
     if not isinstance(data, dict):
         raise AccountInventoryError("agent-worktrees returned a non-object account inventory")
-    raw = data.get("account_map", {})
+    raw = data.get("account_map")
     if not isinstance(raw, dict) or not all(
         isinstance(owner, str) and owner.strip()
         and isinstance(login, str) and login.strip()

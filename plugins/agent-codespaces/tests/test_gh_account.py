@@ -164,6 +164,15 @@ def test_malformed_snapshot_mapping_is_not_confirmed_empty(monkeypatch, mapping)
         gh_account.account_inventory()
 
 
+def test_missing_snapshot_mapping_is_not_confirmed_empty(monkeypatch):
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, "{}", ""),
+    )
+    with pytest.raises(gh_account.AccountInventoryError, match="malformed account mapping"):
+        gh_account.account_inventory()
+
+
 @pytest.mark.parametrize("returncode", [1, 2, -9])
 def test_strict_snapshot_failure_is_not_confirmed_empty(monkeypatch, returncode):
     monkeypatch.setattr(

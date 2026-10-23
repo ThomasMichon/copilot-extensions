@@ -149,6 +149,32 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-22 - Required peer-map metadata and retained Linux scope
+
+- The latest review identified a successful peer response lacking `account_map`.
+  That required response field is now validated instead of defaulting to an
+  empty map. The legacy account-list shape with an explicit empty map remains
+  supported. The focused CLI/account/peer run passed all 136 cases.
+- Retained hosted execution receipts confirm Linux CodeSpaces default-full
+  qualification at `81065d74a03477c0e7e91ce7775c94d5f514d909`: 1,984 passes
+  and 98 explicit skips across all four batches. This includes the new native
+  owner-exit and overlap regressions; skips are not credited as passes.
+- The Worktrees snapshot regression file belongs to its first successful
+  batch. The full Worktrees invocation later stopped in batch five of 24 on
+  two bootstrap/installer assertions, so it is only partial suite evidence.
+- The completed inspection had seven failing plugin jobs. Their failing tests
+  and named implementation paths are unchanged from the candidate's base;
+  no baseline-control run was performed, so this is not proof of a fully
+  green or regression-free portfolio. Failures cover Worktrees bootstrap,
+  container probe structure, Vault service-output/publication, Logger source
+  redirection, MCP generated-resolver/manifest fixtures, Bridge ordinary-task
+  fixture identity, and Dispatch process-flag fixture typing.
+- The workflow declares Test Portfolio Rationalization #1303 as the failure
+  owner and marks this portfolio non-release-dependent. Preserve those
+  findings for that owner rather than modifying unrelated installer/contracts
+  in the namespace repair. Later parser/configuration-seam corrections have
+  focused Windows evidence, not a new same-head Linux full-suite receipt.
+
 ### 2026-10-22 - Existing configuration seam and explicit individual refusal
 
 - Source CI refused four additional lines in the grandfathered configuration
