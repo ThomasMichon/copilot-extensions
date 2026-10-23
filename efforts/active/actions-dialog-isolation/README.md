@@ -280,3 +280,8 @@ interfaces. Do not create a general request broker or shared polling layer.
   `headed_actions.open_worktree_cli_headed` builds a launch request without
   `_decide`. Its one refusal-marker guard needs explicit admission before that
   path is safe to publish. No generic action-engine rewrite is proposed.
+- Source review additionally identified `_resume_embodied_worktree_cli`'s
+  unconditional result mutation/success after `_decide`, and the direct
+  locality checks in its synthetic path and `_embody_task_cli`. Their exact
+  no-effect refusal controls are explicit additional admission/publication
+  dependencies in the amended plan.

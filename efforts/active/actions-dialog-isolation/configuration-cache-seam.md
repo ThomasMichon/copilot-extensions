@@ -304,10 +304,20 @@ decision to `_decide` and return before `_run_bg` or request construction.
 That guard is proposed, not silently included in the two-method admission.
 Do not publish a locality fix that leaves this bypass able to launch.
 
+Two immediate internal-action paths also require explicit narrow admission.
+`engine_worktree_actions._resume_embodied_worktree_cli` must honor refusal in
+both its loaded-row and synthetic-row paths: no result mutation or successful
+return after `_decide` refuses, with or without an explicit project. Its
+synthetic path must not bypass the common not-ready handling.
+`_embody_task_cli` has a direct source-locality check before dispatch; it must
+return a visible failure without starting the embodiment worker when locality
+is unavailable. These are refusal guards, not a new action framework.
+
 Tests must run the real invalidated configured-alias case and immediate
 `_resume_decision`/`_decide` behavior, asserting no SSH, exit, launch request or
 worker launch for unknown locality. Also exercise Restore's label replacement,
-valid local/remote cases and the headed bypass once its guard is admitted.
+valid local/remote cases, headed launch, loaded/synthetic internal resume with
+and without project, and pre-embodiment dispatch once their guards are admitted.
 
 ### Template cell: grounded non-applicability
 
