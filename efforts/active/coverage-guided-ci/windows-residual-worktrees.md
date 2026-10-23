@@ -87,6 +87,27 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-FAST-FORWARD private aligned repository inputs
+
+The fast-forward module publishes its unchanged bare origin, publisher and
+aligned clone once per contained test sandbox, then copies every file into
+private per-case stores and repairs both origin URLs. All later pushes,
+local commits, dirty worktrees, real fetches and fetch-failure mutations
+remain inside their original cases. No assertion, mark or selection changes.
+
+An additional guard compares every non-config byte and checks the repaired
+URLs, distinct source/sibling files and absence of object alternates. A real
+push, fetch, local commit and private object deletion leave the seed and
+sibling byte-identical. The deletion explicitly makes the copied object
+writable because newly created Git objects may be read-only on Windows.
+
+Repeated fixture setup fell from the measured 2.15-2.74 seconds per case to
+roughly 0.52-0.59 seconds, excluding the one session build. All 51 fast-forward
+and adjacent controls pass in 22.14 seconds preparation/cleanup inclusive,
+with exactly two workers and unchanged item, process, memory and native
+deadlines. The unchanged normal group still reaches its 240-second cap;
+this focused improvement is not normal-group or aggregate qualification.
+
 ### B-LANDING-BASE one fresh unique merge base per landing evaluation
 
 Squash and blob checks within one `landing` evaluation share a single fresh

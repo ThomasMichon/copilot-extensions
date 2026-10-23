@@ -6,10 +6,14 @@ the safety guards (clean / ahead / diverged / dirty) are verified end to end.
 
 from __future__ import annotations
 
+import shutil
+import stat
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from conftest import _published_seed_environment, _seed_directory
 
 from agent_worktrees import git_ops
 from agent_worktrees.git_ops import (
@@ -37,13 +41,7 @@ def _commit(repo: Path, name: str, content: str) -> None:
     _git("commit", "-m", f"add {name}", cwd=repo)
 
 
-@pytest.fixture
-def repos(tmp_path: Path) -> tuple[Path, Path]:
-    """Create an origin (bare) plus a clone that tracks origin/master.
-
-    Returns (origin_workdir, clone). ``origin_workdir`` is a normal checkout
-    used to push new commits to origin so the clone falls behind.
-    """
+def _build_repos(tmp_path: Path) -> None:
     origin_bare = tmp_path / "origin.git"
     _git("init", "--bare", "-b", "master", str(origin_bare), cwd=tmp_path)
 
@@ -59,7 +57,69 @@ def repos(tmp_path: Path) -> tuple[Path, Path]:
     _git("config", "user.email", "t@example.com", cwd=clone)
     _git("config", "user.name", "Test", cwd=clone)
 
+
+@pytest.fixture(scope="session")
+def _fast_forward_seed(tmp_path_factory) -> Path:
+    with _seed_directory(tmp_path_factory, "fast-forward") as (root, build):
+        if build:
+            with _published_seed_environment(tmp_path_factory):
+                _build_repos(root)
+        return root
+
+
+def _copy_repos(source: Path, root: Path) -> tuple[Path, Path]:
+    shutil.copytree(source, root, dirs_exist_ok=True, copy_function=shutil.copyfile)
+    seed, clone = root / "seed", root / "clone"
+    for repo in (seed, clone):
+        _git("remote", "set-url", "origin", str(root / "origin.git"), cwd=repo)
     return seed, clone
+
+
+@pytest.fixture
+def repos(tmp_path: Path, _fast_forward_seed: Path) -> tuple[Path, Path]:
+    """Private origin, publisher and aligned clone; later mutations stay per case."""
+    return _copy_repos(_fast_forward_seed, tmp_path)
+
+
+def test_repo_copies_preserve_bytes_and_isolate_mutations(tmp_path, _fast_forward_seed):
+    def snapshot(root):
+        return {
+            path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()
+        }
+
+    source = _fast_forward_seed
+    source_before = snapshot(source)
+    first, second = tmp_path / "first", tmp_path / "second"
+    seed, clone = _copy_repos(source, first)
+    _copy_repos(source, second)
+    second_before = snapshot(second)
+    for root in (first, second):
+        for relative, data in source_before.items():
+            copied = root / relative
+            if relative not in (
+                Path("seed") / ".git" / "config", Path("clone") / ".git" / "config",
+            ):
+                assert copied.read_bytes() == data
+            assert not copied.samefile(source / relative)
+            assert not copied.samefile((second if root == first else first) / relative)
+        for name in ("seed", "clone"):
+            remote = subprocess.run(
+                ["git", "remote", "get-url", "origin"], cwd=root / name,
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            assert remote == str(root / "origin.git")
+        for git_dir in (root / "origin.git", root / "seed" / ".git", root / "clone" / ".git"):
+            assert not (git_dir / "objects" / "info" / "alternates").exists()
+
+    _advance_origin(seed, "publisher-only.txt")
+    _git("fetch", "origin", cwd=clone)
+    _commit(clone, "clone-only.txt", "private clone mutation")
+    object_file = next((clone / ".git" / "objects").glob("??/*"))
+    object_file.chmod(stat.S_IWRITE | stat.S_IREAD)
+    object_file.unlink()
+    assert snapshot(source) == source_before
+    assert snapshot(second) == second_before
 
 
 def _advance_origin(seed: Path, name: str = "next.txt") -> None:

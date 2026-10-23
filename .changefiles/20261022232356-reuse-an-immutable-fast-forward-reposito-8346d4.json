@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse an immutable fast-forward repository seed while preserving private Git mutations per case",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
