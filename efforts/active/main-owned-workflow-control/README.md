@@ -302,6 +302,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [x] Land and observe bounded headless-guard analysis reuse (#7700), preserving
   all production roots, six enforcement rules, allowlists and failure handling.
   Keep local paired timing distinct from natural hosted observations.
+- [ ] Land bounded AST-fact admission for the headless guard's later visitors,
+  preserving every source read/parse, all six rules, scope/alias semantics and
+  ordered diagnostics. Qualify actual empty-pass removal separately from
+  comparable whole-flow latency; retain full source-CI invocation.
 - [x] Land and observe conservative narrative-only PR omission of the three
   source AST scans (#7706), retaining full non-narrative and non-PR execution,
   pinned input/error handling, every other guard and all required unit evidence.
@@ -377,10 +381,14 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Obtain separately owned qualified Main adoption and natural no-runner
   acceptance for #8189. Source delivery is not measured live admission,
   fewer workflow invocations or controlled speedup.
-- [ ] Land the measured documentation-count suffix prefilters with unchanged
+- [x] Land the measured documentation-count suffix prefilters with unchanged
   whole-corpus matches, input reads, ordered diagnostics and error behavior.
-  Observe the actual required guard separately from local paired timing;
-  this is reduced recipe work, not fewer workflow invocations.
+  #8199's required CI executes the complete documentation step in two seconds
+  and all 1,010 admitted units in 19.780 seconds. The integrated merged packet
+  preserves the independent peer's two nodes. Local paired timing remains
+  separate; this is reduced recipe work, not fewer workflow invocations.
+- [ ] Observe qualified release adoption of #8199 separately from source-CI
+  execution and comparable whole-flow timing; this changes no controller pin.
 - [x] Land and observe bounded asyncio ancestry-map reduction, preserving
   every file read/parse, path validation, handler classification and ordered
   diagnostic/list output (#7865). Actual required source CI runs all three

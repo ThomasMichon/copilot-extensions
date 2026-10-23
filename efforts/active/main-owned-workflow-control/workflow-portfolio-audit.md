@@ -5,6 +5,43 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## October 23 remaining source-CI recipe closure
+
+Actual source CI `39943737570` spends ten seconds in the unit checkout and
+22 seconds in the three-scanner AST group. Those are execution steps, not
+runner pickup or promotion admission. Do not remove `pull_request.edited`
+blindly: base retargets still require validation. A fresh real-Git fixture
+rejects replacing the unit checkout with plain depth two: a detached
+merge-plus-parents checkout preserves the usual base/head selection, including
+a fork head with no local branch, but lacks a retargeted event's base that
+full history contains. Missing endpoints fail closed rather than producing
+false evidence, but the resulting failure is still a behavior regression.
+Manual/unknown events do not read a diff; push units remain unallocated.
+
+The next bounded candidate uses facts gathered by the headless guard's
+existing first AST visitor. An unsuppressed spawn needs a recognized
+module attribute or import; a detached launch needs both a `Popen` reference
+and a recognized detach-helper reference. Omit a later visitor only when
+those necessary AST facts are absent. This uses parsed, normalized Python
+identifiers rather than source-text keywords. Every file is still read and
+parsed, syntax failures still diagnose, and admitted visitor/scoping logic,
+all six rules and allowlists remain unchanged.
+
+The unchanged native corpus preserves 2,369 reads, 2,310 parses, all 99 raw
+hits in 81 nonempty finder results, and the complete ordered diagnostic list.
+Actual visitor passes decrease from 6,263 to 2,649. Three alternating whole
+guard runs per version have median **38.909 seconds before** and **22.715
+seconds after**. The 113 focused cases include forced-unfiltered differential
+checks, import aliases, Unicode-normalized identifiers, syntax errors and
+changed-input refresh. These local measurements are not controlled Actions
+latency, fewer workflow invocations or review-throughput evidence.
+
+A preceding shared-child-edge cache candidate also preserved semantics but
+regressed paired whole-guard median from 37.190 to 42.254 seconds. Discard
+that implementation rather than mistaking fewer edge enumerations for a
+real improvement. Publication, isolated Linux qualification, natural source
+CI and qualified release adoption of the retained candidate remain separate.
+
 ## October 23 documentation-count recipe reduction
 
 The documentation and version guards enforce different policies; neither is a
@@ -31,10 +68,21 @@ whitespace, Unicode case variants, ordered failures, impossible-scan work
 counts and read-error propagation. These are local recipe measurements, not
 controlled Actions/whole-flow latency or review-throughput claims.
 
-Required source CI still invokes the whole documentation guard. Source merge,
-actual required-CI observation and release adoption are separate acceptance
-steps; no Main controller, release packet, workflow trigger or runner is
-changed by this optimization.
+Required source CI still invokes the whole documentation guard. #8199 merges
+at `2026-10-23T11:11:37Z` as `c7fce94080ab7f2bfda775b8e5ffcd2a9ca88c1d`.
+Actual final-head CI `39943737570` executes its complete documentation step
+in two seconds and all 1,010 admitted units in 19.780 seconds with coverage.
+The first CI attempt correctly refused stale source-admission hashes; both
+are repaired and the 93 new original assertions are enrolled through their
+unchanged wrapper, not bypassed. The merged packet preserves a concurrent
+peer's two new nodes and passes all 1,012 cases/3,036 phases/45 targets in
+44.658 seconds in isolated Linux with the same 100-source closure and no
+prohibited effects. No deadline or effect boundary changes.
+
+Source merge, actual required-CI observation and release adoption remain
+distinct. No Main controller, workflow trigger, runner or release-unit
+requirement is changed by this optimization. These observations are not a
+controlled Actions speedup or completion of the whole portfolio.
 
 ## Authority and evidence boundary
 
