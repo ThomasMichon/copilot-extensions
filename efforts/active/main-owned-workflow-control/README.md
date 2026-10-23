@@ -329,6 +329,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Actual hosted PR and natural push each execute the intended checker once,
   covering both contracts and all 456 fixtures. This removes one repeated
   invocation per PR, not a workflow run or runner allocation.
+- [x] Land the bounded history-free source-unit checkout reduction (#8001),
+  preserving the pinned Dev snapshot, all 877 admitted cases, contextual
+  coverage and every ancestry-dependent release checkout. A genuinely shallow
+  fresh-Dev fixture qualifies the actual 94-file source closure; source review
+  does not migrate the independently preserved Main controller or establish
+  a hosted promotion critical-path saving. Qualified control adoption remains
+  separate.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.

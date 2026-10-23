@@ -370,7 +370,7 @@ jobs:
 
   remind:
     name: remind-to-target-dev
-    if: github.event.action != 'synchronize'
+    if: github.event.action != 'synchronize' && github.event.pull_request.user.login != github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

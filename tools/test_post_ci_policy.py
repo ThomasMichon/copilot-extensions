@@ -348,7 +348,11 @@ def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
     assert "checkout" not in fetch["run"]
     assert "secrets." not in json.dumps(gate)
     assert gate["env"]["GIT_CONFIG_GLOBAL"] == "/dev/null"
-    assert host["jobs"]["remind"]["if"] == "github.event.action != 'synchronize'"
+    assert host["jobs"]["remind"]["if"] in (
+        "github.event.action != 'synchronize'",
+        "github.event.action != 'synchronize' && "
+        "github.event.pull_request.user.login != github.repository_owner",
+    )
 
 
 @pytest.mark.parametrize("event,branch,same_repo,conclusion,expected", [

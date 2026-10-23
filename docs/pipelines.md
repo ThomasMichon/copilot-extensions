@@ -1183,7 +1183,12 @@ never checks out or executes the PR's own code and never runs tests or requests
 review. The independent contents-read gate in the same trusted invocation can
 report the existing admission decision without approving a fork's code execution.
 On `synchronize`, admission and the admitted-owner scan run; the reminder retains
-its original event scope and one-time-comment behavior.
+its original event scope and one-time-comment behavior. The Dev source also
+omits the reminder job before runner allocation for owner-authored PRs, rather
+than allocating it only to return without posting. Its script retains the
+owner/signature checks as defense in depth. Adoption by the independently
+preserved Main workflow is a separate control change; a Dev merge alone does
+not reduce live Main reminder allocations.
 
 It recognizes `main-gate`'s own four legitimate automated-PR shapes (the
 release pipeline's own PR, a workflow-only bootstrap PR, and `rollback_release.py`'s

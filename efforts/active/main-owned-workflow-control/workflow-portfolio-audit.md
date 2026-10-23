@@ -316,6 +316,34 @@ This removes unnecessary history transfer from that job, not an allocation,
 workflow invocation or demonstrated promotion critical-path delay. Source
 review and actual trusted-control adoption remain distinct gates.
 
+### Owner reminder no-op admission
+
+The current Dev workflow inventory (October 23, source `80fb803c093e7f881d4b53a4a279efa42451511f`)
+contains 22 YAML files, 66 literal jobs and ten scheduled workflows. This is a
+source inventory, not executed coverage: some native jobs are explicitly
+unenrolled and their scheduled status output is not a test result. The older
+October 18 trigger table above remains historical; notably, current departure
+refreshes admit only closed/edited events and trusted-CI is manual-only.
+
+Three already completed Main reminder runs, `39852362163`, `39853993747` and
+`39858588255`, each contain three allocated jobs plus a synthetic identifier
+check. Their `remind-to-target-dev` jobs are `120081608557`, `120087299109` and
+`120103090149`: pickup takes three seconds each and execution takes two/four/two
+seconds. Timestamped logs show equal PR author/repository owner and the explicit
+legitimate-automated-PR skip. These are successful no-op allocations, not missing
+admission or scanning.
+
+The bounded Dev change adds owner inequality to that job's existing synchronize
+exclusion. The JavaScript, automated signatures, current-PR reread, trusted-bot
+marker deduplication, Main admission, identifier reporting, workflow triggers,
+concurrency and credentials stay unchanged. This can remove one no-op runner
+allocation per affected owner event after qualified control adoption; it removes
+no workflow invocation and establishes no hosted critical-path saving. Source
+contracts resolve the recorded Dev workflow separately from preserved Main, whose
+legacy admission remains accepted by the actual-controller compatibility test.
+Existing release/control ownership retains adoption and live-result acceptance;
+this slice starts no Main writer or manual validation run.
+
 ### Enforcement snapshot
 
 At the October 18 capture, the Dev ruleset checks were `workflow-lockdown-guard` and
