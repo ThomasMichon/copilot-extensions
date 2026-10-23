@@ -3068,9 +3068,10 @@ export async function observeHandoffPromptReceived({
   childEnv.AGENT_WORKTREES_PAYLOAD_ROOT = payloadRoot;
   childEnv.AGENT_RT_RESOLVE_TRACE_MODE = "read-only";
   let stage = "runtime";
+  let commandCwd = cwd;
   async function run(bin, args) {
     return (await execute(bin, args, {
-      cwd, env: childEnv, encoding: "utf-8", timeout: remaining(),
+      cwd: commandCwd, env: childEnv, encoding: "utf-8", timeout: remaining(),
       signal, killSignal: "SIGKILL", windowsHide: true, maxBuffer: 64 * 1024,
     })).stdout.trim();
   }
@@ -3110,29 +3111,16 @@ export async function observeHandoffPromptReceived({
       const dir = await cli(args);
       if (!dir) return { status: "unavailable", reason: "identity-unavailable" };
       worktreeId = basename(dir);
+      commandCwd = dir;
     }
-    // A lost acknowledgement or a refork can replay the first prompt. Reconcile
-    // the existing receipt before appending; observation never consumes a baton.
-    stage = "receipt-read";
-    const raw = await cli([
-      "activity", "--worktree-id", worktreeId,
-      "--event", "context_handoff_prompt_received", "--json",
-    ]);
-    const received = raw.split("\n").some((line) => {
-      try {
-        const event = JSON.parse(line);
-        return event.locator === locator && event.session_id === sid;
-      } catch { return false; }
-    });
-    if (!received) {
-      stage = "receipt-write";
-      await cli([
-        "activity-log", "context_handoff_prompt_received",
-        "--worktree-id", worktreeId, "--session-id", sid || "",
-        "--source", "context-handoff", "--field", `locator=${locator}`,
-      ]);
-    }
-    return { status: "logged", replayed: received };
+    stage = "receipt-write";
+    const receipt = JSON.parse(await cli([
+      "activity-log", "context_handoff_prompt_received", "--receipt-json",
+      "--worktree-id", worktreeId, "--session-id", sid,
+      "--source", "context-handoff", "--field", `locator=${locator}`,
+    ]));
+    if (receipt.received !== true) throw new Error("receipt-not-confirmed");
+    return { status: "logged", replayed: receipt.replayed === true };
   } catch (error) {
     return {
       status: "unavailable",
@@ -3206,6 +3194,7 @@ function worktreePromptReceived(cwd, stored, execute = runCli) {
       "agent-worktrees",
       [
         "activity", "--worktree-id", worktreeId,
+        "--receipt-locator", expected,
         "--event", "context_handoff_prompt_received", "--json",
       ],
       { cwd, timeout: 10000 },
@@ -3221,7 +3210,7 @@ function worktreePromptReceived(cwd, stored, execute = runCli) {
     } catch {
       continue;
     }
-    if (String(event?.locator || "") === expected) {
+    if (event?.received === true || String(event?.locator || "") === expected) {
       return { received: true, worktreeId, event };
     }
   }

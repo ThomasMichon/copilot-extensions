@@ -703,6 +703,7 @@ def add_parsers(sub) -> None:
         help="Filter to a single launch flow (correlation id)",
     )
     sp.add_argument("--event", default=None, help="Filter to a single event type")
+    sp.add_argument("--receipt-locator", default=None, help="Read one durable recovery prompt receipt")
     sp.add_argument("--lines", type=int, default=None, help="Show only the most recent N events")
     sp.add_argument(
         "--json", action="store_true", help="Emit one JSON object per line instead of a table"
@@ -715,6 +716,7 @@ def add_parsers(sub) -> None:
     sp.add_argument("event", help="Event name")
     sp.add_argument("--worktree-id", default=None, help="Worktree ID (default: resolved from cwd)")
     sp.add_argument("--session-id", default=None)
+    sp.add_argument("--receipt-json", action="store_true", help="Atomically record a recovery prompt receipt")
     sp.add_argument(
         "--launch-id", dest="launch_id", default=None, help="Launch-flow correlation id"
     )
@@ -734,6 +736,19 @@ def add_parsers(sub) -> None:
 
 def cmd_activity(args) -> int:
     """``agent-worktrees activity`` -- view the lifecycle log."""
+    if getattr(args, "receipt_locator", None):
+        from .handoff_prompt_receipt import prompt_receipt
+
+        try:
+            result = prompt_receipt(
+                cfg.active_project(), getattr(args, "worktree_id", None),
+                args.receipt_locator, legacy_path=log_path(),
+            )
+        except (OSError, ValueError):
+            print("prompt receipt unavailable", file=sys.stderr)
+            return 1
+        print(json.dumps(result))
+        return 0
     since = None
     raw_since = getattr(args, "since", None)
     if raw_since:
@@ -807,6 +822,22 @@ def cmd_activity_log(args) -> int:
             key = key.strip()
             if key:
                 fields[key] = value
+    if getattr(args, "receipt_json", False):
+        from .handoff_prompt_receipt import EVENT, prompt_receipt
+
+        if event != EVENT:
+            print("--receipt-json is only valid for recovery prompt receipts", file=sys.stderr)
+            return 1
+        try:
+            result = prompt_receipt(
+                cfg.active_project(), worktree_id, fields.get("locator"),
+                getattr(args, "session_id", None), record=True, legacy_path=log_path(),
+            )
+        except (OSError, ValueError):
+            print("prompt receipt unavailable", file=sys.stderr)
+            return 1
+        print(json.dumps(result))
+        return 0
     log_event(
         event,
         worktree_id=worktree_id,

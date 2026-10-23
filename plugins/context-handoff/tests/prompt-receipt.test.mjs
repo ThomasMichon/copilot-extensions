@@ -57,8 +57,8 @@ function fixtureExecutor(calls, { replay = false, unavailable = false } = {}) {
     calls.push({ bin, args, opts });
     if (calls.length === 1) return { stdout: unavailable ? "" : process.execPath };
     if (args.includes("get")) return { stdout: join(process.cwd(), "owned") };
-    if (args.includes("activity")) return {
-      stdout: replay ? JSON.stringify({ locator: "task:receipt-1", session_id: "successor" }) : "",
+    if (args.includes("activity-log")) return {
+      stdout: JSON.stringify({ received: true, replayed: replay }),
     };
     return { stdout: "" };
   };
@@ -113,6 +113,31 @@ test("unavailable observation retains first locator and retries only at a later 
   } finally { await h.observation.dispose(); }
 });
 
+test("later reconciliation fills only a missing captured session ID", async () => {
+  let clock = 0;
+  const seen = [];
+  const h = harness({
+    now: () => clock, retryMs: 10,
+    observe: async (input) => {
+      seen.push({ ...input });
+      return { status: input.sid ? "logged" : "unavailable" };
+    },
+  });
+  try {
+    h.state.sessionId = null;
+    h.emit("user.message", { data: { content: prompt } });
+    await settle(h);
+    assert.equal(seen[0].sid, null);
+    h.state.sessionId = "resolved-later";
+    clock = 11;
+    h.emit("tool.execution_complete");
+    await settle(h);
+    assert.equal(seen[1].sid, "resolved-later");
+    assert.equal(seen[1].locator, "task:receipt-1");
+    assert.equal(h.observation.status.status, "logged");
+  } finally { await h.observation.dispose(); }
+});
+
 test("qualified launch identity avoids identity query; legacy ambient identity is ignored", async () => {
   const calls = [];
   const root = payload();
@@ -136,7 +161,7 @@ test("qualified launch identity avoids identity query; legacy ambient identity i
   }
 });
 
-test("receipt replay reconciles without a second append", async () => {
+test("receipt replay uses one atomic backend operation with bounded response", async () => {
   const root = payload();
   const calls = [];
   try {
@@ -144,7 +169,8 @@ test("receipt replay reconciles without a second append", async () => {
       cwd: process.cwd(), sid: "successor", locator: "task:receipt-1",
     }, { payloadRoot: root, execute: fixtureExecutor(calls, { replay: true }) });
     assert.deepEqual(result, { status: "logged", replayed: true });
-    assert.equal(calls.some(({ args }) => args.includes("activity-log")), false);
+    assert.equal(calls.filter(({ args }) => args.includes("--receipt-json")).length, 1);
+    assert.equal(calls.some(({ args }) => args.includes("activity")), false);
     assert.ok(calls.find(({ args }) => args.includes("get")).args.includes("--session-id"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -167,7 +193,7 @@ test("absent service fails visibly and missing session never starts a child", as
       launchIdentity: { project: "project", worktreeId: "owned" },
     }, { payloadRoot: root, execute })).status, "unavailable");
     assert.equal(calls.length, 2);
-    assert.equal(calls.some((args) => args.includes("activity-log")), false);
+    assert.equal(calls.filter((args) => args.includes("--receipt-json")).length, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -184,7 +210,9 @@ test("native consumer succeeds after deferred runtime availability", async (t) =
       execute: (bin, args, options) => {
         commands.push(args);
         if (!args.includes("-m")) return Promise.resolve({ stdout: available ? process.execPath : "" });
-        return runReceiptChild(process.execPath, ["-e", "process.stdout.write('')"], options);
+        return runReceiptChild(process.execPath, [
+          "-e", "process.stdout.write(JSON.stringify({received:true,replayed:false}))",
+        ], options);
       },
     }),
   });

@@ -94,7 +94,12 @@ cleanup. Missing runtime, identity or service leaves the receipt unavailable,
 logs a bounded warning and retains the exact locator. A later user, idle or tool
 completion event may retry after a 30-second cooldown; there is no periodic poll
 or per-event queue. A successful receipt suppresses further attempts. Existing
-matching session/locator activity is reconciled before append on replay.
+matching session/locator receipts are reconciled and appended atomically by
+the [worktrees receipt backend](../agent-worktrees/docs/prompt-receipts.md).
+It reuses the existing durable handoff trace and its cross-process lock, returns
+bounded lookup output, and preserves pre-upgrade rolling-log receipts. A missing
+captured session identity can be filled from the same live session on a later
+reconciliation; an already-known identity is never replaced.
 Session shutdown cancels and joins an in-flight observation. These receipts are
 observational evidence, not ownership or consumption authorization.
 

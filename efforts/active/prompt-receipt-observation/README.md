@@ -78,6 +78,8 @@ Manager, telemetry, mention guard, installed payload and shared services.
 - [ ] Prevent provisioning and bound the complete child lifecycle, including
   cancellation/cleanup, rather than only promise scheduling.
 - [ ] Preserve receipt format, replay behavior and all consumption/ownership checks.
+- [x] Implement the approved atomic backend, bounded history output and late-session
+  recovery corrections; retain process-custody qualification as a separate blocker.
 - [ ] Update consumer documentation, add changefile, review and merge source.
 
 ## Validation Plan
@@ -171,3 +173,50 @@ new authority or ownership behavior requires a separate proposal.
 - Preserve this worktree and draft implementation PR pending that decision;
   source review and merge remain required. Continue without contacting existing
   agents, agent-chat, remote workers or shared installed services.
+
+### 2026-10-22 — Approved bounded backend continuation
+
+- The coordinating owner authorized tightly coupled receipt persistence,
+  bounded history and missing-session recovery changes. Reuse existing canonical
+  locks, transactions and durable stores; no new generic ledger or authority
+  framework. Process custody must first reuse qualified platform/agent-procutil
+  APIs; no new broker or native Job primitive and no competing native-launch edits.
+- Refreshed issue, PR, task and source-file evidence before implementation.
+  Existing ownership remains intact. `activity.py` and `handoff_trace.py` have
+  no intervening upstream delta; the only matching receipt PR is this candidate.
+  Existing process-custody PR #7833 remains untouched.
+- Backend design: one atomic receipt operation under `handoff_trace._append_lock`
+  in its existing per-project/worktree trace. Stream matching with bounded
+  record buffers returns one compact result instead of exporting history.
+  The trace's existing cleanup owns retention. No new ledger is introduced.
+- Missing captured session IDs may be filled only from the current session
+  object's known identity on later reconciliation; known identities and the
+  original locator remain unchanged.
+- Implemented the approved backend slice in `handoff_prompt_receipt.py`,
+  integrated the existing activity commands and bounded result consumer.
+  Forty-seven contained backend/trace tests pass, including two real contending
+  processes, history larger than 64 KiB, oversized records, partial-tail recovery,
+  legacy receipt migration and fsync failure. Touched Python passes Ruff F/E9.
+- The process primitive investigation is now concrete:
+  [exact symbols, ownership, reproductions and minimal integration contract](custody-boundary.md).
+  Existing qualified `run_caller_owned` handles bounded stream custody, but the
+  pre-runtime Python-free invocation measured 3,015 / 2,297 ms cold. The present
+  adapter leaks Python descendants on failed tree-kill and output overflow;
+  Node-only child fixtures concealed this. No generic native primitive was added.
+- Full receipt-suite execution is **not green**: first-touch failed its
+  <2,000 ms lifecycle assertion (test-case duration 2,663.75 ms) and deferred
+  native success exhausted the current budget.
+  Do not merge or reinterpret these as pre-existing failures. Retain the draft
+  candidate until the owning lifecycle/readiness seam can be integrated and the
+  full negative-path suite passes.
+- Final backend revalidation: **48 tests passed** through the contained
+  `run-plugin-tests.py agent-worktrees` selector for the receipt and trace files;
+  Ruff F/E9 and the 13-plugin install-contract gate pass. Seven targeted consumer
+  logic tests pass. These do not replace the full native qualification.
+- The committed exhaustive Python-descendant regression runs both custody cases
+  and fails both: apparent settlement with a live descendant after 2,800 ms.
+  Each test then cleans its exact owned processes and fixtures before asserting.
+- Completed an all-open-PR file check, including remaining file pages for large
+  PRs #5694, #6928 and #7895: no other open PR touches the receipt backend's
+  `activity.py`, `handoff_trace.py` or new receipt module. The known process-custody
+  and launch-maintenance owners remain untouched.

@@ -36,6 +36,7 @@ export function registerPromptReceiptObservation(session, state, {
     scheduled = setImmediate(() => {
       scheduled = null;
       if (disposed) return;
+      if (!pending.sid) pending.sid = state.sessionId || session.sessionId || null;
       controller = new AbortController();
       running = Promise.resolve().then(() => observe({
         ...pending, env, signal: controller.signal,
