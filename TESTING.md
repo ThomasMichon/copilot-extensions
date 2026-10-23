@@ -1797,6 +1797,16 @@ its sleeping descendant and the console ancestry alive, then requires them all
 to exit before outer observer cleanup and before the existing held-read
 watchdog. The test dependency does not enter the core/client runtime wheels.
 
+Typed collaboration adds pure normalization and captured-view-control contracts
+to `tools/promotion_unit_tests/test_chat_collaboration.py`, with the exact
+five-file import/test closure and production coverage targets enrolled in the
+existing unit manifest. These units create no store, provider, process or
+listener. Database atomicity, non-consuming pending/thread pages, unchanged
+reader progress, strict receipts, lost-response recovery and actual source-removed
+installed commands stay in the existing Chat acceptance/full portfolio.
+Its family and parameter inventory expands additively; neither the 120/600-second
+allowances nor any original family is relaxed.
+
 The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
 and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)
 separate the full222-case snapshot from explicit42/221-case candidates measured

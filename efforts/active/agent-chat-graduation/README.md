@@ -239,9 +239,12 @@ requirements.
 
 #### Collaboration contract continuation
 
-- [ ] Review and merge the claimed [collaboration/thread/recipient contract](collaboration.md)
+- [x] Review and merge the claimed [collaboration/thread/recipient contract](collaboration.md)
   over existing Chat state before dependent implementation, preserving the
   coordinated client/service/plugin extension points.
+  Reviewed contract #8134 merged as
+  `85942fd63be8c298ba880bf0d42b5a5747f15c24`; implementation and qualification
+  below remain open.
 - [ ] Implement and qualify optional structured posts and non-consuming
   thread/inbox projections through the existing store and installed client.
   Pending reply attention must outlive an ambient window without becoming a
@@ -376,6 +379,55 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-23 - Portable collaboration candidate qualified
+
+- Implementation candidate `f95502367dc4880be906de48f22b30eb897ba95b`
+  adds optional typed posts, atomic canonical metadata/recipient indexes,
+  stable annotated recovery and non-consuming captured thread/inbox views.
+  Existing text event/page shapes, ordinary cursor settlement and the
+  transport/lifecycle/workspace owners remain unchanged.
+- The unchanged native Windows acceptance and full lanes exercised that same
+  immutable candidate: acceptance selected348 of381 nodes, with346 passes,
+  two allowed POSIX-only skips and33 full-only deselections in81.26 seconds;
+  full selected381, with379 passes and the same two allowed skips in98.72
+  seconds. Both maps were complete and shared membership digest
+  `b1fd10b81848876c5b93a22d5d65fb1ed2c2ef9f0f92b24ab3305afa59d51ac4`.
+  The original326 nodes remain;55 cases were added.
+- Simple end-to-end and fresh-artifact tiers use the existing real HTTP,
+  provider and source-removed installed client/core/service fixtures. They
+  cover lost structured responses, explicit original-ID recovery, recipient
+  and thread projections, and unchanged ordinary reading. No installer or
+  bootstrap changed, so a separate fresh-machine clean-room rig was not
+  required; these artifact environments are not managed-host deployment.
+- Eighteen focused pure metadata/control cases pass locally and are enrolled
+  additively in the existing source-unit manifest. Whole-packet Windows
+  qualification is not claimed: the earlier canonical packet refused a
+  native loader in activation-preservation after856 passes and one platform
+  skip. The exact boundary is retained with the existing portfolio owner in
+  [#1303](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6360280182);
+  no observer or neighboring implementation was weakened. The complete
+  required Linux source-unit packet still has to pass on the review head.
+- Changed-source lint, install-contract and documentation checks pass.
+  The registered `services/chat` consumer has one generated patch changefile;
+  no release version is hand-selected. Native Linux Chat, native feed
+  assignment, foreground attachment and managed adoption are not inferred
+  from these Windows source/artifact results.
+- Review/merge and the parent completion gate remain open. No runtime update,
+  deployment, private provider or external venue activation is authorized or
+  performed by this qualification.
+
+### 2026-10-23 - Collaboration contract reviewed
+
+- The four-document specification merged in #8134 at
+  `85942fd63be8c298ba880bf0d42b5a5747f15c24`, after current-head Copilot
+  approval with no findings and passing required checks.
+- Re-read the complete Plan and Validation Plan after merge. Only the contract
+  review item is resolved; structured post/view implementation, installed
+  qualification and the broader native/lifecycle/adoption gates remain open.
+- Continue in the same source worktree from the reviewed contract. Claim the
+  exact service/client/test boundary before code rather than finalizing the
+  still-Active parent effort.
 
 ### 2026-10-23 - Collaboration contract continuation
 

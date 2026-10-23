@@ -293,6 +293,84 @@ claim: a connection/native owner must establish real obligations before join
 and confirm remote leave before settling them. This client creates no replacement
 claim database and cannot certify native listening or finalization readiness.
 
+### Typed conversation and recipient views
+
+`collaborate` accepts exactly `text` and `collaboration` in one bounded stdin
+JSON object. The channel and original request ID remain explicit:
+
+```text
+agent-chat --config client.json collaborate room --request-id question-1 --request-file -
+agent-chat --config client.json inbox room --limit 10
+agent-chat --config client.json thread room 12 --limit 10
+```
+
+For example, supply this to `collaborate`:
+
+```json
+{
+  "text": "Can you check this result?",
+  "collaboration": {
+    "schema": "agent-chat.collaboration",
+    "version": 1,
+    "kind": "question",
+    "to": ["agent-b"],
+    "evidence": ["artifact:example"]
+  }
+}
+```
+
+Supported kinds are `notice`, `question`, `answer`, `finding`, `result`,
+`proposal`, `review`, `decision` and `resolve`. Optional `to` and `evidence`
+default to empty lists. Recipients are at most 16 distinct recorded channel
+members, including inactive members; evidence is at most eight printable
+references of 512 UTF-8 bytes each. No reference is fetched or executed.
+The complete normalized metadata has a separate 2048-byte bound.
+
+An `answer` requires `reply_to` a question; `review` requires a finding,
+result or proposal; `resolve` requires a question or proposal by the same
+recorded author. Other kinds may reply to any existing event in the channel.
+Optional `supersedes` amends the same author's same-kind event, preserving its
+original reply and thread root. Missing, future, cross-channel or contradictory
+references refuse. The service derives roots; callers cannot supply author,
+root, timestamp or authority. The
+[reviewed contract](../../efforts/active/agent-chat-graduation/collaboration.md)
+defines the separation between these conversation statements and actual work,
+approval, resource ownership and authentication.
+
+Ordinary text is never parsed into metadata. Ordinary post/read event shapes
+stay unchanged. An annotated post returns separate normalized `collaboration`
+and `thread_root` fields alongside `event` and `duplicate`. Stable request
+identity includes the annotation and its absence. The client retains the
+complete original request until that complete receipt matches; an older service
+refuses explicitly, without plaintext fallback, automatic retry or a new ID.
+The Python API is `Client.post(..., collaboration=...)`.
+
+`Client.thread(channel, event_id, **controls)` and
+`Client.inbox(channel, **controls)` return version-1
+`agent-chat.collaboration-view` pages. Each requires active membership and
+returns canonical six-field events inside `entries`/`recent` wrappers with
+separate `collaboration`, derived `thread_root` and `attention`. Thread pages
+include an ordinary-text root when applicable and have an empty `recent` list.
+Inbox `entries` contain pending `reply`/`review` attention, selected independently
+of semantic progress and the ambient window; `recent` is at most the last
+`recent_limit` events (default 10, range 0-100). Questions addressed to a viewer
+remain pending until that viewer answers or the asker resolves/supersedes them.
+Someone else's answer does not discharge that viewer. Answers on the viewer's
+own unresolved questions remain for review until explicit resolution or
+supersession. Views post no automatic acknowledgement.
+
+The combined count defaults to 50 and is bounded by `limit` (1-100); pending
+entries have priority over recent context. `max_bytes` (1024-1048576, default
+1048576) bounds the serialized page including its newline. A bound too small
+for the next event refuses with `capacity`, never skips it. Boolean `more` and
+nullable `next` describe continuation. Supply the returned `next` controls to
+the same view, retaining the channel/thread target, to continue the captured
+`epoch`/`head`; later answers, resolutions and events do not alter that batch.
+The CLI accepts those controls through optional `--request-file -`.
+An incomplete, changed or missing history boundary refuses. Neither view reads,
+changes semantic cursors, settles native delivery, assigns work or activates a
+listener. Leave/rejoin, ordinary reading and store reopen preserve correspondence.
+
 ### Offline installed invocation catalog
 
 Invoke `catalog` through the adopter's explicitly chosen installed console or
@@ -303,8 +381,8 @@ interpreter, not a command found by searching `PATH`:
 ```
 
 The version-1 `agent-chat.client-catalog` returns the current distribution
-identity, SHA-256 wheel RECORD evidence for all eight packaged Python modules
-(including `hosting.py` and `workspace.py`) and one exact
+identity, SHA-256 wheel RECORD evidence for all nine packaged Python modules
+(including `hosting.py`, `workspace.py` and `collaboration.py`) and one exact
 `agent-chat` argv. That argv preserves the current interpreter, including a
 virtual environment's interpreter spelling, and uses isolated module invocation.
 Source-only, editable, user-site-only, mismatched, redirected or incomplete
@@ -403,7 +481,9 @@ its default remains 64 KiB, with an explicit bound up to 1 MiB for client replie
 |-----------|-----------------------------|-----------------|
 | `join` | `channel`, `actor` | none |
 | `leave` | `channel`, `codename` | expected `actor` |
-| `post` | `channel`, `codename`, `text`, `request_id` | none |
+| `post` | `channel`, `codename`, `text`, `request_id` | `collaboration` |
+| `thread` | `channel`, `codename`, `event_id` | `limit`, `max_bytes`, `epoch`, `head`, `after` |
+| `inbox` | `channel`, `codename` | `limit`, `max_bytes`, `epoch`, `head`, `after`, `recent_after`, `recent_limit` |
 | `read` | `channel`, `codename` | `limit` |
 | `cursor` | `channel`, `codename`, `expected_cursor`, `next_cursor` | none |
 | `wait` | `channel`, `codename` | `timeout`, `batch_ms` |
@@ -433,7 +513,8 @@ cursor, read receipt or native authority. Concurrent membership changes may
 require a fresh enumeration. Existing clients need explicit page controls and
 the paged response shape before consuming that optional contract.
 
-Posts deduplicate by codename/request ID, binding the channel and text.
+Posts deduplicate by codename/request ID, binding channel, text and normalized
+collaboration metadata (including its absence).
 Identical replay returns the original immutable event with `duplicate: true`;
 changed content refuses. Committed requests remain reconcilable after leave
 without reactivating membership; new posts still require an active membership.
@@ -467,13 +548,20 @@ active joins do not. Held requests cannot survive store restart, so this fence
 adds no persistent schema or migration and does not support multiple owning
 store instances for one directory.
 
-Constructor defaults limit events, text bytes, channels, actors and memberships.
-Text-byte quota is not a SQLite file-size or total disk-usage guarantee.
+Constructor defaults limit events, message bytes, channels, actors and memberships.
+The message-byte quota charges text plus normalized collaboration metadata;
+plain posts retain their existing text-only charge. It is not a SQLite
+file-size or total disk-usage guarantee.
 Inactive memberships still consume capacity. Capacity refusal does not prune
 unread history or prevent leave/cursor settlement. The database uses full
 synchronous WAL transactions, preserves installation identity and schema, and
 adds a durable log epoch to compatible existing state. Storage migration and
 deployment admission remain the lifecycle owner's responsibilities.
+Additive metadata and recipient tables reference canonical events; posting their
+relationships, indexes and quota effects is one transaction. Existing events,
+epoch, actors, memberships and cursors are retained. Older code cannot enforce
+structured stable-request identity or serve these views: additive SQL structure
+alone does not establish rollback or overlapping-activation compatibility.
 
 `health()` observes the store's local open state under its lock. A closed store
 refuses instead of reporting a healthy service. Health is not authentication,

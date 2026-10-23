@@ -1,0 +1,9 @@
+{
+  "comment": "Add typed conversation posts and non-consuming recipient and thread views",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

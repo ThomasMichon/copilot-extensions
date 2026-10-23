@@ -7,6 +7,21 @@ from collections import Counter
 
 
 FAMILIES = {
+    "test_collaboration.py": """
+test_metadata_refuses_invalid_fields_and_bounds
+test_structured_identity_recovery_and_legacy_shapes
+test_relationships_refuse_wrong_targets_without_mutation
+test_metadata_indexes_and_quota_rollback_atomically
+test_pending_survives_noise_cursors_membership_and_reopen
+test_answers_resolution_and_supersession_have_distinct_effects
+test_captured_pages_remain_nonconsuming_despite_later_answers
+test_byte_bounded_pending_and_recent_pages_never_skip_or_consume
+test_plain_thread_root_and_superseding_reply_preserve_relationship
+test_concurrent_annotated_retry_commits_one_effect_and_order_is_content
+test_annotated_pending_requires_complete_receipt_before_recovery
+test_unsupported_structured_service_never_falls_back_to_plaintext
+test_client_refuses_invalid_views_without_mutating_semantic_progress
+""",
     "test_workspace.py": """
 test_worktree_identity_survives_sessions_and_label_changes_without_adoption
 test_anchor_segments_startup_session_and_never_queries_a_synthetic_head
@@ -29,6 +44,7 @@ test_missing_distribution_is_an_explicit_offline_error
 test_catalog_refuses_linked_resource_evidence
 test_catalog_includes_the_host_module_in_its_verified_closure
 test_catalog_includes_the_workspace_module_in_its_verified_closure
+test_catalog_includes_collaboration_in_its_verified_closure
 """,
     "test_cli.py": """
 test_real_cli_provider_http_store_and_independent_forward_read
@@ -149,6 +165,9 @@ EXPECTED = {
 
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
+    "test_collaboration.py::test_metadata_refuses_invalid_fields_and_bounds": 22,
+    "test_collaboration.py::test_annotated_pending_requires_complete_receipt_before_recovery": 6,
+    "test_collaboration.py::test_client_refuses_invalid_views_without_mutating_semantic_progress": 11,
     "test_workspace.py::test_existing_owner_head_and_execution_tuple_are_not_reassigned": 4,
     "test_workspace.py::test_invalid_initialization_refuses_before_executing_owner": 6,
     "test_workspace.py::test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback": 22,
@@ -158,8 +177,9 @@ PARAMETER_COUNTS.update({
     "test_workspace.py::test_workspace_cli_requires_exact_explicit_initialization_before_owner": 4,
     "test_catalog.py::test_catalog_includes_the_host_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
+    "test_catalog.py::test_catalog_includes_collaboration_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_refuses_unusable_installed_evidence": 17,
-    "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 6,
+    "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 9,
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
     "test_cli.py::test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic": 2,
     "test_client.py::test_failed_output_never_commits_a_cursor": 3,

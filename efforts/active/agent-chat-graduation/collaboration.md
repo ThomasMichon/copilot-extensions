@@ -1,8 +1,9 @@
 # Chat collaboration and recipient views
 
-Proposed realization for [Agent Chat Graduation](README.md) and its
-[architecture](architecture.md). This is a specification to review before
-dependent code, not an implemented endpoint or a deployment instruction.
+Reviewed realization for [Agent Chat Graduation](README.md) and its
+[architecture](architecture.md), published by #8134 before dependent code.
+This governs the portable source implementation and its qualification; it is
+not a deployment instruction or a native delivery claim.
 
 ## Intent and first slice
 
@@ -28,7 +29,7 @@ object. An absent object is ordinary text: never parse quoted JSON, transcripts,
 an embedded marker or a claimed sender out of `text` to promote it into a
 structured event.
 
-Proposed object:
+Version-1 object:
 
 ```json
 {
@@ -176,33 +177,34 @@ it must not introduce another conversation store or scrape operator transcripts.
 
 ## Validation obligations
 
-- [ ] Strict metadata, bounds, Unicode, unknown/version fields, duplicate
+- [x] Strict metadata, bounds, Unicode, unknown/version fields, duplicate
   recipients and reference-type validation; quoted structured-looking text
   remains ordinary text.
-- [ ] Same-ID identical recovery and changed-annotation conflict, including
+- [x] Same-ID identical recovery and changed-annotation conflict, including
   retry after leave and a retained client request across a lost response.
-- [ ] Real transaction failure after event/metadata/index/quota writes leaves
+- [x] Real transaction failure after event/metadata/index/quota writes leaves
   all parts unchanged; reopen preserves the original committed relationships.
-- [ ] Legacy plain post/read/scan/client output remains compatible, with
+- [x] Legacy plain post/read/scan/client output remains compatible, with
   independent viewer cursors and unchanged event identities.
-- [ ] Cross-channel, missing/future/cyclic and wrong-author resolution or
+- [x] Cross-channel, missing/future/cyclic and wrong-author resolution or
   supersession refuse without mutation; addresses confer no new permission.
-- [ ] An older directed question survives more than100 later events, ordinary
+- [x] An older directed question survives more than100 later events, ordinary
   read/cursor advancement, leave/rejoin and store reopen.
-- [ ] A different author's answer does not discharge the addressed recipient;
+- [x] A different author's answer does not discharge the addressed recipient;
   explicit own-answer, asker's resolution and supersession have the documented
   distinct effects.
-- [ ] Count/byte-limited pages and captured-boundary continuation preserve
+- [x] Count/byte-limited pages and captured-boundary continuation preserve
   pending questions and later arrivals without changing semantic cursors.
-- [ ] Actual installed source-removed command exercises structured post,
+- [x] Actual installed source-removed command exercises structured post,
   thread/inbox, unknown-response recovery and unchanged ordinary reading.
-- [ ] Catalog/resource closure includes every changed import; unsupported
+- [x] Catalog/resource closure includes every changed import; unsupported
   older service behavior is explicit and never triggers plaintext fallback.
 - [ ] Fast pure contracts remain in the admitted unit packet; installed,
   database/process and platform cases use the existing appropriate lanes.
   No new exhaustive PR matrix, environment provisioning or runtime adoption
   is inferred from this proposal.
 
-These are required tests to implement, not assertions that they have run.
+Unchecked obligations remain open; source qualification is recorded in the
+parent journal rather than inferred from this contract.
 The parent [Validation Plan](README.md#validation-plan) continues to own the
 complete service/plugin/native/lifecycle/release objective.
