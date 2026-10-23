@@ -77,27 +77,23 @@ No first-machine installer behavior changes. Clean-room role installation and
 live external provider/serving proof are not supplied by this isolated library;
 those larger Plan and Validation Plan gates remain open.
 
-## Local execution record
+## Validation evidence
 
-The contract was reviewed and merged in #8041 before implementation. The
-owned reader/admission/store selection passes 123 tests in 48.21 seconds under
-the unchanged 120-second containment limit, including the real independent
-consumer and lock cases. An initial new-test collection error used pytest's
-reserved `request` parameter name; renaming that parameter fixed collection
-without changing assertions. Existing unselected upstream tests report 21
-unknown timeout-marker warnings in this environment; no such fixture or
-deadline was changed here.
+The owned reader/admission/store selection passes 123 tests in 48.21 seconds
+under the unchanged 120-second containment limit, including the real independent
+consumer and lock cases. The dated parent Journal records execution history,
+including failed attempts.
 
 The [implemented API](../../../fleet-manager/docs/scoped-observation-reader.md)
 keeps the trusted full-row parser distinct from selected result projection.
 Current-head hosted review and required CI remain the independent merge gate
 above, not a result inferred from this local run.
 
-The first implementation review found an opposing lock order between a reader
-and direct callers whose snapshot callback acquires the owner fence. The
-authority now explicitly binds the same fence and acquires it before its
-internal lock on every admission/checkpoint path; the reader rejects an
-unbound or differently fenced authority. A bounded subprocess regression
+The authority binds the reader's exact reentrant fence and acquires it before
+its internal lock on every admission/checkpoint path, including direct calls.
+The reader rejects an unbound or differently fenced authority. This common
+ordering prevents an opposing-lock deadlock when the snapshot callback also
+acquires the owner fence. A bounded subprocess regression
 exercises mixed direct/reader calls with a fence-acquiring callback, plus an
 inverted-order negative control that reproduces the deadlock. Existing unfenced
 callers keep their original lock semantics.
