@@ -28,8 +28,10 @@ failed immutable publication with `manifest source closure differs from
 candidate`. The tag-aware allocation repair merged in #8110 after current-head
 approval and required CI. Reviewed helper-pin adoption landed in #8121; its
 first natural run correctly refused the old helper's already-frozen composition
-for the same Dev source. The Source control mirror and a fresh naturally
-qualified source remain required. Native complete-suite and normal-entry acceptance remain open;
+for the same Dev source. The Source mirror merged in #8127. Fresh natural
+qualification `39912447859` has passed source units, build and attestation;
+candidate publication and actual Main/source/tag receipts remain unverified.
+Native complete-suite and normal-entry acceptance remain open;
 guest interrupted-request recovery still needs the separately confirmed
 disruptive restart. The next driver first repairs the promotion blocker under
 #3336, preserving immutable publication checks and the existing control writer,
@@ -269,6 +271,20 @@ installed tab visibility remains an explicit acceptance case; bridge, mux or
 canonical-head presence is not equivalent proof. Prospective naming quality is
 separate and does not establish the cause of the missing row.
 
+The subsequent read-only diagnosis in #5674 identifies project scope for this
+particular witness: the unchanged record is present in its owning project's
+installed current roster and Picker normalization, while the open Manager
+instances enumerate a different project. That does not establish a machine or
+name exclusion, and does not authorize related-project aggregation, a rename
+or a metadata rewrite. The broader installed acceptance matrix remains open.
+
+**Operator-directed continuation boundary (public-safe summary):** the agent
+home must be an agent-capable harness; this repository's checkout remains
+subordinate source work. Preserve the existing source, effort, relationships,
+claims, queues and promotion progress during the coordinated transfer. No
+finalization, record rewrite, automatic claim release or new agent launch from
+this source repository is part of the wrap-up.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite
@@ -463,11 +479,12 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
   separation, update/launch gate agreement, new single-environment naming,
   unchanged legacy lookup and native/guest refusal boundaries using the
   [validation matrix](physical-machine-environment-boundary.md#validation-plan).
-- [ ] Verify the operator-reported retained guest worktree appears in the actual
-  installed Manager's expected machine tab using authoritative machine/platform/
-  environment metadata, preserving its historical ID, path, relationships and
-  live session. Do not use its duplicated naming qualifier as locality authority
-  or rename it as a visibility remedy.
+- [x] Classify the operator-reported retained guest worktree using its installed
+  owning-project roster and actual Picker data-source path: it is present with
+  unchanged guest metadata; the open Manager instances enumerate another
+  project. Preserve the ID/path/relationships and do not infer a locality defect,
+  related-project aggregation requirement or rename remedy. This source-path
+  diagnosis is not completion of the broader installed creation/resume matrix.
 
 ## Proposal
 
