@@ -220,6 +220,16 @@ operator selected `isolated-scoped-reader`. The
 **agent-recommended implementation elaboration**. This explicit assignment does
 not waive the separate resident integration or live adoption gates.
 
+The operator subsequently requested verbatim:
+
+> Great. Look over the fleet, mesh, and gateway visions to ensure you can align, or adjust what's up there to be more coherent. Take a look at related efforts, and determine how you can contribute in your own lane.
+
+This assigns an alignment review and contribution assessment, not a transfer of
+another campaign's implementation. The existing no-other-agent-coordination
+constraint remains in force. The
+[observation contribution boundary](central-state-backing-store.md#owned-contract-lane)
+is an **agent-recommended follow-on**, not a new runtime assignment.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -416,6 +426,22 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-22 - Fleet, mesh and Gateway alignment review
+
+- Compared the governing visions with the routing, Linux-role, Gateway/SSH
+  onboarding, transport-convergence and conventional-connectivity efforts.
+  Their implementation and adoption responsibilities remain separate.
+- Reconciled the parent fabric and SSH vision's per-query/no-central-copy
+  language with the fleet's existing push-backed observation intent: canonical
+  registries retain authority while scoped projections expose provenance,
+  freshness and coverage without becoming another writer or control grant.
+- Identified a future scoped-view/recovery contract as the isolated
+  observation implementer's candidate lane. It requires an explicit bounded
+  assignment and reviewed plan before code; the completed point reader does
+  not already provide snapshots, replay authorization or subscriptions.
+- No other agent was contacted. No runtime, provider, enrollment, SSH profile,
+  release, deployment, lease or ownership migration changed.
 
 ### 2026-10-22 - Isolated scoped-reader prerequisite merged
 

@@ -120,6 +120,29 @@ global positions and page-change signals are not a scoped wire protocol;
 authenticated per-view pagination/replay still requires an adapter that preserves
 consistency without exposing another scope's activity.
 
+## Owned contract lane
+
+**Agent-recommended contribution assessment:** extend the existing isolated
+observation/admission contracts, not a resident integration or another mesh.
+The completed point reader is the starting prerequisite, not a snapshot or
+subscription implementation.
+
+The next candidate is a separately reviewed, transport-neutral scoped-view and
+recovery contract. It must preserve correlated entity/field grants, authorize
+before lookup or aggregation, and define a coherent snapshot/replay boundary
+without exposing global positions, unrelated counts or another scope's activity.
+Revocation, gaps and slow-reader recovery need explicit outcomes. Source-local
+point coverage must not become a claim of complete roster publication.
+
+Before implementation, explicitly assign the bounded source/test seam and
+review its plan. Local contract work cannot claim authenticated snapshot
+provenance, durable shared policy epochs or delayed wire-emission authorization.
+Producers and origin agency remain with #3761, Manager UX with #352, transport
+and routing with #5789/#6443, and installation/adoption with their existing
+owners. No provider, enrollment, SSH-profile, resident or live deployment edits
+follow from this assessment; it neither replaces those owners nor requires
+contacting them to finish the alignment review.
+
 ## Lifecycle and adoption
 
 Use the selected Gateway's existing release, installer/update and activation

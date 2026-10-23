@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** branch (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-20
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -158,6 +158,12 @@ The central projection retains provenance, freshness and coverage without
 becoming another writer of its sources' worktree, task, session or resource
 authority. Centralizing an actual authority requires its separate explicit
 migration; centralizing observation alone does not perform that migration.
+
+The [SSH mesh](../plugins/agent-ssh/README.md) and each machine's repository
+registry remain the source of their respective reachability and location facts.
+An authorized shared view may retain those facts without per-client remote
+probes; it exposes derived observations, not another topology editor or a grant
+to act on a stale target.
 
 ### Role deployments and container managers
 

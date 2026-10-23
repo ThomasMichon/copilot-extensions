@@ -5,7 +5,7 @@
   rather than merely borrowing whatever SSH profiles happen to already exist.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-18
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's [`README`](../../../plugins/agent-ssh/README.md),
   `docs/transport-provider-contract.md`, and its skills (`agent-ssh`,
@@ -180,8 +180,11 @@ derived**, not separately authored: a machine's own checkouts *are* the list of
 agents reachable on it. Introspection is **report-first** — it surfaces what a
 target actually has before anything is written — and **adoption is the explicit
 follow-on** that records the finding into the mesh. The machine remains the
-single owning store of *its own* locations; the fabric reads them at query time
-rather than copying them into a central list that will drift.
+single owning store of *its own* locations. Direct introspection reads that
+authority; an explicitly adopted fleet view may consume authorized, source-derived
+observations without making every client query contact the machine. Such a view
+retains provenance, freshness and coverage rather than becoming another editable
+location registry.
 
 ## Features
 
@@ -329,12 +332,17 @@ themselves. This is the fabric's *derive-don't-duplicate* rule applied to
 transport.
 
 ### locations-live-from-the-machine
-A machine's actual repo-checkout locations are read from **that machine's own
-repo registry at query time** — the machine is the source of truth for where its
-own checkouts live. The fabric does **not** copy those paths into a central store
-that drifts; in-repo config may declare an *expected* location, but the mesh's
-**live** answer wins. This is *derive-don't-duplicate* applied to repo locations:
-the same rule that keeps reachability honest keeps the derived roster honest.
+A machine's actual repo-checkout locations originate in **that machine's own
+repo registry** — the machine is the source of truth for where its own checkouts
+live. Direct queries and authorized push-backed fleet projections consume that
+same authority; a projection is not a second registry to edit or adopt from
+implicitly. In-repo config may declare an *expected* location, but it does not
+override the owner's current answer. Retained observations expose their source,
+freshness and incomplete or disconnected coverage; silence never proves an empty
+machine or a vanished checkout. A projected path or reachability observation is
+not permission to execute, change profiles or reassign work. Standalone live
+introspection remains usable without a Gateway. This is *derive-don't-duplicate*
+applied to repo locations and the derived roster.
 
 ### explore-before-adopt
 Introspecting a target is **read-only first**: exploration reports what a machine
@@ -402,6 +410,8 @@ layer's.)
   written (e.g. a future `visions/plugins/agent-bridge/`).
 - Related vision: [plugin-services](../../plugin-services/README.md) — the
   per-host service model agent-ssh's runtime deploys as.
+- Fleet observation: [machine-fleet](../../machine-fleet/README.md#resumable-observation)
+  — optional shared projections preserve the mesh and target-local authorities.
 - Reality docs: [`docs/architecture.md`](../../../docs/architecture.md) and the
   plugin's future `plugins/agent-ssh/docs/`.
 

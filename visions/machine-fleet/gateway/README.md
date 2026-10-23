@@ -3,7 +3,7 @@
 - **Subject:** A reusable, live-configured Gateway for declared services and outbound role channels
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-10-22
 
 ## Purpose & Intent
 
@@ -105,6 +105,13 @@ place until an explicit migration transfers their responsibility. The Gateway
 does not add a second installer, supervisor, issuer or container scheduler.
 Failed candidate configuration or serving activation preserves the prior valid
 state and gives a precise outcome.
+
+The parent fleet's shared current-state view is a derived observation surface,
+not a second owner of source registries or service state. It preserves scoped
+access, source freshness and coverage without requiring per-client source
+probes. A connected role, ready route or retained observation cannot establish
+the readiness of another capability, authorize an operation or prove accepted
+work has stopped.
 
 ## Non-Goals / Boundaries
 
