@@ -238,3 +238,7 @@ All functional phases remain gated even if this proposal merges.
   performs only the trusted producer's fenced-block replacement rather than
   duplicating catalog validation. The unchanged cap passes without a baseline
   edit; the combined source/guidance selection passes 265 tests.
+- Final review also identified that the last owner-validation read could itself
+  exhaust the budget. The adapter now checks the deadline after that read;
+  received and absent late-result regressions pass. The combined source/guidance
+  selection now passes 267 tests; module-size and lint gates remain unchanged.

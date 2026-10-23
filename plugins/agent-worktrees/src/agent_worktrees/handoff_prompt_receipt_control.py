@@ -285,6 +285,8 @@ class ReceiptControl:
                 same_owner = False
             if not same_owner:
                 return self._result("unknown", "owner-changed-after-admission", subject=subject, owner=owner)
+            if time.monotonic() >= deadline:
+                return self._result("unknown", "completion-after-deadline", subject=subject, owner=owner)
             return self._result(
                 result["status"], result["reason"], subject=subject, owner=owner,
                 replayed=result["replayed"],

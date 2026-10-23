@@ -237,6 +237,26 @@ def test_completed_after_deadline_is_not_claimed_as_timely(monkeypatch):
     assert runtime.active_count() == 0
 
 
+@pytest.mark.parametrize("operation", ["query", "record"])
+def test_final_owner_validation_is_inside_the_deadline(monkeypatch, operation):
+    now = [100.0]
+    calls = []
+    monkeypatch.setattr(receipts.time, "monotonic", lambda: now[0])
+    def owner():
+        calls.append(True)
+        if len(calls) == 2:
+            now[0] += 3
+        return dict(OWNER)
+    runtime = receipts.ReceiptControl(owner, backend=lambda *args, **kwargs: {
+        "status": "received" if operation == "record" else "absent",
+        "replayed": False, "reason": "completed",
+    })
+    result = runtime.handle(request(operation))
+    assert result["status"] == "unknown"
+    assert result["reason"] == "completion-after-deadline"
+    assert runtime.active_count() == 0
+
+
 @pytest.fixture
 def subject_record(sample_record, tmp_tracking_dir, monkeypatch):
     from agent_worktrees import config, installer, tracking
