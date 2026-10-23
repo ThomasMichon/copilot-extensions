@@ -15,7 +15,7 @@ Split out of ``finalize.py`` (module-size guard).
 from __future__ import annotations
 
 from . import git_ops
-from .finalize_ref import Landing, creation_point, landing
+from .finalize_ref import Landing, creation_point, landing, report_history_snapshot
 
 
 def remote_ref(repo, branch: str) -> str:
@@ -127,7 +127,7 @@ def explain(record, repo, worktree_path: str, anchor: str) -> dict:
     worktree's work landed, and every check's verdict -- nothing is fetched,
     finalized or recorded."""
     from . import finalize_open_pr_gate as fopg
-    with fopg.one_read_per_pr():
+    with fopg.one_read_per_pr(), report_history_snapshot():
         return _explain(record, repo, worktree_path, anchor)
 
 

@@ -7,12 +7,40 @@ from __future__ import annotations
 
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from subprocess import CompletedProcess
+from typing import Iterator
 
 from . import git_ops, git_tree_diff, output
 
 #: The identity of the probe commit :func:`squash_landed` builds (never a ref's).
 _PROBE_IDENTITY = ("-c", "user.name=agent-worktrees", "-c", "user.email=agent-worktrees@localhost")
+_report_history: ContextVar[
+    dict[tuple[tuple[str, ...], str], CompletedProcess[str]] | None
+] = ContextVar("finalize_report_history", default=None)
+
+
+@contextmanager
+def report_history_snapshot() -> Iterator[None]:
+    """Share history reads within one read-only report, never a pruning decision."""
+    token = _report_history.set({})
+    try:
+        yield
+    finally:
+        _report_history.reset(token)
+
+
+def _history_read(*args: str, cwd: str) -> CompletedProcess[str]:
+    snapshot = _report_history.get()
+    key = args, cwd
+    if snapshot is not None and key in snapshot:
+        return snapshot[key]
+    result = git_ops.git(*args, cwd=cwd, check=False)
+    if snapshot is not None:
+        snapshot[key] = result
+    return result
 
 
 @dataclass
@@ -101,11 +129,11 @@ def creation_point(ref: str, cwd: str, *, published_bases: tuple[str, ...] = ())
     clone), names it, or one of the remote's tracking refs contains it now. ""
     when unknown or ambiguous: not a local branch, an expired or edited reflog,
     any other source, or no such proof."""
-    full = git_ops.git("rev-parse", "--symbolic-full-name", ref, cwd=cwd, check=False)
+    full = _history_read("rev-parse", "--symbolic-full-name", ref, cwd=cwd)
     name = full.stdout.strip()
     if full.returncode != 0 or not name.startswith("refs/heads/"):
         return ""
-    log = git_ops.git("reflog", "show", "--format=%H%x09%gs", name, "--", cwd=cwd, check=False)
+    log = _history_read("reflog", "show", "--format=%H%x09%gs", name, "--", cwd=cwd)
     entries = [ln for ln in log.stdout.splitlines() if ln.strip()]
     if log.returncode != 0 or not entries:
         return ""
@@ -115,14 +143,14 @@ def creation_point(ref: str, cwd: str, *, published_bases: tuple[str, ...] = ())
     if not subject.startswith(prefix) or not sha:
         return ""
     source = subject[len(prefix):].strip().removeprefix("refs/remotes/")
-    remotes = git_ops.git("remote", cwd=cwd, check=False).stdout.split()
+    remotes = _history_read("remote", cwd=cwd).stdout.split()
     if "/" not in source or source.partition("/")[0] not in remotes:
         return ""
     remote = source.partition("/")[0]
     remote_prefix = f"refs/remotes/{remote}/"
-    refs_r = git_ops.git(
+    refs_r = _history_read(
         "for-each-ref", "--format=%(refname)%09%(objectname)",
-        f"refs/heads/{source}", remote_prefix, cwd=cwd, check=False,
+        f"refs/heads/{source}", remote_prefix, cwd=cwd,
     )
     if refs_r.returncode != 0:
         return ""
@@ -137,12 +165,12 @@ def creation_point(ref: str, cwd: str, *, published_bases: tuple[str, ...] = ())
             remote_tips.add(object_id)
     created = sha if sha in remote_tips else ""
     if not created and remote_tips:
-        held_now = git_ops.git("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
-                               remote_prefix, cwd=cwd, check=False)
+        held_now = _history_read("for-each-ref", "--count=1", "--contains", sha, "--format=%(refname)",
+                                remote_prefix, cwd=cwd)
         created = sha if held_now.returncode == 0 and held_now.stdout.strip() else ""
     if not created:
         for logged in (f"refs/remotes/{source}", f"refs/remotes/{remote}/HEAD"):  # HEAD logs a clone
-            tracked = git_ops.git("reflog", "show", "--format=%H", logged, "--", cwd=cwd, check=False)
+            tracked = _history_read("reflog", "show", "--format=%H", logged, "--", cwd=cwd)
             if tracked.returncode == 0 and sha in {ln.strip() for ln in tracked.stdout.splitlines()}:
                 created = sha
                 break
@@ -168,10 +196,11 @@ def _later_resets_to_source(
     held: set[str] = set()
     for qualified in sources:
         short = qualified.removeprefix("refs/remotes/")
-        if git_ops.git("rev-parse", "--verify", "-q", f"refs/heads/{short}", cwd=cwd,
-                       check=False).returncode == 0:
+        if _history_read(
+            "rev-parse", "--verify", "-q", f"refs/heads/{short}", cwd=cwd,
+        ).returncode == 0:
             continue
-        tips = git_ops.git("reflog", "show", "--format=%H", qualified, "--", cwd=cwd, check=False)
+        tips = _history_read("reflog", "show", "--format=%H", qualified, "--", cwd=cwd)
         if tips.returncode == 0:
             held.update(ln.strip() for ln in tips.stdout.splitlines())
     point = created

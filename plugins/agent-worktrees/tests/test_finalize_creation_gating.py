@@ -49,6 +49,45 @@ def test_zero_extra_commits_use_real_graph_evidence_without_creation_history(env
     )
 
 
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_report_history_snapshot_never_survives_into_a_later_decision(
+    env, monkeypatch, interrupted,
+):
+    branch = f"worktree/{env.worktree_id}"
+    head = _git("rev-parse", "HEAD", cwd=env.clone)
+    original = git_ops.git
+    reads = []
+
+    def observed(*args, **kwargs):
+        if args[:3] == ("reflog", "show", "--format=%H%x09%gs"):
+            reads.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "git", observed)
+
+    def report():
+        with finalize_ref.report_history_snapshot():
+            assert finalize_ref.creation_point(branch, str(env.clone)) == head
+            assert finalize_ref.creation_point(
+                branch, str(env.clone), published_bases=("refs/remotes/origin/dev",),
+            ) == head
+            if interrupted:
+                raise RuntimeError("report interrupted")
+
+    if interrupted:
+        with pytest.raises(RuntimeError, match="report interrupted"):
+            report()
+    else:
+        report()
+    assert len(reads) == 1
+
+    _git("reflog", "expire", "--expire=now", branch, cwd=env.clone)
+    assert finalize_ref.creation_point(branch, str(env.clone)) == ""
+    with finalize_ref.report_history_snapshot():
+        assert finalize_ref.creation_point(branch, str(env.clone)) == ""
+    assert len(reads) == 3
+
+
 @pytest.mark.parametrize(
     "returncode,stdout",
     [(1, ""), (0, ""), (0, "unknown"), (0, "-1"), (0, "1\n2"), (0, "\u00b2")],

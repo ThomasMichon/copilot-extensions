@@ -1,5 +1,5 @@
 {
-  "comment": "Reuse complete landing checks only within one read-only explanation while keeping later pruning checks fresh.",
+  "comment": "Reuse landing evidence and creation-history reads only within a read-only report; keep pruning fresh and historical reset fixtures private.",
   "changes": [
     {
       "plugin": "agent-worktrees",

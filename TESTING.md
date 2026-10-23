@@ -1003,10 +1003,15 @@ commit, pushes it and runs the real pull-forward operation; production Git
 configuration and rebase conflict handling remain unchanged.
 
 Landing explanations evaluate each base's complete evidence once and reuse
-those checks only while forming that read-only report. Native Git regressions
-add an empty commit after a report and require both a later report and the
-actual finalization precondition to refuse it. Report fields, provider
-validation and fresh reads at the pruning boundary remain unchanged.
+those checks only while forming that read-only report. Its creation-history
+queries share a context-local snapshot that is discarded even when the report
+raises. Native Git regressions add an empty commit or expire actual reflog
+evidence after a report, requiring later reports and pruning checks to read
+fresh state. Report fields, refusal messages and provider validation remain
+unchanged. Historical cross-base cases copy complete prepared Git topologies
+for both publication bases, retaining independent objects, refs and reflogs;
+each case still performs its own later commit/revert, rewrite, expiry or
+shadow mutation and original safety assertions.
 
 The optional profile-assignment-state failure guard follows both real command
 layers returned by worktree creation: exact record-bound execution admission,
