@@ -389,6 +389,29 @@ def test_start_cancellation_keeps_custody_of_initial_disk_read(setup, monkeypatc
     asyncio.run(scenario())
 
 
+def test_close_withdraws_admission_before_waiting_for_mutex(setup):
+    store, make, _ = setup
+
+    async def scenario():
+        service = make()
+        await service.start()
+        await service._closing.acquire()
+        try:
+            with pytest.raises(TimeoutError):
+                await service.close(timeout=0.01)
+            response = await service.gateway.handle(request("register", registration()))
+            assert response.status == 503
+            assert service.status()["draining"]
+            assert service._closing.locked()
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+        finally:
+            service._closing.release()
+            await service.close(timeout=3)
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("ending", ["timeout", "cancel"])
 def test_queued_close_keeps_its_own_budget_and_cannot_release_active_drain(
     setup, monkeypatch, ending,
@@ -436,8 +459,11 @@ def test_queued_close_keeps_its_own_budget_and_cannot_release_active_drain(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("ending", ["cancel", "stop"])
 @pytest.mark.parametrize("timeout", [False, True])
-def test_foreground_startup_cancellation_drains_its_retained_adoption(setup, monkeypatch, timeout):
+def test_foreground_startup_withdrawal_drains_its_retained_adoption(
+    setup, monkeypatch, timeout, ending,
+):
     store, make, _ = setup
     entered, release = threading.Event(), threading.Event()
     targets = store.observation_targets
@@ -451,24 +477,34 @@ def test_foreground_startup_cancellation_drains_its_retained_adoption(setup, mon
 
     async def scenario():
         service = make()
+        stop = asyncio.Event()
         running = asyncio.create_task(service.run(
-            asyncio.Event(), drain_timeout=0.02 if timeout else 3,
+            stop, drain_timeout=0.02 if timeout else 3,
         ))
         try:
             assert await asyncio.to_thread(entered.wait, 3)
-            running.cancel()
+            began = asyncio.get_running_loop().time()
+            if ending == "cancel":
+                running.cancel()
+            else:
+                stop.set()
             await wait_for(lambda: service.status()["draining"])
             with pytest.raises(AlreadyRunningError):
                 contender(store).acquire()
             if timeout:
                 with pytest.raises(TimeoutError):
-                    await running
+                    await asyncio.wait_for(asyncio.shield(running), 1)
+                assert running.done()
+                assert asyncio.get_running_loop().time() - began < 1
                 with pytest.raises(AlreadyRunningError):
                     contender(store).acquire()
             else:
                 assert not running.done()
                 release.set()
-                with pytest.raises(asyncio.CancelledError):
+                if ending == "cancel":
+                    with pytest.raises(asyncio.CancelledError):
+                        await running
+                else:
                     await running
                 assert service._disk.done() and service.status()["closed"]
                 with contender(store):
@@ -477,6 +513,92 @@ def test_foreground_startup_cancellation_drains_its_retained_adoption(setup, mon
             release.set()
             await asyncio.gather(running, return_exceptions=True)
             await service.close(timeout=3)
+        assert not service.connector.entered.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_foreground_with_preset_stop_does_not_acquire_or_start(setup):
+    store, make, _ = setup
+
+    async def scenario():
+        service = make()
+        stop = asyncio.Event()
+        stop.set()
+        await service.run(stop, drain_timeout=0.01)
+        assert not service.connector.entered.is_set()
+        assert service._disk is None and not service._tasks
+        with contender(store):
+            pass
+
+    asyncio.run(scenario())
+
+
+def test_stop_racing_adoption_completion_does_not_launch_units(setup, monkeypatch):
+    store, make, _ = setup
+    entered, release = threading.Event(), threading.Event()
+    targets = store.observation_targets
+
+    def held(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return targets(**kwargs)
+
+    monkeypatch.setattr(store, "observation_targets", held)
+
+    async def scenario():
+        service = make()
+        stop = asyncio.Event()
+        running = asyncio.create_task(service.run(stop, drain_timeout=3))
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            stop.set()
+            release.set()
+            await running
+            assert not service.connector.entered.is_set()
+            assert not service._tasks and service.status()["closed"]
+            with contender(store):
+                pass
+        finally:
+            release.set()
+            await asyncio.gather(running, return_exceptions=True)
+            await service.close(timeout=3)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("second", ["start", "run"])
+def test_foreground_reserves_owner_before_scheduling_adoption(setup, monkeypatch, second):
+    store, make, _ = setup
+    entered, release = threading.Event(), threading.Event()
+    targets = store.observation_targets
+
+    def held(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return targets(**kwargs)
+
+    monkeypatch.setattr(store, "observation_targets", held)
+
+    async def scenario():
+        service = make()
+        stop = asyncio.Event()
+        running = asyncio.create_task(service.run(stop, drain_timeout=3))
+        competing = asyncio.create_task(
+            service.start() if second == "start" else service.run(asyncio.Event()),
+        )
+        try:
+            with pytest.raises(RuntimeError, match="already used"):
+                await competing
+            assert await asyncio.to_thread(entered.wait, 3)
+            assert not service.status()["draining"]
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+        finally:
+            stop.set()
+            release.set()
+            await running
+        assert service.status()["closed"] and not service.connector.entered.is_set()
 
     asyncio.run(scenario())
 
@@ -500,7 +622,7 @@ def test_cancellation_racing_successful_close_lock_acquisition_releases_only_mut
         try:
             with pytest.raises(asyncio.CancelledError):
                 await service.close(timeout=3)
-            assert not lock.locked() and not service.status()["draining"]
+            assert not lock.locked() and service.status()["draining"]
             with pytest.raises(AlreadyRunningError):
                 contender(store).acquire()
         finally:

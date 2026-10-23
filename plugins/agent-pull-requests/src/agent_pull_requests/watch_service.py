@@ -97,8 +97,12 @@ class WatchService:
             except asyncio.TimeoutError:
                 pass
 
-    async def start(self) -> None:
-        """Adopt existing state before starting either owned unit; never create it."""
+    def _withdraw(self) -> None:
+        self._stopping.set()
+        self.gateway.stop_admission()
+        self._stop.set()
+
+    def _begin_start(self) -> None:
         if self._started or self._closed:
             raise RuntimeError("watch service instance already used")
         if os.getpid() != self._pid:
@@ -106,7 +110,12 @@ class WatchService:
         self._loop = asyncio.get_running_loop()
         self._lease.acquire()
         self._started = True
+
+    async def _adopt(self, stop: asyncio.Event | None = None) -> None:
         try:
+            if stop is not None and stop.is_set():
+                self._withdraw()
+                return
             if (self.store.root / "watch-subscriptions.json").exists():
                 raise ValueError("native and replay state roots must be separate")
             self._check()
@@ -115,11 +124,12 @@ class WatchService:
                 expires_at=self._authority(), checkpoint=self._check,
             ))
             await asyncio.shield(self._disk)
+            if stop is not None and stop.is_set():
+                self._withdraw()
+                return
             self._check()
         except BaseException:
-            self._stopping.set()
-            self._stop.set()
-            self.gateway.stop_admission()
+            self._withdraw()
             if self._disk is None or self._disk.done():
                 if self._disk is not None:
                     await asyncio.gather(self._disk, return_exceptions=True)
@@ -130,6 +140,11 @@ class WatchService:
             asyncio.create_task(self.connector.run(self._stop)),
             asyncio.create_task(self._observe()),
         )
+
+    async def start(self) -> None:
+        """Adopt existing state before starting either owned unit; never create it."""
+        self._begin_start()
+        await self._adopt()
 
     def status(self) -> dict:
         """Report local readiness, not placement, provider or activation evidence."""
@@ -160,6 +175,7 @@ class WatchService:
             raise RuntimeError("watch service belongs to another execution owner")
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
+        self._withdraw()
         acquisition = asyncio.create_task(self._closing.acquire())
         try:
             await asyncio.wait_for(acquisition, timeout=timeout)
@@ -171,9 +187,6 @@ class WatchService:
             raise
         drain = None
         try:
-            self._stopping.set()
-            self.gateway.stop_admission()
-            self._stop.set()
             tasks = set(self._tasks)
             if self._disk is not None:
                 tasks.add(self._disk)
@@ -205,10 +218,17 @@ class WatchService:
         drain_timeout = positive_seconds(drain_timeout)
         if self._started or self._closed:
             raise RuntimeError("watch service instance already used")
-        stopped = None
+        if stop.is_set():
+            return
+        # Reserve ownership before yielding to either startup or another caller.
+        self._begin_start()
+        startup = asyncio.create_task(self._adopt(stop))
+        stopped = asyncio.create_task(stop.wait())
         try:
-            await self.start()
-            stopped = asyncio.create_task(stop.wait())
+            await asyncio.wait({startup, stopped}, return_when=asyncio.FIRST_COMPLETED)
+            if stop.is_set():
+                return
+            await startup
             done, _ = await asyncio.wait(
                 {*self._tasks, stopped}, return_when=asyncio.FIRST_COMPLETED,
             )
@@ -217,8 +237,15 @@ class WatchService:
                     await task
                 raise RuntimeError("watch service unit stopped")
         finally:
-            if stopped is not None:
-                stopped.cancel()
-                await asyncio.gather(stopped, return_exceptions=True)
-            if self._started:
-                await self.close(timeout=drain_timeout)
+            self._withdraw()
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + drain_timeout
+            for task in (startup, stopped):
+                if not task.done():
+                    task.cancel()
+            done, pending = await asyncio.wait({startup, stopped}, timeout=drain_timeout)
+            await asyncio.gather(*done, return_exceptions=True)
+            remaining = deadline - loop.time()
+            if pending or remaining <= 0:
+                raise TimeoutError("watch service is not drained")
+            await self.close(timeout=remaining)

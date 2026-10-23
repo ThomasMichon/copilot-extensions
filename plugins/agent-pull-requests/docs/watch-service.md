@@ -72,7 +72,11 @@ performance qualification remain open in the parent effort.
 `await service.run(stop, drain_timeout=60)` owns startup, waits for the supplied
 stop event or either unit's exit, then drains. The container/service manager
 supplies that event; this API does not register another supervisor.
-Cancellation during initial adoption also enters that bounded drain path.
+Stop requests and cancellation during initial adoption also enter that bounded
+drain path without waiting for the shielded disk read first. A pending stop
+prevents owned units from launching after adoption; a preset stop does not
+acquire custody or start work. Startup ownership is reserved before scheduling
+adoption, so concurrent entry cannot take over another invocation's cleanup.
 A rejected second invocation never drains the already-starting/running owner.
 
 `await service.close(timeout=...)` immediately withdraws admission/readiness,
@@ -81,8 +85,10 @@ connector, observer, actual shielded native/disk task and every already-admitted
 Gateway operation before releasing the lease. Timeouts and cancellation never
 release writer custody or advertise successful drain; retry `close` on the
 same instance and event loop. A foreign process/event loop cannot release it.
-One monotonic deadline includes waiting behind another close and the remaining
-drain work. A queued caller's timeout/cancellation cannot release the active
+Admission withdrawal precedes waiting behind another close. One monotonic
+deadline includes that wait and the remaining drain work; foreground shutdown
+also counts startup/waiter cleanup against its drain budget.
+A queued caller's timeout/cancellation cannot release the active
 drain's lock or writer custody.
 Instances are single-use; construct a new one only after the old owner settled.
 
