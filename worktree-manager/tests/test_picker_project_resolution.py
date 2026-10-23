@@ -1,117 +1,76 @@
-"""Regression tests for #2426 (Worktree Manager/Picker can show/act on the
-wrong project's content): ``_cmd_picker``'s no-positional project resolution
-must never silently pick an arbitrary registered project.
-"""
+"""Project ambiguity remains a refusal, resolved after pending chrome paints."""
 
 from __future__ import annotations
 
+import pytest
+
 from worktree_manager import __main__ as cli
 from worktree_manager.harness_state import ProjectInfo, RepoInfo
+from worktree_manager.production_picker import runner
 
 
 def _project(name: str, klass: str = "worktree") -> ProjectInfo:
-    repo = RepoInfo(
-        name=name, klass=klass, agent=True, remote=None, path=None,
-        account=None,
-    )
     return ProjectInfo(
         name=name, config_dir=None, expose_agent=False,
-        knowledge_repo=None, profiles=0, repo=repo,
+        knowledge_repo=None, profiles=0,
+        repo=RepoInfo(name=name, klass=klass, agent=True, remote=None, path=None, account=None),
     )
 
 
-class TestPickerNoPositionalProjectResolution:
-    def test_no_positional_zero_projects_errors(self, monkeypatch, capsys):
-        monkeypatch.setattr(cli, "engine_available", lambda: True)
-        monkeypatch.setattr(cli, "build_projects", lambda: [])
-        rc = cli._cmd_picker([])
-        assert rc == 2
-        assert "no project to open" in capsys.readouterr().out
-
-    def test_no_positional_one_project_uses_it_unambiguously(self, monkeypatch):
-        monkeypatch.setattr(cli, "engine_available", lambda: True)
-        monkeypatch.setattr(cli, "build_projects", lambda: [_project("solo-repo")])
-        seen = {}
-        monkeypatch.setattr(
-            cli, "_run_production_picker",
-            lambda project: (seen.update(project=project), 0)[1])
-        rc = cli._cmd_picker([])
-        assert rc == 0
-        assert seen["project"] == "solo-repo"
-
-    def test_no_positional_multiple_projects_refuses_not_first(self, monkeypatch, capsys):
-        """The actual #2426 bug: previously silently picked projects[0] (an
-        arbitrary, registration-order-dependent project) with no visible
-        error, potentially opening the wrong repo's worktree content."""
-        monkeypatch.setattr(cli, "engine_available", lambda: True)
-        monkeypatch.setattr(
-            cli, "build_projects",
-            lambda: [_project("dotfiles"), _project("odsp-web-harness")])
-        monkeypatch.setattr(
-            cli, "_run_production_picker",
-            lambda project: (_ for _ in ()).throw(
-                AssertionError("must not silently open any project")))
-        rc = cli._cmd_picker([])
-        assert rc == 2
-        out = capsys.readouterr().out
-        assert "multiple projects are registered" in out
-        assert "dotfiles" in out and "odsp-web-harness" in out
-
-    def test_explicit_positional_still_wins_with_multiple_projects(self, monkeypatch):
-        monkeypatch.setattr(cli, "engine_available", lambda: True)
-        monkeypatch.setattr(
-            cli, "build_projects",
-            lambda: [_project("dotfiles"), _project("odsp-web-harness")])
-        seen = {}
-        monkeypatch.setattr(
-            cli, "_run_production_picker",
-            lambda project: (seen.update(project=project), 0)[1])
-        rc = cli._cmd_picker(["odsp-web-harness"])
-        assert rc == 0
-        assert seen["project"] == "odsp-web-harness"
+@pytest.fixture(autouse=True)
+def available_engine(monkeypatch):
+    monkeypatch.setattr(runner.engine_client, "engine_available", lambda: True)
 
 
-class TestPickerExcludesKnowledgeOnlyProjects:
-    """A ``knowledge`` class repo exists only to be carved as another
-    project's paired ``-k`` companion -- it must never be silently picked as
-    the implicit single-project default, nor offered in the ambiguous-
-    selection prompt (though an explicit positional naming it still works, for
-    browsing)."""
+@pytest.mark.parametrize("projects", [[], [_project("notes", "knowledge")]])
+def test_no_launchable_project_refuses(monkeypatch, projects):
+    monkeypatch.setattr(runner.harness_state, "build_projects", lambda: projects)
+    with pytest.raises(RuntimeError, match="no project to open"):
+        runner._select_project("")
 
-    def test_knowledge_only_repo_not_used_as_sole_implicit_default(self, monkeypatch, capsys):
-        monkeypatch.setattr(cli, "engine_available", lambda: True)
-        monkeypatch.setattr(
-            cli, "build_projects", lambda: [_project("dotfiles", klass="knowledge")])
-        rc = cli._cmd_picker([])
-        assert rc == 2
-        assert "no project to open" in capsys.readouterr().out
 
-    def test_knowledge_only_repo_excluded_from_ambiguous_listing(self, monkeypatch, capsys):
-        monkeypatch.setattr(cli, "engine_available", lambda: True)
-        monkeypatch.setattr(
-            cli, "build_projects",
-            lambda: [
-                _project("dotfiles", klass="knowledge"),
-                _project("odsp-web-harness"),
-                _project("copilot-extensions"),
-            ])
-        rc = cli._cmd_picker([])
-        # Exactly one non-knowledge project remains -> unambiguous default.
-        assert rc == 2
-        out = capsys.readouterr().out
-        assert "multiple projects are registered" in out
-        assert "dotfiles" not in out
-        assert "odsp-web-harness" in out and "copilot-extensions" in out
+@pytest.mark.parametrize("with_knowledge", [False, True])
+def test_only_launchable_project_is_unambiguous(monkeypatch, with_knowledge):
+    projects = [_project("example")]
+    if with_knowledge:
+        projects.insert(0, _project("notes", "knowledge"))
+    monkeypatch.setattr(runner.harness_state, "build_projects", lambda: projects)
+    assert runner._select_project("") == "example"
 
-    def test_knowledge_only_repo_sole_survivor_is_still_implicit_default(self, monkeypatch):
-        monkeypatch.setattr(cli, "engine_available", lambda: True)
-        monkeypatch.setattr(
-            cli, "build_projects",
-            lambda: [_project("dotfiles", klass="knowledge"), _project("odsp-web-harness")])
-        seen = {}
-        monkeypatch.setattr(
-            cli, "_run_production_picker",
-            lambda project: (seen.update(project=project), 0)[1])
-        rc = cli._cmd_picker([])
-        assert rc == 0
-        assert seen["project"] == "odsp-web-harness"
+
+def test_multiple_launchable_projects_refuse_without_offering_knowledge(monkeypatch):
+    monkeypatch.setattr(
+        runner.harness_state, "build_projects",
+        lambda: [_project("notes", "knowledge"), _project("example"), _project("second")],
+    )
+    with pytest.raises(RuntimeError, match="multiple projects") as error:
+        runner._select_project("")
+    assert "example, second" in str(error.value)
+    assert "notes" not in str(error.value)
+
+
+def test_explicit_project_is_validated_by_engine_without_full_roster(monkeypatch):
+    def forbidden():
+        raise AssertionError("explicit selection does not require roster enumeration")
+    monkeypatch.setattr(runner.harness_state, "build_projects", forbidden)
+    assert runner._select_project("example") == "example"
+
+
+@pytest.mark.parametrize("args,expected", [([], ""), (["example"], "example")])
+def test_cli_enters_production_without_discovery(monkeypatch, args, expected):
+    def forbidden():
+        raise AssertionError("discovery must wait until pending frame")
+    monkeypatch.setattr(cli, "build_projects", forbidden)
+    monkeypatch.setattr(cli, "engine_available", forbidden)
+    seen = []
+    monkeypatch.setattr(cli, "_run_production_picker", lambda project: seen.append(project) or 0)
+    assert cli._cmd_picker(args) == 0
+    assert seen == [expected]
+
+
+def test_deferred_selection_failure_retains_usage_exit(monkeypatch, capsys):
+    def fail(project):
+        raise runner.ProjectSelectionError("no project to open")
+    monkeypatch.setattr(runner, "run", fail)
+    assert cli._run_production_picker("") == 2
+    assert "no project to open" in capsys.readouterr().out

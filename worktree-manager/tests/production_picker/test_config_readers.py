@@ -1,9 +1,51 @@
 from __future__ import annotations
 
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from worktree_manager import harness_state
 from worktree_manager.production_picker import context, project_config
+
+
+def test_optional_bootstrap_scalars_avoid_legacy_calls(monkeypatch, tmp_path):
+    def unexpected(*args):
+        raise AssertionError(args)
+
+    monkeypatch.setattr(project_config.engine_client, "get_value", unexpected)
+    project_config.bind_bootstrap("demo", {
+        "config_dir": str(tmp_path / "config"),
+        "repo_dir": str(tmp_path / "repo"),
+        "machine": "host",
+    })
+    try:
+        assert project_config._project_dir("demo") == tmp_path / "config"
+        assert project_config._repo_dir("demo") == str(tmp_path / "repo")
+        assert project_config._machine_name("demo") == "host"
+    finally:
+        project_config.clear_caches()
+
+
+def test_legacy_scalars_are_single_flight_and_project_scoped(monkeypatch, tmp_path):
+    calls = []
+
+    def get_value(project, key):
+        calls.append((project, key))
+        return str(tmp_path / project) if key != "machine" else "host"
+
+    monkeypatch.setattr(project_config.engine_client, "get_value", get_value)
+    project_config.bind_bootstrap("demo", None)
+    try:
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            assert len(list(pool.map(project_config._project_dir, ["demo"] * 12))) == 12
+        for _ in range(2):
+            project_config._repo_dir("demo")
+            project_config._machine_name("demo")
+        assert calls == [("demo", "config-dir"), ("demo", "repo-dir"), ("demo", "machine")]
+        project_config.bind_bootstrap("other", {"config_dir": "relative", "machine": 23})
+        assert project_config._project_dir("other") == tmp_path / "other"
+        assert calls[-1] == ("other", "config-dir")
+    finally:
+        project_config.clear_caches()
 
 
 def _project(name: str, anchor: Path) -> harness_state.ProjectInfo:

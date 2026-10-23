@@ -71,7 +71,7 @@ from .engine_helpers import (
 from .engine_input import PickerScreenInputMixin
 from .inbox import Inbox
 from .engine_live_screens import MsgViewScreen, ProgressScreen, SessionsViewScreen
-from .engine_loading import PickerScreenLoadingMixin
+from .engine_loading import PendingBindingScreen, PickerScreenLoadingMixin
 from .engine_maintenance_actions import PickerScreenMaintenanceActionsMixin
 from .engine_prompt_dialog import PromptDlgScreen
 from .engine_model import PickerScreenModelMixin
@@ -546,6 +546,7 @@ class PickerScreen(
 class PickerApp(App):
     CSS = """
     Screen { background: $surface; }
+    PendingBindingScreen { width: 100%; height: 100%; padding: 1 2; }
     PickerScreen { width: 100%; height: 100%; }
     /* NF compose tree (#88): fixed-height chrome, body fills the rest. */
     PickerScreen > #nf-title  { width: 100%; height: 1; }
@@ -592,12 +593,17 @@ class PickerApp(App):
         live=False,
         mock_mode=None,
         after_first_refresh=None,
+        prepare=None,
+        project_label="project",
     ):
         super().__init__()
         self._source = source
         self._live = live
         self._mock_mode = mock_mode
         self._after_first_refresh = after_first_refresh
+        self._prepare = prepare
+        self._project_label = project_label
+        self.binding_error = None
         self.result = None            # set by the screen on a launch decision
         # Idle-liveness self-exit (copilot-extensions#2761 follow-up) -- see
         # `_idle_timeout_secs` for the full rationale. Tracked in monotonic
@@ -606,6 +612,9 @@ class PickerApp(App):
         self._idle_check_timer = None
 
     def compose(self) -> ComposeResult:
+        if self._prepare is not None:
+            yield PendingBindingScreen(self._prepare, self._project_label)
+            return
         yield PickerScreen(
             self._source,
             self._live,
@@ -621,6 +630,16 @@ class PickerApp(App):
             check_interval = max(5.0, min(60.0, IDLE_TIMEOUT_SECS / 10))
             self._idle_check_timer = self.set_interval(
                 check_interval, self._check_idle_timeout)
+
+    def install_binding(self, binding):
+        self._source, self._live = binding.source, binding.live
+        self.query_one(PendingBindingScreen).remove()
+        self.screen.mount(PickerScreen(
+            binding.source,
+            binding.live,
+            mock_mode=self._mock_mode,
+            after_first_refresh=self._after_first_refresh,
+        ))
 
     async def on_event(self, event) -> None:
         # Only a real input event counts as activity -- the background

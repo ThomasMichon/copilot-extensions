@@ -7,9 +7,14 @@ import itertools
 import os
 import threading
 import time
+from dataclasses import dataclass
+from collections.abc import Callable
+
+from textual.widget import Widget
+from textual.widgets import Static
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
-from .inbox import ensure_inbox
+from .inbox import Inbox, ensure_inbox
 from .selection import ListSelection
 from .. import project_config as cfg
 
@@ -26,6 +31,90 @@ _WORKER_APPLY_SEQ = itertools.count()
 # machines.yaml/config.yaml edit is picked up within roughly a minute of a live
 # session, not just at next launch.
 _CONFIG_CACHE_TTL_SECS = 60.0
+
+
+@dataclass(frozen=True)
+class PickerBinding:
+    source: object
+    live: bool
+    activate: Callable[[], None]
+
+
+class PendingBindingScreen(Widget):
+    """Presentation only: no operational Picker exists before engine binding."""
+
+    BINDINGS = [("escape", "cancel", "Cancel"), ("q", "cancel", "Cancel")]
+    can_focus = True
+
+    def __init__(self, prepare, project_label):
+        super().__init__()
+        self._prepare = prepare
+        self._project_label = project_label
+        self._cancel = threading.Event()
+        self._delivery_lock = threading.Lock()
+        self._inbox = Inbox(self)
+
+    def compose(self):
+        yield Static(
+            f"Worktree Picker · {self._project_label}\n"
+            "Resolving project binding…\nEscape to cancel",
+            id="binding-status",
+            markup=False,
+        )
+
+    def on_mount(self):
+        self.focus()
+        self.call_after_refresh(self._start_binding)
+
+    def _start_binding(self):
+        def work():
+            from .frame_health import append_launch_event
+
+            append_launch_event("picker_pending_binding_first_refresh")
+            try:
+                binding = self._prepare()
+                error = None
+            except Exception as exc:
+                binding, error = None, exc
+
+            def apply():
+                if self._cancel.is_set():
+                    return
+                if error is not None:
+                    self.app.binding_error = error
+                    self.query_one("#binding-status", Static).update(
+                        f"Project binding failed: {error}\nEscape to close"
+                    )
+                    return
+                try:
+                    binding.activate()
+                except Exception as exc:
+                    self.app.binding_error = exc
+                    self.query_one("#binding-status", Static).update(
+                        f"Project binding failed: {exc}\nEscape to close"
+                    )
+                    return
+                self.app.install_binding(binding)
+
+            with self._delivery_lock:
+                if not self._cancel.is_set():
+                    self._inbox.post("binding", apply)
+
+        threading.Thread(target=work, name="picker-binding", daemon=True).start()
+
+    def on_inbox_updated(self, event):
+        event.stop()
+        self._inbox.drain_apply()
+
+    def action_cancel(self):
+        with self._delivery_lock:
+            self._cancel.set()
+        self.app.exit()
+
+    def on_unmount(self):
+        with self._delivery_lock:
+            self._cancel.set()
+
 
 class PickerScreenLoadingMixin:
     def on_mount(self):
@@ -184,22 +273,7 @@ class PickerScreenLoadingMixin:
         return session.scope()
 
     def _setup_live_async(self):
-        """Publish bootstrap rows, then fill roster and pivots independently."""
-        bootstrap_fn = getattr(self.src, "bootstrap_rows", None)
-        if callable(bootstrap_fn):
-            try:
-                bootstrap_rows = bootstrap_fn()
-            except Exception:
-                bootstrap_rows = None
-            if bootstrap_rows is not None:
-
-                def apply_bootstrap():
-                    if not self._roster_ready and self.loader is None:
-                        self.data = bootstrap_rows
-                        self.refresh()
-
-                self._apply_from_worker(apply_bootstrap)
-
+        """Enroll the current feed without a redundant advisory one-shot read."""
         threading.Thread(
             target=self._setup_live_pivots,
             name="picker-pivots",

@@ -6,11 +6,16 @@ import os
 import threading
 from collections.abc import Mapping
 
-from .. import engine_client
+from .. import engine_client, harness_state
 from . import context
 from . import engine_group_b
 from . import housekeeping
 from .picker_tui import run_tui_picker
+
+
+class ProjectSelectionError(RuntimeError):
+    """Invalid implicit selection, retaining the CLI's usage-error exit code."""
+
 
 def _prepare(project: str, *, heal: bool = True) -> bool:
     """Activate ``project`` and return the engine-owned default live mode."""
@@ -30,6 +35,26 @@ def _prepare(project: str, *, heal: bool = True) -> bool:
     if heal:
         _start_anchor_heal_check(bootstrap.project)
     return bootstrap.default_live
+
+
+def _select_project(project: str) -> str:
+    if not engine_client.engine_available():
+        raise RuntimeError(
+            "the agent-worktrees engine is not installed; "
+            "run `worktree-manager setup --apply`"
+        )
+    if project:
+        return project
+    projects = harness_state.build_projects()
+    launchable = [p for p in projects if not (p.repo and p.repo.klass == "knowledge")]
+    if len(launchable) == 1:
+        return launchable[0].name
+    if not launchable:
+        raise ProjectSelectionError("no project to open. Adopt one, or pass a project name.")
+    raise ProjectSelectionError(
+        "multiple projects are registered and none was specified. Pass a project name: "
+        + ", ".join(p.name for p in launchable)
+    )
 
 
 def _start_anchor_heal_check(project: str) -> None:
@@ -85,20 +110,66 @@ def run(
     data/action imports are replaced with Manager-owned process adapters.
     """
     from .picker_tui.engine import _resolve_mock_mode
+    from .picker_tui.engine_loading import PickerBinding
+    from . import project_config
 
     resolved_mock = _resolve_mock_mode(mock_mode)
-    default_live = _prepare(project, heal=not resolved_mock)
-    if not resolved_mock:
+    picker_root = None
+    finished = threading.Event()
+    root_lock = threading.Lock()
+
+    def prepare():
+        selected = project if resolved_mock else _select_project(project)
+        try:
+            payload = engine_group_b.picker_bootstrap(selected)
+        except engine_client.EngineFeatureUnavailable as error:
+            raise RuntimeError(
+                "the installed agent-worktrees engine predates "
+                "`picker-bootstrap --json`; update agent-worktrees"
+            ) from error
+        bootstrap = context.ProjectBootstrap.from_payload(payload)
+        live = False if local else bootstrap.default_live
+        if live:
+            from .picker_tui import data_ssh as source
+        else:
+            from .picker_tui import data_local as source
+
+        def activate():
+            # Commit only on the surviving pending screen. The worker resolves
+            # authority but never changes cwd/context after Escape.
+            if bootstrap.should_switch_cwd and bootstrap.cwd is not None:
+                os.chdir(bootstrap.cwd)
+            context.bind_project_bootstrap(payload)
+            project_config.bind_bootstrap(bootstrap.project, payload.get("project_config"))
+
+        return PickerBinding(source, live, activate)
+
+    def after_binding():
+        nonlocal picker_root
+        if resolved_mock or finished.is_set():
+            return
+        _start_anchor_heal_check(context.project())
         _start_housekeeping()
-    picker_root = None if resolved_mock else housekeeping.start_picker_monitor_root()
-    live = False if local else default_live
+        root = housekeeping.start_picker_monitor_root()
+        with root_lock:
+            if finished.is_set():
+                if root is not None:
+                    root.close()
+            else:
+                picker_root = root
+
     try:
-        if not resolved_mock and mock_mode is None:
-            return run_tui_picker(live=live)
-        return run_tui_picker(live=live, mock_mode=resolved_mock)
+        return run_tui_picker(
+            prepare=prepare,
+            project_label=project or "selecting project",
+            mock_mode=resolved_mock,
+            after_first_refresh=after_binding,
+        )
     finally:
-        if picker_root is not None:
-            picker_root.close()
+        finished.set()
+        with root_lock:
+            if picker_root is not None:
+                picker_root.close()
 
 
 def capture(

@@ -120,11 +120,12 @@ class TestPickerPreviewDispatch:
         preview_mod.enable_preview_mode()
         monkeypatch.setattr(runner, "_start_housekeeping", lambda: None)
         monkeypatch.setattr(runner.housekeeping, "start_picker_monitor_root", lambda: None)
-        monkeypatch.setattr(
-            runner,
-            "run_tui_picker",
-            lambda *, live: {"action": "new", "live": live, "project": runner.context.project()},
-        )
+        def run_picker(*, prepare, **kwargs):
+            binding = prepare()
+            binding.activate()
+            return {"action": "new", "live": binding.live, "project": runner.context.project()}
+
+        monkeypatch.setattr(runner, "run_tui_picker", run_picker)
 
         try:
             decision = runner.run(preview_mod.DEMO_PROJECT)

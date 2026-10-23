@@ -338,6 +338,44 @@ Those inspections run in the background only after opening the detail card;
 ordinary row rendering never walks a claim graph or performs network reads.
 Descendant claims remain owned by their original worktrees.
 
+Interactive Picker startup first presents a pending project-binding view with
+Escape to cancel. Project-default discovery and engine `picker-bootstrap`
+resolution run after that view's first refresh, off the input thread. Operational
+actions are not available until the engine's project/cwd/live decisions are
+accepted. A failed binding stays visible until dismissal and returns failure;
+late results after cancellation cannot activate a project or start housekeeping.
+Explicit project names go to the engine without enumerating the full Manager
+project roster; implicit defaults still reject ambiguity and knowledge-only
+companions.
+
+Initial live rows come from one authoritative snapshot-plus-follow subscription,
+not a preceding cache-only one-shot process. Pivot discovery remains independent
+and remote loading remains lazy. There is no advisory initial-row result that
+can subsequently overwrite current rows. Optional bootstrap `project_config`
+fields (`config_dir`, `repo_dir`, `machine`) seed the Manager's config cache.
+Older engines retain one memoized fallback call per missing scalar, on setup
+workers. This consumer support does not assert that every engine produces those
+optional fields.
+
+First pending refresh is not first current rows, and neither alone proves visible
+native input acknowledgement. Existing launch tracing records
+`picker_pending_binding_first_refresh` and `picker_config_scalar_fallback`;
+no new telemetry service or SDK is required. The explicitly selected native
+headless qualification uses real interpreter/engine processes and Textual
+rendering, but does not claim compositor visibility or installed-host acceptance:
+
+```powershell
+$env:WORKTREE_MANAGER_STARTUP_PROBE = "1"
+python tools/run-plugin-tests.py worktree-manager --test-file tests/production_picker/test_picker_startup_native.py --test-timeout 90 --timeout 600
+```
+
+It samples cold/warm process state at 1, 100 and 1,000 rows, with and without
+optional scalars, checks input acknowledgement while bootstrap is gated for two
+seconds, and verifies a rendered current row and one held subscription. Host
+startup latency is measured separately from that controlled delay; the
+under-two-second vision budget remains an independent qualification, not an
+assertion inferred from these protocol checks.
+
 Held-feed startup uses the source's existing bounded process/SSH budget
 (20 seconds by default). Once an initial snapshot or update starts, the
 two-second atomic-publication deadline applies; committed feeds retain the

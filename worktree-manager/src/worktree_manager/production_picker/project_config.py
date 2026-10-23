@@ -12,6 +12,7 @@ import contextlib
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+import threading
 
 import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
@@ -20,6 +21,42 @@ from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yam
 
 from .. import engine_client, harness_state, terminal_fragment
 from . import context, engine_group_a
+
+_scalar_lock = threading.RLock()
+_scalars: dict[tuple[str, str], str] = {}
+
+
+def bind_bootstrap(project: str, values: object) -> None:
+    """Adopt optional engine scalars; older engines keep the memoized fallback."""
+    clear_caches()
+    if not isinstance(values, dict):
+        return
+    with _scalar_lock:
+        for field, key in (
+            ("config_dir", "config-dir"), ("repo_dir", "repo-dir"), ("machine", "machine")
+        ):
+            value = values.get(field)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            if field != "machine" and not Path(value).is_absolute():
+                continue
+            _scalars[project, key] = value
+
+
+def _scalar(project: str, key: str) -> str:
+    # lru_cache alone permits concurrent cold misses from pivot/source workers.
+    with _scalar_lock:
+        identity = (project, key)
+        if identity not in _scalars:
+            from .picker_tui.frame_health import append_launch_event
+
+            append_launch_event("picker_config_scalar_fallback", key=key)
+            try:
+                value = engine_client.get_value(project, key)
+            except engine_client.EngineError:
+                value = ""
+            _scalars[identity] = value
+        return _scalars[identity]
 
 # ``SSHEnvironment``/``MachineEntry`` are the shared ``machine_transport``
 # library's own classes (vendored, not duplicated -- see its README's "Why
@@ -60,6 +97,8 @@ def cached_load_config_scope():
 
 
 def clear_caches() -> None:
+    with _scalar_lock:
+        _scalars.clear()
     _project_dir.cache_clear()
     _repo_dir.cache_clear()
     _machine_name.cache_clear()
@@ -71,10 +110,7 @@ def clear_caches() -> None:
 
 @lru_cache(maxsize=None)
 def _project_dir(project: str) -> Path:
-    try:
-        value = engine_client.get_value(project, "config-dir")
-    except engine_client.EngineError:
-        value = ""
+    value = _scalar(project, "config-dir")
     if value:
         return Path(value)
     return harness_state.home() / f".{project}"
@@ -82,10 +118,7 @@ def _project_dir(project: str) -> Path:
 
 @lru_cache(maxsize=None)
 def _repo_dir(project: str) -> str:
-    try:
-        value = engine_client.get_value(project, "repo-dir")
-    except engine_client.EngineError:
-        value = ""
+    value = _scalar(project, "repo-dir")
     if value:
         return value
     for info in harness_state.build_projects():
@@ -96,10 +129,7 @@ def _repo_dir(project: str) -> str:
 
 @lru_cache(maxsize=None)
 def _machine_name(project: str) -> str:
-    try:
-        value = engine_client.get_value(project, "machine")
-    except engine_client.EngineError:
-        value = ""
+    value = _scalar(project, "machine")
     if value:
         return value
     return str(harness_state.project_config(project).get("machine") or "")

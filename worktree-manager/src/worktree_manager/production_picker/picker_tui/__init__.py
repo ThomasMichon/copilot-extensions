@@ -30,6 +30,8 @@ def run_tui_picker(
     live=False,
     mock_mode=None,
     after_first_refresh=None,
+    prepare=None,
+    project_label="project",
 ):
     """Run the TUI picker and return its result (a launch decision or None).
 
@@ -50,6 +52,10 @@ def run_tui_picker(
     see its module docstring and ``inbox.Inbox.post()``), never a raw
     ``app.call_from_thread`` call.
 
+    ``prepare`` optionally resolves a ``PickerBinding`` on a worker after
+    pending-binding chrome paints. Only the surviving pending widget activates
+    the result; failures remain visible until dismissal and are re-raised.
+
     Launch-channel handling: this runs inside ``resolve``, whose **stdout
     (fd 1) is captured by the launcher for the JSON plan**. Textual's driver
     renders to ``sys.__stdout__`` -- so when stdout is captured (not a TTY) but
@@ -65,7 +71,7 @@ def run_tui_picker(
 
     from .engine import PickerApp
 
-    if source is None:
+    if source is None and prepare is None:
         if live:
             from . import data_ssh
             source = data_ssh
@@ -87,11 +93,15 @@ def run_tui_picker(
         app_kwargs = {"live": live, "mock_mode": mock_mode}
         if after_first_refresh is not None:
             app_kwargs["after_first_refresh"] = after_first_refresh
+        if prepare is not None:
+            app_kwargs.update(prepare=prepare, project_label=project_label)
         app = PickerApp(source, **app_kwargs)
         from .frame_health import append_launch_event
 
         append_launch_event("textual_app_start", live=live)
         app.run()
+        if getattr(app, "binding_error", None) is not None:
+            raise app.binding_error
     except Exception as exc:
         # The launcher sends the picker's stderr straight to the terminal and
         # never captures it, so an unhandled exception would vanish when the

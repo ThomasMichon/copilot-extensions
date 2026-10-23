@@ -867,12 +867,10 @@ def _cmd_picker(rest: list[str]) -> int:
         if action == "run":
             return _run_production_picker(project)
     else:
-        if action == "run" and not engine_available():
-            print()
-            print("  The agent-worktrees engine is not installed. Try `--demo` for a")
-            print("  mock preview, or `worktree-manager setup --apply` to install it.")
-            print()
-            return 1
+        if action == "run":
+            # The production pending screen owns discovery and errors; neither
+            # roster enumeration nor engine resolution belongs before paint.
+            return _run_production_picker(positionals[0] if positionals else "")
         projects = build_projects()
         # A knowledge-only repo (repo class "knowledge", see #knowledge_only)
         # exists solely to be carved as another project's paired "-k"
@@ -908,8 +906,6 @@ def _cmd_picker(rest: list[str]) -> int:
             print(f"error: unknown project {project!r}. "
                   f"Known: {', '.join(p.name for p in projects)}")
             return 2
-        if action == "run":
-            return _run_production_picker(project)
 
     from .production_picker import runner
 
@@ -990,12 +986,18 @@ def _run_production_picker(project: str) -> int:
         raise_current_process_priority()
         try:
             decision = runner.run(project)
+        except runner.ProjectSelectionError as error:
+            print(f"error: {error}")
+            return 2
         except Exception as error:
             print(f"error: production Picker failed: {error}")
             return 1
-        restore_normal_process_priority()
+        finally:
+            restore_normal_process_priority()
         if not decision:
             return 0
+        if not project:
+            project = str(decision.get("project") or runner.context.project())
         action = str(decision.get("action") or "")
         options = decision.get("options")
         opts = dict(options) if isinstance(options, dict) else {}

@@ -1,0 +1,116 @@
+"""Consumer startup admission precedes engine authority, never substitutes for it."""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+
+from worktree_manager.production_picker.picker_tui import engine
+from worktree_manager.production_picker.picker_tui.engine_loading import PickerBinding
+
+
+def test_pending_binding_paints_and_escapes_before_slow_bootstrap():
+    async def exercise():
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        activated = []
+
+        def prepare():
+            entered.set()
+            try:
+                assert release.wait(3)
+                return PickerBinding(object(), True, lambda: activated.append(True))
+            finally:
+                finished.set()
+
+        app = engine.PickerApp(None, prepare=prepare, project_label="example")
+        try:
+            async with app.run_test() as pilot:
+                assert await asyncio.to_thread(entered.wait, 1)
+                assert not app.screen.query(engine.PickerScreen)
+                assert "example" in str(app.screen.query_one("#binding-status").render())
+                await pilot.press("escape")
+                assert app.result is None
+        finally:
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 1)
+        assert activated == []
+
+    asyncio.run(exercise())
+
+
+def test_binding_failure_is_visible_and_preserved():
+    async def exercise():
+        def prepare():
+            raise RuntimeError("unknown project: example")
+
+        app = engine.PickerApp(None, prepare=prepare, project_label="example")
+        async with app.run_test() as pilot:
+            for _ in range(30):
+                if app.binding_error is not None:
+                    break
+                await pilot.pause(0.02)
+            assert "unknown project" in str(app.screen.query_one("#binding-status").render())
+            assert not app.screen.query(engine.PickerScreen)
+            await pilot.press("escape")
+        assert str(app.binding_error) == "unknown project: example"
+
+    asyncio.run(exercise())
+
+
+def test_successful_binding_mounts_operational_widget_in_original_app(monkeypatch):
+    class Source:
+        LOCAL = ("host", "Win")
+
+    monkeypatch.setattr(engine.PickerScreen, "_finish_mount", lambda self: None)
+    monkeypatch.setattr(engine.PickerScreen, "_after_first_refresh", lambda self: None)
+
+    async def exercise():
+        activated = []
+        app = engine.PickerApp(
+            None,
+            prepare=lambda: PickerBinding(Source(), True, lambda: activated.append(True)),
+        )
+        async with app.run_test() as pilot:
+            for _ in range(30):
+                if app.query(engine.PickerScreen):
+                    break
+                await pilot.pause(0.02)
+            assert app.binding_error is None
+            screen = app.query_one(engine.PickerScreen)
+            assert screen.live
+            assert activated == [True]
+            assert not app.query("#binding-status")
+            app.exit()
+
+    asyncio.run(exercise())
+
+
+def test_authoritative_loader_does_not_wait_for_advisory(monkeypatch):
+    class Source:
+        LOCAL = ("host", "Win")
+
+        def bootstrap_rows(self):
+            raise AssertionError("advisory read must not run before current feed")
+
+        def source_snapshot(self):
+            return ()
+
+        def make_loader(self, snapshot):
+            assert snapshot == ()
+            return loader
+
+    class Loader:
+        def start(self, *, focus_keys=None):
+            calls.append({"focus_keys": focus_keys})
+
+    calls = []
+    loader = Loader()
+    screen = engine.PickerScreen(Source(), live=True)
+    monkeypatch.setattr(screen, "_setup_live_pivots", lambda: None)
+    monkeypatch.setattr(screen, "_prepare_live_source", lambda _: {"local": Source.LOCAL})
+    monkeypatch.setattr(screen, "_apply_from_worker", lambda fn: fn())
+    monkeypatch.setattr(screen, "_apply_live_source", lambda prepared, value: calls.append(value))
+    screen._setup_live_async()
+    assert calls == [{"focus_keys": {Source.LOCAL}}, loader]

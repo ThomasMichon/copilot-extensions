@@ -1,0 +1,9 @@
+{
+  "comment": "Paint cancellable pending binding before Picker discovery and enroll the authoritative feed without advisory preload",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -847,7 +847,7 @@ def test_setup_live_async_records_failure():
     assert screen._busy_label == "Load failed"
 
 
-def test_setup_live_async_keeps_bootstrap_rows_on_roster_failure(monkeypatch):
+def test_setup_live_async_reports_roster_failure_without_advisory_rows(monkeypatch):
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
 
@@ -871,7 +871,7 @@ def test_setup_live_async_keeps_bootstrap_rows_on_roster_failure(monkeypatch):
 
         @staticmethod
         def bootstrap_rows():
-            return [{"id": "cached"}]
+            raise AssertionError("initial feed must not request advisory rows")
 
         @staticmethod
         def make_loader(*_a, **_k):
@@ -883,7 +883,7 @@ def test_setup_live_async_keeps_bootstrap_rows_on_roster_failure(monkeypatch):
     screen._setup_skeleton()
     screen._setup_live_async()
 
-    assert screen.data == [{"id": "cached"}]
+    assert screen.data == []
     assert "roster exploded" in screen.debug
     assert screen._busy_label == "Load failed"
 

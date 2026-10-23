@@ -111,6 +111,7 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
             self.target()
 
     runner.context.reset()
+    monkeypatch.setattr(runner.engine_client, "engine_available", lambda: True)
     monkeypatch.setattr(
         runner.engine_group_b,
         "picker_bootstrap",
@@ -153,12 +154,15 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
         "start_picker_monitor_root",
         lambda: calls.append(("monitor", runner.context.project())) or None,
     )
-    monkeypatch.setattr(
-        runner,
-        "run_tui_picker",
-        lambda *, live: calls.append(("picker", live, runner.context.project()))
-        or {"action": "new"},
-    )
+    def run_picker(*, prepare, project_label, mock_mode, after_first_refresh):
+        assert calls == []
+        binding = prepare()
+        binding.activate()
+        calls.append(("picker", binding.live, runner.context.project()))
+        after_first_refresh()
+        return {"action": "new"}
+
+    monkeypatch.setattr(runner, "run_tui_picker", run_picker)
     monkeypatch.setattr(runner.threading, "Thread", ImmediateThread)
 
     try:
@@ -166,13 +170,13 @@ def test_production_runner_activates_project_and_uses_transplanted_ui(monkeypatc
         assert calls == [
             ("bootstrap", "demo"),
             ("chdir", "C:/resolved-demo"),
+            ("picker", False, "resolved-demo"),
             ("heal", "resolved-demo"),
             ("reap", True),
             ("managed",),
             ("shells",),
             ("finished",),
             ("monitor", "resolved-demo"),
-            ("picker", False, "resolved-demo"),
         ]
         assert runner.context.project() == "resolved-demo"
     finally:
@@ -437,13 +441,14 @@ def test_production_runner_mock_skips_mutating_startup(monkeypatch):
         "start_picker_monitor_root",
         lambda: calls.append(("monitor",)),
     )
-    monkeypatch.setattr(
-        runner,
-        "run_tui_picker",
-        lambda *, live, mock_mode: calls.append(
-            ("picker", live, mock_mode, runner.context.project())
-        ) or None,
-    )
+    def run_picker(*, prepare, project_label, mock_mode, after_first_refresh):
+        assert calls == []
+        binding = prepare()
+        binding.activate()
+        calls.append(("picker", binding.live, mock_mode, runner.context.project()))
+        after_first_refresh()
+
+    monkeypatch.setattr(runner, "run_tui_picker", run_picker)
 
     try:
         assert runner.run("demo", mock_mode=True, local=True) is None
