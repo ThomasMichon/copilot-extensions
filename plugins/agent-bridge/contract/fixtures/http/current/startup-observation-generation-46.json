@@ -129,6 +129,14 @@
     "resume_posts": 1,
     "prompt_posts": 0
   },
+  "canonical_session": {
+    "reference": "native-acp",
+    "session_id": "bridge-a",
+    "status": "stopped",
+    "resumed_ids": [
+      "bridge-a"
+    ]
+  },
   "prompt_request": {
     "method": "POST",
     "path": "/api/v1/sessions/bridge-a/turns",
@@ -163,7 +171,7 @@
     "contact_uses_local_receipt_not_payload_timestamp": true
   },
   "captured_from": {
-    "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/startup_observation.py",
     "source_git_blob": "69e14738b0224ec360de53bd2c12e5060bdea6f3",

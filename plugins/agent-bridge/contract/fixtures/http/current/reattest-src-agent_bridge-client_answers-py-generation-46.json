@@ -45,7 +45,7 @@
     "ordinary_provider_instance_default": false
   },
   "captured_from": {
-    "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
     "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",

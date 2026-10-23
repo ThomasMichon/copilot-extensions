@@ -62,12 +62,12 @@
     "sha256": "02db74cd05d1a2a951e575d9fcd6ccbed5162e8dc6712723f56a4d87c6f6a883"
   },
   "captured_from": {
-    "commit": "4071dcf802a4bf55626ca11a1f65b587447cc522",
+    "commit": "64d95081b412963d7ea4eba8d8ddc4006dc1e065",
     "plugin_version": "0.4.1-dev3",
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py",
-    "source_git_blob": "fe7e80206e16070fdf515268daf35d0ade110043",
+    "source_git_blob": "7bd372c31ef81307248e3c7e12074f2b9a90795b",
     "protocol_generation": 46,
-    "source_sha256": "a604544128bbb4bdd8342a07c9a3968cdfa879fd887e15f556804bb73462c7ed"
+    "source_sha256": "8ab714ff18dba14d1dd633551c3f97d01d1abbe266f759a4a6168deaf739a74e"
   },
   "reattested_from": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-session_targeting_cli-generation-45.json",
