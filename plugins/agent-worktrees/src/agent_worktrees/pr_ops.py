@@ -565,7 +565,11 @@ def create_pr(
     # authoritative; an unreachable remote ("unknown") keeps the prior
     # (reuse) behavior. Looping lets a stack of stale merged+pruned PRs all
     # reconcile down to the genuinely-live (or no) active PR.
-    if not new and not branch and git_ops.has_remote(remote, cwd=worktree_path):
+    if (
+        not new and not branch and active_is_live and active is not None
+        and active.branch and not pr_publication_state.unpublished(active)
+        and git_ops.has_remote(remote, cwd=worktree_path)
+    ):
         while active_is_live and active is not None and active.branch:
             if pr_publication_state.unpublished(active):
                 break

@@ -26,6 +26,364 @@ def admitted(**kwargs):
     }, **kwargs)
 
 
+def test_signal_admission_is_explicit_and_callback_does_no_sdk_work(tmp_path, monkeypatch):
+    from process_telemetry.signals import SignalEndpoints
+    import builtins
+
+    endpoints = SignalEndpoints(logs="http://127.0.0.1:1/v1/logs")
+    with pytest.raises(ValueError):
+        admitted(endpoint="http://127.0.0.1:1/v1/traces", signal_endpoints=endpoints)
+    observation = admitted(signal_endpoints=endpoints)
+    with pytest.raises(AttributeError):
+        observation.signal_endpoints = None
+    reporter = frame_health.FrameHealthReporter(tmp_path / "signals", observation=observation)
+    original = builtins.__import__
+
+    def forbidden(name, *args, **kwargs):
+        if name.startswith("opentelemetry") or name == "process_telemetry.otlp":
+            raise AssertionError("callback imported exporter/SDK")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", forbidden)
+    reporter.observe("source_entry")
+    reporter.observe("input_ack", duration_ns=0)
+    assert reporter._queue.qsize() == 2 and reporter._thread is None
+    assert not reporter.path.exists()
+    assert admitted(signal_endpoints=SignalEndpoints()).signal_endpoints is None
+
+
+def test_signal_summary_preserves_units_first_failure_and_trace_compatibility(monkeypatch):
+    from process_telemetry import otlp
+    from process_telemetry.signals import SignalBatchResult, SignalEndpoints, SignalResult
+
+    class Sink:
+        metric_expectations = ()
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def export_batch(self, spans):
+            return SignalBatchResult(
+                SignalResult("not_requested"),
+                SignalResult("unsupported", attempted_records=1, unknown_records=1, requests=1),
+                SignalResult("deadline_exhausted", not_attempted_records=2),
+            )
+
+    monkeypatch.setattr(otlp, "LocalOtlpSignalsSink", Sink)
+    observation = admitted(signal_endpoints=SignalEndpoints(
+        logs="http://127.0.0.1:1/v1/logs", metrics="http://127.0.0.1:1/v1/metrics",
+    ))
+    stream = io.StringIO()
+    record = observation.capture({"event": "source_entry"})
+    record["enqueued_ns"] = observation.origin_ns
+    observation.deliver(stream, [record])
+    summary = observation.summary()
+    assert not summary["export_requested"]
+    assert summary["signals"]["logs"]["unknown_records"] == 1
+    assert summary["signals"]["metrics"]["generated_records"] == 2
+    assert summary["signals"]["logs"]["first_failure"] == "unsupported"
+    assert summary["counts"]["export_failed"] == summary["counts"]["exported"] == 0
+    assert json.loads(stream.getvalue().splitlines()[-1])["schema"] == "manager.signal-batch.v1"
+
+
+@pytest.mark.parametrize("mutation", [
+    {"accepted_records": 2}, {"generated_records": 2}, {"status": "arbitrary"},
+    {"unknown_records": -1}, {"requests": True}, {"first_failure": "private message"},
+])
+def test_bad_signal_accounting_remains_a_failed_child_sample(mutation):
+    from process_telemetry.signals import SignalResult
+    from dataclasses import asdict
+
+    row = {**asdict(SignalResult("accepted", attempted_records=1, accepted_records=1)),
+           "generated_records": 1, **mutation}
+    value = {
+        "mode": "enabled", "outcome": "ok", "points_ns": {},
+        "telemetry": {"counts": {}, "signals_requested": ["logs"], "signals": {"logs": row}},
+    }
+    result = child_result("MANAGER_OBSERVATION " + json.dumps(value), mode="enabled", returncode=0)
+    assert result["outcome"] == "error" and result["error_code"] == "invalid_child_report"
+
+
+@pytest.mark.parametrize("identity", [None, [], {"source_revision": "private path"}, {"unknown": "x"}])
+def test_malformed_child_identity_is_not_accepted_for_later_sender_readback(identity):
+    value = {
+        "mode": "enabled", "outcome": "ok", "points_ns": {},
+        "telemetry": {"counts": {}, "identity": identity},
+    }
+    result = child_result("MANAGER_OBSERVATION " + json.dumps(value), mode="enabled", returncode=0)
+    assert result["outcome"] == "error" and result["error_code"] == "invalid_child_report"
+
+
+@pytest.mark.parametrize("missing", [
+    "status", "attempted_records", "accepted_records", "rejected_records", "unknown_records",
+    "not_attempted_records", "requests", "attempted_payload_bytes", "generated_records",
+])
+def test_sparse_signal_counters_cannot_escape_validation_and_abort_aggregation(missing):
+    from dataclasses import asdict
+    from process_telemetry.signals import SignalResult
+
+    row = {**asdict(SignalResult("accepted", attempted_records=1, accepted_records=1)), "generated_records": 1}
+    del row[missing]
+    value = {
+        "mode": "enabled", "outcome": "ok", "points_ns": {},
+        "telemetry": {"counts": {"queued": 1, "written": 1}, "identity": {},
+                      "signals_requested": ["logs"], "signals": {"logs": row},
+                      "sampled": True, "writer_started": True},
+    }
+    parsed = child_result("MANAGER_OBSERVATION " + json.dumps(value), mode="enabled", returncode=0)
+    assert parsed["outcome"] == "error"
+    result = source_report([parsed], expected_per_mode=1)
+    assert result["modes"]["enabled"]["completed"] == result["modes"]["enabled"]["failed"] == 1
+
+
+@pytest.mark.parametrize("signal", ["logs", "traces", "metrics"])
+def test_zero_signal_accounting_cannot_certify_nonempty_observations(signal):
+    from dataclasses import asdict
+    from process_telemetry.signals import SignalResult
+
+    value = {
+        "mode": "enabled", "outcome": "ok", "points_ns": {},
+        "telemetry": {"counts": {"queued": 1, "written": 1}, "identity": {},
+                      "signals_requested": [signal],
+                      "signals": {signal: {**asdict(SignalResult("accepted")), "generated_records": 0}},
+                      "sampled": True, "writer_started": True},
+    }
+    parsed = child_result("MANAGER_OBSERVATION " + json.dumps(value), mode="enabled", returncode=0)
+    result = source_report([parsed], expected_per_mode=1)
+    assert result["modes"]["enabled"]["telemetry_incomplete"] == 1
+
+
+def test_readback_scopes_logs_before_validating_foreign_batch_content():
+    from copy import deepcopy
+    from worktree_manager.performance_report import signal_readback
+
+    def attributes(values):
+        return [{"key": key, "value": {"stringValue": value}} for key, value in values.items()]
+
+    attrs = {"ce.schema": "agent.source-observation.log.v1", "ce.component": "worktree-manager-source",
+             "ce.stage": "input_ack", "ce.outcome": "ok"}
+    log = {
+        "traceId": "a" * 32, "spanId": "b" * 16, "timeUnixNano": "10",
+        "body": {"stringValue": "agent.source.observation"}, "eventName": "agent.source.observation",
+        "severityNumber": 9, "severityText": "INFO", "attributes": attributes(attrs),
+    }
+    expected = {("a" * 32, "b" * 16): {
+        "attributes": attrs, "severity_number": 9, "severity_text": "INFO", "time_ns": 10,
+    }}
+    request = {"resourceLogs": [{
+        "resource": {"attributes": attributes({"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"})},
+        "scopeLogs": [{"scope": {"name": "copilot-extensions.process-telemetry", "version": "1"},
+                       "logRecords": [{}, {"traceId": "c" * 32}, log]}],
+    }, {
+        "resource": {"attributes": [{"key": "foreign", "value": {"arrayValue": {"values": []}}}]},
+        "scopeLogs": [{"logRecords": [{"traceId": "d" * 32}]}],
+    }]}
+    assert signal_readback([json.dumps(request)], signal="logs", expected_logs=expected)["complete"]
+    upper = deepcopy(request)
+    upper_log = upper["resourceLogs"][0]["scopeLogs"][0]["logRecords"][2]
+    upper_log["traceId"] = upper_log["traceId"].upper()
+    upper_log["spanId"] = upper_log["spanId"].upper()
+    duplicate = signal_readback([json.dumps(request), json.dumps(upper)], signal="logs", expected_logs=expected)
+    assert not duplicate["complete"] and duplicate["duplicates"] == 1
+    upper_expected = {(trace.upper(), span.upper()): value for (trace, span), value in expected.items()}
+    assert signal_readback([json.dumps(request)], signal="logs", expected_logs=upper_expected)["complete"]
+    import base64
+    encoded = deepcopy(upper)
+    encoded_log = encoded["resourceLogs"][0]["scopeLogs"][0]["logRecords"][2]
+    encoded_log["traceId"] = base64.b64encode(bytes.fromhex(encoded_log["traceId"])).decode()
+    encoded_log["spanId"] = base64.b64encode(bytes.fromhex(encoded_log["spanId"])).decode()
+    duplicate = signal_readback([json.dumps(upper), json.dumps(encoded)], signal="logs", expected_logs=expected)
+    assert not duplicate["complete"] and duplicate["duplicates"] == 1
+    bad = deepcopy(log)
+    del bad["spanId"]
+    request["resourceLogs"][0]["scopeLogs"][0]["logRecords"].append(bad)
+    result = signal_readback([json.dumps(request)], signal="logs", expected_logs=expected)
+    assert not result["complete"] and result["invalid_matching_lines"] == 1
+
+
+@pytest.mark.parametrize("corruption", [
+    "wrong_unit", "wrong_type", "multiple_types", "wrong_start", "bad_start",
+    "unavailable", "reserved_flag", "bool_value", "fractional_value", "value_oneof", "bool_temporality",
+])
+def test_readback_uses_received_metric_type_and_rejects_conflicting_points(corruption):
+    from copy import deepcopy
+    from worktree_manager.performance_report import signal_readback
+
+    def attributes(values):
+        return [{"key": key, "value": {"stringValue": value}} for key, value in values.items()]
+
+    point = {"attributes": attributes({"ce.stage": "input_ack", "ce.outcome": "ok"}),
+             "startTimeUnixNano": "100", "timeUnixNano": "200", "asInt": "1"}
+    metric = {"name": "ce.source.observations", "unit": "{observation}",
+              "sum": {"aggregationTemporality": 1, "isMonotonic": True, "dataPoints": [point]}}
+    expected = [{"name": "ce.source.observations", "unit": "{observation}", "stage": "input_ack",
+                 "outcome": "ok", "start_time_ns": 100, "time_ns": 200, "value": 1}]
+    request = {"resourceMetrics": [{
+        "resource": {"attributes": attributes({"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"})},
+        "scopeMetrics": [{"scope": {"name": "copilot-extensions.process-telemetry", "version": "1"},
+                          "metrics": [metric]}],
+    }]}
+    request["resourceMetrics"].append({
+        "scopeMetrics": [{"metrics": [{"name": "foreign", "sum": {"dataPoints": [{
+            "startTimeUnixNano": "300", "timeUnixNano": "400",
+            "attributes": [{"key": "foreign", "value": {"arrayValue": {"values": []}}}],
+        }]}}]}],
+    })
+    assert signal_readback([json.dumps(request)], signal="metrics", expected_metrics=expected)["complete"]
+    bad = deepcopy(metric)
+    if corruption == "wrong_unit":
+        bad["unit"] = "s"
+    elif corruption == "wrong_type":
+        bad["gauge"] = bad.pop("sum")
+    elif corruption == "multiple_types":
+        bad["gauge"] = deepcopy(bad["sum"])
+    elif corruption == "bool_temporality":
+        bad["sum"]["aggregationTemporality"] = True
+    else:
+        altered = bad["sum"]["dataPoints"][0]
+        altered.update({
+            "wrong_start": {"startTimeUnixNano": "101"},
+            "bad_start": {"startTimeUnixNano": "invalid"},
+            "unavailable": {"flags": 1}, "reserved_flag": {"flags": 2},
+            "bool_value": {"asInt": True}, "fractional_value": {"asInt": 1.5},
+            "value_oneof": {"asDouble": 1.0},
+        }[corruption])
+    request["resourceMetrics"][0]["scopeMetrics"][0]["metrics"].append(bad)
+    result = signal_readback([json.dumps(request)], signal="metrics", expected_metrics=expected)
+    assert not result["complete"]
+    assert result["extra"] + result["mismatched"] + result["invalid_matching_lines"] > 0
+
+
+@pytest.mark.parametrize("corruption", ["flags", "bool_count", "bool_bucket", "bool_bound"])
+def test_histogram_readback_preserves_missing_value_flags_and_integer_semantics(corruption):
+    from worktree_manager.performance_report import signal_readback
+    from process_telemetry.signals import BOUNDS
+
+    def attributes(values):
+        return [{"key": key, "value": {"stringValue": value}} for key, value in values.items()]
+
+    expected = {
+        "name": "ce.source.duration", "unit": "s", "stage": "input_ack", "outcome": "ok",
+        "start_time_ns": 100, "time_ns": 200, "count": 1, "sum": 0., "min": 0., "max": 0.,
+        "bounds": list(BOUNDS), "bucket_counts": [1] + [0] * len(BOUNDS),
+    }
+    point = {
+        "attributes": attributes({"ce.stage": "input_ack", "ce.outcome": "ok"}),
+        "startTimeUnixNano": "100", "timeUnixNano": "200", "count": "1",
+        "sum": 0., "min": 0., "max": 0., "explicitBounds": list(BOUNDS),
+        "bucketCounts": ["1"] + ["0"] * len(BOUNDS),
+    }
+    metric = {"name": expected["name"], "unit": "s",
+              "histogram": {"aggregationTemporality": 1, "dataPoints": [point]}}
+    request = {"resourceMetrics": [{
+        "resource": {"attributes": attributes({"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"})},
+        "scopeMetrics": [{"scope": {"name": "copilot-extensions.process-telemetry", "version": "1"},
+                          "metrics": [metric]}],
+    }]}
+    assert signal_readback([json.dumps(request)], signal="metrics", expected_metrics=[expected])["complete"]
+    if corruption == "flags":
+        point["flags"] = 1
+    elif corruption == "bool_count":
+        point["count"] = True
+    elif corruption == "bool_bucket":
+        point["bucketCounts"][0] = True
+    else:
+        point["explicitBounds"][8] = True
+    result = signal_readback([json.dumps(request)], signal="metrics", expected_metrics=[expected])
+    assert not result["complete"]
+
+
+def test_real_source_writer_sdk_logs_metrics_and_exact_readback(tmp_path):
+    pytest.importorskip("opentelemetry.sdk._logs.export")
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from google.protobuf.json_format import MessageToDict
+    from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
+    from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
+    from process_telemetry.signals import SignalEndpoints
+    from worktree_manager.performance_report import signal_readback
+
+    captured = {"logs": [], "metrics": []}
+    writer_ids = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            signal = self.path.rsplit("/", 1)[-1]
+            cls = ExportLogsServiceRequest if signal == "logs" else ExportMetricsServiceRequest
+            request = cls.FromString(self.rfile.read(int(self.headers["Content-Length"])))
+            body = json.dumps(MessageToDict(request, use_integers_for_enums=True))
+            captured[signal].append(body)
+            with (tmp_path / f"{signal}.jsonl").open("a") as stream:
+                stream.write(body + "\n")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-protobuf")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    server.timeout = .025
+    stop = threading.Event()
+
+    def serve():
+        while not stop.is_set():
+            server.handle_request()
+
+    receiver = threading.Thread(target=serve, daemon=True)
+    receiver.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    observation = admitted(signal_endpoints=SignalEndpoints(logs=f"{base}/v1/logs", metrics=f"{base}/v1/metrics"))
+    original = observation.deliver
+
+    def deliver(stream, records):
+        writer_ids.append(threading.get_ident())
+        original(stream, records)
+
+    observation.deliver = deliver
+    reporter = frame_health.FrameHealthReporter(tmp_path / "events", observation=observation)
+    try:
+        with frame_health.source_observation_scope(reporter):
+            reporter.observe("source_entry")
+            reporter.start()
+            reporter.observe("input_ack", duration_ns=1)
+        state = reporter.observation_summary()
+        assert not state["writer_alive"]
+        assert len(set(writer_ids)) == 1 and writer_ids[0] != threading.get_ident()
+        assert state["signals"]["logs"]["accepted_records"] == state["counts"]["written"] == 4
+        assert state["signals"]["metrics"]["accepted_records"] == state["signals"]["metrics"]["generated_records"]
+        rows = [json.loads(line) for line in reporter.path.read_text().splitlines()]
+        points = [point for row in rows if row.get("schema") == "manager.signal-batch.v1" for point in row["metrics"]]
+        expected = {}
+        for row in rows:
+            if "span" not in row:
+                continue
+            span = row["span"]
+            attrs = {f"ce.{k}": span[k] for k in ("component", "stage", "outcome", "duration_ns", "queue_wait_ns")}
+            attrs["ce.schema"] = "agent.source-observation.log.v1"
+            attrs.update({f"ce.{k}": v for k, v in observation.identity.items() if v is not None})
+            expected[(span["trace_id"], span["span_id"])] = {
+                "attributes": attrs, "severity_number": 9, "severity_text": "INFO",
+                "time_ns": span["start_time_ns"] + span["duration_ns"],
+            }
+        for signal in ("logs", "metrics"):
+            with (tmp_path / f"{signal}.jsonl").open() as stream:
+                result = signal_readback(stream, signal=signal, expected_logs=expected, expected_metrics=points)
+            assert result["complete"], result
+            duplicate = signal_readback(captured[signal] * 2, signal=signal, expected_logs=expected, expected_metrics=points)
+            assert not duplicate["complete"] and duplicate["duplicates"] > 0
+            wrong = [line.replace("worktree-manager-source", "wrong-component") for line in captured[signal]]
+            mismatch = signal_readback(wrong + captured[signal], signal=signal, expected_logs=expected, expected_metrics=points)
+            assert not mismatch["complete"] and mismatch["mismatched"] > 0
+    finally:
+        reporter.close()
+        reporter.drain()
+        stop.set()
+        receiver.join(3)
+        server.server_close()
+        assert not receiver.is_alive()
+
+
 def test_disabled_reporter_has_no_clock_file_thread_or_import_work(monkeypatch):
     monkeypatch.delenv("AGENT_WORKTREES_LAUNCH_TRACE", raising=False)
     monkeypatch.delenv("AGENT_WORKTREES_PICKER_FRAME_HEALTH", raising=False)

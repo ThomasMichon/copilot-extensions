@@ -78,7 +78,7 @@ shared host; scheduling and uncontrolled OS cache remain part of the evidence.
 **Exit zero means the requested observation flow completed, not that a latency
 budget passed.** Headed/installed budget qualification is explicitly unavailable.
 Native first-frame, authority, hook composition, full process-resource and
-structured log/metric work remains with the
+live structured-signal qualification remains with the
 [performance campaign](../../efforts/active/performance-telemetry/README.md).
 
 ## Runtime seam
@@ -106,6 +106,55 @@ callbacks are dropped instead of falling back to synchronous legacy file
 writes. A subsequent explicit source scope may replace the owner only after
 its prior writer stops. Failed writes, incomplete drain, SDK absence, sampled
 traces and export errors remain visible; diagnostics never become recovery facts.
+
+### Explicit structured signals
+
+`SourceObservation(..., signal_endpoints=SignalEndpoints(...))` admits optional
+closed Logs/Metrics export through this **same writer**. It is mutually exclusive
+with the legacy `endpoint` argument; an all-None configuration is inert.
+The existing `frame_health.py` and production constructor call sites are unchanged.
+The [shared signal contract](../../libs/process-telemetry/README.md#closed-manager-source-signals)
+owns exact schemas, public SDK APIs, units, intervals, limits and error behavior.
+
+For a separately authorized receiver that actually supports each signal:
+
+```text
+<isolated-python> tools/performance/manager_native_probe.py --run-dir <new-owned-directory> --samples 3 --logs-endpoint http://127.0.0.1:<selected-port>/v1/logs --metrics-endpoint http://127.0.0.1:<selected-port>/v1/metrics --logs-receiver-jsonl <local-logs-jsonl> --metrics-receiver-jsonl <local-metrics-jsonl>
+```
+
+Omit every unrequested signal; `--endpoint` may additionally select traces.
+Readback flags require their corresponding explicitly requested sender endpoint.
+Neither a trace-only receiver nor HTTP 200 proves Logs/Metrics support/persistence.
+No command discovers a receiver, enables pipelines or changes its lifecycle.
+Source processes remain sequential; this does not enroll installed Manager.
+
+Sender JSONL retains original observation records and adds
+`manager.signal-batch.v1` records on the same stream, with per-signal transport
+counts and exact expected metric intervals/points. `summary.signals` retains
+the generated/attempted/outcome partition, request counts, attempted payload
+bytes and the first failure as well as latest status. Legacy `exported` still
+counts trace acceptance only; Logs/Metrics-only export cannot inflate it.
+No per-signal SDK queue or periodic exporter is created.
+
+Log readback matches exact binary correlation IDs (collector hex or protobuf
+JSON base64), closed attributes/body/severity and source timestamp. Metrics
+match exact instrument/unit/labels/interval/count/buckets, not run-ID labels.
+Candidate metric points are selected by owned collection end before validating
+the start/type/unit, so a conflicting overlapping interval cannot disappear.
+Nonzero point flags (including no-recorded-value) and lossy numeric coercions
+cannot turn missing or malformed measurements into persistence evidence.
+Unknown resource/scope attributes, conflicting duplicates, extra owned points
+and malformed matching records fail qualification. No raw receiver rows are
+returned. A partial, failed or not-attempted sender makes the whole requested
+flow incomplete even if some receiver records match.
+Non-object, deeply nested or malformed sender rows and signal metadata are
+retained as invalid samples; they cannot abort creation of the final report or
+discard earlier samples.
+
+Only scoped isolated SDK/wire validation is supplied by the implementation.
+Actual native source Logs/Metrics receive/persist evidence requires a separate
+collector-owner handshake; installed rollout, hard retention, causal overhead
+and native latency budgets remain unqualified.
 
 ## Targeted validation
 

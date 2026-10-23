@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import ipaddress
-import http.client
 import math
 import re
+import time
 from urllib.parse import urlsplit
 
 from .buffer import snapshot
@@ -74,46 +74,34 @@ class LocalOtlpSink:
         except ImportError as exc:
             raise RuntimeError("optional OTLP dependencies are not installed") from exc
 
-        destination = urlsplit(endpoint)
+        owner = self
+        self._deadline = None
+        self._last_reply = None
+        self._payload_bytes = 0
 
         class LoopbackSpanExporter(SpanExporter):
             # The SDK HTTP exporter's constructor parses/logs ambient headers
             # even with explicit arguments. Use the public exporter extension
             # point and canonical protobuf encoder, never patch SDK globals.
             def export(self, spans):
-                connection = http.client.HTTPConnection(
-                    destination.hostname, destination.port, timeout=timeout,
-                )
+                from ._otlp_transport import post
+
                 try:
                     body = encode_spans(spans).SerializeToString()
-                    if len(body) > 262144:
+                    owner._payload_bytes = len(body)
+                    reply = post(
+                        endpoint, body, owner._deadline or time.monotonic() + timeout,
+                        strict=False,
+                    )
+                    owner._last_reply = reply
+                    if reply.error:
                         return SpanExportResult.FAILURE
-                    connection.request("POST", "/v1/traces", body, {
-                        "Content-Type": "application/x-protobuf",
-                        "Content-Length": str(len(body)),
-                    })
-                    response = connection.getresponse()
-                    if not 200 <= response.status < 300:
-                        return SpanExportResult.FAILURE
-                    declared = response.getheader("Content-Length")
-                    expected = None
-                    if declared is not None:
-                        if response.chunked or not re.fullmatch(r"[0-9]{1,10}", declared.strip()):
-                            return SpanExportResult.FAILURE
-                        expected = int(declared)
-                        if expected > 65536:
-                            return SpanExportResult.FAILURE
-                    result = response.read(65537)
-                    if len(result) > 65536 or (expected is not None and len(result) != expected):
-                        return SpanExportResult.FAILURE
-                    acknowledgement = ExportTraceServiceResponse.FromString(result)
+                    acknowledgement = ExportTraceServiceResponse.FromString(reply.body)
                     if acknowledgement.partial_success.rejected_spans:
                         return SpanExportResult.FAILURE
                     return SpanExportResult.SUCCESS
                 except Exception:
                     return SpanExportResult.FAILURE
-                finally:
-                    connection.close()
 
             def shutdown(self):
                 pass  # Every export closes its own finite connection.
@@ -178,3 +166,6 @@ class LocalOtlpSink:
         if not self._closed:
             self._closed = True
             self._exporter.shutdown()
+
+
+from .otlp_signals import LocalOtlpSignalsSink  # noqa: E402,F401
