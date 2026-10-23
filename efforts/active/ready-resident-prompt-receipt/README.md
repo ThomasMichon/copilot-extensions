@@ -121,9 +121,9 @@ The concrete names, byte ceilings and decomposition in `contract.md` are
 
 ### Subject producer amendment — bounded existing binding stamp
 
-- [ ] Review and merge the narrow producer contract in
+- [x] Review and merge the narrow producer contract in
   [contract.md](contract.md#trusted-subject-producer-amendment) before code.
-- [ ] Add optional actual-record qualification to the existing writer and only
+- [x] Add optional actual-record qualification to the existing writer and only
   its existing post-registration caller; preserve the registration transaction.
 - [ ] Validate the real caller plus writer against the focused matrix in the
   contract, then clear source review, required CI and verified merge.
@@ -300,3 +300,28 @@ All functional phases remain gated even if this proposal merges.
 - This amendment and the retained source-completion journal clear automated
   source-plan review before implementation. There is no edit authority over
   backend/Node, lock/cache internals, other registration transactions or services.
+
+### 2026-10-23 — Producer plan reviewed; focused source validation
+
+- #8320 approved at `8c7cfb728148c77c0884e889288cca2577870666` and merged as
+  `134e6e078ac977f80254a7121d975797c56543ac` before functional edits. The
+  previously retained source-completion journal was included unchanged in intent.
+- The optional caller and writer now use acquired nonblocking sidecar guards and
+  uncached record reads. The existing reentrant lock keeps the caller's guard
+  across writer revalidation and atomic replacement; no lock/cache internals or
+  registration critical transaction changed.
+- Both focused caller/writer files passed 86 tests in the isolated runner;
+  install contract (13 plugins) and touched-file lint passed. The tests cover
+  real caller publication, stale cache, lock refusal, exact non-head/pending
+  association, identity/revision mismatch, legacy/stale-field removal and I/O
+  failure. An existing Windows test that simulates Linux source identity needed
+  its execution-platform reader pinned before the global platform stub; that
+  focused regression and the complete selection now pass.
+- Functional source review, required CI and verified merge remain open. The
+  next handoff is the exact producer contract to the receipt integration owner;
+  native, installed, macOS and complete campaign gates remain unchanged.
+- Source review found that assigning the head cache did not move the
+  authoritative ledger. The non-head fixture now registers a second session,
+  uses the existing `set_head_session` transition and asserts the resolved head
+  before publication. This corrects the regression's evidence, not runtime
+  subject authority.

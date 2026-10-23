@@ -17,11 +17,14 @@ Two independent halves:
 from __future__ import annotations
 
 import json
+import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from agent_worktrees import handoff_diagnostics, sessions, tracking
+from agent_worktrees import config as cfg
 from agent_worktrees.tracking import (
     SessionLifecycleError,
     WorktreeRecord,
@@ -107,6 +110,156 @@ class TestStampSessionStateWorktreeBinding:
 
 
 # -- yielded state + relaxed head-claim gating -------------------------------
+
+
+@pytest.fixture
+def qualified_binding(tmp_path, tmp_tracking_dir, monkeypatch_config):
+    cfg.set_active_project("test-repo")
+    _save_record(tmp_tracking_dir, "wt-subject", str(tmp_path / "checkout"))
+    tracking.register_session("wt-subject", "sid-subject")
+    tracking.register_session("wt-subject", "other-head")
+    record_path = tmp_tracking_dir / "wt-subject.yaml"
+    record = tracking._load_record_uncached(record_path)
+    record.creation_nonce = "subject-incarnation"
+    tracking.set_head_session(record, "other-head", save=False)
+    save_record(record, record_path)
+    session_dir = sessions._session_state_dir() / "sid-subject"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return record_path, tracking._load_record_uncached(record_path), session_dir
+
+
+def test_trusted_binding_qualifies_actual_non_head_record(qualified_binding, monkeypatch):
+    record_path, snapshot, session_dir = qualified_binding
+    assert snapshot.resolved_head_session == "other-head"
+    assert snapshot.session_entry("sid-subject") is not None
+    original = Path.replace
+    held_at_replace = []
+
+    def replace_while_guarded(path, target):
+        key = os.path.normcase(os.path.abspath(record_path))
+        held_at_replace.append(tracking._thread_sidecar_counts().get(key, 0) > 0)
+        return original(path, target)
+
+    monkeypatch.setattr(Path, "replace", replace_while_guarded)
+    result = handoff_diagnostics.stamp_session_state_worktree_binding(
+        "sid-subject", "wt-subject", worktree_record=snapshot,
+    )
+    assert result["project"] == "test-repo"
+    assert result["creationNonce"] == "subject-incarnation"
+    assert json.loads((session_dir / "worktree-binding.json").read_text()) == result
+    assert held_at_replace == [True]
+
+
+def test_trusted_binding_accepts_exact_pending_candidate(qualified_binding):
+    record_path, record, _ = qualified_binding
+    tracking.open_handoff(record, "other-head", "task-subject")
+    record = tracking._load_record_uncached(record_path)
+    record.handoffs[-1].candidate = "sid-pending"
+    save_record(record, record_path)
+    (sessions._session_state_dir() / "sid-pending").mkdir(parents=True)
+    result = handoff_diagnostics.stamp_session_state_worktree_binding(
+        "sid-pending", "wt-subject",
+        worktree_record=tracking._load_record_uncached(record_path),
+    )
+    assert result["creationNonce"] == "subject-incarnation"
+
+
+@pytest.mark.parametrize("invalid", [
+    "project", "worktree", "nonce", "lifecycle", "head",
+    "session", "removed-association", "missing-nonce", "legacy",
+])
+def test_trusted_binding_invalid_or_legacy_rewrite_removes_stale_fields(
+    qualified_binding, invalid,
+):
+    record_path, snapshot, session_dir = qualified_binding
+    binding_path = session_dir / "worktree-binding.json"
+    binding_path.write_text(json.dumps({"project": "old", "creationNonce": "old"}))
+    if invalid in {"project", "worktree", "nonce", "lifecycle", "head"}:
+        field, value = {
+            "project": ("repo", "wrong-project"),
+            "worktree": ("worktree_id", "wrong-worktree"),
+            "nonce": ("creation_nonce", "wrong-incarnation"),
+            "lifecycle": ("lifecycle_revision", snapshot.lifecycle_revision + 1),
+            "head": ("head_revision", snapshot.head_revision + 1),
+        }[invalid]
+        snapshot = replace(snapshot, **{field: value})
+    elif invalid in {"session", "removed-association"}:
+        current = tracking._load_record_uncached(record_path)
+        current.sessions = [] if invalid == "removed-association" else [
+            replace(current.sessions[0], session_id="unrelated")
+        ]
+        save_record(current, record_path)
+    elif invalid == "missing-nonce":
+        current = tracking._load_record_uncached(record_path)
+        current.creation_nonce = ""
+        save_record(current, record_path)
+    else:
+        snapshot = None
+    result = handoff_diagnostics.stamp_session_state_worktree_binding(
+        "sid-subject", "wt-subject", worktree_dir="legacy-path",
+        machine="test", worktree_record=snapshot,
+    )
+    assert result["worktreeDir"] == "legacy-path"
+    assert result["machine"] == "test"
+    assert "project" not in result and "creationNonce" not in result
+    assert json.loads(binding_path.read_text()) == result
+
+
+def test_trusted_binding_contention_preserves_qualified_file(qualified_binding, monkeypatch):
+    _, snapshot, session_dir = qualified_binding
+    binding_path = session_dir / "worktree-binding.json"
+    before = '{"project":"newer","creationNonce":"newer"}'
+    binding_path.write_text(before)
+
+    class Busy:
+        acquired = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def busy_lock(path, **kwargs):
+        assert kwargs == {"blocking": False, "require_sidecar": True}
+        return Busy()
+
+    monkeypatch.setattr(tracking, "_RecordLock", busy_lock)
+    assert handoff_diagnostics.stamp_session_state_worktree_binding(
+        "sid-subject", "wt-subject", worktree_record=snapshot,
+    ) is None
+    assert binding_path.read_text() == before
+
+
+def test_trusted_binding_absent_session_dir_is_not_created(qualified_binding):
+    _, snapshot, _ = qualified_binding
+    path = sessions._session_state_dir() / "absent-subject"
+    assert handoff_diagnostics.stamp_session_state_worktree_binding(
+        "absent-subject", "wt-subject", worktree_record=snapshot,
+    ) is None
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("failure", ["read", "write"])
+def test_trusted_binding_io_failure_is_best_effort_without_overwrite(
+    qualified_binding, monkeypatch, failure,
+):
+    _, snapshot, session_dir = qualified_binding
+    binding_path = session_dir / "worktree-binding.json"
+    before = '{"project":"newer","creationNonce":"newer"}'
+    binding_path.write_text(before)
+
+    def fail(*args, **kwargs):
+        raise OSError("synthetic I/O failure")
+
+    if failure == "read":
+        monkeypatch.setattr(tracking, "_load_record_uncached", fail)
+    else:
+        monkeypatch.setattr(Path, "write_text", fail)
+    assert handoff_diagnostics.stamp_session_state_worktree_binding(
+        "sid-subject", "wt-subject", worktree_record=snapshot,
+    ) is None
+    assert binding_path.read_text() == before
 
 
 class TestYieldedPredecessorAutoClaim:
