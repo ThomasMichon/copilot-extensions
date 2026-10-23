@@ -521,11 +521,16 @@ callback an implicit credential store.
   An overly broad `test_cli` selector included unrelated native client
   construction and reached the 240-second aggregate limit; the exact
   credential/base-CLI module selection passes without relaxing deadlines.
-- Final focused validation passes 252 cases: 99 Worktrees credential/configuration,
-  63 Fleet typed/legacy worker and base CLI, and 90 PR native/transport cases.
+- Final focused validation passes 264 cases: 99 Worktrees credential/configuration,
+  63 Fleet typed/legacy worker and base CLI, and 102 PR native/transport cases.
   Ten existing POSIX process controls skip on Windows. The real complete
   process/TLS path is included, not just an injected credential callback.
   Python lint and the 13-plugin install contract pass.
+- #7984 review identified an outer Windows batch-shim boundary before native
+  helper validation. Credential-backed PR bridge reads now refuse `.cmd`/`.bat`
+  in both direct command and explicit prefix forms. Normal unselected launches
+  stay unchanged; both cases and uppercase suffixes have refusal/compatibility
+  tests, while the complete native/Fleet/TLS exchange still passes.
 - This closes no production or deployment gate. The credential account/action
   contract, actual provider verification, service observation/consumer/lifecycle,
   installed acceptance and real fleet acceptance remain Active. Final focused

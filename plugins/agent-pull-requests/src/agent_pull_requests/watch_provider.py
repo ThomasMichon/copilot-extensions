@@ -140,6 +140,8 @@ def fetch_snapshot(
         raise ValueError("invalid native repository target")
     credential_arguments = []
     if credential_command is not None:
+        if Path(launch[0]).suffix.lower() in (".cmd", ".bat"):
+            raise ValueError("credential-backed snapshots require a native executable/interpreter prefix")
         if (
             not isinstance(credential_command, list) or not 1 <= len(credential_command) <= 64
             or any(not isinstance(argument, str) or not argument or "\0" in argument

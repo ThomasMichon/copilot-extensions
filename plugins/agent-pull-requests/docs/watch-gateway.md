@@ -145,7 +145,10 @@ Omitting the keyword preserves the existing bridge behavior.
 
 The embedding owner supplies an absolute attributable executable/interpreter
 prefix, enrolled worker policy, account/source/forge binding and an available
-credential controller. Fleet's public credential command reuses the existing
+credential controller. Credential-backed reads refuse an outer `.cmd`/`.bat`
+Worktrees shim, whether selected directly or as `prefix[0]`: serialized helper
+arguments must not cross implicit shell parsing before native validation.
+Unselected ordinary launches remain unchanged. Fleet's public credential command reuses the existing
 typed exchange; there is no Fleet import or new issuer in the native process.
 Never accept argv, keys, credential references or provider endpoint selection
 from a remote watch registration. None is added to the Gateway wire contract,
