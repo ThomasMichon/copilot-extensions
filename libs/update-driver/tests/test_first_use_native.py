@@ -199,7 +199,8 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
 ):
     payload, installation, project = owning_payload
     library = Path(__file__).resolve().parents[2]
-    inputs = area / "foundation-source"
+    diagnostic = "caf\u00e9-\u6d4b\u8bd5"
+    inputs = area / ("foundation-" + diagnostic)
     for name in PACKAGES:
         shutil.copytree(
             library / name, inputs / name,
@@ -212,10 +213,14 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
     (source / "scripts" / "foundation-produce.ps1").write_text(
         "param([string]$Root,[string]$SourceHash)\n"
         "[IO.File]::WriteAllText((Join-Path $Root 'foundation-entered'), $SourceHash)\n"
+        "$log = (Get-ChildItem -LiteralPath $Root -Filter 'first-use-*.log').FullName\n"
+        "[IO.File]::AppendAllText($log, ('caf' + [char]0x00e9 + '-' + "
+        "[char]0x6d4b + [char]0x8bd5 + [Environment]::NewLine), (New-Object Text.UTF8Encoding($false)))\n"
         "exit 37\n", encoding="utf-8",
     )
     (source / "scripts" / "foundation-produce.sh").write_text(
         '#!/usr/bin/env bash\nprintf "%s" "$2" >"$1/foundation-entered"\n'
+        f"printf '%s\\n' '{diagnostic}' >&2\n"
         "printf 'fixture foundation refusal\\n' >&2\nexit 37\n",
         encoding="utf-8",
     )
@@ -227,12 +232,13 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
         command += ["-Wait" if os.name == "nt" else "--wait"]
     result = subprocess.run(
         command,
-        env=dict(os.environ), capture_output=True, text=True, timeout=60,
+        env=dict(os.environ), capture_output=True, text=True, encoding="utf-8", timeout=60,
         **no_window_kwargs(),
     )
     assert (result.returncode != 0 if wait else result.returncode == 0), result.stdout + result.stderr
     if wait:
         assert "Foundation construction failed" in result.stderr or "fixture foundation refusal" in result.stderr
+        assert diagnostic in result.stderr, result.stderr
         assert "launched" not in result.stdout
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:

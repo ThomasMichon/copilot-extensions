@@ -150,7 +150,7 @@ def _isolated_install_env(home: Path) -> dict[str, str]:
         path.mkdir(parents=True, exist_ok=True)
     env.update({name: str(path) for name, path in roots.items()})
     env["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
-    for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
+    for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"):
         env.pop(name, None)
     return env
 
@@ -180,6 +180,11 @@ def _stage_payload(tmp_path: Path) -> Path:
     finally:
         sys.path[:] = previous_path
     assert not any(message.startswith("SKIP ") for message in materialized), materialized
+    # Match the top-level fixture exclusion without pruning runtime/native assets.
+    for library in (payload / "libs").iterdir():
+        tests = library / "tests"
+        if tests.is_dir():
+            shutil.rmtree(tests)
     policy = runpy.run_path(str(payload / "scripts" / "installer_dependency_policy.py"))
     project = policy["_toml"](payload / "pyproject.toml")
     manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
@@ -189,6 +194,7 @@ def _stage_payload(tmp_path: Path) -> Path:
         "agent-procutil": {"path": "libs/agent-procutil"},
         "agent-zdd": {"path": "libs/zdd"},
         "agent-single-instance-lease": {"path": "libs/single-instance-lease"},
+        "agent-update-driver": {"path": "libs/update-driver"},
     }
     staged_libs = tmp_path / "libs"
     staged_libs.mkdir(parents=True, exist_ok=True)
@@ -458,7 +464,7 @@ if (-not $env:UV_DEFAULT_INDEX) {{ exit 1 }}
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
-def test_posix_stamp_wrapper_fails_when_provision_reports_success_without_runtime(
+def test_posix_stamp_wrapper_refuses_snapshot_without_driver_dispatcher(
     tmp_path: Path,
 ) -> None:
     bash = shutil.which("bash")
@@ -500,8 +506,9 @@ def test_posix_stamp_wrapper_fails_when_provision_reports_success_without_runtim
         timeout=60,
         check=False,
     )
-    assert invoke.returncode == 1, invoke.stderr
-    assert "provisioning completed without a resolvable runtime" in invoke.stderr
+    assert invoke.returncode == 126, invoke.stderr
+    assert "snapshot admission helper is unavailable" in invoke.stderr
+    assert not (install_dir / ".provision.lock").exists()
 
 
 @pytest.fixture(scope="module")
@@ -575,6 +582,7 @@ def stamped_snapshot(tmp_path_factory):
     assert (snapshot / "libs" / "zdd" / "pyproject.toml").is_file()
     assert (snapshot / "libs" / "agent-procutil" / "pyproject.toml").is_file()
     assert (snapshot / "libs" / "single-instance-lease" / "pyproject.toml").is_file()
+    assert (snapshot / "libs" / "update-driver" / "pyproject.toml").is_file()
     for helper in (
         "versioned_runtime.py", "versioned_runtime_leases.py",
         "versioned_runtime_construction.py", "installer_dependency_policy.py",
@@ -616,6 +624,8 @@ def provisioned_snapshot(stamped_snapshot):
     state = stamped_snapshot
     home, snapshot, env, pwsh = state.home, state.snapshot, state.env, state.pwsh
     _offline_uv(state.fixture_root, env)
+    # Running inside the snapshot makes each library preinstall rediscover
+    # and retain the entire consumer UV graph rather than its own inputs.
     if os.name == "nt":
         provision = subprocess.run(
             [
@@ -631,7 +641,7 @@ def provisioned_snapshot(stamped_snapshot):
                 str(home / ".agent-vault"),
             ],
             env=env,
-            cwd=snapshot,
+            cwd=state.fixture_root,
             capture_output=True,
             text=True,
             timeout=420,
@@ -650,7 +660,7 @@ def provisioned_snapshot(stamped_snapshot):
                 str(home / ".agent-vault"),
             ],
             env=env,
-            cwd=snapshot,
+            cwd=state.fixture_root,
             capture_output=True,
             text=True,
             timeout=420,

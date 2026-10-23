@@ -726,7 +726,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('zdd', 'agent-procutil', 'single-instance-lease')) {
+    foreach ($lib in @('zdd', 'agent-procutil', 'single-instance-lease', 'update-driver')) {
         $source = Join-Path $PluginDir "libs\$lib"
         if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
             $source = Join-Path $PluginDir "..\..\libs\$lib"
