@@ -459,7 +459,10 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   is not a negative mux verdict. Missing tmux, malformed output and missing batch
   completion remain unknown. Session renewal and release compare launch
   generations under the existing owner lock. Legacy two-argument probe providers
-  remain supported. Bridge and transcript transports are not shared by this change.
+  remain supported. Default bridge proof reuses inventory admission but opens and
+  closes its own manager; no transport is borrowed or shared, and transcript
+  transport behavior is unchanged. Scope is rechecked after execution and
+  disconnect before publishing a verdict; registry checks run off the owner loop.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 

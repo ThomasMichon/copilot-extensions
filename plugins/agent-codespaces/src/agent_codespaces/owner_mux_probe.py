@@ -14,6 +14,7 @@ from ._ssh_retry import exec_with_retry
 from .owner_inventory import (
     OwnerInventory, capture_scope, collect_inventory, credential,
     credential_matches, joined_thread,
+    bounded_operation, finish_cleanup,
 )
 
 
@@ -45,7 +46,7 @@ def _admitted_manager(admit):
         async def _start_control_master(self, *args, **kwargs):
             # The shared manager may retry: each dial must re-enter admission.
             budget = await admit()
-            return await asyncio.wait_for(
+            return await bounded_operation(
                 super()._start_control_master(*args, **kwargs), timeout=budget,
             )
 
@@ -122,6 +123,8 @@ class RemoteMuxProbe:
     async def probe_wave(
         self, codespace: str, targets: list[str], inventory: OwnerInventory,
         generation: int, current: Callable[[], bool],
+        *, owner_check: Callable[[], Awaitable[bool]] | None = None,
+        command: str | None = None, parse_result: Callable | None = None,
     ) -> dict[str, bool | None]:
         unknown = dict.fromkeys(targets)
         manager = None
@@ -146,10 +149,11 @@ class RemoteMuxProbe:
 
             async def admit() -> float:
                 latest = await joined_thread(self.scope_reader)
-                if latest != scope:
+                if latest != scope or (owner_check is not None and not await owner_check()):
                     raise RuntimeError("Owner inventory authority changed")
                 return remaining()
 
+            await admit()
             if self.open_manager is not None:
                 remaining()
                 manager = await self.open_manager(codespace)
@@ -160,23 +164,57 @@ class RemoteMuxProbe:
                 source = _admitted_source(codespace, row.account, token, remaining)
                 # Drain the synchronous config child ourselves. The manager's
                 # ordinary to_thread call now only reads an already-filled cache.
+                await admit()
                 await joined_thread(source.get_ssh_config)
                 manager = _admitted_manager(admit)
                 budget = await admit()
-                await asyncio.wait_for(
+                await bounded_operation(
                     manager.ensure_connected(codespace, source, []), timeout=budget,
                 )
             remaining()
             result = await exec_with_retry(
-                _AdmittedExec(manager, admit), codespace, wrap_login_shell(batch_command(targets)),
+                _AdmittedExec(manager, admit), codespace,
+                wrap_login_shell(command if command is not None else batch_command(targets)),
                 timeout=30.0, attempts=2,
             )
-            remaining()
-            return parse_batch(targets, getattr(result, "stdout", ""), getattr(result, "exit_code", None))
+            verdicts = (
+                parse_result(result) if parse_result is not None else
+                parse_batch(targets, getattr(result, "stdout", ""), getattr(result, "exit_code", None))
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
             return unknown
         finally:
             if manager is not None:
-                await manager.disconnect(codespace)
+                await finish_cleanup(manager.disconnect(codespace))
+        try:
+            await admit()
+        except Exception:
+            return unknown
+        return verdicts
+
+
+class RemoteBridgeProbe:
+    """A separately owned bridge observation using the wave's inventory, not its transport."""
+
+    async def __call__(self, codespace: str, port: int) -> bool | None:
+        probe = RemoteMuxProbe()
+        try:
+            inventory = await probe.begin_wave(0)
+            return await self.probe_wave(codespace, port, probe, inventory, 0, lambda: True)
+        except Exception:
+            return None
+
+    async def probe_wave(self, codespace, port, probe, inventory, generation, current, owner_check=None):
+        from venue_copilot import bridge_probe_script
+
+        def parse(result):
+            code = getattr(result, "exit_code", None)
+            return {"bridge": True if code == 0 else False if code in {7, 28, 52, 56} else None}
+
+        result = await probe.probe_wave(
+            codespace, ["bridge"], inventory, generation, current,
+            owner_check=owner_check, command=bridge_probe_script(port), parse_result=parse,
+        )
+        return result["bridge"]

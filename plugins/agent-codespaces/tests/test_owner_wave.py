@@ -30,7 +30,11 @@ SCOPE = inv.InventoryScope("source", "config", ("a", "b", "c"), ("x", "y", "z"))
 
 def inventory(wave=1, *, rows=None, observed=0.0):
     rows = rows if rows is not None else (inv.InventoryRow("cs", "Available", "a"),)
-    return inv.OwnerInventory(wave, SCOPE, (inv.AccountListing("a", rows, observed, True),))
+    return inv.OwnerInventory(wave, SCOPE, (
+        inv.AccountListing("a", rows, observed, True),
+        inv.AccountListing("b", (), observed, True),
+        inv.AccountListing("c", (), observed, True),
+    ))
 
 
 def lookup(value, **kwargs):
@@ -277,7 +281,9 @@ async def test_stopped_or_unqualified_never_opens(state, complete, error, verdic
         opened.append(name)
 
     value = inventory(rows=(inv.InventoryRow("cs", state, "a"),))
-    value = replace(value, listings=(replace(value.listings[0], complete=complete, error=error),))
+    value = replace(value, listings=(
+        replace(value.listings[0], complete=complete, error=error), *value.listings[1:],
+    ))
     probe = mux.RemoteMuxProbe(open_manager=opener, scope_reader=lambda: SCOPE, clock=lambda: 1)
     assert await probe.probe_wave("cs", ["m"], value, 1, lambda: True) == {"m": verdict}
     assert opened == []
@@ -409,7 +415,7 @@ async def test_shutdown_never_restarts_owed_push(store):
 
 
 @pytest.mark.parametrize("timeout_first", [False, True])
-async def test_shutdown_waits_for_unequal_probe_cancellation_drains(store, timeout_first):
+async def test_shutdown_waits_for_unequal_probe_cancellation_drains(store, timeout_first, monkeypatch):
     for name in ("fast", "draining"):
         owner.hold(name, "t", mux_session="m")
     entered, release = threading.Event(), threading.Event()
@@ -429,6 +435,18 @@ async def test_shutdown_waits_for_unequal_probe_cancellation_drains(store, timeo
             await asyncio.Event().wait()
         return {"m": None}
 
+    if timeout_first:
+        wait_for = asyncio.wait_for
+
+        async def start_then_timeout(awaitable, timeout):
+            if timeout == 0.01:
+                await fast_entered.wait()
+                assert await asyncio.to_thread(entered.wait, 2)
+            return await wait_for(awaitable, timeout)
+
+        # Arm the unchanged short timeout only once both synthetic operations
+        # have entered; registry startup latency is not this fault's subject.
+        monkeypatch.setattr(asyncio, "wait_for", start_then_timeout)
     forwards = sf.SessionForwards(
         lambda *a: None, probe, probe_timeout=0.01 if timeout_first else 90,
     )
@@ -449,3 +467,151 @@ async def test_shutdown_waits_for_unequal_probe_cancellation_drains(store, timeo
         await closing
         await asyncio.gather(wave, return_exceptions=True)
     assert finished == [True] and not forwards._probe_tasks
+
+
+@pytest.mark.parametrize("during", ["exec", "disconnect"])
+async def test_scope_change_during_remote_work_is_unknown(during):
+    selected = [SCOPE]
+
+    class Manager:
+        async def exec_command(self, *a, **k):
+            if during == "exec":
+                selected[0] = replace(SCOPE, configuration="changed")
+            return SimpleNamespace(exit_code=0, stdout="ACMUX1\t0\tgone\nACMUX1\tDONE\t1\n")
+
+        async def disconnect(self, name):
+            if during == "disconnect":
+                selected[0] = replace(SCOPE, configuration="changed")
+
+    async def opener(name):
+        return Manager()
+
+    probe = mux.RemoteMuxProbe(
+        scope_reader=lambda: selected[0], clock=lambda: 1, open_manager=opener,
+    )
+    assert await probe.probe_wave("cs", ["m"], inventory(), 1, lambda: True) == {"m": None}
+
+
+async def test_scope_change_during_credential_lookup_cannot_fetch_config(monkeypatch):
+    token = "fixture"
+    scope = replace(SCOPE, credentials=(inv._digest(token), "y", "z"))
+    selected = [scope]
+
+    def credential(account):
+        selected[0] = replace(scope, source="replaced")
+        return token
+
+    class Source:
+        def get_ssh_config(self):
+            pytest.fail("stale scope performed config fetch")
+
+    monkeypatch.setattr(mux, "credential", credential)
+    monkeypatch.setattr(mux, "_admitted_source", lambda *a: Source())
+    probe = mux.RemoteMuxProbe(scope_reader=lambda: selected[0], clock=lambda: 1)
+    value = replace(inventory(), scope=scope)
+    assert await probe.probe_wave("cs", ["m"], value, 1, lambda: True) == {"m": None}
+
+
+def test_owner_credential_bypasses_legacy_cache_and_preserves_provider(monkeypatch):
+    from agent_codespaces import gh_account, picker_auth
+
+    selected, provider = ["old"], [None]
+    monkeypatch.setattr(picker_auth, "credential_token", lambda account: provider[0])
+    monkeypatch.setattr(gh_account.shutil, "which", lambda name: "fixture-gh")
+    monkeypatch.setattr(gh_account.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=selected[0],
+    ))
+    gh_account._token_for_account.cache_clear()
+    try:
+        assert gh_account._token_for_account("fixture-account") == "old"
+        selected[0] = "new"
+        assert inv.credential("fixture-account") == "new"
+        assert gh_account._token_for_account("fixture-account") == "old"
+        provider[0] = "provider"
+        assert inv.credential("fixture-account") == "provider"
+    finally:
+        gh_account._token_for_account.cache_clear()
+
+
+async def test_listing_only_injection_retains_default_opener(monkeypatch):
+    opened = []
+
+    class Manager:
+        async def exec_command(self, *a, **k):
+            return SimpleNamespace(exit_code=0, stdout="ACMUX1\t0\tpresent\nACMUX1\tDONE\t1\n")
+
+        async def disconnect(self, name):
+            pass
+
+    async def opener(name):
+        opened.append(name)
+        return Manager()
+
+    monkeypatch.setattr(sf, "_open_codespace", opener)
+    probe = sf.make_remote_mux_probe(
+        list_codespaces=lambda: [SimpleNamespace(name="cs", state="Available")],
+    )
+    assert await probe("cs", ["m"]) == {"m": True}
+    assert opened == ["cs"]
+
+
+async def test_contended_registry_does_not_block_sibling_probe(store, monkeypatch):
+    for name in ("slow", "fast"):
+        owner.hold(name, "t", mux_session="m")
+    release, entered = threading.Event(), threading.Event()
+    fast = asyncio.Event()
+    real = sf.get_hold
+
+    def read(name, ttl):
+        if name == "slow":
+            entered.set()
+            assert release.wait(5)
+        return real(name, ttl)
+
+    async def probe(name, targets):
+        if name == "fast":
+            fast.set()
+        return {"m": None}
+
+    monkeypatch.setattr(sf, "get_hold", read)
+    forwards = sf.SessionForwards(lambda *a: None, probe)
+    task = asyncio.create_task(forwards.probe(owner.list_holds()))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        await asyncio.wait_for(fast.wait(), 2)
+    finally:
+        release.set()
+        await task
+
+
+async def test_default_bridge_reuses_inventory_not_transport(store, monkeypatch):
+    owner.hold("cs", "t", mux_session="m", daemon_port=12345)
+    acquisitions, operations, closed = [], [], []
+
+    def read(wave):
+        acquisitions.append(wave)
+        return inventory(wave)
+
+    class Manager:
+        async def exec_command(self, name, command, **kwargs):
+            operations.append("mux" if "ACMUX1" in command else "bridge")
+            return SimpleNamespace(exit_code=0, stdout="ACMUX1\t0\tpresent\nACMUX1\tDONE\t1\n")
+
+        async def disconnect(self, name):
+            closed.append(name)
+
+    async def opener(name):
+        return Manager()
+
+    monkeypatch.setattr(lifecycle, "list_codespaces", lambda: pytest.fail("hidden relisting"))
+    probe = mux.RemoteMuxProbe(
+        inventory_reader=read, scope_reader=lambda: SCOPE, clock=lambda: 1, open_manager=opener,
+    )
+    forwards = sf.SessionForwards(
+        lambda *a: None, probe, bridge_probe=sf.make_remote_bridge_probe(),
+    )
+    forwards._channels["cs"] = (12345, SimpleNamespace(is_alive=True))
+    await forwards.probe(owner.list_holds())
+    assert len(acquisitions) == 1
+    assert operations == ["mux", "bridge"]
+    assert closed == ["cs", "cs"]

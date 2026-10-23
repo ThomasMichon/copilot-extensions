@@ -217,7 +217,8 @@ def test_actual_shell_batch_protocol_and_quoting(tmp_path):
     assert mux.parse_batch(targets, result.stdout, result.returncode) == dict.fromkeys(targets)
 
 
-async def test_cancel_real_owned_config_child_is_drained(monkeypatch, tmp_path):
+@pytest.mark.parametrize("kind", ["mux", "bridge"])
+async def test_cancel_real_owned_config_child_is_drained(monkeypatch, tmp_path, kind):
     script, done = tmp_path / "config.py", tmp_path / "done"
     script.write_text(
         "import pathlib,sys,time\n"
@@ -256,7 +257,11 @@ async def test_cancel_real_owned_config_child_is_drained(monkeypatch, tmp_path):
         inv.AccountListing("a", (inv.InventoryRow("cs", "Available", "a"),), now, True),
     ))
     probe = mux.RemoteMuxProbe(scope_reader=lambda: scope)
-    task = asyncio.create_task(probe.probe_wave("cs", ["m"], value, 1, lambda: True))
+    operation = (
+        probe.probe_wave("cs", ["m"], value, 1, lambda: True) if kind == "mux" else
+        sf.make_remote_bridge_probe().probe_wave("cs", 12345, probe, value, 1, lambda: True)
+    )
+    task = asyncio.create_task(operation)
     assert await asyncio.to_thread(entered.wait, 5)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):

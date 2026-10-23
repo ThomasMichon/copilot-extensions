@@ -373,11 +373,9 @@ def heartbeat(
 ) -> OwnerHold | None:
     """Refresh ``tenant``'s heartbeat. Returns the hold, or ``None`` if absent.
 
-    Unlike :func:`hold`, does not create a missing hold or a missing tenant --
-    heartbeating a tenant that was already reclaimed is a no-op (returns the hold
-    if it still exists for other reasons, else ``None``).
-    A supplied session generation is compared under the same lock as the write;
-    a stale observation cannot renew a replacement launch.
+    Unlike :func:`hold`, does not create missing holds or tenants. A reclaimed
+    tenant returns the hold if it still exists for other reasons, else ``None``.
+    A supplied generation atomically fences renewal against replacement.
     """
     now = time.time()
     with _owner_lock():

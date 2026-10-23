@@ -91,6 +91,18 @@ defers to the next due wave, with no hidden per-venue refresh.
   interruptible timeout-cleanup path. Unequal sibling cleanup and timeout-first
   replacement controls pass. Final scoped run: **190 tests passed**; independent
   verification confirmed the named cancellation defects resolved.
+- Provider review tightened post-exec/disconnect scope validation, credential
+  rotation, pre-config admission and listing-only compatibility. Default bridge
+  proof now uses the same inventory with a separately owned manager and bounded
+  config cleanup; this is not S3c transport borrowing. Registry read/renew/release
+  calls run in joined workers rather than blocking the owner's event loop.
+- CI's module cap prompted extraction of owner qualification/parsing into the
+  new helper rather than widening any baseline or unrelated module.
+- Provider-review regression run: **198 tests passed**, including credential
+  rotation, scope changes during execution/disconnect/credential acquisition,
+  listing-only provider compatibility, contended-registry sibling progress,
+  same-inventory/separate-manager bridge proof and actual bridge config-child
+  cancellation. All product and test deadlines remain unchanged.
 
 ## Reproduction and remaining cells
 

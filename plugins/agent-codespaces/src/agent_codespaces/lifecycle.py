@@ -20,6 +20,8 @@ from agent_procutil import no_window_flags
 
 from .config import RUNTIME_DIR, CodespacesConfig, RepoConfig
 from .worktrees import ContextRefused, validate_context
+from .owner_inventory import qualified_account_listing as qualified_account_listing
+from .owner_inventory import decode_listing
 
 log = logging.getLogger("agent-codespaces")
 
@@ -134,23 +136,6 @@ def list_codespaces(*, concurrent: bool = False) -> list[CodespaceInfo]:
     return list(merged.values())
 
 
-def qualified_account_listing(login: str | None, *, clock: Callable[[], float] = time.monotonic):
-    """A single bounded page with explicit error/completeness for owner waves."""
-    from .owner_inventory import AccountListing, InventoryRow
-
-    observed = clock()
-    try:
-        rows = _list_codespaces_under(login, qualified=True)
-        return AccountListing(
-            login, tuple(InventoryRow(row.name, row.state, login) for row in rows),
-            observed, len(rows) < 50,
-        )
-    except ContextRefused:
-        raise
-    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
-        return AccountListing(login, (), observed, False, type(exc).__name__)
-
-
 def _list_codespaces_under(login: str | None, *, qualified: bool = False) -> list[CodespaceInfo]:
     """Run ``gh codespace list`` under one account (or ambient when None)."""
     from . import gh_account
@@ -162,11 +147,9 @@ def _list_codespaces_under(login: str | None, *, qualified: bool = False) -> lis
         "--limit", "50",
     ]
     if qualified:
-        from .owner_inventory import credential
+        from .owner_inventory import qualified_environment
 
-        env = dict(os.environ)
-        env["GH_TOKEN"] = credential(login)
-        env.pop("GITHUB_TOKEN", None)
+        env = qualified_environment(login)
     else:
         env = gh_account.env_for_account(login) if login else None
 
@@ -184,25 +167,7 @@ def _list_codespaces_under(login: str | None, *, qualified: bool = False) -> lis
             f"gh codespace list failed{who}: {result.stderr.strip()}"
         )
 
-    try:
-        if qualified and not result.stdout.strip():
-            raise ValueError("Empty response")
-        entries = json.loads(result.stdout) if result.stdout.strip() else []
-    except (ValueError, TypeError):
-        if qualified:
-            raise RuntimeError("Malformed CodeSpace listing") from None
-        # A malformed/unexpected payload for one account must not sink the
-        # whole cross-account merge; treat it as "no CodeSpaces here".
-        return []
-    if qualified and (
-        not isinstance(entries, list)
-        or any(
-            not isinstance(e, dict) or not isinstance(e.get("name"), str)
-            or not e["name"] or not isinstance(e.get("state"), str) or not e["state"]
-            for e in entries
-        )
-    ):
-        raise RuntimeError("Malformed CodeSpace listing")
+    entries = decode_listing(result.stdout, qualified=qualified)
     codespaces = []
     for e in entries:
         git_status = e.get("gitStatus", {})

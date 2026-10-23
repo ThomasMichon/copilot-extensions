@@ -43,7 +43,7 @@ from .connection_owner import (
 )
 from ._ssh_retry import exec_with_retry
 from .owner_availability import AvailabilityGate
-from .owner_inventory import drain_tasks
+from .owner_inventory import bounded_operation, drain_tasks, finish_cleanup, joined_thread
 
 log = logging.getLogger("agent-codespaces")
 
@@ -371,7 +371,7 @@ class SessionForwards:
             await self._probe_holds(holds)
 
     async def _probe_holds(self, holds: list[OwnerHold]) -> None:
-        from .owner_mux_probe import RemoteMuxProbe
+        from .owner_mux_probe import RemoteBridgeProbe, RemoteMuxProbe
 
         if self._probe is None or self._closed:
             self._start_owed_pushes()
@@ -415,17 +415,12 @@ class SessionForwards:
             async with semaphore:
                 if not current():
                     return
-                observation = asyncio.create_task(observe(hold))
                 try:
-                    await asyncio.wait_for(observation, timeout=self._probe_timeout)
+                    await bounded_operation(observe(hold), timeout=self._probe_timeout)
                 except asyncio.TimeoutError:
                     log.warning("Connection Owner: session probe for %s timed out", hold.codespace)
                 except Exception as exc:
                     log.warning("Connection Owner: session probe for %s failed: %s", hold.codespace, exc)
-                finally:
-                    # In Python 3.10/3.11, cancellation can interrupt wait_for's
-                    # timeout cleanup. Retain and join the observation itself.
-                    await drain_tasks((observation,))
 
         async def observe(hold: OwnerHold) -> None:
             by_mux: dict[str, list[tuple[str, bool, str | None]]] = {}
@@ -433,29 +428,35 @@ class SessionForwards:
                 by_mux.setdefault(meta["mux_session"], []).append(
                     (tenant, bool(meta.get("confirmed")), meta.get("generation")),
                 )
-            def owned() -> bool:
-                live = get_hold(hold.codespace, self._ttl)
+            async def owned() -> bool:
+                live = await joined_thread(get_hold, hold.codespace, self._ttl)
                 return current() and live is not None and any(
                     tenant in live.sessions
                     and live.sessions[tenant].get("generation") == meta.get("generation")
                     for tenant, meta in hold.sessions.items()
                 )
 
-            if not owned():
+            if not await owned():
                 return
             if isinstance(self._probe, RemoteMuxProbe):
                 verdicts = await self._probe.probe_wave(
-                    hold.codespace, sorted(by_mux), inventory, generation, owned,
+                    hold.codespace, sorted(by_mux), inventory, generation, current,
+                    owner_check=owned,
                 )
             else:
                 verdicts = await self._probe(hold.codespace, sorted(by_mux))
-            if not owned():
+            if not await owned():
                 return
             if any(v is True for v in verdicts.values()):
                 # Only while a session provably runs there: the CodeSpace is
                 # Available, so this never wakes a stopped box.
-                await self._check_bridge(hold.codespace)
-                if not owned():
+                bridge = None
+                if inventory is not None and isinstance(self._bridge_probe, RemoteBridgeProbe):
+                    bridge = lambda cs, port: self._bridge_probe.probe_wave(
+                        cs, port, self._probe, inventory, generation, current, owned,
+                    )
+                await self._check_bridge(hold.codespace, probe=bridge)
+                if not await owned():
                     return
                 self._live_seen[hold.codespace] = now
                 if not self._start_mirror(hold.codespace):
@@ -467,14 +468,18 @@ class SessionForwards:
                 verdict = verdicts.get(mux)
                 for tenant, confirmed, tenant_generation in tenants:
                     if verdict is True:
-                        heartbeat(hold.codespace, tenant, self._ttl, generation=tenant_generation)
+                        await joined_thread(
+                            lambda: heartbeat(hold.codespace, tenant, self._ttl, generation=tenant_generation),
+                        )
                     elif verdict is False and confirmed:
                         log.info(
                             "Connection Owner: session %s on %s is gone (or the "
                             "CodeSpace is no longer Available); releasing tenant %s",
                             mux, hold.codespace, tenant,
                         )
-                        release(hold.codespace, tenant, ttl=self._ttl, generation=tenant_generation)
+                        await joined_thread(
+                            lambda: release(hold.codespace, tenant, ttl=self._ttl, generation=tenant_generation),
+                        )
         tasks = {asyncio.create_task(one(hold)) for hold in due}
         self._probe_tasks.update(tasks)
         try:
@@ -555,7 +560,7 @@ class SessionForwards:
         self._mirroring[codespace] = asyncio.get_running_loop().create_task(run())
         return True
 
-    async def _check_bridge(self, codespace: str) -> None:
+    async def _check_bridge(self, codespace: str, *, probe: BridgeProbe | None = None) -> None:
         """Rebuild ``codespace``'s bridge forward when it no longer serves.
 
         Its ssh process can outlive the forward (a transport reset that leaves
@@ -567,7 +572,7 @@ class SessionForwards:
             return
         port, channel = entry
         try:
-            serving = await self._bridge_probe(codespace, port)
+            serving = await (probe or self._bridge_probe)(codespace, port)
         except Exception as exc:
             log.debug("bridge probe on %s failed: %s", codespace, exc)
             return
@@ -758,16 +763,35 @@ async def _open_codespace(codespace: str) -> Any:
     The account lookup (a ``gh codespace list`` when nothing is bound) and the
     source (``gh auth token`` for a bound account) run in a worker thread: on
     the Owner's loop they would stall every forward it carries."""
-    from ssh_manager import ConnectionManager
-
-    from .codespace_config import CodespaceSource
     from .lifecycle import account_for_codespace
+    from .owner_inventory import credential
+    from .owner_mux_probe import _admitted_manager, _admitted_source
 
-    manager = ConnectionManager()
-    source = await asyncio.to_thread(
-        lambda: CodespaceSource(codespace, account=account_for_codespace(codespace)))
-    await manager.ensure_connected(codespace, source, [])
-    return manager
+    deadline = time.monotonic() + 30.0
+
+    def remaining():
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise RuntimeError("Legacy observation admission expired")
+        return budget
+
+    async def admit():
+        return remaining()
+
+    manager = None
+    try:
+        account = await joined_thread(account_for_codespace, codespace)
+        token = await joined_thread(credential, account)
+        source = _admitted_source(codespace, account, token, remaining)
+        await joined_thread(source.get_ssh_config)
+        manager = _admitted_manager(admit)
+        budget = remaining()
+        await bounded_operation(manager.ensure_connected(codespace, source, []), timeout=budget)
+        return manager
+    except BaseException:
+        if manager is not None:
+            await finish_cleanup(manager.disconnect(codespace))
+        raise
 
 
 #: ``curl`` exits meaning the forward didn't connect or answer (7 couldn't
@@ -783,7 +807,11 @@ def make_remote_bridge_probe(
     authenticated probe (``venue_copilot.bridge_probe_script``), run from the
     CodeSpace over a short-lived exec channel. Called only for a CodeSpace
     whose session the mux probe just saw running, so it never wakes one."""
-    opener = open_manager or _open_codespace
+    if open_manager is None:
+        from .owner_mux_probe import RemoteBridgeProbe
+
+        return RemoteBridgeProbe()
+    opener = open_manager
 
     async def probe(codespace: str, port: int) -> bool | None:
         from venue_copilot import bridge_probe_script
@@ -836,5 +864,6 @@ def make_remote_mux_probe(
         return OwnerInventory(wave, scope, (AccountListing(None, rows, observed, True),))
 
     return RemoteMuxProbe(
-        inventory_reader=inventory, scope_reader=lambda: scope, open_manager=open_manager,
+        inventory_reader=inventory, scope_reader=lambda: scope,
+        open_manager=open_manager or _open_codespace,
     )
