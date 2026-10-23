@@ -361,6 +361,8 @@ support does not assert that every engine produces those optional fields.
 Binding replacement never waits for an older scalar read; late results stay in
 their original binding/epoch. Failed scalar lookups may retry after reload,
 without discarding accepted bootstrap values.
+An event-loop caller with an unprepared scalar receives a configuration-pending
+error instead of starting a process or waiting on a setup worker's scalar lock.
 
 First pending refresh is not first current rows, and neither alone proves visible
 native input acknowledgement. Existing launch tracing records

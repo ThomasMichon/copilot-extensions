@@ -9,6 +9,7 @@ instead of importing the engine in-process.
 from __future__ import annotations
 
 import contextlib
+import asyncio
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -58,6 +59,12 @@ def _scalar(cache: _ScalarCache, epoch: int, project: str, key: str) -> str:
     value = cache.values.get(identity)
     if value is not None:
         return value
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError("Picker configuration is not ready; wait for setup or reload")
     with cache.lock:
         if identity not in cache.values:
             if cache.failures.get(identity) == epoch:

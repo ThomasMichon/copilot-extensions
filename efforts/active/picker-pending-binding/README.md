@@ -193,6 +193,9 @@ contract is introduced.
   binding/epoch identity, accepted values survive reload, and negative lookup
   results retry in the next reload epoch. Gated old-reader, late-file-result and
   timeout/recovery regressions pass; the complete targeted cohort is **258 passed**.
+- The same fast-path rule now refuses uncached scalar reads from an event loop
+  rather than starting or waiting on a process. Worker prefetch makes subsequent
+  input reads available; its regression brings the final cohort to **259 passed**.
 - Read-only integration inspection after #7974 merged found **no optional scalar
   fields** in `cmd_picker_bootstrap` at Dev `41913ba4c176c3f2e17ad7c375f9406ac6feba30`.
   Its targeted invocation-record improvement is compatible with this consumer,

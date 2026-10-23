@@ -3,9 +3,34 @@ from __future__ import annotations
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import asyncio
+
+import pytest
 
 from worktree_manager import harness_state
 from worktree_manager.production_picker import context, project_config
+
+
+def test_uncached_scalar_never_starts_or_waits_on_an_event_loop(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        project_config.engine_client, "get_value",
+        lambda *args: calls.append(args) or str(tmp_path),
+    )
+    project_config.bind_bootstrap("example", None)
+
+    async def exercise():
+        with pytest.raises(RuntimeError, match="configuration is not ready"):
+            project_config._project_dir("example")
+        assert calls == []
+        assert await asyncio.to_thread(project_config._project_dir, "example") == tmp_path
+        assert project_config._project_dir("example") == tmp_path
+
+    try:
+        asyncio.run(exercise())
+        assert calls == [("example", "config-dir")]
+    finally:
+        project_config.clear_caches(reset_binding=True)
 
 
 def test_rebinding_does_not_wait_for_or_accept_old_scalar_reader(monkeypatch, tmp_path):
