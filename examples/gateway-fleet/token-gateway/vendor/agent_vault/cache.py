@@ -56,6 +56,7 @@ class PersistentCache:
         self._key_file = base / "credential-cache.key"
         self._lock_file = base / "credential-cache.lock"
         self._replacement_lock_file = base / "credential-replacement.lock"
+        self._key_init_lock_file = base / "credential-cache-key.lock"
         self._fernet = None
         self._available: bool | None = None
 
@@ -86,21 +87,22 @@ class PersistentCache:
         from . import kek
 
         self._base_dir.mkdir(parents=True, exist_ok=True)
-        if self._key_file.exists():
-            blob = self._key_file.read_bytes()
-            if kek.is_wrapped(blob):
-                key = kek.unwrap_bytes(blob)
+        with self._file_lock(self._key_init_lock_file):
+            if self._fernet is not None:
+                return self._fernet
+            if self._key_file.exists():
+                blob = self._key_file.read_bytes()
+                if kek.is_wrapped(blob):
+                    key = kek.unwrap_bytes(blob)
+                else:
+                    key = blob.strip()
+                    with contextlib.suppress(Exception):
+                        self._write_key(key)
             else:
-
-
-                key = blob.strip()
-                with contextlib.suppress(Exception):
-                    self._write_key(key)
-        else:
-            key = Fernet.generate_key()
-            self._write_key(key)
-        self._fernet = Fernet(key)
-        return self._fernet
+                key = Fernet.generate_key()
+                self._write_key(key)
+            self._fernet = Fernet(key)
+            return self._fernet
 
     def _write_key(self, key: bytes) -> None:
         pass
