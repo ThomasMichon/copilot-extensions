@@ -1,0 +1,9 @@
+{
+  "comment": "Retain canonical native Linux foundation helpers in the standalone Manager dependency closure.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
