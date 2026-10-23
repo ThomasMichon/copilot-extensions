@@ -95,6 +95,14 @@ after-images. The source is
 `8b7b8778b69e6bd1b6a6f2b0018fa6e1f59d961f`; the accepted comparison is
 `0ec17554ea0a6cbf7d890e9b4704433ae061e0e5`.
 
+The original published commit
+`339dc00123964d84a117afd55197a192895ebac8` contains the exact same two
+source blobs. Their public bodies are
+[`test_pr_repo_fixture.py`](https://github.com/ThomasMichon/copilot-extensions/blob/339dc00123964d84a117afd55197a192895ebac8/plugins/agent-worktrees/tests/test_pr_repo_fixture.py)
+and
+[`test_pr_seed_cache.py`](https://github.com/ThomasMichon/copilot-extensions/blob/339dc00123964d84a117afd55197a192895ebac8/plugins/agent-worktrees/tests/test_pr_seed_cache.py);
+neither source comparison requires unpublished local history.
+
 | Source hunk | Source Git blob | Accepted Git blob | Disposition |
 |---|---|---|---|
 | `tests/test_pr_repo_fixture.py:1`, `6289ec5ea07d` | `61f9c3ce112b3479165a0cd9eb01447dfc7c6ce9` | `aceb5e88bea1ba132134cc7efa2ba2a1d0c6f76d` | Preserve the stronger accepted assertions; no historical file replay. |
