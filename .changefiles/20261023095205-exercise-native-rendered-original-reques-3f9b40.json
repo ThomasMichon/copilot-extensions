@@ -1,0 +1,9 @@
+{
+  "comment": "Exercise native rendered original-request recovery against an isolated real owner at narrow and wide terminal sizes.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
