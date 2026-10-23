@@ -9,11 +9,12 @@ from .engine_dialogs import ScopeDlgScreen, TaskMenuScreen
 from .create_action_screen import CreateActionScreen
 from .background import run_background
 from .inbox import ensure_inbox
+from .engine_form_drafts import PivotFormDraftActionsMixin
 from .steering import PivotCardScreen, PivotFormScreen, SubmitErrorScreen, _normalize_form_fields, _steer_draft_path
 
 log = logging.getLogger("agent-worktrees.picker")
 
-class PickerScreenPivotActionsMixin:
+class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
     def _run_view_action(self, action):
         from worktree_manager.pivot_progress import PivotProgressScreen
 
@@ -448,6 +449,15 @@ class PickerScreenPivotActionsMixin:
                      or _pivots.resolve_path(rec, "card.body")),
         }
         task_id = ctx.get("task_id") or rec.get(reg.id_field) or ""
+        from worktree_manager.form_drafts import form_binding, shared_values
+        try:
+            binding = form_binding(reg, action, rec, ctx, fields, card)
+        except ValueError as error:
+            self.app.push_screen(SubmitErrorScreen(action.label, str(error), None))
+            return
+        from copy import deepcopy
+        ctx = deepcopy(ctx)
+        draft = spec.get("draft")
 
         def _after(result):
             if result is None:
@@ -456,21 +466,22 @@ class PickerScreenPivotActionsMixin:
             kind = result.get("action")
             values = result.get("values") or {}
             if kind == "confirm":
-                self._run_pivot_form_submit(reg, action, ctx, title, values)
-            elif kind == "save":
-                self._run_pivot_form_draft_save(reg, ctx, title, values)
+                self._run_pivot_form_submit(
+                    reg, action, ctx, title, values, draft_binding=screen._draft_binding,
+                )
+            elif kind == "save" and draft:
+                self._run_pivot_form_draft(reg, action, ctx, title, values, screen)
 
         def _on_clear_draft():
-            self._run_pivot_form_draft_clear(reg, ctx, title)
+            self._run_pivot_form_draft(reg, action, ctx, title, {}, screen, clear=True)
 
-        self.app.push_screen(
-            PivotFormScreen(
-                card, fields, action.label, task_id=str(task_id),
-                on_clear_draft=_on_clear_draft,
-            ),
-            _after,
+        screen = PivotFormScreen(
+            card, fields, action.label, task_id=str(task_id),
+            on_clear_draft=_on_clear_draft if draft else None,
+            draft_binding=binding, draft_values=shared_values(draft, rec, fields),
         )
-    def _run_pivot_form_submit(self, reg, action, ctx, title, values):
+        self.app.push_screen(screen, _after)
+    def _run_pivot_form_submit(self, reg, action, ctx, title, values, *, draft_binding=None):
         """Run a submitted form off the render flow with single-pass values.
 
         Declared text results retain full provider output in the shared command
@@ -538,7 +549,7 @@ class PickerScreenPivotActionsMixin:
                 # (the coordinator clears its own ``card_draft`` server-side on
                 # a successful steer; this is just the local copy).
                 if task_id:
-                    path = _steer_draft_path(str(task_id))
+                    path = _steer_draft_path(str(task_id), draft_binding)
                     try:
                         if path and path.exists():
                             path.unlink()
@@ -570,7 +581,7 @@ class PickerScreenPivotActionsMixin:
                 # richer error surface replaces it instead of stacking on
                 # top of it.
                 self.debug = f"{action.label} failed · {short or 'see command output'}"
-                draft_path = _steer_draft_path(str(task_id)) if task_id else None
+                draft_path = _steer_draft_path(str(task_id), draft_binding) if task_id else None
                 if self.progress is prog:
                     self.progress = None
                     self.app.pop_screen()
@@ -667,70 +678,6 @@ class PickerScreenPivotActionsMixin:
                 self.app.push_screen(SubmitErrorScreen(action.label, msg or short, None))
 
         self._run_bg(action.label, _work, _done)
-    def _run_pivot_form_draft_save(self, reg, ctx, title, values):
-        """Persist an operator's not-yet-submitted draft answer as the task's
-        durable ``card_draft`` on the coordinator (``agent-dispatch card draft
-        save``) -- the Steer form's **Save**. Never touches ``awaiting_steer``
-        or the task's status; the task stays blocked exactly as before. Runs
-        off the render flow via :meth:`_run_bg`, mirroring
-        :meth:`_run_pivot_form_submit`."""
-        from . import pivots as _pivots
-
-        rt = self._pivot_runtime(reg)
-        task_id = ctx.get("task_id")
-        argv = _pivots.format_form_template(
-            ["agent-dispatch", "card", "draft", "save", "{task_id}", "{fields}"],
-            ctx, values,
-        )
-
-        def _work():
-            try:
-                return rt.run_resolved(argv)
-            except Exception as exc:
-                return False, f"{type(exc).__name__}: {exc}"
-
-        def _done(result):
-            ok, msg = result
-            short = (msg or "").splitlines()[0][:80] if msg else ""
-            if ok:
-                self.debug = f"Save · {title}" + (f" — {short}" if short else "")
-            else:
-                self.debug = f"Save failed · {short or 'see command output'}"
-                draft_path = _steer_draft_path(str(task_id)) if task_id else None
-                self.app.push_screen(
-                    SubmitErrorScreen("Save", msg or short, draft_path)
-                )
-
-        self._run_bg("Save", _work, _done, quiet=True)
-    def _run_pivot_form_draft_clear(self, reg, ctx, title):
-        """Clear a task's durable ``card_draft`` on the coordinator
-        (``agent-dispatch card draft clear``) -- the Steer form's **Reset**.
-        Never touches ``awaiting_steer``/status. Best-effort: Reset already
-        cleared the local draft and every on-screen field synchronously, so a
-        failure here only means the coordinator keeps a now-superseded draft
-        around -- worth surfacing, but not worth blocking on."""
-        from . import pivots as _pivots
-
-        rt = self._pivot_runtime(reg)
-        argv = _pivots.format_form_template(
-            ["agent-dispatch", "card", "draft", "clear", "{task_id}"], ctx, {}
-        )
-
-        def _work():
-            try:
-                return rt.run_resolved(argv)
-            except Exception as exc:
-                return False, f"{type(exc).__name__}: {exc}"
-
-        def _done(result):
-            ok, msg = result
-            short = (msg or "").splitlines()[0][:80] if msg else ""
-            self.debug = (
-                f"Reset · {title}" if ok
-                else f"Reset: coordinator draft not cleared · {short or 'see command output'}"
-            )
-
-        self._run_bg("Reset", _work, _done, quiet=True)
     def _scope_label(self):
         return "All sources" if self.is_all() else self._current_tab()["label"]
     def _impact_rows(self, ids):

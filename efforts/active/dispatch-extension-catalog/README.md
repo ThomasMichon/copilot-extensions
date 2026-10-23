@@ -1087,3 +1087,50 @@ authorized installed proof remain distinct obligations.
   for Clear and a fresh non-absent Save revision before reporting success.
   Four corrupt/stale-response regressions prove no automatic mutation replay.
   The final contained draft/HTTP/native-CLI selection passed 46 tests.
+
+### 2026-10-23 - Guarded draft owner merged; native adoption next
+
+- #8013 merged at 01:05Z as `0ca8862f83ca05575653d9424699d2d909fc213b`.
+  Exact head `d80ba5015c60c1a33c4f2851b416879682d7045b` had an approving
+  review with no unresolved findings and complete green required CI. The
+  incomplete/stale acknowledgement finding was fixed and its thread resolved.
+- Re-read the full Plan and Validation Plan. Existing draft transactions now
+  provide the card/ownership and observed-draft CAS boundary, explicit absence,
+  provenance, old-owner refusal and guarded CLI/SDK operations. This is source
+  delivery, not installed or independent-client adoption.
+- Next is generic contributed draft Save/Reset and provenance-bound local
+  restore in Manager, followed by exact-original-request restart/vanished-row
+  recovery. Keep owner-backed shared drafts separate from client recovery
+  context; no persisted command is executable authority by itself.
+- #7141 and this effort remain Active. No live task, source activation,
+  installed update, producer migration or fleet cutover occurred.
+
+### 2026-10-23 - Native contributed shared-draft adoption
+
+- Manager now consumes optional provider-declared Save/Clear argv and provenance
+  selectors through its existing contribution parsers and payload resolution.
+  The dispatch backend remains outside Manager; forms without a declaration
+  do not acquire an implicit dispatch command.
+- Tasks and Maintenance declare card/draft-CAS commands with the owning queue
+  identity. Dedicated scoped HTTP routes and capability-gated SDK/CLI calls
+  refuse a different queue or older owner before mutation, reusing the existing
+  durable queue identity and draft transaction rather than adding a store.
+- Local production recovery binds source/resolved commands, machine, task,
+  action/schema, card, provider installation/queue scope and observed draft
+  revision. Unbound or mismatched files are not adopted. Shared drafts restore
+  only for their original card version. Atomic local writes precede dismissal;
+  a write error retains the open form and its answer.
+- Reset freezes input until Clear is acknowledged. Failure retains fields and
+  local recovery; success updates only the form's draft revision, not the
+  original card basis. Neither Save nor Reset submits an answer or wakes a task.
+- Contained native Manager selections passed 269 tests with one opt-in skip;
+  the final changed form/result/local-write selection passed 93 tests. Owner
+  scope, HTTP/SDK, board and native CLI selections passed 310 tests with one
+  opt-in skip. Native multi-interpreter cases measured roughly 50 seconds each
+  on this host; explicit bounded case/process deadlines cover their real cold
+  startup rather than failing the previous aggregate 30-second harness limit.
+  Lint, unchanged module ceilings and all 13 install contracts passed.
+- This slice is awaiting publication/review. Native POSIX and authorized
+  installed-client proof remain distinct and open; no live task or deployment
+  was exercised. Exact-original-request restart/vanished-row recovery is next,
+  and the full Plan and Validation Plan remain open under #7141 and #7091.

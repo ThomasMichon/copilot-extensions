@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 from .configuration_preview import validate_preview_actions
+from .form_drafts import parse_draft
 
 from .harness_state import (
     build_projects,
@@ -258,6 +259,8 @@ def _parse_actions(
         key = item.get("key")
         action_key = key if isinstance(key, str) and key else f"action{i}"
         kind = item.get("kind") or "command"
+        if "draft" in item and kind != "form":
+            raise ContractError(f"`{path}.draft` requires a form action")
         if kind not in ("command", "internal", "form", "card"):
             raise ContractError(f"`{path}.kind` is unsupported")
         internal = None
@@ -286,6 +289,11 @@ def _parse_actions(
                 "body_from": _optional_path(
                     item.get("body_from"), where=f"`{path}.body_from`"),
             }
+            try:
+                if item.get("draft") is not None:
+                    form["draft"] = parse_draft(item["draft"])
+            except ValueError as exc:
+                raise ContractError(str(exc)) from exc
         elif kind == "card":
             run = ()
             card = {

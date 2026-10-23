@@ -199,9 +199,12 @@ def _steer_drafts_dir() -> Path:
     return Path(override) if override else Path.home() / ".agent-worktrees" / "steer-drafts"
 
 
-def _steer_draft_path(task_id: str) -> Path | None:
+def _steer_draft_path(task_id: str, binding: dict | None = None) -> Path | None:
     """Per-task draft file path (``<drafts>/<sanitized-task-id>.json``), or
     ``None`` when the task id has no filesystem-safe characters."""
+    if binding is not None:
+        from worktree_manager.form_drafts import fingerprint
+        return _steer_drafts_dir() / f"bound-{fingerprint(binding)}.json"
     tid = "".join(c for c in str(task_id) if c.isalnum() or c in "-_")
     return _steer_drafts_dir() / f"{tid}.json" if tid else None
 
@@ -415,4 +418,3 @@ class SubmitErrorScreen(ModalScreen[None]):
 
 
 from .steering_form import PivotFormScreen  # noqa: F401,E402 -- re-export for engine.py
-

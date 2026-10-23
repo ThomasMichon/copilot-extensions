@@ -212,6 +212,10 @@ class GuardedCardDraftBody(CardDraftBody):
     expected_draft_revision: str = Field(min_length=1, strict=True)
 
 
+class ScopedCardDraftBody(GuardedCardDraftBody):
+    expected_queue_id: str = Field(min_length=1, strict=True)
+
+
 class SteerTakeBody(BaseModel):
     worker_id: str
     all_pending: bool = False

@@ -257,7 +257,8 @@ def format_form_template(
                     _encode_field_value(fields.get(field_name[len(field_prefix):], "")),
                     field_name,
                 )
-            return (ctx.get(field_name, ""), field_name)
+            from worktree_manager.form_drafts import read_path
+            return (ctx[field_name] if field_name in ctx else read_path(ctx, field_name, ""), field_name)
 
         def format_field(self, value, format_spec):  # type: ignore[override]
             return "" if value is None else str(value)

@@ -1,12 +1,10 @@
-"""``PivotFormScreen`` -- mechanical extraction from ``steering.py``.
-
-This module exists only to control ``steering.py`` module size. The
-extracted class was moved verbatim with no behavior change.
-"""
+"""Contributed card forms with local recovery and acknowledged shared Reset."""
 
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -23,6 +21,7 @@ from .field_questions import FieldQuestionsMixin
 from .field_widgets import compose_field
 from .steering import (
     ResetConfirmScreen,
+    SubmitErrorScreen,
     SteerButtonRow,
     _card_markdown,
     _steer_draft_path,
@@ -30,49 +29,19 @@ from .steering import (
 
 
 class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
-    """Docked card + tabbed elicitation modal (the DISPATCH-pivot 'Steer' surface).
+    """Docked card and tabbed input; the caller owns every provider command.
 
-    A Copilot-CLI-style layout: the card's prose fills the top (a scrollable
-    ``#steer-card`` that takes all the height the docked input doesn't need), and
-    a **docked** elicitation section sits at the bottom -- one **tab per question**
-    (``TabbedContent``; a single question skips the tab bar), each a single-select
-    (``RadioSet``), multi-select (``SelectionList``), or free-form
-    auto-expanding text box (up to 10 lines). A choice/multichoice that declares
-    ``allow_other`` gains an **"Other…"** entry that reveals a free-text box.
-    Beneath sits a single-line Picker-style button row, with three genuinely
-    distinct semantics (not three names for the same close-and-persist action):
+    Confirm, Save and Escape atomically preserve a local response before
+    dismissal. A failed local write keeps the form open. Production callers
+    bind recovery to provider, installation/queue, task, action/schema, card
+    and observed shared-draft revision; unbound legacy files are not adopted.
+    Save/Escape return all answers (including hidden partial work), whereas
+    Confirm returns only currently applicable fields.
 
-    * **Confirm** -- submits the answer for real (``agent-dispatch steer
-      submit``): the task's ``card_draft`` is superseded, ``awaiting_steer``
-      clears, and the task resumes/re-queues.
-    * **Save** -- leaves the task exactly as blocked as it was, but durably
-      persists the answer as the task's ``card_draft`` on the coordinator
-      itself (``agent-dispatch card draft save``) -- visible from any surface
-      or machine, not just a local sidecar file -- so a later Confirm (from
-      this or any other Picker) starts from it.
-    * **Reset** -- after an are-you-sure, clears every field in place (never
-      closes the dialog) and clears the coordinator's saved ``card_draft`` too
-      (``agent-dispatch card draft clear``); the task stays blocked.
-
-    Every path that *closes* this screen (Confirm, Save, Esc) saves the
-    collected answer to the on-disk draft first, before anything else happens
-    -- so if the actual coordinator call (which runs asynchronously, after
-    this screen has already dismissed) fails for any reason, the operator's
-    answer is never silently lost; it is exactly what reopening this card's
-    next steer prompt restores, and a failed delivery surfaces a blocking
-    :class:`SubmitErrorScreen` rather than an easily-missed status line.
-    Confirm's local draft is only deleted once the caller confirms the
-    submission actually succeeded (mirroring the coordinator's own
-    ``card_draft`` being cleared server-side on a successful steer -- see
-    ``TaskQueue.submit_steer``); Save's local draft is deliberately left in
-    place too, since Save never submits a steer.
-
-    Confirm/Save both dismiss with ``{"action": "confirm"|"save", "values":
-    dict}`` (a multichoice value is a list); this screen never runs a command
-    and never carries a verdict itself -- it only gathers the operator's
-    answer and tells the caller which coordinator call to make.
-
-    Esc behaves exactly like Save (nothing is lost); Ctrl+S saves explicitly."""
+    Reset asks first and stays open. With shared draft support it freezes input
+    until the caller acknowledges Clear; refusal preserves fields and recovery.
+    Without shared support Reset clears only the local form.
+    """
 
     CSS = """
     PivotFormScreen { align: center middle; background: $background 55%; }
@@ -110,19 +79,17 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
     ]
 
     def __init__(self, card: dict, fields: list[dict], submit_label: str,
-                 task_id: str = "", on_clear_draft=None) -> None:
+                 task_id: str = "", on_clear_draft=None, *,
+                 draft_binding: dict | None = None, draft_values: dict | None = None) -> None:
         super().__init__()
         self._card = card or {}
         self._fields = fields or []
         self._submit_label = submit_label or "Steer"
         self._task_id = str(task_id or "")
-        # Fire-and-forget background hook the caller wires (see
-        # ``_open_pivot_form``) so Reset can clear the operator's draft on the
-        # coordinator itself (``card_draft``, distinct from an actual steer) --
-        # a durable, cross-surface scratchpad -- not just a local sidecar file
-        # only this machine can see. Optional: a caller with no coordinator
-        # draft support (or a plain read-only card) passes ``None`` and this
-        # screen behaves exactly as before (Reset only clears local state).
+        self._draft_binding = draft_binding
+        self._draft_values = draft_values or {}
+        self._draft_pending = False
+        # The caller must finish a pending Reset with draft_reset_complete.
         self._on_clear_draft = on_clear_draft
         # Per-question runtime refs, filled during compose:
         #   {name, type, options, allow_other, primary, other}
@@ -217,35 +184,55 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         except Exception:
             pass
 
-    def _write_draft(self) -> None:
-        path = _steer_draft_path(self._task_id)
+    def _write_draft(self) -> bool:
+        path = self._draft_path()
         if not path:
-            return
+            return True
+        temporary = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps({
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent, delete=False,
+            ) as stream:
+                temporary = stream.name
+                json.dump({
                     "task_id": self._task_id,
                     "values": self._collect(include_hidden=True),
-                }),
-                encoding="utf-8",
-            )
-        except OSError:
-            pass
+                    "binding": self._draft_binding,
+                }, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            return True
+        except OSError as error:
+            self.app.push_screen(SubmitErrorScreen(
+                "Local recovery", f"Cannot preserve this response: {error}\nThe form remains open.", None,
+            ))
+            return False
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
 
     def _load_draft(self) -> dict:
-        path = _steer_draft_path(self._task_id)
+        path = self._draft_path()
         try:
             if path and path.exists():
                 data = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(data, dict) and isinstance(data.get("values"), dict):
+                if (isinstance(data, dict) and isinstance(data.get("values"), dict)
+                        and data.get("binding") == self._draft_binding):
                     return data["values"]
         except (OSError, ValueError):
             pass
-        return {}
+        return self._draft_values
+
+    def _draft_path(self):
+        return _steer_draft_path(self._task_id, self._draft_binding)
 
     def _delete_draft(self) -> None:
-        path = _steer_draft_path(self._task_id)
+        path = self._draft_path()
         try:
             if path and path.exists():
                 path.unlink()
@@ -262,16 +249,21 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
             self._on_reset_pressed()
 
     def _confirm(self) -> None:
+        if self._draft_pending:
+            return
         # Save first: the caller submits asynchronously *after* this screen has
         # already dismissed, so if that submission fails for any reason, the
         # collected answer must still be recoverable rather than lost the
         # moment this dialog closes. The caller deletes this draft itself once
         # it confirms the submission actually succeeded.
-        self._write_draft()
+        if not self._write_draft():
+            return
         values = self._collect()
         self.dismiss({"action": "confirm", "values": values})
 
     def _on_reset_pressed(self) -> None:
+        if self._draft_pending:
+            return
         def _after(confirmed: bool | None) -> None:
             if confirmed:
                 self._perform_reset()
@@ -284,6 +276,28 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         caller wired coordinator draft support) the durable ``card_draft`` on
         the task itself, since a reset answer has nothing left worth
         recovering from either place."""
+        if self._draft_pending:
+            return
+        if self._on_clear_draft is not None:
+            if not self._write_draft():
+                return
+            self._draft_pending = True
+            self.query_one("#steer-dock", Vertical).disabled = True
+            self.query_one("#steer-foot", Static).update("Reset pending — waiting for the provider")
+            self._on_clear_draft()
+            return
+        self.draft_reset_complete(True)
+
+    def draft_reset_complete(self, ok: bool, revision: str | None = None) -> None:
+        self._draft_pending = False
+        self.query_one("#steer-dock", Vertical).disabled = False
+        self.query_one("#steer-foot", Static).update(self._foot())
+        if not ok:
+            return
+        self._delete_draft()
+        if revision is not None and self._draft_binding is not None:
+            self._draft_binding = {**self._draft_binding, "revision_from": revision}
+        self._draft_values = {}
         for rec in self._q:
             ftype = rec["type"]
             prim, other = rec["primary"], rec["other"]
@@ -301,27 +315,29 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
                 other.text = ""
                 other.display = False
         self._sync_conditional_fields()
-        self._delete_draft()
-        if self._on_clear_draft is not None:
-            self._on_clear_draft()
         try:
             self.query_one("#steer-buttons", SteerButtonRow).focus()
         except Exception:
             pass
 
     def action_save(self) -> None:
+        if self._draft_pending:
+            return
         # Local draft first (unchanged safety net -- survives even if the
         # coordinator call below fails or agent-dispatch is unreachable), then
         # dismiss so the caller can push the same answer onto the task itself
         # (``card_draft``) as the durable, cross-surface copy. The task stays
         # blocked exactly as before -- Save never submits a steer.
-        self._write_draft()
-        self.dismiss({"action": "save", "values": self._collect()})
+        if not self._write_draft():
+            return
+        self.dismiss({"action": "save", "values": self._collect(include_hidden=True)})
 
     def action_escape_close(self) -> None:
+        if self._draft_pending:
+            return
         # Preserve work: Esc behaves exactly like Save (draft persisted both
         # locally and, once dismissed, on the coordinator) then closes without
         # submitting.
-        self._write_draft()
-        self.dismiss({"action": "save", "values": self._collect()})
-
+        if not self._write_draft():
+            return
+        self.dismiss({"action": "save", "values": self._collect(include_hidden=True)})

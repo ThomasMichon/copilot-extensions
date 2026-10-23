@@ -98,6 +98,7 @@ def register_status_routes(
             "steer_idempotency_key": True,
             "steering_acceptance": 1,
             "card_draft_cas": 1,
+            "card_draft_scope": 1,
             "task_categories": 1,
             "exact_dedup_lookup": 1,
             "delegated_run_waiters": {

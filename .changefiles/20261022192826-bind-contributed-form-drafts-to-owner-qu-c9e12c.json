@@ -1,0 +1,13 @@
+{
+  "comment": "Bind contributed form drafts to owner queue, card and observed draft revisions; retain local responses until provider acknowledgement.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

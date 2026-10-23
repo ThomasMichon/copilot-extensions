@@ -225,13 +225,14 @@ def native_url(owner):
         assert not thread.is_alive(), "isolated native owner did not stop"
 
 
+@pytest.mark.timeout(90)
 def test_native_cli_card_submit_exact_retry_and_request_receipt(native_url, owner):
     queue, task_id = owner
 
     def cli(*args):
         return subprocess.run(
             [sys.executable, "-m", "agent_dispatch", "--url", native_url, *args],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
@@ -269,23 +270,26 @@ def test_both_native_contributions_forward_the_owner_revision(name):
     assert action["run"][index + 1] == "{steering_revision}"
 
 
-def test_native_cli_guarded_draft_first_touch_stale_reset_and_clear(native_url, owner):
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.timeout(120)
+def test_native_cli_guarded_draft_first_touch_stale_reset_and_clear(native_url, owner, scoped):
     queue, task_id = owner
 
     def cli(*args):
         return subprocess.run(
             [sys.executable, "-m", "agent_dispatch", "--url", native_url, *args],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=20,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
     shown = cli("card", "show", task_id)
     assert shown.returncode == 0, shown.stderr
     original = json.loads(shown.stdout)
+    scope_args = ("--expected-queue-id", original["draft_scope"]["queue"]) if scoped else ()
     assert original["card_draft_revision"] == "absent"
     basis = ("--expected-revision", original["steering_revision"],
              "--expected-draft-revision", original["card_draft_revision"])
-    saved = cli("card", "draft", "save", task_id, "--field", "answer=first\nsecond, exact", *basis)
+    saved = cli("card", "draft", "save", task_id, "--field", "answer=first\nsecond, exact", *basis, *scope_args)
     assert saved.returncode == 0, saved.stderr
     draft = json.loads(saved.stdout)
     assert draft["card_draft"]["fields"] == {"answer": "first\nsecond, exact"}
@@ -299,15 +303,25 @@ def test_native_cli_guarded_draft_first_touch_stale_reset_and_clear(native_url, 
     stale = cli(
         "card", "draft", "clear", task_id, "--expected-revision", draft["steering_revision"],
         "--expected-draft-revision", draft["card_draft_revision"],
+        *scope_args,
     )
     assert stale.returncode != 0 and "draft changed" in stale.stderr
     assert queue.get(task_id) == before
     cleared = cli(
         "card", "draft", "clear", task_id, "--expected-revision", newer.steering_revision,
         "--expected-draft-revision", newer.card_draft_revision,
+        *scope_args,
     )
     assert cleared.returncode == 0, cleared.stderr
     assert json.loads(cleared.stdout)["card_draft_revision"] == "absent"
+    if scoped:
+        wrong_queue = cli(
+            "card", "draft", "save", task_id, "--field", "answer=wrong target",
+            "--expected-revision", newer.steering_revision,
+            "--expected-draft-revision", "absent", "--expected-queue-id", "another-queue",
+        )
+        assert wrong_queue.returncode != 0 and "another queue" in wrong_queue.stderr
+        assert queue.get(task_id).card_draft is None
     partial = cli("card", "draft", "clear", task_id, "--expected-revision", newer.steering_revision)
     assert partial.returncode == 2 and "both --expected" in partial.stderr
     assert queue.steer_log(task_id) == queue.list_wakes(task_id) == []

@@ -2425,9 +2425,9 @@ agent-dispatch steer receipt <id> <request-id>
 # Save or clear only the card and shared draft that were actually viewed:
 agent-dispatch card draft save <id> --field notes="Unsent notes" \
   --expected-revision <steering_revision> \
-  --expected-draft-revision <card_draft_revision>
+  --expected-draft-revision <card_draft_revision> --expected-queue-id <draft_scope.queue>
 agent-dispatch card draft clear <id> --expected-revision <steering_revision> \
-  --expected-draft-revision <card_draft_revision>
+  --expected-draft-revision <card_draft_revision> --expected-queue-id <draft_scope.queue>
 
 # The resumed worker drains all answers and continues toward its goal:
 agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "sender": ...}]}
@@ -2473,8 +2473,19 @@ agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "
   `card_draft_cas: 1` and use dedicated guarded routes; an old or downgraded
   owner never receives a fallback unguarded write. An ambiguous response
   requires a fresh read, not automatic Save/Clear replay or an assumption
-  that persistence failed. These owner APIs do not yet change native terminal
-  Save/Reset declarations, local restore or restart recovery.
+  that persistence failed.
+  Task reads, board rows and `card show` also expose `draft_scope`: the existing
+  durable queue identity, a hash of the installation root and the owning host.
+  `--expected-queue-id` (SDK `expected_queue_id`) adds a queue check before the
+  existing CAS. It requires `card_draft_scope: 1` and dedicated scoped routes,
+  so an older owner cannot silently ignore it. No identity store is added.
+  Native Tasks and Maintenance declare these scoped Save/Reset commands through
+  Manager's generic form contract. Shared drafts restore only for their original
+  card version; local recovery additionally binds provider, installation/queue,
+  machine, task, action/schema, card and observed draft revision. Reset clears
+  fields/local recovery only after acknowledgement; a conflict retains both.
+  Neither Save nor Reset submits answers or wakes a worker. Exact-original-request
+  restart/vanished-row recovery remains separate from draft persistence.
 - **`steer submit`** appends the operator's answer to the task's append-only steer
   inbox and clears `awaiting_steer`; it is **not** worker-owned (the operator, or a
   surface acting for them, answers). After persistence, the coordinator asks

@@ -43,6 +43,15 @@
       "key": "steer", "label": "Steer — read the card & answer", "kind": "form",
       "result_view": "text",
       "fields_from": "card.request_input", "title_from": "card.title", "body_from": "card.body",
+      "draft": {
+        "save": ["agent-dispatch", "card", "draft", "save", "{task_id}", "{fields}", "--expected-revision", "{steering_revision}", "--expected-draft-revision", "{card_draft_revision}", "--expected-queue-id", "{draft_scope.queue}"],
+        "clear": ["agent-dispatch", "card", "draft", "clear", "{task_id}", "--expected-revision", "{steering_revision}", "--expected-draft-revision", "{card_draft_revision}", "--expected-queue-id", "{draft_scope.queue}"],
+        "scope_from": "draft_scope",
+        "revision_from": "card_draft_revision",
+        "version_from": "steering_revision",
+        "saved_version_from": "card_draft.steering_revision",
+        "values_from": "card_draft.fields"
+      },
       "run": ["agent-dispatch", "steer", "submit", "{task_id}", "{fields}", "--expected-status", "{status}", "--expected-revision", "{steering_revision}"],
       "when": {"group": "Blocked"}
     },

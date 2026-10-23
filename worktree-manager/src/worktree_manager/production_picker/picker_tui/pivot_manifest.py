@@ -477,6 +477,8 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         #     substitutes `{field.<name>}` into `run` and runs it;
         #   * `card` -- a read-only scrollable card-detail modal (A5); no `run`.
         kind = a.get("kind")
+        if "draft" in a and kind != "form":
+            raise ManifestError(f"`actions[{i}].draft` requires a form action")
         form: Mapping[str, object] | None = None
         card: Mapping[str, object] | None = None
         if kind == "internal":
@@ -510,6 +512,12 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
                     where=f"`actions[{i}].body_from`",
                 ),
             }
+            from worktree_manager.form_drafts import parse_draft
+            try:
+                if a.get("draft") is not None:
+                    form["draft"] = parse_draft(a["draft"])
+            except ValueError as exc:
+                raise ManifestError(str(exc)) from exc
         elif kind == "card":
             run = ()
             internal = None

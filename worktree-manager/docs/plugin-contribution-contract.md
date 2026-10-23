@@ -141,6 +141,57 @@ The command arrays are process-boundary contracts. The Manager invokes the
 contributing plugin's canonical CLI; it never imports the plugin runtime or
 reads the plugin's private state.
 
+### Shared form drafts
+
+A row-scoped `kind: "form"` action may declare `draft`:
+
+```json
+{
+  "save": ["provider", "draft-save", "{task_id}", "{fields}", "{draft_scope.queue}", "{draft_revision}"],
+  "clear": ["provider", "draft-clear", "{task_id}", "{draft_scope.queue}", "{draft_revision}"],
+  "scope_from": "draft_scope",
+  "revision_from": "draft_revision",
+  "version_from": "card_version",
+  "saved_version_from": "draft.card_version",
+  "values_from": "draft.fields"
+}
+```
+
+All seven keys are required; extra keys and malformed argv/selectors fail visibly.
+Both commands resolve against the contributing payload, exactly like `run`.
+Context placeholders support dotted entry paths, with an exact flat key taking
+precedence. Fields are substituted once, never reinterpreted as templates.
+No declaration means local-only Save/Reset, not an implicit backend command.
+Configuration forms retain their separate Apply/Cancel contract.
+
+The provider publishes a stable installation/queue scope, the current card
+version, the observed shared-draft revision (including explicit absence), and
+the saved draft's original card version. Missing provenance stops the form
+with an explicit refresh/upgrade error. The provider owns atomic preconditions
+and must refuse an old target or conflicting card/draft without side effects.
+Commands print a JSON object using these same selectors. Successful stderr
+does not corrupt JSON stdout. Save acknowledgement must contain a fresh
+revision and the submitted fields bound to the original card/scope. Clear must
+explicitly remove the draft and advance an existing draft's revision. A malformed
+or ambiguous response is an error, never permission to replay.
+
+The Manager restores shared values only when the saved/current card versions
+match. Local recovery is atomically written before Confirm, Save or Escape
+closes the modal; a write failure leaves the form open. Its key and envelope
+bind contributing source/resolved commands, machine, task, action/schema, card,
+provider scope and observed draft revision. Unbound legacy or mismatched files
+are left untouched, never automatically adopted. Local content supplies values,
+not executable command authority. Save/Escape preserve hidden partial answers;
+Confirm submits only currently applicable fields.
+
+Reset asks first, freezes input during Clear and retains fields/local recovery
+until a valid acknowledgement arrives. It updates only this form's observed
+draft revision; a conflict does not silently rebase the original card. Save and
+Clear refresh the originating provider after success, not another selected
+pivot. These operations do not submit answers or wake workers. Restoring an
+original submitted request after restart or a vanished row is a separate
+recovery contract, not inferred from a saved draft.
+
 ### Full command results
 
 A non-streaming command or row form may opt into `"result_view": "text"`.

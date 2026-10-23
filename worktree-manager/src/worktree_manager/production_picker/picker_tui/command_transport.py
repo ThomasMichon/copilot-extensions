@@ -8,6 +8,20 @@ from collections.abc import Sequence
 from pathlib import Path
 
 
+def command_result(proc, *, preserve_output: bool = False) -> tuple[bool, str]:
+    if preserve_output:
+        parts = [(proc.stdout or "").strip()]
+        if proc.stderr:
+            parts.append("stderr:\n" + proc.stderr.strip())
+        if proc.returncode:
+            parts.append(f"exit {proc.returncode}")
+        return proc.returncode == 0, "\n\n".join(part for part in parts if part)
+    if proc.returncode:
+        detail = (proc.stderr or "").strip().splitlines()
+        return False, (detail[-1] if detail else f"exit {proc.returncode}")[:200]
+    return True, (proc.stdout or "").strip()[:200]
+
+
 def resolve_command(command_argv: Sequence[str]) -> list[str]:
     """Resolve a command without reinterpreting already-substituted form values."""
     argv = list(command_argv)

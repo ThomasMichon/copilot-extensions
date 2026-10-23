@@ -37,7 +37,7 @@ from collections.abc import Mapping, Sequence
 from agent_procutil import no_window_flags
 
 from ...engine_client import _engine_environment
-from .command_transport import resolve_command as _resolve_command
+from .command_transport import command_result, resolve_command as _resolve_command
 from .configuration_context import run_list
 from .pivots import RegisteredPivot, format_template, parse_list_payload
 
@@ -767,21 +767,19 @@ class RegisteredPivotRuntime:
         )
         if proc is None:
             return False, error
-        if preserve_output:
-            parts = [(proc.stdout or "").strip()]
-            if proc.stderr:
-                parts.append("stderr:\n" + proc.stderr.strip())
-            if proc.returncode:
-                parts.append(f"exit {proc.returncode}")
-            return (proc.returncode == 0, "\n\n".join(part for part in parts if part))
-        if proc.returncode != 0:
-            detail = (proc.stderr or "").strip().splitlines()
-            return (False, (detail[-1] if detail else f"exit {proc.returncode}")[:200])
-        return (True, (proc.stdout or "").strip()[:200])
+        return command_result(proc, preserve_output=preserve_output)
 
     def preview_resolved(self, argv: Sequence[str]) -> tuple[bool, str]:
         """Keep successful stdout separate from diagnostics for strict JSON parsing."""
-        proc, error = self._invoke_resolved(argv, timeout=LIST_TIMEOUT)
+        return self.run_json_resolved(argv, timeout=LIST_TIMEOUT)
+
+    def run_json_resolved(
+        self, argv: Sequence[str], *, timeout: float | None = None,
+    ) -> tuple[bool, str]:
+        """Run a declared JSON command without mixing successful stdout and stderr."""
+        proc, error = self._invoke_resolved(
+            argv, timeout=ACTION_TIMEOUT if timeout is None else timeout, preserve_output=True,
+        )
         if proc is None:
             return False, error
         if proc.returncode:
