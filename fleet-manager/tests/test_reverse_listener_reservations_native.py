@@ -23,7 +23,7 @@ from fleet_manager.reverse_listener_reservations import (
     Admission, Candidate, Listener, Rejected, reserve_reverse_listener as coordinate,
 )
 from test_reverse_listener_reservations import JournalOwner, request
-from test_client_distribution import run, wheel as wheel
+from test_client_distribution import run
 
 
 def reserve_reverse_listener(selected, *, owner):

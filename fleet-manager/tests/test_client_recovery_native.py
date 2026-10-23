@@ -18,7 +18,7 @@ from test_artifact_staging import primitive as primitive  # noqa: F401
 from test_client_activation import activate
 from test_client_admission import database_bytes, identity, independently_sign, retained, selection
 from test_client_construction import built_client as built_client, signed_wheel as signed_wheel, target  # noqa: F401
-from test_client_distribution import FLAGS, wheel as wheel  # noqa: F401
+from test_client_distribution import FLAGS
 from test_client_frontdoor import command_directory
 from test_client_recovery import decision_for, higher_release
 

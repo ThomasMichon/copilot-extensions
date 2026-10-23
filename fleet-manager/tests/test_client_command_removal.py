@@ -14,7 +14,7 @@ from fleet_manager.planning import PlanError
 from test_artifact_staging import primitive as primitive  # noqa: F401
 from test_client_admission import database_bytes, identity
 from test_client_construction import signed_wheel as signed_wheel  # noqa: F401
-from test_client_distribution import FLAGS, wheel as wheel  # noqa: F401
+from test_client_distribution import FLAGS
 from test_client_frontdoor import register, selected as selected, states  # noqa: F401
 
 

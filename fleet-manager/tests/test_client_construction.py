@@ -18,7 +18,6 @@ from test_artifact_staging import primitive as primitive  # noqa: F401 - pytest 
 from test_client_admission import (
     database_bytes, identity, independently_sign, retained, root_at, selection,
 )
-from test_client_distribution import wheel as wheel  # noqa: F401 - pytest fixture
 from test_release_auth import artifact_fixture
 
 
