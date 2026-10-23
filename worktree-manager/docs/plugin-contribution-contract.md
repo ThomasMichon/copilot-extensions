@@ -183,10 +183,12 @@ provider scope and observed draft revision. Unbound legacy or mismatched files
 are left untouched, never automatically adopted. Local content supplies values,
 not executable command authority. Save/Escape preserve hidden partial answers;
 Confirm submits only currently applicable fields.
+After a verified shared Save, its old-revision local fallback is removed so a
+later Clear cannot revive it when the owner returns to explicit absence.
 
 Reset asks first, freezes input during Clear and retains fields/local recovery
 until a valid acknowledgement arrives. It updates only this form's observed
-draft revision; a conflict does not silently rebase the original card. Save and
+draft revision and draft values; a conflict does not silently rebase the original card. Save and
 Clear refresh the originating provider after success, not another selected
 pivot. These operations do not submit answers or wake workers. Restoring an
 original submitted request after restart or a vanished row is a separate

@@ -1,6 +1,6 @@
 """Provider-declared form draft operations; no domain backend in the Manager."""
 
-from worktree_manager.form_drafts import draft_ack, read_path
+from worktree_manager.form_drafts import draft_ack, read_path, update_draft_context
 
 from .steering import SubmitErrorScreen
 
@@ -31,12 +31,10 @@ class PivotFormDraftActionsMixin:
             ok, message, result = outcome
             if ok:
                 if clear:
-                    path = spec["revision_from"].split(".")
-                    target = ctx
-                    for key in path[:-1]:
-                        target = target[key]
-                    target[path[-1]] = read_path(result, spec["revision_from"])
-                    screen.draft_reset_complete(True, target[path[-1]])
+                    update_draft_context(spec, ctx, result)
+                    screen.draft_reset_complete(True, read_path(result, spec["revision_from"]))
+                else:
+                    screen._delete_draft()
                 rt.ensure(scope)
                 self.refresh()
                 self.debug = f"{label} · {title}"

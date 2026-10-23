@@ -38,6 +38,17 @@ def read_path(value, path, default=None):
     return value
 
 
+def update_draft_context(spec, ctx, result) -> None:
+    for selector in ("revision_from", "values_from", "saved_version_from"):
+        *parents, key = spec[selector].split(".")
+        target = ctx
+        for parent in parents:
+            if not isinstance(target.get(parent), dict):
+                target[parent] = {}
+            target = target[parent]
+        target[key] = read_path(result, spec[selector])
+
+
 def fingerprint(value) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()

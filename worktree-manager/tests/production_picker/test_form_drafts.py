@@ -363,3 +363,66 @@ def test_local_persistence_failure_never_dismisses_or_invokes_provider(tmp_path,
             assert not form._draft_pending and calls == []
     asyncio.run(run())
     assert list(tmp_path.iterdir()) == []
+
+
+def test_verified_save_then_two_resets_and_restart_never_revive_cleared_answers(tmp_path, monkeypatch):
+    from test_config_actions import _wait
+    from test_picker_tui import _fixture_source, _wait_for_initial_setup
+    from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
+
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path / "drafts"))
+    reg = registered()
+    owner = {**record(), "id": "same-id", "title": "Example", "card": {**CARD, "fields": FIELDS},
+             "revision": "absent", "draft": None}
+    calls = []
+
+    class Runtime:
+        def run_json_resolved(self, argv):
+            assert argv[-1] == owner["revision"]
+            calls.append(argv[1])
+            if argv[1] == "save":
+                value = argv[argv.index("--field") + 1].partition("=")[2]
+                owner.update(revision="draft-v2", draft={"version": "card-v1", "fields": {"answer": value}})
+            else:
+                owner.update(revision="absent", draft=None)
+            return True, json.dumps(owner)
+        def invalidate(self):
+            pass
+        def ensure(self, scope):
+            pass
+
+    async def open_form(app, pilot):
+        picker = app.query_one(PickerScreen)
+        await _wait_for_initial_setup(pilot, picker)
+        monkeypatch.setattr(picker, "_pivot_runtime", lambda value: Runtime())
+        monkeypatch.setattr(picker, "_pivot_scope_key", lambda: "host")
+        picker._open_pivot_form(reg, reg.actions[0], deepcopy(owner), deepcopy(owner), "Example")
+        await _wait(pilot, lambda: isinstance(app.screen, PivotFormScreen))
+        return app.screen
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            saved = await open_form(app, pilot)
+            empty_path = saved._draft_path()
+            saved.query_one(Input).value = "must not return after Reset"
+            saved.action_save()
+            await _wait(pilot, lambda: "save" in calls and not empty_path.exists())
+            reset = await open_form(app, pilot)
+            assert reset.query_one(Input).value == "must not return after Reset"
+            reset._perform_reset()
+            await _wait(pilot, lambda: calls.count("clear") == 1 and not reset._draft_pending)
+            assert reset.query_one(Input).value == "" and owner["draft"] is None
+            reset.query_one(Input).value = "new unsaved edits"
+            reset._perform_reset()
+            await _wait(pilot, lambda: calls.count("clear") == 2 and not reset._draft_pending)
+            assert app.screen is reset and reset.query_one(Input).value == ""
+            assert reset._draft_binding["version_from"] == "card-v1"
+        restarted = PickerApp(_fixture_source(), live=False)
+        async with restarted.run_test() as pilot:
+            reopened = await open_form(restarted, pilot)
+            assert reopened.query_one(Input).value == ""
+            assert owner["revision"] == "absent" and owner["draft"] is None
+            assert not empty_path.exists()
+    asyncio.run(run())
+    assert calls == ["save", "clear", "clear"]

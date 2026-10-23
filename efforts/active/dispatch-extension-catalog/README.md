@@ -1134,3 +1134,10 @@ authorized installed proof remain distinct obligations.
   installed-client proof remain distinct and open; no live task or deployment
   was exercised. Exact-original-request restart/vanished-row recovery is next,
   and the full Plan and Validation Plan remain open under #7141 and #7091.
+- Published as #8060. Current-head review found two draft-state sequence bugs:
+  consecutive Reset reused stale observed draft fields, and a verified first
+  Save left an `absent`-revision local file that could revive cleared answers.
+  Update acknowledged draft values alongside their revision without rebasing
+  the card; remove the old local fallback only after verified shared Save.
+  A native Save/reopen/Reset/second-Reset/restart regression and the coupled
+  form/result/local-write selection pass 94 tests. Re-review remains required.
