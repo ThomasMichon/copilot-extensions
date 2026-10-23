@@ -996,7 +996,8 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   removed; an in-flight claimed resource, a `follow-up`-flagged, paired-pending,
   `empty`/conversation-only, dirty, wip, or unmerged worktree, and any live
   session/mux are all spared. No network fetch is done, so a merge not yet
-  locally provable simply waits for a later pass. Disable entirely with
+  locally provable simply waits for a later pass. Session-exit output reports
+  only the number collected, not an unbounded list of worktree IDs. Disable entirely with
   `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
 
 ## Installation & Config

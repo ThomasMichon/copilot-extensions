@@ -311,3 +311,50 @@ def test_missing_selected_slot_is_not_another_project(launcher, tmp_path):
     result = _run(argv, env=env, cwd=tmp_path)
     assert result.returncode != 0
     assert not result.stdout.strip()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="cmd.exe batch-file resume contract")
+@pytest.mark.parametrize("exit_code", [0, 7])
+@pytest.mark.parametrize("runtime_kind", ["retained", "legacy"])
+def test_cmd_does_not_resume_replaced_launcher(tmp_path, exit_code, runtime_kind):
+    launcher = tmp_path / "manager.cmd"
+    launcher.write_text(si._cmd_binstub(), encoding="utf-8", newline="")
+    root = tmp_path / "manager root"
+    slot = root / "versions" / "1.2.3"
+    runtime = slot if runtime_kind == "retained" else slot / ".venv"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    (root / "current-version").write_text("1.2.3\n", encoding="utf-8")
+    child_source = (
+        "import os, pathlib\n"
+        "pathlib.Path(os.environ['FIXTURE_LAUNCHER']).write_text("
+        "'@echo off\\n' + 'echo replaced-launcher-must-not-run\\n' * 300, "
+        "encoding='utf-8')\n"
+        "print('fixture session exited')\n"
+        f"raise SystemExit({exit_code})\n"
+    )
+    env = dict(os.environ, WORKTREE_MANAGER_ROOT=str(root), FIXTURE_LAUNCHER=str(launcher))
+    if runtime_kind == "retained":
+        bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+        bootstrap.parent.mkdir()
+        bootstrap.write_text(child_source, encoding="utf-8")
+    else:
+        _payload(slot)
+        (slot / "src" / "worktree_manager" / "__main__.py").write_text(
+            child_source, encoding="utf-8",
+        )
+        uv = shutil.which("uv")
+        assert uv, "the contained runner requires uv"
+        installed = _run(
+            [uv, "pip", "install", "--python", str(runtime / "Scripts" / "python.exe"),
+             "--no-deps", str(slot)],
+            env=env, cwd=tmp_path,
+        )
+        assert installed.returncode == 0, installed.stderr
+    result = _run(
+        [os.environ["COMSPEC"], "/d", "/c", str(launcher)],
+        env=env,
+        cwd=tmp_path,
+    )
+    assert result.returncode == exit_code, result.stderr
+    assert result.stdout.strip() == "fixture session exited"
+    assert not result.stderr.strip()

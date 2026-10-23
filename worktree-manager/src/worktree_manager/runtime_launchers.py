@@ -56,6 +56,9 @@ def _sh_binstub() -> str:
 
 def _cmd_binstub() -> str:
     probe = _legacy_runtime_probe()
+    # cmd resumes batch files by byte offset. Read the exit on the invocation
+    # line before a long-running command can update this file; CALL expands
+    # ERRORLEVEL after the child exits without enabling delayed argument expansion.
     return (
         "@echo off\r\n"
         "setlocal\r\n"
@@ -71,15 +74,14 @@ def _cmd_binstub() -> str:
         'if not exist "%SLOT%\\.venv\\Scripts\\python.exe" goto invalid\r\n'
         f'"%SLOT%\\.venv\\Scripts\\python.exe" -I -c "{probe}" "%SLOT%" >nul 2>&1\r\n'
         'if errorlevel 1 goto invalid\r\n'
-        '"%SLOT%\\.venv\\Scripts\\python.exe" -I -X utf8 -m worktree_manager %*\r\n'
-        'exit /b %errorlevel%\r\n'
+        '"%SLOT%\\.venv\\Scripts\\python.exe" -I -X utf8 -m worktree_manager %* '
+        '& call exit /b %%errorlevel%%\r\n'
         ':invalid\r\n'
         '>&2 echo invalid constructed worktree-manager runtime: "%SLOT%"\r\n'
         'exit /b 1\r\n'
         ':retained\r\n'
         '"%SLOT%\\Scripts\\python.exe" -I -S -B -X utf8 "%SLOT%\\.runtime-bootstrap\\runtime_launcher.py" '
-        '-m worktree_manager %*\r\n'
-        'exit /b %errorlevel%\r\n'
+        '-m worktree_manager %* & call exit /b %%errorlevel%%\r\n'
     )
 
 

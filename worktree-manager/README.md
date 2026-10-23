@@ -71,6 +71,11 @@ dependencies during ordinary launch. Mux cutover uses that same constructed
 interpreter, not an old interpreter with the new source on `PYTHONPATH`.
 The PowerShell entry fails nonzero if that interpreter cannot start and
 preserves the actual exit status when it runs.
+CMD consumes the runtime invocation and its status-preserving return on the same
+line, so an update replacing the launcher during a session cannot make CMD resume
+at an obsolete byte offset. PowerShell post-exit finalization displays native
+diagnostics separately from its numeric result; successful cleanup text is not a
+failure, while a nonzero result or unavailable runtime still reports a warning.
 Mux routes and target readiness use the constructed slot's immutable generation,
 including repair/source qualifiers. Health preserves the semantic package
 `version` and separately reports `runtime_generation` from its own interpreter

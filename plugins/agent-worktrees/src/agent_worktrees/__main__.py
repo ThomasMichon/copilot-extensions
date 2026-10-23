@@ -2353,10 +2353,7 @@ def _sweep_finished_sessions_on_cadence() -> None:
         report = sweep_finished_session_worktrees()
         removed = report.get("removed") or []
         if removed:
-            output.ok(
-                f"Auto-cleaned {len(removed)} finished worktree(s): "
-                + ", ".join(x["id"] for x in removed)
-            )
+            output.ok(f"Auto-cleaned {len(removed)} finished worktree(s).")
     except Exception:
         pass
 

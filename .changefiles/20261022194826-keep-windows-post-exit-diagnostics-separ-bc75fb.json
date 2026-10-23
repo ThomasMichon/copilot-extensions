@@ -1,0 +1,13 @@
+{
+  "comment": "Keep Windows post-exit diagnostics separate from status, bound cleanup summaries, and preserve cmd exit status across launcher updates.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

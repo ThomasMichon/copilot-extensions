@@ -509,7 +509,8 @@ function Invoke-AwPostExit {
         $postArgs += @('--project', $script:LaunchProject)
     }
     $postArgs += @('post-exit', $WorktreeId)
-    & $VenvPython @postArgs
+    # Keep native diagnostics out of the function's scalar return value.
+    & $VenvPython @postArgs | Out-Host
     return $LASTEXITCODE
 }
 

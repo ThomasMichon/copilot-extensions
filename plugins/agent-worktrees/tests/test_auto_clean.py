@@ -133,6 +133,19 @@ def test_no_records_is_noop():
     assert _sweep([]) == {"removed": [], "skipped": []}
 
 
+def test_cadence_cleanup_output_is_bounded(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "auto_clean_enabled", lambda: True)
+    monkeypatch.setattr(cli, "sweep_finished_session_worktrees", lambda: {
+        "removed": [{"id": f"finished-{index}"} for index in range(100)],
+        "skipped": [],
+    })
+    cli._sweep_finished_sessions_on_cadence()
+    text = capsys.readouterr().out
+    assert "Auto-cleaned 100 finished worktree(s)." in text
+    assert "finished-0" not in text
+    assert len(text.splitlines()) == 1
+
+
 def test_reaps_finalized_session_dry_run():
     report = _sweep([_rec("done")])
     assert [x["id"] for x in report["removed"]] == ["done"]
