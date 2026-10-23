@@ -3,13 +3,14 @@
 Back to [the canonical effort](README.md) and
 [client lifecycle admission](client-lifecycle-admission.md).
 
-**Reviewed contract under #6424, merged in #8106; not delivered behavior or
-permission for a live rollback.** The operator selected `explicit-retained-good`, presented as
+**Contract reviewed in #8106 under #6424; client source implementation and
+focused native qualification merged in #8185. Not permission for a live
+rollback.** The operator selected `explicit-retained-good`, presented as
 "Allow explicit retained-good recovery; keep the admission floor unchanged."
 The alternative was requiring a newly selected higher-sequence release to run
 older binaries. The requirements and sequencing below are **agent-recommended
 implementation details** for the selected policy. The plan cleared review before
-executable implementation; implementation and validation remain open.
+executable implementation; complete installer and fleet adoption gates remain open.
 
 ## Policy boundary
 
