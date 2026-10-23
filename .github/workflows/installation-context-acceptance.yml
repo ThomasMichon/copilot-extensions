@@ -11,13 +11,17 @@ on:
         description: Run isolated Dispatch PR-watch callback and replay contracts instead
         type: boolean
         default: false
+      pr_service:
+        description: Run isolated PR serving and observation lifecycle contracts instead
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -38,7 +42,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -187,3 +191,30 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     steps: *dispatch-delegation-steps
+
+  pr-service-linux:
+    if: ${{ inputs.pr_service }}
+    name: Isolated PR service lifecycle (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps: &pr-service-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Writer, drain, observation and real Gateway reconnect
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_watch_service.py
+          --test-file tests/test_watch_gateway.py
+          --test-file tests/test_watch_gateway_transport.py
+          --test-file tests/test_watch_observer.py
+          --max-files-per-sub-suite 2
+
+  pr-service-windows:
+    if: ${{ inputs.pr_service }}
+    name: Isolated PR service lifecycle (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps: *pr-service-steps

@@ -239,6 +239,14 @@ extra does not affect ordinary CLI/native installs. This source adapter
 starts no daemon or listener; production lifecycle, forge observation,
 Dispatch consumption and installed/fleet acceptance remain separate work.
 
+The optional [`watch_service.WatchService` lifecycle](docs/watch-service.md)
+now owns that serving adapter, the finite native observer and Fleet connector
+under one host-local writer lease. It adopts existing replay state before
+starting, reports local readiness and joins actual serving/native/disk work
+before releasing custody. Failed drain retains ownership. This is an embedding
+API, not the independently installed service/container role or a completed
+activation/migration contract.
+
 The same optional extra exposes the
 [`watch_replay_client.ReplayClient` API](docs/watch-gateway.md#finite-typed-replay-client)
 over Fleet's finite authenticated caller. It validates typed receipts and bounded

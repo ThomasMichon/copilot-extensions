@@ -1,0 +1,9 @@
+{
+  "comment": "Compose existing PR serving and observation under one drainable writer lifecycle.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

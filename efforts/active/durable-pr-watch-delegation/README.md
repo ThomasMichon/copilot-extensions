@@ -278,11 +278,18 @@ _Operator-required scope; agent-recommended implementation and validation._
   prepare/arm/finish transactions, retaining original intent and terminal
   settlement progress through disconnect and restart. This source leaf does
   not close coordinator scheduling, service lifecycle or fleet acceptance (#8085).
-- [ ] Land optional replay-consumer scheduling through the coordinator's existing
+- [x] Land optional replay-consumer scheduling through the coordinator's existing
   waiter-maintenance cadence, active-owner checks and drain/shutdown boundary.
   Keep native recovery independent of remote IO and retain original identities
   after interrupted cycles. This source seam does not configure a production
-  caller, attest its namespace, activate a backend or close service/fleet proof.
+  caller, attest its namespace, activate a backend or close service/fleet proof
+  (source confirmed by #8124).
+- [ ] Land the existing-core serving/observation lifecycle seam: adopt persisted
+  replay state under native lifetime exclusion, own one connector and observer,
+  withdraw later admission/effects on disconnect, and join actual serving and
+  native/disk work before releasing the writer. Failed drain retains custody.
+  This prerequisite is not standalone packaging, fleet activation, cross-host
+  fencing or slow-target fairness acceptance.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -644,6 +651,36 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-23 - Merge shared scheduling and continue independent service delivery
+
+- #8124 merged as `c9ed75549c790eeb36d2f9eb0e9fb1bc6c117953` at
+  `2026-10-23T07:10:16Z`, from published head
+  `73d254a7b3d698b1bffe19b62563841cd19f70ec`. Exact-head Copilot review
+  `5624985262` approved with no open issues; the complete thread page was
+  empty. Required checks passed. Managed completion used only the documented
+  additional CODEOWNER exception, not a CI or feedback bypass. #7188 remains open.
+- Hosted acceptance `39915084850` passed both selected Linux and Windows
+  jobs at that exact head. The preceding Windows run exhausted its 30-second
+  item watchdog during cold SQLite schema initialization, before waiter
+  preparation. Only the real 40-waiter cardinality case now uses the existing
+  120-second native Windows convention; assertions, other items and group/job
+  bounds are unchanged. The final local maintenance suite passes all 15 cases;
+  fatal lint and all 13 install contracts pass.
+- Read this entire parent after the actual merge. Close only the optional
+  coordinator-scheduling source leaf, preserving every direct client,
+  presentation, migration, reviewer, idle-record and nonevent acceptance
+  clause, current custody, installation, provider and fleet gate.
+- Next: deliver the independently installable PR serving/observation artifact
+  through the existing standalone-service and fleet role/lifecycle contracts.
+  Reuse the finite PR observer, replay store and Gateway handler rather than
+  introducing a second forge stack, registrar, controller or per-task poller.
+  Concrete shared-source gaps remain implementation work under normal review;
+  credentials, placement and live activation retain their authorization gates.
+- The parent stays Active. This is source integration, not released/installed
+  service acceptance, production provider proof or fleet qualification. No
+  runtime update, credential provisioning, service activation, new capacity
+  or worktree finalization follows from this merge.
 
 ### 2026-10-22 - Direct retained acceptance from #2874
 

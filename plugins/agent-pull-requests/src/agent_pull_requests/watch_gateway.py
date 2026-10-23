@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import MappingProxyType
 
@@ -90,6 +91,7 @@ class WatchGateway:
     def __init__(
         self, store: ReplayStore, *, fleet: str, gateway: str, slot: str,
         bindings: tuple[WatchScopeBinding, ...],
+        checkpoint: Callable[[], None] | None = None,
     ) -> None:
         for name in (fleet, gateway, slot):
             identifier(name)
@@ -104,6 +106,9 @@ class WatchGateway:
                 raise ValueError("duplicate watch scope binding")
             selected[key] = binding.scope
         self.store = store
+        if checkpoint is not None and not callable(checkpoint):
+            raise ValueError("invalid service checkpoint")
+        self._checkpoint = checkpoint
         self.fleet, self.gateway, self.slot = fleet, gateway, slot
         self.bindings = MappingProxyType(selected)
         self._tasks: set[asyncio.Task[ServiceResponse]] = set()
@@ -116,7 +121,7 @@ class WatchGateway:
         if type(request) is not ServiceRequest:
             raise TypeError("expected trusted service request")
         try:
-            request.lifetime.check()
+            self._check(request)
         except RequestDisconnected:
             return _response(503, {"status": "uncertain", "reason": "watch_request_disconnected"})
         caller = request.context
@@ -162,6 +167,15 @@ class WatchGateway:
             request.lifetime.close()
             raise
 
+    def _check(self, request: ServiceRequest) -> None:
+        request.lifetime.check()
+        if self._checkpoint is not None:
+            self._checkpoint()
+
+    def stop_admission(self) -> None:
+        """Withdraw readiness before joining already-owned operations."""
+        self._closing = True
+
     def _completed(self, task: asyncio.Task[ServiceResponse]) -> None:
         self._tasks.discard(task)
         if not task.cancelled() and task.exception() is not None:
@@ -173,7 +187,7 @@ class WatchGateway:
         try:
             value = await asyncio.to_thread(
                 self.store.execute, scope, operation, payload,
-                expires_at=request.context.expires_at, checkpoint=request.lifetime.check,
+                expires_at=request.context.expires_at, checkpoint=lambda: self._check(request),
             )
         except RequestDisconnected:
             return _response(503, {"status": "uncertain", "reason": "watch_request_disconnected"})
@@ -191,7 +205,7 @@ class WatchGateway:
     async def drain(self, *, timeout: float) -> None:
         """Stop admission and join disk work, even after its caller disconnected."""
         timeout = positive_seconds(timeout)
-        self._closing = True
+        self.stop_admission()
         if self._tasks:
             _, pending = await asyncio.wait(self._tasks, timeout=timeout)
             if pending:

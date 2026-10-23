@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import threading
 import time
 from pathlib import Path
@@ -107,6 +108,96 @@ def test_real_gateway_scopes_reconcile_restart_ack_and_policy_withdrawal(tmp_pat
             assert store.path.read_bytes() == before
             assert len(json.loads(before)["records"]) == 1
             await owner.drain(timeout=3)
+    asyncio.run(scenario())
+
+
+def test_owned_runtime_observes_reconnects_and_restarts_over_real_gateway(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
+    from gateway_service_transport_fixtures import eventually, running
+
+    from agent_pull_requests.watch_observer import NativeObservationBinding
+    from agent_pull_requests.watch_service import WatchService
+
+    async def scenario():
+        store = ReplayStore((tmp_path / "runtime").resolve(), "fleet/service/installation")
+        store.provision()
+        scope = ConsumerScope("coordinator-a", "account-a", "example/project")
+        original = {
+            "request_id": "original", "issued_at": time.time(), "number": 1, "until": ("merged",),
+        }
+        receipt = store.execute(scope, "register", original, expires_at=int(time.time()) + 60)
+        store.execute(
+            ConsumerScope("coordinator-b", scope.account, scope.repo), "register", original,
+            expires_at=int(time.time()) + 60,
+        )
+        calls = tmp_path / "native-calls"
+        snapshot = {
+            "schema": "agent-worktrees.pr-snapshot", "version": 1, "repo": scope.repo, "pr": 1,
+            "provider": "github", "pr_state": "closed", "merged": True, "head_sha": "head",
+            "base_ref": "main", "mergeable": True, "checks_state": "success",
+            "title": "Fixture", "draft": False,
+        }
+        code = (
+            "import json,pathlib,sys;"
+            "assert sys.argv[1:]==['pr-watch','snapshot','example/project','1','--json'];"
+            f"pathlib.Path({str(calls)!r}).open('a').write('read\\n');"
+            f"print(json.dumps({snapshot!r}))"
+        )
+        async with running(tmp_path) as rig:
+            async def access():
+                return rig.access("service-a", 1)
+
+            def make():
+                return WatchService(
+                    store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
+                    bindings=(WatchScopeBinding("caller-a", "project", scope),),
+                    observations=(NativeObservationBinding(
+                        scope.account, scope.repo, sys.executable,
+                        prefix=(sys.executable, "-c", code),
+                    ),),
+                    gateway_origin=rig.origin, gateway_ca=rig.ca,
+                    access_token_callback=access, proof_key=rig.h.keys[1].get_op_key("sign"),
+                    authority=lambda: int(time.time()) + 60, checkpoint=lambda: None,
+                    interval=1,
+                )
+
+            async def send(service, operation, payload=None):
+                await eventually(lambda: service.status()["ready"])
+                path = "/api/v1/watch/project/" + operation
+                async with rig.session.post(
+                    rig.origin + path, headers=await rig.auth(path, "POST"), json=payload or {},
+                ) as response:
+                    assert response.status == 200
+                    return await response.json()
+
+            owner = make()
+            await owner.start()
+            try:
+                pending = await send(owner, "pending")
+                event = pending["events"][0]
+                assert event["registration_id"] == receipt["registration_id"]
+                assert not event["timed_out"] and calls.read_text() == "read\n"
+                # The runtime owns reconnection; the client reconciles the same IDs.
+                await rig.state.channels["service-a"].close()
+                await eventually(lambda: not owner.connector.connected.is_set())
+                assert await send(owner, "pending") == pending
+            finally:
+                await owner.close(timeout=5)
+            assert owner.status()["closed"] and not owner.status()["writer_held"]
+            successor = make()
+            await successor.start()
+            try:
+                assert await send(successor, "pending") == pending
+                completion = {
+                    key: original[key] for key in ("request_id", "issued_at")
+                } | {"registration_id": receipt["registration_id"], "event_id": event["event_id"]}
+                assert (await send(successor, "acknowledge", completion))["status"] == "acknowledged"
+                assert await send(successor, "pending") == {"events": [], "more": False}
+                assert calls.read_text() == "read\n"
+                assert rig.backends[0].requests == []
+            finally:
+                await successor.close(timeout=5)
+
     asyncio.run(scenario())
 
 

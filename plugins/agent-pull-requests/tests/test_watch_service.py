@@ -1,0 +1,495 @@
+"""Real disk/lease/thread ownership with a deterministic connector boundary."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import sys
+import threading
+import time
+from dataclasses import replace
+
+import pytest
+from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest
+from single_instance_lease import AlreadyRunningError, OperationLock, SingleInstance
+
+from agent_pull_requests import watch_observer, watch_replay_store, watch_service
+from agent_pull_requests.watch_contract import PRSnapshot
+from agent_pull_requests.watch_gateway import WatchScopeBinding
+from agent_pull_requests.watch_observer import NativeObservationBinding
+from agent_pull_requests.watch_replay import ConsumerScope
+from agent_pull_requests.watch_replay_store import ReplayStore
+from agent_pull_requests.watch_service import WatchService
+
+SCOPE = ConsumerScope("consumer-a", "account-a", "example/project")
+
+
+class Connector:
+    def __init__(self, **kwargs):
+        self.connected = asyncio.Event()
+        self.handler = kwargs["handler"]
+        self.entered = asyncio.Event()
+        self.exited = asyncio.Event()
+
+    async def run(self, stop):
+        self.entered.set()
+        self.connected.set()
+        try:
+            await stop.wait()
+        finally:
+            self.connected.clear()
+            self.exited.set()
+
+
+@pytest.fixture
+def setup(tmp_path, monkeypatch):
+    monkeypatch.setattr(watch_service, "ServiceConnector", Connector)
+    store = ReplayStore(tmp_path.resolve(), "fleet/service/installation")
+    store.provision()
+    revoked = threading.Event()
+
+    def checkpoint():
+        if revoked.is_set():
+            raise PermissionError("synthetic authority lost")
+
+    async def access():
+        return "synthetic"
+
+    def make(**kwargs):
+        return WatchService(
+            store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
+            bindings=(WatchScopeBinding("caller-a", "project", SCOPE),),
+            observations=(NativeObservationBinding(SCOPE.account, SCOPE.repo, sys.executable),),
+            gateway_origin="https://gateway.invalid", access_token_callback=access,
+            proof_key=object(), authority=lambda: int(time.time()) + 60,
+            checkpoint=checkpoint, interval=0.01, **kwargs,
+        )
+
+    return store, make, revoked
+
+
+def request(operation="pending", payload=None):
+    return ServiceRequest(
+        CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", int(time.time()) + 60),
+        "POST", f"/v1/watch/project/{operation}", (("content-type", "application/json"),),
+        json.dumps(payload or {}).encode(),
+    )
+
+
+def registration():
+    return dict(request_id="original", issued_at=time.time(), number=1, until=["merged"])
+
+
+async def wait_for(predicate):
+    async def wait():
+        while not predicate():
+            await asyncio.sleep(0.001)
+    await asyncio.wait_for(wait(), 3)
+
+
+def contender(store):
+    return SingleInstance(store.root, service="agent-pull-requests-watch")
+
+
+def test_adopts_before_readiness_and_releases_after_both_units_exit(setup):
+    store, make, _ = setup
+
+    async def scenario():
+        service = make()
+        assert not service.status()["ready"]
+        await service.start()
+        try:
+            await wait_for(lambda: service.status()["ready"])
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+            service.connector.connected.clear()
+            assert not service.status()["ready"]
+        finally:
+            await service.close(timeout=3)
+        assert service.connector.exited.is_set()
+        assert service.status() == {
+            "ready": False, "writer_held": False, "draining": True, "closed": True,
+        }
+        with contender(store):
+            pass
+        with pytest.raises(RuntimeError):
+            await service.start()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("ending", ["stop", "cancel", "failure", "return"])
+def test_foreground_lifetime_joins_owned_units_on_every_exit(setup, ending):
+    _, make, _ = setup
+
+    async def scenario():
+        service = make()
+        stop = asyncio.Event()
+        if ending in {"failure", "return"}:
+            async def stopped(_stop):
+                if ending == "failure":
+                    raise ValueError("synthetic connector failure")
+            service.connector.run = stopped
+        running = asyncio.create_task(service.run(stop, drain_timeout=3))
+        if ending in {"stop", "cancel"}:
+            await wait_for(lambda: service.status()["ready"])
+            if ending == "stop":
+                stop.set()
+                await running
+            else:
+                running.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await running
+        else:
+            with pytest.raises(ValueError if ending == "failure" else RuntimeError):
+                await running
+        assert service.status()["closed"] and not service.status()["writer_held"]
+        assert all(task.done() for task in service._tasks)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("state", ["missing", "corrupt", "foreign", "native"])
+def test_start_refuses_without_reprovisioning_or_stale_lease(setup, state):
+    store, make, _ = setup
+    if state == "missing":
+        store.path.unlink()
+    elif state == "corrupt":
+        store.path.write_text("corrupt")
+    elif state == "foreign":
+        store.namespace = "other/service/installation"
+    else:
+        (store.root / "watch-subscriptions.json").write_text("{}")
+    before = store.path.read_bytes() if store.path.exists() else None
+
+    async def scenario():
+        service = make()
+        with pytest.raises((OSError, ValueError)):
+            await service.start()
+        assert not service.connector.entered.is_set()
+        with contender(store):
+            pass
+        assert service.status()["closed"]
+
+    asyncio.run(scenario())
+    assert (store.path.read_bytes() if store.path.exists() else None) == before
+
+
+def test_competing_start_cannot_release_original_writer(setup):
+    store, make, _ = setup
+
+    async def scenario():
+        original, replacement = make(), make()
+        await original.start()
+        try:
+            with pytest.raises(AlreadyRunningError):
+                await replacement.start()
+            await replacement.close(timeout=1)
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+        finally:
+            await original.close(timeout=3)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("foreign", ["process", "event-loop"])
+def test_foreign_execution_owner_cannot_release_writer(setup, foreign):
+    store, make, _ = setup
+
+    async def scenario():
+        service = make()
+        await service.start()
+        try:
+            if foreign == "process":
+                original = service._pid
+                service._pid += 1
+                try:
+                    with pytest.raises(RuntimeError, match="execution owner"):
+                        await service.close(timeout=1)
+                finally:
+                    service._pid = original
+            else:
+                def other_loop():
+                    with pytest.raises(RuntimeError, match="execution owner"):
+                        asyncio.run(service.close(timeout=1))
+                await asyncio.to_thread(other_loop)
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+            assert not service.status()["draining"]
+        finally:
+            await service.close(timeout=3)
+
+    asyncio.run(scenario())
+
+
+def test_constructor_refuses_unobservable_serving_scope(setup):
+    store, make, _ = setup
+    configured = make()
+    with pytest.raises(ValueError, match="no native observation binding"):
+        WatchService(
+            store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
+            bindings=(WatchScopeBinding("caller-a", "project", SCOPE),),
+            observations=(), gateway_origin="https://gateway.invalid",
+            access_token_callback=lambda: None, proof_key=object(),
+            authority=configured._authority, checkpoint=configured._checkpoint,
+        )
+    with contender(store):
+        pass
+
+
+def test_observation_shares_scope_and_restarts_from_original_event(setup, monkeypatch):
+    store, make, _ = setup
+    original = registration()
+    peer = replace(SCOPE, consumer="consumer-b")
+    for scope in (SCOPE, peer):
+        store.execute(scope, "register", {**original, "until": ("merged",)},
+                      expires_at=int(time.time()) + 60)
+    calls = []
+    monkeypatch.setattr(watch_observer, "fetch_snapshot",
+                        lambda *a, **kw: calls.append(a) or PRSnapshot(merged=True))
+
+    async def scenario():
+        first = make()
+        await first.start()
+        await wait_for(lambda: first.status()["ready"])
+        await first.close(timeout=3)
+        events = store.execute(SCOPE, "pending", {}, expires_at=int(time.time()) + 60)
+        assert len(events["events"]) == 1
+        second = make()
+        await second.start()
+        await wait_for(lambda: second.status()["ready"])
+        await second.close(timeout=3)
+        assert store.execute(SCOPE, "pending", {}, expires_at=int(time.time()) + 60) == events
+        assert len(calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_provider_unavailable_is_not_ready_or_registration_loss(setup, monkeypatch):
+    store, make, _ = setup
+    original = {**registration(), "until": ("merged",)}
+    receipt = store.execute(SCOPE, "register", original, expires_at=int(time.time()) + 60)
+    read = threading.Event()
+
+    def unavailable(*args, **kwargs):
+        read.set()
+        raise ValueError("synthetic provider unavailable")
+
+    monkeypatch.setattr(watch_observer, "fetch_snapshot", unavailable)
+
+    async def scenario():
+        service = make()
+        await service.start()
+        try:
+            assert await asyncio.to_thread(read.wait, 3)
+            await wait_for(lambda: service._last_cycle is not None)
+            assert service.connector.connected.is_set() and not service.status()["ready"]
+            assert store.execute(SCOPE, "register", original,
+                                 expires_at=int(time.time()) + 60) == receipt
+        finally:
+            await service.close(timeout=3)
+
+    asyncio.run(scenario())
+
+
+def test_normal_transaction_contention_recovers_on_existing_cadence(setup):
+    store, make, _ = setup
+
+    async def scenario():
+        service = make()
+        await service.start()
+        try:
+            await wait_for(lambda: service.status()["ready"])
+            with OperationLock(store.root / "watch-replay.lock"):
+                await wait_for(lambda: service._last_cycle is None)
+                assert not service.status()["ready"]
+                assert all(not task.done() for task in service._tasks)
+            await wait_for(lambda: service.status()["ready"])
+        finally:
+            await service.close(timeout=3)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("cancel_drain", [False, True])
+def test_drain_retains_writer_until_native_read_really_finishes(setup, monkeypatch, cancel_drain):
+    store, make, _ = setup
+    original = {**registration(), "until": ("merged",)}
+    receipt = store.execute(SCOPE, "register", original, expires_at=int(time.time()) + 60)
+    entered, release = threading.Event(), threading.Event()
+
+    def fetch(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return PRSnapshot(merged=True)
+
+    monkeypatch.setattr(watch_observer, "fetch_snapshot", fetch)
+
+    async def scenario():
+        service = make()
+        await service.start()
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            if cancel_drain:
+                drain = asyncio.create_task(service.close(timeout=3))
+                await wait_for(lambda: service.status()["draining"])
+                drain.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await drain
+            else:
+                with pytest.raises(TimeoutError):
+                    await service.close(timeout=0.01)
+            assert not service.status()["ready"]
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+            response = await service.gateway.handle(request("register", registration()))
+            assert response.status == 503
+        finally:
+            release.set()
+            await service.close(timeout=3)
+        with contender(store):
+            pass
+        assert store.execute(SCOPE, "register", original,
+                             expires_at=int(time.time()) + 60) == receipt
+        assert store.execute(SCOPE, "pending", {}, expires_at=int(time.time()) + 60)["events"] == []
+
+    asyncio.run(scenario())
+
+
+def test_start_cancellation_keeps_custody_of_initial_disk_read(setup, monkeypatch):
+    store, make, _ = setup
+    entered, release = threading.Event(), threading.Event()
+    targets = store.observation_targets
+
+    def held(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return targets(**kwargs)
+
+    monkeypatch.setattr(store, "observation_targets", held)
+
+    async def scenario():
+        service = make()
+        start = asyncio.create_task(service.start())
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            start.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await start
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+            assert not service.connector.entered.is_set()
+        finally:
+            release.set()
+            await service.close(timeout=3)
+        with contender(store):
+            pass
+
+    asyncio.run(scenario())
+
+
+def test_drain_timeout_on_serving_write_does_not_release_writer(setup, monkeypatch):
+    store, make, _ = setup
+    entered, release = threading.Event(), threading.Event()
+    atomic = watch_replay_store._atomic_write_json
+
+    def held(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        atomic(*args, **kwargs)
+
+    async def scenario():
+        service = make()
+        await service.start()
+        await wait_for(lambda: service.status()["ready"])
+        monkeypatch.setattr(watch_replay_store, "_atomic_write_json", held)
+        original = registration()
+        pending = asyncio.create_task(service.gateway.handle(request("register", original)))
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            with pytest.raises(TimeoutError):
+                await service.close(timeout=0.01)
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+        finally:
+            release.set()
+            await service.close(timeout=3)
+            response = await pending
+        assert response.status == 503
+        monkeypatch.setattr(watch_replay_store, "_atomic_write_json", atomic)
+        original["until"] = tuple(original["until"])
+        assert store.execute(SCOPE, "register", original,
+                             expires_at=int(time.time()) + 60)["status"] == "active"
+        assert len(json.loads(store.path.read_bytes())["records"]) == 1
+
+    asyncio.run(scenario())
+
+
+def test_close_during_adoption_cannot_start_late_units(setup, monkeypatch):
+    store, make, _ = setup
+    entered, release = threading.Event(), threading.Event()
+    targets = store.observation_targets
+
+    def held(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return targets(**kwargs)
+
+    monkeypatch.setattr(store, "observation_targets", held)
+
+    async def scenario():
+        service = make()
+        start = asyncio.create_task(service.start())
+        close = None
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            close = asyncio.create_task(service.close(timeout=3))
+            await wait_for(lambda: service.status()["draining"])
+        finally:
+            release.set()
+            await asyncio.gather(start, return_exceptions=True)
+            if close is not None:
+                await close
+        assert not service.connector.entered.is_set()
+        with contender(store):
+            pass
+
+    asyncio.run(scenario())
+
+
+def test_authority_loss_after_commit_is_uncertain_and_preserves_original_id(setup, monkeypatch):
+    store, make, revoked = setup
+    atomic = watch_replay_store._atomic_write_json
+    committed = threading.Event()
+
+    def withdraw_after_commit(*args, **kwargs):
+        atomic(*args, **kwargs)
+        revoked.set()
+        committed.set()
+
+    async def scenario():
+        service = make()
+        await service.start()
+        await wait_for(lambda: service.status()["ready"])
+        original = registration()
+        monkeypatch.setattr(watch_replay_store, "_atomic_write_json", withdraw_after_commit)
+        try:
+            response = await service.gateway.handle(request("register", original))
+            assert committed.is_set()
+            assert response.status == 503 and json.loads(response.body)["status"] == "uncertain"
+            assert not service.status()["ready"]
+            response = await service.gateway.handle(request("register", {
+                **original, "request_id": "replacement",
+            }))
+            assert response.status == 503
+        finally:
+            await service.close(timeout=3)
+        monkeypatch.setattr(watch_replay_store, "_atomic_write_json", atomic)
+        revoked.clear()
+        original["until"] = tuple(original["until"])
+        receipt = store.execute(SCOPE, "register", original, expires_at=int(time.time()) + 60)
+        assert receipt["status"] == "active"
+        assert len(json.loads(store.path.read_bytes())["records"]) == 1
+
+    asyncio.run(scenario())
