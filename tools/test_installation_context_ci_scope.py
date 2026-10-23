@@ -221,7 +221,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "watch-owner-boundaries-linux", "watch-owner-boundaries-windows",
         "dispatch-delegation-linux", "dispatch-delegation-windows",
         "pr-service-linux", "pr-service-windows",
-        "pr-artifacts-linux", "pr-artifacts-windows", "dependency-compile",
+        "pr-artifacts-linux", "pr-artifacts-windows",
+        "dependency-compile-linux", "dependency-compile-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
@@ -283,20 +284,22 @@ def test_compile_acceptance_is_bounded_native_and_independently_selected() -> No
     trigger = workflow.get("on", workflow.get(True))
     selector = trigger["workflow_dispatch"]["inputs"]["dependency_compile"]
     assert selector["type"] == "boolean" and selector["default"] is False
-    job = workflow["jobs"]["dependency-compile"]
-    assert job["if"] == "${{ inputs.dependency_compile }}"
-    assert job["runs-on"] == "${{ matrix.os }}"
-    assert job["timeout-minutes"] == 6 and not job.get("continue-on-error")
-    assert job["strategy"] == {
-        "fail-fast": False, "matrix": {"os": ["ubuntu-latest", "windows-latest"]},
-    }
-    commands = [step["run"] for step in job["steps"] if "run" in step]
-    assert commands == [
-        "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest",
-        'python -m pytest -q tools/test_installer_dependency_compile.py '
-        'tools/test_installer_dependency_policy.py '
-        '-k "compile or real_uv_registry_transitive_and_isolated_build_age"',
-    ]
+    for name, runner in (
+        ("dependency-compile-linux", "ubuntu-latest"),
+        ("dependency-compile-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == "${{ inputs.dependency_compile }}"
+        assert job["runs-on"] == runner
+        assert job["timeout-minutes"] == 6 and not job.get("continue-on-error")
+        assert not job.get("strategy")
+        commands = [step["run"] for step in job["steps"] if "run" in step]
+        assert commands == [
+            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest",
+            'python -m pytest -q tools/test_installer_dependency_compile.py '
+            'tools/test_installer_dependency_policy.py '
+            '-k "compile or real_uv_registry_transitive_and_isolated_build_age"',
+        ]
 
 
 def test_watch_owner_acceptance_is_opt_in_native_and_separately_contained() -> None:

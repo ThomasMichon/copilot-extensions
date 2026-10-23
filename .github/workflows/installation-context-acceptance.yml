@@ -255,16 +255,12 @@ jobs:
     timeout-minutes: 10
     steps: *pr-service-steps
 
-  dependency-compile:
+  dependency-compile-linux:
     if: ${{ inputs.dependency_compile }}
-    name: Retained dependency compile (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Retained dependency compile (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 6
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
+    steps: &dependency-compile-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -278,3 +274,10 @@ jobs:
           tools/test_installer_dependency_compile.py
           tools/test_installer_dependency_policy.py
           -k "compile or real_uv_registry_transitive_and_isolated_build_age"
+
+  dependency-compile-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Retained dependency compile (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *dependency-compile-steps
