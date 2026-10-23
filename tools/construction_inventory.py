@@ -73,8 +73,8 @@ def _standalone_consumers(root: Path) -> list[str]:
         value = ast.literal_eval(assignments[0])
     except (SyntaxError, TypeError, ValueError) as exc:
         raise InventoryError(f"invalid standalone roster declaration: {exc}") from exc
-    if not isinstance(value, (tuple, list)) or any(not isinstance(item, str) for item in value):
-        raise InventoryError("standalone roster must be a literal sequence of paths")
+    if not isinstance(value, tuple) or any(not isinstance(item, str) for item in value):
+        raise InventoryError("standalone roster must be an immutable literal tuple of paths")
     consumers = [_relative(item) for item in value]
     if len(set(consumers)) != len(consumers):
         raise InventoryError("duplicate standalone owner")

@@ -206,6 +206,7 @@ class ConstructionInventoryTests(unittest.TestCase):
             "OTHER = ()",
             "STANDALONE_CONSUMERS = make_roster()",
             "STANDALONE_CONSUMERS = 'apps/service'",
+            "STANDALONE_CONSUMERS = ['apps/service']",
             "STANDALONE_CONSUMERS = ('apps/service', 'apps/service')",
             "STANDALONE_CONSUMERS = ('../foreign',)",
             "STANDALONE_CONSUMERS = ()\nSTANDALONE_CONSUMERS += ('apps/service',)",
@@ -215,6 +216,15 @@ class ConstructionInventoryTests(unittest.TestCase):
                 self.write("tools/standalone_consumers.py", source)
                 with self.assertRaises(inventory.InventoryError):
                     self.report()
+
+    def test_mutable_roster_cannot_hide_later_standalone_consumers(self):
+        self.write(
+            "tools/standalone_consumers.py",
+            "STANDALONE_CONSUMERS = ['apps/service']\n"
+            "STANDALONE_CONSUMERS.append('apps/missing')\n",
+        )
+        with self.assertRaisesRegex(inventory.InventoryError, "immutable literal tuple"):
+            self.report()
 
     def test_missing_declared_runtime_cannot_be_omitted_as_payload_only(self):
         self.projects.remove("plugins/runtime/pyproject.toml")

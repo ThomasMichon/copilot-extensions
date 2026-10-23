@@ -329,3 +329,9 @@ cutover is activated by the reviewed documentation.
   use the same duplicate-project claim check; regressions cover both marketplace
   orders and plugin/standalone overlap. This tightens classification only and
   does not add execution ownership or another installer.
+
+- The roster reader now requires the canonical immutable tuple shape. A mutable
+  list followed by `append` could otherwise add a consumer invisible to a
+  literal-only read. The exact mutation regression refuses that source without
+  executing the helper. This is not a general Python evaluator or a new runtime
+  policy; nonliteral or mutable roster declarations need explicit reconciliation.

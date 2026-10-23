@@ -153,8 +153,8 @@ extras are not assumed to be separate environments; canonical and identified
 vendored libraries remain construction inputs.
 
 `--root` binds every ownership declaration to that requested checkout. Its
-standalone roster is read as literal data, never imported or executed; missing,
-computed or ambiguous roster declarations are refused.
+standalone roster is read as an immutable literal tuple, never imported or
+executed; mutable, missing, computed or ambiguous declarations are refused.
 
 Plugin-owned Python projects below a plugin root are declared with
 `additionalPythonProjects` in that plugin's manifest, using plugin-relative
