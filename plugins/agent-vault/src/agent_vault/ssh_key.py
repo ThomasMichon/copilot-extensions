@@ -74,7 +74,7 @@ def _generate_record() -> str:
     ).decode("ascii")
 
 
-def _read_record(value: str) -> dict:
+def decode_record(value: str) -> dict:
     serialization, private_type, _ = _crypto()
     from cryptography.exceptions import UnsupportedAlgorithm
 
@@ -105,12 +105,40 @@ def _read_record(value: str) -> dict:
         ).decode("ascii")
         if derived != record["public_key"]:
             raise ValueError
-        return public_metadata(derived)
+        public_metadata(derived)
+        return record
     except (
         ValueError, TypeError, KeyError, UnicodeError, binascii.Error,
         RecursionError, UnsupportedAlgorithm,
     ) as exc:
         raise IdentityKeyError("malformed_key", FAILURE_HINTS["malformed_key"]) from exc
+
+
+def _read_record(value: str) -> dict:
+    return public_metadata(decode_record(value)["public_key"])
+
+
+def read_for_install(service, kpdb: str, entry: str) -> dict:
+    """Read an existing whole record for the local protected-file consumer."""
+    deadline = time.monotonic() + (
+        100.0 if getattr(service._request_ctx, "allow_prompt", False) else 60.0
+    )
+    validate_request(entry, False, False)
+    _crypto()
+    if not service._credential_lock.acquire(timeout=5.0):
+        raise IdentityKeyError("service_busy", FAILURE_HINTS["service_busy"])
+    try:
+        if not service.ensure_unlocked(kpdb):
+            raise IdentityKeyError("needs_unlock", FAILURE_HINTS["needs_unlock"])
+        if time.monotonic() >= deadline:
+            raise IdentityKeyError("operation_expired", FAILURE_HINTS["operation_expired"])
+        value = service.cli.read_identity_key(kpdb, entry, min(deadline, time.monotonic() + 20.0))
+        if value is None:
+            raise IdentityKeyError("entry_missing", FAILURE_HINTS["entry_missing"])
+        decode_record(value)
+        return {"ok": True, "value": value}
+    finally:
+        service._credential_lock.release()
 
 
 def validate_request(entry: str, initialize: bool, confirm: bool) -> None:
@@ -167,6 +195,13 @@ def handle_prepare_request(service, kpdb: str, group: str | None, request: dict)
         entry = request.get("entry", "")
         if not isinstance(entry, str) or (group is not None and not isinstance(group, str)):
             raise IdentityKeyError("invalid_entry", "Select a slash-delimited SSH key entry.")
+        if request.get("action") == "ssh-key-read":
+            validate_request(
+                entry, request.get("initialize", False), request.get("confirm_initialization", False),
+            )
+            if request.get("initialize", False):
+                raise IdentityKeyError("confirmation_required", "SSH installation never initializes a key.")
+            return read_for_install(service, kpdb, normalize_entry(entry, group))
         validate_request(
             entry, request.get("initialize", False), request.get("confirm_initialization", False),
         )
