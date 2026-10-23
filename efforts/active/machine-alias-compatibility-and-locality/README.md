@@ -32,8 +32,11 @@ requirement. Selected native versions include Manager `0.6.108-dev1`,
 Worktrees `1.24.229-dev1`, Bridge `0.9.130-dev1` and Dispatch `0.18.76-dev1`.
 The registered native source and legacy runtime root are preserved. Guest
 recovery remains blocked by the deliberate `same_kernel_boot` fence; a real
-kernel restart still needs specific operator approval and a verified external
-baton. No guest recovery, replay or ordinary update has run. After that supported
+kernel restart is explicitly deferred by the operator; a future restart still
+needs specific approval. An external continuation baton is verified. The
+operator separately authorizes a full guest update only after successful
+restart-confirmed, no-replay recovery; that does not authorize shutdown or
+bypassing the current fence. No guest recovery, replay or ordinary update has run. After that supported
 guest acceptance, resume local-first identity implementation and the full
 creation/resume/installed matrix. The
 [current journal](journal/2026/10.22%20progress.md) preserves the exact release
@@ -293,6 +296,11 @@ The bounded correction removes cross-component helper-byte admission and
 historical launcher-hash gates for an explicitly registered Manager. Existing
 provider/package/path authority and construction-time change detection remain;
 this is not a request to remove wrong-target or source-selection boundaries.
+
+**Guest restart gate (operator-selected form):** `wsl_restart=defer`,
+`post_recovery_update=true`. Leave current guest workloads running. The separate
+update authorization applies only after a future approved kernel restart and
+successful no-replay recovery; the restart itself is not authorized.
 
 ## Plan
 
