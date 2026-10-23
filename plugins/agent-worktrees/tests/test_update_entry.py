@@ -284,7 +284,7 @@ def test_update_entry_refuses_alternate_provider(update_entry_case, monkeypatch,
 
 
 @pytest.mark.parametrize("name", [
-    "worktree-manager", "agent-worktrees", "agent-worktrees-update-entry.sh",
+    "worktree-manager", "worktree-manager.cmd", "worktree-manager.ps1",
 ])
 def test_update_entry_fresh_installer_protects_foreign_commands(tmp_path, monkeypatch, name):
     home = tmp_path / "home"
@@ -298,7 +298,7 @@ def test_update_entry_fresh_installer_protects_foreign_commands(tmp_path, monkey
     validate = runpy.run_path(str(REPO / "worktree-manager/scripts/update_entry.py"))[
         "validate_manager_ownership"
     ]
-    with pytest.raises(RuntimeError, match=r"Foreign (Manager|Worktrees) command preserved"):
+    with pytest.raises(RuntimeError, match="Foreign Manager command preserved"):
         validate(home / ".worktree-manager", REPO / "worktree-manager")
     assert stub.read_bytes() == b"foreign command"
 
