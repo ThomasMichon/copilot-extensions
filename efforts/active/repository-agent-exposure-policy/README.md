@@ -8,9 +8,9 @@ visions:
 
 - **Slug:** `repository-agent-exposure-policy`
 - **Repo:** copilot-extensions
-- **Branch(es):** independent, source-only proposal and implementation PRs to `dev`
+- **Branch(es):** source-only intent and implementation PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Draft; planning only, implementation and rollout not authorized
+- **Status:** Active; implementation authorized, standing-intent review first
 - **Vision:** extends [agent-worktrees](../../../visions/plugins/agent-worktrees/README.md)
   repository identity/contribution posture and
   [agent-bridge](../../../visions/plugins/agent-bridge/README.md)
@@ -36,17 +36,23 @@ vendor CLI.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Planning coordinator | Capture and land the proposal only | #8332 and the proposal PR |
-| Future implementation owner | Claim one admitted slice after execution authorization | #8332; no implementation assignment yet |
+| Implementation coordinator | Own effective policy, integration and completion | #8332 and source-only implementation PRs |
+| Worktree boundary participant | Inventory adoption, Manager and native launch boundaries | #8332; coordinator-assigned scope |
+| Bridge boundary participant | Inventory creation, resume and receiving host boundaries | #8332; coordinator-assigned scope |
+| Autonomous/provider participant | Inventory dispatch, handoff and venue receivers | #8332; coordinator-assigned scope |
 
 ## Coordination
 
 - **Topology:** independent, source-only worktree PRs; no agent hosted in this
   repository is needed to propose or implement the policy.
-- **Host (owns PRs):** planning coordinator for the initial proposal only.
-- **Delegates:** none assigned; existing related-work owners are not redirected.
-- **Handoff:** the reviewed effort and #8332 retain all implementation, release,
-  and adoption obligations. Planning completion does not close the umbrella.
+- **Host (owns PRs):** implementation coordinator, operating from an external
+  eligible harness; the source checkout stays sessionless.
+- **Delegates:** bounded, non-overlapping evidence and implementation slices;
+  the coordinator owns shared interfaces and integration. Existing related-work
+  owners are not redirected.
+- **Handoff:** this effort and #8332 retain all implementation, release and
+  adoption obligations across context boundaries. A merged slice does not close
+  the umbrella; private elaboration review is not a prerequisite.
 
 ## Context
 
@@ -80,23 +86,27 @@ The operator's relevant instructions, verbatim:
 
 > Great. Make an effort and add this
 
-The operator confirmed the slug `repository-agent-exposure-policy`. The
-immediate assignment is to create the reviewed plan, not execute it.
-The proposed contract below records the discussed design; implementation
-sequencing and additional safeguards/tests are agent-recommended, not additional
-operator authorization.
+The operator confirmed the slug `repository-agent-exposure-policy`. The initial
+assignment was planning-only. Subsequent execution authorization, verbatim:
+
+> Great. Drive the implementation
+
+The reviewed plan now governs execution. Private elaboration review is not a
+dependency. Implementation sequencing and additional safeguards/tests below
+remain visibly agent-recommended; the operator authorized driving this effort,
+not destructive live reconciliation or unrelated release-repair work.
 
 ## Plan
 
 ### Phase 0 - Reviewed proposal
 
 - [x] Capture the request and accepted `expose_agent` naming; claim #8332.
-- [x] Land the proposal through the repository's review gate. Stop this planning
-  assignment there; leave the effort Draft and the implementation backlog open.
+- [x] Land the proposal through the repository's review gate. The planning
+  assignment ended there; subsequent execution authorization is recorded above.
 
 ### Phase 1 - Intent and effective policy
 
-_Agent-recommended implementation sequence; requires execution authorization._
+_Agent-recommended implementation sequence; execution authorized._
 
 - [ ] Review a vision amendment distinguishing source repositories from
   agent-hosting projects, before implementing the stronger hosting contract.
@@ -115,7 +125,7 @@ _Agent-recommended implementation sequence; requires execution authorization._
 
 ### Phase 2 - Managed adoption and launch boundaries
 
-_Agent-recommended implementation sequence; requires Phase 1 and authorization._
+_Agent-recommended implementation sequence; requires Phase 1._
 
 - [ ] Apply the effective veto before project-adoption side effects and before
   managed authoring launch effects: Manager/picker, Bridge creation/embodiment,
@@ -150,7 +160,7 @@ _Agent-recommended follow-through; live changes require separate authorization._
 
 ## Validation Plan
 
-_Agent-recommended proofs for later implementation; not executed by this plan._
+_Agent-recommended proofs; record results as implementation proceeds._
 
 - [ ] Exercise strict policy parsing and canonical/legacy/marketplace resolution:
   absent, true, false, malformed and unreadable configurations; no
@@ -179,7 +189,7 @@ _Agent-recommended proofs for later implementation; not executed by this plan._
 
 ## Proposal
 
-Proposed repository configuration, **not implemented by this effort intake**:
+Repository configuration to implement; **not yet enforced**:
 
 ```yaml
 expose_agent: false
@@ -203,3 +213,18 @@ machine metadata/project enumeration with hosting eligibility.
   and passing checks. Phase 0 is complete; #8332 and the effort remain open.
   The next slice is the separately authorized Phase 1 vision/policy work, not an
   implicit runtime rollout.
+
+### 2026-10-23 - Execution authorization and boundary inventory
+
+- Execution authorized after proposal #8335 and planning-status #8338 merged.
+  Claimed the implementation stretch on #8332; private elaboration review is not
+  a dependency.
+- Inventoried adoption, Manager/picker, native/remote launch, Bridge receivers,
+  dispatch, handoff and venue-provider paths. Existing resume seed preparation,
+  recovery setup and provider rejoin can precede ordinary launch checks; those
+  paths require explicit pre-effect admission, not discovery filtering alone.
+- Preserve plain source allocation separately from launch-plan construction,
+  and preserve saved handoffs independently of successor arming.
+- Standing-intent amendment is the first review gate. Effective policy and
+  boundary implementation follow only after that amendment lands; no live
+  session, registry or installed runtime changed during inventory.
