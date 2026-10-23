@@ -21,6 +21,14 @@
 
 set -euo pipefail
 
+_bootstrap_progress() {
+    local message="$1" state="${2:-running}" stamp line
+    stamp="$(date -u '+%H:%M:%SZ' 2>/dev/null)" || stamp="time unavailable"
+    while IFS= read -r line; do
+        printf '[%s] update/bootstrap %s %s [elapsed unavailable]\n' "$stamp" "$state" "$line" >&2
+    done <<< "$message"
+}
+
 ROOT="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"
 STAGING="$ROOT/staging"
 CONFIG="$ROOT/config.toml"
@@ -45,15 +53,15 @@ fi
 
 installer_args=()
 if [ "${1-}" = --repair-update ]; then
-    [ "$#" -ge 4 ] || { echo 'ERROR: incomplete update bootstrap source.' >&2; exit 2; }
+    [ "$#" -ge 4 ] || { _bootstrap_progress 'incomplete update bootstrap source.' failed; exit 2; }
     REPO="$2"
     REF="$3"
     shift 3
-    [ "${1-}" = update ] || { echo 'ERROR: update bootstrap only accepts update.' >&2; exit 2; }
+    [ "${1-}" = update ] || { _bootstrap_progress 'update bootstrap only accepts update.' failed; exit 2; }
     installer_args+=(--repair-update)
 fi
 
-echo 'copilot-extensions Worktree Manager - bootstrap'
+_bootstrap_progress 'Worktree Manager bootstrap'
 
 # -- Prerequisites (auto-provision; restart-aware; user-local first) ----------
 # The one-liner must take a *bare* machine into the Manager (vision installer
@@ -64,7 +72,7 @@ echo 'copilot-extensions Worktree Manager - bootstrap'
 LOCAL_BIN="$HOME/.local/bin"
 
 if ! command -v uv >/dev/null 2>&1; then
-    echo '  uv not found - installing (user-local, no admin)...'
+    _bootstrap_progress 'uv not found - installing (user-local, no admin)...'
     curl -LsSf https://astral.sh/uv/install.sh | sh
     # uv installs into ~/.local/bin (or its env file); amend THIS session's PATH
     # so we can continue without a restart (the installer persists it for future
@@ -72,7 +80,7 @@ if ! command -v uv >/dev/null 2>&1; then
     [ -f "$LOCAL_BIN/env" ] && . "$LOCAL_BIN/env" || true
     export PATH="$LOCAL_BIN:$PATH"
     if ! command -v uv >/dev/null 2>&1; then
-        echo 'ERROR: uv was installed but is not on PATH yet. Restart your shell and re-run.' >&2
+        _bootstrap_progress 'uv was installed but is not on PATH yet. Restart your shell and re-run.' failed
         exit 1
     fi
 fi
@@ -82,17 +90,17 @@ command -v git >/dev/null 2>&1 && have_git=1
 if [ "$have_git" -eq 0 ]; then
     os="$(uname -s)"
     if [ "$os" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
-        echo '  git not found - installing via Homebrew...'
+        _bootstrap_progress 'git not found - installing via Homebrew...'
         brew install git || true
     elif [ "$os" = "Linux" ] && [ "$(id -u)" = "0" ]; then
-        echo '  git not found - installing via the system package manager...'
+        _bootstrap_progress 'git not found - installing via the system package manager...'
         if command -v apt-get >/dev/null 2>&1; then apt-get update -qq && apt-get install -y git || true
         elif command -v dnf >/dev/null 2>&1; then dnf install -y git || true
         elif command -v pacman >/dev/null 2>&1; then pacman -Sy --noconfirm git || true
         fi
     fi
     command -v git >/dev/null 2>&1 && have_git=1
-    [ "$have_git" -eq 0 ] && echo '  git unavailable - will fetch the payload as a tarball (no git).'
+    [ "$have_git" -eq 0 ] && _bootstrap_progress 'git unavailable - will fetch the payload as a tarball (no git).'
 fi
 
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
@@ -118,10 +126,10 @@ else
             ;;
     esac
     if [ -z "$tar_url" ]; then
-        echo "ERROR: git is required for a non-GitHub source ($REPO). Install git and re-run." >&2
+        _bootstrap_progress "git is required for a non-GitHub source ($REPO). Install git and re-run." failed
         exit 1
     fi
-    echo '  fetching payload tarball (no git)...'
+    _bootstrap_progress 'fetching payload tarball (no git)...'
     mkdir -p "$STAGING"
     extract="$STAGING/extract"; rm -rf "$extract"; mkdir -p "$extract"
     if command -v curl >/dev/null 2>&1; then
@@ -144,7 +152,7 @@ fi
 
 case ":$PATH:" in
     *":$LOCAL_BIN:"*) : ;;
-    *) echo "NOTE: add '$LOCAL_BIN' to your PATH (uv and the worktree-manager binstub live there), then restart your shell." >&2 ;;
+    *) _bootstrap_progress "add '$LOCAL_BIN' to your PATH (uv and the worktree-manager binstub live there), then restart your shell." warning ;;
 esac
 
 # Then run whatever the caller asked for through the freshly-installed app.

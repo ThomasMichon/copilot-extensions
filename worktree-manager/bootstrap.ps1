@@ -20,6 +20,18 @@
 
 $ErrorActionPreference = 'Stop'
 
+$BootstrapClock = [Diagnostics.Stopwatch]::StartNew()
+function Write-BootstrapProgress(
+    [string]$Message,
+    [ValidateSet('running', 'warning', 'failed')][string]$State = 'running'
+) {
+    $stamp = [DateTime]::UtcNow.ToString('HH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+    $elapsed = $BootstrapClock.Elapsed.TotalSeconds.ToString('F1', [Globalization.CultureInfo]::InvariantCulture)
+    foreach ($line in [regex]::Split($Message, '\r\n|\n|\r')) {
+        [Console]::Error.WriteLine("[$stamp] update/bootstrap $State $line [elapsed ${elapsed}s]")
+    }
+}
+
 $Root    = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
 $Staging = Join-Path $Root 'staging'
 $Config  = Join-Path $Root 'config.toml'
@@ -51,7 +63,7 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
     $installerArgs += '--repair-update'
     $commandArgs = @($commandArgs | Select-Object -Skip 3)
 }
-Write-Host 'copilot-extensions Worktree Manager - bootstrap'
+Write-BootstrapProgress 'Worktree Manager bootstrap'
 
 # -- Prerequisites (auto-provision; restart-aware; user-local first) ----------
 # The one-liner must take a *bare* machine into the Manager (vision installer
@@ -62,14 +74,14 @@ Write-Host 'copilot-extensions Worktree Manager - bootstrap'
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    Write-Host '  uv not found - installing (user-local, no admin)...'
+    Write-BootstrapProgress 'uv not found - installing (user-local, no admin)...'
     try { Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression }
     catch { throw "uv install failed: $_" }
     # uv installs into ~\.local\bin; amend THIS session's PATH so we can continue
     # without a restart (the installer persists PATH for future shells).
     if (Test-Path (Join-Path $LocalBin 'uv.exe')) { $env:PATH = "$LocalBin;$env:PATH" }
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        Write-Warning "uv was installed but is not on PATH yet. Restart your shell and re-run the bootstrap."
+        Write-BootstrapProgress 'uv was installed but is not on PATH yet. Restart your shell and re-run the bootstrap.' warning
         exit 1
     }
 }
@@ -77,7 +89,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
 if (-not $HaveGit) {
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Host '  git not found - attempting winget install (may prompt for elevation)...'
+        Write-BootstrapProgress 'git not found - attempting winget install (may prompt for elevation)...'
         try {
             winget install --id Git.Git -e --source winget `
                 --accept-source-agreements --accept-package-agreements | Out-Null
@@ -86,7 +98,7 @@ if (-not $HaveGit) {
         if (Test-Path (Join-Path $gitCmd 'git.exe')) { $env:PATH = "$gitCmd;$env:PATH" }
         $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
     }
-    if (-not $HaveGit) { Write-Host '  git unavailable - will fetch the payload as a tarball (no git).' }
+    if (-not $HaveGit) { Write-BootstrapProgress 'git unavailable - will fetch the payload as a tarball (no git).' }
 }
 
 # -- Fetch the payload (git clone/fetch when available, else GitHub tarball) ---
@@ -96,18 +108,18 @@ if ($HaveGit) {
         if (Test-Path $Staging) { Remove-Item -Recurse -Force $Staging }
         git init --quiet -- $Staging
         if ($LASTEXITCODE -ne 0) {
-            [Console]::Error.WriteLine("git init failed (exit $LASTEXITCODE).")
+            Write-BootstrapProgress "git init failed (exit $LASTEXITCODE)." failed
             exit $LASTEXITCODE
         }
     }
     git -C $Staging fetch --depth 1 -- $Repo $Ref | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("git fetch of $Repo@$Ref failed (exit $LASTEXITCODE).")
+        Write-BootstrapProgress "git fetch of $Repo@$Ref failed (exit $LASTEXITCODE)." failed
         exit $LASTEXITCODE
     }
     git -C $Staging -c core.hooksPath= checkout -q --detach FETCH_HEAD
     if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("git checkout of $Repo@$Ref failed (exit $LASTEXITCODE).")
+        Write-BootstrapProgress "git checkout of $Repo@$Ref failed (exit $LASTEXITCODE)." failed
         exit $LASTEXITCODE
     }
     $PayloadParent = $Staging
@@ -118,7 +130,7 @@ if ($HaveGit) {
     $m = [regex]::Match($Repo, 'github\.com[/:]+([^/]+)/([^/]+?)(?:\.git)?/?$')
     if ($m.Success) { $TarUrl = "https://codeload.github.com/$($m.Groups[1].Value)/$($m.Groups[2].Value)/tar.gz/$Ref" }
     if (-not $TarUrl) { throw "git is required for a non-GitHub source ($Repo). Install git and re-run." }
-    Write-Host '  fetching payload tarball (no git)...'
+    Write-BootstrapProgress 'fetching payload tarball (no git)...'
     New-Item -ItemType Directory -Force -Path $Staging | Out-Null
     $Tar = Join-Path $Staging 'payload.tar.gz'
     Invoke-WebRequest -Uri $TarUrl -OutFile $Tar -UseBasicParsing
@@ -127,7 +139,7 @@ if ($HaveGit) {
     New-Item -ItemType Directory -Force -Path $Extract | Out-Null
     tar -xzf $Tar -C $Extract   # bsdtar ships with Windows 10 1803+
     if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("Extracting the payload tarball failed (exit $LASTEXITCODE).")
+        Write-BootstrapProgress "Extracting the payload tarball failed (exit $LASTEXITCODE)." failed
         exit $LASTEXITCODE
     }
     $PayloadParent = (Get-ChildItem $Extract -Directory | Select-Object -First 1).FullName
@@ -151,9 +163,9 @@ try {
     Pop-Location
 }
 if ($commandExit -ne 0) {
-    [Console]::Error.WriteLine("Manager runtime command failed ($commandExit).")
+    Write-BootstrapProgress "Manager runtime command failed ($commandExit)." failed
 }
 if ($commandExit -eq 0 -and ($env:PATH -split ';') -notcontains $LocalBin) {
-    Write-Warning "Add '$LocalBin' to your PATH (uv and the worktree-manager binstub live there), then restart your shell."
+    Write-BootstrapProgress "Add '$LocalBin' to your PATH (uv and the worktree-manager binstub live there), then restart your shell." warning
 }
 exit $commandExit

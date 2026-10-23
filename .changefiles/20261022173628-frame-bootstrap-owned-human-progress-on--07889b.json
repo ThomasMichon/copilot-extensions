@@ -1,0 +1,9 @@
+{
+  "comment": "Frame bootstrap-owned human progress on stderr without duplicate PowerShell information records",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

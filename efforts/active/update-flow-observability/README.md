@@ -269,6 +269,47 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-22 - Source measurement journal merged; qualify bootstrap emitters
+
+- Merged #8009 as `22fa78f06922d48a2bd91e1feb834b535b0defee`
+  after exact-head approval without findings and all required checks passing.
+  Native PR status reconciled the merge and native synchronization pulled
+  this source worktree forward. The effort remains Active and was not
+  finalized.
+- Coordinated a bounded human-output follow-up with the existing #7743
+  owner. The fresh Manager bootstrap's own progress, warnings and explicit
+  diagnostics now use UTC-correlated stderr text. PowerShell uses an
+  in-process monotonic stopwatch and avoids `Write-Host` information-record
+  duplication; Bash explicitly reports unavailable elapsed timing before a
+  portable provider exists.
+- Native child output, exceptions, source/ref selection, prerequisites,
+  ownership admission, construction, the #7987 wait/stdio repair and durable
+  request custody are unchanged. This slice does not claim those separate
+  producers are all framed and does not add an updater or reporting process.
+- Combined Windows coverage passed 28 cases, with four POSIX-only skips.
+  Both PowerShell hosts passed ordinary and encoded-command capture: one
+  header on stderr, no duplicated host-information record, no human stdout,
+  culture-invariant UTC/elapsed labels and retained failure exits. Native
+  two-cycle controls retained UTF-8 streams, DEVNULL input, failure status
+  and window/focus behavior. The explicit native-tier flag was set inside
+  the isolated child environment; the earlier inherited-only attempt skipped
+  those three opt-in cases and is not counted as their execution.
+- Native Linux coverage passed 21 cases, with eleven unavailable-host/tier
+  skips. Actual local-Git bootstrap fixtures retain success/failure exits,
+  explicit malformed-repair diagnostics and physical-line framing. Installer
+  synchronization, all thirteen install contracts, lint, documentation
+  consistency and whitespace checks passed. Original limits were retained.
+- Docker and devcontainer commands were discoverable only as unusable
+  interop shims in the Linux venue: Docker integration was unavailable and
+  the CLI could not execute its Node dependency. Bounded contained probes
+  established that limitation after an initial direct discovery timed out.
+  No tool or system repair was attempted; validation used the existing
+  contained native lane. Full installation clean-room and external live
+  rollout were not run for this producer-only slice; its fixtures stop at
+  synthetic native commands and do not change construction or activation.
+- No host update or installed repair was performed. Whole-flow, populated
+  registry, healthy installed no-op and parent #6600 acceptance stay open.
+
 ### 2026-10-22 - Attribute real source CLI startup and context fan-out
 
 - The actual CLI `main`, parsers, adapters and configuration discovery ran

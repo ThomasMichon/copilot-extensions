@@ -9,7 +9,9 @@ installed a stale staged payload).
 
 from __future__ import annotations
 
+import base64
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -63,6 +65,7 @@ def _fake_tools(bin_dir: Path, uv_exit: int, python_exit: int) -> None:
 
 def _run(
     tmp_path: Path, uv_exit: int, ref: str = "main", python_exit: int = 0,
+    *, host: str | None = None, encoded: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     repo = _source_repo(tmp_path)
     root = tmp_path / "manager-root"
@@ -76,8 +79,19 @@ def _run(
     env["WORKTREE_MANAGER_ROOT"] = str(root)
     env["USERPROFILE"] = str(tmp_path / "profile")
     env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+    command = [host or PWSH, "-NoProfile", "-NonInteractive"]
+    if encoded:
+        script = str(BOOTSTRAP).replace("'", "''")
+        text = (
+            "[Threading.Thread]::CurrentThread.CurrentCulture = "
+            "[Globalization.CultureInfo]::GetCultureInfo('de-DE'); "
+            f"& '{script}' --version; exit $LASTEXITCODE"
+        )
+        command += ["-EncodedCommand", base64.b64encode(text.encode("utf-16le")).decode("ascii")]
+    else:
+        command += ["-File", str(BOOTSTRAP), "--version"]
     return subprocess.run(
-        [PWSH, "-NoProfile", "-NonInteractive", "-File", str(BOOTSTRAP), "--version"],
+        command,
         capture_output=True, text=True, env=env, timeout=120, check=False,
     )
 
@@ -90,7 +104,7 @@ def test_failed_uv_fails_the_bootstrap(tmp_path):
 
 def test_failed_runtime_command_fails_the_bootstrap(tmp_path):
     result = _run(tmp_path, uv_exit=0, python_exit=4)
-    assert result.returncode != 0
+    assert result.returncode == 4
     assert "failed (4)" in result.stdout + result.stderr
 
 
@@ -103,3 +117,32 @@ def test_failed_git_fetch_fails_the_bootstrap(tmp_path):
     result = _run(tmp_path, uv_exit=0, ref="no-such-branch")
     assert result.returncode != 0
     assert "git fetch of" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("encoded", [False, True])
+def test_bootstrap_progress_is_once_on_stderr_without_information_records(
+    tmp_path, host_name, encoded,
+):
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    result = _run(tmp_path, uv_exit=0, host=host, encoded=encoded)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert result.stderr.count("Worktree Manager bootstrap") == 1
+    assert "HostInformationMessage" not in result.stderr
+    progress = [
+        line for line in result.stderr.splitlines()
+        if "update/bootstrap " in line
+    ]
+    assert len(progress) == 2, result.stderr
+    assert " running Worktree Manager bootstrap " in progress[0]
+    assert " warning Add " in progress[1]
+    for line in progress:
+        assert re.fullmatch(
+            r"\[\d{2}:\d{2}:\d{2}\.\d{3}Z\] update/bootstrap "
+            r"(?:running|warning) .+ \[elapsed \d+\.\d+s\]", line,
+        ), line
+    elapsed = [float(re.search(r"\[elapsed (\d+\.\d+)s\]$", line)[1]) for line in progress]
+    assert elapsed == sorted(elapsed)

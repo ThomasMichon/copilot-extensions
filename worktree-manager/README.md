@@ -111,6 +111,16 @@ manual migration step for an adopted Manager. Do not rewrite a deployed launcher
 install application dependencies into ambient Python, or use update bypass flags
 to force recovery.
 
+Bootstrap-owned human progress goes to stderr with UTC correlation time and
+explicit running, warning or failed state. PowerShell uses its in-process
+monotonic stopwatch for elapsed time and writes text directly, avoiding duplicate
+information records in redirected encoded-command capture. Bash reports
+`elapsed unavailable` before a portable monotonic provider exists; it does not
+claim wall-clock differences are durations. These dependency-free lines do not
+load an installed runtime. Native prerequisite diagnostics, exceptions and the
+launched Manager's streams and exit status retain their existing ownership;
+this is not a claim that those separate producers are all framed.
+
 `doctor` also reports **plugin-catalog alignment**: whether the authored
 catalog (`data/plugins.toml`) still matches the discovered plugin membership
 (same report as `plugins --reconcile`, folded into one surface). A discovered
