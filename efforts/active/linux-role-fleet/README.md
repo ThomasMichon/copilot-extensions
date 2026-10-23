@@ -125,6 +125,36 @@ accepted floor. The isolation and fencing details remain agent-recommended.
 
 ## Plan
 
+### Repository-led preparation and local telemetry amendment
+
+The operator's 2026-10-23 direction extends this existing campaign, not a parallel
+controller or deployment implementation:
+
+> Let's focus on adding deployment-control modules to the Gateway/Komodo system. We need the Gateway or dedicated controller to pull config from the repo(s), determine the expected layout and package versions, and then be ready to activate deployment and updates. We want to be able to use the fleet-manager on a dev machine to say "go", but not have to feed the config manually to the controller.
+
+The operator then narrowed immediate execution (private machine/agent identities
+redacted, surrounding direction retained):
+
+> Actually let's not overcomplicate this: extend the vision to cover what we discussed, extend the existing Gateway/Fleet control effort to cover it, but then just give me a simple jsonc-bucket dump sink to a folder somewhere on each machine, so worst-case we can SSH into each machine and view data. Then, let's debug-activate it here on [selected local machine] so we can validate what we're collecting. Defer Grafana until after [the existing Fleet Management owner] can get more Fleet Management properly deployed.
+
+The operator clarified the dump format as **JSONL**. The
+[preparation and observation sub-plan](repository-config-preparation.md) records
+the future controller/Grafana requirements and their validation. Current adopter
+execution reuses the already-shipped local spool seam only; it does not implement
+controller modules, enroll a fleet or deploy Grafana. Existing Fleet Management
+owners retain those changes.
+
+- [ ] Implement controller-owned acquisition of explicitly adopted configuration
+  repositories and exact desired module/package selection.
+- [ ] Produce an inspectable prepared generation, then admit thin-client
+  activation without client-supplied config blobs.
+- [ ] Prove stale/changed source, source/credential outage, uncertain activation,
+  unchanged repeat and independently bootstrapped manager cases.
+- [ ] Add the optional operator-owned telemetry service role and explicit
+  multi-destination delivery after the deployment foundation is usable.
+- Local JSONL adopter/debug capture is useful independent evidence, not a
+  completion claim for any of these controller or hosted-sink items.
+
 ### Mission amendment - Setup, refresh and first useful services
 
 Public-safe summary of the operator's 2026-10-10 direction; full private wording

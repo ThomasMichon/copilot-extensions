@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** branch (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-23
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -360,6 +360,22 @@ through trusted local declarations and the existing installer/update authorities
 Broadcast means an explicit set of recipients with individual acknowledgements
 and outcomes, not arbitrary command execution or a claim that every host updated.
 
+### repository-led-deployment-preparation
+
+The Gateway or a designated deployment controller should obtain desired state
+from explicitly adopted repositories itself. It should resolve the expected
+service/module layout and selected package versions, prepare an inspectable
+generation, and distinguish source acquisition, preparation, activation and
+observed health. A development-machine client should be able to say "go" for
+that prepared generation without manually supplying configuration documents.
+
+Preparation should not activate a deployment. Activation should remain bound to
+the reviewed source/version selection and current authority; changed or invalid
+inputs should not silently become a different approved deployment. Repository
+access and credentials stay with their existing owners. Komodo or another
+selected deployment manager retains container lifecycle, while fleet-manager
+coordinates intent rather than becoming another package manager or supervisor.
+
 ### declarative-setup-modules
 
 Gateway and Vault setup are declared Fleet Manager modules, composed through the
@@ -460,6 +476,14 @@ when a target is offline. Generic telemetry does not depend on an external
 analytics vendor or send data outside the fleet without consent.
 Organization-governed telemetry adapters are separate policy-owned integrations;
 they cannot silently widen the portable collector's scope.
+
+An operator should be able to inspect their own telemetry through an optional
+fleet-hosted observability role, including a self-hosted dashboard, without
+waiting for a centralized organization service. Local machine-owned structured
+buckets should remain a useful independent fallback, accessible through existing
+machine access even when the Gateway or dashboard is unavailable. Multiple
+approved sinks may be explicitly selected without coupling their availability
+or silently widening collection.
 
 ## Behaviors
 

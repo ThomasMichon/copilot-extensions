@@ -4,7 +4,7 @@
   Extensions tools and services, with sinks owned by the adopting harness
 - **Scope:** leaf (cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-23
 - **Reality docs:** [Suite architecture](../../docs/architecture.md) ·
   [Dispatch telemetry seam](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) ·
   [Bridge telemetry seam](../../plugins/agent-bridge/src/agent_bridge/telemetry.py)
@@ -73,6 +73,21 @@ A harness can instead select a local HTTP daemon reached through the owning
 service's endpoint or port-discovery mechanism. Clients discover the current
 owned endpoint; they neither assume a fixed port nor scan for a listener.
 Selecting this transport does not implicitly install or start a daemon.
+
+### locally-inspectable-capture
+
+An adopter can select a simple machine-local structured-record bucket without
+starting an observability service. Existing machine access is sufficient to
+inspect the captured data. This fallback remains useful while a fleet-hosted or
+organization sink is unavailable, and its contents reflect actual instrumented
+coverage rather than claiming that every catalog operation was observed.
+
+### explicit-consumer-fan-out
+
+A selected consumer can deliberately deliver the same admitted observation to
+multiple approved destinations, such as operator-owned and centralized sinks.
+Destination failure and delivery accounting remain independent; fan-out does
+not authorize more fields, broader audiences or an implicit off-site default.
 
 ### interoperable-signal-meaning
 
