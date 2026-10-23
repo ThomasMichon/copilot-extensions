@@ -100,8 +100,7 @@ Nothing is cached across calls.
 Real-Git controls cover attached and detached checkouts, a same-named tag,
 an unborn HEAD, a non-repository, exact one-query behavior, and subsequent
 checkout changes. Existing report strings and short-ref identities remain
-unchanged: an initial qualified-ref candidate changed four landing-report
-assertions and was corrected rather than relaxing those assertions.
+unchanged.
 
 Native Windows validation uses exactly two workers and the unchanged
 30-second item deadline. The complete precondition and creation-gating
@@ -115,7 +114,7 @@ including cleanup); no timing waiver, selection change or completion claim
 follows from the complementary pass. Full same-head repeated qualification
 and the previously interrupted worker failure remain parent-owned.
 
-Review follow-up: Git permits non-ASCII whitespace in branch names. Output
+Git permits non-ASCII whitespace in branch names. Output
 is therefore framed only on LF and rejects only ASCII whitespace/control
 characters, not Unicode whitespace or line separators. Four real checkouts
 with U+00A0, U+0085, U+2028 and U+2029 remain selected instead of falling
