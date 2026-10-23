@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
+if [[ -v UPDATE_DRIVER_WITNESS ]]; then
+    printf 'Nested first-use submission is unsupported; retain the current installation owner.\n' >&2
+    exit 1
+fi
 [[ "$(uname -s)" == Linux && ( "$#" == 4 || "$#" == 6 ) ]] || exit 2
 root="$1" payload="$2" runtime="$3" project="$4"
 foundation="$(CDPATH= cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"

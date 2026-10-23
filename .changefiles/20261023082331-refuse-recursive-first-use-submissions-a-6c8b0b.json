@@ -1,0 +1,13 @@
+{
+  "comment": "Refuse recursive first-use submissions and supply the executing retained interpreter to native provisioning without enabling ordinary publishers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

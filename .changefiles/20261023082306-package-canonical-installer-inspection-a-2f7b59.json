@@ -1,0 +1,9 @@
+{
+  "comment": "Package canonical installer inspection and input-freezing helpers for the fixed first-use execution handoff.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

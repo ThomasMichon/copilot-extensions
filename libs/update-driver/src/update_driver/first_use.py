@@ -14,7 +14,7 @@ import sys
 from agent_procutil import no_window_kwargs
 
 from . import core
-from .participant import borrowed_custody
+from .participant import ENVIRONMENT_KEY, borrowed_custody, participant_environment
 
 
 # This first adopter uses its existing direct, self-staging provision action.
@@ -153,6 +153,8 @@ def enqueue(
     expected_source: str | None = None,
 ) -> core.Request:
     """Accept exactly the fixed provision action into the existing durable queue."""
+    if ENVIRONMENT_KEY in os.environ or participant_environment():
+        raise ProvisionError("nested first-use submission is unsupported; retain the current installation owner")
     if os.name != "nt" and not sys.platform.startswith("linux"):
         raise ProvisionError("native plugin provision execution is not qualified on this platform")
     execution_root = core._root(root)
@@ -210,6 +212,11 @@ def _execute(admission: dict, *, root: Path) -> int:
         # source after queue authentication and full before/after verification.
         environment["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
         environment["COPILOT_PLUGIN_STAGED_FROM"] = str(payload)
+        # Native installers can discover the executing retained interpreter even
+        # when the original first-use caller had no Python on PATH.
+        environment["PATH"] = os.pathsep.join(filter(None, (
+            str(Path(sys.executable).parent), environment.get("PATH"),
+        )))
         if os.name == "nt":
             shell = Path(os.environ["SystemRoot"]) / (
                 "System32/WindowsPowerShell/v1.0/powershell.exe"

@@ -1,6 +1,7 @@
 """Keep mutable fixtures out of source retained by concurrent installer checks."""
 
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -13,6 +14,19 @@ from update_driver import first_use as provision
 @pytest.fixture
 def area(tmp_path_factory):
     return tmp_path_factory.mktemp("ud")
+
+
+@pytest.fixture
+def native_window_observation():
+    if os.name != "nt":
+        yield
+        return
+    from test_foundation_genesis_process import window_observer
+
+    with window_observer(Path(__file__).resolve().parents[2]) as observation:
+        yield
+        assert observation.surfaced == {}
+        assert observation.focus_changes == {}
 
 
 @pytest.fixture
@@ -44,16 +58,14 @@ def native_source(area):
 
 
 @pytest.fixture
-def owning_payload(area, monkeypatch):
-    library = Path(__file__).resolve().parents[2]
+def owning_context(area, monkeypatch):
     profile = area / "profile"
     profile.mkdir()
     project = area / "project"
     project.mkdir()
     marketplace = area / "market"
     payload = marketplace / "plugins" / "agent-vault"
-    scripts = payload / "scripts"
-    scripts.mkdir(parents=True)
+    payload.mkdir(parents=True)
     catalog = marketplace / ".github" / "plugin" / "marketplace.json"
     catalog.parent.mkdir(parents=True)
     catalog.write_text(json.dumps({
@@ -61,6 +73,19 @@ def owning_payload(area, monkeypatch):
             {"name": "agent-vault", "source": "./plugins/agent-vault"},
         ],
     }), encoding="utf-8")
+    for key in (*provision.CONTEXT_KEYS, "AGENT_VAULT_VALIDATED_CONTEXT", "UPDATE_DRIVER_WITNESS"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    return payload, profile / ".agent-vault", project
+
+
+@pytest.fixture
+def owning_payload(owning_context):
+    library = Path(__file__).resolve().parents[2]
+    payload, installation, project = owning_context
+    scripts = payload / "scripts"
+    scripts.mkdir()
     (payload / "plugin.json").write_text(
         '{"name":"agent-vault","version":"1.0.0"}', encoding="utf-8",
     )
@@ -100,8 +125,4 @@ def owning_payload(area, monkeypatch):
         'exit 7\n',
         encoding="utf-8",
     )
-    for key in (*provision.CONTEXT_KEYS, "AGENT_VAULT_VALIDATED_CONTEXT"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("HOME", str(profile))
-    monkeypatch.setenv("USERPROFILE", str(profile))
-    return payload, profile / ".agent-vault", project
+    return payload, installation, project

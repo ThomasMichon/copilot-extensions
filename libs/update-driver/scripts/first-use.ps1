@@ -9,6 +9,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
+    throw 'Nested first-use submission is unsupported; retain the current installation owner.'
+}
 if ($env:OS -ne 'Windows_NT' -or $PSVersionTable.PSEdition -ne 'Desktop' -or $PSVersionTable.PSVersion -lt [version]'5.1') {
     throw 'Native first-use admission requires stock Windows PowerShell 5.1.'
 }

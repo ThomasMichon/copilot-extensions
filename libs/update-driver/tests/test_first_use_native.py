@@ -10,6 +10,7 @@ import time
 
 import pytest
 from agent_procutil import no_window_kwargs
+from update_driver import RequestSpec, TrustedRunner, drain, enqueue, status
 from update_driver.foundation_inputs import GENERATED, PACKAGES
 
 from test_first_use import primitive
@@ -30,6 +31,39 @@ def native_command(root, payload, installation, project, *, source=None):
         shutil.which("bash"), str(source / "scripts" / "first-use.sh"),
         str(root), str(payload), str(installation), str(project),
     ]
+
+
+@pytest.mark.parametrize("same_root", [False, True])
+def test_native_live_owner_refuses_before_launch_or_queue_mutation(owning_payload, area, same_root):
+    payload, installation, project = owning_payload
+    root = area / "owner"
+    destination = root if same_root else area / "foreign"
+    request = enqueue(
+        RequestSpec("native-nested-admission-control"), root=root,
+        runner=TrustedRunner((sys.executable, "-c", "pass"), str(project)),
+    )
+
+    def executor(transaction):
+        before = sorted(path.name for path in root.iterdir())
+        result = subprocess.run(
+            native_command(destination, payload, installation, project),
+            env={**os.environ, **transaction.participant_env()}, cwd=project,
+            capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode != 0
+        assert "first-use submission is unsupported" in result.stderr
+        # participant_env creates the live endpoint, not a first-use operation.
+        after = sorted(path.name for path in root.iterdir())
+        assert [name for name in after if not name.startswith("w-")] == before
+        assert len(status(root=root)) == 1
+        if not same_root:
+            assert not destination.exists()
+        transaction.assert_owned()
+        return 0
+
+    drain(root=root, executor=executor)
+    assert status(request.id, root=root).state == "completed"
+    assert not installation.exists()
 
 
 @pytest.mark.parametrize("reason", ["no-self", "managed", "malformed", "wrong-root"])
