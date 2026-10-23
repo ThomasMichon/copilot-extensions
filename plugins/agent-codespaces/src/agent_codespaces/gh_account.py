@@ -302,17 +302,17 @@ def account_inventory() -> AccountInventory:
 
 
 def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str] | None:
-    if worktrees.explicit_context():
-        return worktrees.run(*args, timeout=10)
-    aw = _agent_worktrees_bin()
-    if not aw:
-        return None
     try:
+        if worktrees.explicit_context():
+            return worktrees.run(*args, timeout=10)
+        aw = _agent_worktrees_bin()
+        if not aw:
+            return None
         return subprocess.run(
             [aw, *args], capture_output=True, text=True, timeout=10,
             creationflags=_creation_flags(),
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         if strict:
             raise AccountInventoryError(
                 "agent-worktrees account resolution snapshot is unavailable",

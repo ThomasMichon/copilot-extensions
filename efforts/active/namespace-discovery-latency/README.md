@@ -149,6 +149,16 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-22 - Undecodable peer-output refusal
+
+- The next review had no remaining formal threads but identified undecodable
+  peer output in its summary. Both legacy and same-cell snapshot calls now
+  translate decoding errors into `AccountInventoryError`; the optional wrapper
+  cannot turn those errors into a successful empty namespace.
+- Added legacy snapshot and explicit-context namespace CLI decoding regressions.
+  The focused CLI/account/peer suite passed all 134 cases. No deadline,
+  success-path worker, activation-library source or effect-observer rule changed.
+
 ### 2026-10-22 - Explicit-context failure preservation
 
 - The next #7998 review identified a separate boundary: same-cell peer startup,

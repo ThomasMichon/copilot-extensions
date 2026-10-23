@@ -165,7 +165,10 @@ def test_strict_snapshot_failure_is_not_confirmed_empty(monkeypatch, returncode)
         gh_account.account_inventory()
 
 
-@pytest.mark.parametrize("error", [OSError("startup failed"), subprocess.TimeoutExpired("aw", 10)])
+@pytest.mark.parametrize("error", [
+    OSError("startup failed"), subprocess.TimeoutExpired("aw", 10),
+    UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid output"),
+])
 def test_snapshot_process_failure_is_not_confirmed_empty(monkeypatch, error):
     monkeypatch.setattr(gh_account.worktrees, "explicit_context", lambda: False)
     monkeypatch.setattr(gh_account, "_agent_worktrees_bin", lambda: "aw")

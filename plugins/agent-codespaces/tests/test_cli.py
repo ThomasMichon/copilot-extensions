@@ -818,7 +818,7 @@ class TestNamespaceSeams:
         assert output.out == ""
         assert "account snapshot unavailable" in output.err
 
-    @pytest.mark.parametrize("failure", ["startup", "timeout", "refused"])
+    @pytest.mark.parametrize("failure", ["startup", "timeout", "refused", "decoding"])
     def test_namespace_list_retains_explicit_peer_failure(self, tmp_path, monkeypatch, capsys, failure):
         import subprocess
 
@@ -837,6 +837,8 @@ class TestNamespaceSeams:
                 raise OSError("peer startup failed")
             if failure == "timeout":
                 raise subprocess.TimeoutExpired("same-cell-peer", 10)
+            if failure == "decoding":
+                raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid peer output")
             return subprocess.CompletedProcess([], 126, "", "peer receipt refused")
 
         monkeypatch.setattr(worktrees.subprocess, "run", run)
@@ -849,7 +851,7 @@ class TestNamespaceSeams:
         assert main(["namespace-list"]) != 0
         output = capsys.readouterr()
         assert output.out == ""
-        assert "peer" in output.err
+        assert ("unavailable" if failure == "decoding" else "peer") in output.err
         assert "reporting zero" not in output.err
 
     def test_namespace_resolve_json_and_argv(self, capsys):
