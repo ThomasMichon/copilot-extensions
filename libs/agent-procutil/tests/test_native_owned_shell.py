@@ -31,6 +31,17 @@ def test_owned_shell_keeps_finished_root_unreaped_until_exec_and_retires_whole_g
     assert '"settled": true' in result.stdout
 
 
+def test_native_command_refuses_before_effects_without_its_own_session_group(tmp_path):
+    helper = Path(__file__).parents[1] / "src" / "agent_procutil" / "native_owned.sh"
+    marker = tmp_path / "must-not-exist"
+    result = subprocess.run(
+        ["bash", str(helper), "--owned-child", "30", "bash", "-c",
+         'printf effect >"$1"', "foreign-group", str(marker)],
+        capture_output=True, text=True, timeout=5,
+    )
+    assert result.returncode != 0 and not marker.exists()
+
+
 def test_parent_loss_during_native_acquisition_retires_exact_group_not_unrelated_control(tmp_path):
     control = subprocess.Popen(
         ["sleep", "300"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,

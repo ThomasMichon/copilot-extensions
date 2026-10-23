@@ -57,6 +57,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     timeout="$2"
     shift 2
     [[ "$timeout" =~ ^[1-9][0-9]*$ ]] || exit 2
+    IFS= read -r identity <"/proc/$$/stat"
+    read -r _state _parent group session _rest <<<"${identity##*) }"
+    [[ "$group" == "$$" && "$session" == "$$" ]] || exit 1
     (
         trap '' TERM HUP
         # EOF means the actual parent (including an exec successor) lost custody.
