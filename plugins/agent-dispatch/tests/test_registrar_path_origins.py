@@ -284,6 +284,68 @@ def test_global_identity_needs_no_attributed_payload_in_a_wheel(tmp_path, monkey
     assert source.spec["worker_identity_cwd"] == str(tmp_path)
 
 
+@pytest.mark.parametrize(("authored", "deferred", "leaf_override"), [
+    (False, False, False), (False, True, False), (False, True, True),
+    (True, False, True), (True, True, False),
+])
+def test_inherited_identity_retains_first_adopters_effective_execution_context(
+    tmp_path, monkeypatch, authored, deferred, leaf_override,
+):
+    roots = {name: tmp_path / name for name in ("supplier", "leaf", "tools", "other")}
+    name = "worker" if authored else "goal-driven"
+    for root_name, root in roots.items():
+        _identity(root, f"RULES-{root_name}", name=name)
+
+    def registered(repository, *, timeout):
+        assert repository in {"tools", "other"}
+        return roots[repository], "worktree"
+
+    monkeypatch.setattr(repository_resources, "_registered_repository", registered)
+    base_data = _config(execution_repo="{target}" if deferred else "tools")
+    if authored:
+        base_data["worker_identity"] = name
+    else:
+        base_data["extends"] = "global:goal-driven"
+    base = _write(
+        roots["supplier"] / ".copilot-extensions" / "agent-dispatch" / "registrar" / "base.json",
+        base_data,
+    )
+    leaf_data = {"extends": str(base), "params": {"target": "tools"}}
+    if leaf_override:
+        leaf_data["execution_repo"] = "other"
+    leaf = _write(roots["leaf"] / "loop.json", leaf_data)
+    source, _ = read_declaration_file_set(leaf, repo_root=roots["leaf"])
+    assert source.spec["worker_identity_cwd"] == "repo:tools:."
+    assert source.spec["cwd"] == f"repo:{'other' if leaf_override else 'tools'}:."
+    config = validate_config(
+        source.spec["repository_issue_loop"], cwd=source.spec["cwd"],
+        worker_identity_cwd=source.spec["worker_identity_cwd"],
+    )
+    assert config["worker_guidance"] == "RULES-tools"
+    emitter.validate_spec(source.spec, resolve_resources=True)
+
+
+def test_direct_global_identity_default_honors_execution_repository(tmp_path, monkeypatch):
+    tools = tmp_path / "tools"
+    leaf_root = tmp_path / "leaf"
+    _identity(tools, "TOOLS-DEFAULT", name="goal-driven")
+    _identity(leaf_root, "WRONG-DECLARING-DEFAULT", name="goal-driven")
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository",
+        lambda name, **kwargs: (tools, "worktree"),
+    )
+    leaf = _write(leaf_root / "loop.json", {
+        "extends": "global:goal-driven", **_config(execution_repo="tools"),
+    })
+    source, _ = read_declaration_file_set(leaf, repo_root=leaf_root)
+    assert source.spec["worker_identity_cwd"] == "repo:tools:."
+    config = validate_config(
+        source.spec["repository_issue_loop"], cwd=source.spec["cwd"],
+        worker_identity_cwd=source.spec["worker_identity_cwd"],
+    )
+    assert config["worker_guidance"] == "TOOLS-DEFAULT"
+
+
 def test_cli_discovery_reads_supplier_only_identity_without_live_effects(
     tmp_path, monkeypatch, capsys,
 ):

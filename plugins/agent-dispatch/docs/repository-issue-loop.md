@@ -265,7 +265,11 @@ uses the repository/plugin that defined the selector, even across deferred
 placeholder fills, without changing the script's execution cwd. A leaf's
 explicit selector override restores the leaf's normal identity tiers.
 Built-in `global:` identity defaults still bind in the declaration that
-instantiates them. Generated emitter `worker_identity_cwd` preserves this
+instantiates them, honoring its explicit `execution_repo`. Inherited authored
+selectors also retain their defining declaration's effective context, including
+a deferred execution-repository parameter. A later execution-root override does
+not silently rebind an inherited identity. Generated emitter
+`worker_identity_cwd` preserves this
 context through serialization; shape validation does not read identity files.
 Named source roots remain named until the existing repository resource owner
 resolves them at use time.

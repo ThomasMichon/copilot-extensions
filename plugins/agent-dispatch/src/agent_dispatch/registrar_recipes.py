@@ -22,7 +22,9 @@ from .recipes import EXTERNAL_AUTHOR_CLAUSE, RESOLUTION_CLAUSE, STAGNATION_CLAUS
 from .registrar import RegistrarError
 from .registrar_recipe_values import (
     _PLACEHOLDER_RE,
+    declaration_path_origins as _path_origins,
     deep_merge as deep_merge,
+    identity_context_origin,
     substitute_placeholders as substitute_placeholders,
 )
 from .repository_resources import RepositoryResourceSnapshot
@@ -811,28 +813,6 @@ def resolve_extends(
     return resolved
 
 
-def _path_origins(
-    data: Mapping[str, Any], directory: Path | str,
-    inherited: Mapping[str, Path | str] | None = None,
-) -> dict[str, Path | str]:
-    origins = dict(inherited or {})
-    for field in ("spec.cwd", "emitter.cwd", "worker_identity", "forge.command", "forge.cwd"):
-        parts = field.split(".")
-        current = data
-        for part in parts:
-            if part not in current:
-                break
-            value = current[part]
-            if part == parts[-1]:
-                origins[field] = directory
-            elif not isinstance(value, Mapping):
-                origins.pop(field, None)
-                break
-            else:
-                current = value
-    return origins
-
-
 def _resolve_extends_tracking_cwd_origin(
     data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...],
     _snapshot: RepositoryResourceSnapshot | None = None,
@@ -862,7 +842,9 @@ def _resolve_extends_tracking_cwd_origin(
     to the original relative values.
     """
     if "extends" not in data:
-        return dict(data), None, _path_origins(data, _base_resource or base_dir)
+        return dict(data), None, _path_origins(
+            data, _base_resource or base_dir, execution_repo=data.get("execution_repo"),
+        )
     ref = data["extends"]
     if not isinstance(ref, str) or not ref:
         raise RegistrarError(f"extends: expected a non-empty string ref, got {ref!r}")
@@ -897,6 +879,7 @@ def _resolve_extends_tracking_cwd_origin(
             f"extends: recipe {ref!r} resolved to a non-mapping "
             f"document ({type(template).__name__})"
         )
+    global_identity_default = ref.startswith("global:") and "worker_identity" in template
     # The next hop's own base directory is only needed if there IS a next
     # hop (this template has its own extends:) or if it carries a relative
     # spec.cwd to absolutize -- resolved lazily so a `global:` recipe with
@@ -935,7 +918,10 @@ def _resolve_extends_tracking_cwd_origin(
             directory = next_base_resource or (
                 resolved_path.parent if resolved_path is not None else _plugin_payload_root()
             )
-            origins.update(dict.fromkeys(fields, directory))
+            origins.update(_path_origins(
+                template, directory,
+                execution_repo=template.get("execution_repo"),
+            ))
     if pending_cwd_origin is None and next_base_dir is not None:
         # This hop's own (non-inherited, or no-longer-pending) template
         # may itself carry a relative spec.cwd -- that field was written
@@ -987,8 +973,16 @@ def _resolve_extends_tracking_cwd_origin(
         # leaf-file rebase already handles correctly once merging
         # finishes (the same as an un-inherited cwd always was).
         pending_cwd_origin = None
+    merged = deep_merge(filled_template, overrides)
+    if global_identity_default:
+        origins["worker_identity"] = identity_context_origin(
+            _base_resource or base_dir, merged.get("execution_repo"),
+        )
     return (
-        deep_merge(filled_template, overrides),
+        merged,
         pending_cwd_origin,
-        _path_origins(overrides, _base_resource or base_dir, origins),
+        _path_origins(
+            overrides, _base_resource or base_dir, origins,
+            execution_repo=merged.get("execution_repo"), params=scalar_params,
+        ),
     )

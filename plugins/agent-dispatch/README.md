@@ -1702,7 +1702,10 @@ repository (or plugin payload), not the outer leaf's execution cwd.
 Canonical/legacy registrar directories and repository/plugin roots identify
 that context; an arbitrary standalone template without one uses its own
 directory. Shipped `global:` identity defaults bind in the declaration
-that first instantiates them, preserving normal repository-local overrides.
+that first instantiates them, including its explicit `execution_repo`,
+preserving normal repository-local overrides. An authored selector likewise
+retains that defining declaration's effective identity context, even if a
+later hop selects a different execution repository.
 Direct declarations retain their existing leaf-file/repository behavior.
 
 Expansion preserves the identity context separately as generated emitter
