@@ -600,7 +600,8 @@ qualify one fixed recipe: the owning Agent Vault payload's existing legacy
 **direct `provision`** action. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
-retained owning snapshot's runtime gate before taking a provisioning lock.
+selected owning source's runtime gate before taking a provisioning lock
+(the existing snapshot pointer for installed payloads).
 Other publishers, including Vault's bootstrap reconciliation hook and explicit
 installer entry points, have not adopted it. Snapshot-based `stamp`/`provision` recipes
 and other plugin identities remain unsupported rather than being inferred

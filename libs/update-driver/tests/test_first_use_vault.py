@@ -95,7 +95,10 @@ def stamp_vault(payload, installation, project):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
-    assert snapshot.is_relative_to(installation / "snapshots")
+    if os.name == "nt":
+        assert snapshot.is_relative_to(installation / "snapshots")
+    else:
+        assert snapshot == payload
     command = installation.parent / ".local" / "bin" / (
         "agent-vault.ps1" if os.name == "nt" else "agent-vault"
     )
@@ -209,7 +212,7 @@ def cold_environment(installation, project, area):
         tools = area / "native-tools"
         tools.mkdir()
         for name in (
-            "bash", "dirname", "basename", "uname", "readlink", "stat", "find", "sort",
+            "sh", "bash", "dirname", "basename", "uname", "readlink", "stat", "find", "sort",
             "sha256sum", "iconv", "cat", "mkdir", "sync", "awk", "date", "mktemp", "mv",
             "rm", "cp", "flock", "grep", "sleep", "setsid", "mkfifo", "rmdir", "curl",
             "tar", "gzip", "head", "chmod", "sed", "tr", "ps", "realpath", "cut",
