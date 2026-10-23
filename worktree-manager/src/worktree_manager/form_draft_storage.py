@@ -10,6 +10,9 @@ import tempfile
 import time
 import uuid
 
+_PENDING_DIRECTORY = ".worktree-manager-publication-pending"
+_PENDING_CONTENT = b"worktree-manager.directory-publication.v1\n"
+
 
 def _windows_move(source, destination, *, replace: bool) -> None:
     import ctypes
@@ -23,21 +26,68 @@ def _windows_move(source, destination, *, replace: bool) -> None:
         raise ctypes.WinError(ctypes.get_last_error())
 
 
+def _windows_flush_directory(path: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.FlushFileBuffers.argtypes = [wintypes.HANDLE]
+    kernel.FlushFileBuffers.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # A directory flush requires write access plus BACKUP_SEMANTICS, not
+    # administrative volume access. Unsupported filesystems fail closed.
+    handle = kernel.CreateFileW(str(path), 0x40000000, 0x7, None, 3, 0x02000000, None)
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not kernel.FlushFileBuffers(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def _windows_directory(path: Path) -> None:
     if path.is_dir():
+        pending = path / _PENDING_DIRECTORY
+        try:
+            content = pending.read_bytes()
+        except FileNotFoundError:
+            return
+        if content != _PENDING_CONTENT:
+            raise OSError(f"Unrecognized directory publication marker: {pending}")
+        _windows_flush_directory(path.parent)
+        pending.unlink(missing_ok=True)
         return
     if path.parent == path:
         raise FileNotFoundError(errno.ENOENT, "Draft directory root is unavailable", str(path))
     _windows_directory(path.parent)
     temporary = Path(tempfile.mkdtemp(dir=path.parent))
+    pending = temporary / _PENDING_DIRECTORY
     try:
+        # Persist uncertainty before the rename: a failed write-through move
+        # may still leave the destination name visible, even after restart.
+        with pending.open("wb") as stream:
+            stream.write(_PENDING_CONTENT)
+            stream.flush()
+            os.fsync(stream.fileno())
+        _windows_flush_directory(temporary)
         try:
             _windows_move(temporary, path, replace=False)
         except FileExistsError:
             if not path.is_dir():
                 raise
+            _windows_directory(path)
+        else:
+            (path / _PENDING_DIRECTORY).unlink(missing_ok=True)
     finally:
         if temporary.exists():
+            pending.unlink(missing_ok=True)
             temporary.rmdir()
 
 

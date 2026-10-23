@@ -1080,7 +1080,10 @@ file and directory publication barriers; a failed barrier prevents Submit.
 Identical retries re-establish those barriers before invoking Submit; receipt
 reads remain available when storage is unavailable.
 New parent directories are published write-through on Windows; POSIX writes
-sync the containing directory and ancestors. Inspection loads observations
+sync the containing directory and ancestors. Windows stages a local pending
+marker before publishing a new directory; a leftover marker requires a
+successful parent-directory flush before the directory can be reused.
+Inspection loads observations
 off the UI thread and reports unreadable observations without hiding the
 original request. **Retained
 responses** (`Ctrl+Shift+R` from any top-level view) remains reachable after
