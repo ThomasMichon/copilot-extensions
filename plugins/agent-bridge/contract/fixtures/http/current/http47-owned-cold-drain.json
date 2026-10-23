@@ -91,7 +91,7 @@
       "status": 401
     }
   },
-  "execution_closure_sha256": "855d220269209509f95ecd8bfc702f690eba4098693f282b5ae1e7ce59621275",
+  "execution_closure_sha256": "a0006a9eb854b26bd14e2a3097f79fb81372f6a2389db0197ab131b26d028faa",
   "execution_closure": {
     "libs/agent-procutil/src/agent_procutil/__init__.py": {
       "blob": "055e20131efdc966b58de8ad46699d9ba31305b2",
@@ -1146,8 +1146,8 @@
       "sha256": "e9c68eeff116da76d6fbf4f458e893bde80ada22a5e9257122d3248bf18181e7"
     },
     "plugins/agent-bridge/src/agent_bridge/app.py": {
-      "blob": "011b48cf57160f63f63b5c281777656c2f54651c",
-      "sha256": "4b5bbc4b7c0e567a9ce4fcf72508a46dbae3c3a9e2af6e7e22136a34b89f3d95"
+      "blob": "cd80647de43d694c73d4ac35e124dd1af0288f68",
+      "sha256": "6e3bc5c750646868087315bff2c6725c15380f2ff9343e55752e94c8ae9a4e3a"
     },
     "plugins/agent-bridge/src/agent_bridge/app_agent_roster.py": {
       "blob": "81a8f7cd1ef81546728b05b780e393e662d2d0cb",
@@ -1156,6 +1156,10 @@
     "plugins/agent-bridge/src/agent_bridge/app_routes.py": {
       "blob": "208154e26c6597fa541ff775269fd51ee6831e50",
       "sha256": "a90cd2a37647b59f59b3c859bde86c4516dc1b7fc4375744970a482c89893a88"
+    },
+    "plugins/agent-bridge/src/agent_bridge/app_supersession.py": {
+      "blob": "cbf062bdccf47e0a44d80ec41ac81b3887a137c5",
+      "sha256": "26a59f0fb25254a1c5ea1952b74580819c964691f6d67094d13e9a93d96750d0"
     },
     "plugins/agent-bridge/src/agent_bridge/app_worktree_cache.py": {
       "blob": "c4126d9273f02a6af35a491015e590c61b6996ae",
@@ -1206,8 +1210,8 @@
       "sha256": "212ba2f30dfc0c1cdfe788b379f473620b48a1e5a4f6fd5b20fb211074e1f88d"
     },
     "plugins/agent-bridge/src/agent_bridge/client.py": {
-      "blob": "b9992bbf9c1ed6080d1e7be87a102b1bd187670d",
-      "sha256": "bd95c6d90256e51053a2fefc232d52fc751b2d47269a715a9bf92ad2e68b2feb"
+      "blob": "978d59d2636fb4cbd7fc437e2de1e77635662869",
+      "sha256": "b29ae660d7669c833820ddc09a5081826b28ddfb3662a7527ea5ac392f3eeac6"
     },
     "plugins/agent-bridge/src/agent_bridge/client_agents.py": {
       "blob": "04af11144864b6293c32c1c049ed0a65e3060fa9",
@@ -1220,6 +1224,10 @@
     "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py": {
       "blob": "d70a74c51ba3733a8210838deab704203aa508f3",
       "sha256": "70058bd55121a268307177aaa9b1e4ef1447b7b69334832e29da5eff4f37690d"
+    },
+    "plugins/agent-bridge/src/agent_bridge/client_drain.py": {
+      "blob": "f21ca4d729e46157d0eb5c6766913e2c892cd929",
+      "sha256": "cf61733b357ff87fdf4aa87bc58d06a607eac99214f0342e2f802837949db117"
     },
     "plugins/agent-bridge/src/agent_bridge/client_live_results.py": {
       "blob": "606b0eaad54380ead30086ce2eac85454d188f99",
@@ -1494,8 +1502,8 @@
       "sha256": "58d61eb6dfe99daeccf6306e0335df77caa8d006bc90dac96abe70cc98b5c7c0"
     },
     "plugins/agent-bridge/src/agent_bridge/privileged_plugins.py": {
-      "blob": "64a52b2c8b22f66e06f9b229961efffc9f358ee9",
-      "sha256": "b71d80757c5081ed9f411a40522ad53f27b72fab5592a058c69fa0dbe1b8f90d"
+      "blob": "a192bd81c05e2691d60b4eee6907faa3ab456878",
+      "sha256": "ec0dfb47fcfc4c0b057327f502e364d6e2408c4ad09cfa1e19a02912693bf283"
     },
     "plugins/agent-bridge/src/agent_bridge/procgroup.py": {
       "blob": "35a1036f9eb99f0b9a72ea59206b6356a2d03a93",
@@ -2226,8 +2234,8 @@
       "sha256": "a4fc42f91705658ab43fb9a538cefec6701b5cd595a106b7d9236d76e0ad8e55"
     },
     "tools/bridge_http47_evidence.py": {
-      "blob": "ec7d98d712e655aa591cbbf083458a436baffcec",
-      "sha256": "98796402bdb693a180abc00d29eab34012c31a8325ab34186203bb70d82018ca"
+      "blob": "3d34bd3fd14cf0c3c6e8caef49fd1f9927ad46c7",
+      "sha256": "de91f96e9c4a0a543efdf427a874234a2f9525f20caf11dbf962e96e04f3ebe2"
     },
     "tools/bridge_http47_runtime.py": {
       "blob": "7e27a8dfed6876fee91ed9c696025737dabfa328",
@@ -3170,7 +3178,7 @@
   },
   "scope": "model-free ASGI and owned stdio fixtures; not real Copilot, deployment or host qualification",
   "captured_from": {
-    "commit": "09f194af0f44162b6506cfcc11ef4ff7a6e0042e",
+    "commit": "d3535754c8b7c1d0dca1150adf690c85abded4df",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
