@@ -33,6 +33,10 @@ lossy observations, never durable recovery facts or ownership authority.
   they retain their launch/preparation files.
 - Preserve maintenance #7694/#7788, startup #3303, churn #6086, readiness #5215
   and process-registry #5559 ownership. This effort does not close them.
+- Execution uses only this effort's native workers or newly created owned
+  local workers. Do not contact pre-existing agent sessions, use agent-chat or
+  dispatch remote workers. Detect overlap through read-only forge/task state
+  and escalate conflicts to the coordinator; retain existing claims and PRs.
 
 ## Context
 
@@ -88,6 +92,10 @@ startup/new-resume, then hooks.
   on the SDK and no implicit environment-selected off-site destination.
 - [ ] Exercise real export to an isolated local receiver, including outage;
   a synthetic JSON mapping alone does not satisfy this item.
+- [ ] Retain structured logging and metric mappings as separate acceptance:
+  initial traces-only interoperability does not complete all telemetry.
+  Typed span events/counters or an explicit structured adapter must preserve
+  the default exclusion of free-form logs and content.
 - [ ] Integrate Manager and then hooks through their existing owners; use
   complete end-to-end observations, not sums of overlapping spans.
 - [ ] Obtain explicit collector host/lifecycle authorization before shared

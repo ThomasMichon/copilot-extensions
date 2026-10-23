@@ -96,6 +96,19 @@ def test_snapshot_is_bounded_independent_and_never_calls_repr():
         snapshot({"x": "a" * 100}, max_bytes=128)
 
 
+@pytest.mark.parametrize("key", ["capacity", "max_bytes", "batch_size"])
+@pytest.mark.parametrize("value", [1.5, True, "128", None, float("nan")])
+def test_noninteger_queue_bounds_rejected_before_start(monkeypatch, key, value):
+    def forbidden_start(*args):
+        raise AssertionError("invalid construction started a writer")
+
+    monkeypatch.setattr(BufferedSink, "start", forbidden_start)
+    slot = SinkSlot()
+    with pytest.raises(ValueError, match="integers"):
+        slot.set_buffered(lambda _: None, **{key: value})
+    assert not slot.enabled()
+
+
 def test_real_consumer_blocked_sink_drops_and_close_does_not_wait():
     entered, release = threading.Event(), threading.Event()
     seen = []

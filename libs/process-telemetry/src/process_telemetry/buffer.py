@@ -76,6 +76,8 @@ class BufferedSink:
     ) -> None:
         if not callable(sink):
             raise ValueError("sink must be callable")
+        if any(type(value) is not int for value in (capacity, max_bytes, batch_size)):
+            raise ValueError("queue bounds must be integers")
         if not 1 <= capacity <= 4096 or not 128 <= max_bytes <= 65536:
             raise ValueError("invalid queue bounds")
         if not 1 <= batch_size <= capacity:
