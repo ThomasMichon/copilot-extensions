@@ -41,6 +41,7 @@ def pull(number=7, run="123"):
 
 
 def execute(monkeypatch, pages, error=None):
+    body = script()
     calls = []
 
     def run(argv, **kwargs):
@@ -51,7 +52,7 @@ def execute(monkeypatch, pages, error=None):
 
     monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
     monkeypatch.setattr(subprocess, "run", run)
-    exec(compile(script(), "<trusted-cleanup-guard>", "exec"), {})
+    exec(compile(body, "<trusted-cleanup-guard>", "exec"), {})
     return calls
 
 
@@ -129,10 +130,11 @@ def test_provider_errors_fail_without_leaking_raw_output(monkeypatch, capsys, er
 
 
 def test_non_json_provider_output_fails_closed(monkeypatch, capsys):
+    body = script()
     monkeypatch.setenv("GITHUB_REPOSITORY", REPOSITORY)
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: SimpleNamespace(stdout="not JSON"))
     with pytest.raises(SystemExit, match="1"):
-        exec(compile(script(), "<trusted-cleanup-guard>", "exec"), {})
+        exec(compile(body, "<trusted-cleanup-guard>", "exec"), {})
     assert "JSONDecodeError" in capsys.readouterr().err
 
 
