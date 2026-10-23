@@ -166,27 +166,17 @@ fit an existing archetype.
       named; placeholder substitution and override deep-merge both still
       apply correctly at every hop, in order (closest override wins,
       matching today's single-hop contract).
-- [ ] **Known gap, not yet closed** (surfaced in PR #4968 round 5):
-      per-hop directory provenance is proven for exactly one
-      path-dependent field on one kind -- `kind: emitter`'s own
-      `spec.cwd`. Two other kind-specific expansion paths resolve their
-      own path-dependent fields against the *outer* leaf file/`repo_root`
-      entirely outside `resolve_extends` (discarded once it returns a
-      plain dict): `reviewer_loops.expand_reviewer_loop`'s own
-      `emitter.cwd` handling, and
-      `repository_issue_loops.expand_repository_issue_loop`'s
-      `worker_identity` resolution via the caller's `repo_root`.
-      Extending a cross-repo `reviewer-loop`/`repository-issue-loop` base
-      through a chain may therefore still misattribute one of those
-      fields to the wrong repo. Closing this fully likely needs
-      `resolve_extends`'s per-hop directory tracking threaded out to
-      `read_declaration_file_set` (a public-signature change spanning
-      `registrar_recipes.py` and `registrar_discovery.py`), not just
-      `registrar_recipes.py` alone -- scoped as its own follow-up slice
-      rather than folded into this phase, since no real consumer needs
-      cross-repo chaining of those two kinds today (the motivating
-      consumer only needs `repository-issue-loop`'s forthcoming `script`
-      provider, Phase 2 below, chained same-repo).
+- [x] Close the supported reviewer/identity provenance follow-up surfaced in
+      PR #4968 round 5. PR #8300 preserves the defining directory of inherited
+      `reviewer-loop.emitter.cwd` and the defining effective context of
+      `repository-issue-loop.worker_identity`, through recursive expansion,
+      deferred parameters, serialization, resource validation and execution.
+      Explicit overrides reset origin; global defaults retain repository-local
+      overrides and pass transparently through pure `extends`/`params` aliases.
+      Existing `emitter.spec.cwd` behavior is preserved. Script-forge origins
+      remain raw and the cross-repository inherited relative command/cwd refusal
+      remains a safety mitigation, not proof of safe relative-script execution
+      or completion of every retained #4959 clause.
 
 ### Phase 2 — `script` backlog provider (first script-path-hook realization)
 - [x] Add a `script` forge provider for `repository_issue_loop`
@@ -454,6 +444,12 @@ https://github.com/ThomasMichon/copilot-extensions/pull/4962 .
       plugin↔repo, repo↔plugin, repo↔repo) resolve correctly, each with a
       dedicated test; a cycle crossing origins is rejected by the same
       guard as a same-origin cycle (two dedicated tests).
+- [x] Prove supported reviewer/identity context through actual declaration
+      expansion, named-resource admission, serialized emitter execution and
+      CLI discovery; retain direct/global/shipped-alias behavior and script
+      refusal. PR #8300 passed 512 contained tests across eight coupled files,
+      including a real fixture script provider with an isolated fake
+      coordinator. This is source-level coverage, not installed/live adoption.
 - [ ] The motivating consumer's own emitter need is provably expressible as
       a `script`-provider `repository_issue_loop` extension with zero
       bespoke command-emitter code — confirmed with that consumer's own
@@ -466,6 +462,28 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-23 - Supported path-origin follow-up merged
+
+- PR #8300 merged as `39f7924842a03e29e0ac0c4b84c5a2152394a2d1`
+  after exact-head approval with no open findings, resolved threads and required
+  green CI. No review or CI exception was used beyond ordinary authorized
+  Maintainer self-merge; no runtime update or activation occurred.
+- Closed only the Phase 1 reviewer/identity origin follow-up. Effective
+  `execution_repo` context, deferred substitution timing, relative roots,
+  unattributed wheel-like layouts, actual shipped aliases and CLI discovery
+  received focused regressions. The base loop/provider/resource owners remain.
+- The contained eight-file packet passed 512 tests. Scoped Python lint,
+  install contract and unchanged module ceilings passed; required source CI
+  remained independent. Fresh isolated Windows roots and a real fixture
+  script provider were exercised, without live queue/provider effects.
+  Full installer clean-room, another local native OS, installed/fleet and
+  live external-provider lanes were not exercised: installation did not change
+  and rollout/live effects were not authorized.
+- #4959 remains open: retaining the inherited cross-repository relative-script
+  refusal does not itself deliver proper origin-safe execution for that shape.
+  Optional #2570 hooks and motivating-consumer acceptance retain their existing
+  owners and unfinished scope. This effort remains Active.
 
 ### 2026-10-22 - Complete retained acceptance from #2570
 
