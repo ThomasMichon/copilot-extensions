@@ -37,6 +37,19 @@ TLS/PoP reconnect, restart and drain, with synthetic issuer/provider inputs.
 It adds no required-PR process matrix and does not qualify a production
 credential provider, installed artifact or fleet placement.
 
+The same manual selector also runs `tools/run-standalone-tests.py services/pr
+--prepare --timeout 180`. Its independent environment installs this checkout's
+PR/Fleet dependencies and the standalone wheel without Copilot. Tests build a
+normal source-independent wheel, validate the existing reference-only
+`container.service` declaration, and drive an installed foreground service in
+a separate process over Fleet's real TLS/PoP Gateway fixture. Provision,
+duplicate writer refusal, register/observe, token-file reread on reconnect,
+durable restart and exact ACK use synthetic identities/provider snapshots.
+Windows uses the public embedding stop event; Linux exercises CLI SIGTERM.
+Windows passive-reader rename sharing is tested at the actual file boundary.
+These controls do not qualify a live provider, built container or fleet
+placement, and do not close the remaining slow-target fairness/update gates.
+
 ## Optional diagnostic telemetry
 
 Manager's source-native consumer lane is documented in

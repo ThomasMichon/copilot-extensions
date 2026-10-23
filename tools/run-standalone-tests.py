@@ -36,6 +36,7 @@ COMPONENT_ALIASES = {
     "agent-index-service": "services/index",
     "agent-dispatch-service": "services/dispatch",
     "agent-chat-service": "services/chat",
+    "agent-pull-requests-service": "services/pr",
 }
 
 
@@ -174,6 +175,11 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         ]
     elif component == "services/dispatch":
         sources = [str(REPO / "plugins" / "agent-dispatch")]
+    elif component == "services/pr":
+        sources = [
+            str(REPO / "plugins" / "agent-pull-requests") + "[fleet]",
+            str(REPO / "fleet-manager") + "[service-gateway]",
+        ]
     extra = ("test" if smoke else "native,test") if component == "services/index" else "dev"
     if component == "worktree-manager":
         # The Manager distribution includes sibling bin/references payloads,
@@ -206,6 +212,15 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             override = Path(temporary) / "overrides.txt"
             core = (REPO / "plugins" / "agent-dispatch").resolve().as_uri()
             override.write_text(f"agent-dispatch @ {core}\n", encoding="utf-8")
+            overrides = ["--override", str(override)]
+        elif component == "services/pr":
+            override = Path(temporary) / "overrides.txt"
+            core = (REPO / "plugins" / "agent-pull-requests").resolve().as_uri()
+            fleet = (REPO / "fleet-manager").resolve().as_uri()
+            override.write_text(
+                f"agent-pull-requests[fleet] @ {core}\n"
+                f"fleet-manager[service-gateway] @ {fleet}\n", encoding="utf-8",
+            )
             overrides = ["--override", str(override)]
         run_uv_install(
             "uv", ["--python", str(python), *overrides, *sources],

@@ -1,0 +1,9 @@
+{
+  "comment": "Add an independent foreground PR watch host, external credential references and offline container role inputs.",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

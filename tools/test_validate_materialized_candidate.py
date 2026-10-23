@@ -141,6 +141,56 @@ def chat_subject(subject):
     return root, commit(root), dev, main
 
 
+def test_pr_service_has_native_candidate_recipes_without_fleet_partition_work(subject):
+    root, _, _, main = subject
+    dev_root = root.parent / "validated-dev"
+    for checkout in (root, dev_root):
+        roster = checkout / "tools/standalone_consumers.py"
+        roster.write_text(
+            roster.read_text("utf-8").replace(
+                "'services/dispatch')", "'services/dispatch', 'services/pr')",
+            ), encoding="utf-8",
+        )
+        package = checkout / "services/pr/pyproject.toml"
+        package.parent.mkdir()
+        package.write_text('[project]\nname="fixture-pr"\n', encoding="utf-8")
+        # This explicit native inventory is not today's source-unit CI profile.
+        (checkout / ".github/workflows/ci.yml").write_text(
+            "jobs:\n"
+            "  fleet-native-linux:\n"
+            "    strategy:\n"
+            "      matrix:\n"
+            "        partition: &fleet-native-partitions\n"
+            "          - name: fixture\n"
+            "            selector: 'fixture'\n"
+            "    steps: &fleet-native-steps\n"
+            "      - run: fixture\n"
+            "  fleet-native-windows:\n"
+            "    strategy:\n"
+            "      matrix:\n"
+            "        partition: *fleet-native-partitions\n"
+            "    steps: *fleet-native-steps\n", encoding="utf-8",
+        )
+    git(dev_root, "add", ".")
+    git(dev_root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "-qm", "fixture pr registration")
+    dev = git(dev_root, "rev-parse", "HEAD")
+    state = json.loads((root / candidate.STATE).read_text("utf-8"))
+    state["last_promotion"]["dev_head"] = dev
+    (root / candidate.STATE).write_text(json.dumps(state), encoding="utf-8")
+    head = commit(root)
+    rows = candidate.matrix(root, dev_root, dev)["include"]
+    assert {row["os"] for row in rows if row["component"] == "pr"} == {
+        "ubuntu-latest", "windows-latest",
+    }
+    recipe = candidate.recipes(root, "pr")
+    assert len(recipe) == 1
+    assert recipe[0][0][2:] == [
+        "services/pr", "--prepare", "--admission-wait", "60", "--timeout", "180",
+    ]
+    assert candidate.run(root, head, dev, main, "pr", dev_root=dev_root)["outcome"] == "success"
+
+
 def test_exact_candidate_and_real_consumer_preserve_tracked_inputs(subject):
     root, head, dev, main = subject
     identity = candidate.validate(root, head, dev, main)

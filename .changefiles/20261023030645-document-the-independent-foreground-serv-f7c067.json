@@ -1,0 +1,9 @@
+{
+  "comment": "Document the independent foreground service consumer and its unqualified deployment boundaries.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

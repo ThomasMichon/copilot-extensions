@@ -1,0 +1,26 @@
+{
+  "schema": "fleet-manager.role-bindings",
+  "version": 1,
+  "providers": {
+    "manager": {
+      "implementation": "komodo",
+      "instance_ref": "core-a",
+      "target": "host-a",
+      "configuration_ref": "core-config",
+      "bootstrap_ref": "independent-bootstrap"
+    }
+  },
+  "bindings": {
+    "pr-watch": {
+      "implementation": "container.service",
+      "provider": "manager",
+      "target": "host-a",
+      "resource": "pr-watch-stack",
+      "artifact_ref": "approved-pr-image",
+      "configuration_ref": "pr-service-config",
+      "key_refs": ["pr-service-identity", "pr-forge-worker"],
+      "requires": ["container-role", "named-resource"],
+      "depends_on": []
+    }
+  }
+}

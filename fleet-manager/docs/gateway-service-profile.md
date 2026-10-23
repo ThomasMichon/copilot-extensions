@@ -55,6 +55,17 @@ the file path do not independently establish that owner's authority. There is
 no ambient repository lookup, remote key fetch, provider login or issuer service.
 Private connector keys and access-token custody remain external.
 
+Standalone service hosts can use
+`fleet_manager.credential_references.load_service_credentials(proof_key_file=...,
+access_token_file=...)`. It loads an externally provisioned P-256 PEM key and
+returns `proof_key` plus the async `access_token` callback for `ServiceConnector`.
+References must be absolute; file reads retain the credential worker's existing
+bounded semantics. Each admission rereads current token bytes, without an
+environment/login fallback or token persistence. Proof-key rotation requires a
+new connector. Loading these references is not enrollment, placement authority,
+local lifecycle authority or evidence of Gateway acceptance. Actual TLS,
+JWT/PoP, slot and caller verification remain unchanged.
+
 The runtime reloads the explicit file off the event loop. Candidate validation
 precedes one coherent context publication, binding desired state, trust,
 resolved proof keys and caller grants together. Lower revisions and changed

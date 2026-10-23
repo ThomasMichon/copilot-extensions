@@ -256,7 +256,7 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
         assert job["runs-on"] == runner and job["timeout-minutes"] == 10
         assert not job.get("strategy") and not job.get("continue-on-error")
         commands = [step for step in job["steps"] if "run" in step]
-        assert len(commands) == 1 and not commands[0].get("env")
+        assert len(commands) == 2 and not any(step.get("env") for step in commands)
         assert commands[0]["run"].split() == [
             "python", "tools/run-plugin-tests.py", "agent-pull-requests",
             "--test-file", "tests/test_watch_service.py",
@@ -264,6 +264,10 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
             "--test-file", "tests/test_watch_gateway_transport.py",
             "--test-file", "tests/test_watch_observer.py",
             "--max-files-per-sub-suite", "2",
+        ]
+        assert commands[1]["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/pr",
+            "--prepare", "--timeout", "180", "--admission-wait", "30",
         ]
 
 
