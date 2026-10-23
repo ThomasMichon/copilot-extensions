@@ -311,10 +311,14 @@ jobs:
     needs: [select, test, linux-full]
     # Only a genuine `dev`-rotation failure (scheduled, or a manual
     # dispatch explicitly validating `dev`) files/updates the shared
-    # tracking issue -- a manual dispatch validating some other PR
+    # tracking issue, including selection/preparation before outputs exist.
+    # Event/input provenance identifies Dev even when selection fails early.
+    # A manual dispatch validating some other PR
     # branch's candidate head is one-off evidence-gathering, not a signal
     # about `dev`'s own health, and must not pollute that issue.
-    if: always() && (needs.test.result == 'failure' || needs.linux-full.result == 'failure') && needs.select.outputs.ref == 'dev'
+    if: >-
+      always() && (needs.select.result == 'failure' || needs.test.result == 'failure' || needs.linux-full.result == 'failure') &&
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.ref == '' || inputs.ref == 'dev')))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -343,23 +347,29 @@ jobs:
             gh issue create --repo "${{ github.repository }}" --title "Windows coverage rotation: a plugin failed on windows-latest" --body "$body" --label windows-rotation-failure
           fi
       - name: Ensure the Linux periodic failure label exists
-        if: needs.linux-full.result == 'failure'
+        if: needs.select.result == 'failure' || needs.linux-full.result == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >-
           gh label create periodic-linux-integration-failure --repo "${{ github.repository }}"
           --color B60205
-          --description "Detection-only Linux integration failure; portfolio owner #1303"
+          --description "Detection-only integration or selection failure; portfolio owner #1303"
           --force
       - name: File or update the Linux portfolio tracking issue
-        if: needs.linux-full.result == 'failure'
+        if: needs.select.result == 'failure' || needs.linux-full.result == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TESTED_SHA: ${{ needs.select.outputs.sha }}
+          SELECTION_RESULT: ${{ needs.select.result }}
         run: |
           existing=$(gh issue list --repo "${{ github.repository }}" --label periodic-linux-integration-failure --state open --json number --jq '.[0].number // empty')
-          body="The periodic default-full Linux container portfolio failed at $TESTED_SHA. Run and per-plugin execution artifacts: $RUN_URL. Failure owner: Test Portfolio Rationalization #1303; assign the affected plugin specialist during triage. This is not a promotion or required-PR gate. Windows execution is disabled pending container enrollment and supplies no validation evidence. Unprovided explicit-tier, native-platform and filesystem prerequisites remain tracked in tools/periodic-integration-inventory.json, not claimed as passes."
+          if [ "$SELECTION_RESULT" = "failure" ]; then
+            outcome="The periodic integration selection/preparation failed before portfolio execution. Resolved input, if available: ${TESTED_SHA:-unavailable}. No Linux or Windows validation evidence is claimed."
+          else
+            outcome="The periodic default-full Linux container portfolio failed at $TESTED_SHA."
+          fi
+          body="$outcome Run and available execution artifacts: $RUN_URL. Failure owner: Test Portfolio Rationalization #1303; triage the affected stage/plugin. This is not a promotion or required-PR gate. Windows execution is disabled pending container enrollment and supplies no validation evidence. Unprovided explicit-tier, native-platform and filesystem prerequisites remain tracked in tools/periodic-integration-inventory.json, not claimed as passes."
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "${{ github.repository }}" --body "$body"
           else

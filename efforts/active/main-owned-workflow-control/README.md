@@ -343,11 +343,15 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Dev selection with preserved legacy Main bytes. Qualified Main adoption and
   natural no-runner observation remain separate; no live allocation saving is
   claimed from the Dev merge.
-- [ ] Land the bounded cleanup-publication guard: completely page open Dev
+- [x] Land the bounded cleanup-publication guard (#8070): completely page open Dev
   metadata before any new commit/push and fail visibly on an outstanding
   same-repository, owner-authored generated cleanup PR. Preserve its existing
   owner, merge gates, cadence and wait budget. Qualified Main adoption and
   natural duplicate-prevention acceptance remain separate.
+- [ ] Land bounded periodic selection/preparation-failure reporting using the
+  existing portfolio tracker and owner. Genuine Dev provenance must survive
+  missing selection outputs; other manual refs remain inspection-only, and
+  preparation failure cannot imply executed Linux or Windows coverage.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
