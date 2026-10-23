@@ -144,12 +144,22 @@ retain their existing unit-only policy.
 
 ## Construction-source inventory
 
-With Python 3.11 or newer, `python tools/construction_inventory.py` reads the tracked Python projects,
+With Python 3.11 or newer, `python tools/construction_inventory.py` reads the
+tracked Python projects,
 canonical marketplace and `standalone_consumers.py` roster without constructing
 or launching any runtime. It records declared package/Python requirements,
 optional dependency group names and script bindings. Products and optional
 extras are not assumed to be separate environments; canonical and identified
 vendored libraries remain construction inputs.
+
+`--root` binds every ownership declaration to that requested checkout. Its
+standalone roster is read as literal data, never imported or executed; missing,
+computed or ambiguous roster declarations are refused.
+
+Plugin-owned Python projects below a plugin root are declared with
+`additionalPythonProjects` in that plugin's manifest, using plugin-relative
+`pyproject.toml` paths. Missing, duplicate or escaping declarations are refused.
+This inert source-owner declaration does not select or install an environment.
 
 Exit `1` reports unclassified Python projects, including nested projects and
 fixtures that have no established source-owner classification. Exit `2` reports

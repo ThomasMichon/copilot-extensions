@@ -79,6 +79,9 @@ not reproduced here. The inventory, execution and evidence design below is
 ### Phase 1 - Review the policy and complete inventory
 
 - [x] Review and merge this release-vision exception and canonical effort.
+- [x] Derive and validate every tracked Python source owner's classification
+  against the canonical plugin/product rosters and explicit nested-project
+  declarations, retaining libraries as inputs rather than separate venvs.
 - [ ] Reconcile the complete environment census against existing authoritative
   declarations: runtime plugins, standalone applications, bootstrap/build
   environments and selected optional/server/profile closures.
@@ -288,3 +291,32 @@ cutover is activated by the reviewed documentation.
   not a feed construction run, clean-room runtime installation or hosted/native
   runtime qualification. No workflow, admitted unit packet, credential,
   controller, dependency policy or installed state was changed.
+
+### 2026-10-23 - Declare the engine owner without inventing an environment matrix
+
+- Added an inert plugin-owned `additionalPythonProjects` declaration for the
+  index engine's existing `server/pyproject.toml`. The inventory consumes that
+  declaration rather than hardcoding the engine into a second product roster.
+  Missing, duplicate, escaping or multiply owned projects refuse classification.
+  This metadata does not invoke the existing explicit engine installer or alter
+  host/client role selection.
+- The actual source CLI now classifies all tracked Python projects: thirteen
+  plugin runtime owners, six standalone product owners and one explicitly
+  declared engine project, with twenty-seven canonical and seven vendored
+  library inputs. This closes the bounded source-owner census only, not the
+  actual environment/profile and native matrix reconciliation.
+- All twenty-two local contracts passed, including the actual fresh Git-fixture
+  CLI refusal. A separate real-source invocation returned a complete
+  source-owner inventory while still reporting
+  `runtime_qualification: not-performed`. The required plugin changefile covers
+  its inert declaration; no version number was changed manually. Construction,
+  installed launch, hosted feed/native execution and trusted CI/promotion
+  activation remain open.
+
+- Review identified a real source-root binding error: an explicit target root
+  still inherited the executing checkout's standalone roster. The diagnostic
+  now reads the requested root's literal roster without importing or executing
+  candidate code, and refuses missing, computed or ambiguous declarations.
+  All twenty-four local contracts and the explicit-root source invocation passed
+  after this correction; install-contract validation also passed. Root binding
+  is source classification, not source/candidate-bound runtime evidence.

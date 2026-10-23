@@ -14,7 +14,6 @@ from unittest.mock import patch
 import construction_inventory as inventory
 
 
-CANONICAL_STANDALONE_CONSUMERS = inventory.STANDALONE_CONSUMERS
 PROJECT = """\
 [project]
 name = "{name}"
@@ -36,9 +35,7 @@ class ConstructionInventoryTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
-        self.roster = patch.object(inventory, "STANDALONE_CONSUMERS", ("apps/service",))
-        self.roster.start()
-        self.addCleanup(self.roster.stop)
+        self.write_roster(("apps/service",))
         self.plugins = [
             {"name": "runtime", "source": "./plugins/runtime"},
             {"name": "guidance", "source": "./plugins/guidance"},
@@ -61,6 +58,9 @@ class ConstructionInventoryTests(unittest.TestCase):
 
     def write_marketplace(self):
         self.write_json(".github/plugin/marketplace.json", {"plugins": self.plugins})
+
+    def write_roster(self, components):
+        self.write("tools/standalone_consumers.py", f"STANDALONE_CONSUMERS = {components!r}\n")
 
     def add_project(self, relative, name):
         self.write(relative, PROJECT.format(name=name))
@@ -100,6 +100,38 @@ class ConstructionInventoryTests(unittest.TestCase):
             ["plugins/runtime/engine/pyproject.toml", "tools/fixtures/example/pyproject.toml"],
         )
 
+    def test_explicit_additional_project_is_owned_without_inferring_its_environment(self):
+        self.add_project("plugins/runtime/engine/pyproject.toml", "engine")
+        self.write_json(
+            "plugins/runtime/plugin.json",
+            {"name": "runtime", "runtimeScope": "universal", "additionalPythonProjects": ["engine/pyproject.toml"]},
+        )
+        report = self.report()
+        self.assertTrue(report["source_owner_inventory_complete"])
+        self.assertEqual(len(report["owners"]), 3)
+        engine = next(owner for owner in report["owners"] if owner["kind"] == "plugin-python-project")
+        self.assertEqual(engine["distribution"], "engine")
+        self.assertEqual(engine["owner"], "runtime:engine/pyproject.toml")
+        self.assertEqual(report["runtime_qualification"], "not-performed")
+
+    def test_additional_project_declarations_refuse_missing_duplicate_or_escaping_paths(self):
+        self.add_project("plugins/runtime/engine/pyproject.toml", "engine")
+        for paths in (
+            ["missing/pyproject.toml"],
+            ["engine/pyproject.toml", "engine/pyproject.toml"],
+            ["../foreign/pyproject.toml"],
+            ["pyproject.toml"],
+            ["engine/README.md"],
+            "engine/pyproject.toml",
+        ):
+            with self.subTest(paths=paths):
+                self.write_json(
+                    "plugins/runtime/plugin.json",
+                    {"name": "runtime", "runtimeScope": "universal", "additionalPythonProjects": paths},
+                )
+                with self.assertRaises(inventory.InventoryError):
+                    self.report()
+
     def test_vendored_library_inputs_are_not_counted_as_environments(self):
         self.add_project("plugins/runtime/libs/shared/pyproject.toml", "shared")
         self.add_project("plugins/guidance/libs/shared/pyproject.toml", "shared")
@@ -132,9 +164,34 @@ class ConstructionInventoryTests(unittest.TestCase):
             self.report()
 
     def test_standalone_roster_growth_requires_its_actual_project(self):
-        with patch.object(inventory, "STANDALONE_CONSUMERS", ("apps/service", "apps/new")):
-            with self.assertRaisesRegex(inventory.InventoryError, "missing.*standalone"):
-                self.report()
+        self.write_roster(("apps/service", "apps/new"))
+        with self.assertRaisesRegex(inventory.InventoryError, "missing.*standalone"):
+            self.report()
+
+    def test_requested_root_roster_is_authoritative_and_is_never_executed(self):
+        self.write_roster(())
+        self.write(
+            "tools/standalone_consumers.py",
+            "raise AssertionError('must not execute candidate code')\nSTANDALONE_CONSUMERS = ()\n",
+        )
+        report = self.report()
+        self.assertEqual(len(report["owners"]), 1)
+        self.assertEqual(report["unclassified_python_projects"], ["apps/service/pyproject.toml"])
+
+    def test_invalid_missing_or_computed_standalone_roster_is_refused(self):
+        for source in (
+            "OTHER = ()",
+            "STANDALONE_CONSUMERS = make_roster()",
+            "STANDALONE_CONSUMERS = 'apps/service'",
+            "STANDALONE_CONSUMERS = ('apps/service', 'apps/service')",
+            "STANDALONE_CONSUMERS = ('../foreign',)",
+            "STANDALONE_CONSUMERS = ()\nSTANDALONE_CONSUMERS += ('apps/service',)",
+            "if True:\n    STANDALONE_CONSUMERS = ()",
+        ):
+            with self.subTest(source=source):
+                self.write("tools/standalone_consumers.py", source)
+                with self.assertRaises(inventory.InventoryError):
+                    self.report()
 
     def test_missing_declared_runtime_cannot_be_omitted_as_payload_only(self):
         self.projects.remove("plugins/runtime/pyproject.toml")
@@ -223,8 +280,7 @@ class ConstructionInventoryTests(unittest.TestCase):
         self.assertTrue(kwargs["check"])
 
     def test_real_cli_uses_the_tracked_tree_and_refuses_an_unclassified_project(self):
-        for component in CANONICAL_STANDALONE_CONSUMERS:
-            self.add_project(f"{component}/pyproject.toml", component.replace("/", "-"))
+        self.add_project("other/pyproject.toml", "unknown")
         env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         options = {
             "cwd": self.root,
@@ -246,8 +302,8 @@ class ConstructionInventoryTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(len(report["owners"]), 1 + len(CANONICAL_STANDALONE_CONSUMERS))
-        self.assertEqual(report["unclassified_python_projects"], ["apps/service/pyproject.toml"])
+        self.assertEqual(len(report["owners"]), 2)
+        self.assertEqual(report["unclassified_python_projects"], ["other/pyproject.toml"])
         self.assertEqual(report["runtime_qualification"], "not-performed")
 
 

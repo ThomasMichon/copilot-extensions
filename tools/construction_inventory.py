@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -9,9 +10,6 @@ import re
 import subprocess
 import sys
 import tomllib
-
-from standalone_consumers import STANDALONE_CONSUMERS
-
 
 class InventoryError(ValueError):
     """The canonical source inventory cannot be read unambiguously."""
@@ -46,6 +44,41 @@ def _strings(value: object, label: str) -> list[str]:
 
 def _distribution_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _standalone_consumers(root: Path) -> list[str]:
+    path = _source_file(root, "tools/standalone_consumers.py")
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        assignments = [
+            node.value
+            for node in tree.body
+            if (
+                isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "STANDALONE_CONSUMERS" for target in node.targets)
+            )
+            or (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "STANDALONE_CONSUMERS"
+            )
+        ]
+        stores = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and node.id == "STANDALONE_CONSUMERS" and isinstance(node.ctx, ast.Store)
+        ]
+        if len(assignments) != 1 or len(stores) != 1:
+            raise InventoryError("standalone roster needs exactly one literal declaration")
+        value = ast.literal_eval(assignments[0])
+    except (SyntaxError, TypeError, ValueError) as exc:
+        raise InventoryError(f"invalid standalone roster declaration: {exc}") from exc
+    if not isinstance(value, (tuple, list)) or any(not isinstance(item, str) for item in value):
+        raise InventoryError("standalone roster must be a literal sequence of paths")
+    consumers = [_relative(item) for item in value]
+    if len(set(consumers)) != len(consumers):
+        raise InventoryError("duplicate standalone owner")
+    return consumers
 
 
 def _project(root: Path, path: str, kind: str, owner: str) -> dict:
@@ -103,6 +136,7 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
     classified: set[str] = set()
     identities: set[str] = set()
     sources: set[str] = set()
+    standalone_consumers = _standalone_consumers(root)
     for plugin in plugins:
         if not isinstance(plugin, dict):
             raise InventoryError(f"{marketplace}: invalid plugin entry")
@@ -125,12 +159,25 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
         if path not in tracked:
             if manifest.get("runtimeScope") not in (None, "none"):
                 raise InventoryError(f"missing runtime project: {path}")
-            continue
-        if manifest.get("runtimeScope") == "none":
-            raise InventoryError(f"{manifest_path}: runtimeScope none has a Python project")
-        owners.append(_project(root, path, "runtime-plugin", name))
-        classified.add(path)
-    for component in STANDALONE_CONSUMERS:
+        else:
+            if manifest.get("runtimeScope") == "none":
+                raise InventoryError(f"{manifest_path}: runtimeScope none has a Python project")
+            owners.append(_project(root, path, "runtime-plugin", name))
+            classified.add(path)
+        additional = _strings(
+            manifest.get("additionalPythonProjects", []),
+            f"{manifest_path}: additionalPythonProjects",
+        )
+        for relative in additional:
+            relative = _relative(relative)
+            path = f"{source}/{relative}"
+            if PurePosixPath(relative).name != "pyproject.toml" or path not in tracked:
+                raise InventoryError(f"missing additional Python project: {path}")
+            if path in classified:
+                raise InventoryError(f"multiply owned Python project: {path}")
+            owners.append(_project(root, path, "plugin-python-project", f"{name}:{relative}"))
+            classified.add(path)
+    for component in standalone_consumers:
         path = f"{_relative(component)}/pyproject.toml"
         if path not in tracked or path in classified:
             raise InventoryError(f"missing or multiply owned standalone project: {path}")
@@ -146,7 +193,7 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
         for path in library_inputs
     }
     vendored_inputs = []
-    consumers = sources | set(STANDALONE_CONSUMERS)
+    consumers = sources | set(standalone_consumers)
     remaining = tracked - classified - set(library_inputs)
     for path in sorted(remaining):
         for consumer in sorted(consumers):

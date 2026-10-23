@@ -5,6 +5,9 @@
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",
   "runtimeScope": "machine-gated",
+  "additionalPythonProjects": [
+    "server/pyproject.toml"
+  ],
   "installerReadiness": "installer-readiness.json",
   "zeroDowntimeUpdate": true,
   "author": {

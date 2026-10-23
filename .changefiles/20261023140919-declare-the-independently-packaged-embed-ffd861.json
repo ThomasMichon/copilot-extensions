@@ -1,0 +1,9 @@
+{
+  "comment": "Declare the independently packaged embedding engine in the canonical Python source-owner inventory without changing installation or runtime behavior.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
