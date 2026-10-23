@@ -166,23 +166,48 @@ def test_automatic_phase_failure_is_not_a_successful_completion(monkeypatch, cap
     assert next(item for item in result["executed"] if item["phase"] == failed)["returncode"] == 7
 
 
-def test_automatic_custody_loss_does_not_continue_independent_mutation(monkeypatch):
+@pytest.mark.parametrize("lost_custody", [False, True])
+def test_automatic_real_reconcile_error_preserves_results_or_stops_on_custody_loss(
+    monkeypatch, tmp_path, capsys, lost_custody,
+):
     from update_driver import ParticipantError
 
     monkeypatch.setattr(launch.update_stage, "stage", lambda: dict(
         stage_done=True, acquisition_ok=True, plugin_changed=True,
     ))
+    monkeypatch.setattr(launch.update_cli.worktree_identity, "_find_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(launch, "_staged_snapshot", lambda path: ({}, "digest"))
+    actual_execute = launch._execute_phase
     observed = []
 
     def execute(args):
         observed.append(args.phase)
-        raise ParticipantError("synthetic custody loss")
+        if args.phase == "reconcile":
+            return actual_execute(args)
+        print(json.dumps({"phase": args.phase, "executed": []}))
+        return 0
+
+    def reconcile(*args, **kwargs):
+        if lost_custody:
+            raise ParticipantError("synthetic custody loss")
+        raise ValueError("synthetic adopted-plugin failure")
 
     monkeypatch.setattr(launch, "_execute_phase", execute)
-    monkeypatch.setattr(launch, "_staged_snapshot", lambda *a: pytest.fail("staged after custody loss"))
-    with pytest.raises(ParticipantError, match="custody loss"):
-        launch._execute(_args(phase="automatic", with_reconcile=True))
-    assert observed == ["bootstrap"]
+    monkeypatch.setattr(launch.reconcile, "apply_plan", reconcile)
+    if lost_custody:
+        with pytest.raises(ParticipantError, match="custody loss"):
+            launch._execute(_args(phase="automatic", with_reconcile=True))
+        assert observed == ["bootstrap", "reconcile"]
+    else:
+        assert launch._execute(_args(phase="automatic", with_reconcile=True)) == 1
+        assert observed == ["bootstrap", "reconcile", "staged"]
+        result = json.loads(capsys.readouterr().out)
+        assert [item["phase"] for item in result["executed"]] == observed
+        assert result["executed"][0]["returncode"] == 0
+        failed = result["executed"][1]
+        assert failed["returncode"] == 1 and failed["result"]["ok"] is False
+        assert failed["result"]["reason"] == "synthetic adopted-plugin failure"
+        assert result["executed"][2]["returncode"] == 0
 
 
 def test_reconcile_phase_calls_canonical_executor_only_under_request_custody(monkeypatch):

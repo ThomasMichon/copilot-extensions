@@ -716,3 +716,29 @@ repository history.
   diagnostics remain; all temporary timers and source instrumentation were
   removed before publication. Final-head review, CI and Linux acceptance
   still precede merge. The operator selected local-only Windows qualification.
+
+### 2026-10-23 - Preserve the real reconciliation failure result
+
+- Exact-source run
+  [39933889758](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39933889758)
+  passed all three Linux container targets at
+  `ec7f986b80faf8fb8ff484fc7b37f8dbcd8598d7`; required PR checks also passed.
+  Copilot confirmed the original findings were resolved but identified a
+  further concrete producer-contract gap: handled reconciliation exceptions
+  returned nonzero without JSON, so automatic aggregation parsed an empty
+  buffer and skipped later eligible work. The absence of an open inline
+  thread did not make that reported Medium finding a passing review.
+- The real apply-error handler now emits structured unsuccessful JSON and
+  preserves its existing failed status fields. Execution-state errors,
+  participant/custody loss and unconfirmed native cleanup remain fatal rather
+  than ordinary plugin failures. Regressions call the actual handler, verify
+  retained earlier results and continued eligible staged work, and verify
+  that authority loss stops subsequent mutation.
+- The focused producer/orchestration/routing controls passed 48 cases with
+  four platform skips. Full producer, acquisition and automatic-phase
+  coverage then passed 88 cases with one native-lifetime skip.
+  Deployment-policy regression coverage passed all 106 cases in two complete
+  partitions (76 and 30), using the canonical short Windows fixture layout.
+  Earlier diagnostic runs with oversized fixture paths or incomplete
+  aggregate execution budgets are not counted as passing. Individual test
+  and production deadlines were not widened for those policy checks.

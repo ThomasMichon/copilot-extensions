@@ -1300,6 +1300,9 @@ cancel eligible staged Worktrees apply; the final aggregate result is nonzero.
 Blocking wrappers submit `launch-update reconcile`, `launch-update bootstrap`
 and `launch-update staged --status <path>` rather than running cached argv.
 The fixed reconciliation phase invokes the same canonical apply executor.
+Handled apply errors retain unsuccessful JSON (`ok: false`), failed status
+and a nonzero exit. Lost execution authority or unconfirmed cleanup remains
+fatal rather than an ordinary component failure.
 It does not reuse the older `reconcile-plugins --apply` command as a capability
 probe: an old engine can support that command without the execution driver.
 Bootstrap derives a fresh plan under custody and rechecks staleness after
