@@ -2,6 +2,11 @@
 
 [Episode](s3ab.md) · [Reviewed S3 design](codespaces.md) · #7949
 
+**Historical proposal/evidence:** the subsequent user decision and merged #8278
+[selected-authority contract](selected-authority-contract.md) supersede this
+document's policy fork. Raw observations remain unchanged. The current blocker
+is the [protected read-result seam](selected-readresult-dependency.md).
+
 ## Decision
 
 Keep #8143 **draft and unmerged**. Existing APIs can supply the values for an

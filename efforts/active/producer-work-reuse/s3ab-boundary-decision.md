@@ -1,5 +1,10 @@
 # S3a/b boundary decision
 
+**Historical decision packet:** the user selected `selected_then_full_publication`;
+#8278 merged the [amended contract](selected-authority-contract.md).
+The strict-mode arithmetic below is retained evidence, not a claim about the
+unimplemented amended mode. See the [current ownership dependency](selected-readresult-dependency.md).
+
 **Decision needed; no implementation admission.** #8143 stays draft/unmerged;
 the existing task stays suspended. No new probe, benchmark, retry or agent was
 run for this packet. Arithmetic uses the retained

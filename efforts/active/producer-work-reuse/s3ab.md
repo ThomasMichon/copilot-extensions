@@ -7,11 +7,13 @@
 - **Participant:** placid-battery, source implementation and PR owner.
 - **Scope:** qualified owner-wave inventory, batched mux checks, bounded venue
   concurrency, and compatible atomic heartbeat generation fencing.
-- **Current boundary:** [exact authority proposal and counter evidence](s3ab-authority-proposal.md).
-  Proposal/evidence only; shared functional API changes remain unadmitted.
-- **Latest decision packet:** [boundary-only schedule and lower bound](s3ab-boundary-decision.md).
-  Pure reads do not need repeated full revalidation; strict true-effect and
-  publication admission still exceed the retained total-work baseline.
+- **Current contract:** [selected admission, full publication](selected-authority-contract.md),
+  explicitly selected by the user and reviewed/merged in #8278.
+- **Current blocker:** [protected candidate read-result seam](selected-readresult-dependency.md).
+  The #5761 owner has not released or agreed that seam; no shared API edit is made.
+- **Historical evidence:** [authority accounting](s3ab-authority-proposal.md) and
+  [strict-boundary lower bound](s3ab-boundary-decision.md) remain retained, not
+  current-policy performance qualification.
 
 ## Request
 
@@ -30,6 +32,8 @@ launch/recovery, production deployment or live venue probes.
 
 - [x] Recheck issue/task/file claims and verify the merged design.
 - [x] Obtain admission for the narrow shared heartbeat signature.
+- [x] Review and merge the explicit selected-authority semantic amendment (#8278).
+- [ ] Obtain the protected #5761 owner's agreement for the candidate read-result seam.
 - [x] Implement immutable inventory and batch protocol with explicit wave adapter.
 - [x] Implement bounded concurrent probes, cancellation and atomic renewal fence.
 - [ ] Validate and independently review; publish and merge through normal gates.
@@ -37,6 +41,8 @@ launch/recovery, production deployment or live venue probes.
 
 ## Validation Plan
 
+- [ ] Requalify the amended selected/publication implementation with complete
+  matched total-work cold/warm/not-due 0/1/10 CLI/keyring and bridge/no-bridge cases.
 - [x] Pure inventory/protocol/error/age/generation tests.
 - [x] Actual SessionForwards consumer with owned executable/transport counters,
   identical baseline/candidate workload, 0/1/10 due and unchanged second poll.
@@ -58,6 +64,24 @@ conservatively withholds connection authority for the wave. Expired evidence
 defers to the next due wave, with no hidden per-venue refresh.
 
 ## Journal
+
+### 2026-10-23 — Selected-authority amendment merged; ownership dependency retained
+
+- Explicit user decision `selected_then_full_publication` is now the reviewed
+  contract. Docs-only #8278 merged at
+  `c6c117c03cc75790023c7db1ffa15e2d59a589ea` after independent review, provider
+  approval with no findings, and required green CI.
+- Read the canonical effort after merge; this completed only the contract
+  amendment, not runtime implementation, aggregate qualification or rollout.
+- Fresh #5761 forge comments and its active source effort still name
+  `rattling-circuit`; no release or narrow seam agreement was found. Returned
+  the exact [candidate read-result dependency](selected-readresult-dependency.md)
+  before shared edits rather than duplicating its algorithm or taking ownership.
+- Pulled the merged contract into this retained implementation branch. The
+  rebase resolved only adjacent effort-index text, preserving other owners'
+  updates; product source and test bytes are unchanged from the saved branch.
+- Draft #8143 remains unmerged. Original raw evidence is untouched. No amended
+  implementation measurement, live CodeSpace probe or installed rollout occurred.
 
 ### 2026-10-23 — Admission
 
