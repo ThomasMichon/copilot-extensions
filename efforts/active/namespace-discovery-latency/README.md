@@ -149,6 +149,31 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-22 - Namespace-only overlap and bounded owner compatibility
+
+- The next review summary identified interpreter-shutdown retention in the
+  existing bounded credential-owner helper. Its daemon thread must not acquire
+  executor workers whose shutdown hooks extend the caller's process lifetime.
+- Narrowed overlap to explicit namespace enumeration. Ordinary listing,
+  account-candidate and configuration reads retain their original serial
+  defaults; namespace enumeration opts into all three overlap layers.
+  No daemon executor, detached worker, larger budget or new shutdown owner
+  was introduced.
+- A real child-process regression blocks an owner listing for twenty seconds
+  while the bounded helper returns unknown; ordinary interpreter shutdown must
+  still finish within the five-second test bound. Additional cases prove
+  serial default execution, namespace opt-in and activation-root opt-in.
+- The focused consumer/config/authentication suite passed 309 cases with six
+  existing platform/optional skips. Five fresh actual Bridge scans completed
+  in 6.266, 5.812, 6.422, 5.750 and 5.766 seconds under the unchanged default
+  eight-second deadline, each followed by five warm reads. Malformed stored
+  mapping remained incomplete in 6.547 seconds; exact restoration recovered
+  complete discovery in 6.688 seconds. Native and sampling holders settled.
+- The existing manual periodic Linux workflow can inspect an immutable
+  candidate ref through the canonical hardened container runner. That hosted
+  lane is distinct from unavailable local Docker and the unit-only PR packet;
+  its candidate execution remains pending.
+
 ### 2026-10-22 - Undecodable peer-output refusal
 
 - The next review had no remaining formal threads but identified undecodable

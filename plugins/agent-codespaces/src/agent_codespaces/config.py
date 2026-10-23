@@ -1278,9 +1278,9 @@ def _shadow_config_d_with_active_plugins(
     )
 
 
-def scan_config_providers() -> ConfigProviderReports:
+def scan_config_providers(*, concurrent_roots: bool = False) -> ConfigProviderReports:
     """Scan active plugin declarations and compatibility config.d entries."""
-    activation = resolve_active_plugins(concurrent_roots=True)
+    activation = resolve_active_plugins(concurrent_roots=concurrent_roots)
     active_plugins = scan_active_plugin_config_registry(activation=activation)
     config_d = _shadow_config_d_with_active_plugins(
         scan_config_dropin_registry(activation=activation),
@@ -2380,6 +2380,7 @@ def load_merged_config(
     include_cwd: bool = True,
     *,
     provider_reports: ConfigProviderReports | None = None,
+    concurrent_roots: bool = False,
 ) -> CodespacesConfig:
     """Load and merge CodeSpace config from all adopted repos.
 
@@ -2431,7 +2432,10 @@ def load_merged_config(
         if raw is None:
             continue
         sources.append((raw, config_dir, repo_root))
-    provider_reports = provider_reports or scan_config_providers()
+    provider_reports = provider_reports or (
+        scan_config_providers(concurrent_roots=True) if concurrent_roots
+        else scan_config_providers()
+    )
     _warn_active_plugin_config_findings(provider_reports.active_plugins)
     _warn_config_dropin_findings(provider_reports.config_d)
     for contribution in provider_reports.active_configs:

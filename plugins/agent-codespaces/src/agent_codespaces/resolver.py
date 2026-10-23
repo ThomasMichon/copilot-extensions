@@ -382,7 +382,7 @@ class CodespaceResolver:
         JSON and agent-bridge can reconstruct ``NamespaceAgentInfo`` across a
         process boundary (#892 Inc 3).
         """
-        codespaces = await asyncio.to_thread(list_codespaces)
+        codespaces = await asyncio.to_thread(list_codespaces, concurrent=True)
         agents = []
         for cs in codespaces:
             repo_short = cs.repository.split("/")[-1] if cs.repository else ""

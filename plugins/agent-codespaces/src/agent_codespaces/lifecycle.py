@@ -12,6 +12,7 @@ import os
 import subprocess
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -76,7 +77,7 @@ def _creation_flags() -> int:
     return no_window_flags()
 
 
-def list_codespaces() -> list[CodespaceInfo]:
+def list_codespaces(*, concurrent: bool = False) -> list[CodespaceInfo]:
     """List CodeSpaces across all candidate gh accounts, merged by name.
 
     ``gh codespace list`` only returns the *active* account's CodeSpaces, so a
@@ -88,6 +89,8 @@ def list_codespaces() -> list[CodespaceInfo]:
 
     When no candidate accounts exist this collapses to a single ambient
     ``gh codespace list`` (today's behavior) -- additive and safe.
+    Namespace enumeration explicitly opts into overlap; ordinary callers stay
+    serial, including bounded owner lookup running in a daemon thread.
     """
     from .account_candidates import candidates
 
@@ -95,31 +98,37 @@ def list_codespaces() -> list[CodespaceInfo]:
 
     merged: dict[str, CodespaceInfo] = {}
     errors: list[str] = []
-    # Start known accounts while slower configuration/peer metadata resolves.
-    # Join in canonical candidate order so completion timing cannot change owners.
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        pending: dict[str | None, Future[list[CodespaceInfo]]] = {}
-
-        def start(login: str | None) -> None:
-            key = login.casefold() if login else None
-            if key not in pending:
-                pending[key] = executor.submit(_list_codespaces_under, login)
-
+    def collect(login: str | None, read: Callable[[], list[CodespaceInfo]]) -> None:
         try:
-            for login in candidates(on_account=start):
-                key = login.casefold() if login else None
-                try:
-                    for cs in pending[key].result():
-                        cs.account = login or ""
-                        merged.setdefault(cs.name, cs)
-                except ContextRefused:
-                    raise
-                except RuntimeError as exc:
-                    errors.append(str(exc))
-        except BaseException:
-            for future in pending.values():
-                future.cancel()
+            for cs in read():
+                cs.account = login or ""
+                merged.setdefault(cs.name, cs)
+        except ContextRefused:
             raise
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    if not concurrent:
+        for login in candidates():
+            collect(login, lambda: _list_codespaces_under(login))
+    else:
+        # Start known accounts early, but merge results in canonical source order.
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            pending: dict[str | None, Future[list[CodespaceInfo]]] = {}
+
+            def start(login: str | None) -> None:
+                key = login.casefold() if login else None
+                if key not in pending:
+                    pending[key] = executor.submit(_list_codespaces_under, login)
+
+            try:
+                for login in candidates(on_account=start, concurrent=True):
+                    key = login.casefold() if login else None
+                    collect(login, pending[key].result)
+            except BaseException:
+                for future in pending.values():
+                    future.cancel()
+                raise
     if not merged and errors:
         raise RuntimeError("; ".join(dict.fromkeys(errors)))
     return list(merged.values())

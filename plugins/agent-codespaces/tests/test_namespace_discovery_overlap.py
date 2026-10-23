@@ -31,6 +31,31 @@ def space(name, account):
     )
 
 
+def test_ordinary_listing_retains_serial_execution(monkeypatch):
+    def unexpected_executor(*args, **kwargs):
+        raise AssertionError("ordinary discovery must not create executor threads")
+
+    monkeypatch.setattr(lifecycle, "ThreadPoolExecutor", unexpected_executor)
+    monkeypatch.setattr(account_candidates, "ThreadPoolExecutor", unexpected_executor)
+    monkeypatch.setattr(lifecycle, "_list_codespaces_under", lambda account: [space(account, account)])
+    assert [row.account for row in lifecycle.list_codespaces()] == ["configured", "active"]
+
+
+@pytest.mark.asyncio
+async def test_namespace_enumeration_opts_into_overlap(monkeypatch):
+    from agent_codespaces import resolver
+
+    selected = []
+
+    def listing(*, concurrent=False):
+        selected.append(concurrent)
+        return []
+
+    monkeypatch.setattr(resolver, "list_codespaces", listing)
+    assert await resolver.CodespaceResolver().list_specs() == []
+    assert selected == [True]
+
+
 def test_known_account_starts_before_configuration_finishes(monkeypatch):
     started = Event()
     monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ("bound",))
@@ -46,7 +71,7 @@ def test_known_account_starts_before_configuration_finishes(monkeypatch):
 
     monkeypatch.setattr(config, "load_merged_config", configured)
     monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
-    assert [row.account for row in lifecycle.list_codespaces()] == [
+    assert [row.account for row in lifecycle.list_codespaces(concurrent=True)] == [
         "bound", "configured", "active",
     ]
 
@@ -66,7 +91,7 @@ def test_account_reads_overlap_but_merge_in_source_order(monkeypatch):
         return [space("shared", account)]
 
     monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
-    assert lifecycle.list_codespaces()[0].account == "first"
+    assert lifecycle.list_codespaces(concurrent=True)[0].account == "first"
 
 
 def test_sources_overlap_and_keep_priority_and_casefold_dedup(monkeypatch):
@@ -87,7 +112,7 @@ def test_sources_overlap_and_keep_priority_and_casefold_dedup(monkeypatch):
     monkeypatch.setattr(gh_account, "account_for_repo", lambda _: "mapped")
     monkeypatch.setattr(gh_account, "active_account", lambda: "provider")
     notified = []
-    assert account_candidates.candidates(on_account=notified.append) == (
+    assert account_candidates.candidates(on_account=notified.append, concurrent=True) == (
         "Mapped", "BOUND", "Provider",
     )
     assert sorted(value.casefold() for value in notified) == [
@@ -113,7 +138,7 @@ def test_early_lower_priority_casing_does_not_change_the_selected_owner(monkeypa
 
     monkeypatch.setattr(gh_account, "account_inventory", inventory)
     monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
-    assert lifecycle.list_codespaces()[0].account == "BOUND"
+    assert lifecycle.list_codespaces(concurrent=True)[0].account == "BOUND"
     assert called == ["Bound"]
 
 
@@ -125,7 +150,7 @@ def test_ambient_fallback_waits_for_complete_candidate_set(monkeypatch, provider
     monkeypatch.setattr(picker_auth, "authorized_configs", lambda: providers)
     monkeypatch.setattr(gh_account, "active_account", lambda: None)
     notified = []
-    assert account_candidates.candidates(on_account=notified.append) == expected
+    assert account_candidates.candidates(on_account=notified.append, concurrent=True) == expected
     assert (None in notified) == (None in expected)
 
 
@@ -146,7 +171,7 @@ def test_context_refusal_joins_already_started_reads(monkeypatch):
     monkeypatch.setattr(config, "load_merged_config", configured)
     monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
     with pytest.raises(lifecycle.ContextRefused, match="refused"):
-        lifecycle.list_codespaces()
+        lifecycle.list_codespaces(concurrent=True)
     assert finished.is_set()
 
 
@@ -175,6 +200,6 @@ def test_native_concurrency_is_bounded_and_failures_still_surface(monkeypatch):
 
     monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
     with pytest.raises(RuntimeError, match="provider failed"):
-        lifecycle.list_codespaces()
+        lifecycle.list_codespaces(concurrent=True)
     assert peak == 4
     assert active == 0

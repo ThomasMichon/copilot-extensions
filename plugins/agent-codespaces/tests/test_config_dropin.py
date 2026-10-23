@@ -75,6 +75,23 @@ def _active_report(source: str, root: Path) -> ActivationReport:
     )
 
 
+@pytest.mark.parametrize("concurrent", [False, True])
+def test_activation_root_overlap_requires_explicit_opt_in(tmp_path, monkeypatch, concurrent):
+    selected = []
+
+    def activation(**kwargs):
+        selected.append(kwargs)
+        return ActivationReport(authority=ScanAuthority.COMPLETE, decisions={})
+
+    monkeypatch.setattr(cfg, "resolve_active_plugins", activation)
+    monkeypatch.setattr(cfg, "config_d_dir", lambda: tmp_path / "config.d")
+    if concurrent:
+        cfg.scan_config_providers(concurrent_roots=True)
+    else:
+        cfg.scan_config_providers()
+    assert selected == [{"concurrent_roots": concurrent}]
+
+
 def _declared_plugin(
     tmp_path: Path,
     *,
