@@ -479,11 +479,12 @@ _NO_UPDATE="${WORKTREE_NO_UPDATE:-}"
 _STAGE_PID=""
 _UPDATE_APPLIED=""
 
-# ── Background update: stage-then-join (#1430) ─────────────────────────────
+# ── Optional maintenance: submit by default, join only in blocking mode ─────
 # The Picker runs from the installed runtime venv, so the slow marketplace
 # download is STAGED in the background while the Picker is open, then the apply
-# (installer -> runtime, pre-launch, reconcile) runs at the JOIN, after the
-# Picker closes and before the tmux/Copilot handoff. The launcher script is
+# (installer -> runtime, pre-launch, reconcile) runs at the JOIN only with
+# WORKTREE_BLOCKING_INSTALL; ordinary launches submit one driver request.
+# The blocking join follows Picker exit and precedes handoff. The launcher script is
 # applied via the installer but NOT re-exec'd mid-flight: a launcher change
 # takes effect on the NEXT launch (stage-next).
 
@@ -491,6 +492,7 @@ start_update_stage() {
     # Spawn the background stage (marketplace download + fingerprint + plan).
     # Output is discarded so it never writes to the Picker's terminal.
     [[ "$_NO_UPDATE" == "1" ]] && return 0
+    [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && return 0
     setup_log INFO 'Starting background update stage (stage-update)'
     ( "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 ) &
     _STAGE_PID=$!
@@ -505,6 +507,23 @@ invoke_update_apply() {
     [[ -n "$_UPDATE_APPLIED" ]] && return 0
     _UPDATE_APPLIED=1
     local _SETUP_PROGRESS_DIR="" _SETUP_PROGRESS_PID="" _SETUP_PROGRESS_JOB="" _SETUP_PROGRESS_SEQUENCE=0 _SETUP_PROGRESS_FAILED=0
+    if [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
+        local _automatic_args=(-m agent_worktrees)
+        [[ -n "$LAUNCH_PROJECT" ]] && _automatic_args+=(--project "$LAUNCH_PROJECT")
+        _automatic_args+=(launch-update automatic --detach)
+        local _include_reconcile=""
+        [[ "$with_reconcile" == "1" && "${WORKTREE_NO_RECONCILE:-}" != "1" ]] && _include_reconcile=1
+        if [[ "$_NO_UPDATE" == "1" ]]; then
+            [[ -z "$_include_reconcile" ]] && return 0
+            _automatic_args+=(--no-update)
+        fi
+        [[ -n "$_include_reconcile" ]] && _automatic_args+=(--with-reconcile)
+        _start_setup_progress
+        _run_launch_request maintenance 'Automatic maintenance submission' \
+            "$PYTHON" "${_automatic_args[@]}"
+        _stop_setup_progress
+        return
+    fi
     _start_setup_progress
 
     local status_file="$HOME/.agent-worktrees/updater-status.json"
@@ -634,8 +653,8 @@ if [[ $# -gt 0 ]]; then
 fi
 if [[ -n "$_IS_DIRECT" ]]; then
     setup_log INFO "Direct dispatch: $1 (bypassing resolve)"
-    # No Picker window to hide behind: stage + apply synchronously (no
-    # reconcile, matching historical direct-command behavior) before dispatch.
+    # Direct commands retain update-only optional maintenance. Only explicit
+    # blocking mode joins it before dispatch.
     start_update_stage
     invoke_update_apply 0
     direct_args=(-m agent_worktrees)
@@ -645,7 +664,7 @@ if [[ -n "$_IS_DIRECT" ]]; then
 fi
 
 # ── Background update stage (#1430) ──────────────────────────────────────
-# Spawn the marketplace download now so it runs WHILE the Picker is open. It is
+# In explicit blocking mode, start acquisition while the Picker is open. It is
 # joined and applied (installer + pre-launch + reconcile) after resolve returns
 # an exec plan, before the tmux handoff -- see invoke_update_apply below.
 start_update_stage

@@ -100,6 +100,22 @@ plugin preferences. The controls prove actual SSH streaming and cancellation
 quiescence, not cross-machine native plugin discovery. Leave this opt-in unset
 for ordinary contained test runs.
 
+## Targeted launch-maintenance acceptance
+
+Manually dispatch `windows-coverage-rotation.yml` with the candidate `ref` and
+`launch_maintenance: true` to run Worktrees, Manager and shared-driver launch-maintenance
+selections through the existing hardened, network-isolated Linux container
+wrapper. The resolved source SHA, exact selector, wrapper invocation and actual
+exit status are recorded in each execution artifact. The ordinary daily
+nine-plugin portfolio is unchanged. A targeted run never files the shared
+portfolio failure issue, even when it targets `dev`.
+
+This exercises native Bash handoff, canonical driver coordination and explicit
+failure behavior, not Windows broker activation, installed rollout or every
+integration family. The disabled Windows rotation stays disabled; local
+contained Windows evidence is recorded separately. Required PR CI and promotion
+retain their existing unit-only policy.
+
 ## Native file-link prerequisites
 
 `tools/test_dependency_uv_executable_native.py` qualifies both absolute and

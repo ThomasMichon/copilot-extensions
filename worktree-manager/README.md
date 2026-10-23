@@ -206,7 +206,18 @@ their service labels, timed outcomes and child diagnostics without a duplicate r
 echo. Execution arguments are unchanged; this does not redact arbitrary output
 emitted by a child command.
 
-Native wrappers submit fixed `launch-update bootstrap`, `launch-update reconcile`
+Healthy native wrappers submit `launch-update automatic --detach` and hand off
+after acceptance, before optional acquisition or installation completes. The
+existing execution driver owns that entire finite operation: no shell-owned
+stage, background-job join, inline-download retry or separate maintenance queue.
+`WORKTREE_NO_UPDATE` and `WORKTREE_NO_RECONCILE` remain independent. A failed
+submission warns without starting an inline installer; a failed accepted
+operation remains inspectable in its durable request/log.
+The owner continues independently eligible maintenance after a handled phase
+failure and preserves the failed aggregate outcome; one plugin's failure does
+not suppress an otherwise permitted staged Worktrees update.
+
+Blocking native wrappers submit fixed `launch-update bootstrap`, `launch-update reconcile`
 and `launch-update staged` requests instead of executing JSON plan
 arguments. The execution owner re-derives the bootstrap/reconcile plans and
 revalidates each runtime's selected installation and publication permission.
@@ -215,7 +226,7 @@ fingerprint, then reconstruct installer arguments and environment canonically.
 A replaced status, payload or installation fails visibly rather than mixing
 two acquisitions. No arbitrary command-execution protocol is exposed.
 
-Foreground bootstrap and reconciliation finish before staged self-installation
+In explicit blocking mode, bootstrap and reconciliation finish before staged self-installation
 is submitted, so their waiters do not accidentally join that detached install.
 When a staged self-install is pending, bootstrap leaves Worktrees to that
 request but still updates independent repository bootstrap services.

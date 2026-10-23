@@ -528,18 +528,19 @@ $noUpdate = ($env:WORKTREE_NO_UPDATE -eq '1')
 $script:UpdateApplied = $false
 $script:StageJob = $null
 
-# ── Background update: stage-then-join (#1430) ───────────────────────────
+# ── Optional maintenance: submit by default, join only in blocking mode ──
 # The Picker runs from the installed runtime venv, so the slow marketplace
 # download is STAGED in the background while the Picker is open, then the
-# apply (installer -> runtime, pre-launch, reconcile) runs at the JOIN, after
-# the Picker closes and before the psmux/Copilot handoff. The launcher script
+# apply (installer -> runtime, pre-launch, reconcile) runs at the JOIN only
+# with WORKTREE_BLOCKING_INSTALL; ordinary launches submit one driver request.
+# The blocking join follows Picker exit and precedes handoff. The launcher script
 # itself is applied via the installer but NOT re-exec'd mid-flight: a launcher
 # change takes effect on the NEXT launch (stage-next).
 
 function Start-UpdateStage {
     # Spawn the background stage (marketplace download + fingerprint + plan).
     # Runs headless in a job so it never writes to the Picker's console.
-    if ($noUpdate) { return $null }
+    if ($noUpdate -or -not $env:WORKTREE_BLOCKING_INSTALL) { return $null }
     try {
         Write-SetupLog 'Starting background update stage (stage-update)'
         return Start-Job -Name 'aw-stage-update' -ScriptBlock {
@@ -610,6 +611,19 @@ function Invoke-UpdateApply {
     # Enable console status echo for interactive launches (the caller passes
     # -ShowStatus on the Picker exec / refresh paths, never on direct dispatch).
     $script:ShowLaunchStatus = [bool]$ShowStatus
+
+    if (-not $env:WORKTREE_BLOCKING_INSTALL) {
+        $includeReconcile = $WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1'
+        if ($noUpdate -and -not $includeReconcile) { return }
+        $requestArgs = @('-m', 'agent_worktrees')
+        if ($script:LaunchProject) { $requestArgs += @('--project', $script:LaunchProject) }
+        $requestArgs += @('launch-update', 'automatic', '--detach')
+        if ($noUpdate) { $requestArgs += '--no-update' }
+        if ($includeReconcile) { $requestArgs += '--with-reconcile' }
+        $null = Invoke-SetupCommand -CommandArgv (@($VenvPython) + $requestArgs) `
+            -Scope 'launch/maintenance' -Label 'Automatic maintenance submission'
+        return
+    }
 
     if (-not $noUpdate) {
         Write-SetupStatus 'Finalizing launch: applying any pending plugin and runtime updates...'
@@ -702,9 +716,8 @@ $DirectCommands = @(
 )
 if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
     Write-SetupLog "Direct dispatch: $($CopilotArgs[0]) (bypassing resolve)"
-    # No Picker window to hide behind: stage + apply synchronously (no
-    # reconcile, matching the historical direct-command behavior) before
-    # dispatching.
+    # Direct commands retain update-only optional maintenance. Only explicit
+    # blocking mode joins it before dispatch.
     Invoke-UpdateApply -StageJob (Start-UpdateStage)
     $directArgs = @('-m', 'agent_worktrees')
     if ($script:LaunchProject) {
@@ -716,7 +729,7 @@ if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
 }
 
 # ── Background update stage (#1430) ──────────────────────────────────────
-# Spawn the marketplace download now so it runs WHILE the Picker is open. It is
+# In explicit blocking mode, start acquisition while the Picker is open. It is
 # joined and applied (installer + pre-launch + reconcile) after resolve returns
 # an exec plan, before the psmux handoff -- see Invoke-UpdateApply below.
 $script:StageJob = Start-UpdateStage

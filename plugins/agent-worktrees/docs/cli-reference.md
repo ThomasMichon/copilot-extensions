@@ -1160,7 +1160,7 @@ to the effort after release.
 | `accounts` | gh account identity catalog (`accounts.yaml`) -- list/show/set/remove logins, scopes, login flows |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
-| `launch-update bootstrap\|reconcile\|staged` | Submit a fixed native maintenance phase to the shared installation driver (JSON result) |
+| `launch-update automatic\|bootstrap\|reconcile\|staged` | Submit fixed native maintenance to the shared installation driver (JSON result) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
 
@@ -1286,9 +1286,23 @@ action repeats the stager's owning payload discovery, preserving its supported
 deployment policy. The marker cannot select another plugin or an arbitrary
 payload path, and ordinary marketplace reconciliation is unchanged.
 An older standalone payload without policy needs no new policy helper.
-Native wrappers now submit `launch-update reconcile`, `launch-update bootstrap`
+Healthy native wrappers submit `launch-update automatic --detach`. Acquisition,
+bootstrap, reconciliation and self-installation happen inside the accepted
+request, not on the handoff path. `--no-update` skips acquisition and bootstrap;
+`--with-reconcile` selects reconciliation independently. These two options are
+valid only for `automatic`, which derives its stage rather than accepting a
+status path or snapshot. Acquisition refusal or a failed phase is a failed
+durable result, never successful installation.
+Worktrees publication refusal is retained as a diagnostic without suppressing
+independent bootstrap or reconciliation. A reconciliation failure does not
+cancel eligible staged Worktrees apply; the final aggregate result is nonzero.
+
+Blocking wrappers submit `launch-update reconcile`, `launch-update bootstrap`
 and `launch-update staged --status <path>` rather than running cached argv.
 The fixed reconciliation phase invokes the same canonical apply executor.
+Handled apply errors retain unsuccessful JSON (`ok: false`), failed status
+and a nonzero exit. Lost execution authority or unconfirmed cleanup remains
+fatal rather than an ordinary component failure.
 It does not reuse the older `reconcile-plugins --apply` command as a capability
 probe: an old engine can support that command without the execution driver.
 Bootstrap derives a fresh plan under custody and rechecks staleness after

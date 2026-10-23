@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from . import reconcile, update_cli, update_stage
@@ -14,7 +15,7 @@ from .reconcile_deployment import execution_diagnostic
 
 def add_parsers(sub) -> None:
     parser = sub.add_parser("launch-update", help="Submit durable native launch maintenance")
-    parser.add_argument("phase", choices=("bootstrap", "reconcile", "staged"))
+    parser.add_argument("phase", choices=("bootstrap", "reconcile", "staged", "automatic"))
     parser.add_argument("--status", help="Staged acquisition status path")
     parser.add_argument("--detach", action="store_true", help="Return after durable submission")
     parser.add_argument(
@@ -22,6 +23,8 @@ def add_parsers(sub) -> None:
         help="Leave the Worktrees runtime to the launcher's staged request",
     )
     parser.add_argument("--snapshot", help=argparse.SUPPRESS)
+    parser.add_argument("--no-update", action="store_true", help="Skip automatic update acquisition")
+    parser.add_argument("--with-reconcile", action="store_true", help="Include automatic reconciliation")
 
 
 def _staged_snapshot(path: Path) -> tuple[dict, str]:
@@ -48,6 +51,21 @@ def cmd_launch_update(args: argparse.Namespace) -> int:
     from .update_driver_json_cli import _run_request
 
     flags = [args.phase]
+    automatic_options = [
+        option for name, option in (
+            ("no_update", "--no-update"), ("with_reconcile", "--with-reconcile"),
+        ) if getattr(args, name, False)
+    ]
+    if automatic_options and args.phase != "automatic":
+        print("Launch update: automatic options require the automatic phase", file=sys.stderr)
+        print(json.dumps({"ok": False, "reason": "invalid-phase-options"}))
+        return 2
+    if args.phase == "automatic":
+        if args.status or args.snapshot or args.defer_worktrees:
+            print("Launch update: automatic maintenance derives its own stage", file=sys.stderr)
+            print(json.dumps({"ok": False, "reason": "invalid-phase-options"}))
+            return 2
+        flags += automatic_options
     if args.phase == "staged":
         path = Path(args.status).expanduser().resolve() if args.status else update_stage.status_path()
         try:
@@ -91,11 +109,70 @@ def _apply(update: dict, *, staged: bool = False) -> dict:
 
 def _execute(args: argparse.Namespace) -> int:
     try:
+        if args.phase == "automatic":
+            return _execute_automatic(args)
         return _execute_phase(args)
     except (OSError, ValueError) as error:
         _log(f"launch: {error}")
         print(json.dumps({"ok": False, "reason": "launch-phase-invalid", "message": str(error)}))
         return 1
+
+
+def _execute_automatic(args: argparse.Namespace) -> int:
+    """Run optional work inside the existing request's custody, never a second queue."""
+    from .update_driver_json_cli import _ProtocolBuffer
+
+    results = []
+    diagnostics = []
+
+    def run_phase(phase: str, **options) -> int:
+        selected = argparse.Namespace(
+            phase=phase, status=None, snapshot=None, defer_worktrees=False,
+        )
+        vars(selected).update(options)
+        buffer = _ProtocolBuffer()
+        with redirect_stdout(buffer):
+            code = _execute(selected)
+        result = json.loads(buffer.getvalue())
+        if not isinstance(result, dict):
+            raise ValueError("automatic phase did not return one result object")
+        results.append({"phase": phase, "returncode": code, "result": result})
+        return code
+
+    stage = None
+    if not getattr(args, "no_update", False):
+        _log("launch: acquiring optional update under execution-driver custody")
+        stage = update_stage.stage()
+        if stage.get("stage_done") is not True or stage.get("skipped") == "locked":
+            raise ValueError("automatic update acquisition did not complete")
+        if stage.get("acquisition_ok") is False:
+            raise ValueError("automatic update acquisition failed; see updater status")
+        if stage.get("runtime_apply_blocked"):
+            reason = stage["runtime_apply_blocked"]
+            diagnostic = stage.get("runtime_apply_diagnostic")
+            diagnostics.append(diagnostic if isinstance(diagnostic, dict) else {
+                "service": "agent-worktrees", "phase": "runtime",
+                "reason": reason, "message": f"Automatic runtime apply blocked: {reason}",
+            })
+            _log(f"launch: Worktrees runtime apply blocked: {reason}")
+        run_phase(
+            "bootstrap",
+            defer_worktrees=stage.get("plugin_changed") is True or bool(diagnostics),
+        )
+    if getattr(args, "with_reconcile", False):
+        run_phase("reconcile")
+    if (
+        stage is not None and stage.get("plugin_changed") is True
+        and not stage.get("runtime_apply_blocked")
+    ):
+        path = update_stage.status_path()
+        _current, digest = _staged_snapshot(path)
+        run_phase("staged", status=str(path), snapshot=digest)
+    result = {"action": "launch-update", "phase": "automatic", "executed": results}
+    if diagnostics:
+        result["diagnostics"] = diagnostics
+    print(json.dumps(result))
+    return 1 if diagnostics or any(item["returncode"] for item in results) else 0
 
 
 def _execute_phase(args: argparse.Namespace) -> int:

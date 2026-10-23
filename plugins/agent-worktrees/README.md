@@ -81,14 +81,28 @@ supervision, never a second installation writer.
 The [Manager's update reference](../../worktree-manager/README.md#durable-update-execution)
 owns the shared request/lifetime contract and its current migration boundary.
 
-Native launch maintenance submits fixed `launch-update bootstrap`,
+Healthy native launches submit one `launch-update automatic --detach` request
+to that same owner, then proceed without waiting for acquisition or installers.
+The worker acquires updates and runs bootstrap, optional reconciliation and
+staged self-installation under the original request's custody. `--no-update`
+and `--with-reconcile` independently select that work; equivalent pending
+requests coalesce without discarding another project's request. Acceptance is
+not maintenance completion; follow the durable request/log for the outcome.
+Borrowed execution registers cleanup responsibility with that owner before
+mutation. Unconfirmed native cleanup is fatal and retains an interruption fence,
+not an ordinary acquisition failure that allows another queued installer.
+Worktrees publication refusal leaves independently eligible bootstrap and
+reconciliation work available. Known phase failures do not cancel independent
+later phases; the aggregate durable outcome remains unsuccessful.
+
+Explicit blocking launch maintenance retains fixed `launch-update bootstrap`,
 `launch-update reconcile` and `launch-update staged --status <acquisition-result>`
 phases to that owner.
 Bootstrap re-plans under custody; staged apply binds the acquisition and payload
 fingerprint and reconstructs its installer rather than executing supplied JSON
 arguments. Staged `--detach` returns acceptance, not installation success.
-The launchers submit it after foreground maintenance so its next-launch install
-remains nonblocking; blocking mode observes the same request.
+`WORKTREE_BLOCKING_INSTALL` preserves blocking recovery through that same
+execution owner. Neither mode adds a maintenance queue or installer lock.
 
 On Windows, ordinary and passive status-monitor starts bypass the venv Python
 redirector and use the real base **console** interpreter, preserving the venv

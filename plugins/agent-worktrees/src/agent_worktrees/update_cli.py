@@ -892,6 +892,8 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
     with_payload = getattr(args, "with_payload_refresh", False)
 
     if getattr(args, "apply", False):
+        from agent_procutil.owned_process import OwnedCleanupError
+        from update_driver import DriverError, ParticipantError
 
         def _log(msg: str) -> None:
             print(msg, file=sys.stderr, flush=True)
@@ -907,16 +909,18 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
                     if getattr(args, "installer_output_fd", None) is not None else {}
                 ),
             )
+        except (DriverError, ParticipantError, OwnedCleanupError):
+            raise
         except Exception as e:
             print(f"provision: error: {e}", file=sys.stderr)
-            _write_status(
-                {
-                    "ok": False,
-                    "repo": str(Path(repo_dir).resolve()),
-                    "reason": str(e),
-                    "failed": [],
-                }
-            )
+            failure = {
+                "ok": False,
+                "repo": str(Path(repo_dir).resolve()),
+                "reason": str(e),
+                "failed": [],
+            }
+            _write_status(failure)
+            print(json.dumps({"action": "reconcile", "executed": [], **failure}))
             return 1
         failed = [item for item in summary.get("executed", []) if not item.get("ok", False)]
         _write_status(

@@ -4,6 +4,10 @@ Parent contract: [Coordinated Launch Maintenance](README.md).
 Tracking: #6859 and #7694. This is a proposed source design, not an installed
 service, successful qualification or permission to change a host.
 
+The operator's `scheduling-only` decision separates this owned repair
+(#6859/#7833) from #7788's delivery. No gate below is waived or implied complete;
+the scheduling PR retains the existing execution driver's lifetime refusals.
+
 ## Authority and intent
 
 The operator selected `source-redesign`: "Authorize the source-level broker
@@ -136,8 +140,8 @@ CI/promotion enforcement remain the separate parent gate.
 
 ## Implementation and validation gates
 
-- [ ] Land this amended contract through ordinary review before broker code.
-- [ ] Complete the other #6859 review corrections: enforce census deadlines
+- [x] Land this amended contract through ordinary review before broker code.
+- [x] Complete the other #6859 review corrections: enforce census deadlines
   during work, retain retryable descendant/Job handles after unconfirmed exit,
   and make synthetic PID fixtures independent of the runner PID.
 - [ ] Implement the canonical broker protocol and owning installer integration;
@@ -145,7 +149,7 @@ CI/promotion enforcement remain the separate parent gate.
 - [ ] Unit tests cover wrong owner/instance, stale registration, malformed and
   over-budget input, missing prerequisites, failed stage/adoption/resume,
   disconnect/ambiguous acknowledgement and retryable cleanup failure.
-- [ ] A native negative fixture puts the candidate and caller in different
+- [x] A native negative fixture puts the candidate and caller in different
   immediate Jobs under one shared outer cleanup Job. It must not receive a
   durable-success result. The control dies when that outer Job closes.
 - [ ] An approved isolated Windows lane activates the actual owned broker,
@@ -153,9 +157,15 @@ CI/promotion enforcement remain the separate parent gate.
   the resident independently through two complete cycles. Prove actual PID
   and exit/control semantics, exact argv/environment/log delivery, bounded
   control reaping and zero visible windows or foreground changes.
-- [ ] Exercise clean first adoption, repeat adoption, update, failed-update
+  _Two actual protocol cycles, all caller-Job closures, exact delivery, actual
+  cleanup and hidden own console passed in run 39876801692. Full
+  desktop/foreground observation remains open._
+- [x] Exercise clean first adoption, repeat adoption, update, failed-update
   rollback, status, stop and uninstall in that approved disposable lane.
   Assert no stale registrations or abandoned owned instances remain.
+  _Run 39878472832 exercised the actual lifecycle, including unhealthy action
+  refusal and restoration after an injected publication failure. Both native
+  resident cycles and final owned cleanup passed._
 - [ ] Prove replaced payload/checkout paths can disappear without breaking
   the installed broker. Test simultaneous starts and generation cutover or
   demonstrate the finite-worker exemption above.

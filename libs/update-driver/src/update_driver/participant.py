@@ -11,10 +11,14 @@ import hashlib
 import hmac
 import os
 import secrets
+import stat
+import sys
+import tempfile
 import threading
 import time
 import uuid
 from contextvars import ContextVar
+from contextlib import contextmanager
 from collections.abc import MutableMapping
 from multiprocessing.connection import Client, Listener
 from pathlib import Path
@@ -24,10 +28,38 @@ MAX_FRAME = 16384
 IPC_TIMEOUT = 2.0
 _current_custody = ContextVar("update_driver_participant_custody", default=None)
 _environment_guard = threading.Lock()
+_UNIX_SOCKET_LIMIT = 108 if sys.platform.startswith("linux") else 104
 
 
 class ParticipantError(RuntimeError):
     """Borrowed transaction authority was not proved or is no longer live."""
+
+
+def _unix_socket_address(root: Path) -> tuple[str, tempfile.TemporaryDirectory | None]:
+    address = str(root / f"w-{uuid.uuid4().hex[:12]}.sock")
+    if len(os.fsencode(address)) < _UNIX_SOCKET_LIMIT:
+        return address, None
+    directory = tempfile.TemporaryDirectory(prefix="udw-")
+    address = str(Path(directory.name) / "s")
+    if len(os.fsencode(address)) >= _UNIX_SOCKET_LIMIT:
+        directory.cleanup()
+        raise ParticipantError("private temporary endpoint exceeds the native socket limit")
+    return address, directory
+
+
+def _validate_unix_address(address: str, root: Path) -> None:
+    path = Path(address)
+    if len(os.fsencode(address)) >= _UNIX_SOCKET_LIMIT:
+        raise ParticipantError("participant endpoint exceeds the native socket limit")
+    if path.parent == root and path.name.startswith("w-"):
+        return
+    info = path.parent.lstat()
+    if (
+        not path.is_absolute() or path.name != "s" or not path.parent.name.startswith("udw-")
+        or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) & 0o077
+    ):
+        raise ParticipantError("participant endpoint is not in an owned private directory")
 
 
 def _send(connection, payload: dict) -> None:
@@ -86,17 +118,25 @@ class Witness:
         self.root, self.request_id = str(root), request_id
         self.key = secrets.token_bytes(32)
         self.family = "AF_PIPE" if os.name == "nt" else "AF_UNIX"
-        self.address = (
-            rf"\\.\pipe\update-driver-{uuid.uuid4().hex}" if os.name == "nt"
-            else str(root / f"w-{uuid.uuid4().hex[:12]}.sock")
-        )
+        self._socket_directory = None
+        if os.name == "nt":
+            self.address = rf"\\.\pipe\update-driver-{uuid.uuid4().hex}"
+        else:
+            self.address, self._socket_directory = _unix_socket_address(root)
         # Authentication uses bounded, pickle-free frames below. The stdlib
         # Listener auth handshake can block indefinitely on an abandoned pipe.
-        self.listener = Listener(self.address, family=self.family, authkey=None)
+        try:
+            self.listener = Listener(self.address, family=self.family, authkey=None)
+        except BaseException:
+            if self._socket_directory is not None:
+                self._socket_directory.cleanup()
+            raise
         self.active = threading.Event()
         self.active.set()
         self.guard = threading.Lock()
         self.connections = set()
+        self.executions = {}
+        self.unconfirmed_execution = False
         self.accept_thread = threading.Thread(target=self._accept, daemon=True)
         self.accept_thread.start()
 
@@ -151,13 +191,35 @@ class Witness:
                 if not valid or not self.active.is_set():
                     _send(connection, {"valid": False})
                     return
-                _send(connection, {"valid": True, "nonce": frame["nonce"]})
+                execution = frame.get("execution")
+                with self.guard:
+                    valid_execution = not self.unconfirmed_execution or execution == "end"
+                    if valid_execution and execution is not None:
+                        depth = self.executions.get(connection, 0)
+                        if execution == "begin":
+                            self.executions[connection] = depth + 1
+                        elif execution == "end" and depth:
+                            if depth == 1:
+                                self.executions.pop(connection)
+                            else:
+                                self.executions[connection] = depth - 1
+                        else:
+                            valid_execution = False
+                if not valid_execution:
+                    _send(connection, {"valid": False})
+                    return
+                response = {"valid": True, "nonce": frame["nonce"]}
+                if execution is not None:
+                    response["execution"] = execution
+                _send(connection, response)
                 if frame.get("close"):
                     return
         except (OSError, EOFError, ValueError, ParticipantError):
             pass
         finally:
             with self.guard:
+                if self.executions.pop(connection, 0):
+                    self.unconfirmed_execution = True
                 self.connections.discard(connection)
             connection.close()
 
@@ -167,7 +229,8 @@ class Witness:
         deadline = time.monotonic() + IPC_TIMEOUT
         while self.connections and time.monotonic() < deadline:
             time.sleep(.01)
-        unsettled = bool(self.connections)
+        with self.guard:
+            unsettled = bool(self.connections or self.executions) or self.unconfirmed_execution
         self.active.clear()
         try:
             wakeup = _connect(self.address, self.family)
@@ -180,6 +243,8 @@ class Witness:
             for connection in tuple(self.connections):
                 connection.close()
             self.connections.clear()
+        if self._socket_directory is not None:
+            self._socket_directory.cleanup()
         if unsettled:
             raise ParticipantError("transaction returned with unclosed participants")
 
@@ -196,6 +261,7 @@ class BorrowedCustody:
         self._transport = transport
         self._source_environ = source_environ
         self._scope_token = None
+        self._execution_failed = False
         try:
             if (
                 witness.get("version") != 1 or witness.get("root") != str(root)
@@ -211,8 +277,8 @@ class BorrowedCustody:
             if os.name == "nt":
                 if not address.startswith(r"\\.\pipe\update-driver-"):
                     raise ParticipantError("participant endpoint is not a local driver pipe")
-            elif Path(address).parent != root or not Path(address).name.startswith("w-"):
-                raise ParticipantError("participant endpoint is not in the execution space")
+            else:
+                _validate_unix_address(address, root)
             self._connection = _connect(address, witness["family"])
             challenge = _receive(self._connection)
             nonce = challenge.get("nonce")
@@ -234,21 +300,43 @@ class BorrowedCustody:
                 raise
             raise ParticipantError("participant witness unavailable or unauthenticated") from error
 
-    def assert_owned(self) -> None:
+    def _exchange(self, execution: str | None = None) -> None:
         if self._process_id != os.getpid():
             raise ParticipantError("participant custody belongs to a different process")
         if self._connection is None:
             raise ParticipantError("participant witness is closed")
+        if self._execution_failed:
+            raise ParticipantError("participant execution cleanup is unconfirmed")
         nonce = secrets.token_hex(32)
         try:
-            _send(self._connection, {
+            frame = {
                 "root": str(self.root), "request_id": self.request_id, "nonce": nonce,
-            })
+            }
+            if execution is not None:
+                frame["execution"] = execution
+            _send(self._connection, frame)
             response = _receive(self._connection)
             if response.get("valid") is not True or response.get("nonce") != nonce:
                 raise ParticipantError("participant owner refused custody")
+            if execution is not None and response.get("execution") != execution:
+                raise ParticipantError("participant owner does not support execution custody")
         except (OSError, EOFError, ValueError) as error:
             raise ParticipantError("participant owner lost custody") from error
+
+    def assert_owned(self) -> None:
+        self._exchange()
+
+    @contextmanager
+    def execution_scope(self):
+        """Register cleanup responsibility before executing, release only on return."""
+        self._exchange("begin")
+        try:
+            yield
+        except BaseException:
+            self._execution_failed = True
+            raise
+        else:
+            self._exchange("end")
 
     def close(self) -> None:
         try:

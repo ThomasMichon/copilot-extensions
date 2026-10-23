@@ -8,11 +8,67 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from agent_worktrees import update_stage as us
+
+
+@pytest.mark.parametrize("code", [0, 7])
+def test_acquisition_uses_bounded_caller_custody_and_actual_exit(monkeypatch, code):
+    import shutil
+    from agent_procutil import owned_process
+
+    monkeypatch.setattr(shutil, "which", lambda name: "owned-copilot")
+    calls = []
+
+    def run(argv, **options):
+        calls.append((argv, options))
+        return subprocess.CompletedProcess(argv, code, "progress", "diagnostic")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    assert us._run_copilot_update() == (code == 0, "progressdiagnostic")
+    assert calls == [(
+        ["copilot", "plugin", "update", us._PLUGIN_ID],
+        dict(timeout=90, max_stdout_bytes=1024 * 1024, max_stderr_bytes=1024 * 1024),
+    )]
+
+
+def test_acquisition_timeout_is_explicit_and_does_not_retry(monkeypatch):
+    import shutil
+    from agent_procutil import owned_process
+
+    monkeypatch.setattr(shutil, "which", lambda name: "owned-copilot")
+    calls = []
+
+    def refuse(argv, **options):
+        calls.append(argv)
+        raise subprocess.TimeoutExpired(argv, options["timeout"])
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", refuse)
+    ok, message = us._run_copilot_update()
+    assert not ok and "timed out" in message
+    assert len(calls) == 1
+
+
+def test_unconfirmed_acquisition_cleanup_preserves_native_custody(monkeypatch):
+    import shutil
+    from agent_procutil import owned_process
+
+    monkeypatch.setattr(shutil, "which", lambda name: "owned-copilot")
+    process, job = object(), object()
+    failure = owned_process.OwnedCleanupError(process, job)
+
+    def unconfirmed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", unconfirmed)
+    with pytest.raises(owned_process.OwnedCleanupError) as caught:
+        us._run_copilot_update()
+    assert caught.value is failure
+    assert caught.value.process is process and caught.value.job is job
 
 
 # ---------------------------------------------------------------------------
