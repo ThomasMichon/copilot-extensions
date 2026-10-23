@@ -37,6 +37,10 @@ their source.
 The supplied command directory itself must be absolute and exactly match the
 decision. Relative input is refused before installation custody, health or
 selector effects rather than resolving it in only one phase.
+Recovery also validates the complete generated command family before health or
+selector publication, including when no command registration exists. Unsupported
+control characters in command or runtime paths cannot become a later,
+predictable registration failure after selectors change.
 
 The exact `fleet-manager.client-recovery-decision`, version 1, has these fields:
 

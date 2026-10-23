@@ -215,6 +215,7 @@ def _activate_client_runtime(root, identity, selection, staged, *, current_polic
                     from . import client_frontdoor
 
                     commands_unchanged()
+                    client_frontdoor._commands(command_directory, slot)
                     registered = client_frontdoor._receipt(
                         namespace, identity, command_directory, publication,
                     )

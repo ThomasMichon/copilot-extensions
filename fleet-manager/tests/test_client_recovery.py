@@ -203,6 +203,34 @@ def test_relative_command_directory_refuses_before_custody_health_or_effects(
     assert not (namespace / frontdoor.PENDING).exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows disallows control characters in directory names")
+def test_unregistered_control_character_command_path_refuses_before_health_or_selectors(
+    prepared, tmp_path, monkeypatch,
+):
+    root, _old, _staged, _trusted, directory, namespace, _slot, decision, *_rest = prepared
+    unregister_client_frontdoor(root, identity(), command_directory=directory)
+    invalid_directory = command_directory(tmp_path, "invalid\ncommands")
+    decision["command_directory"] = str(invalid_directory)
+    arguments = list(prepared)
+    arguments[4] = invalid_directory
+    before = states([*activation._targets(namespace), namespace / activation.ACTIVE])
+    floor = database_bytes(root)
+    health_calls = []
+
+    def observed_health(*_args):
+        health_calls.append(True)
+        return {"unit_health_stub": True}
+
+    monkeypatch.setattr(construction, "_health", observed_health)
+    with pytest.raises(PlanError, match="control characters"):
+        recover(tuple(arguments))
+    assert not health_calls and states(before) == before and database_bytes(root) == floor
+    assert not list(invalid_directory.iterdir())
+    assert not (namespace / activation.PENDING).exists()
+    assert not (namespace / frontdoor.REGISTERED).exists()
+    assert not (namespace / frontdoor.PENDING).exists()
+
+
 @pytest.mark.parametrize("change", [
     "custody", "active", "candidate", "runtime_sha256", "target_digest",
     "admitted", "recovery_decision_digest", "health",
