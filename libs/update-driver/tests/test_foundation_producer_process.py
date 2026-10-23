@@ -100,6 +100,11 @@ def test_native_producer_defers_working_linked_uv_to_canonical_physical_selectio
     config = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config)
     physical_uv = config.select_uv_executable("uv", error_type=RuntimeError)
+    # Hosted UV is a regular path; local WinGet discovery may already include an NT namespace.
+    if physical_uv.startswith("\\\\?\\UNC\\"):
+        physical_uv = "\\\\" + physical_uv[8:]
+    elif physical_uv.startswith("\\\\?\\"):
+        physical_uv = physical_uv[4:]
     link_dir = area / "linked-tools"
     link_dir.mkdir()
     logical_uv = link_dir / "uv.exe"
@@ -136,7 +141,7 @@ def test_native_producer_defers_working_linked_uv_to_canonical_physical_selectio
         root / "bootstrap" / completed.operation_id / "prerequisites.json"
     ).read_text())
     assert Path(prerequisites["uv"]) == logical_uv
-    assert Path((root / "uv-selected").read_text()).resolve() == Path(physical_uv).resolve()
+    assert os.path.samefile((root / "uv-selected").read_text(), physical_uv)
 
 
 def test_native_producer_never_creates_control_state_inside_its_source(producer_source):

@@ -33,7 +33,8 @@ with borrowed_custody(root=args.root) as custody:
         import agent_procutil as pu
 
         selected_uv = select_uv_executable(args.uv, error_type=RuntimeError)
-        assert Path(selected_uv).resolve() == Path(os.environ["FOUNDATION_FIXTURE_UV_TARGET"]).resolve()
+        expected_uv = os.environ["FOUNDATION_FIXTURE_UV_TARGET"]
+        assert os.path.samefile(selected_uv, expected_uv), (args.uv, selected_uv, expected_uv)
         result = subprocess.run(
             [selected_uv, "--version"], capture_output=True, text=True,
             timeout=15, **pu.no_window_kwargs(),
