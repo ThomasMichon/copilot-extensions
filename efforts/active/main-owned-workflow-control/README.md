@@ -370,6 +370,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
+- [ ] Omit the promotion-filter no-op allocation for successful Main-push CI
+  completions, preserving Main CI, manual refs, Dev ancestry and all deferred
+  recovery paths. Source qualification and separately owned Main adoption
+  must not be conflated with fewer workflow invocations or measured speedup.
 - [x] Land and observe bounded asyncio ancestry-map reduction, preserving
   every file read/parse, path validation, handler classification and ordered
   diagnostic/list output (#7865). Actual required source CI runs all three

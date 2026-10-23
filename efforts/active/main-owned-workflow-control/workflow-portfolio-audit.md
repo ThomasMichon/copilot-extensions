@@ -486,6 +486,20 @@ investigation map, not a claim that its already-delivered reductions remain
 unimplemented. Capacity expansion, another unit cohort and individual native
 installer repairs are not substitutes for this whole-flow investigation.
 
+**Bounded completion-admission follow-up:** the source trace distinguishes
+identifier reporting, new-head attribution, departed-head peer repair and
+promotion-completion recovery; none is a duplicate merely because its name or
+commit overlaps another. The retained population has one successful Main-push
+CI, `39911280826`, followed by `39911295855`. Its allocated ancestry job
+`120274675022` runs for 13 seconds and explicitly rejects source
+`8d905243c80f6e867ca6deff875dc3eb52a3c2dd` as not a Dev ancestor;
+dispatch skips. The proposed source job condition omits only successful CI
+push completions on Main, retaining all manual refs, Dev ancestry/freshness,
+promotion failure/cancellation recovery, closed-Main wakes and other jobs.
+This removes a demonstrated no-op allocation, not an invocation, required
+validation or measured review bottleneck. Main control adoption and natural
+no-runner acceptance remain separately owned.
+
 ### Enforcement snapshot
 
 At the October 18 capture, the Dev ruleset checks were `workflow-lockdown-guard` and
