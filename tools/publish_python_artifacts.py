@@ -264,6 +264,14 @@ def publish_artifacts(
     index = validate_commit_artifacts(
         directory, commit=merged_commit, dev_head=dev_head, repo=repo,
     )
+    if index["schema_version"] == 2:
+        from promotion_artifact_readiness import prepare_artifacts
+
+        prepare_artifacts(
+            directory, repository=repository, candidate_commit=merged_commit,
+            dev_head=dev_head, repo=repo,
+        )
+        return
     if admission_cache is None:
         admission_cache = {}
     for entry in index["artifacts"]:
@@ -314,6 +322,14 @@ def verify_published_artifacts(
 ) -> dict:
     """Read every required final asset with consumer authority before Main moves."""
     index = validate_commit_artifacts(directory, commit=candidate_commit, dev_head=dev_head, repo=repo)
+    if index["schema_version"] == 2:
+        from promotion_artifact_readiness import verify_ready_artifacts
+
+        verify_ready_artifacts(
+            directory, repository=repository, candidate_commit=candidate_commit,
+            dev_head=dev_head, repo=repo,
+        )
+        return index
     if admission_cache is None:
         admission_cache = {}
     downloads = []

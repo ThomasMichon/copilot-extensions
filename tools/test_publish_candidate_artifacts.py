@@ -13,7 +13,8 @@ import promotion_artifact_readiness as readiness
 import promotion_python_artifacts as artifacts
 import publish_python_artifacts as publisher
 import qualify_promotion_candidate as qualification
-from test_promotion_python_artifacts import DEV, MAIN, TREE, _publish_fixture, _write_index
+import test_promotion_python_artifacts as artifact_fixtures
+from test_promotion_python_artifacts import DEV, MAIN, TREE, _index, _publish_fixture, _write_index
 from verify_promotion_workflows import VerificationError
 
 
@@ -220,7 +221,7 @@ def test_final_raw_reads_start_only_after_every_release_identity_is_validated(
         {"plugin": name, "version": "1.0", "filename": f"{name}.zip", "sha256": str(i) * 64}
         for i, name in enumerate(("first", "second"), 1)
     ]
-    index = {"artifacts": entries}
+    index = {"schema_version": 1, "artifacts": entries}
     monkeypatch.setattr(publisher, "validate_commit_artifacts", lambda *a, **kw: index)
     monkeypatch.setattr(publisher, "_tag_commit", lambda *a: TREE)
     bindings = []
@@ -325,7 +326,7 @@ class PublicationService:
         if "/releases/assets/" in endpoint:
             assert binary and kwargs.get("verification"), "availability must use raw consumer reads"
             asset = self.assets[int(endpoint.rsplit("/", 1)[1])]
-            if asset["tag"].startswith("demo-v") and self.failure in ("read", "digest"):
+            if self.failure in ("read", "digest"):
                 return (
                     result(code=1, error="HTTP 403: Forbidden") if self.failure == "read"
                     else result(b"tampered after publication")
@@ -391,19 +392,91 @@ def test_real_prepublish_cli_checks_qualification_signatures_and_final_downloads
     fields = dict(line.split("=", 1) for line in output.read_text("utf-8").splitlines())
     assert fields["source_release"] == f"python-artifacts-{DEV}"
     assert len(fields["publication_digest"]) == 64
-    final = service.releases["demo-v1.0"]
-    assert service.tags["demo-v1.0"] == TREE
-    assert len(final["assets"]) == 1
-    assert any(
-        options.get("binary") and options.get("verification")
-        and str(final["assets"][0]["id"]) == call[1].rsplit("/", 1)[-1]
-        for call, options in service.calls if call[0] == "api" and "/releases/assets/" in call[1]
-    )
+    source = service.releases[f"python-artifacts-{DEV}"]
+    assert service.tags == {f"python-artifacts-{DEV}": DEV}
+    assert len(source["assets"]) == 2
+    assert {
+        int(call[1].rsplit("/", 1)[-1])
+        for call, options in service.calls
+        if call[0] == "api" and "/releases/assets/" in call[1]
+        and options.get("binary") and options.get("verification")
+    } == {asset["id"] for asset in source["assets"]}
     writes = list(service.writes)
     assert publisher.main(argv) == 0
     assert service.writes == writes
     assert output.read_text("utf-8").count(f"source_release=python-artifacts-{DEV}") == 2
     assert (directory / artifacts.INDEX_NAME).is_file()
+
+
+def test_source_publication_does_not_read_or_mutate_another_sources_version_alias(
+    prepared: tuple,
+) -> None:
+    _, service, _, argv, output = prepared
+    alias = "demo-v1.0"
+    old_source = "e" * 40
+    old_release = {"id": 99, "tag_name": alias, "draft": False, "assets": []}
+    service.tags[alias] = old_source
+    service.releases[alias] = old_release
+    before = len(service.calls)
+
+    assert publisher.main(argv) == 0
+
+    assert service.tags[alias] == old_source
+    assert service.releases[alias] is old_release
+    assert not any(alias in argument for call, _ in service.calls[before:] for argument in call)
+    assert f"source_release=python-artifacts-{DEV}" in output.read_text("utf-8")
+
+
+def test_source_publication_still_refuses_changed_candidate_sources(
+    prepared: tuple,
+) -> None:
+    directory, service, _, argv, output = prepared
+    source = directory.parent / "plugins" / "demo" / "src" / "demo" / "__init__.py"
+    source.write_bytes(b"VALUE = 'changed after artifact construction'\n")
+    before = list(service.writes)
+
+    assert publisher.main(argv) == 1
+
+    assert service.writes == before
+    assert not output.exists()
+
+
+def test_distinct_dev_sources_can_publish_different_bytes_with_the_same_plugin_version(
+    prepared: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory, service, _, argv, _ = prepared
+    assert publisher.main(argv) == 0
+    original = service.releases[f"python-artifacts-{DEV}"]
+    original_assets = list(original["assets"])
+    other_root = tmp_path / "other-source"
+    _publish_fixture(other_root, monkeypatch)
+    source = other_root / "plugins" / "demo" / "src" / "demo" / "__init__.py"
+    source.write_bytes(b"VALUE = 'another development source'\n")
+    wheel_bytes = artifact_fixtures._wheel_bytes
+    monkeypatch.setattr(
+        artifact_fixtures, "_wheel_bytes",
+        lambda name, version: wheel_bytes(name, version, payload=source.read_bytes()),
+    )
+    other_directory = other_root / "qualified-artifacts"
+    _index(other_directory, candidate_root=other_root)
+    index = json.loads((other_directory / artifacts.INDEX_NAME).read_text("utf-8"))
+    other_dev = "e" * 40
+    index["schema_version"] = 2
+    index["dev_head"] = other_dev
+    del index["main_before"]
+    _write_index(other_directory, index)
+    original_index = json.loads((directory / artifacts.INDEX_NAME).read_text("utf-8"))
+    assert index["artifacts"][0]["version"] == original_index["artifacts"][0]["version"]
+    assert index["artifacts"][0]["sha256"] != original_index["artifacts"][0]["sha256"]
+    arguments = dict(repository="example/plugins", dev_head=other_dev, repo=other_root)
+
+    publisher.publish_artifacts(other_directory, merged_commit=TREE, **arguments)
+    assert publisher.verify_published_artifacts(
+        other_directory, candidate_commit=TREE, **arguments,
+    )["dev_head"] == other_dev
+
+    assert service.tags == {f"python-artifacts-{DEV}": DEV, f"python-artifacts-{other_dev}": other_dev}
+    assert original["assets"] == original_assets
 
 
 @pytest.mark.parametrize("failure", ["read", "digest", "attestation", "bundle-attestation"])

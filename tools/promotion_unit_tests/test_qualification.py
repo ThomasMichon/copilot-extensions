@@ -101,6 +101,70 @@ def test_raw_readback_provider_refusal_never_becomes_success(monkeypatch, inline
     assert inline_readback == ["entered", "exited"]
 
 
+@pytest.mark.parametrize("operation", ["publish", "verify"])
+def test_source_owned_publication_uses_the_dev_set_not_plugin_version_aliases(
+    tmp_path, monkeypatch, operation,
+):
+    import promotion_artifact_readiness as readiness
+
+    index = {"schema_version": 2, "dev_head": DEV, "artifacts": []}
+    validated = []
+    observed = []
+
+    def validate(directory, **kwargs):
+        validated.append((directory, kwargs))
+        return index
+
+    def source_set(directory, **kwargs):
+        assert validated
+        observed.append((directory, kwargs))
+        return f"python-artifacts-{DEV}"
+
+    def refuse_alias(*args, **kwargs):
+        pytest.fail("source-owned publication must not consult a plugin-version alias")
+
+    monkeypatch.setattr(publisher, "validate_commit_artifacts", validate)
+    monkeypatch.setattr(publisher, "_tag_commit", refuse_alias)
+    monkeypatch.setattr(publisher, "_gh", refuse_alias)
+    monkeypatch.setattr(readiness, "prepare_artifacts", source_set)
+    monkeypatch.setattr(readiness, "verify_ready_artifacts", source_set)
+    arguments = dict(repository=REPOSITORY, dev_head=DEV, repo=tmp_path)
+    if operation == "publish":
+        publisher.publish_artifacts(tmp_path, merged_commit=CANDIDATE, **arguments)
+    else:
+        assert publisher.verify_published_artifacts(
+            tmp_path, candidate_commit=CANDIDATE, **arguments,
+        ) is index
+    assert observed == [(tmp_path, {**arguments, "candidate_commit": CANDIDATE})]
+    assert validated == [(tmp_path, dict(commit=CANDIDATE, dev_head=DEV, repo=tmp_path))]
+
+
+@pytest.mark.parametrize("operation", ["publish", "verify"])
+def test_source_owned_publication_propagates_source_set_verification_failure(
+    tmp_path, monkeypatch, operation,
+):
+    import promotion_artifact_readiness as readiness
+
+    monkeypatch.setattr(
+        publisher, "validate_commit_artifacts",
+        lambda *args, **kwargs: {"schema_version": 2},
+    )
+
+    def refuse(*args, **kwargs):
+        raise publisher.PromotionArtifactError("source set has a corrupt asset")
+
+    monkeypatch.setattr(readiness, "prepare_artifacts", refuse)
+    monkeypatch.setattr(readiness, "verify_ready_artifacts", refuse)
+    arguments = dict(repository=REPOSITORY, dev_head=DEV, repo=tmp_path)
+    with pytest.raises(publisher.PromotionArtifactError, match="corrupt asset"):
+        if operation == "publish":
+            publisher.publish_artifacts(tmp_path, merged_commit=CANDIDATE, **arguments)
+        else:
+            publisher.verify_published_artifacts(
+                tmp_path, candidate_commit=CANDIDATE, **arguments,
+            )
+
+
 def _producer():
     repository = {"id": 77, "full_name": REPOSITORY}
     return {

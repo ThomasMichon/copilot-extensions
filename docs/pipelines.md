@@ -348,7 +348,11 @@ The source-owned helper interface uses an immutable
 signed composition and exact toolchain lock are reused across equivalent Git
 containers, not rebuilt under a new Main identity. Historical version-1 indexes
 retain the original `python-artifacts-<candidate-commit>` lookup and parent
-binding. See [source-owned release qualification](pipelines/source-owned-release-identity.md)
+binding. Version-2 publication and raw readback use that complete Dev-keyed set,
+not per-plugin version aliases left by older candidates. Main's landed source
+selects the release; the existence of assets for an unmerged source does not.
+Legacy version-1 publication retains its original version-tag checks.
+See [source-owned release qualification](pipelines/source-owned-release-identity.md)
 for the helper interfaces and their independently reviewed control activation.
 
 Before creating or merging the candidate PR, readiness publishes
