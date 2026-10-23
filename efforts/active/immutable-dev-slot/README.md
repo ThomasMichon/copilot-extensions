@@ -95,6 +95,10 @@ adding operator-requested runtime scope to this documentation task.
 - [x] Abandon/archive the mutable effort with explicit transfers, preserving delivered work and journal history.
 - [x] Land this reconciliation through review, then publish the final disposition to existing coordination owners (#8065 and the closing coordination comments below).
 
+### Phase 0a - Best-effort handoff amendment (documentation only)
+- [x] Land the revised service vision, binding patterns and effort acceptance, retaining implementation ownership and all unproven native/runtime gates (#8090).
+- [x] Validate the literal follow-on, document links and canonical schemas; publish the merged rule to the existing #5472/#7028 coordination owners.
+
 ### Phase 1 - Complete shared admission and immutable development
 - [ ] Reconcile existing shared/first-adopter deliveries against the archived Phase 3 evidence before choosing the next implementation slice; do not redo delivered work.
 - [ ] Freeze every declared source, vendor and selected dependency input before construction; identify the immutable non-editable generation by source and assembly hashes separately from package version.
@@ -144,6 +148,23 @@ This reconciliation changes intent and effort ownership only. Implementation,
 native installation and rollout remain separately assigned and gated.
 
 ## Journal
+
+### 2026-10-22 - Best-effort rule landed; finite amendment complete
+
+#8090 merged as `4b78ba2d5dd2f49d695fe312af5f8d34d3c0385d` after current-head
+approval and successful required CI. The final diff is twelve Markdown files;
+the library and all consuming plugin payloads remain unchanged. The amendment's
+schema, documentation consistency, link/anchor, changefile-scope and literal
+Request checks passed. Runtime unit/E2E, clean-room and live activation were not
+exercised by this documentation task.
+
+Published the actual merged disposition on
+[#5472](https://github.com/ThomasMichon/copilot-extensions/issues/5472#issuecomment-6357855668)
+and [#7028](https://github.com/ThomasMichon/copilot-extensions/issues/7028#issuecomment-6357856879).
+Phase 0a is complete, not Phases 1-3. Existing implementation owners retain the
+new unchecked forced-takeover, crash/retry, native and installed-adoption gates.
+The next implementation slice reconciles delivered evidence against those
+gates; it must not restore unconditional handoff compatibility as a veto.
 
 ### 2026-10-22 - Best-effort handoff and cold takeover amendment
 

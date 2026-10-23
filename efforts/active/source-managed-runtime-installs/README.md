@@ -295,6 +295,14 @@ onto one branch.
 
 ## Journal
 
+### 2026-10-22 - Best-effort amendment reviewed and published
+
+#8090 merged as `4b78ba2d5dd2f49d695fe312af5f8d34d3c0385d` with approval and
+required CI passing. The documentation amendment and final #7028 coordination
+are complete; the new cold-recovery/retry, native, maintenance/driver and
+installed-adoption obligations above remain open with their existing owners.
+No runtime or installed activation changed.
+
 ### 2026-10-22 - Best-effort service replacement alignment
 
 Aligned this effort with the operator follow-on captured verbatim by Immutable
