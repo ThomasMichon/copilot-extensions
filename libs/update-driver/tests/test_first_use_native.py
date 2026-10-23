@@ -6,15 +6,17 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 from agent_procutil import no_window_kwargs
+from update_driver.foundation_inputs import GENERATED, PACKAGES
 
 from test_first_use import primitive
 
 
-def native_command(root, payload, installation, project):
-    source = Path(__file__).resolve().parents[1]
+def native_command(root, payload, installation, project, *, source=None):
+    source = source or Path(__file__).resolve().parents[1]
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         return [
@@ -71,7 +73,7 @@ def test_native_preflight_reaches_exact_source_check_without_writes(owning_paylo
     root = area / "cold"
     command = native_command(root, payload, installation, project)
     if os.name == "nt":
-        command += ["-RunOwner", "-ExpectedSource", "sha256:" + "0" * 64]
+        command += ["-Mode", "owner", "-ExpectedSource", "sha256:" + "0" * 64]
     else:
         command += ["--run-owner", "sha256:" + "0" * 64]
     result = subprocess.run(
@@ -83,3 +85,51 @@ def test_native_preflight_reaches_exact_source_check_without_writes(owning_paylo
         result.stdout, result.stderr,
     )
     assert not root.exists() and not installation.exists()
+
+
+def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_diagnostics(
+    owning_payload, area,
+):
+    payload, installation, project = owning_payload
+    library = Path(__file__).resolve().parents[2]
+    inputs = area / "foundation-source"
+    for name in PACKAGES:
+        shutil.copytree(
+            library / name, inputs / name,
+            ignore=lambda _path, names: {
+                name for name in names if name in GENERATED
+                or name.endswith((".egg-info", ".dist-info", ".pyc", ".pyo"))
+            },
+        )
+    source = inputs / "update-driver"
+    (source / "scripts" / "foundation-produce.ps1").write_text(
+        "param([string]$Root,[string]$SourceHash)\n"
+        "[IO.File]::WriteAllText((Join-Path $Root 'foundation-entered'), $SourceHash)\n"
+        "exit 37\n", encoding="utf-8",
+    )
+    (source / "scripts" / "foundation-produce.sh").write_text(
+        '#!/usr/bin/env bash\nprintf "%s" "$2" >"$1/foundation-entered"\n'
+        "printf 'fixture foundation refusal\\n' >&2\nexit 37\n",
+        encoding="utf-8",
+    )
+    root = area / "cold"
+    result = subprocess.run(
+        native_command(root, payload, installation, project, source=source),
+        env=dict(os.environ), capture_output=True, text=True, timeout=60,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        logs = list(root.glob("first-use-*.log"))
+        text = "\n".join(path.read_text(errors="replace") for path in logs)
+        if (root / "foundation-entered").exists() and (
+            "Foundation construction failed" in text or "fixture foundation refusal" in text
+        ):
+            break
+        time.sleep(.05)
+    else:
+        pytest.fail(result.stdout + result.stderr + text)
+    assert len(logs) == 1 and logs[0].parent == root
+    assert not list(project.glob(".native-daemon-*"))
+    assert not (root / "queue.sqlite3").exists() and not installation.exists()

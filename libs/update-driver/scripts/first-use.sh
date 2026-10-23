@@ -50,7 +50,7 @@ if [[ "$#" == 4 ]]; then
     mkdir -p -m 700 -- "$root"
     check_native_foundation_execution_root "$root" "$foundation"
     log="$root/first-use-$(cat /proc/sys/kernel/random/uuid).log"
-    start_native_daemon "$foundation/scripts/first-use.sh" "$project" "$log" \
+    start_native_daemon "$foundation/scripts/first-use.sh" "$root" "$log" \
         "$root" "$payload" "$runtime" "$project" --run-owner "$source_id"
     # This line acknowledges only the positively launched finite supervisor.
     printf 'launched:%s log:%s\n' "$__native_daemon_pid" "$log"

@@ -3,7 +3,7 @@ param(
     [Parameter(Mandatory)][string]$Payload,
     [Parameter(Mandatory)][string]$RuntimeRoot,
     [Parameter(Mandatory)][string]$Project,
-    [switch]$RunOwner,
+    [ValidateSet('launch', 'owner')][string]$Mode = 'launch',
     [string]$ExpectedSource,
     [string]$ReceiptLog
 )
@@ -74,15 +74,14 @@ if ($ExpectedSource -and $ExpectedSource -cne $source) {
     throw 'Owning source changed after native first-use admission.'
 }
 
-if (-not $RunOwner) {
+if ($Mode -ceq 'launch') {
     [CopilotExtensions.NativeFoundationState]::CheckExecutionRoot($Root, $foundation)
     . (Join-Path $foundation 'src\update_driver\directory.ps1')
     . (Join-Path ([IO.Path]::GetDirectoryName($foundation)) 'agent-procutil\src\agent_procutil\native_daemon.ps1')
     New-NativeExecutionDirectory -Root $Root
     $log = Join-Path $Root ('first-use-' + [Guid]::NewGuid().ToString('N') + '.log')
     $worker = Start-NativeDaemon -Script $PSCommandPath -Arguments @(
-        '-Root', $Root, '-Payload', $Payload, '-RuntimeRoot', $RuntimeRoot,
-        '-Project', $Project, '-RunOwner', '-ExpectedSource', $source, '-ReceiptLog', $log
+        $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log
     ) -WorkingDirectory $Project -LogPath $log
     try {
         # This is launch acknowledgement, never a durable ordinary-request receipt.
