@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -113,5 +114,43 @@ def test_darwin_routed_owner_uses_native_birth_identity(tmp_path, monkeypatch):
             lambda url: original_client(url, token="fixture-token"),
         )
         assert control.routed_monitor_identity() == (pid, "123456:789", "serving")
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("damage", ["json", "object", "active", "previous", "fallback"])
+def test_damaged_or_fallback_routing_cannot_certify_monitor_absence(tmp_path, monkeypatch, damage):
+    pid = os.getpid()
+    server = control.ControlServer(lambda *_args: {"status": "ready", "pid": pid}, token="fixture-token")
+    server.start()
+    try:
+        endpoint = routing.publish_active(tmp_path, bind="127.0.0.1", port=server.port, pid=pid)
+        table = routing.read_table(tmp_path)
+        if damage in ("active", "previous"):
+            table[damage] = {**endpoint.to_dict(), "process_start_time": "invalid-token"}
+        elif damage == "fallback":
+            table["previous"] = endpoint.to_dict()
+            table["active"] = {**endpoint.to_dict(), "pid": 2**30, "port": 1}
+        path = routing.routing_table_path(tmp_path)
+        path.write_text(
+            "{" if damage == "json" else json.dumps([] if damage == "object" else table),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(control, "routing_dir", lambda: tmp_path)
+        monkeypatch.setattr(control, "_monitor_lock_is_live", lambda: False)
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+        monkeypatch.setattr(
+            status_monitor_runtime, "_restart_status_monitor",
+            lambda **_kwargs: pytest.fail("unverified routing must not restart a monitor"),
+        )
+        monkeypatch.setattr(
+            control, "CutoverOrchestrator",
+            lambda *_args, **_kwargs: pytest.fail("unverified routing must not enter cutover"),
+        )
+        with pytest.raises(ValueError):
+            control.routed_monitor_identity()
+        result = control.activate_after_update(monitor_was_live=False)
+        assert result["action"] == "refused"
+        assert result["reason"] == "routed-monitor-unverified"
     finally:
         server.close()

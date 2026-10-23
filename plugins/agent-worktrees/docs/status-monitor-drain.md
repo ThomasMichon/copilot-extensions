@@ -21,6 +21,9 @@ Ownership-transfer and serving-convergence follow-ups remain tracked by
    Custody and manifest publication wait for actual predecessor exit, not just
    a shutdown acknowledgement. Identity checks use the native Windows, Linux
    or Darwin process-birth token; existing route tokens remain comparable.
+   Corrupt routing state or malformed active/previous rows refuse convergence.
+   A live previous endpoint behind a dead or absent active owner likewise
+   requires owner-led route recovery; it is not reported as monitor absence.
    Native helper-publication callbacks use the plan owner's base interpreter,
    not an independently selected bootstrap Python. Windows file-device identity
    representations differ across Python versions; the exact copy-inventory

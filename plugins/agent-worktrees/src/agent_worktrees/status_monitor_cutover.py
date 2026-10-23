@@ -444,8 +444,23 @@ def _monitor_lock_is_live() -> bool:
 def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str, str | None] | None:
     """Authenticate a stable routed owner before installer retention or cutover."""
     directory = routing_dir() if runtime_home is None else routing_dir(runtime_home)
-    snapshot = routing.read_table(directory)
-    endpoint = routing.read_active_endpoint(directory, verify_listener=False)
+    snapshot = routing.read_table(directory, strict=True)
+    endpoints = []
+    for key in ("active", "previous"):
+        raw = (snapshot or {}).get(key)
+        if raw is None:
+            continue
+        endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+        if endpoint is None or type(endpoint.pid) is not int or endpoint.pid <= 0:
+            raise ValueError(f"Routed monitor {key} identity is malformed")
+        endpoints.append((key, endpoint))
+    endpoint = None
+    for key, candidate in endpoints:
+        if locks.lock_is_live({"pid": candidate.pid}):
+            if key != "active":
+                raise ValueError("Live fallback monitor requires owner-led route recovery")
+            endpoint = candidate
+            break
     if endpoint is None:
         return None
     pid = endpoint.pid
@@ -464,7 +479,7 @@ def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str,
         health.get("pid") != pid
         or health.get("status") not in {"ready", "draining", "unavailable"}
         or locks.process_start_time(pid) != before
-        or routing.read_table(directory) != snapshot
+        or routing.read_table(directory, strict=True) != snapshot
     ):
         raise ValueError("Routed monitor identity changed during admission")
     slot = health.get("runtime_slot")
