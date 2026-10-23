@@ -923,7 +923,7 @@ def _create_worktree_core(
                         suffix=suffix, plat=plat, plat_short=plat_short,
                         **({"machine_identity": machine_identity} if machine_identity is not None else {}),
                     )
-            except codename_tracking.CodenameAttributionPolicyError:
+            except (codename_tracking.CodenameAttributionPolicyError, permissions.FolderTrustError):
                 raise
             except Exception as exc:  # pragma: no cover - existing fail-safe pairing policy
                 print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)
