@@ -370,6 +370,11 @@ The CLI accepts those controls through optional `--request-file -`.
 An incomplete, changed or missing history boundary refuses. Neither view reads,
 changes semantic cursors, settles native delivery, assigns work or activates a
 listener. Leave/rejoin, ordinary reading and store reopen preserve correspondence.
+Inbox branches start with indexed channel/recipient and derived reply-author
+candidates before checking
+relationships; thread IDs and their root are selected through the relationship
+index before loading bounded event bodies. Unrelated channel traffic does not
+require a projection scan.
 
 ### Offline installed invocation catalog
 
@@ -562,6 +567,9 @@ relationships, indexes and quota effects is one transaction. Existing events,
 epoch, actors, memberships and cursors are retained. Older code cannot enforce
 structured stable-request identity or serve these views: additive SQL structure
 alone does not establish rollback or overlapping-activation compatibility.
+Channel and reply-author index values are derived from canonical events during
+that transaction, not accepted as caller-supplied metadata or another writable
+attention log.
 
 `health()` observes the store's local open state under its lock. A closed store
 refuses instead of reporting a healthy service. Health is not authentication,

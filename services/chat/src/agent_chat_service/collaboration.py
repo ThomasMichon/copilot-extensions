@@ -86,7 +86,7 @@ def relationship(store, request, value):
         ).fetchone() is None:
             raise ChatError("invalid", "A recipient is not a recorded channel member.")
     reply = value.get("reply_to")
-    root = None
+    root = reply_author = None
     if reply is not None:
         target = store._db.execute(
             "SELECT channel, codename FROM events WHERE id=?", (reply,),
@@ -101,6 +101,7 @@ def relationship(store, request, value):
         if value["kind"] == "resolve" and target["codename"] != codename:
             raise ChatError("invalid", "Only the recorded author can resolve this request.")
         root = relation["thread_root"] if relation else reply
+        reply_author = target["codename"]
     if "supersedes" in value:
         previous = store._db.execute(
             """SELECT c.*, e.channel, e.codename FROM collaborations c
@@ -112,7 +113,8 @@ def relationship(store, request, value):
                 or reply is not None and reply != previous["reply_to"]):
             raise ChatError("invalid", "Supersession must preserve author, kind and reply target.")
         reply, root = previous["reply_to"], previous["thread_root"]
-    return reply, root
+        reply_author = previous["reply_author"]
+    return reply, root, reply_author
 
 
 def receipt(store, row, duplicate, value):
@@ -128,38 +130,45 @@ FROM events e LEFT JOIN collaborations c ON c.event_id=e.id
 """
 
 # The high-water predicate applies to every relation, not just the visible event.
+# CROSS JOIN keeps each indexed recipient branch ahead of relationship checks.
 PENDING = """
-WITH live_questions AS (
-    SELECT q.event_id, qe.codename FROM collaborations q JOIN events qe ON qe.id=q.event_id
-    WHERE qe.channel=:channel AND q.kind='question' AND q.event_id<=:head
+WITH candidates AS (
+    SELECT q.event_id, 'reply' AS attention, q.event_id AS question_id
+    FROM collaboration_recipients recipient INDEXED BY collaboration_recipient_events
+    CROSS JOIN collaborations q ON q.event_id=recipient.event_id
+    WHERE recipient.channel=:channel AND recipient.codename=:viewer
+    AND recipient.event_id>:after AND recipient.event_id<=:head AND q.kind='question'
     AND NOT EXISTS (
-        SELECT 1 FROM collaborations retire
-        WHERE retire.event_id<=:head AND (
-            retire.supersedes=q.event_id OR
-            (retire.kind='resolve' AND retire.reply_to=q.event_id)
-        )
-    )
-), pending AS (
-    SELECT q.event_id, 'reply' AS attention FROM live_questions q
-    JOIN collaboration_recipients recipient ON recipient.event_id=q.event_id
-    WHERE recipient.codename=:viewer AND NOT EXISTS (
         SELECT 1 FROM collaborations answer JOIN events ae ON ae.id=answer.event_id
         WHERE answer.kind='answer' AND answer.reply_to=q.event_id
         AND answer.event_id<=:head AND ae.codename=:viewer
     )
     UNION ALL
-    SELECT answer.event_id, 'review' AS attention FROM live_questions q
-    JOIN collaborations answer ON answer.reply_to=q.event_id AND answer.kind='answer'
-    WHERE q.codename=:viewer AND answer.event_id<=:head
+    SELECT answer.event_id, 'review' AS attention, q.event_id AS question_id
+    FROM collaborations answer INDEXED BY collaborations_review
+    CROSS JOIN collaborations q ON q.event_id=answer.reply_to
+    WHERE answer.channel=:channel AND answer.reply_author=:viewer AND answer.kind='answer'
+    AND q.kind='question' AND answer.event_id>:after AND answer.event_id<=:head
     AND NOT EXISTS (
         SELECT 1 FROM collaborations amendment
         WHERE amendment.supersedes=answer.event_id AND amendment.event_id<=:head
     )
+), pending AS (
+    SELECT event_id, attention FROM candidates candidate
+    WHERE NOT EXISTS (
+        SELECT 1 FROM collaborations amendment
+        WHERE amendment.supersedes=candidate.question_id AND amendment.event_id<=:head
+    ) AND NOT EXISTS (
+        SELECT 1 FROM collaborations resolution
+        WHERE resolution.reply_to=candidate.question_id AND resolution.kind='resolve'
+        AND resolution.event_id<=:head
+    )
+    ORDER BY event_id LIMIT :limit
 )
 SELECT e.*, c.metadata AS collaboration_metadata, c.thread_root, p.attention
 FROM pending p JOIN events e ON e.id=p.event_id
 JOIN collaborations c ON c.event_id=p.event_id
-WHERE p.event_id>:after ORDER BY p.event_id LIMIT :limit
+ORDER BY p.event_id
 """
 
 
@@ -210,9 +219,14 @@ def view(store, request):
         root = target["thread_root"] if target["thread_root"] is not None else target["id"]
         result["thread_root"] = root
         entries = store._db.execute(
-            SELECT_ENTRY + """
-            WHERE e.channel=? AND e.id>? AND e.id<=? AND (e.id=? OR c.thread_root=?)
-            ORDER BY e.id LIMIT ?""", (channel, after, head, root, root, limit + 1),
+            """WITH thread_ids AS (
+                SELECT event_id AS id FROM collaborations
+                WHERE thread_root=:root AND event_id>:after AND event_id<=:head
+                UNION SELECT :root AS id WHERE :root>:after AND :root<=:head
+                ORDER BY id LIMIT :limit
+            ) """ + SELECT_ENTRY + """
+            WHERE e.id IN (SELECT id FROM thread_ids) ORDER BY e.id""",
+            {"root": root, "after": after, "head": head, "limit": limit + 1},
         ).fetchall()
     else:
         entries = store._db.execute(PENDING, controls).fetchall()

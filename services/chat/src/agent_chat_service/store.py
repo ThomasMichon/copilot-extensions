@@ -308,23 +308,26 @@ class ChatStore:
                     kind TEXT NOT NULL, metadata TEXT NOT NULL,
                     thread_root INTEGER NOT NULL REFERENCES events(id),
                     reply_to INTEGER REFERENCES events(id),
-                    supersedes INTEGER REFERENCES collaborations(event_id)
+                    supersedes INTEGER REFERENCES collaborations(event_id),
+                    channel TEXT NOT NULL REFERENCES channels(name),
+                    reply_author TEXT REFERENCES actors(codename)
                 );
                 CREATE INDEX IF NOT EXISTS collaborations_thread
                     ON collaborations(thread_root, event_id);
                 CREATE INDEX IF NOT EXISTS collaborations_reply
                     ON collaborations(reply_to, kind, event_id);
-                CREATE INDEX IF NOT EXISTS collaborations_kind
-                    ON collaborations(kind, event_id);
+                CREATE INDEX IF NOT EXISTS collaborations_review
+                    ON collaborations(channel, reply_author, kind, event_id);
                 CREATE INDEX IF NOT EXISTS collaborations_supersedes
                     ON collaborations(supersedes, event_id);
                 CREATE TABLE IF NOT EXISTS collaboration_recipients (
                     event_id INTEGER NOT NULL REFERENCES collaborations(event_id),
                     codename TEXT NOT NULL REFERENCES actors(codename),
+                    channel TEXT NOT NULL REFERENCES channels(name),
                     PRIMARY KEY(event_id, codename)
                 );
                 CREATE INDEX IF NOT EXISTS collaboration_recipient_events
-                    ON collaboration_recipients(codename, event_id);
+                    ON collaboration_recipients(channel, codename, event_id);
             """)
             with self._transaction():
                 self._db.execute(
@@ -567,7 +570,9 @@ class ChatStore:
                 raise ChatError("conflict", "Request ID already has different content.")
             return receipt(self, old, True, value)
         self._member(channel, codename)
-        reply, root = relationship(self, request, value) if value is not None else (None, None)
+        reply, root, reply_author = (
+            relationship(self, request, value) if value is not None else (None, None, None)
+        )
         size = len(request["text"].encode("utf-8")) + (
             len(json_bytes(value)) if value is not None else 0
         )
@@ -588,13 +593,16 @@ class ChatStore:
         ).lastrowid
         if value is not None:
             self._db.execute(
-                "INSERT INTO collaborations VALUES (?, ?, ?, ?, ?, ?)",
+                """INSERT INTO collaborations
+                (event_id, kind, metadata, thread_root, reply_to, supersedes, channel, reply_author)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (row_id, value["kind"], json_bytes(value).decode("utf-8"),
-                 root if root is not None else row_id, reply, value.get("supersedes")),
+                 root if root is not None else row_id, reply, value.get("supersedes"),
+                 channel, reply_author),
             )
             self._db.executemany(
-                "INSERT INTO collaboration_recipients VALUES (?, ?)",
-                [(row_id, recipient) for recipient in value["to"]],
+                "INSERT INTO collaboration_recipients (event_id, codename, channel) VALUES (?, ?, ?)",
+                [(row_id, recipient, channel) for recipient in value["to"]],
             )
         self._db.execute(
             "UPDATE settings SET value=CAST(value AS INTEGER)+1 WHERE key='event_count'"

@@ -332,3 +332,93 @@ def test_client_refuses_invalid_views_without_mutating_semantic_progress(pair, t
     first = viewer.inbox("room", limit=1)
     assert first["more"]
     assert viewer.inbox("room", **first["next"])["entries"][0]["event"]["id"] == 2
+
+
+def seed_unrelated(store, start, count, *, structured, codename="agent-a",
+                   channel="room", recipients=None):
+    with store._transaction():
+        for number in range(start, start + count):
+            request = {
+                "channel": channel, "codename": codename, "text": "unrelated context",
+                "request_id": f"noise-{channel}-{number}",
+            }
+            if structured:
+                request["collaboration"] = annotation(
+                    to=["agent-c"] if recipients is None else recipients,
+                )
+            store._post(request)
+
+
+def sqlite_work(store, operation):
+    steps = 0
+
+    def progress():
+        nonlocal steps
+        steps += 1
+        return 0
+
+    store._db.set_progress_handler(progress, 1)
+    try:
+        result = operation()
+    finally:
+        store._db.set_progress_handler(None, 0)
+    return steps, result
+
+
+def test_empty_inbox_work_does_not_grow_with_unrelated_questions(store):
+    for name in ("agent-a", "agent-b", "agent-c"):
+        join(store, name)
+    own = collaborate(store, "own", codename="agent-b", to=["agent-c"])
+    seed_unrelated(store, 0, 100, structured=True)
+    seed_unrelated(store, 0, 100, structured=False, codename="agent-b")
+    small, first = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
+    seed_unrelated(store, 100, 4900, structured=True)
+    seed_unrelated(store, 100, 4900, structured=False, codename="agent-b")
+    large, last = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
+    assert first["entries"] == last["entries"] == []
+    assert not first["more"] and not last["more"]
+    assert large <= small + 1000, (small, large)
+    answer = collaborate(store, "answer", codename="agent-c", kind="answer",
+                         reply_to=own["event"]["id"])
+    assert inbox(store, recent_limit=0)["entries"][0]["event"] == answer["event"]
+    assert read(store, "agent-b")["cursor"] == 0
+
+
+def test_inbox_work_ignores_other_channel_correspondence(store):
+    for channel in ("room", "other"):
+        for name in ("agent-a", "agent-b"):
+            join(store, name, channel=channel)
+    seed_unrelated(store, 0, 100, structured=True, channel="other", recipients=["agent-b"])
+    small, first = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
+    seed_unrelated(store, 100, 4900, structured=True, channel="other", recipients=["agent-b"])
+    large, last = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
+    assert first["entries"] == last["entries"] == []
+    assert not first["more"] and not last["more"]
+    assert large <= small + 1000, (small, large)
+
+
+def test_sparse_thread_work_and_pagination_ignore_unrelated_history(store):
+    join(store)
+    join(store, "agent-b")
+    root = post(store)["event"]
+    child = collaborate(store, "child", kind="notice", reply_to=root["id"])["event"]
+    seed_unrelated(store, 0, 100, structured=False)
+
+    def whole_thread():
+        return rpc(store, "thread", channel="room", codename="agent-b",
+                   event_id=child["id"], limit=2)
+
+    small, first = sqlite_work(store, whole_thread)
+    seed_unrelated(store, 100, 4900, structured=False)
+    large, last = sqlite_work(store, whole_thread)
+    assert [entry["event"] for entry in first["entries"]] == [root, child]
+    assert last["entries"] == first["entries"]
+    assert not first["more"] and not last["more"]
+    assert large <= small + 1000, (small, large)
+    paged = rpc(store, "thread", channel="room", codename="agent-b",
+                event_id=child["id"], limit=1)
+    assert paged["entries"][0]["event"] == root and paged["more"]
+    next_page = rpc(store, "thread", channel="room", codename="agent-b",
+                    event_id=child["id"], **paged["next"])
+    assert [entry["event"] for entry in next_page["entries"]] == [child]
+    assert not next_page["more"] and read(store, "agent-b")["cursor"] == 0

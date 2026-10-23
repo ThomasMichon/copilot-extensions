@@ -380,6 +380,26 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-23 - Review-driven projection work bounds
+
+- The first current-head review of #8159 found two real lock-held query costs:
+  an empty inbox scanned unrelated questions and a sparse thread scanned
+  unrelated channel events. Regression-first measurements reproduced growth
+  from5373 to225511 and1698 to75166 SQLite instructions, respectively, as
+  unrelated history grew from100 to5000 events.
+- Candidate selection now starts with indexed channel/recipient or canonical
+  reply-author relationships; thread IDs and the root are bounded before event
+  bodies are loaded. Derived channel/reply-author scalars are committed with
+  the canonical event and metadata, not writable attention state. No native
+  listener, transport or lifecycle source is involved.
+- Three additive regressions include unrelated questions, the viewer's own
+  ambient messages, another channel's correspondence and sparse-thread
+  pagination. Each requires no more than1000 extra SQLite instructions between
+  the small and large fixtures. The existing120-second acceptance lane passes
+  with349 passes, two allowed POSIX skips and33 full-only deselections in98.14
+  seconds;384 nodes are collected. Final same-candidate full qualification and
+  the next actual-head review/CI remain required before merge.
+
 ### 2026-10-23 - Portable collaboration candidate qualified
 
 - Implementation candidate `f95502367dc4880be906de48f22b30eb897ba95b`

@@ -1806,6 +1806,10 @@ reader progress, strict receipts, lost-response recovery and actual source-remov
 installed commands stay in the existing Chat acceptance/full portfolio.
 Its family and parameter inventory expands additively; neither the 120/600-second
 allowances nor any original family is relaxed.
+The empty-inbox and sparse-thread regressions compare actual SQLite instruction
+counts with100 versus5000 unrelated questions/messages, including the viewer's
+own ambient traffic and correspondence in another channel. They allow at most1000 extra instructions
+while retaining correct pending/page results and unchanged semantic progress.
 
 The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
 and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)
