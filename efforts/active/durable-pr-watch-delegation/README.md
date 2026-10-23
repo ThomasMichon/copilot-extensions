@@ -250,11 +250,12 @@ _Operator-required scope; agent-recommended implementation and validation._
   than importing Fleet into Worktrees. Preserve per-request renewal,
   scope/expiry/refusal and the ordinary unselected CLI paths; service
   activation and production-provider validation remain separate (#7984).
-- [ ] Land a finite replay-observation adapter over the native credential-backed
+- [x] Land a finite replay-observation adapter over the native credential-backed
   bridge. Coalesce only exact account/repository/PR groups; release disk custody
   across reads, apply only captured registration identities, and retain original
   events/deadlines through provider loss, cancellation and restart. Source
-  validation does not close service scheduling, activation or production proof.
+  validation does not close service scheduling, activation or production proof
+  (source confirmed by #8028).
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -500,6 +501,63 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Prepare the finite service-caller transport
+
+- Added Fleet's finite `ServiceCaller` SDK under the existing optional
+  `service-gateway` extra, reusing its TLS, PoP and wire bounds. The embedding
+  supplies the exact canonical Gateway origin, current async access-token
+  callback, proof key and optional CA. There is no credential issuer, ambient
+  login, endpoint discovery, retry scheduler or runtime activation.
+- Each call owns a bounded HTTP session, obtains a fresh challenge/current
+  token, and returns an immutable finite response. Policy withdrawal is an
+  ordinary failed request; cancellation/transport loss cannot establish remote
+  nonacceptance. A transmitted mutation with an unusable response reports
+  uncertainty for original-ID reconciliation, not replacement or rollback.
+- Exact real-TLS refusal tests caught aiohttp retrying a disconnected GET even
+  on a fresh force-closed connection. The SDK now explicitly disables automatic
+  retries, following the existing connector's idiom. It also validates the
+  nonce before credential acquisition. The contained Windows caller, transport
+  and policy selection passes 167 tests; the new caller cases include actual
+  PoP, method/query binding, current credentials, policy withdrawal/recovery,
+  malformed challenge, redirect/encoding/stream-size refusal, cancellation,
+  bounded concurrency and one-attempt GET/POST/PUT/DELETE disconnects.
+- Final focused checks also confirm one challenge/token callback per operation
+  and bodyless HEAD/304 responses whose representation `Content-Length` exceeds
+  the finite body cap (one plus two passing cases). Fatal lint, the 13-plugin
+  install-contract gate and 13-adopter headless-launch guard pass.
+- This bounded shared-module source contribution remains subject to current-head
+  review and required CI. The PR-owned replay client, shared Dispatch consumer,
+  installable lifecycle, production-provider credentials, release/authorized
+  installed proof and actual fleet acceptance remain open. The parent is Active;
+  no rollout or production authentication occurred.
+
+### 2026-10-22 - Merge scoped observation and continue shared consumption
+
+- #8028 merged as `e53d8d24e00fc6a4ba82003273398ab680b44347` at
+  `2026-10-23T01:55:34Z`, from published head
+  `6aa0aa4504577d9032f954caeb9808a40f127d25`. Current-head Copilot review
+  `5623018366` approved with no open issues. The full review body and all thread
+  pages were read; the event-size thread was resolved, the body-only stale-target
+  finding was fixed, and every required check passed. Managed completion used
+  only the documented additional-CODEOWNER review exception, not a CI or
+  feedback bypass. The parent #7188 remains open.
+- Re-read the entire current parent Plan and Validation after merge. Closed
+  only the finite native replay-observation source item. Final validation
+  passes 275 cases with ten existing platform skips, including real
+  native/Fleet-CLI/TLS credentials through durable replay and restarted consumer
+  ACK. Production credential validation, installation, lifecycle, client/matrix,
+  shared Dispatch consumption and actual fleet acceptance remain open.
+- Next: connect the shared consumer through the real service profile and
+  existing Dispatch prepare/arm/finish fences. The current static Gateway client
+  does not implement that service-caller transport; contribute the missing
+  bounded shared seam in its owner rather than use index routes or a second
+  authentication scheme. Preserve original request/deadline and exact
+  registration/event identity across reconnect and completion.
+- Managed post-merge pull-forward retained a backup and removed only the three
+  redundant already-published commits. The worktree remains bound to this
+  Active parent; no finalization, runtime update, production credential
+  acquisition, remote activation or new capacity is authorized by the merge.
 
 ### 2026-10-22 - Connect replay groups to finite native observation
 

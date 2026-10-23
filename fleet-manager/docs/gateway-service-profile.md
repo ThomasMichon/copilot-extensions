@@ -1,7 +1,7 @@
 # Opt-in outbound service Gateway
 
-The `service-gateway` extra adds an asynchronous TLS service-role profile and
-outbound connector SDK. It is selected explicitly; ordinary
+The `service-gateway` extra adds an asynchronous TLS service-role profile,
+outbound connector and finite caller SDK. It is selected explicitly; ordinary
 `serve --role gateway --config ...` retains the existing index/credential
 Gateway. This profile does not advertise those legacy operations, migrate their
 state or install a second controller beside them.
@@ -169,6 +169,61 @@ do not establish live Cloudflare, GitHub, Entra or broker interoperability.
 Gateway-owned Entra/Authelia login integration is not yet supplied; there is no
 anonymous UX workaround. Tunnel access and optional edge login never substitute
 for the existing caller proof and explicit Fleet grant.
+
+### Finite service caller
+
+`fleet_manager.gateway_service_caller.ServiceCaller` uses this service profile,
+not `GatewayClient`'s separate static index/credential protocol. The embedding
+supplies one exact canonical HTTPS `gateway_origin`, an async
+`access_token_callback`, an externally provisioned P-256 `proof_key`, and
+optionally `gateway_ca` (otherwise platform CA trust). There is no discovery,
+login, issuer, proxy environment, cookie jar, credential persistence or fallback
+endpoint. Importing or constructing it never activates a service.
+
+```python
+from fleet_manager.gateway_service_caller import ServiceCaller
+
+caller = ServiceCaller(
+    gateway_origin=selected_origin,
+    access_token_callback=current_access_token,
+    proof_key=selected_private_key,
+    gateway_ca=selected_ca_file,
+)
+result = await caller.request("GET", "/example/status?opaque=%2f")
+```
+
+`request` accepts the actual uppercase method, canonical root-relative target,
+optional `request_headers` pairs from the existing request allowlist and an
+immutable `body` of at most 32 KiB. The proof binds the exact selected origin
+and path, not the opaque query. It returns an immutable `ServiceResponse` with
+`status`, allowlisted `headers` pairs and bounded `body` bytes. HTTP error
+statuses remain responses for the application to interpret; redirect statuses
+other than 304 and content encodings other than exact `identity` refuse.
+`response_limit` may reduce, never exceed, the existing 8 MiB response bound.
+This is a finite body API, not a streaming/subscription owner.
+
+Every invocation gets one fresh TLS challenge and invokes the current token
+callback once (at most five seconds). The total deadline, including those steps,
+is `timeout` (default/maximum 60 seconds). Each object is used on one event loop
+and admits at most eight concurrent operations with immediate excess refusal,
+not an unbounded waiting queue. It starts no scheduler or subprocess. Each
+operation owns and closes its HTTP session and explicitly disables the HTTP
+library's implicit idempotent reconnect retry. A completed operation performs
+two HTTPS requests, reusing its connection only within that operation, with no
+retained nonce or token; there is no background refresh work. Repeated consumers must budget
+this cost and use bounded batching at their application layer.
+
+No operation is automatically retried, including after policy withdrawal.
+Before application transmission, credential/challenge failure is a value-free
+refusal. After a mutation attempt, transport loss, deadline or an unusable
+response raises `TransportError("outcome-unknown")`; server-reported uncertainty
+can also arrive as an HTTP error body. Cancellation propagates and closes local
+resources but does not prove remote nonacceptance. Reconcile the application's
+**original request ID** on a later authenticated connection; do not replace it,
+start another waiter or roll back an effect merely because a response was lost.
+Revocation is handled like a disconnect, not a distributed commit barrier.
+The SDK neither grants authority nor turns a completed HTTP response into an
+application acknowledgment.
 
 ## Routes, streams and explicit limits
 
