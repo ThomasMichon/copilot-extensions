@@ -742,3 +742,34 @@ repository history.
   Earlier diagnostic runs with oversized fixture paths or incomplete
   aggregate execution budgets are not counted as passing. Individual test
   and production deadlines were not widened for those policy checks.
+
+### 2026-10-23 - Keep unconfirmed acquisition cleanup with the canonical owner
+
+- Exact-source run
+  [39939723023](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39939723023)
+  passed all three Linux targets at
+  `587775c90c0d91ffc5986ac2070713f43ba3d95b`; required PR CI passed too.
+  The subsequent review identified another concrete custody boundary despite
+  its empty inline-issue list: acquisition caught `OwnedCleanupError` through
+  the generic subprocess-error handler. It must not become an ordinary
+  unsuccessful download followed by more queued installation.
+- Acquisition now rethrows that exact error, retaining its original native
+  process/Job control. Borrowed JSON execution registers cleanup responsibility
+  with the existing transaction witness before executing and releases it only
+  after normal completion/result publication. A participant that abandons
+  execution cannot regain mutation authority; disconnect or a converted
+  integer exit cannot discard the owner's outstanding obligation. The same
+  canonical journal records interruption and fences later queued work under
+  its existing positive-settlement policy.
+- This adds neither a queue nor another mutation lock/owner. Scope control
+  requires an explicit owner acknowledgement, so an unsupported predecessor
+  refuses before mutation instead of silently ignoring the responsibility.
+  Existing native-foundation ownership assertions retain their wire contract.
+- Real-process regression coverage has a product abandon execution and exit
+  with an ordinary nonzero integer: its request remains interrupted, and the
+  next queued product never executes. Separate controls verify normal nonzero
+  completion, nested scopes, downlevel refusal, native-control retention and
+  both borrowed JSON-adapter branches. The combined local Windows slice passed
+  200 cases with 11 explicit native/platform skips and sandbox retirement,
+  including native-foundation compatibility and actual healthy handoff.
+  Lint and module ceilings passed. Final-source review and CI remain required.

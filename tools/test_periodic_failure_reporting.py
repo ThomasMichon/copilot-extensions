@@ -108,9 +108,11 @@ def test_targeted_launch_selection_preserves_container_and_exact_scope_evidence(
     assert """'["agent-worktrees","worktree-manager","update-driver"]'""" in matrix
     selector = linux["env"]["TEST_SELECTOR"]
     for name in (
-        "test_update_launch_cli", "test_update_stage", "test_reconcile_status", "test_launch_update_requests",
+        "test_update_launch_cli", "test_update_driver_json", "test_update_stage", "test_reconcile_status",
+        "test_launch_update_requests",
         "test_launch_preparation_progress", "test_launch_session_unwrap",
         "test_core", "test_participant_transport",
+        "test_real_product_exit_cannot_hide_abandoned_execution_custody",
     ):
         assert name in selector
     execute = next(step for step in linux["steps"] if step.get("id") == "full")

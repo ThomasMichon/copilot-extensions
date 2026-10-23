@@ -88,6 +88,9 @@ staged self-installation under the original request's custody. `--no-update`
 and `--with-reconcile` independently select that work; equivalent pending
 requests coalesce without discarding another project's request. Acceptance is
 not maintenance completion; follow the durable request/log for the outcome.
+Borrowed execution registers cleanup responsibility with that owner before
+mutation. Unconfirmed native cleanup is fatal and retains an interruption fence,
+not an ordinary acquisition failure that allows another queued installer.
 Worktrees publication refusal leaves independently eligible bootstrap and
 reconciliation work available. Known phase failures do not cancel independent
 later phases; the aggregate durable outcome remains unsuccessful.

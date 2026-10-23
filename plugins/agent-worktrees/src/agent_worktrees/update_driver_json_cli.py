@@ -66,7 +66,8 @@ def _run_request(
                 if request.state == "running" and request.spec.backend in {"manager", "engine"}:
                     with update_driver_cli._execution_context(request.spec.context):
                         custody.assert_owned()
-                        return execute(args)
+                        with custody.execution_scope():
+                            return execute(args)
                 if (
                     request.state != "running" or request.spec.backend != backend
                     or request.spec.argv != tuple(flags)
@@ -76,14 +77,15 @@ def _run_request(
                     if request.spec.source != str(cfg.install_dir().resolve()):
                         raise driver.StateError("engine installation changed after submission")
                     custody.assert_owned()
-                    buffer = _ProtocolBuffer()
-                    with redirect_stdout(buffer):
-                        code = execute(args)
-                    text = buffer.getvalue()
-                    if not text and code != 0:
-                        text = json.dumps({"ok": False, "reason": "canonical-executor-failed"})
-                    _publish_result(request, text)
-                    return code
+                    with custody.execution_scope():
+                        buffer = _ProtocolBuffer()
+                        with redirect_stdout(buffer):
+                            code = execute(args)
+                        text = buffer.getvalue()
+                        if not text and code != 0:
+                            text = json.dumps({"ok": False, "reason": "canonical-executor-failed"})
+                        _publish_result(request, text)
+                        return code
         project, cwd = cfg.active_project(), update_driver_cli._invocation_cwd()
         spec = driver.RequestSpec(
             backend=backend, argv=tuple(flags), project=project or "", cwd=str(cwd),

@@ -81,6 +81,68 @@ def test_listener_creation_failure_releases_its_owned_temporary_directory(monkey
     assert cleaned == [True]
 
 
+@pytest.mark.parametrize("code", [0, 7])
+def test_normal_borrowed_execution_certifies_cleanup_without_masking_exit(area, code):
+    root = prepare(area)
+
+    def execute(tx):
+        with borrowed_custody(root=root, environ=tx.participant_env()) as custody:
+            with custody.execution_scope():
+                with custody.execution_scope():
+                    custody.assert_owned()
+        return code
+
+    drain(root=root, executor=execute)
+    request, = update_driver.status(root=root)
+    assert request.state == "completed" and request.exit_code == code
+
+
+def test_abandoned_borrowed_execution_fences_even_if_executor_returns_status(area):
+    root = prepare(area)
+    later = enqueue(
+        RequestSpec("later"), runner=TrustedRunner((sys.executable,), str(area)), root=root,
+    )
+    observed = []
+
+    def execute(tx):
+        observed.append(tx.request.id)
+        with borrowed_custody(root=root, environ=tx.participant_env()) as custody:
+            with pytest.raises(RuntimeError, match="unconfirmed cleanup"):
+                with custody.execution_scope():
+                    raise RuntimeError("unconfirmed cleanup")
+            with pytest.raises(ParticipantError, match="cleanup is unconfirmed"):
+                custody.assert_owned()
+        return 7
+
+    with pytest.raises(ParticipantError):
+        drain(root=root, executor=execute)
+    requests = update_driver.status(root=root)
+    assert len(observed) == 1
+    assert requests[0].state == "interrupted" and requests[0].exit_code is None
+    assert update_driver.status(later.id, root=root).state == "pending"
+    with pytest.raises(update_driver.InterruptedError):
+        drain(root=root, executor=execute)
+
+
+def test_downlevel_owner_cannot_silently_accept_execution_custody(monkeypatch, area):
+    transport = transport_module()
+    custody = transport.BorrowedCustody.__new__(transport.BorrowedCustody)
+    custody._process_id = os.getpid()
+    custody._connection = object()
+    custody._execution_failed = False
+    custody.root = area
+    custody.request_id = "fixture"
+    frames = []
+    monkeypatch.setattr(transport, "_send", lambda connection, value: frames.append(value))
+    monkeypatch.setattr(transport, "_receive", lambda connection: {
+        "valid": True, "nonce": frames[-1]["nonce"],
+    })
+    with pytest.raises(ParticipantError, match="does not support execution custody"):
+        with custody.execution_scope():
+            pytest.fail("downlevel owner admitted mutation")
+    assert frames[-1]["execution"] == "begin"
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Native Unix endpoint and filesystem permissions")
 def test_long_execution_root_preserves_live_participant_scope_and_cleanup(area):
     import json

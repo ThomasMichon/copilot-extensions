@@ -18,6 +18,7 @@ import threading
 import time
 import uuid
 from contextvars import ContextVar
+from contextlib import contextmanager
 from collections.abc import MutableMapping
 from multiprocessing.connection import Client, Listener
 from pathlib import Path
@@ -134,6 +135,8 @@ class Witness:
         self.active.set()
         self.guard = threading.Lock()
         self.connections = set()
+        self.executions = {}
+        self.unconfirmed_execution = False
         self.accept_thread = threading.Thread(target=self._accept, daemon=True)
         self.accept_thread.start()
 
@@ -188,13 +191,35 @@ class Witness:
                 if not valid or not self.active.is_set():
                     _send(connection, {"valid": False})
                     return
-                _send(connection, {"valid": True, "nonce": frame["nonce"]})
+                execution = frame.get("execution")
+                with self.guard:
+                    valid_execution = not self.unconfirmed_execution or execution == "end"
+                    if valid_execution and execution is not None:
+                        depth = self.executions.get(connection, 0)
+                        if execution == "begin":
+                            self.executions[connection] = depth + 1
+                        elif execution == "end" and depth:
+                            if depth == 1:
+                                self.executions.pop(connection)
+                            else:
+                                self.executions[connection] = depth - 1
+                        else:
+                            valid_execution = False
+                if not valid_execution:
+                    _send(connection, {"valid": False})
+                    return
+                response = {"valid": True, "nonce": frame["nonce"]}
+                if execution is not None:
+                    response["execution"] = execution
+                _send(connection, response)
                 if frame.get("close"):
                     return
         except (OSError, EOFError, ValueError, ParticipantError):
             pass
         finally:
             with self.guard:
+                if self.executions.pop(connection, 0):
+                    self.unconfirmed_execution = True
                 self.connections.discard(connection)
             connection.close()
 
@@ -204,7 +229,8 @@ class Witness:
         deadline = time.monotonic() + IPC_TIMEOUT
         while self.connections and time.monotonic() < deadline:
             time.sleep(.01)
-        unsettled = bool(self.connections)
+        with self.guard:
+            unsettled = bool(self.connections or self.executions) or self.unconfirmed_execution
         self.active.clear()
         try:
             wakeup = _connect(self.address, self.family)
@@ -235,6 +261,7 @@ class BorrowedCustody:
         self._transport = transport
         self._source_environ = source_environ
         self._scope_token = None
+        self._execution_failed = False
         try:
             if (
                 witness.get("version") != 1 or witness.get("root") != str(root)
@@ -273,21 +300,43 @@ class BorrowedCustody:
                 raise
             raise ParticipantError("participant witness unavailable or unauthenticated") from error
 
-    def assert_owned(self) -> None:
+    def _exchange(self, execution: str | None = None) -> None:
         if self._process_id != os.getpid():
             raise ParticipantError("participant custody belongs to a different process")
         if self._connection is None:
             raise ParticipantError("participant witness is closed")
+        if self._execution_failed:
+            raise ParticipantError("participant execution cleanup is unconfirmed")
         nonce = secrets.token_hex(32)
         try:
-            _send(self._connection, {
+            frame = {
                 "root": str(self.root), "request_id": self.request_id, "nonce": nonce,
-            })
+            }
+            if execution is not None:
+                frame["execution"] = execution
+            _send(self._connection, frame)
             response = _receive(self._connection)
             if response.get("valid") is not True or response.get("nonce") != nonce:
                 raise ParticipantError("participant owner refused custody")
+            if execution is not None and response.get("execution") != execution:
+                raise ParticipantError("participant owner does not support execution custody")
         except (OSError, EOFError, ValueError) as error:
             raise ParticipantError("participant owner lost custody") from error
+
+    def assert_owned(self) -> None:
+        self._exchange()
+
+    @contextmanager
+    def execution_scope(self):
+        """Register cleanup responsibility before executing, release only on return."""
+        self._exchange("begin")
+        try:
+            yield
+        except BaseException:
+            self._execution_failed = True
+            raise
+        else:
+            self._exchange("end")
 
     def close(self) -> None:
         try:

@@ -189,10 +189,19 @@ def test_queued_json_round_trip_returns_original_payload_and_exit(tmp_path, monk
     assert seen["spec"].backend == "engine-reconcile-plugins"
 
 
-def test_nested_update_participant_returns_json_without_recursive_enqueue(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("backend", ["engine", "engine-reconcile-plugins"])
+def test_nested_update_participant_returns_json_without_recursive_enqueue(
+    tmp_path, monkeypatch, capsys, backend,
+):
     import update_driver
 
-    request = SimpleNamespace(state="running", spec=SimpleNamespace(backend="engine", context=()))
+    request = SimpleNamespace(
+        id="fixture", state="running", log_path=tmp_path / "fixture.log",
+        spec=SimpleNamespace(
+            backend=backend, context=(), argv=("--apply",), source=str(tmp_path),
+        ),
+    )
+    scoped = []
 
     class Custody:
         root = tmp_path
@@ -207,15 +216,34 @@ def test_nested_update_participant_returns_json_without_recursive_enqueue(tmp_pa
         def assert_owned(self):
             pass
 
+        def execution_scope(self):
+            from contextlib import contextmanager
+
+            @contextmanager
+            def scope():
+                scoped.append("begin")
+                yield
+                scoped.append("end")
+
+            return scope()
+
     def execute(args):
+        scoped.append("execute")
         print('{"executed":[]}')
         return 0
 
     monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
     monkeypatch.setattr(update_driver, "status", lambda *args, **kwargs: request)
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(boundary.update_cli, "cmd_reconcile_plugins", execute)
     assert boundary.cmd_reconcile_request(_args(apply=True)) == 0
-    assert json.loads(capsys.readouterr().out) == {"executed": []}
+    output = capsys.readouterr().out
+    if backend == "engine":
+        assert json.loads(output) == {"executed": []}
+    else:
+        assert output == ""
+        assert json.loads(boundary._result_path(request).read_text()) == {"executed": []}
+    assert scoped == ["begin", "execute", "end"]
 
 
 def test_actual_empty_inventory_apply_uses_worker_and_retains_json(tmp_path, monkeypatch):

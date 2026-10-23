@@ -165,7 +165,7 @@ jobs:
       matrix:
         plugin: ${{ fromJSON(inputs.launch_maintenance && '["agent-worktrees","worktree-manager","update-driver"]' || '["agent-bridge","agent-codespaces","agent-containers","agent-dispatch","agent-logger","agent-mcp","agent-ssh","agent-vault","agent-worktrees"]') }}
     env:
-      TEST_SELECTOR: ${{ inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport' || 'test_update_launch_cli or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap') || '' }}
+      TEST_SELECTOR: ${{ inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:

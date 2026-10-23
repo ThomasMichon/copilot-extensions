@@ -53,6 +53,24 @@ def test_acquisition_timeout_is_explicit_and_does_not_retry(monkeypatch):
     assert len(calls) == 1
 
 
+def test_unconfirmed_acquisition_cleanup_preserves_native_custody(monkeypatch):
+    import shutil
+    from agent_procutil import owned_process
+
+    monkeypatch.setattr(shutil, "which", lambda name: "owned-copilot")
+    process, job = object(), object()
+    failure = owned_process.OwnedCleanupError(process, job)
+
+    def unconfirmed(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", unconfirmed)
+    with pytest.raises(owned_process.OwnedCleanupError) as caught:
+        us._run_copilot_update()
+    assert caught.value is failure
+    assert caught.value.process is process and caught.value.job is job
+
+
 # ---------------------------------------------------------------------------
 # Single-flight lock
 # ---------------------------------------------------------------------------

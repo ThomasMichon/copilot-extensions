@@ -258,7 +258,7 @@ def fingerprint(plugin_dir: Path) -> str:
 
 def _run_copilot_update() -> tuple[bool, str]:
     """Run bounded, caller-owned acquisition. Returns (succeeded, output)."""
-    from agent_procutil.owned_process import run_caller_owned
+    from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
     from shutil import which
 
     if which("copilot") is None:
@@ -272,6 +272,8 @@ def _run_copilot_update() -> tuple[bool, str]:
         )
         out = (proc.stdout or "") + (proc.stderr or "")
         return proc.returncode == 0, out.strip()
+    except OwnedCleanupError:
+        raise
     except subprocess.TimeoutExpired:
         return False, f"copilot plugin update timed out ({_COPILOT_UPDATE_TIMEOUT}s)"
     except (OSError, subprocess.SubprocessError) as e:
