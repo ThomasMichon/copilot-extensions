@@ -285,14 +285,12 @@ class TestPRFinalize(PRWorkflowSetup):
             _git("rev-parse", "origin/master", cwd=wt_path)
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == wt_branch
 
-    def test_precondition_ok_refspec_after_create_pr(self, pr_repo):
+    def test_precondition_ok_refspec_after_create_pr(self, published_refspec_pr_repo):
         # #1815: finalize precondition passes in refspec -- the tracked PR head
         # (pr/<slug>) is a remote ref, and content-on-upstream / remote-exists
         # both hold; no local feature branch is required.
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        config = self._refspec_config(config)
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_refspec_pr_repo
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         import dataclasses
         repo = config.default_repo
@@ -301,22 +299,21 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is True, err
         assert err is None
 
-    def test_reconcile_refspec_realigns_after_merge_in_place(self, pr_repo):
+    def test_reconcile_refspec_realigns_after_merge_in_place(self, published_refspec_pr_repo):
         # #1815: refspec worktree/<id> sits ahead while the PR is open, so after
         # the squash-merge it is diverged (ahead+behind) and a plain FF can't
         # align it. Reconcile realigns it in place once content is confirmed on
         # upstream -- HEAD stays on worktree/<id>, no work lost.
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        config = self._refspec_config(config)
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_refspec_pr_repo
         wt_branch = f"worktree/{wid}"
         # refspec: worktree/<id> carries the squashed commit (1 ahead of master).
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == wt_branch
         assert len(git_ops.get_commits_ahead(
             wt_branch, "origin/master", cwd=str(wt_path))) == 1
 
-        self._simulate_squash_merge(config, wid, "pr/add-feature-aaaa")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        self._simulate_squash_merge(config, wid, rec.pr.branch)
         _git("fetch", "origin", cwd=str(wt_path))
         # Diverged now: 1 ahead (pre-merge squash) + behind (the merge commit).
         repo = config.default_repo
@@ -330,13 +327,11 @@ class TestPRFinalize(PRWorkflowSetup):
             _git("rev-parse", "origin/master", cwd=wt_path)
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == wt_branch
 
-    def test_reconcile_refspec_leaves_open_pr_ahead(self, pr_repo):
+    def test_reconcile_refspec_leaves_open_pr_ahead(self, published_refspec_pr_repo):
         # An OPEN refspec PR must NOT be realigned -- its content is not yet on
         # upstream, so reconcile leaves worktree/<id> ahead (honest #1815/#5).
         from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = pr_repo
-        config = self._refspec_config(config)
-        pr_ops.create_pr(wid, config, title="Add feature")
+        config, wid, wt_path, _ = published_refspec_pr_repo
         wt_branch = f"worktree/{wid}"
         before = _git("rev-parse", wt_branch, cwd=wt_path)
         repo = config.default_repo

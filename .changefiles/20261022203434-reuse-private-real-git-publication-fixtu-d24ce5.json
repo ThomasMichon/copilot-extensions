@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private real-Git publication fixtures in post-publication refspec finalization tests while retaining merge, reconciliation and safety assertions.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

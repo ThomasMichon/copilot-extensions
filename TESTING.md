@@ -1066,6 +1066,10 @@ The claim-warning suite separately exercises CodeSpace CLI invocation.
 The native consoleless-parent observation in `test_pr_rebase.py` also executes
 both state-root Git probes over two cycles, observing windows and foreground
 transitions without pytest's subprocess-suppression hook.
+Post-publication refspec finalization cases use the existing private-copy
+publication fixture. They still perform their own real squash merge, fetch,
+reconciliation and unchanged branch/content assertions; publication itself is
+executed by the shared seed rather than repeated as setup in each case.
 
 The optional profile-assignment-state failure guard follows both real command
 layers returned by worktree creation: exact record-bound execution admission,
