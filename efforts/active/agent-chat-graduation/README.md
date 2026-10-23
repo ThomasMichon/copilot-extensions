@@ -406,6 +406,13 @@ shared-multiplex contracts above.
   release before Job cleanup, and adds one deterministic publication-race case
   without removing the normal case. This does not change production reader
   logic or hide a permanent publication failure.
+- Final candidate `d3265690f7` passed the unchanged full and acceptance lanes
+  without further source edits: full383 passes and two allowed POSIX skips
+  in108.58 seconds; acceptance350 passes, the same skips and33 full-only
+  deselections in77.97 seconds. Both complete385-node maps share
+  `e1b8371d38ee3691daed1058b305eae2ba63f393d2927fbdd7a0a4c02464f4e1`.
+  The original326 cases remain and59 cases are additive. The next current-head
+  review and required CI remain merge gates, not implied approvals.
 
 ### 2026-10-23 - Portable collaboration candidate qualified
 
