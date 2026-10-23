@@ -1108,6 +1108,12 @@ headlessly by default; `--cli` resumes it in the owner's existing mux launch
 path. It never substitutes a fresh conversation or takes over a live
 conflicting execution leg. See the [resume command contract](skills/agent-bridge/references/cli-commands.md#session-management)
 for protocol compatibility, native identity and uncertain-launch behavior.
+Retained `complete`, `completed` and `finalized` checkouts may resume the same
+owner-asserted head; those lifecycle labels do not imply a changed directory.
+Exact workspace/head checks and owner-fenced launch admission still apply.
+The owner can refuse terminal managed workspaces; finalizing, archived and gone
+records remain unavailable. Resume does not authorize cleanup or erase the
+owner's remaining obligations.
 
 ## Platforms
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Allow exact native resume of retained completed checkouts while preserving owner admission and identity fences.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

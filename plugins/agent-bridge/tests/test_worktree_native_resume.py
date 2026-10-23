@@ -579,16 +579,52 @@ async def test_owner_preflight_must_match_native_and_workspace(boundary):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["acp", "cli"])
+@pytest.mark.parametrize("status", ["complete", "completed", "finalized"])
+async def test_retained_completed_checkout_resumes_exact_native_head(boundary, mode, status):
+    boundary.state["record"]["status"] = status
+    result = await native_resume.resume_native_worktree("wt-example", boundary.request, mode)
+    assert result.durable_session_id == "native-original"
+    assert result.target_dir == boundary.entry.path
+    assert result.mode == mode
+    preflight = next(args for args in boundary.calls if "--dry-run" in args)
+    assert "--require-native-admission" in preflight
+    assert preflight[preflight.index("--bridge-acquisition") + 1] == "native-original"
+    boundary.manager.start_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["acp", "cli"])
+@pytest.mark.parametrize("status", ["complete", "completed", "finalized"])
+async def test_completed_checkout_still_requires_owner_launch_admission(boundary, mode, status):
+    boundary.state["record"]["status"] = status
+    boundary.state["preflight"] = {"error": "terminal managed workspace cannot be embodied"}
+    with pytest.raises(HTTPException) as refused:
+        await native_resume.resume_native_worktree("wt-example", boundary.request, mode)
+    assert refused.value.detail["reason"] == "owner_refused"
+    assert not boundary.manager.list_sessions()
+    assert not boundary.state["launched"]
+    boundary.manager.start_session.assert_not_called()
+    boundary.manager.resume_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["active", "complete", "completed", "finalized"])
+@pytest.mark.parametrize("mode", ["acp", "cli"])
 @pytest.mark.parametrize("change", [
     {"last_session_id": "different-native"}, {"execution_leg_opaque": True},
-    {"session_backend_opaque": True}, {"status": "finalized"}, {"status": "finalizing"},
+    {"session_backend_opaque": True}, {"status": "finalizing"}, {"status": "archived"},
+    {"status": "gone"}, {"id": "other-worktree"}, {"path": "other-workspace"},
 ])
-async def test_exact_record_unknown_or_changed_authority_refuses(boundary, change):
+async def test_exact_record_unknown_or_changed_authority_refuses(boundary, change, mode, status):
+    boundary.state["record"]["status"] = status
     boundary.state["record"].update(change)
     with pytest.raises(HTTPException) as refused:
-        await native_resume.resume_native_worktree("wt-example", boundary.request, "acp")
+        await native_resume.resume_native_worktree("wt-example", boundary.request, mode)
     assert refused.value.detail["reason"] == "workspace_identity_changed"
     assert not boundary.manager.list_sessions()
+    boundary.manager.start_session.assert_not_called()
+    boundary.manager.resume_session.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -630,7 +666,10 @@ async def test_owner_native_admission_capability_must_be_exact(boundary, version
 
 
 @pytest.mark.asyncio
-async def test_head_revision_change_prevents_native_import(boundary, monkeypatch):
+@pytest.mark.parametrize("mode", ["acp", "cli"])
+@pytest.mark.parametrize("status", ["active", "complete", "completed", "finalized"])
+async def test_head_revision_change_prevents_native_import(boundary, monkeypatch, mode, status):
+    boundary.state["record"]["status"] = status
     original = wt._run_for_agent
     reads = 0
 
@@ -647,7 +686,7 @@ async def test_head_revision_change_prevents_native_import(boundary, monkeypatch
 
     monkeypatch.setattr(wt, "_run_for_agent", changed)
     with pytest.raises(HTTPException) as refused:
-        await native_resume.resume_native_worktree("wt-example", boundary.request, "acp")
+        await native_resume.resume_native_worktree("wt-example", boundary.request, mode)
     assert refused.value.detail["reason"] == "head_changed"
     assert not boundary.manager.list_sessions()
 
@@ -669,12 +708,15 @@ async def test_uncertain_load_retry_retains_bridge_and_native_identity(boundary)
 
 
 @pytest.mark.asyncio
-async def test_represented_foreign_holder_refuses_without_takeover(boundary, monkeypatch):
+@pytest.mark.parametrize("mode", ["acp", "cli"])
+@pytest.mark.parametrize("status", ["active", "complete", "completed", "finalized"])
+async def test_represented_foreign_holder_refuses_without_takeover(boundary, monkeypatch, mode, status):
+    boundary.state["record"]["status"] = status
     monkeypatch.setattr(boundary.db, "list_fresh_live_sessions", lambda *a, **k: [
         {"session_id": "other-conversation"},
     ])
     with pytest.raises(HTTPException) as refused:
-        await native_resume.resume_native_worktree("wt-example", boundary.request, "acp")
+        await native_resume.resume_native_worktree("wt-example", boundary.request, mode)
     assert refused.value.detail["reason"] == "live_holder"
     assert not boundary.manager.list_sessions()
 

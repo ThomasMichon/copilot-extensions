@@ -151,9 +151,9 @@ async def _resume(
         or (row["bound_agent"] is not None and not isinstance(row["bound_agent"], str))
         or row.get("execution_leg_opaque") is not False
         or row.get("session_backend_opaque") is not False
-        or row.get("status") in {"finalizing", "finalized", "complete", "completed", "archived", "gone"}
+        or row.get("status") in {"finalizing", "archived", "gone"}
     ):
-        raise _refuse("workspace_identity_changed", "Owner did not confirm the active execution workspace")
+        raise _refuse("workspace_identity_changed", "Owner did not confirm the exact execution workspace")
     entry = replace(entry, bound_agent=row["bound_agent"])
     delivery = f"ordinary-resume:{worktree_id}:{native}:{mode}"
     store = AcquisitionStore(db)
