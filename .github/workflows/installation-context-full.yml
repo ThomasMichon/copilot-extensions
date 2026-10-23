@@ -79,11 +79,14 @@ jobs:
           --test-file tests/test_foundation_genesis_process.py
           --test-file tests/test_native_participant.py
           --test-file tests/test_foundation_build_process.py
+          --test-file tests/test_first_use.py
+          --test-file tests/test_first_use_native.py
           --test-timeout 300 --timeout 600
       - name: Qualify Python-free Linux genesis and retained upgrade
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_foundation_linux_genesis.py
+          --test-file tests/test_first_use_genesis.py
           --test-timeout 900 --timeout 1080
   foundation-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
@@ -118,4 +121,7 @@ jobs:
           --test-file tests/test_foundation_genesis_process.py
           --test-file tests/test_native_participant.py
           --test-file tests/test_foundation_build_process.py
+          --test-file tests/test_first_use.py
+          --test-file tests/test_first_use_native.py
+          --test-file tests/test_first_use_genesis.py
           --test-timeout 1200 --timeout 1380

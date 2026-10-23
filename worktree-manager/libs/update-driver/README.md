@@ -588,10 +588,86 @@ staging or prerequisites, preserving queue bytes and the healthy selection.
 No native branch reads, edits or deletes SQLite.
 
 The producer does not enroll maintenance or enable ordinary first-use
-publishers. Native Linux/macOS genesis and the remaining first-use integrations
+publishers. Native macOS genesis and the remaining first-use integrations
 stay explicit, separate boundaries. The single foundation progress snapshot
-is not durable ordinary-request history: future publication adapters still
-need canonical queued request receipts.
+is not durable ordinary-request history; ordinary publication adapters need
+canonical queued request receipts.
+
+### Fixed first-use handoff (not yet adopted by ordinary publishers)
+
+The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
+qualify one fixed recipe: the owning Agent Vault payload's existing legacy
+**direct `provision`** action. Namespaced installation recipes refuse before
+queue or plugin mutation until separately qualified. These front doors do not
+enable the recipe in its generated shim,
+runtime gate, hook or installer. Snapshot-based `stamp`/`provision` recipes
+and other plugin identities remain unsupported rather than being inferred
+from an arbitrary command line.
+
+Both native clients take the execution root, owning payload, addressed runtime
+root and originating project. Before creating driver state, they honor the
+plugin's no-self-provision/pinned-read controls, validate normalized absolute
+unlinked paths including the execution root, check the complete fixed recipe
+(with `install` retained as the omitted-installer default),
+and ask its existing native installation helper for publication permission
+and source provenance. They neither create an installation cell nor adopt
+management purpose. Managed, malformed, mismatched and unsupported evidence
+refuses before prerequisite acquisition or plugin writes.
+
+The canonical native daemon helper launches one finite, caller-independent
+supervisor. **Its launch acknowledgement and diagnostic log are not request
+acceptance.** The supervisor repeats the admission, constructs or reuses the
+foundation through its existing producer, and invokes only the selected
+foundation's exact Python and retention launcher. There is no PATH Python,
+sibling runtime, Manager dependency, foreground installation fallback, second
+queue or resident scheduler. A missing/incompatible selected module refuses
+explicitly. The supervisor never performs plugin installation itself.
+
+`update_driver.first_use` then checks the fixed manifest recipe, complete
+materialized package closure and the owning payload's canonical source and
+installation/publication readers. Raw development inputs with external local
+dependencies refuse; the existing materialization owner must supply the
+self-contained payload. Its canonical full-input fingerprint, source identity,
+runtime root, originating project and selected installation generations become
+the existing `RequestSpec` identity. Only equivalent pending requests coalesce.
+The trusted runner is reconstructed internally as that foundation's retained
+module, never a caller-supplied executable, installer name or argument recipe.
+
+After `enqueue` commits, the existing queue's ID/state JSON is the **durable
+ordinary-request receipt**. It appears in the supervisor log even if worker
+launch subsequently fails. The finite worker and waiter are the existing
+`ensure_worker`/`wait` path. Waiting only observes the queue, streams its log and
+returns its canonical integer outcome; it does not install or retry inline.
+Loss before receipt is not falsely reported as accepted work; native foundation
+progress and the finite supervisor's diagnostics retain their separate meanings.
+
+The queue-owned execution consumes a fresh same-root participant and execution
+scope, rechecks the complete accepted source and selected installation, and uses
+the canonical engine's complete-input copier under that custody. It verifies
+the frozen hash and original admission again before invoking only the frozen
+owning native installer's fixed provision action and addressed root.
+The trusted adapter sets the existing staging-origin fields only after this
+authenticated copy; unrelated ambient staging hints are discarded. Frozen inputs
+remain under `<execution-root>/provision-inputs/<request-id>` because published
+runtime/source metadata may retain those paths. No new source-selection policy
+or package construction mechanism is introduced.
+The existing canonical process owner encloses that
+entire native tree, including staging, construction and integration. Installer
+staging, dependency policy, per-generation ownership and publication safeguards
+are not replaced. Native descendants do not inherit the queue witness or a
+foreign lifecycle ticket. Saved credential-free routing context is restored
+before product startup, including clearing keys absent on acceptance.
+Downgrade permission (`AGENT_VAULT_ALLOW_DOWNGRADE`) belongs to that saved
+request context, never to whichever caller happens to launch the shared worker.
+Source or policy changes during queue delay refuse before installer entry and
+leave the existing conservative interrupted fence, not a success-shaped result.
+
+The manual `foundation` portfolio additionally runs a Python-free cold handoff
+on Windows and Linux, destroys the original caller's cleanup boundary during
+foundation acquisition, then proves the actual queued native invocation,
+ordinary request receipt and nonzero final status. That controlled native
+product fixture qualifies the handoff, **not** a real Vault deployment,
+production publisher adoption, maintenance enrollment, macOS or host rollout.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;
