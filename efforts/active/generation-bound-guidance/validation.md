@@ -218,3 +218,12 @@ reproduced false liveness after foreground preparation without any queued
 request. The correction preserves actual queued ownership and an unconfirmed
 admission lock; those three controls passed. This is a liveness/reclamation
 correction, not evidence of faster full-roster CLI startup.
+
+Partial source ownership has explicit collision controls. A failed provider's
+existing slot cannot be replaced by another valid provider, including after
+an initially partial publication. Unknown legacy slots are preserved until a
+complete source set is available, while proven healthy slots remain updateable.
+Three negative controls failed before the correction; the partial-ownership,
+cyclic-source, normal reuse, late-notice and full-reconciliation selection
+completed **13 passed**. Private preparation metadata is version 2 and
+distinguishes partial ownership history from reusable ready state.

@@ -191,6 +191,16 @@ Pending paired composition always refuses reuse. Partial/failed publications
 never create reusable readiness. The receipt is disposable local evidence, not
 a source of instruction authority or a model-admission receipt.
 
+Version 2 distinguishes ready preparation from partial ownership history.
+Partial records are never reusable readiness. Their bounded source/byte
+ownership map lets healthy providers update proven slots without replacing
+guidance owned by an unresolved provider. Unknown legacy slots and structural
+overlaps remain untouched with an explicit ownership finding; a later complete
+source set can reconcile the generated namespace normally. Successful partial
+publication records ownership for newly delivered sources, so another partial
+pass can safely update them. This is a file-ownership safeguard, not a content
+selection policy; all tracked-file and path checks still apply.
+
 The complete desired set is built once inside the publication lock. Captured
 input identities and current source selection are checked again before copying,
 rather than reconstructing every desired byte a second time. All mutation-path

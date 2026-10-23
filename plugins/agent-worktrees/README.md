@@ -415,6 +415,9 @@ outputs and Git protection evidence remain current. Unchanged reads do not
 rebuild or copy the set. An unavailable payload yields an explicit partial
 result while safe independent sources are copied; unresolved old outputs and
 reviewed fallback remain, and no complete-readiness receipt is issued.
+Partial ownership history also prevents a valid provider from overwriting an
+unresolved provider's existing slot. Proven healthy slots remain updateable;
+unknown legacy slots wait for a complete preparation rather than being guessed.
 SessionStart queues a bounded backup only when current preparation is absent.
 Its late completion is surfaced once through the next post-tool hook:
 refreshed files require restart/new context for discovery, not an assertion

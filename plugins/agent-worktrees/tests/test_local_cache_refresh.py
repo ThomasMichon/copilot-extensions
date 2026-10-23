@@ -202,6 +202,63 @@ def test_missing_payload_does_not_withhold_independent_guidance(copy_workspace, 
     assert not result.reused
 
 
+@pytest.mark.parametrize("initially_partial", [False, True])
+def test_partial_source_cannot_overwrite_failed_provider_output(copy_workspace, initially_partial):
+    root, home = copy_workspace
+    broken, protected = provider(root, home, "broken", content=b"retain unresolved guidance")
+    settings = root / ".github/copilot/settings.json"
+    if initially_partial:
+        data = json.loads(settings.read_text())
+        data["enabledPlugins"]["missing@market"] = True
+        write_json(settings, data)
+    assert lcr.prepare_for_launch(root).status == ("partial" if initially_partial else "ready")
+    broken.unlink()
+    replacement, _ = provider(root, home, "replacement", content=b"must not replace another provider")
+    declaration = replacement.parents[1] / "instruction-projections.json"
+    data = json.loads(declaration.read_text())
+    data["projections"][0]["destination"] = ".github/instructions/broken/fallback.instructions.md"
+    write_json(declaration, data)
+    _, independent = provider(root, home, "independent", content=b"safe independent guidance")
+    result = lcr.prepare_for_launch(root)
+    assert result.status == "partial", result.diagnostic
+    assert protected.read_bytes() == b"retain unresolved guidance"
+    assert independent.read_bytes() == b"safe independent guidance"
+    assert "ownership" in result.detail
+
+
+def test_partial_publication_preserves_legacy_unknown_slot_until_complete(copy_workspace):
+    root, home = copy_workspace
+    _, protected = provider(root, home, content=b"current canonical guidance")
+    protected.parent.mkdir(parents=True)
+    protected.write_bytes(b"unknown unresolved owner")
+    _, independent = provider(root, home, "independent")
+    settings = root / ".github/copilot/settings.json"
+    data = json.loads(settings.read_text())
+    data["enabledPlugins"]["missing@market"] = True
+    write_json(settings, data)
+    assert lcr.prepare_for_launch(root).status == "partial"
+    assert protected.read_bytes() == b"unknown unresolved owner"
+    assert independent.exists()
+    data["enabledPlugins"]["missing@market"] = False
+    write_json(settings, data)
+    assert lcr.prepare_for_launch(root).status == "ready"
+    assert protected.read_bytes() == b"current canonical guidance"
+
+
+def test_partial_publication_can_update_its_proven_existing_source(copy_workspace):
+    root, home = copy_workspace
+    template, output = provider(root, home, content=b"first safe version")
+    settings = root / ".github/copilot/settings.json"
+    data = json.loads(settings.read_text())
+    data["enabledPlugins"]["missing@market"] = True
+    write_json(settings, data)
+    assert lcr.prepare_for_launch(root).status == "partial"
+    template.write_bytes(b"second safe version")
+    result = lcr.prepare_for_launch(root)
+    assert result.status == "partial" and result.changed == 1
+    assert output.read_bytes() == b"second safe version"
+
+
 @pytest.mark.parametrize("publisher", [
     "backup", "foreground", "foreground-partial", "during-probe", "post-copy-failure",
 ])

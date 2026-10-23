@@ -213,6 +213,11 @@ coordinate the smallest additive owner API before changing another slice.
   Foreground preparation without a request is now inactive; queued workers
   and unconfirmed admission locks remain protected. Three focused controls
   passed. This does not claim or change the cold full-roster entry path.
+- Added byte-bound output ownership history for partial publication. Healthy
+  providers cannot overwrite unresolved/unknown slots, but their proven slots
+  remain updateable across partial passes. Three failing collision/legacy
+  controls became green in a 13-case selection. Metadata version 2 explicitly
+  separates partial history from reusable readiness.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

@@ -13,6 +13,7 @@ import uuid
 
 _READS: ContextVar[dict | None] = ContextVar("static_instruction_reads", default=None)
 _SCHEMA = "agent-worktrees.static-preparation"
+_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,37 @@ def generation(selection: list, reads: dict) -> str:
     return hashlib.sha256(json.dumps(
         [selection, reads], sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
+
+
+def _ownership_digest(owners: dict) -> str:
+    return hashlib.sha256(json.dumps(
+        owners, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def ownership_history(root: Path, home: Path, *, deadline: float | None = None) -> dict:
+    """Previous source/byte ownership is history, not reusable readiness."""
+    try:
+        _check(deadline)
+        path = _directory(root) / "prepared.json"
+        if not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        owners = data.get("owners")
+        _check(deadline)
+        if (
+            data.get("schema") == _SCHEMA and data.get("version") == _VERSION
+            and data.get("root") == str(root) and data.get("home") == str(home)
+            and data.get("readiness") in ("ready", "partial")
+            and isinstance(owners, dict)
+            and data.get("ownership_digest") == _ownership_digest(owners)
+        ):
+            return owners
+    except TimeoutError:
+        raise
+    except (OSError, ValueError, TypeError, AttributeError, RuntimeError):
+        pass
+    return {}
 
 
 def _directory(root: Path) -> Path:
@@ -237,13 +269,17 @@ def read(
         data = json.loads(path.read_text(encoding="utf-8"))
         _check(deadline)
         if (
-            data.get("schema") != _SCHEMA or data.get("version") != 1
+            data.get("schema") != _SCHEMA or data.get("version") != _VERSION
+            or data.get("readiness") != "ready"
             or data.get("root") != str(root) or data.get("home") != str(home)
             or data.get("selection") != selection
             or not isinstance(data.get("inputs"), dict)
             or not isinstance(data.get("outputs"), dict)
             or not isinstance(data.get("generation"), str)
             or type(data.get("count")) is not int or data["count"] < 0
+            or not isinstance(data.get("owners"), dict)
+            or data.get("ownership_digest") != _ownership_digest(data["owners"])
+            or data["count"] != len(data["owners"])
         ):
             return None
         if (
@@ -267,11 +303,12 @@ def read(
 def save(
     root: Path, home: Path, selection: list, reads: dict, desired: dict, namespace: str,
     *, validated_git: dict, revision: str, deadline: float | None = None,
+    ready: bool, sources: dict, previous_owners: dict,
 ) -> str:
     from .local_cache_worker import _write
 
     require_git_state(root, validated_git, deadline=deadline)
-    identity = generation(selection, reads)
+    identity = generation(selection, reads) if ready else ""
     directory = _directory(root)
     directory.mkdir(exist_ok=True)
     outputs = output_state(root, namespace, deadline=deadline)
@@ -283,14 +320,26 @@ def save(
         path: value[-1] for path, value in outputs.items()
         if value is not None and stat.S_ISREG(value[1])
     }
-    if actual != expected:
+    if (ready and actual != expected) or any(actual.get(path) != digest for path, digest in expected.items()):
         raise ValueError("instruction output changed before readiness was recorded")
+    owners = {} if ready else {
+        relative: record for relative, record in previous_owners.items()
+        if isinstance(record, dict) and isinstance(relative, str)
+        and isinstance(record.get("source"), str) and isinstance(record.get("sha256"), str)
+        and actual.get(str(root / namespace / relative)) == record.get("sha256")
+    }
+    owners.update({
+        relative: {"source": sources[relative], "sha256": hashlib.sha256(content).hexdigest()}
+        for relative, content in desired.items()
+    })
     data = {
-        "schema": _SCHEMA, "version": 1, "root": str(root), "home": str(home),
+        "schema": _SCHEMA, "version": _VERSION, "root": str(root), "home": str(home),
+        "readiness": "ready" if ready else "partial",
         "selection": selection, "inputs": reads, "count": len(desired),
         "generation": identity, "outputs": outputs,
         "git": validated_git, "model_admission": "unknown",
         "publication_revision": revision,
+        "owners": owners, "ownership_digest": _ownership_digest(owners),
     }
     require_git_state(root, validated_git, deadline=deadline)
     _write(directory / "prepared.json", json.dumps(data) + "\n")

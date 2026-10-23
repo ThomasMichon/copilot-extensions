@@ -163,9 +163,9 @@ def _plugin(identity: str, markets: dict, home: Path, *, deadline: float | None 
     return candidate.root
 
 
-def _selection(root: Path, home: Path, *, deadline: float | None = None) -> tuple[list, dict, list]:
+def _selection(root: Path, home: Path, *, deadline: float | None = None) -> tuple[list, dict, dict]:
     enabled, markets = _settings(root, home, deadline=deadline)
-    selection, plugins, failures = [], {}, []
+    selection, plugins, failures = [], {}, {}
     for identity in sorted(enabled):
         _remaining(deadline)
         if not enabled[identity]:
@@ -180,15 +180,17 @@ def _selection(root: Path, home: Path, *, deadline: float | None = None) -> tupl
             ]])
             plugins[identity] = plugin
         except (OSError, ValueError, RuntimeError) as exc:
-            failures.append(f"{identity}: {exc}")
+            failures[identity] = f"{identity}: {exc}"
     return selection, plugins, failures
 
 
 class _Snapshot(dict):
-    def __init__(self, selection: list, failures: list):
+    def __init__(self, selection: list, failures: dict):
         super().__init__()
         self.selection = selection
-        self.failures = failures
+        self.failures = list(failures.values())
+        self.failed_sources = set(failures)
+        self.owners: dict[str, str] = {}
 
 
 def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> _Snapshot:
@@ -203,6 +205,7 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> _Snap
             raise
         except (OSError, ValueError, RuntimeError) as exc:
             result.failures.append(f"{identity}: {exc}")
+            result.failed_sources.add(identity)
             continue
         for relative, content in entries.items():
             key = unicodedata.normalize("NFC", relative).casefold()
@@ -210,6 +213,7 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> _Snap
                 raise ValueError(f"colliding instruction destination: {relative}")
             folded.add(key)
             result[relative] = content
+            result.owners[relative] = identity
     _remaining(deadline)
     return result
 
@@ -308,6 +312,42 @@ def _walk_error(error: OSError) -> None:
     raise error
 
 
+def _protect_partial_outputs(
+    root: Path, home: Path, desired: _Snapshot, existing: set[str], *, deadline: float | None,
+) -> dict:
+    previous = preparation.ownership_history(root, home, deadline=deadline)
+    folded = {path: unicodedata.normalize("NFC", path).casefold() for path in existing}
+    for relative in list(desired):
+        _remaining(deadline)
+        key = unicodedata.normalize("NFC", relative).casefold()
+        overlaps = [
+            path for path, value in folded.items()
+            if key == value or key.startswith(value + "/") or value.startswith(key + "/")
+        ]
+        if not overlaps:
+            continue
+        record = previous.get(relative)
+        proven = (
+            overlaps == [relative] and isinstance(record, dict)
+            and isinstance(record.get("source"), str) and isinstance(record.get("sha256"), str)
+        )
+        if proven:
+            try:
+                validate_identity(record["source"])
+                proven = (
+                    record["source"] not in desired.failed_sources
+                    and hashlib.sha256(_read_regular_bytes(root / NAMESPACE / relative)).hexdigest()
+                    == record["sha256"]
+                )
+            except (OSError, ValueError, KeyError, TypeError):
+                proven = False
+        if not proven:
+            desired.failures.append(f"{desired.owners[relative]}: partial output ownership is unconfirmed: {relative}")
+            del desired[relative]
+            del desired.owners[relative]
+    return previous
+
+
 def pair_pending_path(root: Path) -> Path:
     from .local_cache_worker import metadata_directory
 
@@ -379,6 +419,10 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
                         existing.add(path.relative_to(output).as_posix())
                     else:
                         existing_directories.add(path)
+        previous_owners = (
+            _protect_partial_outputs(root, home, desired, existing, deadline=deadline)
+            if desired.failures else {}
+        )
         stale = set() if desired.failures else existing - desired.keys()
         removable_files = {output / relative for relative in stale}
         exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
@@ -486,12 +530,11 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
         if not preparation.matches(inputs, deadline=deadline):
             raise ValueError("instruction sources changed during publication; retry preparation")
         preparation.require_git_state(root, validated_git, deadline=deadline)
-        identity = ""
-        if not desired.failures:
-            identity = preparation.save(
-                root, home, selected, inputs, desired, NAMESPACE,
-                validated_git=validated_git, revision=revision, deadline=deadline,
-            )
+        identity = preparation.save(
+            root, home, selected, inputs, desired, NAMESPACE,
+            validated_git=validated_git, revision=revision, deadline=deadline,
+            ready=not desired.failures, sources=desired.owners, previous_owners=previous_owners,
+        )
         return preparation.Publication(
             changed, unchanged, len(stale), identity, failures=tuple(desired.failures),
             publication_revision=revision,
