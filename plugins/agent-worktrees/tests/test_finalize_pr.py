@@ -15,6 +15,32 @@ pytestmark = pytest.mark.usefixtures("git_only_mux")
 
 
 class TestPRFinalize(PRWorkflowSetup):
+    @pytest.mark.parametrize("disposition", ["retained", "failed-removal", "removed"])
+    def test_trust_lives_until_checkout_is_actually_removed(
+        self, published_pr_repo, monkeypatch, disposition,
+    ):
+        from agent_worktrees import finalize as fin, permissions
+
+        config, wid, wt_path, _ = published_pr_repo
+        self._simulate_squash_merge(config, wid, "feature/add-feature-aaaa")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.state = "merged"
+        tracking.save_record(rec)
+        permissions.ensure_trusted_folder(str(wt_path))
+        monkeypatch.setattr(fin, "_has_live_session", lambda record: False)
+        monkeypatch.setattr(fin.git_ops, "is_cwd_inside", lambda path: disposition == "retained")
+        monkeypatch.setattr(fin.procs, "terminate_processes_under", lambda path: [])
+        if disposition == "failed-removal":
+            monkeypatch.setattr(fin.git_ops, "remove_worktree", lambda *a, **k: False)
+            monkeypatch.setattr(fin.shutil, "rmtree", lambda *a, **k: None)
+            monkeypatch.setattr(fin.time, "sleep", lambda delay: None)
+
+        assert fin.validate_and_finalize(wid, config)
+        _, data = permissions._read_config_jsonc(permissions._config_path())
+        present = disposition != "removed"
+        assert wt_path.exists() is present
+        assert (str(wt_path.resolve()) in data["trustedFolders"]) is present
+
     def test_precondition_fails_before_push(self, pr_repo):
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _ = pr_repo

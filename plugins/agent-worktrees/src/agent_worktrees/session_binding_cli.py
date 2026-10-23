@@ -447,6 +447,9 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             initial_projection=source == "hook:new",
             source_identity=source_identity,
         )
+        from .worktree_trust import ensure_record_trusted
+
+        ensure_record_trusted(tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml"))
         if candidate_token:
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
             with tracking._RecordLock(yaml_path):
@@ -668,6 +671,9 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
                 session_id, native_lifecycle_source.witness(None, resident=False),
             ),
         )
+        from .worktree_trust import ensure_record_trusted
+
+        ensure_record_trusted(tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml"))
         profile_assignment.bind(
             getattr(args, "assignment_token", None)
             or os.environ.get(profile_assignment.ASSIGNMENT_TOKEN_ENV),

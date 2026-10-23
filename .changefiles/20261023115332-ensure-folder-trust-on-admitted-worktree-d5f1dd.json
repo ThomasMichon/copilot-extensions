@@ -1,0 +1,9 @@
+{
+  "comment": "Ensure folder trust on admitted worktree creation, resume and session entry; preserve retained checkout trust until actual removal.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

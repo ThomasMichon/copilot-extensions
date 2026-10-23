@@ -114,7 +114,7 @@ def _permission_state(worktree_path: str) -> dict:
 
 def _prepare_permissions(anchor: str, worktree_path: str) -> None:
     permissions.clone_permissions(anchor, worktree_path)
-    permissions.add_trusted_folder(worktree_path)
+    permissions.ensure_trusted_folder(worktree_path)
     permissions.ensure_extension_permission_approvals(worktree_path)
     if not all(_permission_state(worktree_path).values()):
         raise ValueError("Copilot trust or facility approvals remain incomplete")

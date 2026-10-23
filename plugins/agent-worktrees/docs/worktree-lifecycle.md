@@ -64,6 +64,30 @@ rather than as a successful refresh. The existing `auto_fast_forward` policy
 disables opportunistic anchor movement during creation without preventing
 remote-ref-based worktree creation.
 
+### Folder trust follows admitted checkout entry
+
+Creation (including paired knowledge and retained-creation repair), non-preview
+resume planning, and successful `register-session` / `bind-session` entry ensure
+the native checkout is in Copilot's `config.json` `trustedFolders`. Resume
+planning does this before local guidance rendering even with
+`--defer-projections`; bare resume trusts the recorded checkout, not HOME.
+Read-only inspection, dry runs and rejected ownership/lifecycle admission do
+not grant trust. Folder trust neither clones tool permissions nor approves
+extensions; those remain separate creation-time operations.
+
+The update is idempotent and shares the user-wide configuration sidecar lock
+with existing trust mutations. A missing configuration is initialized; existing
+trust entries, unrelated settings and the managed leading comment header
+survive. Malformed settings, a failed write or lock contention are explicit
+entry errors, not “already trusted.” Session registration may already be
+recorded when a trust error is reported; after fixing the cause, repeat the
+same entry command rather than creating a replacement session.
+
+Finalization preserves trust and checkout-specific permissions when it retains
+the directory, including an unsuccessful removal attempt. The existing cleanup
+flow removes them only after the checkout is actually absent. This does not
+enable automatic cleanup or change its eligibility and custody gates.
+
 ### Session worktree names
 
 Seeded and unseeded session creation use the same timestamp and four-character

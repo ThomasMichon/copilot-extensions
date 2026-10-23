@@ -220,7 +220,7 @@ def _run(creation, capsys, *, fix=False, **changes):
 def test_creation_report_is_scoped_read_only(creation, monkeypatch, capsys):
     before = creation.record.yaml_path.read_bytes()
     state_before = launch_seed_state.state_path(creation.record.yaml_path).read_bytes()
-    for name in ("clone_permissions", "add_trusted_folder", "ensure_extension_permission_approvals"):
+    for name in ("clone_permissions", "ensure_trusted_folder", "ensure_extension_permission_approvals"):
         monkeypatch.setattr(permissions, name, lambda *a: pytest.fail("report mutated permissions"))
     monkeypatch.setattr(
         worktree_creation, "_carve_paired_knowledge", lambda *a, **kw: pytest.fail("report allocated"),

@@ -814,11 +814,6 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
         return output._json_error(launch_preflight.error, exit_code=3)
-    if not getattr(state.args, "defer_projections", False):
-        local_cache_refresh.prepare_for_launch(
-            record.worktree_path, dry_run=getattr(state.args, "dry_run", False),
-            compose_pair=True, config=config,
-        )
     if getattr(state.args, "restore", False):
         if getattr(state.args, "dry_run", False):
             return output._json_error("--restore preview is unsupported; no session was restored", exit_code=3)
@@ -917,6 +912,17 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
     if native_resume and (seed_pending or not no_resume):
         return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
+    if not getattr(state.args, "dry_run", False):
+        from . import permissions, worktree_trust
+
+        try:
+            worktree_trust.ensure_record_trusted(record, config)
+        except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
+            return output._json_error(str(exc), exit_code=3)
+        if not getattr(state.args, "defer_projections", False):
+            local_cache_refresh.prepare_for_launch(
+                record.worktree_path, compose_pair=True, config=config,
+            )
     if seed_pending:
         launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
     else:

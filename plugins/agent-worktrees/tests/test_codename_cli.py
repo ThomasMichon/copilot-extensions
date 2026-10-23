@@ -46,7 +46,7 @@ def _stub_create_worktree_core_internals(
     )
     monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
-    monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *_a: False)
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(
         m.state_root_mod,

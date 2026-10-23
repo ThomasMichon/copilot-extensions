@@ -1759,7 +1759,7 @@ def validate_and_finalize(
 
             git_ops.prune_worktrees(cwd=anchor)
 
-        if checkout_managed:
+        if checkout_managed and not Path(worktree_path).exists():
             merged = permissions.merge_permissions(anchor, worktree_path)
             if merged:
                 for m in merged:
