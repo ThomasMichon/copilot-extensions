@@ -152,6 +152,12 @@ class Backend:
                     self.reply({"session_id": "original", "status": "idle"})
                 elif path == "/api/v1/sessions/original/turns":
                     backend.turns.append(body)
+                    if backend.ack_failure in {"empty-status", "invalid-status"}:
+                        self.reply({
+                            "session_id": "original", "turn_index": 0,
+                            "status": "" if backend.ack_failure == "empty-status" else "not-a-lifecycle-status",
+                        })
+                        return
                     if backend.lost_admission:
                         backend.stopping.wait(4)
                     if backend.ack_failure is not None:
@@ -287,7 +293,9 @@ def test_lost_prompt_acceptance_is_unknown_without_a_second_submission():
         assert backend.turns[0]["no_resume"] is True
 
 
-@pytest.mark.parametrize("failure", ["truncated", "malformed"])
+@pytest.mark.parametrize("failure", [
+    "truncated", "malformed", "empty-status", "invalid-status",
+])
 def test_real_accepted_prompt_with_bad_ack_is_not_a_delivery_failure(failure):
     with Backend(ack_failure=failure) as backend:
         result, _ = invoke(backend)

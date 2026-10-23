@@ -183,7 +183,7 @@ After readiness, prompt admission uses a separate short response wait and
 `no_resume: true`: a race back to STOPPED cannot silently begin another
 startup. A lost admission acknowledgement also exits 70 with
 `reason: admission_unknown`, not a retryable refusal or a second submission.
-This includes truncated HTTP bodies, invalid UTF-8/JSON and incomplete
+This includes truncated HTTP bodies, invalid UTF-8/JSON, empty/unknown lifecycle statuses and incomplete
 acknowledgement shapes after acceptance. An observation/decoding failure that
 did not exhaust a clock reports `clock: null`, rather than claiming a timer
 expired. Explicit HTTP refusals retain their existing classification.

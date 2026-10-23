@@ -13,6 +13,7 @@ from agent_bridge import __main__ as cli
 from agent_bridge import startup_observation as observation
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.send_outcome import run_send
+from agent_bridge.session_status import SessionStatus
 
 
 class Stream:
@@ -409,7 +410,11 @@ def test_admission_read_or_decode_error_is_unknown_without_retry(monkeypatch, er
     assert calls[0][0][2]["no_resume"] is True
 
 
-@pytest.mark.parametrize("result", [None, {}, [], {"status": "running"}])
+@pytest.mark.parametrize("result", [
+    None, {}, [], {"status": "running"},
+    {"session_id": "original", "turn_index": 0, "status": ""},
+    {"session_id": "original", "turn_index": 0, "status": "not-a-lifecycle-status"},
+])
 def test_incomplete_admission_shape_cannot_become_delivered(monkeypatch, result):
     client = BridgeClient("http://fixture.invalid", "fixture")
     monkeypatch.setattr(client, "_request", lambda *args, **kwargs: result)
@@ -421,9 +426,10 @@ def test_incomplete_admission_shape_cannot_become_delivered(monkeypatch, result)
             client.submit_prompt("original", "one exact prompt")
 
 
-def test_observed_admission_keeps_the_real_first_turn_index_zero(monkeypatch):
+@pytest.mark.parametrize("status", list(SessionStatus))
+def test_observed_admission_keeps_the_real_first_turn_index_zero(monkeypatch, status):
     client = BridgeClient("http://fixture.invalid", "fixture")
-    result = {"status": "running", "session_id": "original", "turn_index": 0}
+    result = {"status": status.value, "session_id": "original", "turn_index": 0}
     monkeypatch.setattr(client, "_request", lambda *args, **kwargs: result)
     args = argparse.Namespace(startup_communication_timeout=30, startup_process_timeout=300)
     with observation.observing_send(args):

@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from .client_worktree_restart import _Base
+from .session_status import SessionStatus
 
 
 class PromptClientMixin(_Base):
@@ -54,6 +55,7 @@ class PromptClientMixin(_Base):
                 if (
                     isinstance(result, dict)
                     and isinstance(result.get("status"), str)
+                    and result["status"] in {status.value for status in SessionStatus}
                     and type(result.get("turn_index")) is int
                     and result["turn_index"] >= 0
                 ):

@@ -255,6 +255,26 @@ def test_http46_native_reference_is_canonical_before_observed_resume():
     assert resumed == expected["resumed_ids"]
 
 
+@pytest.mark.parametrize("index", range(2))
+def test_http46_invalid_admission_status_remains_unknown(monkeypatch, index, capsys):
+    status = packet()["invalid_admission_statuses"][index]
+    client = BridgeClient("http://fixture.invalid", "fixture")
+    calls = []
+
+    def request(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"session_id": "bridge-a", "turn_index": 0, "status": status}
+
+    monkeypatch.setattr(client, "_request", request)
+    with observer.observing_send(arguments()):
+        observer.current().ready()
+        with pytest.raises(SystemExit) as raised:
+            run_send(arguments(), lambda _: client.submit_prompt("bridge-a", "exactly once"))
+    assert raised.value.code == 70
+    assert len(calls) == 1
+    assert json.loads(capsys.readouterr().out)["reason"] == "admission_unknown"
+
+
 def test_http46_local_timer_does_not_renew_and_process_budget_is_independent(capsys):
     item = observer.StartupObservation(StartupTimeouts())
     now = [0.0]

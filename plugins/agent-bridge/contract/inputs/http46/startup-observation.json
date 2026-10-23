@@ -61,6 +61,7 @@
     "body": {"prompt": "one exact continuation", "no_resume": true},
     "request_timeout": 30, "allow_retry": false, "count": 1
   },
+  "invalid_admission_statuses": ["", "not-a-lifecycle-status"],
   "lost_ack": {
     "exit_code": 70,
     "json": {
