@@ -895,18 +895,6 @@
     "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_false_for_everything_else[]",
     "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_false_for_everything_else[fish]",
     "tools/promotion_unit_tests/test_remote_login_shell.py::test_is_posix_login_shell_false_for_everything_else[cmd]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_only_a_free_or_exact_matching_version_is_selected[occupied0-equivalent0-1]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_only_a_free_or_exact_matching_version_is_selected[occupied1-equivalent1-1]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_only_a_free_or_exact_matching_version_is_selected[occupied2-equivalent2-2]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_only_a_free_or_exact_matching_version_is_selected[occupied3-equivalent3-3]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_only_a_free_or_exact_matching_version_is_selected[occupied4-equivalent4-2]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_reservation_read_failure_cannot_be_treated_as_absence",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_complete_closure_and_inherited_attributes_affect_reservation_match[plugins/demo/src/main.py]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_complete_closure_and_inherited_attributes_affect_reservation_match[plugins/demo/libs/events/src/events.py]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_complete_closure_and_inherited_attributes_affect_reservation_match[libs/shared/src/shared.py]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_complete_closure_and_inherited_attributes_affect_reservation_match[.gitattributes]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_complete_closure_and_inherited_attributes_affect_reservation_match[plugins/.gitattributes]",
-    "tools/promotion_unit_tests/test_version_reservations.py::test_complete_closure_and_inherited_attributes_affect_reservation_match[libs/.gitattributes]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_omits_only_closed_packet_inputs[packet-python]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_omits_only_closed_packet_inputs[packet-manifest]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_omits_only_closed_packet_inputs[packet-and-narrative]",
@@ -985,12 +973,12 @@
     "tools/promotion_unit_tests/test_manager_launchers.py": "f31a192e5ad6d54c54964448ecd35579901ec622640ad47684f5733d0cd63707",
     "tools/promotion_unit_tests/test_packet.py": "6357602d5fb57688ee04e9e866dbd1bc66037ff69a3231401e161e03da4cd62e",
     "tools/promotion_unit_tests/test_plugin_resolve.py": "57ca4d8f030c2d0919e600595e06ff8cb91f7133cad6aea9fb343824ce39738f",
-    "tools/promotion_unit_tests/test_qualification.py": "0e32a8950c350c02e48ec3439daa35734e1b7d9e98882ed56cf9ac421ad5f706",
+    "tools/promotion_unit_tests/test_qualification.py": "0ebc43dfe9a2afd9f21132caa32fd276d29955b7111da108332f98c68b01e0fe",
     "tools/promotion_unit_tests/test_runtime_regressions.py": "971c527f39664983d611b96c44b7253aa3d778567d3cc9882ea5f708c97ebbc6",
     "tools/promotion_unit_tests/test_selection.py": "cc0c254e2c96dd2594f772e7181e3b2f501b69c09aab6d468b55046b738fe94b",
     "tools/promotion_unit_tests/test_windows_lease_acl.py": "d0b960fc15dc6ed369dcaa0b2b80aec35bcefbfec8adaafe7b51c0116c5e26f0",
     "tools/promotion_unit_tests/test_worktree_identity.py": "667c4cb239d7254cb4af7fa77faf4d1a711e1b01441bac48c3a01edcf279cecf",
-    "tools/publish_python_artifacts.py": "69d3ae7dd20cdad0b929653015a8e1e4badfd9395e534adb3a16017c531b9893",
+    "tools/publish_python_artifacts.py": "8839bf27fb2da888dd5de32cd3b5bf78058f6cbb171c5aa91b1bd0702ef3da12",
     "tools/qualify_promotion_candidate.py": "2e636eb5e52536650d95df489248cf4cea74ddbb08989c322a4958b842cace98",
     "tools/run-promotion-unit-tests.py": "5b95e6a0319e2739f34521d232792c4d7d0ef09c5bdf301e6d4695c46d8e9aaa",
     "tools/validate_materialized_candidate.py": "d840c5a4755f5b2be4fb528588f2065f554e466e8c2b9ade7cd66270d2fb7cea",
@@ -1020,9 +1008,7 @@
     "tools/promotion_unit_tests/test_activation_preservation.py": "bb6c7de539254571e2635424ac06b5772714d860ba490aca668d02a0731c8a92",
     "libs/remote-login-shell/src/remote_login_shell/__init__.py": "339e08c120b8310de198a3fa675e1089c2229e985e9389cc2f507eabd0b6ffe6",
     "libs/remote-login-shell/tests/test_remote_login_shell.py": "c58b26541adaef6eed1d64e9a7a16fd827ff52045881021d9c1f9b26ac1d11ca",
-    "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
-    "tools/promotion_version_allocation.py": "8bb64908ccecf49c8326aa60b0f336caced8782288608bf2797ab67b52312aeb",
-    "tools/promotion_unit_tests/test_version_reservations.py": "15434c96e0ddd427560498deab3b73009e7cda4f3bff872d68a2287552001790"
+    "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0"
   },
   "coverage_targets": [
     "libs/config-migrate/src/config_migrate/core.py",
@@ -1068,8 +1054,7 @@
     "tools/check-docs-consistency.py",
     "libs/plugin-activation/src/plugin_activation/preservation.py",
     "libs/plugin-activation/src/plugin_activation/state.py",
-    "libs/remote-login-shell/src/remote_login_shell/__init__.py",
-    "tools/promotion_version_allocation.py"
+    "libs/remote-login-shell/src/remote_login_shell/__init__.py"
   ],
   "max_seconds": 300
 }

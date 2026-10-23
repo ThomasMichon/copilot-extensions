@@ -441,6 +441,20 @@ def test_source_publication_still_refuses_changed_candidate_sources(
     assert not output.exists()
 
 
+def test_source_publication_never_repairs_a_missing_prepared_set(prepared: tuple) -> None:
+    directory, service, _, _, _ = prepared
+    del service.releases[f"python-artifacts-{DEV}"]
+    before = list(service.writes)
+
+    with pytest.raises(artifacts.PromotionArtifactError, match="unavailable or misbound"):
+        publisher.publish_artifacts(
+            directory, repository="example/plugins", merged_commit=TREE,
+            dev_head=DEV, repo=directory.parent,
+        )
+
+    assert service.writes == before
+
+
 def test_distinct_dev_sources_can_publish_different_bytes_with_the_same_plugin_version(
     prepared: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -470,6 +484,7 @@ def test_distinct_dev_sources_can_publish_different_bytes_with_the_same_plugin_v
     assert index["artifacts"][0]["sha256"] != original_index["artifacts"][0]["sha256"]
     arguments = dict(repository="example/plugins", dev_head=other_dev, repo=other_root)
 
+    readiness.prepare_artifacts(other_directory, candidate_commit=TREE, **arguments)
     publisher.publish_artifacts(other_directory, merged_commit=TREE, **arguments)
     assert publisher.verify_published_artifacts(
         other_directory, candidate_commit=TREE, **arguments,

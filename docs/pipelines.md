@@ -414,8 +414,8 @@ duplicate matching runs. An Actions rerun changes `github.run_attempt` and
 dispatches new consumers for that attempt; its original `created_at` remains
 the discovery bound, not the later rerun start time.
 
-After the exact candidate PR really merges, the final publisher fetches the
-candidate commit explicitly (squash does not preserve its ancestry), repeats
+For a final post-merge binding, the publisher fetches the candidate commit
+explicitly (squash does not preserve its ancestry), repeats
 read-only availability verification without repairing the ready set, and
 requires exact complete-tree equality with that ready candidate (including
 release state and coverage pointers), rechecks the actual merge's parent/content
@@ -425,7 +425,7 @@ Content-tree filtering removes only release state and coverage pointers from a
 throwaway index loaded from the supplied candidate tree. Its index-only removal
 does not require those entries to match the publisher's older trusted checkout;
 the real index, working files and candidate payload remain unchanged.
-Final version aliases also publish assets under the deterministic
+Legacy version-1 publication uses the deterministic
 `<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
 manifest's content-addressed `artifact_id`, permitting independently attested
 rebuilds without replacing a prior asset. Outer ZIP members have fixed
@@ -447,14 +447,13 @@ Unrelated promotions must not move unchanged plugins' stable version tags,
 and a toolchain-only rebuild may add a new content-addressed asset to that
 same version. An unlanded alias requires the authenticated frozen-source
 provenance described below; an unauthenticated or different-payload tag is rejected.
-The composer accounts for versions reserved before an unsuccessful Main landing:
-it retains an occupied version only for an unchanged complete first-party source
-closure and advances incompatible reservations before artifact construction.
-See [occupied version allocation](pipelines/source-owned-release-identity.md#occupied-version-allocation).
-This does not relax the publisher's independent source-binding checks.
+Version-2 publication instead verifies the complete Dev-keyed set and never
+consults or creates those aliases. Composition keeps the ordinary landed-Main
+version baseline and pending changefiles, without a reservation scan. See
+[Main-derived plugin versions](pipelines/source-owned-release-identity.md#main-derived-plugin-versions).
 The release PAT and verification token are scoped to their readiness/final
 publisher shell steps, not exposed to checkout, Python setup or transfer-artifact
-actions. Final version publication remains its own job so a partial upload can be retried with
+actions. Publication/readback remains its own job so a failure can be retried with
 **Re-run failed jobs**, reusing the successful signer and exact merge
 outputs rather than repeating promotion. Such a failure does not erase the
 complete pre-merge candidate set, but the overall pipeline remains failed until

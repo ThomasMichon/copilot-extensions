@@ -85,6 +85,17 @@ The bounded repair follows the existing source-owned release identity. It does
 not introduce version reservation, move publication after merge, or enable the
 separately owned installer artifact-consumption lane.
 
+After comparison with the independently merged reservation repair, the
+operator explicitly selected:
+
+> Great. Switch to the source-owned model
+
+**Selection summary:** Remove the now-unneeded tag-reservation dependency
+introduced by #8110 while retaining ordinary version bumps from landed Main,
+the complete source-keyed artifact set and all current-source verification.
+This supersedes the reservation approach for this repair; it does not
+authorize live Main-control activation or installed rollout.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -171,6 +182,29 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-23 - Source-owned composition selected
+
+- While this repair was under review, #8110 independently merged a
+  tag-aware allocator and its regression cohort. The operator explicitly
+  selected the source-owned model after comparing that additional dependency
+  with Main-selected Dev-source artifacts.
+- Rebased onto current Dev, preserving the peer's unrelated control mirror,
+  effort state and other changes. Removed only the reservation hook/helper
+  and its twelve selector-specific admitted units. Existing composition
+  integration tests now require unlanded aliases to have no effect, with
+  normal version advancement after Main actually lands.
+- Source publication now only verifies its already prepared complete source
+  set: it cannot repair a missing set during a final binding. Legacy version-1
+  publication and historical alias-validator refusals remain intact.
+- The reconciled publication/source-identity selection passed all 98 cases;
+  eight real-Git composition cases passed, including unchanged Main versions
+  across abandoned aliases and normal advancement after Main lands. The
+  twelve historical alias-validator/source-set integration cases also passed.
+  Exact unit admission retained every unrelated identity and the unchanged
+  300-second bound; lint, module ceilings and documentation guards passed.
+- New-head review and required CI are pending. Live helper selection and
+  installed acceptance remain separate.
 
 ### 2026-10-23 - Coupled alias-regression migration
 

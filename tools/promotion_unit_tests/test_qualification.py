@@ -121,12 +121,12 @@ def test_source_owned_publication_uses_the_dev_set_not_plugin_version_aliases(
         return f"python-artifacts-{DEV}"
 
     def refuse_alias(*args, **kwargs):
-        pytest.fail("source-owned publication must not consult a plugin-version alias")
+        pytest.fail("source publication must neither consult version aliases nor repair the ready set")
 
     monkeypatch.setattr(publisher, "validate_commit_artifacts", validate)
     monkeypatch.setattr(publisher, "_tag_commit", refuse_alias)
     monkeypatch.setattr(publisher, "_gh", refuse_alias)
-    monkeypatch.setattr(readiness, "prepare_artifacts", source_set)
+    monkeypatch.setattr(readiness, "prepare_artifacts", refuse_alias)
     monkeypatch.setattr(readiness, "verify_ready_artifacts", source_set)
     arguments = dict(repository=REPOSITORY, dev_head=DEV, repo=tmp_path)
     if operation == "publish":

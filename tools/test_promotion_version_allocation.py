@@ -1,4 +1,4 @@
-"""Immutable version reservations survive an unsuccessful Main landing."""
+"""Main-derived versions are independent of unlanded plugin-version aliases."""
 from __future__ import annotations
 
 import json
@@ -11,7 +11,6 @@ import pytest
 import accumulate_bumps
 import promote_release as promotion
 from promotion_python_artifacts import PromotionArtifactError, validate_source_binding
-from promotion_version_allocation import next_reserved_version
 from test_promote_release import (
     _commit, _git, no_ambient_git_identity as _identity_fixture,
     repo as _repo_fixture,
@@ -41,17 +40,7 @@ def _runtime(repo):
     (source / "__init__.py").write_text('VALUE = "initial"\n', encoding="utf-8")
 
 
-@pytest.mark.parametrize("current,expected", [
-    ("1.2.3", "1.2.4-dev1"),
-    ("1.2.3-dev1", "1.2.3-dev2"),
-])
-def test_conflicting_reservation_always_advances_version_order(current, expected):
-    actual = next_reserved_version(current, accumulator=accumulate_bumps)
-    assert actual == expected
-    assert accumulate_bumps.version_key(actual) > accumulate_bumps.version_key(current)
-
-
-def test_changed_dependency_closure_cannot_reuse_an_unlanded_version_tag(repo):
+def test_unlanded_alias_does_not_change_main_derived_dependency_versions(repo):
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
@@ -85,13 +74,13 @@ def test_changed_dependency_closure_cannot_reuse_an_unlanded_version_tag(repo):
     _commit(repo, "extend the pending dependency closure")
     second = promotion.promote(**kwargs)
 
-    assert second["bumps"]["demo-plugin"] == ("0.1.0-dev1", "0.1.1-dev2")
+    assert second["bumps"]["demo-plugin"] == ("0.1.0-dev1", "0.1.1-dev1")
     assert _git(["rev-parse", tag], repo) == first["commit"]
     assert _git(["rev-parse", "main"], repo) == first["main_before"]
     manifest = json.loads(_git([
         "show", f"{second['commit']}:plugins/demo-plugin/plugin.json",
     ], repo))
-    assert manifest["version"] == "0.1.1-dev2"
+    assert manifest["version"] == "0.1.1-dev1"
     prior = promotion.add_scratch_worktree(first["commit"], repo=repo)
     try:
         with pytest.raises(PromotionArtifactError, match="source closure differs"):
@@ -104,20 +93,18 @@ def test_changed_dependency_closure_cannot_reuse_an_unlanded_version_tag(repo):
             }, prior)
     finally:
         promotion.remove_scratch_worktree(prior, repo=repo)
-    second_tag = "demo-plugin-v0.1.1-dev2"
-    _git(["tag", second_tag, second["commit"]], repo)
     assert promotion.promote(**kwargs)["commit"] == second["commit"]
     (library / "src/diagnostic_events/__init__.py").write_text(
         "EVENT = 2\n", encoding="utf-8",
     )
     _commit(repo, "change a reserved library payload")
     third = promotion.promote(**kwargs)
-    assert third["bumps"]["demo-plugin"] == ("0.1.0-dev1", "0.1.1-dev3")
-    assert _git(["rev-parse", second_tag], repo) == second["commit"]
+    assert third["bumps"]["demo-plugin"] == ("0.1.0-dev1", "0.1.1-dev1")
+    assert _git(["rev-parse", tag], repo) == first["commit"]
 
 
 @pytest.mark.parametrize("annotated", [False, True])
-def test_exact_unlanded_payload_reuses_its_reservation_on_retry(repo, annotated):
+def test_exact_source_retry_is_independent_of_unlanded_aliases(repo, annotated):
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
@@ -136,7 +123,7 @@ def test_exact_unlanded_payload_reuses_its_reservation_on_retry(repo, annotated)
 
 
 @pytest.mark.parametrize("change", ["code", "attributes"])
-def test_changed_payload_or_checkout_policy_advances_an_occupied_version(repo, change):
+def test_changed_source_or_checkout_policy_does_not_consume_a_version_before_main(repo, change):
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
@@ -154,10 +141,16 @@ def test_changed_payload_or_checkout_policy_advances_an_occupied_version(repo, c
     _change(repo, "second")
     _commit(repo, "different pending payload")
     second = promotion.promote(repo=repo, dev_ref="dev", main_ref="main")
-    assert second["bumps"]["demo-plugin"] == ("0.1.0-dev1", "0.1.1-dev2")
+    assert second["bumps"]["demo-plugin"] == ("0.1.0-dev1", "0.1.1-dev1")
+    assert promotion._tree_excluding_state(
+        _git(["rev-parse", first["commit"] + "^{tree}"], repo), repo=repo,
+    ) != promotion._tree_excluding_state(
+        _git(["rev-parse", second["commit"] + "^{tree}"], repo), repo=repo,
+    )
+    assert _git(["rev-parse", "demo-plugin-v0.1.1-dev1"], repo) == first["commit"]
 
 
-def test_noncommit_reservation_is_an_explicit_refusal_not_an_unused_version(repo):
+def test_noncommit_plugin_version_alias_does_not_block_source_composition(repo):
     _runtime(repo)
     _commit(repo, "initial runtime")
     _git(["branch", "-f", "dev"], repo)
@@ -167,8 +160,8 @@ def test_noncommit_reservation_is_an_explicit_refusal_not_an_unused_version(repo
     blob = _git(["rev-parse", "HEAD:README.md"], repo)
     _git(["tag", "demo-plugin-v0.1.1-dev1", blob], repo)
     before = _git(["status", "--porcelain"], repo)
-    with pytest.raises(promotion.PromotionError, match="cannot allocate immutable versions"):
-        promotion.promote(repo=repo, dev_ref="dev", main_ref="main")
+    result = promotion.promote(repo=repo, dev_ref="dev", main_ref="main")
+    assert result["bumps"]["demo-plugin"] == ("0.1.0-dev1", "0.1.1-dev1")
     assert _git(["rev-parse", "demo-plugin-v0.1.1-dev1"], repo) == blob
     assert _git(["status", "--porcelain"], repo) == before
     command = subprocess.run(
@@ -177,8 +170,7 @@ def test_noncommit_reservation_is_an_explicit_refusal_not_an_unused_version(repo
         capture_output=True, text=True, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    assert command.returncode == 1
-    assert "cannot allocate immutable versions" in command.stderr
+    assert command.returncode == 0, command.stderr
     assert "Traceback" not in command.stderr
 
 
@@ -197,3 +189,26 @@ def test_unrelated_source_preserves_an_unchanged_shipped_plugin_version(repo):
     assert json.loads(_git([
         "show", f"{result['commit']}:plugins/demo-plugin/plugin.json",
     ], repo))["version"] == "0.1.0-dev1"
+
+
+def test_landed_main_advances_the_next_changed_plugin_version(repo):
+    _runtime(repo)
+    _commit(repo, "initial runtime")
+    _git(["branch", "-f", "dev"], repo)
+    _git(["checkout", "-q", "dev"], repo)
+    _change(repo, "first")
+    _commit(repo, "first pending source")
+    first = promotion.promote(repo=repo, dev_ref="dev", main_ref="main")
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+    (repo / "plugins/demo-plugin/src/demo/__init__.py").write_text(
+        'VALUE = "next released source"\n', encoding="utf-8",
+    )
+    _change(repo, "second")
+    _commit(repo, "second pending source")
+
+    second = promotion.promote(repo=repo, dev_ref="dev", main_ref="main")
+
+    old, new = second["bumps"]["demo-plugin"]
+    assert (old, new) == ("0.1.1-dev1", "0.1.2-dev1")
+    assert accumulate_bumps.version_key(new) > accumulate_bumps.version_key(old)
+    assert _git(["rev-parse", "main"], repo) == first["commit"]

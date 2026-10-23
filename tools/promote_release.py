@@ -350,8 +350,6 @@ def consume_pending_changes(
                 "escaping pointer would otherwise ship as an unexpanded stub "
                 "in the main snapshot:\n  " + "\n  ".join(unresolved)
             )
-        from promotion_version_allocation import apply_version_reservations
-        apply_version_reservations(scratch, repo, acc, computed, applied, PromotionError)
         projections_synced = _sync_instruction_projections(scratch, trusted_source=trusted_source)
     finally:
         if previous_changefile_mod is not None:

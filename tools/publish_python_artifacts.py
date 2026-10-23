@@ -251,7 +251,7 @@ def publish_artifacts(
     candidate_commit: str | None = None,
     admission_cache: dict[tuple[str, str], dict] | None = None,
 ) -> None:
-    """Publish only after verifying the actual merged candidate's exact composition."""
+    """Verify the source-owned set, or publish legacy version-1 assets."""
     if candidate_commit is not None:
         import promote_release as promotion
 
@@ -265,9 +265,9 @@ def publish_artifacts(
         directory, commit=merged_commit, dev_head=dev_head, repo=repo,
     )
     if index["schema_version"] == 2:
-        from promotion_artifact_readiness import prepare_artifacts
+        from promotion_artifact_readiness import verify_ready_artifacts
 
-        prepare_artifacts(
+        verify_ready_artifacts(
             directory, repository=repository, candidate_commit=merged_commit,
             dev_head=dev_head, repo=repo,
         )

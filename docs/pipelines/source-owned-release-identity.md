@@ -48,36 +48,20 @@ selects a release for install or update: an unmerged candidate's artifact set
 may exist without becoming the selected source. This publication contract does
 not enable the separately owned installer artifact-consumption lane.
 
-### Occupied version allocation
+### Main-derived plugin versions
 
-Publication can reserve a `<plugin>-v<version>` alias before its candidate lands
-on Main. A later source must not allocate that version from unchanged Main
-alone: accumulating another patch changefile does not by itself advance the
-single highest-bump result.
+The composer seeds versions from landed Main and applies the ordinary pending
+changefiles. Unlanded plugin-version aliases do not alter that computation or
+require a scan of historical reservations. Different unlanded Dev sources can
+therefore retain the same next plugin version while their Dev-keyed artifact
+sets distinguish their exact content. After Main advances, a later changed
+plugin receives the normal next version so update detection still works.
 
-After materialization, the composer snapshots the checkout's complete version
-tag inventory. An occupied Python-plugin version is reused only when the
-complete plugin and recursively discovered first-party source roots retain the
-same Git blobs, paths and modes, including inherited `.gitattributes`.
-This conservative pre-build comparison may allocate a new version when checkout
-policy changes; it never treats changed source as equivalent. Unrelated
-plugin/repository content does not invalidate an unchanged closure.
-
-An incompatible reservation advances the existing prerelease counter until a
-compatible or unused version is found. An occupied final release advances to
-the next patch prerelease rather than regressing below that final release.
-The existing accumulator writes every aligned version surface and records the
-original Main baseline in the bump summary. Tags are never moved or deleted.
-Malformed or unreadable reservations fail explicitly.
-
-Every composing release job requires the existing full-history/tag checkout.
-The existing single-flight publisher prevents another release generation from
-reserving versions between composition stages. A retry that has published its
-own aliases recomputes the same versions for unchanged payloads; immutable
-source-index reuse still refuses any conflicting composition. Allocation is
-not authentication or publication authority: prior-source attestation,
-qualification, exact manifest closure/hash validation and raw-byte readback
-remain independent mandatory gates.
+Publication verifies the already prepared source set without creating or
+repairing assets. Missing or invalid current-source evidence still refuses
+publication; unrelated aliases cannot substitute for it. Existing tags are
+neither moved nor deleted. Exact source-index reuse, qualification, signatures,
+source closure and raw-byte readback remain mandatory.
 
 ## Qualification before Main publication
 
