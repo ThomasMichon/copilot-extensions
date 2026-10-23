@@ -8,6 +8,7 @@ import time
 import pytest
 
 from agent_bridge import agent_registry_relay as relay
+from agent_bridge import __main__ as cli
 from agent_bridge import provider_process, singleton_anchor
 from agent_bridge.provider_process import run_captured
 
@@ -148,3 +149,47 @@ def test_singleton_query_timeout_does_not_wait_for_wrapper_descendants(tmp_path,
     assert ready.is_file(), "fixture must spawn the pipe-holding descendant"
     assert elapsed < 6, f"two-second registry deadline took {elapsed:.2f}s"
     assert "singleton repo query failed" in caplog.text
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows caller lookup pipe-drain regression")
+def test_caller_lookup_timeout_owns_pipe_holding_descendants(tmp_path, monkeypatch, caplog):
+    script = tmp_path / "caller_registry.py"
+    ready = tmp_path / "caller_spawned"
+    script.write_text(
+        "import pathlib, subprocess, sys, time\n"
+        "assert sys.argv[1:]==['get','worktree-dir']\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(60)'], creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        f"pathlib.Path({str(ready)!r}).write_text(str(child.pid))\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    wrapper = tmp_path / "caller_registry.cmd"
+    wrapper.write_text(f'@echo off\n"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+    monkeypatch.setattr(cli.shutil, "which", lambda _: str(wrapper))
+    spawn = provider_process.spawn_sync_in_kill_on_close_job
+    started = []
+
+    def spawn_ready_lookup(argv, **kwargs):
+        assert kwargs["require_job"] is True
+        assert kwargs["allow_breakaway"] is False
+        process, job = spawn(argv, **kwargs)
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.is_file():
+                assert process.poll() is None, "lookup exited before spawning its descendant"
+                assert time.monotonic() < deadline, "lookup fixture did not become ready"
+                time.sleep(0.01)
+        except BaseException:
+            if job is not None:
+                job.close()
+            process.wait(timeout=5)
+            raise
+        started.append(time.monotonic())
+        return process, job
+
+    monkeypatch.setattr(provider_process, "spawn_sync_in_kill_on_close_job", spawn_ready_lookup)
+    assert cli._worktrees_get("worktree-dir") is None
+    elapsed = time.monotonic() - started[0]
+    assert elapsed < 12, f"eight-second caller deadline took {elapsed:.2f}s"
+    assert "Worktree lookup failed (worktree-dir): TimeoutExpired" in caplog.text

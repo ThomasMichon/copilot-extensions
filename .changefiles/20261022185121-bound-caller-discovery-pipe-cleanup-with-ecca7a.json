@@ -1,0 +1,9 @@
+{
+  "comment": "Bound caller-discovery pipe cleanup within the existing lookup budget",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

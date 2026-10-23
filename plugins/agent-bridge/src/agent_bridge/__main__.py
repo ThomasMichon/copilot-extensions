@@ -177,13 +177,19 @@ def _worktrees_get(key: str) -> str | None:
     exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow agent-worktrees-management
     if not exe:
         return None
+    from .provider_process import run_captured
+
     try:
-        r = subprocess.run(
-            [exe, "get", key], capture_output=True, text=True, timeout=8, **no_window_kwargs(),
+        r = run_captured([exe, "get", key], timeout=8)
+    except (OSError, subprocess.SubprocessError, UnicodeError, RuntimeError) as exc:
+        logging.getLogger(__name__).warning(
+            "Worktree lookup failed (%s): %s", key, type(exc).__name__,
         )
-    except Exception:
         return None
     if r.returncode != 0:
+        logging.getLogger(__name__).warning(
+            "Worktree lookup failed (%s): exit %s", key, r.returncode,
+        )
         return None
     val = (r.stdout or "").strip()
     return val or None

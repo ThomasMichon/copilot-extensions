@@ -103,3 +103,22 @@ continuity and uncertain-outcome/idempotency semantics across reconnects.
 SSH remains an independently supported transport and may serve bootstrap or
 recovery; optional Gateway adoption must not become a hidden standalone
 dependency or a second session ledger or supervisor.
+
+## Caller discovery before startup
+
+Before submitting or resuming a session, the CLI may query Worktrees for its
+caller identity. This optional lookup retains an eight-second command deadline
+and owns the finite subprocess tree, including Windows wrapper descendants that
+can otherwise keep captured pipes open after the wrapper times out.
+
+`Worktree lookup failed (<key>): <exception-type>` or `exit <code>` reports
+bounded lookup failure without dumping child output. The existing unavailable
+caller fallback is unchanged. This message is not a failed ACP launch or proof
+that a prompt was accepted. Classify the later operation independently.
+Bounding this metadata lookup does not extend a calling application's startup
+deadline or implement progress-based waiting. The eight-second value is an
+unchanged legacy lookup budget, not the shared communication/process timeout
+policy. Startup callers still need independent clocks and incremental nested
+progress under the
+[shared contract](../../../docs/patterns/progress-and-timeouts.md); repairing
+pipe cleanup alone does not qualify that adoption.
