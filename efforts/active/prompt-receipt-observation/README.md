@@ -220,3 +220,21 @@ new authority or ownership behavior requires a separate proposal.
   PRs #5694, #6928 and #7895: no other open PR touches the receipt backend's
   `activity.py`, `handoff_trace.py` or new receipt module. The known process-custody
   and launch-maintenance owners remain untouched.
+
+### Bounded ready-invocation discovery
+
+- Completed the requested read-only continuation, documented in
+  [the custody packet's ready-descriptor section](custody-boundary.md#bounded-ready-descriptor-discovery).
+  The existing catalog publishes a shim, the binding publishes ownership/root,
+  and readiness/completion records do not provide an active interpreter invocation.
+- No supported pre-resolved invocation was found in the inspected owning
+  startup/config/catalog contracts. Consumption would require a new owner handoff;
+  no speculative consumer adapter or native primitive was implemented.
+- The smallest proposed handoff includes source/generation-bound exact argv and
+  isolated environment plus helper-launch custody. Supplying a Python path alone
+  must not shift the leak from the command to the adapter that invokes it.
+- Backend commit `851afb2e4` and its 48-backend/7-targeted-consumer test packet are
+  unchanged. No additional test suite or stress benchmark was run.
+- Prior negative controls terminated their recorded test-child identities in
+  cleanup and removed their fixtures; this continuation launched no controls or
+  background helpers. Source worktree is retained for the same owning task.
