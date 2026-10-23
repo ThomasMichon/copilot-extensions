@@ -20,7 +20,7 @@ def _create_config(tmp_path: Path) -> cfg.Config:
     config = cfg.Config(
         srcroot=str(tmp_path),
         machine="test",
-        platform="windows",
+        platform=cfg.detect_platform(),
         repo_name="demo-repo",
         repos={
             "demo-repo": cfg.RepoConfig(

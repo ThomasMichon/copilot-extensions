@@ -118,6 +118,7 @@ def _assert_profile_launch_effects(
 
 @pytest.fixture
 def assignment_home(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     assignment._DIAGNOSTIC_KEYS.clear()
     cfg.set_active_project("test-project")
     project = tmp_path / ".test-project"

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from .config import Config
 
 def _load_state_root_authority(
     name: str, anchor: str, platform_name: str, remote_name: str | None,
@@ -241,8 +244,8 @@ def load_project_authority_config(
     return canonicalize_legacy_config(config)
 
 
-def require_registration_record_mutation(record) -> None:
-    """Fence one session-registration record without full project policy."""
+def registration_record_config(record) -> Config:
+    """Return receiving-side configuration after fencing registration."""
     from . import config as cfg
     from .execution_spaces import ExecutionSpaceError, require_record_mutation
 
@@ -253,6 +256,7 @@ def require_registration_record_mutation(record) -> None:
                 "requested project is not registered in receiving-side configuration"
             )
         require_record_mutation(record, config)
+        return config
     except (
         OSError, ValueError, KeyError, TypeError,
         cfg.yaml.YAMLError,
@@ -260,3 +264,8 @@ def require_registration_record_mutation(record) -> None:
         raise ExecutionSpaceError(
             f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"
         ) from exc
+
+
+def require_registration_record_mutation(record) -> None:
+    """Fence one session-registration record without full project policy."""
+    registration_record_config(record)

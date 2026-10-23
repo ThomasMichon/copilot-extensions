@@ -187,6 +187,7 @@ def test_resolve_resume_plan_project_matches_repo_name_not_ambient_global(
     config = _config(tmp_path)
     import dataclasses
     config = dataclasses.replace(config, auto_fast_forward=False)
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: config.platform)
     monkeypatch.setattr(m.cfg, "active_project", lambda: "some-other-stale-project")
 
     worktree_path = tmp_path / "worktrees" / "wt-1"

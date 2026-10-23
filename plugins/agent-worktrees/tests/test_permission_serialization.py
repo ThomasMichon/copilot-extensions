@@ -362,3 +362,32 @@ def test_strict_trust_timeout_raises_and_never_writes(tmp_path: Path) -> None:
             _stop(process)
     assert config.read_text() == '{"other": true}'
     assert not prefix.with_suffix(".loaded").exists()
+
+
+def test_confirmed_removal_while_ensure_waits_cannot_restore_trust(tmp_path, monkeypatch):
+    home = tmp_path / ".copilot"
+    home.mkdir()
+    monkeypatch.setattr(permissions, "_copilot_dir", lambda: home)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    config = home / "config.json"
+    permissions.ensure_trusted_folder(str(checkout))
+    prefix = tmp_path / "late-ensure"
+    with tracking._RecordLock(config, require_sidecar=True):
+        process = _start(home, prefix, "ensure_trusted_folder", [str(checkout)], timeout=6)
+        try:
+            _wait_for(prefix.with_suffix(".contending"), process)
+            checkout.rmdir()
+            assert permissions.remove_trusted_folder(str(checkout))
+        except BaseException:
+            _stop(process)
+            raise
+    try:
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode != 0, stdout
+        assert "FolderTrustError" in stderr
+        assert "checkout disappeared" in stderr
+    finally:
+        _stop(process)
+    assert json.loads(config.read_text())["trustedFolders"] == []
+    assert not prefix.with_suffix(".loaded").exists()

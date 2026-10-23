@@ -318,6 +318,7 @@ class TestResumeWiring:
     def _patched_resume(self, tmp_path: Path, monkeypatch, sample_record, *, dry_run: bool):
 
         config = self._config(tmp_path)
+        monkeypatch.setattr(m.cfg, "detect_platform", lambda: config.platform)
         worktree_path = tmp_path / "worktrees" / "wt-1"
         worktree_path.mkdir(parents=True)
         record = replace(

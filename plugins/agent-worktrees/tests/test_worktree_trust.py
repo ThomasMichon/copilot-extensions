@@ -127,7 +127,7 @@ def test_refused_receiving_authority_does_not_trust(native_checkout, sample_reco
     def refuse(record):
         raise ExecutionSpaceError("different execution space")
 
-    monkeypatch.setattr(config_authority, "require_registration_record_mutation", refuse)
+    monkeypatch.setattr(config_authority, "registration_record_config", refuse)
     with pytest.raises(ExecutionSpaceError, match="different execution space"):
         worktree_trust.ensure_record_trusted(record)
     assert not home.exists()
@@ -177,10 +177,13 @@ def test_registered_entry_repairs_trust_after_admission(
     broken_config, capfd,
 ):
     import argparse
+    from agent_worktrees import config as cfg
 
     checkout, home = native_checkout
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     record = replace(
         sample_record, worktree_path=str(checkout), kind="session", status="active", sessions=[],
+        machine="test",
     )
     tracking.save_record(record, tmp_tracking_dir / f"{record.worktree_id}.yaml")
     if broken_config:
@@ -227,3 +230,46 @@ def test_rejected_registration_does_not_trust(
         cwd=str(checkout), stdin=False, pane=None, pid=None,
     )) == 1
     assert not home.exists()
+
+
+@pytest.mark.parametrize("mismatch", ["machine", "platform"])
+def test_legacy_record_without_topology_cannot_trust_foreign_checkout(
+    native_checkout, sample_record, tmp_path, mismatch,
+):
+    from agent_worktrees import config as cfg
+
+    checkout, home = native_checkout
+    actual = cfg.detect_platform()
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="local-host", platform=actual, repo_name="test-repo",
+        repos={"test-repo": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
+    )
+    record = replace(
+        sample_record, worktree_path=str(checkout),
+        machine="foreign-host" if mismatch == "machine" else config.machine,
+        platform=actual if mismatch == "machine" else ("windows" if actual != "windows" else "linux"),
+    )
+    assert not (tmp_path / "machines.yaml").exists()
+    with pytest.raises(ExecutionSpaceError, match="local execution|native execution platform"):
+        worktree_trust.ensure_record_trusted(record, config)
+    assert not home.exists()
+
+
+def test_declared_legacy_alias_remains_local(
+    native_checkout, sample_record, tmp_path,
+):
+    from agent_worktrees import config as cfg
+
+    checkout, home = native_checkout
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n  local-space:\n    alias: historical-alias\n", encoding="utf-8",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="local-space", platform=cfg.detect_platform(), repo_name="test-repo",
+        repos={"test-repo": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
+    )
+    record = replace(
+        sample_record, worktree_path=str(checkout), machine="historical-alias", platform=config.platform,
+    )
+    assert worktree_trust.ensure_record_trusted(record, config)
+    assert json.loads((home / "config.json").read_text())["trustedFolders"] == [str(checkout.resolve())]

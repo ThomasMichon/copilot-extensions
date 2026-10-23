@@ -334,6 +334,9 @@ def _add_trusted_folder(config_file: Path, worktree_path: str) -> bool:
 @_serialized(lambda: _config_path(), strict=True)
 def _ensure_trusted_folder(worktree_path: str) -> bool:
     try:
+        root = Path(worktree_path)
+        if not root.is_dir() or root.is_symlink():
+            raise ValueError("native checkout disappeared before folder trust could be established")
         return _add_trusted_folder(_config_path(), worktree_path)
     except (OSError, ValueError, TypeError) as exc:
         raise FolderTrustError(f"Could not ensure Copilot folder trust: {exc}") from exc

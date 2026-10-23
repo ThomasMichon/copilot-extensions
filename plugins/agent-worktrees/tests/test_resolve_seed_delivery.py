@@ -32,6 +32,9 @@ from agent_worktrees.sessions import LiveVerdict
 
 def _stub_launch_plumbing(monkeypatch, config: cfg.Config) -> None:
     monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: config.platform)
+    # Seed-routing fixtures use synthetic checkout paths; native trust has its own suite.
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *a: False)
     monkeypatch.setattr(
         m, "_preflight_launch",
         lambda *_a, **_k: SimpleNamespace(error=None, config_root_path=None),

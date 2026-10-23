@@ -27,7 +27,7 @@ def synthetic_folder_trust(monkeypatch):
 
     Native entry/trust integration is exercised by test_worktree_trust.py.
     """
-    monkeypatch.setattr("agent_worktrees.permissions.ensure_trusted_folder", lambda path: False)
+    monkeypatch.setattr("agent_worktrees.worktree_trust.ensure_record_trusted", lambda record: False)
 
 
 def _save_record(tracking_dir: Path, wt_id: str, wt_path: str) -> None:
