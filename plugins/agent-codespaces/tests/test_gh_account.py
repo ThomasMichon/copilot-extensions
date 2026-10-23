@@ -49,6 +49,17 @@ def test_account_for_repo_none_without_agent_worktrees():
         assert gh_account.account_for_repo("owner/x") is None
 
 
+def test_explicit_individual_lookup_cannot_fall_back_on_undecodable_output(monkeypatch):
+    monkeypatch.setattr(gh_account.worktrees, "explicit_context", lambda: True)
+    monkeypatch.setattr(gh_account.worktrees, "validate_context", lambda: None)
+    monkeypatch.setattr(
+        gh_account.worktrees, "run",
+        MagicMock(side_effect=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid output")),
+    )
+    with pytest.raises(gh_account.worktrees.ContextRefused, match="lookup is unavailable"):
+        gh_account.env_for_repo("example/repo")
+
+
 # --- token + env ------------------------------------------------------------
 
 

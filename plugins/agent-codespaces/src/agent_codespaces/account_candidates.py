@@ -15,7 +15,7 @@ def candidates(
     source precedence regardless of which metadata query finishes first.
     """
     from . import account_binding, gh_account, picker_auth
-    from .config import load_merged_config
+    from .config import load_merged_config, scan_config_providers
 
     providers = picker_auth.authorized_configs()
     bound = account_binding.bound_accounts_or_raise()
@@ -31,7 +31,10 @@ def candidates(
                 on_account(account)
 
     def configured_accounts(inventory: Callable[[], gh_account.AccountInventory]) -> tuple[str, ...]:
-        options = {"concurrent_roots": True} if concurrent else {}
+        options = (
+            {"provider_reports": scan_config_providers(concurrent_roots=True)}
+            if concurrent else {}
+        )
         repos = load_merged_config(include_cwd=False, **options).repos
         routing = inventory()
         return tuple(

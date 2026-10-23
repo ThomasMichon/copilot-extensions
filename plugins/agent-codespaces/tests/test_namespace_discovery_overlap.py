@@ -23,6 +23,7 @@ def account_sources(monkeypatch):
         config, "load_merged_config",
         lambda **_: SimpleNamespace(repos={"example/repo": {}}),
     )
+    monkeypatch.setattr(config, "scan_config_providers", lambda **_: object())
 
 
 def space(name, account):

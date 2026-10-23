@@ -149,6 +149,27 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-22 - Existing configuration seam and explicit individual refusal
+
+- Source CI refused four additional lines in the grandfathered configuration
+  module. Removed the new loader parameter and reused its existing
+  `provider_reports` seam to supply the opt-in activation scan. The unchanged
+  module ceiling now passes; no baseline was widened or assertion removed.
+- Preserved explicit-context decoding refusal for individual account lookups
+  too. They raise `ContextRefused`, rather than returning no preference and
+  permitting ambient credentials. A regression exercises `env_for_repo`.
+- The focused consumer/config/authentication run passed 310 cases with six
+  existing skips. Requalification through the actual default-budget Bridge
+  consumer completed five fresh scans in 6.078, 5.906, 5.985, 5.641 and 5.844
+  seconds, each finding the target and serving five warm reads. The malformed
+  map remained incomplete in 7.078 seconds; exact restoration recovered in
+  6.218 seconds. Native and sampling holders settled.
+- The existing periodic Linux inspection is pinned to candidate
+  `81065d74a03477c0e7e91ce7775c94d5f514d909` (run `39881444618`).
+  Its CodeSpaces suite passed, but several other jobs failed and the run was
+  still active when inspected. Their logs and the exact exercised coverage
+  remain owed; this is not an all-green Linux qualification claim.
+
 ### 2026-10-22 - Namespace-only overlap and bounded owner compatibility
 
 - The next review summary identified interpreter-shutdown retention in the

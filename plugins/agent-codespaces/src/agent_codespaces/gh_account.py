@@ -302,8 +302,9 @@ def account_inventory() -> AccountInventory:
 
 
 def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str] | None:
+    explicit = worktrees.explicit_context()
     try:
-        if worktrees.explicit_context():
+        if explicit:
             return worktrees.run(*args, timeout=10)
         aw = _agent_worktrees_bin()
         if not aw:
@@ -316,6 +317,10 @@ def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str
         if strict:
             raise AccountInventoryError(
                 "agent-worktrees account resolution snapshot is unavailable",
+            ) from exc
+        if explicit:
+            raise worktrees.ContextRefused(
+                "Same-cell worktrees account lookup is unavailable",
             ) from exc
         return None
 

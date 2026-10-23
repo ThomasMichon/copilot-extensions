@@ -2380,7 +2380,6 @@ def load_merged_config(
     include_cwd: bool = True,
     *,
     provider_reports: ConfigProviderReports | None = None,
-    concurrent_roots: bool = False,
 ) -> CodespacesConfig:
     """Load and merge CodeSpace config from all adopted repos.
 
@@ -2432,10 +2431,7 @@ def load_merged_config(
         if raw is None:
             continue
         sources.append((raw, config_dir, repo_root))
-    provider_reports = provider_reports or (
-        scan_config_providers(concurrent_roots=True) if concurrent_roots
-        else scan_config_providers()
-    )
+    provider_reports = provider_reports or scan_config_providers()
     _warn_active_plugin_config_findings(provider_reports.active_plugins)
     _warn_config_dropin_findings(provider_reports.config_d)
     for contribution in provider_reports.active_configs:
