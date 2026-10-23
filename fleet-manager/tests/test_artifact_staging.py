@@ -20,7 +20,7 @@ import fleet_manager.artifact_staging as staging
 import fleet_manager.staging_cleanup as cleanup
 from fleet_manager.planning import PlanError, canonical
 from test_release_auth import artifact_fixture
-from test_client_distribution import run, wheel as shared_wheel  # noqa: F401 - pytest fixture
+from test_client_distribution import run
 
 
 @pytest.fixture
@@ -754,7 +754,7 @@ def test_descriptor_is_closed_when_stream_construction_is_interrupted(
 def test_actual_installed_authenticated_artifact_staging_has_no_execution_or_network(
     tmp_path, request,
 ):
-    artifact, _ = request.getfixturevalue("shared_wheel")
+    artifact, _ = request.getfixturevalue("wheel")
     uv = shutil.which("uv")
     assert uv is not None
     target = tmp_path / "installed-sdk"
@@ -816,7 +816,7 @@ print(json.dumps(result))
 
 
 def test_fresh_installed_console_admission_and_durable_reopen_without_hosting(tmp_path, request):
-    artifact, _ = request.getfixturevalue("shared_wheel")
+    artifact, _ = request.getfixturevalue("wheel")
     uv = shutil.which("uv")
     assert uv
     target = tmp_path / "installed-client"

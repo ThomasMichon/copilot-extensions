@@ -94,6 +94,55 @@ the specific already-merged findings below.
 
 ## Named retained batches and explicit blocked owners
 
+### Subsequent admission: F-WHEEL and its encountered Gateway prerequisite
+
+The F-WHEEL candidate admits S001/S020/S021/S022 (`cbba7d8b52ee`,
+`141138e09b0e`, `7bcaefad4600`, `9918c6de8ef8`). The original wheel fixture
+still exists at module scope in current Dev; the proposed conftest was never
+landed, not missing immutable evidence. Move the current fixture to session
+scope, retain the real build and assert unchanged wheel bytes at teardown.
+Each xdist worker owns its own artifact; installations and durable client
+state remain independent per test. Update both current artifact-staging
+consumers and the subsequently added role-plan distribution consumer to use
+the shared fixture. All other fixture imports now use conftest discovery too,
+preserving their non-fixture helper imports. The destructive installed assembly
+proof builds its own private artifact and deletes only that private source;
+it additionally verifies the session artifact and library survived. Existing
+source-removal assertions remain intact. No generic build helper, dependency
+declaration, installed-client assertion or allocation fixture changes.
+
+Complete consumer validation encountered a separate required-input omission:
+#8196 added `credential_references.py` and its Gateway worker consumer without
+adding that module to the pinned Gateway proof's closed source list. The real
+pinned-context wheel test failed on the missing archive member. This candidate
+adds only that explicit module to the list; unknown sources and linked blobs
+still refuse. The existing committed-module equality, source-refusal and
+materialization tests cover the list without relaxing admission. This is a
+directly encountered prerequisite, not a new F-ALLOC or installer extraction.
+
+Validation first refused an unsuitable Worktrees environment lacking Fleet's
+installed metadata and setuptools. The dedicated Fleet environment was then
+prepared through the existing leased standalone preparation and seasoned
+dependency helper. The existing native OpenSSL was exposed only in the owned
+test child's PATH; no host tool, PATH or runtime was changed. The complete
+four consumer modules plus five existing portable Gateway source cases passed
+89 tests with six unchanged platform/privilege skips, native Windows, exactly
+two workers. Complete Fleet collection also passed without errors; collection
+and execution together took 90.00 seconds including preparation and cleanup.
+The initial
+properly prepared run reproduced the pinned wheel omission before correction.
+All item/native deadlines, test selections and resource caps remain unchanged.
+The real wheel/sdist builds, isolated installs, RECORD/dependency assertions,
+client operations and fixture teardown ran; no mock substitutes for them.
+
+These fresh temporary builds/installs exercise the lightweight clean consumer
+boundary. No Docker/container proof or live fleet qualification is claimed;
+that proof runner is Linux-owned, while the changed input closure is exercised
+by real local pinned materialization and wheel construction. Existing public
+usage documentation remains accurate. A scoped Fleet changefile, review and
+required CI gate publication; the broader ledger and parent timing acceptance
+remain open.
+
 These are proposed extraction boundaries, not one implementation PR.
 All require the reviewed plan, this census, a fresh Dev baseline, scoped
 documentation/changefile where applicable, current-head review and required
