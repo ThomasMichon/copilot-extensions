@@ -3,12 +3,14 @@
 - **Subject:** A reusable, live-configured Gateway for declared services and outbound role channels
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-23
 
 ## Purpose & Intent
 
-An owning repository declares the services, namespaces, capabilities and trust
-relationships its fleet should offer. The Gateway reconciles that desired
+An adopted harness and its paired private knowledge/configuration repository
+declare the services, namespaces, capabilities and trust relationships its fleet
+should offer. Reusable templates come from the harness; the paired repository
+selects what should actually exist. The Gateway reconciles that desired
 surface while service instances independently deploy and connect outbound.
 Routine service churn changes live configuration and observed availability, not
 the Gateway executable or deployment.
@@ -25,7 +27,8 @@ grant implied by a connected machine.
 ## Concepts & Components
 
 - **Desired manifest:** owner-controlled service slots, API and UX namespaces,
-  role configuration, capability restrictions and credential-source references.
+  role configuration, capability restrictions and credential-source references,
+  resolved from the adopted repository pair rather than a private Gateway fork.
 - **Expected role slot:** a reserved service responsibility with explicit
   eligible identities, rather than an endpoint invented by a connecting service.
 - **Outbound connector:** a service-owned authenticated channel that supplies
@@ -37,6 +40,28 @@ grant implied by a connected machine.
   compose their own supported lifecycle and trust boundaries.
 
 ## Features
+
+### paired-source-refresh-and-confirmed-deployment
+
+The Gateway retains the adopted harness/knowledge repository pairing and
+refreshes it on a schedule or on an authorized fleet-manager driver's request.
+An authorized driver can also deliver updates with the same reviewed source
+identity; a pushed update is not a separate persistent configuration authority.
+Repository webhooks can drive the same refresh contract without becoming a
+separate configuration owner. Refresh exposes the selected source revisions,
+desired/observed delta and necessary deployment steps through subscriptions.
+
+Initially the Gateway and selected deployment manager prepare those steps and
+wait for confirmation from an authorized user or agent through fleet-manager.
+Neither a merged configuration nor a refresh notification grants activation.
+Confirmation applies to the actual prepared plan; changed inputs require a new
+decision. Invalid, stale or unapproved candidates preserve the serving state.
+Existing credential expiry/revocation and admitted stop controls remain
+effective while a deployment proposal awaits confirmation.
+
+Fleet-manager may also request temporary/preview or diagnostic adjustments
+through admitted operations. These remain distinct from persistent configuration,
+which changes through source pull requests and ordinary propagation.
 
 ### repository-declared-service-surface
 
@@ -80,7 +105,8 @@ separate permissions. No terminal capability is inferred from service routing.
 ### nearly-all-configuration-is-live
 
 Adding, replacing or removing a service, changing a valid route or role policy,
-and rotating trust can reconcile without restarting or redeploying the Gateway.
+and rotating trust can reconcile without restarting or redeploying the Gateway,
+after the applicable deployment confirmation and admission gates.
 Candidate validation precedes coherent publication; invalid, conflicting,
 untrusted or stale revisions preserve the last valid serving configuration.
 Applied revision and per-role outcomes remain observable. Changes that genuinely
@@ -139,6 +165,15 @@ access, source freshness and coverage without requiring per-client source
 probes. A connected role, ready route or retained observation cannot establish
 the readiness of another capability, authorize an operation or prove accepted
 work has stopped.
+
+### repurpose-admitted-capacity-not-create-machines
+
+Gateway reconciliation can repurpose existing admitted hosts and use the
+selected container/deployment manager within that capacity. Whole-machine
+creation and removal remain exclusively with fleet-manager's operator-side
+management path and its provider owner. Gateway may surface a capacity request,
+not turn it into provider administration or ask a role connector to evade this
+boundary.
 
 ## Non-Goals / Boundaries
 

@@ -53,6 +53,21 @@ Fleet:      thin clients -> authenticated encrypted API -> Gateway core
 | Credential provider | Issuance, identity/audience, expiry/revocation and custody | Generic event/task secret storage |
 | Installer/deployment manager | One declared application lifecycle; external manager retains container placement | Competing updater, arbitrary apply payload or authority from a healthy container |
 
+The [interactive bootstrap and repository-pair amendment](bootstrap-and-authority.md)
+refines this table: ordinary thin clients remain lightweight, while explicit
+operator-side fleet-manager setup composes the installed heartbeat/authentication
+pump, selected Gateway host, deployment manager and mesh relay. Only that
+operator-side management path may create/remove whole machines through provider
+owners. The Gateway can repurpose admitted capacity, not expand or delete it.
+
+Persistent desired configuration comes from the adopted harness plus its paired
+private knowledge/configuration repository. Gateway refreshes its paired
+checkouts and prepares the delta; initial deployment waits for exact-plan
+confirmation from a subscribed fleet-manager instance. Source PR approval and
+deployment confirmation are separate. Temporary debug/preview controls and an
+adopted slow-sync recovery channel never become alternative persistent policy
+writers or replace current authentication/revocation evidence.
+
 Default to one logical Gateway authority per explicitly configured domain.
 Standalone commonly scopes that domain to an OS user. Fleet clients do not each
 create a competing coordinator. Namespaces are not hostile-tenant isolation;
