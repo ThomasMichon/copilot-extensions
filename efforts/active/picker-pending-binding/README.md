@@ -186,3 +186,16 @@ contract is introduced.
 - Final targeted startup and adjacent mailbox/local-source cohort: **255 passed**.
   Touched-file identifier scanning also exposed legacy fixture names; those test
   values were made generic without changing the roster assertions.
+- A subsequent review identified old in-flight scalar reads blocking rebinding
+  and failed reads surviving invalidation. Both were reproduced before repair.
+  Cache ownership is now binding-scoped: rebinding replaces the state without
+  waiting on an old reader, scalar and derived-file memoization keys retain
+  binding/epoch identity, accepted values survive reload, and negative lookup
+  results retry in the next reload epoch. Gated old-reader, late-file-result and
+  timeout/recovery regressions pass; the complete targeted cohort is **258 passed**.
+- Read-only integration inspection after #7974 merged found **no optional scalar
+  fields** in `cmd_picker_bootstrap` at Dev `41913ba4c176c3f2e17ad7c375f9406ac6feba30`.
+  Its targeted invocation-record improvement is compatible with this consumer,
+  but cannot remove the three fallback scalar commands. Optional producer work
+  and the complete cold/native budget remain explicitly with #7938; no existing
+  agent session was contacted or inspected.

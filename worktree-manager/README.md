@@ -358,6 +358,9 @@ workers. Bound scalars survive ordinary setup/reload file-cache invalidation;
 accepting a new project binding resets them. Environment-enabled mock operations
 still resolve implicit project selection and refuse ambiguity. This consumer
 support does not assert that every engine produces those optional fields.
+Binding replacement never waits for an older scalar read; late results stay in
+their original binding/epoch. Failed scalar lookups may retry after reload,
+without discarding accepted bootstrap values.
 
 First pending refresh is not first current rows, and neither alone proves visible
 native input acknowledgement. Existing launch tracing records

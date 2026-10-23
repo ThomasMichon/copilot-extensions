@@ -74,7 +74,7 @@ def test_successful_binding_mounts_operational_widget_in_original_app(monkeypatc
         )
         async with app.run_test() as pilot:
             for _ in range(30):
-                if app.query(engine.PickerScreen):
+                if app.query(engine.PickerScreen) and not app.query("#binding-status"):
                     break
                 await pilot.pause(0.02)
             assert app.binding_error is None

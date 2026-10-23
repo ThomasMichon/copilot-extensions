@@ -2,9 +2,89 @@ from __future__ import annotations
 
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 from worktree_manager import harness_state
 from worktree_manager.production_picker import context, project_config
+
+
+def test_rebinding_does_not_wait_for_or_accept_old_scalar_reader(monkeypatch, tmp_path):
+    entered, release, rebound = threading.Event(), threading.Event(), threading.Event()
+    project_config.bind_bootstrap("example", None)
+
+    def old_read(*args):
+        entered.set()
+        assert release.wait(3)
+        return str(tmp_path / "old")
+
+    monkeypatch.setattr(project_config.engine_client, "get_value", old_read)
+    old = threading.Thread(target=lambda: project_config._project_dir("example"))
+
+    def rebind():
+        project_config.bind_bootstrap("example", {"config_dir": str(tmp_path / "new")})
+        rebound.set()
+
+    new = threading.Thread(target=rebind)
+    try:
+        old.start()
+        assert entered.wait(1)
+        new.start()
+        prompt = rebound.wait(0.25)
+    finally:
+        release.set()
+        old.join(2)
+        new.join(2)
+    try:
+        assert prompt, "binding must not wait on an old engine scalar process"
+        assert project_config._project_dir("example") == tmp_path / "new"
+    finally:
+        project_config.clear_caches(reset_binding=True)
+
+
+def test_failed_scalar_retries_after_file_cache_invalidation(monkeypatch, tmp_path):
+    calls = []
+
+    def read(project, key):
+        calls.append((project, key))
+        if len(calls) == 1:
+            raise project_config.engine_client.EngineError("temporary timeout")
+        return str(tmp_path)
+
+    monkeypatch.setattr(project_config.engine_client, "get_value", read)
+    project_config.bind_bootstrap("example", {"machine": "host"})
+    try:
+        assert project_config._project_dir("example") != tmp_path
+        project_config.clear_caches()
+        assert project_config._project_dir("example") == tmp_path
+        assert project_config._machine_name("example") == "host"
+        assert calls == [("example", "config-dir"), ("example", "config-dir")]
+    finally:
+        project_config.clear_caches(reset_binding=True)
+
+
+def test_old_project_file_read_cannot_repopulate_new_binding(monkeypatch, tmp_path):
+    entered, release = threading.Event(), threading.Event()
+
+    def read(path):
+        if path.parent.name == "old":
+            entered.set()
+            assert release.wait(3)
+        return {"generation": path.parent.name}
+
+    monkeypatch.setattr(project_config, "_read_yaml", read)
+    project_config.bind_bootstrap("example", {"config_dir": str(tmp_path / "old")})
+    old = threading.Thread(target=lambda: project_config._load_project_yaml("example"))
+    try:
+        old.start()
+        assert entered.wait(1)
+        project_config.bind_bootstrap("example", {"config_dir": str(tmp_path / "new")})
+        release.set()
+        old.join(2)
+        assert project_config._load_project_yaml("example") == {"generation": "new"}
+    finally:
+        release.set()
+        old.join(2)
+        project_config.clear_caches(reset_binding=True)
 
 
 def test_optional_bootstrap_scalars_avoid_legacy_calls(monkeypatch, tmp_path):
