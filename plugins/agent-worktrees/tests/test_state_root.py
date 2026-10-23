@@ -1484,6 +1484,61 @@ def test_config_sources_non_stateless_is_base_only(monkeypatch):
     assert [(s.anchor, s.origin) for s in srcs] == [("/work/tree", "harness")]
 
 
+@pytest.mark.parametrize("explicit_base", [False, True])
+@pytest.mark.parametrize("missing_default", [False, True])
+def test_config_sources_self_hosted_avoids_unused_state_root_probe(
+    monkeypatch, tmp_path, explicit_base, missing_default,
+):
+    config = _config("self-hosted", knowledge_repo="unused")
+    if missing_default:
+        config.repos.clear()
+    local = tmp_path / "machine"
+    (local / ".agent-worktrees").mkdir(parents=True)
+    monkeypatch.setattr(cfg, "project_dir", lambda project: local)
+    probes = []
+
+    def git_toplevel(cwd):
+        probes.append(cwd)
+        return "/work/tree"
+
+    monkeypatch.setattr(sr, "_git_toplevel", git_toplevel)
+    monkeypatch.setattr(
+        sr, "resolve_state_root",
+        lambda *args, **kwargs: pytest.fail("self-hosted overlay needs no state root"),
+    )
+    srcs = sr.config_source_anchors(
+        config, base_anchor="/explicit" if explicit_base else None, cwd="/cwd",
+    )
+    assert [(s.anchor, s.origin) for s in srcs] == [
+        ("/explicit" if explicit_base else "/work/tree", "harness"),
+        (str(local), "machine"),
+    ]
+    assert probes == ([] if explicit_base else ["/cwd"])
+
+
+@pytest.mark.parametrize("flag", ["stateless", "requires_external_state_root"])
+def test_config_sources_external_overlay_is_resolved_fresh(
+    monkeypatch, fake_checkouts, flag,
+):
+    config = _config("harness", knowledge_repo="knowledge", **{flag: True})
+    monkeypatch.setattr(
+        sr, "_git_toplevel",
+        lambda cwd: pytest.fail("explicit external overlay needs no Git root"),
+    )
+    fake_checkouts["knowledge"] = "/first"
+    assert sr.config_source_anchors(config, base_anchor="/base")[-1] == (
+        sr.ConfigSource("/first", "knowledge")
+    )
+    fake_checkouts["knowledge"] = "/second"
+    assert sr.config_source_anchors(config, base_anchor="/base")[-1] == (
+        sr.ConfigSource("/second", "knowledge")
+    )
+    fake_checkouts.clear()
+    assert sr.config_source_anchors(config, base_anchor="/base") == [
+        sr.ConfigSource("/base", "harness"),
+    ]
+
+
 def test_config_sources_stateless_grafts_knowledge_overlay(fake_checkouts):
     fake_checkouts["citadel-knowledge"] = "/repos/knowledge"
     srcs = sr.config_source_anchors(

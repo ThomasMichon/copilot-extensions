@@ -1054,6 +1054,14 @@ for both publication bases, retaining independent objects, refs and reflogs;
 each case still performs its own later commit/revert, rewrite, expiry or
 shadow mutation and original safety assertions.
 
+Config-overlay regressions require self-hosted lookups to retain base and
+machine-local sources without resolving an unused state root. Stateless and
+external-state configurations still resolve the knowledge overlay on every
+call, including changed or removed bindings. The diverged-checkout Git fixtures
+hide only the unrelated CodeSpace CLI from discovery, leaving real Git,
+finalization, status polling and checkout-invalidation assertions intact.
+The claim-warning suite separately exercises CodeSpace CLI invocation.
+
 The optional profile-assignment-state failure guard follows both real command
 layers returned by worktree creation: exact record-bound execution admission,
 then the installed setup launcher. It checks the underlying model arguments,

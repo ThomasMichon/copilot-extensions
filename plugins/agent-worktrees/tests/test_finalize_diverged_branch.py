@@ -28,6 +28,28 @@ from agent_worktrees import finalize
 pytestmark = pytest.mark.usefixtures("git_only_mux")
 
 
+@pytest.fixture(autouse=True)
+def _git_only_providers(monkeypatch):
+    which = finalize.shutil.which
+
+    def git_only_which(command, *args, **kwargs):
+        if command == "agent-codespaces":
+            return None
+        return which(command, *args, **kwargs)
+
+    monkeypatch.setattr(finalize.shutil, "which", git_only_which)
+
+
+def test_git_only_provider_isolation_keeps_real_git(monkeypatch):
+    assert finalize.shutil.which("git")
+    assert finalize.shutil.which("agent-codespaces") is None
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("Git-only fixture reached a venue CLI"),
+    )
+    finalize._warn_of_codespace_claims_for_worktree("fixture-worktree")
+
+
 def _git(*args: str, cwd: Path) -> str:
     return subprocess.run(
         ["git", *args],

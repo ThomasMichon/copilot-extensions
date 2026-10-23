@@ -1044,6 +1044,15 @@ def config_source_anchors(
 
     if local := machine_config_root(base, project=config.repo_name):
         sources.append(ConfigSource(anchor=local, origin="machine"))
+    try:
+        repo = config.default_repo
+    except KeyError:
+        return sources
+    if not (
+        getattr(repo, "requires_external_state_root", False)
+        or getattr(repo, "stateless", False)
+    ):
+        return sources
     res = resolve_state_root(config, cwd=cwd)
     if res.requires_external and res.bound and res.path:
         if not base or os.path.abspath(res.path) != os.path.abspath(base):
