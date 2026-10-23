@@ -264,6 +264,34 @@ def test_marker_version_is_not_an_identity_conflict(tmp_path, version):
     assert_reason("unsupported_schema", lambda: inspect(worktree, common))
 
 
+@pytest.mark.parametrize("operation", ["lstat", "open"])
+@pytest.mark.parametrize("error", [PermissionError, OSError])
+def test_marker_io_failure_is_unavailable_not_corrupt(tmp_path, monkeypatch, operation, error):
+    worktree, common = roots(tmp_path)
+    layout = inspect(worktree, common)
+    seed_marker(layout.marker_directory, marker_value(REPOSITORY, RESOURCE))
+    marker = layout.marker_directory / "identity.json"
+    original = getattr(Path, operation)
+    def unavailable(path, *args, **kwargs):
+        if path == marker:
+            raise error("fixture-only unavailable source")
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, operation, unavailable)
+    assert_reason("source_unavailable", lambda: inspect(worktree, common))
+
+
+@pytest.mark.parametrize(("raw", "reason"), [
+    (b"{", "malformed_marker"),
+    (b"[" * 1000 + b"]" * 1000, "record_limit"),
+])
+def test_marker_malformed_and_deep_input_are_scoped(tmp_path, raw, reason):
+    worktree, common = roots(tmp_path)
+    layout = inspect(worktree, common)
+    seed_marker(layout.marker_directory, marker_value(REPOSITORY, RESOURCE))
+    (layout.marker_directory / "identity.json").write_bytes(raw)
+    assert_reason(reason, lambda: inspect(worktree, common))
+
+
 @pytest.mark.parametrize(("number", "reason"), [
     (b"1e999", "malformed_json"), (b"-1e999", "malformed_json"),
     (b"1e-999", "number_precision_unsupported"),

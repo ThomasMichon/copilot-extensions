@@ -225,3 +225,6 @@ supported rollback-reader floor are explicit decisions, not implied approval.
 - Addressed subsequent review's Unicode canonical-size and marker-version
   classification findings. Final contained Windows run: **73 passed**; Ruff
   F/E9 remains green. These checks still add no production persistence path.
+- Kept marker I/O failures distinct from corrupt metadata and bounded nested
+  marker parsing after final classification review. Final contained Windows
+  run: **79 passed**; Ruff F/E9 green.

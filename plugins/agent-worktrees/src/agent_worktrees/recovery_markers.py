@@ -69,7 +69,7 @@ def _inspect(directory: Path, expected: dict) -> None:
         if info.st_size > 4096:
             raise RecoveryError("record_limit")
         # Duplicate known keys must never hide a conflicting identity.
-        from .recovery_facts import _constant, _integer, _number, _object
+        from .recovery_facts import _constant, _depth, _integer, _number, _object
         with marker.open("rb") as stream:
             raw = stream.read(4097)
         if len(raw) > 4096:
@@ -78,9 +78,14 @@ def _inspect(directory: Path, expected: dict) -> None:
             raw, object_pairs_hook=_object, parse_constant=_constant,
             parse_float=_number, parse_int=_integer,
         )
+        _depth(value)
     except FileNotFoundError:
         raise RecoveryError("foreign_path_conflict") from None
-    except (OSError, UnicodeError, ValueError) as exc:
+    except OSError:
+        raise RecoveryError("source_unavailable") from None
+    except RecursionError:
+        raise RecoveryError("record_limit") from None
+    except (UnicodeError, ValueError) as exc:
         if isinstance(exc, RecoveryError):
             raise
         raise RecoveryError("malformed_marker") from None
