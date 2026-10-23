@@ -104,6 +104,11 @@ producer proofs, not recovery history, authorize withdrawal. Then retry the
 same unchanged decision. New command attempts are bounded to sixteen within
 that selector's recovery history, including attempts after command withdrawal.
 Exact completed reruns do not consume an attempt.
+Attempt markers are published atomically from unique staging files before
+command effects. An interrupted staging write leaves its original bytes as
+evidence but cannot poison the next same-decision retry or consume a published
+attempt. A malformed committed marker still refuses; recovery does not repair
+or adopt it.
 
 A successful `fleet-manager.client-retained-recovery` result reports the
 unchanged complete `admitted` receipt separately from `recovered_active`, plus

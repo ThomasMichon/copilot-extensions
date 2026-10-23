@@ -173,8 +173,7 @@ def _command_attempt(namespace, active, decision):
     for name in names[:len(found)]:
         if construction._read(directory / name) != decision:
             raise PlanError("client recovery command attempt has a different decision")
-    construction._write_exclusive(directory / names[len(found)], decision)
-    client_admission._sync_directory(directory)
+    construction._write(directory / names[len(found)], decision)
 
 
 def _activation_health(handoff, ownership, active, identity, completion, target, admitted, decision):

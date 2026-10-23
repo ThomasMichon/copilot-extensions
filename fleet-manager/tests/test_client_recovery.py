@@ -424,3 +424,59 @@ def test_command_retry_budget_cannot_be_reset_by_withdrawal(prepared):
     with pytest.raises(PlanError, match="attempts are invalid or exhausted"):
         recover(prepared)
     assert not any(path.exists() for path in frontdoor._command_paths(directory))
+
+
+@pytest.mark.parametrize("boundary", ["empty", "partial", "replace"])
+def test_interrupted_command_attempt_staging_preserves_same_decision_retry(prepared, monkeypatch, boundary):
+    root, _old, _staged, _trusted, directory, namespace, _slot, decision, *_rest = prepared
+    floor = database_bytes(root)
+    commands = states(frontdoor._command_paths(directory))
+    write, replace = construction._write_exclusive, os.replace
+
+    def interrupted_write(path, value):
+        if "recovery-command." in path.name and boundary != "replace":
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            try:
+                if boundary == "partial":
+                    os.write(descriptor, canonical(value)[:17])
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            raise OSError("injected command attempt staging write failure")
+        return write(path, value)
+
+    def interrupted_replace(source, destination):
+        if destination.name.startswith("recovery-command."):
+            raise OSError("injected command attempt staging replacement failure")
+        return replace(source, destination)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(construction, "_write_exclusive", interrupted_write)
+        if boundary == "replace":
+            patch.setattr(os, "replace", interrupted_replace)
+        with pytest.raises(PlanError):
+            recover(prepared)
+    assert states(commands) == commands and not (namespace / frontdoor.PENDING).exists()
+    active = construction._read(namespace / activation.ACTIVE)
+    history = namespace / activation.HISTORY / active["publication"]
+    abandoned = states(path for path in history.iterdir() if "recovery-command." in path.name)
+    assert abandoned
+    assert recover(prepared)["frontdoor_registered"]
+    assert all(path.name.startswith(".recovery-command.") for path in abandoned)
+    assert states(abandoned) == abandoned and database_bytes(root) == floor
+    assert construction._read(history / "recovery-command.0.json") == decision
+    assert not (history / "recovery-command.1.json").exists()
+
+
+def test_malformed_committed_command_attempt_is_not_repaired(prepared):
+    root, _old, _staged, _trusted, directory, namespace, _slot, _decision, *_rest = prepared
+    floor = database_bytes(root)
+    recover(prepared)
+    active = construction._read(namespace / activation.ACTIVE)
+    marker = namespace / activation.HISTORY / active["publication"] / "recovery-command.0.json"
+    marker.write_bytes(b'{"schema":')
+    unregister_client_frontdoor(root, identity(), command_directory=directory)
+    with pytest.raises(PlanError, match="invalid bounded JSON"):
+        recover(prepared)
+    assert marker.read_bytes() == b'{"schema":' and database_bytes(root) == floor
+    assert not any(path.exists() for path in frontdoor._command_paths(directory))
