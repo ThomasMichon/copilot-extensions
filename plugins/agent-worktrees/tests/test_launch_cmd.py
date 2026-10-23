@@ -1514,6 +1514,8 @@ def test_bash_command_template_reaches_native_child(tmp_path, command_name):
 @pytest.mark.parametrize("prompt_value", [None, "--execution-directory", "--recovery", "--copilot-path"])
 def test_normalized_bash_keeps_selected_directory_before_literal_tail(tmp_path, monkeypatch, prompt_value):
     from agent_procutil import owned_process
+    from agent_worktrees import installer
+    from agent_worktrees.embody_resume import with_seed
 
     shell = _local_bash()
     selected = tmp_path / "selected worktree"
@@ -1533,14 +1535,19 @@ def test_normalized_bash_keeps_selected_directory_before_literal_tail(tmp_path, 
     native = ["--resume=synthetic-anchor-origin"]
     if prompt_value is not None:
         native += ["--prompt", prompt_value]
-    completed = owned_process.run_owned([
-        shell, str(Path(_SCRIPTS_DIR) / "default-setup.sh"), "--machine", "test",
-        "--copilot-path", str(copilot), "--execution-directory", str(selected),
-        *native, *literal,
-    ], timeout=20)
+    monkeypatch.setattr(installer, "install_dir", lambda: Path(_SCRIPTS_DIR).parent)
+    config = _config({"linux": [
+        shell, str(Path(_SCRIPTS_DIR) / "default-setup.sh"),
+        "--machine", "test", "--copilot-path", str(copilot),
+    ]})
+    command = m._build_launch_cmd(config, _args([*native, *literal]), str(selected))
+    seed = "seed's literal $value"
+    command = _inner_command(with_seed(command, seed))
+    completed = owned_process.run_owned(command, timeout=20)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert marker.read_text(encoding="utf-8").splitlines() == [
-        "-C", str(selected), *native, *literal,
+        "-C", str(selected), *native, "--allow-all", "--experimental",
+        "--interactive", seed, *literal,
     ]
 
 
