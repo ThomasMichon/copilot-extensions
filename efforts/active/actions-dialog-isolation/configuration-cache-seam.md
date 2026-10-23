@@ -2,9 +2,10 @@
 
 Back to [Actions Dialog Isolation](README.md).
 
-**Proposal only; not admitted for implementation.** These are agent-recommended
-mechanics. Source-plan review remains required. The existing Actions claim does
-not silently absorb #7940 or startup ownership.
+**Execution amendment pending source review.** The exact file-store and derived
+consumer surfaces below now have integration admission; shared supplier
+extraction does not. These are agent-recommended mechanics, not implemented
+behavior. The new #7940 episode does not take startup ownership.
 
 ## Evidence and invariants
 
@@ -169,6 +170,140 @@ these exact consumer hooks, or retain them as explicit open #7940 work.
 | Older-engine/fixture compatibility | Scalar fallback and public return shapes retained; `ttl=0` behavior explicit |
 | Derived map/manual reload | Owner integration test proves map refreshed and selection preserved; cache unit test is insufficient |
 
-Stop before code if the file-store seam, supplier dependencies or consumer
-owner is not approved. Native/menu/input budgets, release and installed
-qualification remain open and separate. No benchmarks are requested here.
+The execution amendment below admits file-store/consumer work after its source
+review. Supplier edits remain blocked independently; that does not waive the
+production supplier gate or allow #7940 completion. Native/menu/input budgets,
+release and installed qualification remain separate. No benchmarks are requested.
+
+## Execution amendment
+
+### Admitted surfaces and preserved contracts
+
+The integration owner admits the file-store methods listed above plus only the
+necessary `_machine_key_map` invalidation and existing manual-reload/accepted
+file-revision request/completion hooks in `engine_pivots`, `engine_runtime` and
+`engine_loading`. This supersedes the earlier proposal's consumer-hook hold,
+not its supplier hold.
+
+Keep `_ScalarCache`, `bind_bootstrap`, `_input_scalar`, `_scalar`, `_project_dir`,
+`_repo_dir`, `_machine_name`, `_install_dir` and scalar memoizer APIs/statements
+unchanged. `clear_caches` may only add file invalidation after its existing
+statements. Do not change startup composition, pending binding, telemetry or
+authoritative feed behavior.
+
+The cache key holds the actual binding object, never its numeric `id()`.
+Current state retains only bounded current entries; a retired scope retains
+only its own immutable generation until exit. Nested scopes restore the prior
+context on normal/error/cancel exit. No store keeps a chain of old generations.
+Single-flight ownership is per key and generation; all exit paths notify
+waiters, including loader exceptions/cancellation. UI access never waits on a
+flight or performs a metadata/file/provider lookup. Missing required data is
+not-ready; existing `ValueError`/`FileNotFoundError` consumer semantics remain
+the error boundary, rather than introducing a new success-shaped empty result.
+
+The 60-second bound is demand-driven, measured with a monotonic clock. A scope
+pins its logical generation even when expiry occurs midway through a pass.
+`ttl=0` provides reuse only within that scope. At expiry, bounded dependency
+bytes are read once, including same-size/same-mtime replacements; unchanged
+bytes reuse parsed data. Warm reads do zero file, stat, provider or subprocess
+work. Manual clear and rebind reject obsolete completions without clearing
+accepted scalar bindings or unrelated UI selection.
+
+Consumer completion remains qualified by the existing setup/source generation.
+The derived machine-key mapping is invalidated by manual reload and renewed
+when an existing worker accepts a new file revision; no timer, service or
+polling loop is added. A stale/error refresh is not installed as an empty valid
+map. Tests must prove the real consumer invalidation/completion path, not just
+the lower file reader.
+
+### Exact supplier API proposed for separate admission
+
+Owner: `worktree_manager.harness_state`, which already owns repository/project
+registration interpretation. Proposed additive API:
+
+```python
+@dataclass(frozen=True)
+class ProjectAnchorSelection:
+    anchor: str | None
+    dependency_paths: tuple[Path, ...]
+
+def project_anchor_selection(
+    name: str,
+    home_dir: Path | None = None,
+    *,
+    input_roots: ProfileInputRoots | None = None,
+    reader=None,
+) -> ProjectAnchorSelection: ...
+```
+
+`reader`, when provided, is the file-snapshot reader; it does not supply selection
+policy or alternate registrations. The default uses the owner's existing YAML
+reader. The owner computes the two registry paths using its existing root
+rules and returns both as dependencies, including an absent registry. A missing
+selected project yields `anchor=None`, not a discovery scan.
+
+Extract two pure selection helpers inside the owner:
+
+1. The existing `build_repos` path rule: selected `_platform_key()` entry, then
+   `windows`, `linux`, `wsl` fallback in that exact order.
+2. The existing `build_projects` rule: a nonempty resolved repository path wins;
+   otherwise use the selected project's string `anchor` override. A repository
+   entry alone does not create a project absent from `projects.yaml`.
+
+Make the existing builders reuse these helpers, then have the new API apply
+them to the **selected entries only**. The API reads at most `repos.yaml` and
+`projects.yaml`; it must not call `build_projects`, `build_repos`, `pr_model`,
+`repo_enabled_plugins`, `project_roster`, Git or any unrelated project's config.
+Keep ordinary callers' output and precedence unchanged. Do not replace this
+rule with `_exact_platform_key`, another platform's invented fallback, or a
+Manager-local copy of registry interpretation.
+
+The admitted `project_config.machines_yaml_path` consumer obtains the supplier
+name from the accepted project-config snapshot, not a guessed default home.
+It calls the proposed owner API, then reads only that supplier's actual
+canonical/legacy roster candidates. The dependency graph includes the project
+config, both registries and both supplier candidates. A changed supplier name
+or registry mapping replaces that dependency graph in the same background pass.
+Absent higher-precedence candidates remain tracked.
+
+**Not authorized yet:** all `harness_state` edits above. Until admission and
+actual production-path tests, #7940 remains open. Do not hide the present
+`build_projects` fallback behind a TTL or mock it into a constant and call the
+supplier lane qualified.
+
+### Template cell: grounded non-applicability
+
+The actual current owner `machine_transport.registry.parse_machines_yaml_file`
+opens one YAML file, calls `yaml.safe_load`, validates the `machines` mapping
+and delegates to `parse_machines_yaml`; it has no external include/template
+expansion. The Manager project reader likewise uses `yaml.safe_load`. YAML
+anchors within a file are covered by that file's content revision. Thus an
+external-template cell is not applicable to these concrete readers, not a
+passing synthetic-template test. If a real additional supplier expands external
+templates, stop and request that provider's dependency contract before claiming
+coverage.
+
+### Additional validation and completion gates
+
+- [ ] Fake clock at 59.999 and 60 seconds; `ttl=0`, nested scopes and expiry
+  midway through a logical pass.
+- [ ] Same-mtime/same-size bytes changed; unchanged bytes do not reparse; warm
+  path counters show zero reads/stats/subprocesses.
+- [ ] One in-flight reader per key/generation with concurrent consumers,
+  success/error sharing, repair retry and cancellation releasing every waiter.
+- [ ] Manual clear and bootstrap rebind during blocked I/O; old completions
+  cannot enter current state; strong binding identity survives old-scope life.
+- [ ] Bounded retained entries and obsolete scopes; no id-reuse key collisions,
+  generation chains or cross-project/path contamination.
+- [ ] Missing/deleted/preferred-file creation, invalid YAML and permission errors
+  retain honest missing/error state and compatible exception boundaries.
+- [ ] Real supplier switch, registry change and supplier-only content replacement
+  use the owner API and read no unrelated project; prove parity against existing
+  owner precedence with real synthetic registry files, not a constant supplier.
+- [ ] Derived mapping updates through actual admitted consumer hooks; stale
+  source/setup completions are rejected and unrelated selection remains intact.
+- [ ] Template non-applicability cites the actual readers above; any newly found
+  expanding provider requires its real dependency contract.
+- [ ] Reviewed source plan, focused tests, required CI and actual source merges;
+  original failure/command evidence retained before cleanup. Native timing and
+  installed rollout remain separate, unperformed gates.
