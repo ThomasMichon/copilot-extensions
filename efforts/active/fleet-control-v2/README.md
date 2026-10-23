@@ -208,6 +208,18 @@ This authorizes driving the reviewed implementation, beginning with an isolated
 verifier prerequisite. It does not select live trust roots, enroll principals,
 transfer another campaign's active source ownership or authorize deployment.
 
+The operator later directed verbatim:
+
+> Check status here; resume. Avoid coordinating with any other agent and drive the work that you own explicitly
+
+Asked to assign an isolated, transport-neutral scoped observation-reader adapter
+composing this effort's admission library and store, without changing resident
+consumers, providers, enrollment, deployment, leases or other owners' files, the
+operator selected `isolated-scoped-reader`. The
+[bounded reader contract](scoped-observation-reader.md) is the
+**agent-recommended implementation elaboration**. This explicit assignment does
+not waive the separate resident integration or live adoption gates.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -318,6 +330,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 ### Phase 2b - Central push-backed current state
 - [x] Review the [backing-store amendment](central-state-backing-store.md) under
   existing #5862, preserving #3761 origin authority and #352 client/mux ownership.
+- [ ] Review and implement the explicitly assigned
+  [isolated scoped point-reader](scoped-observation-reader.md), composing only
+  owned admission/storage libraries without wiring a resident consumer.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
   The subsequent operator approval permits only an isolated transport-neutral
