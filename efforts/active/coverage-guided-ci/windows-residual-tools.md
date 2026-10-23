@@ -94,6 +94,35 @@ the specific already-merged findings below.
 
 ## Named retained batches and explicit blocked owners
 
+### Subsequent admission: F-ALLOC
+
+This candidate admits only S002-S019 in `test_allocation_release.py`.
+Each worker prepares one active node/Gateway SQLite pair through the existing
+real admission, acceptance and cooperative commit path. Each case receives
+ordinary private file copies and reconstructs its actual journal objects;
+no live lease, callback, connection or production ownership evidence is shared.
+The seed's original database bytes must remain unchanged at session teardown.
+The added two-copy regression retires/releases the left pair while proving the
+right pair's active effect, node ownership, Gateway claim and absence of release
+proofs remain unchanged. The original seed remains active too.
+
+All 16 original test bodies and decorators are AST-identical after normalizing
+only the first setup assignment to the copied fixture. Every existing parameter,
+rollback, proof/index refusal, installed crash/lost-reply/concurrent-release
+and successor assertion remains present. The complete module passed 87 tests
+with no skips, native Windows, exactly two workers, 13.51 seconds including
+preparation and cleanup. The original 30-second item/native child deadlines,
+240-second diagnostic bound and default process/memory/temp caps remain intact.
+Real SQLite creation and native installed subprocess operations run; no mock
+substitutes for the consumer contract.
+
+Existing runtime/usage documentation remains accurate. This ledger records
+the test-only setup change; a scoped Fleet patch changefile accompanies it.
+Fresh temporary databases and the independent-copy regression exercise the
+lightweight clean consumer path. No installer/bootstrap behavior or external
+fleet venue changes, no rollout and no parent timing qualification are claimed.
+Review and required CI still gate merge; other residual contracts remain open.
+
 ### Subsequent admission: F-WHEEL and its encountered Gateway prerequisite
 
 The F-WHEEL candidate admits S001/S020/S021/S022 (`cbba7d8b52ee`,

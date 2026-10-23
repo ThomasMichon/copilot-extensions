@@ -1,0 +1,9 @@
+{
+  "comment": "Copy immutable active-allocation database seeds into independent test cases while retaining real installed release and rollback operations.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
