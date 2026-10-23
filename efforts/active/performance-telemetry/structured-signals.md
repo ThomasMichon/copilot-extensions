@@ -2,7 +2,7 @@
 
 Back to [Performance Telemetry](README.md). Part of #7935 / #5900.
 
-**Status: design reviewed in #8187; listed source implementation admitted.**
+**Status: design reviewed in #8187; listed source implementation merged in #8228.**
 The campaign coordinator accepted the exact shared API and file scope
 below. Neither approval enrolls an installed producer
 or authorizes collector configuration, ports, installation or restart.
@@ -349,17 +349,17 @@ exact amended proposal rather than extending scope silently.
 
 - [x] Coordinator accepts shared API, first-consumer mapping and exact file
   ownership. Plan clears normal source review/CI/merge before any execution.
-- [ ] Pure stdlib tests: disabled new signals have no extra clock/UUID/import/
+- [x] Pure stdlib tests: disabled new signals have no extra clock/UUID/import/
   queue/file/network effects; closed schema rejects unknown/hostile values,
   non-finite numbers, overflow and unbounded labels. Trace-only API unchanged.
-- [ ] Existing writer only: single queue/thread, caller never maps SDK data,
+- [x] Existing writer only: single queue/thread, caller never maps SDK data,
   capture/close races, sampled-out/no-writer path, overflow, writer errors,
   failed drain and no recursive telemetry; all local loss counts retained.
-- [ ] Optional SDK floor and seasoned-version tests: actual public SDK objects,
+- [x] Optional SDK floor and seasoned-version tests: actual public SDK objects,
   official protobuf decode/type/attributes/timestamps/severity/IDs; sums,
   histogram buckets/count/min/max/units and DELTA interval/reset semantics.
   No instrumentation/global/environment/atexit mutation, ambient poison ignored.
-- [ ] Isolated port-zero receiver after plan review: real SDK/protobuf requests
+- [x] Isolated port-zero receiver after plan review: real SDK/protobuf requests
   for each signal, exact full/partial/empty ACK, wrong MIME, 404, bad counts,
   malformed/truncated/oversize/slow-drip responses, connection failure and
   deadline/circuit behavior. Verify no retries, no cross-signal success masking
@@ -377,11 +377,14 @@ exact amended proposal rather than extending scope silently.
   local drops, request counts/bytes, writer/drain cost and source-process CPU.
   Separate observed queue wait from unavailable lock/descendant measurements.
   Preserve all failures and raw runs; no p99/budget claim from tiny samples.
-- [ ] Keep required CI pure and scoped; native Windows and Linux validation
+- [x] Keep required CI pure and scoped; native Windows and Linux validation
   remain explicit integration lanes. Test absent SDK and standalone packaging,
   source gates and source merges; installed adoption/rollout remain separate.
 
-**This design episode completes when its plan is reviewed/merged and the exact
-proposal is returned to the coordinator.** The unchecked implementation,
-wire/native qualification and consumer-deployment gates remain with #7935/#5900;
-none is closed by this design PR.
+The design episode completed in #8187/#8194; the later admitted source episode
+merged in #8228. Isolated source-reporter API/wire controls passed, including
+complete and intentional overflow/outage populations. The native/collector
+receive and measurement items above remain unchecked: API fixtures do not
+substitute for them. Actual Linux-native qualification was not run in the
+Windows lane and remains with #7935, as do installed adoption and deployment.
+Neither this source slice nor its accounting completes the broader campaign.
