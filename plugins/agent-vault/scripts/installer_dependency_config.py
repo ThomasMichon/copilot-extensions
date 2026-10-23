@@ -257,6 +257,149 @@ def package_cutoffs(entries, *, balanced, error_type):
     return result
 
 
+def cutoff_arguments(settings, *, now, operation, min_age, balanced, remote_reference, error_type):
+    now = datetime.now(timezone.utc) if now is None else now
+    if now.tzinfo is None:
+        raise error_type("seasoning requires a timezone-aware clock")
+    floor = now.astimezone(timezone.utc) - timedelta(seconds=min_age)
+    projection = {"install": "PipInstallSettings", "compile": "PipCompileSettings"}.get(operation)
+    if projection is None:
+        raise error_type("unsupported UV dependency operation")
+    projections = list(re.finditer(r"(?m)^" + projection + r" \{", settings))
+    if len(projections) != 1:
+        raise error_type("UV installation settings projection is unsupported")
+    _, projection_end = balanced(settings, settings.index("{", projections[0].start()), "{", "}")
+    if settings[projection_end:].strip():
+        raise error_type("UV settings projection has unexpected trailing content")
+    settings = settings[projections[0].start():projection_end]
+    if (re.search(r"(?m)^\s*dependency_mode:\s*(?!Transitive\b)\S+", settings)
+            or re.search(r"(?m)^\s*build_isolation:\s*(?!Isolate\b)\S+", settings)):
+        raise error_type("dependency or isolated-build resolution cannot bypass seasoning")
+    indexes = list(re.finditer(r"(?m)^\s*index_locations: IndexLocations \{", settings))
+    if len(indexes) != 1:
+        raise error_type("UV registry source configuration is unsupported")
+    index_body, indexes_end = balanced(settings, settings.index("{", indexes[0].start()), "{", "}")
+    flat = re.search(r"\bflat_index:\s*\[", index_body)
+    if flat is None:
+        raise error_type("UV flat-index configuration is unsupported")
+    flat_body, _ = balanced(index_body, index_body.index("[", flat.start()), "[", "]")
+    if flat_body.strip():
+        raise error_type("flat-index dependencies cannot prove artifact upload age")
+    non_registry = settings[:indexes[0].start()] + settings[indexes_end:]
+    if remote_reference.search(non_registry):
+        raise error_type("direct remote dependencies lack release-age evidence")
+    matches = list(re.finditer(r"(?m)^\s*exclude_newer: ExcludeNewer \{", settings))
+    if len(matches) != 1:
+        raise error_type("UV does not expose an unambiguous seasoning configuration")
+    match = matches[0]
+    body, end = balanced(settings, settings.index("{", match.start()), "{", "}")
+    # Per-index dates can synthesize age for artifacts with unknown timestamps.
+    remaining = settings[:match.start()] + settings[end:]
+    index_values = re.findall(r"(?m)^\s*exclude_newer:\s*([^\n]+)", remaining)
+    if any(value.strip().rstrip(",") != "None" for value in index_values):
+        raise error_type("index-specific exclude-newer cannot prove artifact upload age")
+    global_match = re.match(r"\s*global:\s*(None|Some\()", body)
+    if global_match is None:
+        raise error_type("UV global cutoff settings are unsupported")
+    position = global_match.end()
+    if global_match[1] == "Some(":
+        global_body, position = balanced(body, position - 1, "(", ")")
+        floor = min(floor, cutoff_value(global_body, now, error_type=error_type))
+    package_match = re.fullmatch(
+        r",?\s*package:\s*ExcludeNewerPackage\(\s*\{(.*)\},?\s*\),?\s*",
+        body[position:], re.DOTALL,
+    )
+    if package_match is None:
+        raise error_type("UV package cutoff settings are unsupported")
+    package_arguments = []
+    for name, value in package_cutoffs(package_match[1], balanced=balanced, error_type=error_type):
+        cutoff = cutoff_value(value, now, error_type=error_type)
+        if cutoff > floor:
+            raise error_type(f"package-specific cutoff weakens seasoning: {name}")
+        package_arguments.extend(["--exclude-newer-package", f"{name}={cutoff.isoformat().replace('+00:00', 'Z')}"])
+    result = ["--exclude-newer", floor.isoformat().replace("+00:00", "Z"), *package_arguments]
+    return [*result, "--reinstall"] if operation == "install" else result
+
+
+def compile_arguments(arguments, *, argument_pairs, error_type):
+    """Bounded requirements export, never an implicit incremental lock update."""
+    values = {
+        "--constraints", "-c", "--overrides", "--excludes", "--build-constraints", "-b",
+        "--extra", "--cert", "-o", "--output-file", "--format", "--only-binary",
+        "--python-platform", "--python-version", "--index", "--default-index",
+        "--index-url", "-i", "--extra-index-url", "--index-strategy", "--keyring-provider",
+        "--resolution", "--prerelease", "--fork-strategy", "--exclude-newer",
+        "--exclude-newer-package", "--cache-dir", "-p", "--python", "--color",
+        "--directory", "--project", "--config-file",
+    }
+    flags = {
+        "--all-extras", "--generate-hashes", "--no-build", "--no-index", "--universal",
+        "--upgrade", "-U", "--no-sources", "--no-cache", "-n", "--refresh",
+        "--no-python-downloads", "--no-managed-python", "--offline", "--system-certs",
+        "--no-progress", "--quiet", "-q", "--verbose", "-v", "--no-header",
+        "--no-annotate",
+    }
+    result = []
+    for option, value in argument_pairs(arguments):
+        if not option:
+            if value == "-" or not value:
+                raise error_type("lock export requires retained file inputs, not standard input")
+            result.append(value)
+        elif option == "--format" and value != "requirements.txt":
+            raise error_type("lock export supports only hashed requirements.txt output")
+        elif option in ("--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate") and value:
+            raise error_type("lock export boolean options cannot carry values")
+        elif option in ("--format", "--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate"):
+            continue
+        elif option in values:
+            if option in ("-o", "--output-file") and value == "-":
+                raise error_type("lock export output must be a file path or implicit standard output")
+            result.extend([option, value])
+        elif option in flags and not value:
+            result.append(option)
+        else:
+            raise error_type("unsupported lock export option")
+    return [*result, "--format", "requirements.txt", "--generate-hashes", "--upgrade", "--no-header", "--no-annotate"]
+
+
+def check_compile_projection(projection, arguments, *, argument_pairs, balanced, error_type):
+    """Output policy is effective configuration, not merely a CLI intention."""
+    for field, expected in (
+        ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
+        ("emit_index_url", "false"), ("emit_find_links", "false"), ("emit_index_annotation", "false"),
+        ("no_emit_package", r"\[\]"),
+    ):
+        if not re.search(r"(?m)^\s*" + field + r":\s*" + expected + r",\s*$", projection):
+            raise error_type("UV lock export output configuration is unsupported")
+    outputs = [value for option, value in argument_pairs(arguments) if option in ("-o", "--output-file")]
+    output = re.search(r"(?m)^\s*output_file:\s*(None,|Some\()", projection)
+    if output is None:
+        raise error_type("UV lock export output configuration is unsupported")
+    selected = None
+    if output[1] == "Some(":
+        body, _ = balanced(projection, output.end() - 1, "(", ")")
+        try:
+            selected = json.loads(body.strip().rstrip(","))
+        except ValueError as exc:
+            raise error_type("UV lock export output path is unsupported") from exc
+    if selected != (outputs[-1] if outputs else None):
+        raise error_type("UV lock export output must be selected explicitly by the caller")
+
+
+def compile_requirement_includes(text, source, mirror, remap=None):
+    """Retain include targets by identity, not by lexical path replacement."""
+    lines = []
+    for line in re.sub(r"\\\r?\n", " ", text).splitlines():
+        requirement = re.split(r"\s+#", line, maxsplit=1)[0].strip()
+        include = re.fullmatch(r"(-r|--requirements?|--constraints?|-c)\s+(.+)", requirement)
+        if include:
+            line = include[1] + " " + mirror(source.parent / include[2]).as_posix()
+        elif remap is not None:
+            line = remap(line)
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
 def _toml_value(value, error_type):
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=True)

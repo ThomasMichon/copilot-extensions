@@ -19,13 +19,17 @@ on:
         description: Build and verify first-party PR/Fleet artifacts and install them offline
         type: boolean
         default: false
+      dependency_compile:
+        description: Exercise retained lock export and existing install seasoning with real UV
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -46,7 +50,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -250,3 +254,30 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     steps: *pr-service-steps
+
+  dependency-compile-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Retained dependency compile (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &dependency-compile-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest
+      - name: Real retained compile, transitive age and unchanged install isolation
+        run: >-
+          python -m pytest -q
+          tools/test_installer_dependency_compile.py
+          tools/test_installer_dependency_policy.py
+          -k "compile or real_uv_registry_transitive_and_isolated_build_age"
+
+  dependency-compile-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Retained dependency compile (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *dependency-compile-steps

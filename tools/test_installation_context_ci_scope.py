@@ -206,7 +206,9 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     trigger = workflow.get("on", workflow.get(True))
     assert set(trigger) == {"workflow_dispatch"}
     inputs = trigger["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"watch_owner", "dispatch_delegation", "pr_service"}
+    assert set(inputs) == {
+        "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
+    }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
     routes = {
@@ -219,11 +221,14 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "watch-owner-boundaries-linux", "watch-owner-boundaries-windows",
         "dispatch-delegation-linux", "dispatch-delegation-windows",
         "pr-service-linux", "pr-service-windows",
+        "pr-artifacts-linux", "pr-artifacts-windows",
+        "dependency-compile-linux", "dependency-compile-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
         assert job["if"] == (
-            "${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service }}"
+            "${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service "
+            "&& !inputs.pr_artifacts && !inputs.dependency_compile }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -259,6 +264,7 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
         assert len(commands) == 2 and not any(step.get("env") for step in commands)
         assert commands[0]["run"].split() == [
             "python", "tools/run-plugin-tests.py", "agent-pull-requests",
+            "--test-file", "tests/test_watch_replay_store.py",
             "--test-file", "tests/test_watch_service.py",
             "--test-file", "tests/test_watch_gateway.py",
             "--test-file", "tests/test_watch_gateway_transport.py",
@@ -268,6 +274,31 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
         assert commands[1]["run"].split() == [
             "python", "tools/run-standalone-tests.py", "services/pr",
             "--prepare", "--timeout", "180", "--admission-wait", "30",
+        ]
+
+
+def test_compile_acceptance_is_bounded_native_and_independently_selected() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    selector = trigger["workflow_dispatch"]["inputs"]["dependency_compile"]
+    assert selector["type"] == "boolean" and selector["default"] is False
+    for name, runner in (
+        ("dependency-compile-linux", "ubuntu-latest"),
+        ("dependency-compile-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == "${{ inputs.dependency_compile }}"
+        assert job["runs-on"] == runner
+        assert job["timeout-minutes"] == 6 and not job.get("continue-on-error")
+        assert not job.get("strategy")
+        commands = [step["run"] for step in job["steps"] if "run" in step]
+        assert commands == [
+            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest",
+            'python -m pytest -q tools/test_installer_dependency_compile.py '
+            'tools/test_installer_dependency_policy.py '
+            '-k "compile or real_uv_registry_transitive_and_isolated_build_age"',
         ]
 
 

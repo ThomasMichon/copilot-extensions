@@ -67,9 +67,10 @@ from this proposal.
 
 - [x] Review and merge this construction proposal before changing artifact
   schemas, release selection or dependency acquisition (confirmed by #8275).
-- [ ] Deliver standalone first-party build/verification through the shared
+- [x] Deliver standalone first-party build/verification through the shared
   artifact path, initially scoped to the PR service's required distributions.
-  Preserve existing release consumers and optional artifact/source fallback.
+  Preserve existing release consumers and optional artifact/source fallback
+  (source confirmed by #8293; Linux/Windows packaging acceptance `40026242589`).
 - [ ] Deliver approved target-specific runtime closure and offline-context
   construction through existing authority/installer contracts.
 - [ ] Build and exercise the real isolated image through an available
