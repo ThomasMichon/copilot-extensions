@@ -88,6 +88,46 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-INCONCLUSIVE retains five independently collected native refusals
+
+This settles only `tests/test_finalize_precondition.py:4`, header
+`@@ -459,50 +507,21 @@ class TestContentExceedsMergedHeadFailsClosed:`,
+full hunk SHA256
+`4ce4848c0aa3a8068829dee0b6f670c3266b0db92c43f55c1d91d149e3c72d00`.
+The source proposes consolidating five methods into one labeled loop, not
+removing any of their refusal obligations. Retain the five independently
+collected accepted methods instead of replaying that consolidation.
+
+Preserved source `8b7b8778b69e6bd1b6a6f2b0018fa6e1f59d961f` and public
+original publication `339dc00123964d84a117afd55197a192895ebac8` both
+contain complete test blob `e3b8ff6d277af771ee3bb8f5d163d0290e7a3c35`.
+Accepted comparison `104a2e379539286f1062add33b7d671981d73f07`
+contains blob `c5028e5a5f40e2ea98205d9fa5a53ce7c3733a06`.
+Within `TestContentExceedsMergedHeadFailsClosed`, each source loop row
+maps to its own existing accepted native test:
+
+| Source label / exact refusal input | Accepted method |
+|---|---|
+| `missing-head`: empty recorded head, valid content/upstream | `test_missing_head_sha` |
+| `missing-content`: valid recorded head/upstream, `None` content | `test_none_content_ref` |
+| `unresolvable-head`: `"0" * 40`, valid content/upstream | `test_unresolvable_head_sha` |
+| `unresolvable-content`: valid recorded head/upstream, `no-such-ref-at-all` content | `test_unresolvable_content_ref` |
+| `rev-list-error`: valid recorded head/content, `no-such-upstream-ref-at-all` upstream | `test_failed_rev_list_unresolvable_upstream` |
+
+Every method still calls the real `content_exceeds_merged_head` against its
+private `refspec_worktree` and asserts `is True`. The final three cases retain
+actual Git failures for the unresolvable revision, not a permissive zero or a
+mocked result. Collection remains five separately named cases, so a failure
+identifies the same branch more directly than a loop label. The already-admitted
+G graph-validation semantics remain separate; this disposition adds no cache
+and removes no native boundary, fixture dependency, test or assertion.
+
+Both complete current precondition and creation-gating modules pass 119 cases
+in 82.95 seconds preparation/cleanup inclusive, with exactly two native workers
+and all original item/process/memory/deadline limits. This is bounded contract
+evidence, not normal-group or repeated same-head complete-plugin qualification.
+No runtime, fixture or test edit is needed for this semantic disposition.
+
 ### T redundant end-of-file whitespace needs no further extraction
 
 This settles only `src/agent_worktrees/finalize_ref.py:6`, header
