@@ -2,12 +2,12 @@
 
 Back to [Actions Dialog Isolation](README.md).
 
-**Supplier/locality amendment pending source review.** The exact file-store,
-derived-consumer and supplier surfaces below have integration admission.
-Locality admission is limited to `data_local.is_local` and immediate
-`_resume_decision`/`_decide` handling. The headed-launch bypass guard remains an
-explicit extra dependency. These are agent-recommended mechanics, not completed
-behavior. The #7940 episode does not take startup ownership.
+**Reviewed design; functional source review pending.** The initial evidence and
+proposals below record the pre-change baseline. The execution amendment and
+README journal carry current admission and validation: file store, selected
+supplier API, locality refusal and the three exact immediate-caller guards are
+admitted and implemented locally. This does not claim source merge, native
+qualification or installed rollout. The #7940 episode does not take startup ownership.
 
 ## Evidence and invariants
 
@@ -301,10 +301,10 @@ otherwise the operation waits for an existing worker refresh or manual retry.
 `headed_actions.open_worktree_cli_headed` does not: it reads options and builds
 a `LaunchRequest` directly. A one-branch guard there must forward a deferred
 decision to `_decide` and return before `_run_bg` or request construction.
-That guard is proposed, not silently included in the two-method admission.
+That exact guard now has separate admission; it is not a generic action rewrite.
 Do not publish a locality fix that leaves this bypass able to launch.
 
-Two immediate internal-action paths also require explicit narrow admission.
+Two immediate internal-action paths also have explicit narrow admission.
 `engine_worktree_actions._resume_embodied_worktree_cli` must honor refusal in
 both its loaded-row and synthetic-row paths: no result mutation or successful
 return after `_decide` refuses, with or without an explicit project. Its
@@ -333,24 +333,24 @@ coverage.
 
 ### Additional validation and completion gates
 
-- [ ] Fake clock at 59.999 and 60 seconds; `ttl=0`, nested scopes and expiry
+- [x] Fake clock at 59.999 and 60 seconds; `ttl=0`, nested scopes and expiry
   midway through a logical pass.
-- [ ] Same-mtime/same-size bytes changed; unchanged bytes do not reparse; warm
+- [x] Same-mtime/same-size bytes changed; unchanged bytes do not reparse; warm
   path counters show zero reads/stats/subprocesses.
-- [ ] One in-flight reader per key/generation with concurrent consumers,
+- [x] One in-flight reader per key/generation with concurrent consumers,
   success/error sharing, repair retry and cancellation releasing every waiter.
-- [ ] Manual clear and bootstrap rebind during blocked I/O; old completions
+- [x] Manual clear and bootstrap rebind during blocked I/O; old completions
   cannot enter current state; strong binding identity survives old-scope life.
-- [ ] Bounded retained entries and obsolete scopes; no id-reuse key collisions,
+- [x] Bounded retained entries and obsolete scopes; no id-reuse key collisions,
   generation chains or cross-project/path contamination.
-- [ ] Missing/deleted/preferred-file creation, invalid YAML and permission errors
+- [x] Missing/deleted/preferred-file creation, invalid YAML and permission errors
   retain honest missing/error state and compatible exception boundaries.
-- [ ] Real supplier switch, registry change and supplier-only content replacement
+- [x] Real supplier switch, registry change and supplier-only content replacement
   use the owner API and read no unrelated project; prove parity against existing
   owner precedence with real synthetic registry files, not a constant supplier.
-- [ ] Derived mapping updates through actual admitted consumer hooks; stale
+- [x] Derived mapping updates through actual admitted consumer hooks; stale
   source/setup completions are rejected and unrelated selection remains intact.
-- [ ] Template non-applicability cites the actual readers above; any newly found
+- [x] Template non-applicability cites the actual readers above; any newly found
   expanding provider requires its real dependency contract.
 - [ ] Reviewed source plan, focused tests, required CI and actual source merges;
   original failure/command evidence retained before cleanup. Native timing and

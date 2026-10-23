@@ -54,6 +54,12 @@ it directly. `install`/`update` rebuild only the light `[store,server]` service
 slot, then cut traffic over with zdd; the durable engine remains on its separate
 explicit lifecycle and is never rebuilt by a routine service update.
 
+The manifest's source-inventory `additionalPythonProjects` declaration names
+`server/pyproject.toml`, so the independently packaged embedding engine cannot
+be omitted from the construction-owner census. This is inert source metadata:
+it does not install an engine, select a runtime profile or certify native/feed
+construction or installed readiness.
+
 Both canonical installers use the shared installer engine for uv acquisition,
 venv/package retries and deploy manifests. Native installs keep the versioned
 primary CLI base-only for both roles. A host installs `[store,server]` once,

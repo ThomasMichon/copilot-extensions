@@ -790,14 +790,10 @@ class PickerScreenWorktreeActionsMixin:
         self, wid, *, machine=None, env=None, title=None, source_id=None,
         source_kind=None, project=None, embodied=False
     ):
-        """Exit into the standard resume flow for a worktree an internal task
-        action just embodied.
+        """Resume an embodied worktree using its loaded row or a synthetic row.
 
-        Prefer the loaded row when it already exists (a resumed Suspended task,
-        or a just-created worktree that has already shown up in the loaded
-        source). Fall back to a synthetic resume decision when the picker has not
-        reloaded yet: the launch path only needs the stable worktree id plus the
-        resolved remote/local host identity, not the full loaded row.
+        Unknown locality refuses without exit, result mutation or success.
+        A synthetic row carries the stable id and resolved host identity.
         """
         row, error = self._find_internal_worktree(wid, source_id)
         if row is not None:
@@ -806,7 +802,8 @@ class PickerScreenWorktreeActionsMixin:
             # A successful embodiment transaction already owns a fresh binding.
             if not embodied and row.get("managed_child") and not row.get("mux_live"):
                 return False, "workspace has no session here; navigate to its controller or Refresh"
-            self._decide(self._resume_decision(row))
+            if self._decide(self._resume_decision(row)) is False:
+                return False, self.debug
             if project:
                 self.app.result["project"] = project
             return True, f"opening …{str(wid)[-4:]} into a CLI session"
@@ -816,15 +813,15 @@ class PickerScreenWorktreeActionsMixin:
         env = str(env or "").strip()
         if not machine or not env:
             return False, error or "worktree launched but picker could not resolve its host"
-        self._decide({
-            "action": "resume",
-            "worktree_id": wid,
+        decision = self._resume_decision({
+            "raw": {"id": wid},
             "id4": str(wid)[-4:],
             "machine": machine,
             "env": env,
             "title": title,
-            "is_local": self.src.is_local(machine, env),
         })
+        if self._decide(decision) is False:
+            return False, self.debug
         if project:
             self.app.result["project"] = project
         return True, f"opening …{str(wid)[-4:]} into a CLI session"
@@ -866,7 +863,12 @@ class PickerScreenWorktreeActionsMixin:
                 source_id = source_id or match.get("source_id")
                 source_kind = source_kind or match.get("source_kind")
         env = env or str(local_env or "").strip()
-        remote = not self.src.is_local(machine, env)
+        try:
+            remote = not self.src.is_local(machine, env)
+        except RuntimeError as exc:
+            self.debug = str(exc)
+            self.refresh()
+            return False, self.debug
         base_argv = ["agent-dispatch", "embody", task_id, "--interactive", "--machine", machine]
         def _work():
             from . import data_ssh as _data_ssh

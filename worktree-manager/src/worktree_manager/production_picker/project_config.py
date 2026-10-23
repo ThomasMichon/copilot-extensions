@@ -10,15 +10,21 @@ from __future__ import annotations
 
 import contextlib
 import asyncio
+from collections import OrderedDict
+from contextvars import ContextVar
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import lru_cache
+import math
 from pathlib import Path
 import threading
+from time import monotonic as _file_clock
 
 import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
 from machine_transport import normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
+from machine_transport import parse_machines_yaml as _mt_parse_machines_yaml
 
 from .. import engine_client, harness_state, terminal_fragment
 from . import context, engine_group_a
@@ -113,23 +119,177 @@ class ProjectConfig:
     default_repo: RepoConfig
 
 
-class ConfigCacheSession:
-    """Compatibility surface for the Picker's setup worker cache scope.
+def _on_event_loop() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
 
-    The Manager now reads its small config subset directly and memoizes it at the
-    module level, so the old engine-owned TTL session collapses to a no-op
-    context manager that still matches the call sites' shape.
-    """
+
+@dataclass(frozen=True)
+class _YamlSnapshot:
+    content: bytes | None
+    value: dict
+
+
+class _FileEntry:
+    def __init__(self) -> None:
+        self.finished = threading.Event()
+        self.value = None
+        self.error: BaseException | None = None
+        self.ready = False
+
+
+class _FileGeneration:
+    """One bounded snapshot generation; only workers join in-flight reads."""
+
+    capacity = 128
+
+    def __init__(self, binding, epoch, ttl, previous=None):
+        self.binding = binding
+        self.epoch = epoch
+        self.ttl = ttl
+        self.created = _file_clock()
+        self.invalidated = False
+        self.lock = threading.Lock()
+        self.entries = OrderedDict()
+        self.seeds = {}
+        if previous is not None:
+            with previous.lock:
+                self.seeds = {
+                    key: entry.value for key, entry in previous.entries.items()
+                    if entry.ready and isinstance(entry.value, _YamlSnapshot)
+                }
+
+    def current(self):
+        return (
+            not self.invalidated and self.binding is _scalar_cache
+            and self.epoch == self.binding.epoch
+        )
+
+    def expired(self):
+        return self.ttl > 0 and _file_clock() - self.created >= self.ttl
+
+    def get(self, key, loader):
+        if not self.current():
+            raise RuntimeError("Picker file configuration is not ready; generation superseded")
+        if _on_event_loop():
+            entry = self.entries.get(key)
+            if entry is None or not entry.ready:
+                raise RuntimeError("Picker file configuration is not ready; refresh on a worker")
+        else:
+            with self.lock:
+                entry = self.entries.get(key)
+                owner = entry is None
+                if owner:
+                    if len(self.entries) >= self.capacity:
+                        raise RuntimeError("Picker file configuration read capacity is exhausted")
+                    entry = self.entries[key] = _FileEntry()
+                else:
+                    self.entries.move_to_end(key)
+            if owner:
+                try:
+                    value = loader()
+                    if not self.current():
+                        raise RuntimeError("Picker file configuration is not ready; generation superseded")
+                    entry.value = value
+                except BaseException as exc:
+                    entry.error = exc
+                finally:
+                    entry.ready = True
+                    entry.finished.set()
+            else:
+                entry.finished.wait()
+        if not self.current():
+            raise RuntimeError("Picker file configuration is not ready; generation superseded")
+        if entry.error is not None:
+            errors = _active_file_errors.get()
+            if errors is not None:
+                errors[0] = entry.error
+            raise entry.error
+        return entry.value
+
+
+_active_files = ContextVar("picker_file_generation", default=None)
+_active_file_errors = ContextVar("picker_file_errors", default=None)
+_file_generation = None
+_file_generation_lock = threading.Lock()
+
+
+def _invalidate_file_cache():
+    global _file_generation
+    previous = _file_generation
+    _file_generation = None
+    if previous is not None:
+        previous.invalidated = True
+
+
+def _current_file_generation(ttl):
+    global _file_generation
+    scoped = _active_files.get()
+    if scoped is not None:
+        return scoped
+    current = _file_generation
+    if _on_event_loop():
+        if ttl == 0 or current is None or not current.current() or current.expired():
+            raise RuntimeError("Picker file configuration is not ready; refresh on a worker")
+        return current
+    with _file_generation_lock:
+        current = _file_generation
+        if ttl == 0:
+            return _FileGeneration(_scalar_cache, _scalar_cache.epoch, ttl)
+        if current is None or not current.current() or current.expired() or current.ttl != ttl:
+            same_binding = current is not None and current.current()
+            current = _FileGeneration(
+                _scalar_cache, _scalar_cache.epoch, ttl,
+                previous=current if same_binding else None,
+            )
+            _file_generation = current
+        return current
+
+
+class ConfigCacheSession:
+    """Pin a file generation across one logical worker pass."""
 
     def __init__(self, ttl: float = 0.0) -> None:
-        del ttl
+        if not math.isfinite(ttl) or ttl < 0:
+            raise ValueError("configuration cache TTL must be finite and nonnegative")
+        self.ttl = ttl
 
+    @property
+    def revision(self):
+        generation = _active_files.get() or _file_generation
+        if generation is None or not generation.current() or generation.expired():
+            return None
+        return generation
+
+    @contextlib.contextmanager
     def scope(self):
-        return contextlib.nullcontext(self)
+        generation = _current_file_generation(self.ttl)
+        token = _active_files.set(generation)
+        errors = _active_file_errors.get()
+        error_token = _active_file_errors.set(errors if errors is not None else [None])
+        try:
+            yield self
+        finally:
+            _active_file_errors.reset(error_token)
+            _active_files.reset(token)
+
+    def raise_for_errors(self):
+        errors = _active_file_errors.get()
+        if errors is not None and errors[0] is not None:
+            raise errors[0]
 
 
 def cached_load_config_scope():
-    return contextlib.nullcontext(ConfigCacheSession())
+    return ConfigCacheSession().scope()
+
+
+@contextlib.contextmanager
+def _file_scope():
+    with ConfigCacheSession(ttl=60.0).scope():
+        yield _active_files.get()
 
 
 def clear_caches(*, reset_binding: bool = False) -> None:
@@ -145,6 +305,7 @@ def clear_caches(*, reset_binding: bool = False) -> None:
     _cached_project_yaml.cache_clear()
     _cached_repo_yaml.cache_clear()
     _load_machines_yaml.cache_clear()
+    _invalidate_file_cache()
 
 
 def _project_dir(project: str) -> Path:
@@ -235,11 +396,35 @@ def detect_platform() -> str:
 
 
 def _read_yaml(path: Path) -> dict:
-    try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    return deepcopy(_yaml_snapshot(path).value)
+
+
+def _yaml_snapshot(path: Path) -> _YamlSnapshot:
+    path = Path(path).absolute()
+    with _file_scope() as files:
+        key = ("yaml", path)
+
+        def read():
+            try:
+                content = path.read_bytes()
+            except FileNotFoundError:
+                return _YamlSnapshot(None, {})
+            except OSError as exc:
+                raise ValueError(f"Cannot read configuration file: {path}") from exc
+            previous = files.seeds.get(key)
+            if previous is not None and previous.content == content:
+                return previous
+            try:
+                value = yaml.safe_load(content)
+            except yaml.YAMLError as exc:
+                raise ValueError(f"Invalid configuration file: {path}") from exc
+            if value is None:
+                value = {}
+            if not isinstance(value, dict):
+                raise ValueError(f"Configuration must be a mapping: {path}")
+            return _YamlSnapshot(content, value)
+
+        return files.get(key, read)
 
 
 def _load_project_yaml(project: str) -> dict:
@@ -247,9 +432,12 @@ def _load_project_yaml(project: str) -> dict:
     return _cached_project_yaml(cache, cache.epoch, project, default_config_path(project))
 
 
-@lru_cache(maxsize=None)
 def _cached_project_yaml(cache: _ScalarCache, epoch: int, project: str, path: Path) -> dict:
-    return _read_yaml(path)
+    path = Path(path).absolute()
+    with _file_scope() as files:
+        if files.binding is not cache or files.epoch != epoch:
+            raise RuntimeError("Picker file configuration is not ready; generation superseded")
+        return deepcopy(files.get(("project", project, path), lambda: _read_yaml(path)))
 
 
 def _load_repo_yaml(project: str) -> dict:
@@ -257,18 +445,26 @@ def _load_repo_yaml(project: str) -> dict:
     return _cached_repo_yaml(cache, cache.epoch, project, _repo_dir(project).strip())
 
 
-@lru_cache(maxsize=None)
 def _cached_repo_yaml(cache: _ScalarCache, epoch: int, project: str, repo_dir: str) -> dict:
-    if not repo_dir:
-        return {}
-    root = Path(repo_dir)
-    for candidate in (
-        root / ".agent-worktrees" / "config.yaml",
-        root / "config.yaml",
-    ):
-        if candidate.is_file():
-            return _read_yaml(candidate)
-    return {}
+    repo_dir = str(Path(repo_dir).absolute()) if repo_dir else ""
+    with _file_scope() as files:
+        if files.binding is not cache or files.epoch != epoch:
+            raise RuntimeError("Picker file configuration is not ready; generation superseded")
+
+        def read():
+            if repo_dir:
+                root = Path(repo_dir)
+                for candidate in (root / ".agent-worktrees" / "config.yaml", root / "config.yaml"):
+                    snapshot = _yaml_snapshot(candidate)
+                    if snapshot.content is not None:
+                        return snapshot.value
+            return {}
+
+        return deepcopy(files.get(("repo", project, repo_dir), read))
+
+
+_cached_project_yaml.cache_clear = _invalidate_file_cache
+_cached_repo_yaml.cache_clear = _invalidate_file_cache
 
 
 def _parse_machines_yaml_file(path: Path) -> dict[str, MachineEntry]:
@@ -291,7 +487,6 @@ def _parse_machines_yaml_file(path: Path) -> dict[str, MachineEntry]:
         raise ValueError(f"machines.yaml at {path} is missing 'machines' key") from exc
 
 
-@lru_cache(maxsize=None)
 def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
     """Additive merge of the canonical in-repo ``.agent-worktrees/
     machines.yaml`` (agent-containers fleet registrations, etc.) with the
@@ -309,42 +504,63 @@ def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
     the shared read-only logical-machine projection; generated key/alias
     collisions refuse rather than overwrite another entry.
     """
-    root = Path(repo_dir)
-    canonical = root / ".agent-worktrees" / "machines.yaml"
-    legacy = root / "machines.yaml"
-    canonical_exists = canonical.is_file()
-    legacy_exists = legacy.is_file()
-    if not canonical_exists and not legacy_exists:
-        path = machines_yaml_path(repo_dir)  # overlay fallback, or the error path
-        if not path.is_file():
-            raise FileNotFoundError(f"Machine registry not found at {path}")
-        return normalize_machine_entries(_parse_machines_yaml_file(path))
-    entries: dict[str, MachineEntry] = {}
-    if legacy_exists:
-        entries.update(_parse_machines_yaml_file(legacy))
-    if canonical_exists:
-        entries.update(_parse_machines_yaml_file(canonical))
-    return normalize_machine_entries(entries)
+    repo_dir = str(Path(repo_dir).absolute())
+    try:
+        project = project_name()
+    except RuntimeError:
+        project = None
+    with _file_scope() as files:
+        def parse(snapshot):
+            if not isinstance(snapshot.value.get("machines"), dict):
+                raise ValueError("Machine registry requires an explicit machines mapping")
+            return _mt_parse_machines_yaml(deepcopy(snapshot.value), require_alias=False)
+
+        def read():
+            root = Path(repo_dir)
+            canonical = _yaml_snapshot(root / ".agent-worktrees" / "machines.yaml")
+            legacy = _yaml_snapshot(root / "machines.yaml")
+            if canonical.content is None and legacy.content is None:
+                path = machines_yaml_path(repo_dir)
+                supplier = _yaml_snapshot(path)
+                if supplier.content is None:
+                    raise FileNotFoundError(f"Machine registry not found at {path}")
+                return normalize_machine_entries(parse(supplier))
+            entries = {}
+            for snapshot in (legacy, canonical):
+                if snapshot.content is not None:
+                    entries.update(parse(snapshot))
+            return normalize_machine_entries(entries)
+
+        return deepcopy(files.get(("machines", project, repo_dir), read))
+
+
+_load_machines_yaml.cache_clear = _invalidate_file_cache
 
 
 def load_config() -> ProjectConfig:
     project = project_name()
-    project_yaml = _load_project_yaml(project)
-    repo_yaml = _load_repo_yaml(project)
-    repo_name = str(project_yaml.get("repo_name") or project).strip() or project
-    machine = _machine_name(project).strip()
-    repo_dir = _repo_dir(project).strip()
-    default_branch = str(repo_yaml.get("default_branch") or "").strip()
-    if not default_branch:
-        repos = harness_state.repos_registry().get("repos") or {}
-        entry = repos.get(project)
-        if isinstance(entry, dict):
-            default_branch = str(entry.get("default_branch") or "").strip()
-    return ProjectConfig(
-        repo_name=repo_name,
-        machine=machine,
-        default_repo=RepoConfig(anchor=repo_dir, default_branch=default_branch),
-    )
+    with _file_scope() as files:
+        def read():
+            project_yaml = _load_project_yaml(project)
+            repo_yaml = _load_repo_yaml(project)
+            repo_name = str(project_yaml.get("repo_name") or project).strip() or project
+            machine = _machine_name(project).strip()
+            repo_dir = _repo_dir(project).strip()
+            default_branch = str(repo_yaml.get("default_branch") or "").strip()
+            if not default_branch:
+                repos = _read_yaml(harness_state._registry_path(None, "repos")).get("repos", {})
+                if not isinstance(repos, dict):
+                    raise ValueError("Repository registry entries must be a mapping")
+                entry = repos.get(project)
+                if isinstance(entry, dict):
+                    default_branch = str(entry.get("default_branch") or "").strip()
+                elif entry is not None:
+                    raise ValueError("Selected repository entry must be a mapping")
+            return ProjectConfig(
+                repo_name=repo_name, machine=machine,
+                default_repo=RepoConfig(anchor=repo_dir, default_branch=default_branch),
+            )
+        return files.get(("config", project), read)
 
 
 def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
@@ -352,24 +568,23 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
 
 
 def machines_yaml_path(repo_dir: str | Path) -> Path:
-    root = Path(repo_dir)
-    project = project_name()
-    for candidate in (
-        root / ".agent-worktrees" / "machines.yaml",
-        root / "machines.yaml",
-    ):
-        if candidate.is_file():
-            return candidate
-    knowledge_repo = str(harness_state.project_config(project).get("knowledge_repo") or "").strip()
-    if knowledge_repo:
-        for info in harness_state.build_projects():
-            if info.name != knowledge_repo or not info.anchor:
-                continue
-            overlay_root = Path(info.anchor)
+    with _file_scope():
+        root = Path(repo_dir)
+        project = project_name()
+        for candidate in (root / ".agent-worktrees" / "machines.yaml", root / "machines.yaml"):
+            if _yaml_snapshot(candidate).content is not None:
+                return candidate
+        knowledge_repo = str(_load_project_yaml(project).get("knowledge_repo") or "").strip()
+        if knowledge_repo:
+            selection = harness_state.project_anchor_selection(knowledge_repo, reader=_read_yaml)
+            overlay_root = Path(selection.anchor) if selection.anchor else None
+        else:
+            overlay_root = None
+        if overlay_root is not None:
             for candidate in (
                 overlay_root / ".agent-worktrees" / "machines.yaml",
                 overlay_root / "machines.yaml",
             ):
-                if candidate.is_file():
+                if _yaml_snapshot(candidate).content is not None:
                     return candidate
-    return root / ".agent-worktrees" / "machines.yaml"
+        return root / ".agent-worktrees" / "machines.yaml"

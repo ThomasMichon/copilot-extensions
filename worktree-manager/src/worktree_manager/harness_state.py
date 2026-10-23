@@ -236,12 +236,16 @@ class ProfileInputRoots:
         return self.projects[name]
 
 
+def _registry_path(home_dir, kind, *, input_roots=None) -> Path:
+    root = input_roots.registry if input_roots else (home_dir or home()) / ".agent-worktrees"
+    return root / f"{kind}.yaml"
+
+
 def _registry(
     home_dir: Path | None, kind: str, *, strict: bool,
     input_roots: ProfileInputRoots | None = None,
 ) -> dict:
-    root = input_roots.registry if input_roots else (home_dir or home()) / ".agent-worktrees"
-    path = root / f"{kind}.yaml"
+    path = _registry_path(home_dir, kind, input_roots=input_roots)
     data = _read_yaml(path, strict=True, required_key=kind) if strict else _read_yaml(path)
     if strict:
         entries = data.get(kind, {})
@@ -442,6 +446,56 @@ def repo_enabled_plugins(repo_path: str | None) -> list[str]:
     ]
 
 
+def _registered_repo_path(entry, platform_key):
+    return entry.get(platform_key) or entry.get("windows") or entry.get("linux") or entry.get("wsl")
+
+
+def _selected_project_anchor(repo_path, entry):
+    override = entry.get("anchor") if isinstance(entry.get("anchor"), str) else None
+    return repo_path or override
+
+
+@dataclass(frozen=True)
+class ProjectAnchorSelection:
+    anchor: str | None
+    dependency_paths: tuple[Path, ...]
+
+
+def project_anchor_selection(
+    name: str, home_dir: Path | None = None, *,
+    input_roots: ProfileInputRoots | None = None, reader=None,
+) -> ProjectAnchorSelection:
+    """Resolve only one registered project's anchor, without materializing it."""
+    paths = tuple(
+        _registry_path(home_dir, kind, input_roots=input_roots)
+        for kind in ("repos", "projects")
+    )
+    read = reader if reader is not None else lambda path: _read_yaml(path, strict=True)
+    documents = [read(path) for path in paths]
+    registries = []
+    for document, kind in zip(documents, ("repos", "projects")):
+        if not isinstance(document, dict):
+            raise ValueError(f"{kind} registry must be a mapping")
+        entries = document.get(kind, {})
+        if not isinstance(entries, dict):
+            raise ValueError(f"{kind} entries must be a mapping")
+        registries.append(entries)
+    repos, projects = registries
+    if name not in projects:
+        return ProjectAnchorSelection(None, paths)
+    project_entry, repo_entry = projects[name], repos.get(name)
+    project_entry = {} if project_entry is None else project_entry
+    repo_entry = {} if repo_entry is None else repo_entry
+    if not isinstance(project_entry, dict) or not isinstance(repo_entry, dict):
+        raise ValueError("Selected project and repository entries must be mappings")
+    anchor = _selected_project_anchor(
+        _registered_repo_path(repo_entry, _platform_key()), project_entry,
+    )
+    if anchor is not None and not isinstance(anchor, str):
+        raise ValueError("Selected project anchor must be a string")
+    return ProjectAnchorSelection(anchor, paths)
+
+
 def build_repos(
     home_dir: Path | None = None, *, strict: bool = False,
     input_roots: ProfileInputRoots | None = None,
@@ -457,7 +511,7 @@ def build_repos(
     out: list[RepoInfo] = []
     for name, entry in (reg.get("repos") or {}).items():
         entry = entry or {}
-        path = entry.get(pkey) or entry.get("windows") or entry.get("linux") or entry.get("wsl")
+        path = _registered_repo_path(entry, pkey)
         out.append(RepoInfo(
             name=name,
             klass=entry.get("class", "?"),
@@ -612,8 +666,7 @@ def build_projects(
         # Prefer the repos.yaml-resolved path; fall back to this project's
         # own projects.yaml `anchor:` override for a project registered
         # without (or overriding) a repos.yaml entry.
-        anchor_override = entry.get("anchor") if isinstance(entry.get("anchor"), str) else None
-        anchor = (repo.path if repo else None) or anchor_override
+        anchor = _selected_project_anchor(repo.path if repo else None, entry)
         out.append(ProjectInfo(
             name=name,
             config_dir=entry.get("config_dir"),

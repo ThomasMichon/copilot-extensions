@@ -6,6 +6,7 @@ import threading
 import asyncio
 
 import pytest
+import yaml
 from types import SimpleNamespace
 
 from worktree_manager import harness_state
@@ -99,13 +100,22 @@ def test_old_project_file_read_cannot_repopulate_new_binding(monkeypatch, tmp_pa
 
     monkeypatch.setattr(project_config, "_read_yaml", read)
     project_config.bind_bootstrap("example", {"config_dir": str(tmp_path / "old")})
-    old = threading.Thread(target=lambda: project_config._load_project_yaml("example"))
+    errors = []
+
+    def old_read():
+        try:
+            project_config._load_project_yaml("example")
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    old = threading.Thread(target=old_read)
     try:
         old.start()
         assert entered.wait(1)
         project_config.bind_bootstrap("example", {"config_dir": str(tmp_path / "new")})
         release.set()
         old.join(2)
+        assert len(errors) == 1 and "superseded" in errors[0]
         assert project_config._load_project_yaml("example") == {"generation": "new"}
     finally:
         release.set()
@@ -142,7 +152,11 @@ def test_worker_recovery_replaces_fallback_after_input_read(monkeypatch, tmp_pat
         recovering = True
 
         async def exercise():
-            assert project_config.load_config().machine == "fallback-host"
+            with pytest.raises(RuntimeError, match="file configuration is not ready"):
+                project_config.load_config()
+            assert project_config._machine_name("example") == "fallback-host"
+            assert project_config._repo_dir("example") == str(tmp_path / "fallback")
+            assert project_config._project_dir("example") == tmp_path / ".example"
             assert len(calls) == 3
             result = await asyncio.to_thread(project_config.load_config)
             assert result.repo_name == "recovered" and result.machine == "recovered-host"
@@ -240,13 +254,10 @@ def test_load_config_uses_registry_default_branch_when_inrepo_config_missing(
         "build_projects",
         lambda home_dir=None: [_project("demo", project_root)],
     )
-    monkeypatch.setattr(
-        harness_state,
-        "repos_registry",
-        lambda home_dir=None: {
-            "repos": {"demo": {"windows": str(project_root), "default_branch": "dev"}}
-        },
-    )
+    monkeypatch.setattr(harness_state, "home", lambda: tmp_path)
+    registry = tmp_path / ".agent-worktrees" / "repos.yaml"
+    registry.parent.mkdir()
+    registry.write_text("repos:\n  demo:\n    default_branch: dev\n")
     monkeypatch.setattr(
         harness_state,
         "project_config",
@@ -271,24 +282,23 @@ def test_machines_yaml_path_uses_knowledge_repo_overlay(monkeypatch, tmp_path):
     overlay.parent.mkdir(parents=True)
     overlay.write_text("machines: {}\n", encoding="utf-8")
 
-    monkeypatch.setattr(
-        harness_state,
-        "build_projects",
-        lambda home_dir=None: [
-            _project("demo", launch_root),
-            _project("knowledge", knowledge_root),
-        ],
-    )
-    monkeypatch.setattr(
-        harness_state,
-        "project_config",
-        lambda name, home_dir=None: {"knowledge_repo": "knowledge"} if name == "demo" else {},
-    )
+    monkeypatch.setattr(harness_state, "home", lambda: tmp_path)
+    registry = tmp_path / ".agent-worktrees"
+    registry.mkdir()
+    (registry / "projects.yaml").write_text(yaml.safe_dump({
+        "projects": {"knowledge": {"anchor": str(knowledge_root)}},
+    }))
+    config_dir = tmp_path / "accepted-config"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("knowledge_repo: knowledge\n")
+    project_config.bind_bootstrap("demo", {"config_dir": str(config_dir)})
+    monkeypatch.setattr(harness_state, "build_projects", lambda *a: pytest.fail("all-project scan"))
     context.set_project("demo")
     try:
         resolved = project_config.machines_yaml_path(launch_root)
     finally:
         context.reset()
+        project_config.clear_caches(reset_binding=True)
 
     assert resolved == overlay
 

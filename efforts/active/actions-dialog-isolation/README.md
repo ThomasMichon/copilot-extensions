@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-23
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Picker](../../../visions/picker/README.md), responsive-by-budget
 - **Umbrella issue:** #7939
 - **Sub-issues:** #7940 (new configuration-freshness episode)
@@ -113,17 +113,18 @@ episode requiring its own reviewed source amendment before implementation.
 
 ### Phase 4 — Bounded configuration freshness
 
-- [ ] Review and merge the execution amendment before functional changes.
-- [ ] Replace the three indefinite file memoizers with demand-driven scoped
+- [x] Review and merge the execution amendment before functional changes.
+- [x] Replace the three indefinite file memoizers with demand-driven scoped
   snapshots, real binding identity, TTL and single-flight changed-input reads.
-- [ ] Add only the admitted derived-map/manual-reload/accepted-revision hooks;
+- [x] Add only the admitted derived-map/manual-reload/accepted-revision hooks;
   preserve unrelated selection and current setup/source generation.
-- [ ] Qualify the complete amended matrix, including cancellation, error
+- [x] Qualify the complete amended matrix, including cancellation, error
   retry, manual clear/rebind races and zero-work warm reads.
-- [ ] Obtain supplier-API admission before editing `harness_state`; then qualify
+- [x] Obtain supplier-API admission before editing `harness_state`; then qualify
   the actual selected-supplier path without unrelated-project discovery.
-- [ ] Review the supplier/locality amendment before those functional edits;
-  keep the headed-launch bypass guarded or explicitly blocked pending admission.
+- [x] Review the supplier/locality amendment before those functional edits.
+- [x] Obtain the three remaining immediate-caller guard admissions, implement
+  their narrow no-effect refusal checks and pass the six captured controls.
 - [ ] Pass review and required checks, merge source PRs and explicitly retain
   native/release/installed obligations. Do not close #7940 with a production
   supplier or derived-view gap.
@@ -285,3 +286,80 @@ interfaces. Do not create a general request broker or shared polling layer.
   locality checks in its synthetic path and `_embody_task_cli`. Their exact
   no-effect refusal controls are explicit additional admission/publication
   dependencies in the amended plan.
+
+### 2026-10-23 — Supplier/locality source progress and remaining caller gates
+
+- Plan amendment #8215 merged as `d292ffcdfcae6280034063d1afbf7985518de5a5`
+  after required checks and current-head approval. The review's caller-safety
+  finding was addressed by explicit guard/admission/test prerequisites, not by
+  claiming the unimplemented callers safe.
+- Restored the preserved, unpublished prototype on top of that reviewed plan.
+  Implemented the selected supplier API and shared pure precedence helpers,
+  replaced the remaining machine-roster memoizer, and routed supplier/config
+  reads through the scoped file store. Known source-locality remains Boolean;
+  not-ready configuration is explicitly refused by the admitted immediate
+  resume/decide path.
+- A contained 64-test packet passes: real builder/selected-reader parity and
+  two-registry dependency reads; real supplier content/name/registry changes;
+  missing-preferred creation; actual derived mapping expiry/manual invalidation,
+  source/setup/clear late-result rejection, error retry and selection retention;
+  configured-local-alias refusal and known-local/known-remote decision behavior.
+  Touched Python lint passes and all 11 frozen scalar ASTs remain unchanged.
+- Six additional controls fail at the still-unadmitted immediate caller seams:
+  headed launch schedules its worker; loaded internal resume reports success or
+  mutates a `None` result; synthetic internal resume and pre-embodiment locality
+  checks propagate an exception. These failures block functional publication.
+  The original failure evidence is retained; none is skipped or called a flake.
+- Required remaining admissions are exactly
+  `headed_actions.open_worktree_cli_headed`,
+  `engine_worktree_actions._resume_embodied_worktree_cli` and
+  `_embody_task_cli` refusal guards. No changes to those methods were made.
+  The functional work remains local/unpublished; no native or installed
+  qualification is claimed.
+
+### 2026-10-23 — Final guard admission and source validation
+
+- The three already-reviewed refusal guards received explicit admission.
+  Fresh issue/PR/task checks found no competing owner. Headed launch now returns
+  before worker/request construction, internal loaded/synthetic resume honors a
+  refused decision before result mutation/success, and pre-embodiment refusal
+  returns before dispatch. Known-success callers retain their behavior.
+- All six original fail-first guard controls pass, alongside the complete
+  affected configuration matrix. Expanded compatibility checks found a real
+  completion-boundary bug: setup invalidated freshly prepared file snapshots
+  while applying them. Invalidation now happens at the existing request
+  boundary before collection, with the existing epoch/failure fencing retained.
+- Source-locality fallback preserves unbound raw-host identity and valid
+  prepared positive evidence without bypassing an explicit logical platform.
+  The startup control now waits for a nonzero applied epoch, and asserts its
+  prepared file generation survives publication.
+- The final combined 171-case configuration/locality/refusal/startup packet passed.
+  A mapping failure no longer replaces an in-progress setup status, and cache
+  source keys normalize relative file/roster paths without filesystem discovery.
+  Raw failure and correction evidence remains retained. Native performance,
+  installed rollout and broader campaign gates remain open.
+- Final structural comparison proves all 11 frozen scalar/class helper ASTs
+  and every pre-existing `clear_caches` statement unchanged. Touched Python
+  lint and the 13-plugin install contract pass.
+- Functional source review, required CI and actual merge remain the next gate.
+
+### 2026-10-23 — Current-head review corrections
+
+- Reproduced all three Medium source-review findings on #8286 before fixing
+  them. Four immediate launch callers and two worker-preparation controls
+  demonstrated the warm-config/cold-roster bypass. Not-ready roster errors now
+  propagate to the existing visible refusal guards instead of alias fallback.
+  The existing mapping worker prepares the real same-generation roster; no
+  worker, polling or startup-composition framework was added.
+- Supplier selected-entry validation now defaults only absent/null entries.
+  Falsey lists, strings, booleans and numbers are rejected. Default-branch
+  registry containers default only when absent; explicitly supplied null and
+  other non-mappings fail and can recover on a subsequent generation.
+- The non-live startup fixture now uses the real source's roster metadata
+  helpers on its existing collection worker. It no longer treats a project-only
+  warmup as locality authority. Scalar binding and original epoch statements
+  remain structurally unchanged.
+- The expanded combined packet passed 202 tests, including Windows/Linux/guest
+  preparation controls. Lint, module cap, install contract and the
+  11-helper AST proof passed. Original failures and correction logs are retained.
+  Current-head review/CI/merge and native/installed qualification remain separate.

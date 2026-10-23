@@ -6,6 +6,8 @@ import threading
 
 from .engine_helpers import BUILTIN_PIVOTS, PIVOT_PLACEMENT
 
+_UNTRACKED_CONFIG_REVISION = object()
+
 class PickerScreenPivotsMixin:
     def _load_pivots(self, *, scan: bool = True):
         """(Re)scan the manifest registry and rebuild the ordered pivot list.
@@ -195,10 +197,26 @@ class PickerScreenPivotsMixin:
         here as a safety net (idempotent/no-op if already running or resolved),
         in case something calls this before the setup-reload path ever ran it."""
         cached = getattr(self, "_mkey_map", None)
-        if cached is not None:
+        revision = self._machine_key_map_revision()
+        if cached is not None and self._machine_key_map_current(revision):
             return cached
         self._prewarm_machine_key_map()
+        if getattr(self, "_mkey_map_error", None) and not getattr(self, "_busy_label", None):
+            self.debug = f"machine mapping unavailable: {self._mkey_map_error}"
         return {}
+    def _machine_key_map_revision(self):
+        session = getattr(self, "_config_cache_session", None)
+        return getattr(session, "revision", _UNTRACKED_CONFIG_REVISION)
+    def _machine_key_map_current(self, revision):
+        return revision is _UNTRACKED_CONFIG_REVISION or (
+            revision is not None and revision is getattr(self, "_mkey_map_revision", None)
+        )
+    def _invalidate_machine_key_map(self):
+        self._mkey_map = None
+        self._mkey_map_revision = None
+        self._mkey_map_failed = False
+        self._mkey_map_error = None
+        self._mkey_map_epoch = getattr(self, "_mkey_map_epoch", 0) + 1
     def _prewarm_machine_key_map(self):
         """Compute ``machines.yaml``'s display-name -> registry-key map on a
         background thread and cache it into ``self._mkey_map`` ahead of time.
@@ -227,31 +245,53 @@ class PickerScreenPivotsMixin:
         ``self.app`` eagerly) ``_apply_from_worker`` degrades safely when
         called outside a mounted app -- e.g. a unit test that constructs a
         bare ``PickerScreen`` and calls ``setup_sync_for_tests()`` directly."""
-        if getattr(self, "_mkey_map", None) is not None:
+        revision = self._machine_key_map_revision()
+        if getattr(self, "_mkey_map", None) is not None and self._machine_key_map_current(revision):
+            return
+        self._mkey_map = None
+        if getattr(self, "_mkey_map_failed", False) and revision is getattr(
+            self, "_mkey_map_failed_revision", None,
+        ):
             return
         if getattr(self, "_mkey_map_inflight", False):
             return
         self._mkey_map_inflight = True
+        source = self.src
+        setup_epoch = getattr(self, "_setup_epoch", None)
+        map_epoch = getattr(self, "_mkey_map_epoch", 0)
 
         def _work():
+            prepared_revision = _UNTRACKED_CONFIG_REVISION
             try:
                 from . import data_ssh
 
-                with self._load_config_cache_scope():
-                    return data_ssh.machine_key_map()
-            except Exception:
-                return {}
+                with self._load_config_cache_scope() as session:
+                    prepared_revision = getattr(session, "revision", _UNTRACKED_CONFIG_REVISION)
+                    mapping = data_ssh.machine_key_map()
+                    check = getattr(session, "raise_for_errors", None)
+                    if callable(check):
+                        check()
+                    return mapping, prepared_revision, None
+            except Exception as exc:
+                return None, prepared_revision, str(exc)
 
-        def _apply(mapping):
+        def _apply(result):
             self._mkey_map_inflight = False
-            if getattr(self, "_mkey_map", None) is None:
+            mapping, prepared_revision, error = result
+            if (
+                self.src is not source
+                or getattr(self, "_setup_epoch", None) != setup_epoch
+                or getattr(self, "_mkey_map_epoch", 0) != map_epoch
+                or prepared_revision is not self._machine_key_map_revision()
+            ):
+                return
+            self._mkey_map_failed = error is not None
+            self._mkey_map_failed_revision = prepared_revision if error else None
+            self._mkey_map_error = error
+            if error is None:
                 self._mkey_map = mapping
-                # The map upgraded in place after at least one caller already
-                # rendered against the empty-map fallback -- repaint so any
-                # already-open registered-pivot view picks up the corrected
-                # {machine} identity rather than waiting for the next
-                # unrelated refresh.
-                self.refresh()
+                self._mkey_map_revision = prepared_revision
+            self.refresh()
 
 
         def _worker():

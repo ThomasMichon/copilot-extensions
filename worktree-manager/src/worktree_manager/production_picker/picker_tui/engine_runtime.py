@@ -456,10 +456,7 @@ class PickerScreenRuntimeMixin:
         self._prewarm_machine_key_map()
 
     def _invalidate_setup_reload_caches(self):
-        # A manual reload ('r') must also refresh the registered Tasks pivot, not
-        # just the worktree lists (the pivot runtime is separate + has no TTL):
-        # clear each pivot runtime's cache so the next frame's ensure() refetches,
-        # so a task/card created by another session appears on demand.
+        # Reload invalidates both contributed pivots and derived config mappings.
         for _rt in getattr(self, "_pivot_runtimes", {}).values():
             try:
                 _rt.invalidate()
@@ -471,6 +468,9 @@ class PickerScreenRuntimeMixin:
             _cfg.clear_caches()
         except Exception:
             pass
+        invalidate = getattr(self, "_invalidate_machine_key_map", None)
+        if callable(invalidate):
+            invalidate()
 
     def _ensure_setup_epoch_lock(self) -> threading.Lock:
         """Lazily resolve ``self._setup_epoch_lock`` -- the dedicated lock
@@ -770,6 +770,9 @@ class PickerScreenRuntimeMixin:
         # a now-invalid range anchor. A no-op while records are still streaming.
         self._roster_ready = True
         self._reconcile_wt_sel()
+        prewarm = getattr(self, "_prewarm_machine_key_map", None)
+        if callable(prewarm) and getattr(self, "is_mounted", False):
+            prewarm()
 
     def _apply_setup_failure(self, epoch: int, err: Exception) -> None:
         self._busy_label = "Load failed"
@@ -803,6 +806,12 @@ class PickerScreenRuntimeMixin:
         self._prime_setup_reload()
         epoch = self._next_setup_epoch()
         cancel = self._bg_cancel
+        try:
+            self._invalidate_setup_reload_caches()
+        except Exception as exc:
+            self._publish_setup_failure_if_current(epoch, cancel, exc)
+            self.refresh()
+            return epoch
         # A minimal test double that never ran PickerScreen.__init__ still
         # gets a working Inbox here, lazily -- resolved on this (the calling)
         # thread, before the worker below ever touches it.
@@ -837,7 +846,6 @@ class PickerScreenRuntimeMixin:
                     return
                 payload_to_apply = self._release_setup_payload(epoch) or payload
                 try:
-                    self._invalidate_setup_reload_caches()
                     self._apply_setup_payload(payload_to_apply)
                 except Exception as apply_exc:
                     # Record a diagnosed failure instead of letting this
@@ -957,12 +965,12 @@ class PickerScreenRuntimeMixin:
         self._prime_setup_reload()
         epoch = self._next_setup_epoch()
         try:
+            self._invalidate_setup_reload_caches()
             payload = self._collect_setup_payload()
         except Exception as exc:
             self._apply_setup_failure(epoch, exc)
             raise
         try:
-            self._invalidate_setup_reload_caches()
             self._apply_setup_payload(payload)
         except Exception as exc:
             self._dispose_setup_payload(payload)

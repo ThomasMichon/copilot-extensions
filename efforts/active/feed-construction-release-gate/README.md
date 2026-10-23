@@ -79,6 +79,9 @@ not reproduced here. The inventory, execution and evidence design below is
 ### Phase 1 - Review the policy and complete inventory
 
 - [x] Review and merge this release-vision exception and canonical effort.
+- [x] Derive and validate every tracked Python source owner's classification
+  against the canonical plugin/product rosters and explicit nested-project
+  declarations, retaining libraries as inputs rather than separate venvs.
 - [ ] Reconcile the complete environment census against existing authoritative
   declarations: runtime plugins, standalone applications, bootstrap/build
   environments and selected optional/server/profile closures.
@@ -165,7 +168,8 @@ cutover is activated by the reviewed documentation.
 | Boundary | Current evidence |
 |----------|------------------|
 | Checked-in policy | #7655 merged the construction/first-launch exception and canonical effort; implementation is permitted within that reviewed scope. |
-| Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate has landed for this effort. |
+| Inventory implementation | The source-owner diagnostic derives canonical plugin/product rosters and tracked Python projects, identifies library inputs and refuses to hide unclassified nested owners. It does not yet classify complete construction environments or qualify runtimes. |
+| Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate is active for this effort. |
 | Released gate | None: the existing release pipeline does not yet enforce this effort's configured-feed construction and first-launch contract. |
 | Installed evidence | Earlier consumer-specific Manager capture/origin results remain bounded observations, not full environment/profile coverage. The launch-maintenance effort separately records current selected-slot observations. |
 | Hosted/native qualification | Configured-feed execution, complete declared native matrix and negative publication controls remain unproved. Missing feed or capacity must fail qualification, not be called an unsupported row or successful skip. |
@@ -261,3 +265,86 @@ cutover is activated by the reviewed documentation.
 - Existing deployment holds and independently owned Windows broker
   #6859/#7833 qualification are unchanged. No updater, service, registration
   or dependency-policy exception was introduced to resume this work.
+
+### 2026-10-23 - Executable source-owner census; construction coverage still open
+
+- Added a finite, read-only source inventory using the canonical marketplace,
+  standalone product roster and actual Git-tracked Python projects. The current
+  census contains thirteen runtime plugin owners and **six** standalone products,
+  including the newly declared PR service. The earlier five-product record is
+  historical, not a complete current roster.
+- The diagnostic keeps twenty-seven canonical library inputs and seven
+  identified vendored copies separate from product/runtime owners. An
+  independently constructed index engine remains an explicit unclassified
+  nested project and produces a nonzero result; it cannot disappear because it
+  is absent from the marketplace and standalone product rosters. Test fixtures
+  and future nested projects receive the same visible classification boundary.
+- Optional dependency group names and console scripts are inventory data, not
+  an inferred environment matrix or installed first-launch evidence. Reuse the
+  existing shared installer-engine and versioned-runtime primitives through
+  each owner's canonical constructor when execution is
+  implemented. Worktrees' `runtime_install` and `runtime_install_modes` own its
+  specific lifecycle; they are not a generic installer for other components.
+  No new installer was added. Complete environment identities, production
+  profile selections,
+  constructor/launch bindings and native matrix remain open Phase 1 work.
+- Local refusal/data contracts and a real fresh Git-fixture CLI control passed.
+  The real source invocation independently reported the expected unclassified
+  engine with `runtime_qualification: not-performed`. This is source discovery,
+  not a feed construction run, clean-room runtime installation or hosted/native
+  runtime qualification. No workflow, admitted unit packet, credential,
+  controller, dependency policy or installed state was changed.
+
+### 2026-10-23 - Declare the engine owner without inventing an environment matrix
+
+- Added an inert plugin-owned `additionalPythonProjects` declaration for the
+  index engine's existing `server/pyproject.toml`. The inventory consumes that
+  declaration rather than hardcoding the engine into a second product roster.
+  Missing, duplicate, escaping or multiply owned projects refuse classification.
+  This metadata does not invoke the existing explicit engine installer or alter
+  host/client role selection.
+- The actual source CLI now classifies all tracked Python projects: thirteen
+  plugin runtime owners, six standalone product owners and one explicitly
+  declared engine project, with twenty-seven canonical and seven vendored
+  library inputs. This closes the bounded source-owner census only, not the
+  actual environment/profile and native matrix reconciliation.
+- All twenty-two local contracts passed, including the actual fresh Git-fixture
+  CLI refusal. A separate real-source invocation returned a complete
+  source-owner inventory while still reporting
+  `runtime_qualification: not-performed`. The required plugin changefile covers
+  its inert declaration; no version number was changed manually. Construction,
+  installed launch, hosted feed/native execution and trusted CI/promotion
+  activation remain open.
+
+- Review identified a real source-root binding error: an explicit target root
+  still inherited the executing checkout's standalone roster. The diagnostic
+  now reads the requested root's literal roster without importing or executing
+  candidate code, and refuses missing, computed or ambiguous declarations.
+  All twenty-four local contracts and the explicit-root source invocation passed
+  after this correction; install-contract validation also passed. Root binding
+  is source classification, not source/candidate-bound runtime evidence.
+
+- A second review found order-dependent duplicate ownership between a parent's
+  additional project and a later marketplace plugin. All three owner kinds now
+  use the same duplicate-project claim check; regressions cover both marketplace
+  orders and plugin/standalone overlap. This tightens classification only and
+  does not add execution ownership or another installer.
+
+- The roster reader now requires the canonical immutable tuple shape. A mutable
+  list followed by `append` could otherwise add a consumer invisible to a
+  literal-only read. The exact mutation regression refuses that source without
+  executing the helper. This is not a general Python evaluator or a new runtime
+  policy; nonliteral or mutable roster declarations need explicit reconciliation.
+
+- Resolved source ownership is scoped to the declaring plugin/product, not just
+  the repository. A link to another project's metadata cannot assign that
+  project to a foreign plugin or claim a second owner through an alias.
+  Resolver-boundary controls and a native file-link control cover this case;
+  unavailable native link privileges remain an explicit skip, not native proof.
+
+- The containment slice passed twenty-nine Windows controls with one explicit
+  native file-link privilege skip. An existing Linux guest then passed all
+  thirty controls, including the real file-link refusal and fresh Git-fixture
+  CLI. No guest provisioning, package installation, launcher transfer or
+  runtime deployment was performed. This qualifies the diagnostic's filesystem
+  boundary, not hosted feed access or the release's native runtime matrix.
