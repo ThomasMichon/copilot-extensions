@@ -222,6 +222,13 @@ All items below are **agent-recommended acceptance checks** for execution.
 - [x] Exercise graphical restart/vanished-row recovery, persistence refusal,
   read-only receipt inspection and separately confirmed exact retry against
   the real owner and both native category contribution boundaries.
+- [x] Join rendered native form submission and fresh global recovery to the
+  real isolated owner through both category contributions at narrow and wide
+  terminal sizes, including confirmed replay without duplicate answers/wakes.
+- [x] Carry the identical saved graphical request through both rendered native
+  recovery menus and the independent graphical renderer against one isolated
+  owner; preserve full receipts, cancellation and confirmed replay without
+  duplicate answers/wakes.
 - [ ] Exercise mapped-record emission with missing/renamed columns, stable
   source identity, paging, repeated polls and lost responses. Prove malformed
   records remain visible and retries do not duplicate accepted work.
@@ -1366,3 +1373,61 @@ authorized installed proof remain distinct obligations.
   Source/configuration actions, history, provenance-safe templates, generic
   process/evaluator and mapped-record production remain open. #7091, #7141
   and this effort remain Active; this source milestone is not convergence.
+
+### 2026-10-23 - Rendered native recovery real-owner join
+
+- #8254 merged at 17:15Z as `69353ff54a7253896fa19603ab065608d838fb36`.
+  Exact head `30846b6c984db00086c1aaf6ae306794c857ed31` received an
+  approving review with no unresolved findings; required CI 39992928024 passed.
+  The role-authorized managed merge did not waive a test or review finding.
+- Four opt-in cases join actual rendered Textual forms and global recovery
+  menus to a real disposable queue/HTTP/child-CLI owner: both category
+  contributions at 80x24 and 120x40. An accepted response is lost; a fresh
+  rendered client has no original row/card, inspects the original receipt,
+  cancels retry, then separately confirms identical replay. Original fields
+  and fingerprint remain unchanged with exactly one answer and one wake.
+- Review caught an unstubbed fresh-client list refresh. The final fixture
+  disables list/subscription ensure on every runtime, not only the original
+  Picker; receipt and submit commands remain real. All six contained native
+  owner cases passed again on the published dependency base, including the
+  two existing parser/runtime cases, and Ruff F/E9 passed.
+- Required CI also required a standalone changefile for this tests-only slice.
+  Added the prescribed patch entry through the versioning tool rather than
+  exempting the gate or editing version metadata. Runtime behavior is unchanged.
+  TESTING.md documents the interpreter opt-in and isolation seam.
+- Re-read both canonical Plans and Validation Plans after merge. Marked only
+  the bounded native rendered/owner join complete. Same-owner rendered recovery
+  with the independent graphical client remains under review; #7141 stays open.
+  Native Windows and fresh isolated storage were exercised, not full machine
+  provisioning, another native OS, live workers or an installed rollout.
+  Those unavailable/unrequested lanes are not credited as passed.
+- Continue the independent graphical proof and the remaining finite steering
+  acceptance before moving to broader source/configuration, history, templates,
+  process/evaluator and mapped-record work. #7091 and this effort remain Active.
+
+### 2026-10-23 - Same-owner independent rendered recovery proven
+
+- The independent graphical consumer's tests-only join merged after its exact
+  corrected head passed required CI and current-head review reported no open
+  issues. Together with #8254, it exercises actual rendered native recovery
+  menus and a built graphical renderer against the identical saved request on
+  one disposable queue/HTTP/CLI owner through both category contributions.
+- Full JSON receipt inspection, fresh-client recovery without task rows,
+  cancellation and separately confirmed identical replay preserve the original
+  request ID, fields and fingerprint. The owner retains exactly one answer and
+  one original wake. A forced graphical retry refusal fails the proof as
+  expected; the subsequent positive joined proof passed.
+- Both fixtures suppress ambient list/subscription ensure class-wide. Native
+  profile and graphical bridge/attribution are test-injected seams, not evidence
+  of installed IPC, live task production or deployment. Separate IPC evidence
+  remains distinct. No runtime behavior or installed payload changed.
+- Re-read both canonical Plans and Validation Plans after merge. Checked only
+  this bounded rendered recovery join; full rendered shared-draft editing,
+  source/configuration/status/history, template instantiation, process/evaluator
+  and mapped production remain open. #7141 requires clause-by-clause
+  reconciliation before closure; #7091 and this effort remain Active.
+- Validation: native Windows and fresh isolated profile/storage passed, as did
+  all six contained native owner cases and Ruff. Required consumer CI passed.
+  Full machine provisioning, another native OS and live external/installed/fleet
+  lanes were not exercised: this change is tests/documentation only and no
+  operational rollout or live effects were authorized.
