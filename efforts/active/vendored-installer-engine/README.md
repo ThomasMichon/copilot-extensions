@@ -60,6 +60,12 @@ as independent per-plugin PRs; see Coordination._
 
 ## Coordination
 
+The direct #2871 audit is conjunctive across this ROOT and the other named receiving
+ROOT: Immutable Dev Slot retains six runtime families and Vendored Installer Engine the
+budget-guidance audit-only seventh row. Preserve the combined seven-family ledger, same
+#5472/adopter/service/native owners, Worktrees' permanent service-engine exception, and
+budget-guidance's non-rollout exception.
+
 - **Topology:** independent per-phase/per-plugin PRs. Each phase below is a
   self-contained, mergeable PR — mirroring how `uniform-runtime-resolution`
   (the `versioned_runtime.py` collapse, effort #581/#765) was landed as a
@@ -489,7 +495,55 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
       decision. This amendment neither removes Worktrees' engine exception nor
       pulls all service-specific lifecycle logic into the shared build engine.
 
+<!-- backlog-reconciliation:7556:transfer:2871:to:efforts/active/vendored-installer-engine/README.md -->
+
+Add this exact audit-only seventh row of #2871 directly to the existing ROOT audit Plan
+AND Validation/continuing Coordination. Preserve the entire incumbent document, its
+audit/implementation/service owners, permanent Worktrees exception, current
+budget-guidance audit-only exclusion and Journal. The other six runtime rows are
+conditionally received by the existing Immutable Dev Slot ROOT under the same complete
+seven-row ledger.
+
+### budget-guidance local-source freshness audit retained from #2871
+- [ ] Classify BOTH PowerShell and POSIX budget-guidance initial/update and actually
+  reachable compatibility/fallback entrypoints against current source. Establish whether
+  any Python own-package/local tool.uv.sources installation path remains supported and
+  reachable; distinguish retired/staging-only text from executable package construction.
+  Do not invent a runtime adoption obligation from the historical installer label.
+- [ ] For any applicable current package-install path, retain fresh own-package and
+  COMPLETE declared local dependency source/installed-metadata behavior after
+  same-version edits, with safe cache/build handling and meaningful regression
+  sensitivity. A verified frozen non-editable graph/qualified origin alternative is
+  acceptable instead of mechanically requiring the old two flags. If the historical path
+  is truly retired/nonapplicable, record concrete reachability/consumer evidence and
+  explicit disposition rather than silently dropping this seventh family.
+- [ ] Preserve exact-input healthy reuse and actual failure reporting; do not prescribe
+  global cache deletion, published in-place repair, arbitrary force or a new
+  engine/framework. budget-guidance stays AUDIT ONLY, not runtime rollout; Worktrees'
+  separate permanent service-engine exception is unchanged.
+- [ ] Keep #6788's explicit test-runner reinstall repair and its bounded ownership
+  distinct from plugin production/installer completion. Preserve every original/current
+  source versus release/installed/native distinction and supported native evidence tier.
+
+### Validation and continuing coordination for the budget #2871 row
+- [ ] Record both-platform initial/update/reachable-compatibility classification, any
+  own/transitive local dependency freshness positives/negatives, or source-supported
+  retirement/nonapplicability evidence, at the actual consumer boundary. Preserve the
+  combined seven-row ledger with the six explicitly named runtime families in Immutable
+  Dev Slot; no missing family, forced adopter expansion or hidden skip is permitted.
+- [ ] BOTH complete ROOT intakes require NEW normal reviewed ACTUAL merges and full
+  CURRENT Plan/Validation/Coordination readback before #2871 is administratively
+  superseded. Existing creation/review, a title/link, child document or one of two
+  receipts is insufficient. Keep original owners and accepted exceptions; if either
+  intake fails, retain the whole source. No product/native/install/cache operation or
+  implementation claim is authorized by this proposal.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #2871 Plan/Validation clause above at its original
+  finite scope and evidence tier, preserving alternatives, same owners, holds, and
+  current portfolio bounds. Administrative intake is not implementation, native
+  acceptance, rollout, or completion of unrelated parent work.
 
 - [ ] _(agent-recommended)_: exercise the [serving-convergence cases](serving-convergence-audit.md#validation-cases)
       for each applicable adopter. Record build, selected generation, expected
@@ -582,6 +636,15 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #2871
+
+- Materialized the complete #2871 receiving portion directly in this ROOT Plan and
+  Validation, with continuing coordination. All incumbent obligations and custody
+  remain; historical private identifiers, where present, are represented by neutral
+  historical placeholders without changing their role or outcome. A new normal reviewed
+  merge and full current readback must precede administrative source supersession. No
+  behavior, test, native result, or rollout is claimed.
 
 ### 2026-10-16 — Strict derived ownership views implemented
 
@@ -1677,7 +1740,7 @@ installs, no service-specific config needed for this class of plugin.
   .instructions.md` template had grown to 4380 bytes, past
   `customizing-copilot`'s `MAX_TEMPLATE_BYTES = 4096` projection budget —
   the exact same bug class as the earlier `context-handoff` fix
-  (private downstream repo #404 -> upstream #3250), this time hitting
+  (upstream #3250), this time hitting
   `agent-worktrees` and hard-blocking `push-changes`/finalize validation in
   *every* repo that resolves this projection (discovered when it blocked a
   routine knowledge-repo effort-doc push, unrelated to this effort). Trimmed
@@ -1755,7 +1818,7 @@ appropriately larger/riskier for one sitting):
 - Landed as `ThomasMichon/copilot-extensions#3363` (squash-merged): 15/15
   plugin tests passing, `check-version-consistency.py` /
   `check-docs-consistency.py` / `check-install-contract.py` all clean, a
-  live `status` call against the private downstream repo's PR #491 still correct
+  live `status` call against an existing downstream pull request still correct
   through the module (unchanged transport), full CI green (one prior
   unrelated `worktree-manager` drift failure not present this run).
 - **Genuinely still open**: `agent-bridge`'s Phase 1 installer-engine

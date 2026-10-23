@@ -30,6 +30,16 @@ waiters and supported native PR operation remain working alternatives.
 
 ## Coordination
 
+The direct #2874 unchanged-cursor family keeps waiter and independent periodic-evaluator
+consumers distinct, including honest timeout and retry-ceiling escalation. Preserve
+existing provider, evaluator, local-callback, remote-replay, credential/service, and
+lifecycle owners.
+
+The direct #2797 idle-record consumer stays under this existing host and shared PR
+observation/Worktrees write-path owners. Enrollment is independent of session/Picker
+demand; preserve every existing claim and guarded-finalization OR ready-indication
+alternative.
+
 The direct #2700/#2881 checkout-free operation matrix extends the existing #2400
 client/migration lane under the same effort host. Keep #7188 service/consumer, #7051
 conformance and Worktrees publication/resource and credential/provider claims bounded
@@ -466,7 +476,123 @@ back; no feature is declared complete or source custodian changed.
   Coordination/Journal. Old2400/7189/7885 intake, a topic link, proposed patch or
   source7850 alone is not this receipt. If the full intake is not accepted, retain2700.
 
+<!-- backlog-reconciliation:7556:transfer:2797:to:efforts/active/durable-pr-watch-delegation/README.md -->
+
+### Direct idle-worktree merged-PR reconciliation acceptance from #2797
+
+Add directly to this existing Active ROOT Plan/Validation, preserving its full current
+body and every existing conformance, service, credential, publication/resource and
+rollout claim. This is unassigned consumer acceptance under the same effort host, not a
+new implementation/resource assignment or a running poller. Existing shared PR
+observation and Worktrees ground truth remain the owners.
+
+#### Plan
+
+- [ ] Enroll every eligible tracked cached-open PR for periodic provider observation
+  independently of live mux/session, an open Picker and transient reader demand.
+  Preserve source/machine/repository/PR/account identity; local and remote ownership
+  cannot be confused.
+- [ ] Use the existing resident/collector cadence integration OR admitted shared PR
+  observation contract, with rate-aware bounded cadence, backoff, fairness and honest
+  unavailable/unknown outcomes. Reuse one authorized target observation stream; do not
+  create a second polling service or caller-side fleet scan.
+- [ ] Persist authoritative merged/closed PR facts through the owning Worktrees write
+  path and surface the actual current result in list/Picker. Reconnect, restart and lost
+  observations cannot fabricate closure or silently forget enrollment.
+- [ ] Preserve the original guarded auto-finalization OR clear ready-to-finalize
+  indication. A merge fact alone is not whole-objective completion, no-new-work proof or
+  authority to release unrelated claims, validations, pending handoffs or active
+  efforts; any actual settlement/finalization keeps the existing fresh safety/permission
+  contract.
+- [ ] Retain existing PR-watch/service/conformance and Worktrees lifecycle/publication
+  owners and all current claims. Continue the exact leaf through this root's
+  Plan/Validation/Journal and open bounded-source flow, resolving concrete overlaps
+  through normal review without a new generic ACK ceremony.
+
+#### Validation
+
+- [ ] Exercise actual tracked-record enrollment -> shared provider observation ->
+  durable writeback -> current list/Picker consumer with multiple idle/no-session
+  cached-open PRs and no open Picker; include missing/invalid/unauthorized provider,
+  rate/backoff, restart and duplicate subscription cases.
+- [ ] Verify a merged PR with remaining claims/new work/active effort is only an honest
+  fact/candidate until canonical guards permit more; preserve terminal, dirty, unknown
+  and foreign-source safety. A helper, source counter or open-Picker-only test is not
+  all-idle coverage.
+- [ ] Before administrative closure, obtain a NEW normal reviewed merge containing this
+  entire direct ROOT intake and continuing coordination, then read back CURRENT FULL
+  Plan/Validation/Coordination and unchanged custody. Old shared-watch/creation
+  receipts, a child link or this proposal are not delivery. No
+  monitor/sweeper/provider/UI/runtime action is authorized by this checklist.
+
+<!-- backlog-reconciliation:7556:transfer:2874:to:efforts/active/durable-pr-watch-delegation/README.md -->
+
+### Direct unchanged-cursor and nonevent wake acceptance from #2874
+
+Add directly to this existing Active ROOT Plan/Validation, preserving every prior row,
+current host and independent PR/provider, Dispatch waiter/evaluator, credential/service
+and worktree claim boundary. Credit existing timeout handling, shared observation and
+actual8085 replay progress without claiming the legacy/evaluator nonevent case complete
+or silently expanding a bounded source claim.
+
+#### Plan
+
+- [ ] Bind each suspended watch to its exact provider/account/repository/PR, criteria,
+  baseline cursor/head/state/review/check context and coordinator/task/waiter
+  generation. Rearm/restart cannot borrow another target's baseline or treat unknown
+  first observations as a transition.
+- [ ] For an unchanged suspension baseline with no matched condition, the waiter and
+  periodic evaluator must not manufacture a PR-change completion/wake. Attribute both
+  routes independently; preserve fixed-cadence evidence as a hypothesis discriminator
+  rather than assume an evaluator or timeout cause.
+- [ ] Preserve explicit unmatched timeout/current snapshot, existing124 rearm and
+  reviewed retry-ceiling gave-up/error outcomes. A legitimate escalation must say why it
+  occurred and not claim a PR delta; operator-requested re-evaluation is also distinct.
+  Do not introduce an unconditional never-wake-on-timeout/error rule or silently reset
+  the baseline to hide repeats.
+- [ ] Make unchanged periodic evaluator decisions explicit NoOp. Keep meaningful new
+  commits/reviews/dismissals/comments/check transitions, including pending-to-terminal
+  cycles and genuine native history, actionable under their actual criteria. Snapshot
+  payload, delivery/ACK or a timer alone is not semantic change evidence.
+- [ ] Preserve original event/registration/request/deadline and generation fences across
+  duplicate/lost delivery, replay, cancellation and restart. Shared-consumer source
+  progress does not grant scheduling, provider credentials, process fallback or fleet
+  activation authority.
+- [ ] Continue this precise integration through the current root host, direct
+  Plan/Validation/Journal and open bounded source scopes. Existing evaluator, local
+  process-wait/callback and remote replay owners retain custody; normal source
+  review/nonblocking consultation resolves actual overlaps without a new generic ACK.
+
+#### Validation
+
+- [ ] Exercise BOTH actual waiter-to-coordinator and independent evaluator-to-wake
+  consumers against repeated identical cursor/head/state/review/check/comment
+  observations, across poll intervals, rearm and restart. Assert no false change/resume
+  and record independently attributable nonevent/escalation reasons; do not use private
+  raw traces.
+- [ ] Include unknown-baseline adoption, unmatched timeout/snapshot, retry ceiling,
+  genuine failure, deliberate operator re-evaluation, meaningful provider transitions,
+  duplicate/frozen replay and stale generations. A passing shared registry or timeout
+  helper alone is not full end-to-end acceptance; qualify supported actual source/native
+  tiers and label unavailable installed/provider lanes honestly.
+- [ ] Before administrative closure obtain a NEW ordinary reviewed merge containing this
+  complete direct ROOT two-route acceptance and continuing coordination; independently
+  read back CURRENT FULL Plan/Validation/Coordination and all existing claims/holds. Old
+  service/replay receipts, a child section/link or this proposal are not acceptance
+  delivery. No live wait, evaluator, provider, task wake, service or runtime action is
+  authorized.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #2874 Plan/Validation clause above at its original
+  finite scope and evidence tier, preserving alternatives, same owners, holds, and
+  current portfolio bounds. Administrative intake is not implementation, native
+  acceptance, rollout, or completion of unrelated parent work.
+
+- [ ] Resolve every directly retained #2797 Plan/Validation clause above at its original
+  finite scope and evidence tier, preserving alternatives, same owners, holds, and
+  current portfolio bounds. Administrative intake is not implementation, native
+  acceptance, rollout, or completion of unrelated parent work.
 
 - [ ] Complete every directly retained #2700 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
@@ -513,6 +639,24 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #2874
+
+- Materialized the complete #2874 receiving portion directly in this ROOT Plan and
+  Validation, with continuing coordination. All incumbent obligations and custody
+  remain; historical private identifiers, where present, are represented by neutral
+  historical placeholders without changing their role or outcome. A new normal reviewed
+  merge and full current readback must precede administrative source supersession. No
+  behavior, test, native result, or rollout is claimed.
+
+### 2026-10-22 - Direct retained acceptance from #2797
+
+- Materialized the complete #2797 receiving portion directly in this ROOT Plan and
+  Validation, with continuing coordination. All incumbent obligations and custody
+  remain; historical private identifiers, where present, are represented by neutral
+  historical placeholders without changing their role or outcome. A new normal reviewed
+  merge and full current readback must precede administrative source supersession. No
+  behavior, test, native result, or rollout is claimed.
 
 ### 2026-10-22 - Prepare durable shared Dispatch replay consumption
 

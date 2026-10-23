@@ -55,6 +55,12 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The direct #3093 finite order/context-leak family continues through the existing
+reviewed Worktrees wave. Preserve #1349 native acceptance, #2721/#584 quota/mock
+acceptance, OPEN #1303, and every actual audit, source, cohort, and failure claim. Fix
+OR owning-fixture isolation remains an alternative, not permission to weaken assertions
+or CI tiers.
+
 The directly retained #2721 quota/reclaim and inherited #584 fixture family belongs to
 the existing Phase 4 CodeSpaces wave. Preserve OPEN #1303, its active
 audit/source/cohort/failure claims, #6237/#3336 and every existing native family,
@@ -339,7 +345,80 @@ is not Active, scope/custody is not accepted or delivery is partial, retain the 
 No test deletion, source/resource handoff, new generic ACK or whole-parent qualification
 is introduced.
 
+<!-- backlog-reconciliation:7556:transfer:3093:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+Add the COMPLETE named #3093 family directly to the SAME existing reviewed ACTIVE ROOT
+Worktrees Plan wave AND corresponding Validation/continuing Coordination, preserving
+every incumbent row, Journal, #1349 native family, #2721/#584 quota/mock family, OPEN
+#1303 and actual audit/source/cohort/failure owners. Use the existing migration-intake
+and serial plugin-wave review boundaries. This proposal runs no test/collection/import
+and grants no source/process/resource authority.
+
+### Whole order/context-dependent Worktrees failure family retained from #3093
+- [ ] Map the original scattered full-suite failures, including execution-leg CLI and
+  extension-reload-warning-retirement families, to their ACTUAL current cases/consumer
+  contracts. Preserve the historical isolated 33/33 observation and separate full-run
+  failures as reported evidence, not fresh results or accepted-flake waiver. Explicitly
+  map legitimate retired/renamed behavior instead of silently dropping an old case.
+- [ ] Identify the ACTUAL shared leaking state across collection AND execution
+  boundaries: environment/Path.home, active project/handoff, imported modules/sys.path,
+  singleton/cache, fixture teardown, resident/background threads/daemons and
+  SQLite/lock/temp state as actually implicated. The listed candidates and current eager
+  CLI/module-import boundaries are hypotheses, not proved causes. Alphabetically later
+  tests not yet executing does not rule out import-time effects.
+- [ ] Fix the actual leak OR strengthen the relevant owning fixture(s), retaining the
+  original alternative. Give every implicated owner deterministic setup/restore/teardown
+  on pass/failure/interruption; preserve valid isolated behavior and observable
+  assertions, current HOME/USERPROFILE/AGENT_HOME and resident-monitor/project/handoff
+  containment, and owned shutdown/lock/cache/reader cleanup. Do not paper over ordering
+  through a generic catch, retry, skip, xfail or changed expected behavior.
+- [ ] Qualify a bounded representative predecessor/affected-family ordering or
+  permutation AND/OR same-process repetition appropriate to the identified cause,
+  including collection-time state where relevant. Establish meaningful negative
+  sensitivity to reintroduced leak/wrong teardown; isolated green files, sharding or an
+  unrelated focused daemon/wrapper fix are not order-independence evidence. Record exact
+  source/current-node mapping, platform/context and remaining unknowns rather than
+  asserting current failures were reproduced here.
+- [ ] Explicitly consider and record the original proposed future regression lane
+  (representative alternate orders or repeat-in-one-process), at the least expensive
+  correct current tier. Keep genuine units eligible only under current admission; real
+  native/Git/process/integration families retain their existing contained/periodic or
+  explicit lanes and independent failure ownership. No restoration of obsolete whole
+  integration suites as required PR CI, budget enlargement, full-corpus tournament
+  prerequisite or new unbounded raw suite run.
+- [ ] Preserve runner-owned state and descendants, item/group/plugin/resource limits,
+  effect declarations and existing platform/credential/provider boundaries. Current pure
+  inventory is distinct from code-executing collection; source reading alone is not
+  causal or native qualification. No ambient HOME, shared SQLite/campaign state,
+  unrelated process, live service/provider or resource may become a fixture.
+
+### Validation and continuing coordination for #3093
+- [ ] Record the identified causal boundary, minimal representative predecessor/affected
+  consumer, chosen fix-or-isolation alternative, actual repeat/order/permutation and
+  relevant negative evidence, with deterministic owning cleanup and preserved valid
+  standalone/adjacent contracts. Maintain exact historical versus newly executed results
+  and unavailable/uncertain outcomes. A targeted finite family can finish without
+  waiting for the whole portfolio, but moving it out of CI or deleting assertions is not
+  repair.
+- [ ] Preserve all existing ROOT Plan/Validation/Journal rows, native/mock intake gates
+  and #1303/source/cohort/failure claims; no new assignee, handoff, claimant expiry or
+  universal ACK is introduced. Continue through the existing reviewed Worktrees wave and
+  owning bounded runner when separately authorized.
+
+Receiving gate: BEFORE administratively superseding #3093, a NEW normal reviewed ACTUAL
+source merge must deliver ALL these direct unchecked ROOT Plan AND Validation/continuing
+Coordination obligations, followed by FULL CURRENT ROOT readback and owner/gate
+preservation. Existing plan creation, the original accelerator PR, a title/link/child
+section or this proposal is not receipt. If either scope/custody or actual complete
+delivery is unavailable, retain #3093. The technical order-leak investigation and repair
+remain unresolved after tracker consolidation.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #3093 Plan/Validation clause above at its original
+  finite scope and evidence tier, preserving alternatives, same owners, holds, and
+  current portfolio bounds. Administrative intake is not implementation, native
+  acceptance, rollout, or completion of unrelated parent work.
 
 - [ ] Complete every directly retained #2721 Plan/Validation clause above at its original scope and evidence
   tier, preserving original alternatives, same owners, holds and current
@@ -377,6 +456,15 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #3093
+
+- Materialized the complete #3093 receiving portion directly in this ROOT Plan and
+  Validation, with continuing coordination. All incumbent obligations and custody
+  remain; historical private identifiers, where present, are represented by neutral
+  historical placeholders without changing their role or outcome. A new normal reviewed
+  merge and full current readback must precede administrative source supersession. No
+  behavior, test, native result, or rollout is claimed.
 
 ### 2026-10-22 - Complete retained acceptance from #2721
 

@@ -38,6 +38,11 @@ another product or a change to service-supervision ownership.
 
 ## Coordination
 
+The direct #2822 installed-output/LKG family continues under the same #5472/#7028/#7029
+source-managed, adopter, native, and deployment owners. Candidate-health and
+retained-good-generation qualification remain distinct from best-effort handoff and
+separately authorized rollout.
+
 - **Topology:** serial, coherent PRs against `dev`; this plan clears review before implementation.
 - **Host (owns PRs):** Implementation coordinator.
 - **Delegates:** bounded evidence, implementation or validation scopes only; no shared mutable git ownership.
@@ -258,7 +263,76 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] Deferred to `#7031`: implement exclusive local-checkout sourcing of Copilot plugin content after the runtime-only campaign.
 - [x] Deferred to `#7250`: **Agent-recommended follow-up, operator-approved tracking:** preserve legacy Python-free redirect sets through a separate native publication mechanism; do not add a bootstrap interpreter prerequisite.
 
+<!-- backlog-reconciliation:7556:transfer:2822:to:efforts/active/source-managed-runtime-installs/README.md -->
+
+Add this COMPLETE named family directly to the existing ROOT Plan AND
+Validation/continuing Coordination, retaining the full incumbent document, Journal and
+#5472/#7028/#7029/adopter/deployment owners. Do not create another updater or acquire an
+implementation claim.
+
+### Installed CLI health and known-good publication retained from #2822
+- [ ] Credit #3671, #6598 and #6707's actual entrypoint/full-command loading, isolated
+  installed origins, held frozen construction and health-before-completion progress.
+  Reconcile this installed-output family against those real deliveries rather than
+  restoring the superseded unsafe in-place premise.
+- [ ] On the original supported Worktrees entrypoints/platform lanes, classify an
+  install that completes inside its watchdog budget but leaves the real CLI broken as
+  FAILED. Real installed candidate health must precede completion and promotion;
+  exit/time/stamp/metadata alone is not CLI readiness. Preserve explicit timeout versus
+  completed-with-error diagnostics and genuine dependency/probe failures.
+- [ ] Preserve missing __main__/entrypoint, truncated installed files, lazy/nonimported
+  code/resource and wrong/missing installed dependency/output cases. Verify the relevant
+  installed consumer rather than only source fingerprints/direct_url/provenance. Retain
+  appropriate output-integrity qualification without prescribing a new universal hash
+  algorithm or unrelated every-file audit.
+- [ ] Publish current and last-known-good only after the appropriate
+  candidate/selected-runtime health gates. Preserve and retain a verified previous-good
+  generation across failed construction, promotion or cutover; never replace it with the
+  failed candidate or trust a corrupt current/LKG pointer as health evidence.
+- [ ] Qualify corrupt/unavailable prior or LKG evidence, failed candidate/promotion,
+  interruption and state-aware recovery/compatible rollback with explicit
+  uncertain/blocked/failure outcomes. Repair a bad published identity through a distinct
+  qualified generation, never in-place rewriting, broad cache deletion or a force
+  shortcut.
+- [ ] Preserve the accepted immutable source/admitted-input generation identity,
+  current-selection identity inequality rather than version/hash ordering, and
+  health-gated compatible forward/reverse handoff. Marketplace source, merged source,
+  containing release, installed selection and native effect remain separate facts.
+
+### Validation and continuing coordination for #2822
+- [ ] Record original/current consumer and exact source/provider mapping, including the
+  quick-broken-install negative, missing/truncated/lazy/resource/dependency output
+  cases, candidate/selected CLI invocation, safe current/LKG advancement, healthy-prior
+  preservation and corrupt-prior/LKG refusal/recovery. Historical POSIX/WSL and isolated
+  Windows proof remain credited at their actual limits; complete the original supported
+  native lanes only under their existing owners and separately authorized venue.
+- [ ] Preserve unrelated source-managed/adopter/native/maintenance/driver and
+  rollback-skew work. This finite family may be implemented/qualified without waiting
+  for every unrelated adopter or the entire parent; conversely its intake is not parent
+  completion, rollout or a new generic ACK ceremony.
+
+Receiving gate: NEW normal reviewed ACTUAL merge and complete CURRENT ROOT
+Plan/Validation/Coordination readback must deliver every row before administratively
+superseding #2822. Existing effort creation, a child document or this proposal is not
+receipt. If status, scope, custody or evidence tiers cannot be preserved, retain #2822.
+
+Current best-effort handoff interpretation: references above to compatible
+forward/reverse handoff do not reinstate zero-outage continuity, a compatibility veto,
+or incoming successor readiness before every old-runtime retirement. Preserve the
+accepted bounded, identity-checked cold-takeover route when handoff breaks, explicit
+outage/unknown recovery, and client/child retry obligations. Actual candidate/output CLI
+health still gates candidate promotion and completion, and a verified retained
+previous-good generation must survive failed construction or cutover. Best-effort
+continuity does not make an unhealthy candidate or corrupt current/LKG evidence
+acceptable. This records the existing reviewed direction; it authorizes no live force,
+service, runtime, or deployment operation.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #2822 Plan/Validation clause above at its original
+  finite scope and evidence tier, preserving alternatives, same owners, holds, and
+  current portfolio bounds. Administrative intake is not implementation, native
+  acceptance, rollout, or completion of unrelated parent work.
 
 - [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality; compatible handoff health-gates before retirement, while incompatible/refused/hung handoff allows bounded owned-scope shutdown or identity-checked force termination before cold-start readiness.
 - [ ] **Cold recovery and retries:** breaking all predecessor handoff contracts does not veto selected Dev deployment. Qualify durable recovery after abrupt child death, consumer reconnect after stream/reply loss, safe retry/deduplication or unknown-outcome reconciliation, exclusive ownership and explicit failed-recovery reporting.
@@ -295,6 +369,15 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #2822
+
+- Materialized the complete #2822 receiving portion directly in this ROOT Plan and
+  Validation, with continuing coordination. All incumbent obligations and custody
+  remain; historical private identifiers, where present, are represented by neutral
+  historical placeholders without changing their role or outcome. A new normal reviewed
+  merge and full current readback must precede administrative source supersession. No
+  behavior, test, native result, or rollout is claimed.
 
 ### 2026-10-22 - Best-effort amendment reviewed and published
 

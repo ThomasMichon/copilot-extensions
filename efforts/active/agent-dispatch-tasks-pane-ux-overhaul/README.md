@@ -2,7 +2,7 @@
 
 - **Slug:** `agent-dispatch-tasks-pane-ux-overhaul`
 - **Repo:** copilot-extensions
-- **Branch(es):** `worktree/operator-cloud1-win-20260917-003059-332c` (design +
+- **Branch(es):** `worktree/<historical-design>` (design +
   preview tooling); implementation phases land on their own per-phase
   worktrees once the design below is approved.
 - **Created:** 2026-09-17
@@ -38,9 +38,14 @@ agent-chat-driven flow).
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| operator-cloud1 (this session) | Design, grounding against real code, preview-rendering tooling, effort/vision authoring, Phase 1 implementation | `copilot-extensions.worktrees/operator-cloud1-win-20260917-003059-332c` |
+| Original effort host | Design, grounding against real code, preview-rendering tooling, effort/vision authoring, Phase 1 implementation | `<historical-design-worktree>` |
 
 ## Coordination
+
+The direct #2802 all-producer choice/multichoice family stays with this existing UX host
+and backend/source custodians. Preserve the same #2453 actual native
+Confirm-to-correct-coordinator hold; parsed-field progress does not discharge
+raw/provider-card acceptance.
 
 The direct #2453 reopened Confirm-delivery lane preserves the SAME currently
 investigating UI/source custodian and explicit original native
@@ -144,7 +149,7 @@ session never has to re-derive "what's already done" from the Journal alone.
   ready, no blockers) or Phase 6 (smallest scope, needs its own design
   pass on what "unscoped" repo-filter UX should look like — read that
   Phase's Plan bullet first). This worktree
-  (`owner_user-cloud1-win-20260929-011101-363e`) was created fresh for the
+  (`<historical-phase-7-worktree>`) was created fresh for the
   Phase 7 closure and has not yet been submitted as a PR as of this
   writing — check `agent-worktrees pr-status` before starting further work
   in it, and land/finalize Phase 7's own PR before mixing in a new phase's
@@ -1411,7 +1416,65 @@ https://github.com/ThomasMichon/copilot-extensions/pull/2509 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/2913 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/5744 .
 
+<!-- backlog-reconciliation:7556:transfer:2802:to:efforts/active/agent-dispatch-tasks-pane-ux-overhaul/README.md -->
+
+### Direct all-producer freeform steering acceptance from #2802
+
+Add directly to this existing Active ROOT Plan/Validation. Preserve every existing
+phase, current UI/source custodian, backend owner and SPECIFIC2453 actual native
+mouse/keyboard-to-correct-coordinator hold. This is additive unassigned acceptance, not
+reassignment of held files or discharge of that investigation. Parsed-field5304 is
+delivered baseline, not coverage of raw cards.
+
+#### Plan
+
+- [ ] Cover every admitted request-input producer, including directly supplied
+  provider/raw cards, for BOTH choice and multichoice. Expose a generic Other free-text
+  route without requiring missing allow_other opt-in.
+- [ ] Preserve the original implementation alternatives: remove the opt-in gate OR
+  default freeform true, allowing an opt-out only for an explicitly declared
+  exclusive/closed field if a real reviewed requirement justifies it. Mere flag absence
+  or an old raw strict test is not that decision; record compatibility/migration rather
+  than silently misrepresent operator intent.
+- [ ] Align backend construction/storage/validation, UI normalization/widgets, field
+  collection and submission so a rendered freeform answer is actually accepted. Preserve
+  presets, mixed multichoice/free text, conditional visibility, exact answers and
+  authorized provider/task/card identity.
+- [ ] Preserve Save as unsubmitted draft, cancellation/Escape/reset behavior and
+  recoverable input across failure/retry; never silently submit a preset/default or
+  duplicate an ambiguous answer. Maintain actual acceptance versus later delivery
+  distinction and current idempotency/revision fences.
+- [ ] Explicitly evaluate the separate task/worktree Actions general-feedback entry
+  point. Record whether/where it belongs through authorized underlying-agent routing, or
+  a reviewed bounded disposition; do not turn consideration into a compulsory action on
+  every preset/menu or arbitrary shell execution.
+- [ ] Continue through the same root's Plan/Validation/Journal and open bounded source
+  claims. Coordinate actual shared UI/backend edits and preserve the incumbent native
+  delivery hold without creating a universal new signoff or whole-program gate for this
+  finite fallback feature.
+
+#### Validation
+
+- [ ] Exercise parsed and raw/provider-authored forms with omitted/true/explicitly
+  closed declarations, both field types, preset-only and mixed free-text answers,
+  conditional fields, Save, cancellation, stale/retry/failure and narrow/native
+  keyboard/mouse consumers at the existing evidence tiers. Parser tests alone are
+  insufficient.
+- [ ] Preserve the current2453 native Confirm-to-correct-coordinator acceptance as a
+  distinct unwaived obligation; do not infer it from helper/argv/draft tests, and do not
+  require unrelated whole UX/backend phases merely to qualify a finite leaf.
+- [ ] Before administrative closure obtain a NEW normally reviewed merge accepting EVERY
+  row directly in this ROOT, then read back CURRENT FULL
+  Plan/Validation/Coordination/custody, the existing native hold and continuing Journal
+  flow. Old2913/5304, a proposed patch or link is not this receipt. No UI/native
+  submission, task/agent control or implementation is authorized.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #2802 Plan/Validation clause above at its original
+  finite scope and evidence tier, preserving alternatives, same owners, holds, and
+  current portfolio bounds. Administrative intake is not implementation, native
+  acceptance, rollout, or completion of unrelated parent work.
 
 - [ ] Complete every directly retained #2453 Plan/Validation clause above at its original evidence tier and bounds; preserve current owners, holds and unfinished acceptance. Tracker consolidation is not implementation.
 
@@ -1459,6 +1522,15 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5744 .
 _Pending operator review of the Phase 0 previews._
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #2802
+
+- Materialized the complete #2802 receiving portion directly in this ROOT Plan and
+  Validation, with continuing coordination. All incumbent obligations and custody
+  remain; historical private identifiers, where present, are represented by neutral
+  historical placeholders without changing their role or outcome. A new normal reviewed
+  merge and full current readback must precede administrative source supersession. No
+  behavior, test, native result, or rollout is claimed.
 
 ### 2026-10-22 - Complete retained acceptance from #2453
 
@@ -1680,7 +1752,7 @@ phase is ready to submit for review, per the Coordination section).
   point going forward.
 
 ### 2026-09-18 — Phase 1, item 2: auto-suspend on dead liveness lands
-Resumed from the prior session's handoff (`handoff-0f4b6106-...`), same
+Resumed from the prior session's handoff (`<historical-handoff>`), same
 worktree, per the Runbook.
 
 - Surveyed `queue_liveness.py`'s `reconcile_liveness`, `tracking.py`'s

@@ -36,6 +36,12 @@ retention, distinct-generation repair, claim restoration and installed evidence.
 
 ## Coordination
 
+The direct #2871 audit is conjunctive across this ROOT and the other named receiving
+ROOT: Immutable Dev Slot retains six runtime families and Vendored Installer Engine the
+budget-guidance audit-only seventh row. Preserve the combined seven-family ledger, same
+#5472/adopter/service/native owners, Worktrees' permanent service-engine exception, and
+budget-guidance's non-rollout exception.
+
 - **Topology:** independent coherent PRs; preserve existing implementation and open PR ownership.
 - **Host (owns PRs):** each named slice owner; intent reconciliation does not take over the runtime campaign.
 - **Delegates:** no new runtime assignments or rollout authority from this plan.
@@ -126,7 +132,81 @@ adding operator-requested runtime scope to this documentation task.
 - [ ] For each implementation wave, obtain review, merge, verify release and complete its separately authorized installed-generation acceptance with the existing rollout owner.
 - [x] Deferred to `#7028/#7029 (source-managed-runtime-installs)`: clean merged Dev source selection, Manager/deployment policy, maintenance and assembled native rollout; retain that effort's full remaining Plan/Validation Plan and #7758 driver.
 
+<!-- backlog-reconciliation:7556:transfer:2871:to:efforts/active/immutable-dev-slot/README.md -->
+
+Add this exact six-runtime-family portion of #2871 directly to ROOT Phase 3 Plan AND
+corresponding Validation/continuing Coordination, preserving all existing
+thirteen-adopter work, #5472 source claims, source-managed deployment ownership, Journal
+and exceptions. The seventh budget-guidance audit is separately retained in the existing
+Vendored Installer Engine ROOT and is a conjunctive receiving dependency, not silently
+omitted.
+
+### Six-runtime-family source/dependency freshness audit retained from #2871
+- [ ] Audit agent-worktrees, agent-codespaces, agent-index, agent-vault, agent-ssh and
+  agent-logger INDIVIDUALLY on PowerShell and POSIX. Map initial install, update and
+  each actually reachable compatibility/fallback branch to its current constructor;
+  explicitly document retired/unreachable historical paths rather than blindly patching
+  matching text or assuming all wrappers identical. Preserve Index host/engine
+  distinctions and each service's own lifecycle hooks.
+- [ ] For every applicable route, prove fresh own-package code AND the full declared
+  local tool.uv.sources dependency graph after same-package-version source changes.
+  Preserve real local package/name/origin/dependency validation and installed consumer
+  health; own-package reinstall alone is not dependency freshness.
+- [ ] Accept complete frozen, verified, non-editable input-graph construction with
+  distinct qualified source identities as the current equivalent of the historical
+  --reinstall-package/--refresh-package recommendation. Where legacy mutable/local-path
+  compatibility remains genuinely supported, establish its actual
+  cache/build/installed-metadata behavior and a justified safe remedy. Flag count or an
+  unchanged unchecked document is not defect proof.
+- [ ] Preserve exact healthy same-input reuse, completed-content refusal and
+  distinct-generation health repair. Never rebuild published numbered content in place,
+  delete global caches, apply arbitrary force or revive mutable deployment as the
+  target. No unrelated new all-host/adopter completion gate is added to this finite
+  audit.
+- [ ] Preserve agent-worktrees' permanent service-installer-engine adoption exception:
+  freshness/admission qualification does not require adopting that service engine. Keep
+  current vendored canonical graph/origin/health mechanisms and native entrypoint
+  ownership rather than introducing another installer framework.
+- [ ] Credit #6598/#6707 qualified construction progress and #6788's test-runner-only
+  explicit reinstall fix at their exact limits. The test-runner's bounded claim does not
+  transfer or complete plugin installer/production acceptance.
+
+### Validation and continuing coordination for the six #2871 rows
+- [ ] Retain a combined SEVEN-row ledger spanning these six runtime families and
+  budget-guidance's separately owned audit-only row. Record both-platform
+  initial/update/reachable-compatibility source-to-consumer mapping, own and transitive
+  local dependency edits, positive same-input reuse and meaningful negative sensitivity.
+  Attribute source/fixture, supported native, release-containing and installed outcomes
+  separately; perform no qualification merely by moving the tracker.
+- [ ] Preserve #5472/adopter construction/admission/retention/native claims,
+  service-specific owners, the permanent Worktrees exception and the budget non-rollout
+  exception. Ordinary implementation proceeds through existing independently owned
+  reviewed slices, not reassignment or new generic ACKs.
+
+Conjunctive receiving gate: BOTH this complete six-family intake AND the complete
+budget-guidance intake in the existing Vendored Installer Engine ROOT must receive NEW
+normal reviewed ACTUAL merges plus FULL CURRENT ROOT Plan/Validation/Coordination
+readback before #2871 closes. If either intake is incomplete, ineligible or changes
+custody, retain the whole source. The actual seven-family freshness audit remains
+unchecked; this is not a feature or native PASS.
+
+Current best-effort handoff interpretation: references above to compatible
+forward/reverse handoff do not reinstate zero-outage continuity, a compatibility veto,
+or incoming successor readiness before every old-runtime retirement. Preserve the
+accepted bounded, identity-checked cold-takeover route when handoff breaks, explicit
+outage/unknown recovery, and client/child retry obligations. Actual candidate/output CLI
+health still gates candidate promotion and completion, and a verified retained
+previous-good generation must survive failed construction or cutover. Best-effort
+continuity does not make an unhealthy candidate or corrupt current/LKG evidence
+acceptable. This records the existing reviewed direction; it authorizes no live force,
+service, runtime, or deployment operation.
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #2871 Plan/Validation clause above at its original
+  finite scope and evidence tier, preserving alternatives, same owners, holds, and
+  current portfolio bounds. Administrative intake is not implementation, native
+  acceptance, rollout, or completion of unrelated parent work.
 
 - [ ] **Frozen inputs:** changing/removing the worktree after construction cannot change deployed imports; source-only and external vendor changes produce distinct identities.
 - [ ] **Concurrency:** real competing installers yield one exact-input build and bounded healthy reuse; conflicting content refuses after the winner publishes. Exercise cancellation, process death and storage/permission errors separately.
@@ -148,6 +228,15 @@ This reconciliation changes intent and effort ownership only. Implementation,
 native installation and rollout remain separately assigned and gated.
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #2871
+
+- Materialized the complete #2871 receiving portion directly in this ROOT Plan and
+  Validation, with continuing coordination. All incumbent obligations and custody
+  remain; historical private identifiers, where present, are represented by neutral
+  historical placeholders without changing their role or outcome. A new normal reviewed
+  merge and full current readback must precede administrative source supersession. No
+  behavior, test, native result, or rollout is claimed.
 
 ### 2026-10-22 - Best-effort rule landed; finite amendment complete
 

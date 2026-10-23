@@ -3,7 +3,7 @@
 - **Slug:** `module-componentization-discipline`
 - **Repo:** copilot-extensions (repo-wide: every plugin, `libs/`,
   `worktree-manager/`, and `tools/`)
-- **Branch(es):** `worktree/operator-cloud1-win-20260916-140121-80aa` (Phase 0)
+- **Branch(es):** `worktree/<historical-phase-0>` (Phase 0)
 - **Created:** 2026-09-16
 - **Status:** Active
 - **Vision:** none dedicated — this effort establishes the standing
@@ -35,6 +35,12 @@ to test modules via behavioral-contract splitting with filterable attribution.
 | Host worktree | Owns the effort, Phase 0 docs/tooling, and coordinates later phase PRs | Current agent-worktrees session |
 
 ## Coordination
+
+The direct #3124 four-poller extraction stays with the current componentization host,
+OPEN #2805, eligible bounded-source coordination, and existing
+source/compatibility-root/module-health/automation/lifecycle/installer custodians. No
+unreleased overlapping claim expires or transfers; closing the administrative source is
+not a live claim token or worker-activation authority.
 
 - **Topology:** one host worktree for Phase 0; later phases (module/test
   splits) each land as their own independent PR against `main`, claimed off
@@ -496,7 +502,114 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#3446** guards: module-size baseline/hard-cap drift is now a recurring pre-push blocker (3x in <24h)
   - Module-size baseline/hard-cap drift is the exact policy surface this effort establishes.
 
+<!-- backlog-reconciliation:7556:transfer:3124:to:efforts/active/module-componentization-discipline/README.md -->
+
+### Direct retained Phase2 bounded reconcile-poll extraction from #3124
+
+This is a complete direct unchecked ROOT Plan/Validation intake, not implementation or a
+new size-policy exception. Preserve the entire existing Active effort, its
+Plan/Validation/Journal, all #2805 inherited installer/named-module/recurrence streams
+and their OR alternatives, and current source, compatibility-root, module-health,
+automation, lifecycle and installer custodians. Existing shared bounded-reconcile/drain
+construction is credited, not undone or reimplemented.
+
+#### Coordination
+
+The existing componentization host continues coordinating the ranked program. A future
+implementation owner takes only this bounded source slice through normal current
+repository review/Dev workflow and eligible OPEN bounded-source coordination. Continue
+this ROOT Plan/Validation/Journal and OPEN #2805; preserve every unreleased overlapping
+source claim. Closing #3124 administratively does not make that closed issue a live
+claim token, assign a new implementer, transfer native/resource custody or authorize
+worker activation. No owner expires through age, missing local task or absence from this
+report. No generic new ACK is required.
+
+#### Unchecked Plan
+
+- [ ] Extract the four ORIGINAL managed health, managed validate/prepare, managed
+  recovery-validate and unmanaged health pollers into one coherent dedicated
+  bounded-polling responsibility, leaving supervisor_daemon.py responsible for reconcile
+  orchestration. A discovery/provider/receipt-only mixin or moving unrelated methods is
+  not this extraction; a particular proposed new filename is not mandatory.
+- [ ] Coherently own/delegate _prune_probe_inflight, _remaining,
+  _managed_health_futures, _managed_validate_futures,
+  _managed_recovery_validate_futures, _unmanaged_health_futures, _probe_inflight and
+  _retired_runtime_executors plus associated wait/drained state and shutdown accounting.
+  Reuse the already-shared _drain_tracked_futures and actual tracked-future inventory;
+  do not duplicate the drain or move it back merely to satisfy a file name.
+- [ ] Preserve ONE monotonic deadline for the entire reconcile pass, not one renewed
+  budget per companion. Preserve bounded deferral/retry and selected-state recovery, and
+  require all transition-group members to validate before any group mutation.
+- [ ] Retain exact rid/snapshot-fingerprint fencing, invalidation on
+  changed/retired/stopped units and tracking of superseded or otherwise abandoned
+  noncancelable futures until actual completion. A future leaving a rid dictionary is
+  not proof that its operation stopped.
+- [ ] Preserve exception classification, logging, backoff and retry behavior. Completed
+  exceptional futures release tracking before propagation; no silent success or
+  permanently cached exception may replace current behavior.
+- [ ] Preserve one shared bounded shutdown grace, idempotent repeated shutdown,
+  current/retired runtime-executor and managed/receipt/probe future accounting, truthful
+  incomplete-drain outcome and the existing self-update/lifecycle owner boundary. This
+  pure structural slice cannot change scheduling, health, shutdown, activation, recovery
+  or process permission.
+- [ ] Give the extracted responsibility its own appropriate current
+  module-size/guard/baseline accounting. Shrink the original ceiling as applicable; new
+  under-cap files remain governed by the hard cap without inventing grandfathered
+  growth. Raising a ceiling or merely being below2190/2203 historical counts is not
+  completion.
+- [ ] Keep the precise original finite extraction and focused behavior-equivalence
+  scope. Independent native custody, installed rollout, other modules, cross-language
+  policy and the whole effort remain with their existing owners and gates; none becomes
+  a new prerequisite for closing this one implemented source slice.
+
+#### Unchecked Validation Plan
+
+- [ ] Assert direct production callers delegate the four original pollers and related
+  state to the coherent new responsibility, while reconcile orchestration stays in the
+  daemon. Verify actual imports/compatibility surfaces and separately attributed
+  module-size accounting, not only reduced line count or helper existence.
+- [ ] Preserve the original bounded-then-resolves and stale-snapshot cases for EACH
+  poller; exercise one shared whole-pass budget, changed/retired unit, abandoned
+  still-running future, expected and unexpected exceptions and eventual retry through
+  actual production consumers.
+- [ ] Preserve selected-state recovery and transition-group all-members-before-commit
+  assertions; a slow/unknown member must not cause a partial mutation or block unrelated
+  reconciliation beyond the original shared bound.
+- [ ] Preserve repeated shutdown, one-grace wait, no-current-executor with retired work,
+  newly introduced futures and accurate not-drained behavior under existing bounds.
+  Reuse current shared drain inventory and native/lifecycle qualification owners rather
+  than inventing a second shutdown path.
+- [ ] Route focused original regressions and applicable
+  plugin/import/type/module-size/documentation checks through the repository's CURRENT
+  bounded portfolio. Preserve required source behavior and retained periodic/native
+  qualifications where applicable, without restoring obsolete exhaustive PR gates,
+  weakening assertions or adding an unrelated all-host/whole-parent portfolio.
+- [ ] Journal actual source PR/merge and exact validated scope separately from release,
+  installation or running adoption. A merged documentation intake, source helper,
+  passing unrelated test or completed broader phase is not implemented bounded-poll
+  extraction.
+
+Close #3124 only AFTER this ENTIRE direct intake is normally reviewed, actually MERGED
+and read back in the CURRENT FULL Active ROOT Plan/Validation/Coordination, with OPEN
+#2805 and eligible bounded-source coordination and every incumbent hold unchanged. Old
+effort creation, an unmerged patch, a child-only/link-only note or this proposal is not
+delivery. If full delivery or custody cannot be verified, RETAIN #3124. No product
+source, tests/checkers, runtime, provider record or resource is changed by this
+proposal.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/3124 ;
+https://github.com/ThomasMichon/copilot-extensions/issues/2805 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/3039 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6487 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/2807 .
+
 ## Validation Plan
+
+- [ ] Resolve every directly retained #3124 Plan/Validation row above through its
+  original finite source-behavior scope, preserving current owners, focused regression
+  semantics, independent size accounting and existing lifecycle/native gates.
+  Administrative consolidation is not implementation or completion of the broader
+  effort.
 
 - [x] Phase 0: `python tools/check-module-size.py`,
       `python tools/check-skills.py plugins/customizing-copilot/skills/componentizing-modules/SKILL.md`,
@@ -529,6 +642,15 @@ onward has no open design question yet — each is a mechanical application of
 the Phase 0 runbook, picked up as capacity allows.
 
 ## Journal
+
+### 2026-10-22 - Direct retained acceptance from #3124
+
+- Materialized the complete #3124 receiving portion directly in this ROOT Plan and
+  Validation, with continuing coordination. All incumbent obligations and custody
+  remain; historical private identifiers, where present, are represented by neutral
+  historical placeholders without changing their role or outcome. A new normal reviewed
+  merge and full current readback must precede administrative source supersession. No
+  behavior, test, native result, or rollout is claimed.
 
 ### 2026-09-22 — `agent-dispatch/queue.py` slice 1: queue common + steering/wake mixin
 - Started the dedicated `queue.py` campaign the effort's Guiding Intent calls
