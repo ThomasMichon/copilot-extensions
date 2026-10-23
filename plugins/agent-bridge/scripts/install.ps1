@@ -24,6 +24,10 @@
 
 .PARAMETER Purge
     On uninstall: also delete config, DB, and auth token.
+
+.PARAMETER RequireGracefulCutover
+    On update: require a live local versioned predecessor and confirmed
+    graceful cutover. Never force retirement or fall back to stop/start.
 #>
 [CmdletBinding()]
 param(
@@ -34,6 +38,8 @@ param(
     [string]$InstallDir,
 
     [switch]$Purge,
+
+    [switch]$RequireGracefulCutover,
 
     # Opt-in: run the daemon "whether the user is logged on or not" (a headless
     # boot-triggered S4U task) instead of the default at-logon task that only
@@ -65,6 +71,11 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($RequireGracefulCutover -and $Action -ne 'update') {
+    throw '-RequireGracefulCutover requires update'
+}
+
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
@@ -3210,6 +3221,15 @@ function Invoke-UpdateSlotBuild {
 }
 
 function Invoke-ServingRuntimeReconcile {
+    if ($RequireGracefulCutover) {
+        Write-UpdateMarker
+        try {
+            Invoke-RequiredGracefulCutover
+        } finally {
+            Clear-UpdateMarker
+        }
+        return
+    }
     & $VenvPython -m agent_bridge deploy --reconcile-serving --probe-serving --health-timeout 180
     if ($LASTEXITCODE -eq 0) { return }
     if ($LASTEXITCODE -ne 10) {
@@ -3226,6 +3246,28 @@ function Invoke-ServingRuntimeReconcile {
     }
 }
 
+function Invoke-RequiredGracefulCutover {
+    $output = & $LinkPython -m agent_bridge deploy --require-live-predecessor --json --health-timeout 180 | Out-String
+    $rc = $LASTEXITCODE
+    $confirmed = $false
+    if ($rc -eq 0) {
+        try {
+            $result = ConvertFrom-Json -InputObject $output -ErrorAction Stop
+            $confirmed = $output.TrimStart().StartsWith('{') -and
+                ($result -is [PSCustomObject]) -and
+                ($result.PSObject.Properties.Name -contains 'ok') -and
+                ($result.ok -is [bool]) -and $result.ok -and
+                (-not ($result.PSObject.Properties.Name -contains 'skipped') -or $result.skipped -ne $true)
+        } catch {
+            Write-Warn "Required graceful cutover returned invalid JSON: $_"
+        }
+    }
+    if (-not $confirmed) {
+        throw "Required graceful cutover was not confirmed: $output`nRuntime selection may already have changed; no fallback restart or garbage collection attempted."
+    }
+    Write-Ok 'Required graceful cutover confirmed'
+}
+
 function Invoke-Update {
     Write-Step 'agent-bridge update'
 
@@ -3238,6 +3280,9 @@ function Invoke-Update {
         exit 75
     }
     [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
+    if ($RequireGracefulCutover -and -not $VersionedRuntime) {
+        throw 'Required graceful cutover needs a versioned runtime; no process stop attempted.'
+    }
     # The transaction's single payload fingerprint (see Invoke-Install).
     $payloadHash = Get-PayloadHash
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
@@ -3320,6 +3365,9 @@ function Invoke-Update {
         }
     } else {
         $useCutover = $wasRunning -and (-not $activeForward) -and (Test-Path $VenvPython)
+    }
+    if ($RequireGracefulCutover -and -not $useCutover) {
+        throw 'Required graceful cutover needs a live local predecessor in a different versioned slot; no process stop attempted.'
     }
     if ($useCutover) {
         Write-Step 'Graceful cutover: building the new runtime; will cut over (no stop)'
@@ -3474,8 +3522,12 @@ function Invoke-Update {
         # Give the cutover a generous health window: a cold fresh-build first start
         # (even after the warm-up above) can outlast the 60s deploy default, which
         # is tuned for warm standalone cutovers -- see #864.
-        & $LinkPython -m agent_bridge deploy --force --health-timeout 180 2>&1 | ForEach-Object { Write-Host "  $_" }
-        if ($LASTEXITCODE -eq 0) {
+        if ($RequireGracefulCutover) {
+            Invoke-RequiredGracefulCutover
+        } else {
+            & $LinkPython -m agent_bridge deploy --force --health-timeout 180 2>&1 | ForEach-Object { Write-Host "  $_" }
+        }
+        if ($RequireGracefulCutover -or $LASTEXITCODE -eq 0) {
             Write-Ok 'Cutover complete (zero-downtime)'
         } else {
             Write-Warn 'Cutover failed -- falling back to a stop-and-restart swap'

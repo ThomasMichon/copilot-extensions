@@ -188,6 +188,30 @@ def _cmd_deploy(
     from .config import config_dir, load_config, load_or_create_auth_token
     from .routing_state import active_route_is_forward
 
+    if getattr(args, "require_live_predecessor", False) and serving is None:
+        from .serving_reconcile import (
+            ServingReconcileError, compare_serving_version, observe_serving,
+        )
+
+        if (
+            conditional is not None or getattr(args, "force", False)
+            or getattr(args, "recover", False) or getattr(args, "reconcile_serving", False)
+        ):
+            raise ValueError("required predecessor cutover cannot force, recover or reconcile")
+        with observe_serving(Path(config_dir())) as observed:
+            if observed is None:
+                raise ServingReconcileError("required cutover has no verified live local predecessor")
+            if compare_serving_version(observed.version, __version__) == "current":
+                result = {"ok": True, "serving_reconcile": "current", "skipped": False}
+                if getattr(args, "json", False):
+                    core = _core()
+                    core._json_out(result)
+                else:
+                    print("[OK] Required graceful cutover: verified serving runtime is current.")
+                return
+            _cmd_deploy(args, serving=observed, routing_dir=routing_dir)
+        return
+
     if getattr(args, "probe_serving", False) and not getattr(args, "reconcile_serving", False):
         raise ValueError("serving probe requires --reconcile-serving")
     if getattr(args, "reconcile_serving", False) and serving is None:
@@ -531,6 +555,10 @@ def add_deploy_cutover_flags(
     parser.add_argument("--drain-timeout", type=float, default=300.0, metavar="SECONDS", help="Max seconds to wait for the old daemon's in-flight work to settle.")
     parser.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
     if include_recover:
+        parser.add_argument(
+            "--require-live-predecessor", action="store_true",
+            help="Installer-only graceful cutover: require a verified live local predecessor; never cold-start or force retirement.",
+        )
         parser.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
         parser.add_argument(
             "--reconcile-serving", action="store_true",

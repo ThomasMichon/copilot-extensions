@@ -273,6 +273,7 @@ $InstallDir = {_ps_quote(tmp_path / "install")}
 $LinkDir = Join-Path $InstallDir 'venv'
 $SrcVersion = '{_VERSION}'
 $VersionedRuntime = $true
+$RequireGracefulCutover = $false
 $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
 $RealPython = {_ps_quote(sys.executable)}
 # The slot interpreter is a function so `-m agent_bridge ...` (config migrate)

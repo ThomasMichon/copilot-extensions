@@ -430,7 +430,8 @@ def test_serving_control_never_retries_into_a_replacement(serving, monkeypatch, 
     assert attempts[0].get_header("Authorization") == scheme + "test-credential"
 
 
-def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, monkeypatch):
+@pytest.mark.parametrize("required", [False, True])
+def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, monkeypatch, required):
     from zdd import breadcrumb, cutover, routing
     from agent_bridge import config, venue_cli
 
@@ -453,17 +454,82 @@ def test_serving_reconcile_uses_guarded_deploy_without_legacy_recovery(serving, 
     factory = Mock(return_value=orchestrator)
     monkeypatch.setattr(cutover, "CutoverOrchestrator", factory)
     args = Namespace(
-        force=False, recover=False, json=True, reconcile_serving=True,
+        force=False, recover=False, json=True, reconcile_serving=not required,
+        require_live_predecessor=required,
         health_timeout=1, drain_timeout=1,
     )
     with reconcile.observe_serving(root) as observed, pytest.raises(SystemExit) as exit:
-        venue_cli._cmd_deploy(args, serving=observed)
+        venue_cli._cmd_deploy(args, serving=None if required else observed)
     assert exit.value.code == 1
     kwargs = factory.call_args.kwargs
     assert kwargs["expected_old"] == routing.Endpoint.from_dict(row)
     assert kwargs["refuse_old"](row) is None
     assert orchestrator.run.call_args.kwargs["force"] is False
     core._ensure_retired_daemon_exited.assert_not_called()
+
+@pytest.mark.parametrize("case", ["missing", "forward", "unhealthy"])
+def test_required_cutover_refuses_without_verified_local_predecessor(serving, monkeypatch, case):
+    from zdd import cutover
+    from agent_bridge import config, venue_cli
+
+    root, _, _, _, core = serving
+    if case == "missing":
+        (root / "active.json").unlink()
+    elif case == "forward":
+        (root / "active.json").write_text(json.dumps({"active": {"port": 9011, "forwarded": True}}))
+    else:
+        core._service_health_on_port.return_value = None
+    factory = Mock(side_effect=AssertionError("cutover effects ran"))
+    monkeypatch.setattr(cutover, "CutoverOrchestrator", factory)
+    monkeypatch.setattr(config, "config_dir", lambda: root)
+    args = Namespace(require_live_predecessor=True)
+    with pytest.raises(reconcile.ServingReconcileError):
+        venue_cli._cmd_deploy(args)
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize("flag", ["force", "recover", "reconcile_serving"])
+def test_required_cutover_cannot_enable_other_lifecycle_modes(monkeypatch, flag):
+    from agent_bridge import venue_cli
+
+    observe = Mock(side_effect=AssertionError("observation ran before argument validation"))
+    monkeypatch.setattr(reconcile, "observe_serving", observe)
+    with pytest.raises(ValueError, match="cannot force"):
+        venue_cli._cmd_deploy(Namespace(require_live_predecessor=True, **{flag: True}))
+    observe.assert_not_called()
+
+
+def test_required_cutover_current_runtime_is_verified_without_restart(serving, monkeypatch):
+    import agent_bridge
+    from agent_bridge import config, venue_cli
+    from zdd import cutover
+
+    root, row, _, _, core = serving
+    monkeypatch.setattr(agent_bridge, "__version__", row["version"])
+    monkeypatch.setattr(config, "config_dir", lambda: root)
+    monkeypatch.setattr(venue_cli, "_core", lambda: core)
+    factory = Mock(side_effect=AssertionError("already-current daemon was restarted"))
+    monkeypatch.setattr(cutover, "CutoverOrchestrator", factory)
+    venue_cli._cmd_deploy(Namespace(require_live_predecessor=True, json=True))
+    assert core._json_out.call_args.args[0] == {
+        "ok": True, "serving_reconcile": "current", "skipped": False,
+    }
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize("installer", [False, True])
+def test_required_predecessor_option_is_installer_deploy_only(installer):
+    import argparse
+    from agent_bridge.venue_cli import add_deploy_cutover_flags
+
+    parser = argparse.ArgumentParser()
+    add_deploy_cutover_flags(parser, include_recover=installer)
+    if installer:
+        assert parser.parse_args(["--require-live-predecessor"]).require_live_predecessor
+    else:
+        with pytest.raises(SystemExit) as exit:
+            parser.parse_args(["--require-live-predecessor"])
+        assert exit.value.code == 2
 
 
 @pytest.mark.parametrize("scenario", [

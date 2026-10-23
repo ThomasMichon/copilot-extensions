@@ -27,6 +27,9 @@
 #              silently downgrading (and de-featuring) the running daemon.
 #              It never overrides the completed-slot refusal (#5472): a
 #              published versions/<v> slot is not rebuilt in place.
+#   --require-graceful-cutover
+#              On update: require a live local versioned predecessor and
+#              confirmed graceful cutover; never fall back to drain/stop/start.
 # =============================================================================
 
 set -euo pipefail
@@ -319,6 +322,7 @@ shift || true
 
 PURGE=false
 DRY_RUN=false
+REQUIRE_GRACEFUL_CUTOVER=0
 # Bypass the downgrade guard (#1790). Env var lets the marketplace/ZDD paths
 # opt in without threading a flag; the CLI flag is the interactive escape hatch.
 FORCE="${AGENT_BRIDGE_ALLOW_DOWNGRADE:-false}"
@@ -328,6 +332,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --purge) PURGE=true; shift ;;
         --force) FORCE=true; shift ;;
+        --require-graceful-cutover) REQUIRE_GRACEFUL_CUTOVER=1; shift ;;
         --dry-run) DRY_RUN=true; shift ;;
         --install-dir)
             [[ $# -ge 2 ]] || { echo "[FAIL] Missing value for --install-dir" >&2; exit 1; }
@@ -337,6 +342,11 @@ while [[ $# -gt 0 ]]; do
         *)       echo "[FAIL] Unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+if [[ "$REQUIRE_GRACEFUL_CUTOVER" -eq 1 && "$ACTION" != update ]]; then
+    echo "[FAIL] --require-graceful-cutover requires update" >&2
+    exit 1
+fi
 
 INSTALL_DIR="$(_normalize_install_dir "$INSTALL_DIR")"
 
@@ -2530,6 +2540,14 @@ _update_core() {
 }
 
 _reconcile_serving_runtime() {
+    if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 ]]; then
+        trap '_lifecycle_finish "$?"; _clear_update_marker; _exit_install_lock' EXIT
+        _write_update_marker
+        local strict_rc=0
+        _required_graceful_cutover || strict_rc=$?
+        _clear_update_marker
+        return "$strict_rc"
+    fi
     local rc=0
     "$VENV_DIR/bin/python" -m agent_bridge deploy --reconcile-serving --probe-serving --health-timeout 180 || rc=$?
     [[ "$rc" != 0 ]] || return 0
@@ -2546,6 +2564,20 @@ _reconcile_serving_runtime() {
         _fail "Serving runtime reconcile failed; completed slot left unchanged. Resolve the reported ownership/health/cutover failure before retrying."
         return 1
     fi
+}
+
+_required_graceful_cutover() {
+    local output
+    if output="$(_bridge_cli deploy --require-live-predecessor --json \
+            --health-timeout 180 --drain-timeout "${AGENT_BRIDGE_DRAIN_TIMEOUT:-300}")"; then
+        if printf '%s' "$output" | "$VENV_DIR/bin/python" -c 'import json, sys; result = json.load(sys.stdin); sys.exit(0 if isinstance(result, dict) and result.get("ok") is True and result.get("skipped") is not True else 1)'; then
+            _ok "Required graceful cutover confirmed"
+            return 0
+        fi
+    fi
+    _fail "Required graceful cutover was not confirmed: $output"
+    _fail "Runtime selection may already have changed; no fallback restart or garbage collection attempted."
+    return 1
 }
 
 _lifecycle_emit() {
@@ -2589,6 +2621,10 @@ do_update() {
     # over an in-flight install/update. Defer on timeout.
     _require_install_lock
     _payload_unchanged_since_admission source-only || exit 1
+    if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 && "$VERSIONED_RUNTIME" != 1 ]]; then
+        _fail "Required graceful cutover needs a versioned runtime; no process stop attempted."
+        return 1
+    fi
 
     # Immutable-slot admission (#5472) -- BEFORE the update marker, the drain,
     # or any stop, so a no-op or a refused update never disturbs the live
@@ -2679,6 +2715,11 @@ do_update() {
         cutover=true
     fi
 
+    if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 && "$cutover" != true ]]; then
+        _fail "Required graceful cutover needs a live local predecessor in a different versioned slot; no process stop attempted."
+        return 1
+    fi
+
     _versioned_slot_clean || exit 1
 
     # Stop the running instance before the in-place reinstall, UNLESS we are
@@ -2756,7 +2797,9 @@ do_update() {
         _step "Forwarded host bridge route still active -- not starting a local daemon"
     elif [[ "$cutover" == true ]]; then
         _step "Zero-downtime cutover (agent-bridge deploy)..."
-        if _bridge_cli deploy \
+        if [[ "${REQUIRE_GRACEFUL_CUTOVER:-0}" -eq 1 ]]; then
+            _required_graceful_cutover || return 1
+        elif _bridge_cli deploy \
                 --drain-timeout "${AGENT_BRIDGE_DRAIN_TIMEOUT:-300}"; then
             _ok "Cutover complete -- new daemon active, old retired"
         else

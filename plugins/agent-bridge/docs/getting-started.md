@@ -234,6 +234,15 @@ binstub/service manifest, and if a daemon is already live performs the
 installer-driven graceful cutover (falling back to drain/stop/start only on
 failure).
 
+For an explicitly authorized recovery that must not stop active work, use
+`install.sh update --require-graceful-cutover` or
+`install.ps1 update -RequireGracefulCutover`. This opt-in requires a versioned
+runtime and a verified live local predecessor. It refuses forwarded, stopped
+and in-place rebuild paths, never forces retirement, and fails rather than
+falling back to stop/start. A failed cutover may have changed runtime selection;
+reconcile the reported state before retrying. Failure skips success-only garbage
+collection and still clears the installer's lifecycle marker and lock.
+
 A completed `versions/<version>/` slot is never rebuilt in place. Re-running
 `install`/`update` for the version that is already active with unchanged
 content is a no-op, and a completed but inactive slot with the same content is
