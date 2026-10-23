@@ -186,6 +186,7 @@ PARAMETER_COUNTS.update({
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
     "test_cli.py::test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic": 2,
     "test_client.py::test_failed_output_never_commits_a_cursor": 3,
+    "test_client.py::test_local_reader_lock_is_shared_and_crash_released": 2,
     "test_client.py::test_flushed_output_with_unconfirmed_progress_is_explicit": 2,
     "test_client.py::test_invalid_member_controls_refuse_before_transport": 5,
     "test_client.py::test_invalid_member_pages_refuse_progress": 9,

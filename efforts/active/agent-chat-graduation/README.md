@@ -399,6 +399,13 @@ shared-multiplex contracts above.
   with349 passes, two allowed POSIX skips and33 full-only deselections in98.14
   seconds;384 nodes are collected. Final same-candidate full qualification and
   the next actual-head review/CI remain required before merge.
+- That full run exposed a Windows fixture race: the reader-lock child's ready
+  pathname became visible while replacement still temporarily denied reading
+  it. The fixture now requires a readable complete record within its unchanged
+  five-second deadline, still proves the same live child/lock and actual crash
+  release before Job cleanup, and adds one deterministic publication-race case
+  without removing the normal case. This does not change production reader
+  logic or hide a permanent publication failure.
 
 ### 2026-10-23 - Portable collaboration candidate qualified
 
