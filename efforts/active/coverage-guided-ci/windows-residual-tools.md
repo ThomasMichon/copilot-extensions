@@ -129,9 +129,7 @@ four consumer modules plus five existing portable Gateway source cases passed
 89 tests with six unchanged platform/privilege skips, native Windows, exactly
 two workers. Complete Fleet collection also passed without errors; collection
 and execution together took 90.00 seconds including preparation and cleanup.
-Review exposed remaining old fixture imports and the assembly consumer's
-destructive use of the old module fixture; both classes were corrected before
-this final validation. The initial
+The initial
 properly prepared run reproduced the pinned wheel omission before correction.
 All item/native deadlines, test selections and resource caps remain unchanged.
 The real wheel/sdist builds, isolated installs, RECORD/dependency assertions,
