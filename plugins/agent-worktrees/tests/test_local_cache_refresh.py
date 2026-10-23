@@ -160,7 +160,9 @@ def test_preparation_invalidates_actual_changes(copy_workspace, change):
         assert second.generation != first.generation
 
 
-@pytest.mark.parametrize("failure", ["missing", "declaration", "template"])
+@pytest.mark.parametrize("failure", [
+    "missing", "declaration", "template", "dangling-template", "dangling-declaration",
+])
 def test_missing_payload_does_not_withhold_independent_guidance(copy_workspace, failure):
     root, home = copy_workspace
     _, old = provider(root, home, "old")
@@ -170,6 +172,15 @@ def test_missing_payload_does_not_withhold_independent_guidance(copy_workspace, 
         broken, _ = provider(root, home, "missing")
         if failure == "template":
             broken.unlink()
+        elif failure.startswith("dangling-"):
+            path = broken if failure == "dangling-template" else broken.parents[1] / "instruction-projections.json"
+            path.unlink()
+            try:
+                path.symlink_to("missing-target")
+            except OSError as exc:
+                if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                    pytest.skip("native file-link privilege unavailable")
+                raise
         else:
             (broken.parents[1] / "instruction-projections.json").write_text("{")
     settings = root / ".github" / "copilot" / "settings.json"

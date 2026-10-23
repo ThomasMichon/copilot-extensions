@@ -59,7 +59,7 @@ def stamp(
         info.st_size, info.st_mtime_ns, info.st_ctime_ns,
     ]
     regular = stat.S_ISREG(info.st_mode)
-    if allow_links and stat.S_ISLNK(info.st_mode):
+    if content_digest and allow_links and stat.S_ISLNK(info.st_mode):
         regular = stat.S_ISREG(path.stat().st_mode)
     if content_digest and regular:
         value.append(_hash_file(path, deadline))

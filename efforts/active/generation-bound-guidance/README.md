@@ -186,6 +186,10 @@ coordinate the smallest additive owner API before changing another slice.
   counts are marked unavailable rather than displayed as zero delivered files.
   The failing real-output control now passes; focused results were Worktrees
   13 passed and Bridge 4 passed.
+- Corrected the review's dangling-link revalidation defect without weakening
+  healthy linked-input hashing: failed providers retain metadata-only evidence,
+  while safe independent sources publish. Two failing controls became green
+  in a seven-case broken/healthy source-link selection.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

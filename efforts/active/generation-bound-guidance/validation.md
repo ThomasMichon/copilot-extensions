@@ -174,3 +174,9 @@ reprepare restores reusable readiness. Focused results: **13 passed** in
 Worktrees and **4 passed** in Bridge. Abnormal exit after a mutation attempt
 uses the same conservative notice, without claiming that a failed refresh
 delivered a complete set.
+
+Dangling source links have explicit partial-delivery controls. Metadata-only
+evidence no longer follows a missing link target merely to revalidate a failed
+provider; healthy providers still publish, and healthy linked inputs retain
+content-hash validation. Both dangling controls failed before the correction;
+the focused broken/healthy source-link selection then passed **7 cases**.
