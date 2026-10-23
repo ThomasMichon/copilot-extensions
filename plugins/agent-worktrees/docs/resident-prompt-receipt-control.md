@@ -128,6 +128,28 @@ non-head/pending-successor association, existing record-lock exclusion, replay
 fencing, four-slot admission, disconnect/drain accounting and late completion.
 Missing qualified backend is tested explicitly.
 
+The existing registration stamp may add `project` and `creationNonce` to the
+session's existing `worktree-binding.json`. These are the actual worktree record's
+`repo` and existing `creation_nonce`, not values inferred from a path, current
+head, controller or PR. The record's project must match the owning registration
+project. Registration's critical transaction is unchanged.
+
+The optional post-registration caller takes the existing record lock with
+`blocking=False, require_sidecar=True`, checks `acquired`, then reads the actual
+record uncached. The writer's optional keyword-only `worktree_record` is checked
+against another uncached read under the same reentrant guard: exact project,
+worktree, nonce, lifecycle/head revisions and registered-session or exact
+pending-candidate association must agree. Registered non-head sessions remain
+valid. The guard spans atomic publication; there is no new admission wait,
+retry loop, provider lookup, nonce or session directory creation.
+
+Contention skips the optional stamp entirely, preserving any newer binding.
+Known invalid/stale snapshots and legacy calls rewrite only the legacy fields,
+removing rather than retaining stale trusted fields. Read/write `OSError`
+remains best effort. The unchanged legacy fields include `sessionId`,
+`worktreeId`, `worktreeDir`, `machine` and `registeredAt`. Missing trusted subject
+fields still mean unavailable, never permission to infer a subject.
+
 macOS additionally requires qualification of the existing route publisher's
 process-start identity contract (#7659). The current zdd publisher reads
 `/proc` on non-Windows platforms, whereas receipt validation uses Worktrees'
@@ -140,7 +162,7 @@ publisher or claim macOS readiness.
 The receipt owner separately owns the real backend/Node integration, canonical
 lock qualification, total history bounds and the whole 2,000 ms observation
 budget. A timely pending result is not completed-write or cleanup proof.
-The existing launch/session binding projection does not yet supply the required
-project plus creation nonce: that producer addition requires its own narrow
-admission. Missing subject identity remains unavailable. No live host, installed
-runtime or deployment qualification is implied by these source tests.
+The trusted producer's source tests do not prove consumer/backend integration or
+that an installed session has received those fields. Missing subject identity
+remains unavailable. No live host, installed runtime or deployment qualification
+is implied by these source tests.

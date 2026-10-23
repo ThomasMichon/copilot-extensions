@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify optional session subject bindings against uncached records under nonblocking existing lock ownership",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
