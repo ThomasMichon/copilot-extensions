@@ -468,6 +468,7 @@ def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):
 
 def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):
     release = threading.Event()
+    burst_ready = threading.Event()
     lock = threading.Lock()
     active = 0
     peak = 0
@@ -486,16 +487,23 @@ def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):
             with lock:
                 active -= 1
 
-    daemon = make(notify=notify)
+    def fetch(*args):
+        burst_ready.wait()
+        return PRSnapshot(merged=True, pr_state="closed")
+
+    daemon = make(notify=notify, fetch=fetch)
     try:
         for number in range(20):
             daemon.compute("register", spec(str(number)))
+        assert calls == []
+        burst_ready.set()
         wait(lambda: active == 8)
         assert len(daemon._deliveries.workers) == 8
         release.set()
         wait(lambda: len(calls) == 20 and not daemon.status()["subscribers"])
         assert peak == 8 and len(set(calls)) == 20
     finally:
+        burst_ready.set()
         release.set()
 
 def test_pending_only_key_retires_poller_and_scheduler_waits_for_retry(make):
