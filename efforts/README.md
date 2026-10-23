@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Telemetry Measurement Contract](active/telemetry-measurement-contract/README.md) | Active; QoS/Engagement schema, catalog and instrumentation plan only | #8102; bounded design sub-effort of Performance Telemetry, no runtime admission |
 | [Producer Work Reuse](active/producer-work-reuse/README.md) | Draft; code-grounded producer caching/batching/indexing plan only; execution admission pending | #7948/#7949/#7950 and retained #2110 declaration/health acceptance; no rollout |
 | [Reconstructible Runtime State](active/reconstructible-runtime-state/README.md) | Draft; source-only recovery and rollback-compatible reconstruction plan; implementation admission pending | #7947; preserves #1460/#1915 compatibility and #3761 ground-state ownership; no live rebuild or rollout |
 | [Prompt Receipt Observation](active/prompt-receipt-observation/README.md) | Draft; bounded async non-provisioning first-prompt receipt plan before implementation | #7942; unchanged consumption authority; no installed rollout |

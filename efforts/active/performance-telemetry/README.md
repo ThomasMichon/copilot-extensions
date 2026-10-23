@@ -53,6 +53,11 @@ existing producer, process, maintenance, collector and rollout owners remain sep
 
 ## Context
 
+The bounded [Telemetry Measurement Contract](../telemetry-measurement-contract/README.md)
+sub-effort (#8102) proposes QoS/Engagement semantics, a measurement catalog and
+future instrumentation sequencing only. It does not take reserved production
+files or close this campaign's native, structured-signal or rollout acceptance.
+
 Bridge and Dispatch already have optional dict-shaped telemetry and local
 spooling, but call sinks synchronously. Exception handling does not isolate
 a slow sink. Manager already has a bounded frame-health writer; normalize its

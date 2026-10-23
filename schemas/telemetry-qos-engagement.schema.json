@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Proposed QoS and Engagement normalized records",
+  "description": "Design-only projection; not agent.performance.v1 or OTLP wire format.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "eventId", "component", "name"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "kind": {"enum": ["qos", "qos_start", "engagement"]},
+    "eventId": {"$ref": "#/$defs/opaqueId"},
+    "operationId": {"$ref": "#/$defs/opaqueId"},
+    "component": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{0,63}$"},
+    "name": {"type": "string", "pattern": "^agent\\.[a-z][a-z0-9_.]{0,119}$"},
+    "startTime": {"$ref": "#/$defs/timestamp"},
+    "endTime": {"$ref": "#/$defs/timestamp"},
+    "time": {"$ref": "#/$defs/timestamp"},
+    "duration": {"type": "number", "minimum": 0},
+    "resultCode": {"type": "string", "pattern": "^[a-z][a-z0-9_.]{0,79}$"},
+    "resultType": {"enum": ["Success", "Failure", "ExpectedFailure"]},
+    "category": {"enum": ["user_action", "lifecycle", "diagnostic"]},
+    "traceContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traceId", "spanId", "traceFlags"],
+      "properties": {
+        "traceId": {"type": "string", "pattern": "^(?!0{32}$)[0-9a-f]{32}$"},
+        "spanId": {"type": "string", "pattern": "^(?!0{16}$)[0-9a-f]{16}$"},
+        "traceFlags": {"type": "integer", "minimum": 0, "maximum": 255},
+        "parentSpanId": {"type": "string", "pattern": "^(?!0{16}$)[0-9a-f]{16}$"}
+      }
+    },
+    "params": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_.]{0,79}$"},
+      "additionalProperties": {
+        "oneOf": [
+          {"type": "string", "maxLength": 128},
+          {"type": "number"},
+          {"type": "boolean"}
+        ]
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {"kind": {"const": "qos"}},
+      "required": ["operationId", "startTime", "endTime", "duration", "resultCode", "resultType"],
+      "not": {"anyOf": [{"required": ["time"]}, {"required": ["category"]}]}
+    },
+    {
+      "properties": {"kind": {"const": "qos_start"}},
+      "required": ["operationId", "time"],
+      "not": {"anyOf": [
+        {"required": ["startTime"]}, {"required": ["endTime"]},
+        {"required": ["duration"]}, {"required": ["resultCode"]},
+        {"required": ["resultType"]}, {"required": ["category"]}
+      ]}
+    },
+    {
+      "properties": {"kind": {"const": "engagement"}},
+      "required": ["time", "category"],
+      "not": {"anyOf": [
+        {"required": ["startTime"]}, {"required": ["endTime"]},
+        {"required": ["duration"]}, {"required": ["resultCode"]},
+        {"required": ["resultType"]}
+      ]}
+    }
+  ],
+  "$defs": {
+    "opaqueId": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,64}$"},
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+    }
+  }
+}
