@@ -15,7 +15,6 @@ from test_client_admission import database_bytes, identity, independently_sign, 
 from test_client_construction import (
     admit, built_client as built_client, signed_wheel as signed_wheel, target,
 )
-from test_client_distribution import FLAGS, wheel as wheel  # noqa: F401
 
 
 def register(root, fixture, staged, trusted, directory, **kwargs):

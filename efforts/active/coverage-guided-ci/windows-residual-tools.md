@@ -104,8 +104,12 @@ scope, retain the real build and assert unchanged wheel bytes at teardown.
 Each xdist worker owns its own artifact; installations and durable client
 state remain independent per test. Update both current artifact-staging
 consumers and the subsequently added role-plan distribution consumer to use
-the shared fixture. No build helper, dependency declaration, installed-client
-assertion or allocation fixture changes.
+the shared fixture. All other fixture imports now use conftest discovery too,
+preserving their non-fixture helper imports. The destructive installed assembly
+proof builds its own private artifact and deletes only that private source;
+it additionally verifies the session artifact and library survived. Existing
+source-removal assertions remain intact. No generic build helper, dependency
+declaration, installed-client assertion or allocation fixture changes.
 
 Complete consumer validation encountered a separate required-input omission:
 #8196 added `credential_references.py` and its Gateway worker consumer without
@@ -121,9 +125,13 @@ installed metadata and setuptools. The dedicated Fleet environment was then
 prepared through the existing leased standalone preparation and seasoned
 dependency helper. The existing native OpenSSL was exposed only in the owned
 test child's PATH; no host tool, PATH or runtime was changed. The complete
-three consumer modules plus five existing portable Gateway source cases passed
-88 tests with six unchanged platform/privilege skips, native Windows, exactly
-two workers, 61.89 seconds including preparation and cleanup. The initial
+four consumer modules plus five existing portable Gateway source cases passed
+89 tests with six unchanged platform/privilege skips, native Windows, exactly
+two workers. Complete Fleet collection also passed without errors; collection
+and execution together took 90.00 seconds including preparation and cleanup.
+Review exposed remaining old fixture imports and the assembly consumer's
+destructive use of the old module fixture; both classes were corrected before
+this final validation. The initial
 properly prepared run reproduced the pinned wheel omission before correction.
 All item/native deadlines, test selections and resource caps remain unchanged.
 The real wheel/sdist builds, isolated installs, RECORD/dependency assertions,

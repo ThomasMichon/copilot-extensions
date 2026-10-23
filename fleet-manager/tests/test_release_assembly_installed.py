@@ -15,7 +15,6 @@ import test_client_distribution as distribution
 pytestmark = pytest.mark.client_distribution_full
 PROJECT = distribution.PROJECT
 run = distribution.run
-shared_wheel = distribution.wheel
 
 PRODUCE = """
 import hashlib, importlib.util, json, socket, sys
@@ -45,9 +44,15 @@ CONSUME = (
 
 
 def test_release_assembly_installed_first_touch_consumes_real_wheel_and_preserves_state(
-    tmp_path, shared_wheel,
+    tmp_path, wheel,
 ):
-    artifact, library = shared_wheel
+    shared_artifact, shared_library = wheel
+    original = shared_artifact.read_bytes()
+    project, library = distribution.project_at(tmp_path / "private-build")
+    output = tmp_path / "private-build" / "artifacts"
+    built = distribution.build(project, output)
+    assert built.returncode == 0, built.stderr
+    artifact = next(output.glob("*.whl"))
     uv = shutil.which("uv")
     assert uv, "installed assembly qualification requires the runner's uv"
     target = tmp_path / "fresh-runtime"
@@ -73,6 +78,8 @@ def test_release_assembly_installed_first_touch_consumes_real_wheel_and_preserve
     shutil.rmtree(source)
     shutil.rmtree(library)
     assert not source.exists() and not library.exists()
+    assert shared_library.is_dir()
+    assert shared_artifact.read_bytes() == original
 
     case = tmp_path / "assembly"
     case.mkdir()

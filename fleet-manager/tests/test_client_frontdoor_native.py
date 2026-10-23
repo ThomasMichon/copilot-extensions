@@ -17,7 +17,7 @@ from test_client_admission import database_bytes, identity, selection
 from test_client_construction import (
     built_client as built_client, signed_wheel as signed_wheel, target,  # noqa: F401
 )
-from test_client_distribution import FLAGS, wheel as wheel  # noqa: F401
+from test_client_distribution import FLAGS
 from test_client_frontdoor import command_directory, register
 
 
