@@ -41,8 +41,9 @@ def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(tmp_
     codec = PLUGIN.parents[1] / "libs/worktree-identity"
     for package, name in libraries.items():
         destination = sources / name
-        if name == "worktree-identity":
-            shutil.copytree(codec, destination, ignore=shutil.ignore_patterns(
+        if name in {"worktree-identity", "process-telemetry"}:
+            shutil.copytree(PLUGIN.parents[1] / "libs" / name, destination,
+                           ignore=shutil.ignore_patterns(
                 "build", "dist", "__pycache__", "*.egg-info", ".pytest_cache", ".ruff_cache",
             ))
         else:
@@ -94,10 +95,13 @@ Materialize-SnapshotVendoredLibs -SnapshotDir '{target}'
         [
             sys.executable, "-I", "-S", "-c",
             "import sys; sys.path.insert(0,sys.argv[1]); "
+            "sys.path.insert(0,sys.argv[2]); "
+            "from process_telemetry import SinkSlot; assert not SinkSlot().enabled(); "
             "from worktree_identity import WorktreeMachineIdentity,parse_machine_identity; "
             "identity=WorktreeMachineIdentity('host','wsl','guest'); "
             "assert parse_machine_identity(identity.to_record_fields()) == identity",
             str(snapshot / "libs/worktree-identity/src"),
+            str(snapshot / "libs/process-telemetry/src"),
         ],
         capture_output=True, text=True, timeout=20,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),

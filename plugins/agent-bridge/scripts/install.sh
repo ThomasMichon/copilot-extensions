@@ -1850,6 +1850,7 @@ _install_slot_build() {
             --reinstall-package agent-remote-login-shell --refresh-package agent-remote-login-shell \
             --reinstall-package agent-machine-transport --refresh-package agent-machine-transport \
             --reinstall-package agent-worktree-identity --refresh-package agent-worktree-identity \
+            --reinstall-package agent-process-telemetry --refresh-package agent-process-telemetry \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
@@ -2500,6 +2501,7 @@ _update_core() {
             --reinstall-package agent-remote-login-shell --refresh-package agent-remote-login-shell \
             --reinstall-package agent-machine-transport --refresh-package agent-machine-transport \
             --reinstall-package agent-worktree-identity --refresh-package agent-worktree-identity \
+            --reinstall-package agent-process-telemetry --refresh-package agent-process-telemetry \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"
         return 1

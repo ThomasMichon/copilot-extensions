@@ -37,6 +37,8 @@ import os
 import json
 import shutil
 import subprocess
+import sys
+import tomllib
 from functools import partial
 from pathlib import Path
 
@@ -117,6 +119,68 @@ def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
         check=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
+
+
+def test_stamp_materializes_every_declared_library_and_standalone_telemetry(tmp_path):
+    references = tomllib.loads((_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+        "tool"]["uv"]["sources"]
+    sources = tmp_path / "authoring"
+    sources.mkdir()
+    for package, declaration in references.items():
+        name = Path(declaration["path"]).name
+        destination = sources / name
+        if name == "process-telemetry":
+            shutil.copytree(_PLUGIN_ROOT.parents[1] / "libs" / name, destination,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
+        else:
+            destination.mkdir()
+            (destination / "pyproject.toml").write_text(
+                f'[project]\nname = "{package}"\nversion = "1.0.0"\n', encoding="utf-8",
+            )
+    snapshot = tmp_path / "standalone"
+    (snapshot / "scripts").mkdir(parents=True)
+    shutil.copy2(_PLUGIN_ROOT / "pyproject.toml", snapshot / "pyproject.toml")
+    for name in ("install.ps1", "install.sh"):
+        (snapshot / "scripts" / name).write_text("# synthetic\n", encoding="utf-8")
+    (sources / "scripts").mkdir()
+    for name in ("installer-engine.ps1", "installer-engine.sh"):
+        (sources / "scripts" / name).write_text("# synthetic\n", encoding="utf-8")
+    root = str(sources).replace("'", "''")
+    target = str(snapshot).replace("'", "''")
+    installer = _INSTALL_PS1.read_text(encoding="utf-8")
+    start = installer.index("function Materialize-DispatchSnapshot {")
+    end = installer.index("\nfunction Get-DispatchSnapshotHash {", start)
+    script = (
+        "$ErrorActionPreference='Stop'\n"
+        f"$LibraryRoot='{root}'\n"
+        "function Resolve-VendoredLib { param($LibName,$LibRoot) "
+        "return Join-Path $LibraryRoot $LibName }\n"
+        + installer[start:end]
+        + f"\nMaterialize-DispatchSnapshot -SnapshotDir '{target}' -PluginDir '{root}'"
+    )
+    result = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    rewritten = tomllib.loads((snapshot / "pyproject.toml").read_text(encoding="utf-8"))
+    assert rewritten["tool"]["uv"]["sources"] == {
+        package: {"path": f"libs/{Path(declaration['path']).name}"}
+        for package, declaration in references.items()
+    }
+    for declaration in rewritten["tool"]["uv"]["sources"].values():
+        assert (snapshot / declaration["path"] / "pyproject.toml").is_file()
+    shutil.move(str(sources), str(tmp_path / "authoring-unavailable"))
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c",
+         "import sys;sys.path.insert(0,sys.argv[1]);"
+         "from process_telemetry import SinkSlot;assert not SinkSlot().enabled()",
+         str(snapshot / "libs/process-telemetry/src")],
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def _marketplace_plugin_dir(tmp_path: Path) -> Path:

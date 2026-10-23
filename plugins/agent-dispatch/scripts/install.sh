@@ -1189,6 +1189,7 @@ _ensure_runtime() {
         agent-plugin-resolve
         agent-single-instance-lease
         agent-worktree-identity
+        agent-process-telemetry
     )
     _scrub_payload_build_artifacts() {
         # Installing FROM the pristine payload directory ("$PLUGIN_DIR",

@@ -1199,6 +1199,7 @@ function Materialize-DispatchSnapshot {
         'agent-plugin-resolve' = 'plugin-resolve'
         'agent-single-instance-lease' = 'single-instance-lease'
         'agent-worktree-identity' = 'worktree-identity'
+        'agent-process-telemetry' = 'process-telemetry'
         'agent-plugin-activation' = 'plugin-activation'
     }
     $libsDir = Join-Path $SnapshotDir 'libs'
@@ -1892,6 +1893,7 @@ function Install-Runtime {
         @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease'; Display = 'single-instance-lease' },
         @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
         @{ Dir = 'worktree-identity'; Pkg = 'agent-worktree-identity'; Display = 'worktree-identity' },
+        @{ Dir = 'process-telemetry'; Pkg = 'agent-process-telemetry'; Display = 'process-telemetry' },
         @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
     )) {
         $libDir = Resolve-VendoredLib -LibName $lib.Dir -LibRoot $BuildSrcDir
@@ -1944,7 +1946,8 @@ function Install-Runtime {
         'agent-plugin-activation',
         'agent-plugin-resolve',
         'agent-single-instance-lease',
-        'agent-worktree-identity'
+        'agent-worktree-identity',
+        'agent-process-telemetry'
     )
     $installPkg = {
         param([string]$Spec)

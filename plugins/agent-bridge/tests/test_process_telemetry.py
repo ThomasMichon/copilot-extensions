@@ -150,6 +150,46 @@ def test_replacing_owned_buffer_closes_it_without_waiting():
         assert writer.join(5)
 
 
+def test_concurrent_registration_preserves_single_owned_writer(monkeypatch):
+    slot = SinkSlot()
+    constructing, release = threading.Event(), threading.Event()
+    original = BufferedSink.start
+    writers, failures = [], []
+
+    def paused_start(writer):
+        constructing.set()
+        assert release.wait(3)
+        return original(writer)
+
+    def register():
+        try:
+            writers.append(slot.set_buffered(lambda _: None))
+        except RuntimeError as exc:
+            failures.append(str(exc))
+
+    monkeypatch.setattr(BufferedSink, "start", paused_start)
+    first = threading.Thread(target=register)
+    second = threading.Thread(target=register)
+    first.start()
+    try:
+        assert constructing.wait(2)
+        second.start()
+    finally:
+        release.set()
+        first.join(3)
+        if second.ident is not None:
+            second.join(3)
+        slot.set(None)
+        for writer in writers:
+            assert writer.join(3)
+    assert not first.is_alive() and not second.is_alive()
+    assert len(writers) == 1
+    assert failures == ["previous telemetry writer has not stopped"]
+    assert slot.sink is None
+    writers[0]({"kind": "after-clear"})
+    assert writers[0].stats()["inactive"] == 1
+
+
 def test_real_buffered_spool_persists_content_free_event(tmp_path):
     path = tmp_path / "diagnostic.jsonl"
     written = threading.Event()
