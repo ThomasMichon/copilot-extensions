@@ -714,3 +714,35 @@ def test_owner_config_fetch_retains_dial_diagnostics(monkeypatch, tmp_path, outc
     assert records[0]["kind"] == "config_fetch"
     assert records[0]["outcome"] == outcome
     assert records[0]["attempt"] == 1 and records[0]["account"] == "pinned"
+
+
+@pytest.mark.parametrize("state", ["Shutdown", "Available"])
+@pytest.mark.parametrize("change", ["scope", "expiry", "unchanged"])
+async def test_negative_verdict_revalidated_after_registry_await(store, monkeypatch, state, change):
+    first = owner.hold("cs", "t", mux_session="m", confirmed=True)
+    selected, now, reads = [SCOPE], [1], []
+    real = sf.get_hold
+
+    def read(name, ttl):
+        reads.append(name)
+        if len(reads) == 2:
+            if change == "scope":
+                selected[0] = replace(SCOPE, configuration="changed")
+            elif change == "expiry":
+                now[0] = 31
+        return real(name, ttl)
+
+    class NegativeProbe(mux.RemoteMuxProbe):
+        async def probe_wave(self, codespace, targets, *a, **k):
+            return dict.fromkeys(targets, False)
+
+    probe = NegativeProbe(
+        inventory_reader=lambda wave: inventory(wave, rows=(inv.InventoryRow("cs", state, "a"),)),
+        scope_reader=lambda: selected[0], clock=lambda: now[0],
+    )
+    monkeypatch.setattr(sf, "get_hold", read)
+    await sf.SessionForwards(lambda *a: None, probe).probe([first])
+    if change == "unchanged":
+        assert owner.get_hold("cs") is None
+    else:
+        assert owner.get_hold("cs").tenants == first.tenants

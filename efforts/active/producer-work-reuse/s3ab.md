@@ -109,6 +109,11 @@ defers to the next due wave, with no hidden per-venue refresh.
   off-loop test. Extended final selection: **217 tests passed**, including the
   existing `test_owner_never_blocks.py` suite. No shared telemetry adapter or
   transport borrowing was introduced.
+- The next review's unthreaded negative-verdict finding is fixed: every
+  actionable tenant verdict rechecks inventory qualification after registry
+  awaits; negative results allow fresh stopped evidence without requiring
+  Available. Scope-change, expiry and fresh negative controls cover both stopped
+  rows and completed mux negatives. Final scoped run: **223 tests passed**.
 
 ## Reproduction and remaining cells
 

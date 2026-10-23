@@ -124,14 +124,16 @@ class RemoteMuxProbe:
     async def begin_wave(self, generation: int) -> OwnerInventory:
         return await joined_thread(self.inventory_reader, generation)
 
-    async def admitted(self, codespace, inventory, generation, current) -> bool:
+    async def admitted(self, codespace, inventory, generation, current, *, require_available=True) -> bool:
         try:
             scope = await joined_thread(self.scope_reader)
             row = inventory.lookup(
                 codespace, wave=generation, scope=scope,
                 now=self.clock(), max_age=self.max_age,
             )
-            return current() and row is not None and row.state.lower() == "available"
+            return current() and row is not None and (
+                not require_available or row.state.lower() == "available"
+            )
         except Exception:
             return False
 

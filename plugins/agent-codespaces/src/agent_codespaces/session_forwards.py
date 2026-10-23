@@ -471,6 +471,10 @@ class SessionForwards:
             for mux, tenants in by_mux.items():
                 verdict = verdicts.get(mux)
                 for tenant, confirmed, tenant_generation in tenants:
+                    if verdict is not None and inventory is not None and not await self._probe.admitted(
+                        hold.codespace, inventory, generation, current, require_available=verdict is True,
+                    ):
+                        return
                     if verdict is True:
                         await joined_thread(
                             lambda: heartbeat(hold.codespace, tenant, self._ttl, generation=tenant_generation),
