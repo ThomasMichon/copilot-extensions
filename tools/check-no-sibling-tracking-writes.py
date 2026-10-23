@@ -238,6 +238,22 @@ def _sibling_plugin_py_files(plugins_dir: Path) -> list[Path]:
     return files
 
 
+def _has_tracking_root(
+    nodes: tuple[ast.AST, ...], tracking_module_names: frozenset[str],
+) -> bool:
+    targets = tracking_module_names | {"agent_worktrees"}
+    return any(
+        (isinstance(node, ast.Import) and any(alias.name in targets for alias in node.names))
+        or (isinstance(node, ast.ImportFrom) and node.module in targets)
+        or (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and node.value in targets
+        )
+        for node in nodes
+    )
+
+
 def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     try:
         src = path.read_text(encoding="utf-8")
@@ -271,6 +287,10 @@ def _check_file(path: Path, *, repo_root: Path = REPO) -> list[Violation]:
     # Reuse the same breadth-first order without rewalking unchanged AST edges.
     nodes = tuple(ast.walk(tree))
     tracking_module_names = frozenset(f"agent_worktrees.{m}" for m in TRACKING_MODULES)
+    # Every recognized alias starts at a static import or a decoded literal
+    # target, including dynamic imports and the imported lazy helper.
+    if not _has_tracking_root(nodes, tracking_module_names):
+        return []
     violations: list[Violation] = []
     # Local names bound to a whole tracking module (from either
     # `from agent_worktrees import tracking` or `import agent_worktrees.tracking

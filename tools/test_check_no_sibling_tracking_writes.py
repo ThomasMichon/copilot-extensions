@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent / "check-no-sibling-tracking-writes.py"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -1143,6 +1145,95 @@ def test_invalid_utf8_file_fails_closed(tmp_path):
     assert len(violations) == 1
     assert violations[0].line == 0
     assert "is not valid UTF-8" in violations[0].detail
+
+
+@pytest.mark.parametrize("source, expected_count", [
+    ("import \uff41gent_worktrees as aw\naw.tracking.save_record(record, path)\n", 1),
+    ("from \uff41gent_worktrees.tracking import save_record\n", 1),
+    ("from agent_worktrees.tracking import _tracking as lazy\n"
+     "getattr(lazy(), 'save_record')(record, path)\n", 1),
+    ("__import__('agent_\\x77orktrees.tracking', fromlist=['x'])"
+     ".save_record(record, path)\n", 1),
+    ("__import__('agent_' 'worktrees').tracking.save_record(record, path)\n", 1),
+    ("from importlib import import_module as load\n"
+     "module = load(target)\ntarget: str = 'agent_\\u0077orktrees.tracking'\n"
+     "module.__dict__['save_record'](record, path)\n", 1),
+    ("from agent_worktrees.tracking import _STAMP_QUEUE as queue\n"
+     "getattr(queue, 'submit')(record)\n", 1),
+    ("from agent_worktrees import tracking\n"
+     "tracking.__dict__['_STAMP_QUEUE']\n", 1),
+    ("from agent_worktrees import *\n", 1),
+    ("from agent_worktrees.tracking import *\n", 1),
+    ("import unrelated as tracking\ntracking.save_record(record, path)\n", 0),
+    ("from agent_worktrees_lookalike import tracking\n"
+     "tracking.save_record(record, path)\n", 0),
+    ("__import__('agent_' + 'worktrees').tracking.save_record(record, path)\n", 0),
+    ("def write(target):\n    __import__(target).tracking.save_record(record, path)\n", 0),
+    ("def _tracking():\n    return object()\n_tracking().save_record(record, path)\n", 0),
+])
+def test_root_admission_matches_unfiltered_analysis(tmp_path, monkeypatch, source, expected_count):
+    path = _write_plugin_file(tmp_path, "example", "roots.py", source)
+    actual = [(v.line, v.detail) for v in guard._check_file(path, repo_root=tmp_path)]
+    monkeypatch.setattr(guard, "_has_tracking_root", lambda *_: True)
+    expected = [(v.line, v.detail) for v in guard._check_file(path, repo_root=tmp_path)]
+    assert actual == expected
+    assert len(actual) == expected_count
+
+
+def test_rootless_tree_still_reads_and_parses_each_changed_input(tmp_path, monkeypatch):
+    path = _write_plugin_file(tmp_path, "example", "changing.py", "value = 1\n")
+    read_text, parse = Path.read_text, guard.ast.parse
+    reads, parses, admissions = [], [], []
+    has_root = guard._has_tracking_root
+
+    def reading(target, *args, **kwargs):
+        reads.append(target)
+        return read_text(target, *args, **kwargs)
+
+    def parsing(source, *args, **kwargs):
+        parses.append(source)
+        return parse(source, *args, **kwargs)
+
+    def admitting(nodes, targets):
+        result = has_root(nodes, targets)
+        admissions.append(result)
+        return result
+
+    monkeypatch.setattr(Path, "read_text", reading)
+    monkeypatch.setattr(guard.ast, "parse", parsing)
+    monkeypatch.setattr(guard, "_has_tracking_root", admitting)
+    assert guard._check_file(path, repo_root=tmp_path) == []
+    path.write_text("from agent_worktrees import tracking\ntracking.save_record(record, path)\n",
+                    encoding="utf-8")
+    assert len(guard._check_file(path, repo_root=tmp_path)) == 1
+    path.write_text("def broken(:\n", encoding="utf-8")
+    violations = guard._check_file(path, repo_root=tmp_path)
+    assert len(violations) == 1
+    assert "syntax error" in violations[0].detail
+    assert reads == [path, path, path]
+    assert len(parses) == 3
+    assert admissions == [False, True]
+
+
+def test_rootless_tree_does_not_enter_alias_analysis(tmp_path, monkeypatch):
+    path = _write_plugin_file(
+        tmp_path, "example", "unrelated.py",
+        "module = unrelated\nmodule.save_record(record, path)\n",
+    )
+    real_isinstance = isinstance
+    assignment_checks = []
+
+    def checking(value, types):
+        if types in (guard.ast.Assign, guard.ast.AnnAssign):
+            assignment_checks.append(value)
+        return real_isinstance(value, types)
+
+    monkeypatch.setattr(guard, "isinstance", checking, raising=False)
+    assert guard._check_file(path, repo_root=tmp_path) == []
+    assert assignment_checks == []
+    monkeypatch.setattr(guard, "_has_tracking_root", lambda *_: True)
+    assert guard._check_file(path, repo_root=tmp_path) == []
+    assert assignment_checks
 
 
 def test_real_repo_checkout_is_clean():
