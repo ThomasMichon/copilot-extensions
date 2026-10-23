@@ -10,14 +10,14 @@ import sys
 
 import pytest
 
-from test_client_distribution import run, wheel as shared_wheel  # noqa: F401 - pytest fixture
+from test_client_distribution import run
 from test_role_deployment import write_inputs
 
 
 def test_role_plan_distribution_runs_built_wheel_without_source_or_host_dependencies(
     tmp_path: Path, request: pytest.FixtureRequest,
 ) -> None:
-    artifact, _ = request.getfixturevalue("shared_wheel")
+    artifact, _ = request.getfixturevalue("wheel")
     uv = shutil.which("uv")
     assert uv, "native role planning proof requires the runner's package manager"
     installed = tmp_path / "installed"

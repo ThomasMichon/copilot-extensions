@@ -87,16 +87,6 @@ def build(project, output, operation="build_wheel"):
     )
 
 
-@pytest.fixture(scope="module")
-def wheel(tmp_path_factory):
-    root = tmp_path_factory.mktemp("client-wheel")
-    project, library = project_at(root)
-    output = root / "artifacts"
-    result = build(project, output)
-    assert result.returncode == 0, result.stderr
-    return next(output.glob("*.whl")), library
-
-
 def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies(wheel):
     artifact, library = wheel
     with zipfile.ZipFile(artifact) as archive:
