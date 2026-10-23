@@ -116,7 +116,7 @@ def check_health() -> None:
     if core.SCHEMA != 2 or foundation_state.VERSION != 1 or MAX_FRAME != 16384:
         raise FoundationInputError("unsupported foundation execution protocol")
     for package, names in (
-        (agent_procutil, ("native_daemon.ps1", "native_owned.ps1")),
+        (agent_procutil, ("native_daemon.ps1", "native_owned.ps1", "native_owned.sh", "native_daemon.sh")),
         (single_instance_lease, ("operation.ps1", "operation.sh")),
         (update_driver, ("participant.ps1", "foundation.ps1", "directory.ps1",
                          "foundation.sh", "foundation-source.sh", "json-query.awk")),
