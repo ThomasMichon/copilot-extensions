@@ -20,6 +20,11 @@ TRUSTED_JOB_CONDITION = (
 )
 UNIT_CONDITION = "steps.impact.outputs.run == 'true'"
 UNIT_JOB_CONDITION = "github.event_name != 'push'"
+UNIT_COMMAND = (
+    'python tools/ci_pr_unit_reuse.py --source-sha "$GITHUB_SHA" '
+    '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
+)
+UNIT_UPLOAD_CONDITION = "steps.units.outputs.mode == 'executed'"
 SOURCE_AST_CONDITION = "steps.source-ast-impact.outputs.run == 'true'"
 SOURCE_AST_COMMANDS = ("python tools/run-source-ast-guards.py",)
 SOURCE_AST_SCRIPT = """python - <<'PY'
@@ -41,6 +46,7 @@ PY"""
 UNIT_GATE_SCRIPT = """python - <<'PY'
 import json
 import os
+import re
 rows = json.loads(os.environ["RESULTS"])
 if set(rows) != {"checks", "unit-tests"} or any(row["result"] != "success" for row in rows.values()):
     raise RuntimeError("source guard or unit-impact execution failed")
@@ -48,9 +54,29 @@ outputs = rows["unit-tests"]["outputs"]
 selected = outputs.get("run")
 if selected not in ("true", "false"):
     raise RuntimeError("unit selection is missing or invalid")
-expected = "success" if selected == "true" else "skipped"
-if outputs.get("result") != expected:
-    raise RuntimeError("selected units did not pass, or unselected work was executed")
+mode = outputs.get("mode", "")
+origin = outputs.get("origin_run", "")
+attempt = outputs.get("origin_attempt", "")
+digest = outputs.get("packet_sha256", "")
+if selected == "false":
+    if outputs.get("result") != "skipped" or any((mode, origin, attempt, digest)):
+        raise RuntimeError("unselected units fabricated execution or reuse evidence")
+else:
+    if (
+        outputs.get("result") != "success" or mode not in ("executed", "reused")
+        or not all(isinstance(value, str) for value in (digest, origin, attempt))
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        or not re.fullmatch(r"[1-9][0-9]*", origin)
+        or not re.fullmatch(r"[1-9][0-9]*", attempt)
+    ):
+        raise RuntimeError("selected units lack verified execution or exact-input reuse")
+    current = int(os.environ["GITHUB_RUN_ID"])
+    if mode == "executed" and (
+        int(origin) != current or int(attempt) > int(os.environ["GITHUB_RUN_ATTEMPT"])
+    ):
+        raise RuntimeError("unit evidence belongs to another run or a future attempt")
+    if mode == "reused" and int(origin) >= current:
+        raise RuntimeError("reused unit evidence is not from a prior execution")
 print("Required unit-only PR gate satisfied.")
 PY"""
 PERMISSION_SCRIPT = """
@@ -470,10 +496,15 @@ def _validate_ci(path: Path) -> list[str]:
                 or units.get("if") != UNIT_JOB_CONDITION
                 or units.get("runs-on") != "ubuntu-latest"
                 or units.get("timeout-minutes") != "5"
+                or units.get("permissions") != {"contents": "read", "actions": "read"}
                 or "continue-on-error" in units
                 or units.get("outputs") != {
                     "run": "${{ steps.impact.outputs.run }}",
                     "result": "${{ steps.units.outcome }}",
+                    "mode": "${{ steps.units.outputs.mode }}",
+                    "origin_run": "${{ steps.units.outputs.origin_run }}",
+                    "origin_attempt": "${{ steps.units.outputs.origin_attempt }}",
+                    "packet_sha256": "${{ steps.units.outputs.packet_sha256 }}",
                 }
             ):
                 errors.append("unit packet must have the reviewed independent hosted five-minute job")
@@ -490,10 +521,9 @@ def _validate_ci(path: Path) -> list[str]:
             runner = [
                 step for step in unit_steps if isinstance(step, dict)
                 and step.get("id") == "units"
-                and step.get("run") == (
-                    'python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" '
-                    '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
-                )
+                and step.get("name") == "Qualify exact-input PR units"
+                and step.get("run") == UNIT_COMMAND
+                and step.get("env") == {"GH_TOKEN": "${{ github.token }}"}
                 and step.get("if") == UNIT_CONDITION
                 and "continue-on-error" not in step
             ]
@@ -502,6 +532,22 @@ def _validate_ci(path: Path) -> list[str]:
                 or unit_steps.index(impact[0]) >= unit_steps.index(runner[0])
             ):
                 errors.append("unit-only CI must execute the exact admitted packet once")
+            uploads = [
+                step for step in unit_steps if isinstance(step, dict)
+                and step.get("name") == "Upload freshly executed PR unit evidence"
+            ]
+            if len(uploads) != 1 or len(runner) != 1 or (
+                uploads[0].get("uses") != "actions/upload-artifact@v4"
+                or uploads[0].get("if") != UNIT_UPLOAD_CONDITION
+                or uploads[0].get("with") != {
+                    "name": "${{ steps.units.outputs.artifact_name }}",
+                    "path": "${{ runner.temp }}/promotion-unit-evidence/*",
+                    "if-no-files-found": "error", "retention-days": "7",
+                }
+                or any(key in uploads[0] for key in ("continue-on-error", "env"))
+                or unit_steps.index(runner[0]) >= unit_steps.index(uploads[0])
+            ):
+                errors.append("only freshly executed units may publish exact-input reuse evidence")
             gate = _mapping(ci_jobs.get("pr-gate")) or {}
             gate_steps = gate.get("steps")
             gate_step = (

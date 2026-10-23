@@ -161,9 +161,16 @@ jobs:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       run: ${{ steps.impact.outputs.run }}
       result: ${{ steps.units.outcome }}
+      mode: ${{ steps.units.outputs.mode }}
+      origin_run: ${{ steps.units.outputs.origin_run }}
+      origin_attempt: ${{ steps.units.outputs.origin_attempt }}
+      packet_sha256: ${{ steps.units.outputs.packet_sha256 }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -203,14 +210,17 @@ jobs:
     - name: Install seasoned unit tooling
       if: steps.impact.outputs.run == 'true'
       run: python tools/seasoned_uv.py --uv uv -- --system pytest "coverage>=7.7" packaging pyyaml
-    - name: Execute only the positively admitted unit packet once
+    - name: Qualify exact-input PR units
       id: units
       if: steps.impact.outputs.run == 'true'
-      run: python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" --output-dir "$RUNNER_TEMP/promotion-unit-evidence"
-    - uses: actions/upload-artifact@v4
-      if: steps.impact.outputs.run == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python tools/ci_pr_unit_reuse.py --source-sha "$GITHUB_SHA" --output-dir "$RUNNER_TEMP/promotion-unit-evidence"
+    - name: Upload freshly executed PR unit evidence
+      uses: actions/upload-artifact@v4
+      if: steps.units.outputs.mode == 'executed'
       with:
-        name: promotion-unit-evidence
+        name: ${{ steps.units.outputs.artifact_name }}
         path: ${{ runner.temp }}/promotion-unit-evidence/*
         if-no-files-found: error
         retention-days: 7
@@ -230,6 +240,7 @@ jobs:
         python - <<'PY'
         import json
         import os
+        import re
         rows = json.loads(os.environ["RESULTS"])
         if set(rows) != {"checks", "unit-tests"} or any(row["result"] != "success" for row in rows.values()):
             raise RuntimeError("source guard or unit-impact execution failed")
@@ -237,8 +248,28 @@ jobs:
         selected = outputs.get("run")
         if selected not in ("true", "false"):
             raise RuntimeError("unit selection is missing or invalid")
-        expected = "success" if selected == "true" else "skipped"
-        if outputs.get("result") != expected:
-            raise RuntimeError("selected units did not pass, or unselected work was executed")
+        mode = outputs.get("mode", "")
+        origin = outputs.get("origin_run", "")
+        attempt = outputs.get("origin_attempt", "")
+        digest = outputs.get("packet_sha256", "")
+        if selected == "false":
+            if outputs.get("result") != "skipped" or any((mode, origin, attempt, digest)):
+                raise RuntimeError("unselected units fabricated execution or reuse evidence")
+        else:
+            if (
+                outputs.get("result") != "success" or mode not in ("executed", "reused")
+                or not all(isinstance(value, str) for value in (digest, origin, attempt))
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or not re.fullmatch(r"[1-9][0-9]*", origin)
+                or not re.fullmatch(r"[1-9][0-9]*", attempt)
+            ):
+                raise RuntimeError("selected units lack verified execution or exact-input reuse")
+            current = int(os.environ["GITHUB_RUN_ID"])
+            if mode == "executed" and (
+                int(origin) != current or int(attempt) > int(os.environ["GITHUB_RUN_ATTEMPT"])
+            ):
+                raise RuntimeError("unit evidence belongs to another run or a future attempt")
+            if mode == "reused" and int(origin) >= current:
+                raise RuntimeError("reused unit evidence is not from a prior execution")
         print("Required unit-only PR gate satisfied.")
         PY

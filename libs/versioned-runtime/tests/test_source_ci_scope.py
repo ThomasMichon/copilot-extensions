@@ -13,12 +13,13 @@ def test_source_runtime_changes_select_bounded_units_not_required_integration() 
     jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
     testing = jobs["unit-tests"]
     assert testing["timeout-minutes"] <= 5
-    assert "unit-plan" not in jobs and "needs" not in testing and "if" not in testing
+    assert "unit-plan" not in jobs and "needs" not in testing
+    assert testing["if"] == "github.event_name != 'push'"
     detector = next(step for step in testing["steps"] if step.get("id") == "impact")
     assert detector["timeout-minutes"] <= 2
     execution = next(
         step for step in testing["steps"]
-        if step.get("name") == "Execute only the positively admitted unit packet once"
+        if step.get("id") == "units"
     )
     assert "from promotion_unit_contract import ci_requires_units" in detector["run"]
     assert "needed = ci_requires_units(" in detector["run"]
@@ -47,8 +48,9 @@ def test_source_runtime_changes_select_bounded_units_not_required_integration() 
     assert execution["if"] == "steps.impact.outputs.run == 'true'"
     assert testing["outputs"]["result"] == "${{ steps.units.outcome }}"
     assert execution["run"] == (
-        'python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" '
+        'python tools/ci_pr_unit_reuse.py --source-sha "$GITHUB_SHA" '
         '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
     )
+    assert testing["outputs"]["mode"] == "${{ steps.units.outputs.mode }}"
     assert "test-runner-linux" not in jobs and "test-runner-windows" not in jobs
     assert "run-plugin-tests.py runtime-source" not in WORKFLOW.read_text(encoding="utf-8")

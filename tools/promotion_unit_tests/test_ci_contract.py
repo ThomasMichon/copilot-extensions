@@ -46,16 +46,31 @@ def declarations():
             "unit-tests": {
                 "if": "github.event_name != 'push'",
                 "runs-on": "ubuntu-latest", "timeout-minutes": 5,
+                "permissions": {"contents": "read", "actions": "read"},
                 "outputs": {
                     "run": "${{ steps.impact.outputs.run }}",
                     "result": "${{ steps.units.outcome }}",
+                    "mode": "${{ steps.units.outputs.mode }}",
+                    "origin_run": "${{ steps.units.outputs.origin_run }}",
+                    "origin_attempt": "${{ steps.units.outputs.origin_attempt }}",
+                    "packet_sha256": "${{ steps.units.outputs.packet_sha256 }}",
                 },
                 "steps": [{
                     "id": "impact", "run": "ci_requires_units(event, base, head, read_diff)",
                 }, {
                     "id": "units", "if": GUARD.UNIT_CONDITION,
-                    "run": 'python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" '
-                           '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"',
+                    "name": "Qualify exact-input PR units",
+                    "env": {"GH_TOKEN": "${{ github.token }}"},
+                    "run": GUARD.UNIT_COMMAND,
+                }, {
+                    "name": "Upload freshly executed PR unit evidence",
+                    "uses": "actions/upload-artifact@v4",
+                    "if": GUARD.UNIT_UPLOAD_CONDITION,
+                    "with": {
+                        "name": "${{ steps.units.outputs.artifact_name }}",
+                        "path": "${{ runner.temp }}/promotion-unit-evidence/*",
+                        "if-no-files-found": "error", "retention-days": 7,
+                    },
                 }],
             },
             "pr-gate": {
@@ -355,10 +370,12 @@ def test_required_aggregate_cannot_omit_guards_or_accept_unverified_success(tmp_
     assert "unit aggregate must require successful guards and the actual selected outcome" in validate(tmp_path, routing, ci)
 
 
-def execute_gate(tmp_path, results):
+def execute_gate(tmp_path, results, *, attempt="1"):
     routing, ci = declarations()
     assert validate(tmp_path, routing, ci) == []
-    fake_os = SimpleNamespace(environ={"RESULTS": json.dumps(results)})
+    fake_os = SimpleNamespace(environ={
+        "RESULTS": json.dumps(results), "GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": attempt,
+    })
 
     def imports(name, *args, **kwargs):
         return fake_os if name == "os" else builtins.__import__(name, *args, **kwargs)
@@ -371,10 +388,64 @@ def execute_gate(tmp_path, results):
 
 @pytest.mark.parametrize("selected,outcome", [("true", "success"), ("false", "skipped")])
 def test_actual_aggregate_accepts_only_selected_success_or_explicit_skip(tmp_path, selected, outcome):
+    outputs = {"run": selected, "result": outcome}
+    if selected == "true":
+        outputs.update(mode="executed", origin_run="100", origin_attempt="1", packet_sha256="a" * 64)
     execute_gate(tmp_path, {
         "checks": {"result": "success"},
-        "unit-tests": {"result": "success", "outputs": {"run": selected, "result": outcome}},
+        "unit-tests": {"result": "success", "outputs": outputs},
     })
+
+
+def test_actual_aggregate_accepts_verified_prior_run_without_claiming_fresh_execution(tmp_path):
+    execute_gate(tmp_path, {
+        "checks": {"result": "success"},
+        "unit-tests": {"result": "success", "outputs": {
+            "run": "true", "result": "success", "mode": "reused",
+            "origin_run": "20", "origin_attempt": "2", "packet_sha256": "a" * 64,
+        }},
+    })
+
+
+def test_actual_aggregate_preserves_successful_unit_jobs_in_failed_job_only_reruns(tmp_path):
+    execute_gate(tmp_path, {
+        "checks": {"result": "success"},
+        "unit-tests": {"result": "success", "outputs": {
+            "run": "true", "result": "success", "mode": "executed",
+            "origin_run": "100", "origin_attempt": "1", "packet_sha256": "a" * 64,
+        }},
+    }, attempt="2")
+
+
+@pytest.mark.parametrize("change", [
+    {"mode": ""}, {"mode": "skipped"}, {"mode": "reused", "origin_run": "100"},
+    {"mode": "reused", "origin_run": "101"}, {"mode": "executed", "origin_run": "20"},
+    {"origin_attempt": "2"}, {"packet_sha256": ""}, {"packet_sha256": True},
+    {"origin_attempt": "01"}, {"origin_run": "-1"}, {"origin_run": True},
+    {"result": "skipped"},
+])
+def test_actual_aggregate_refuses_unverified_or_mislabelled_reuse(tmp_path, change):
+    outputs = {
+        "run": "true", "result": "success", "mode": "executed",
+        "origin_run": "100", "origin_attempt": "1", "packet_sha256": "a" * 64,
+        **change,
+    }
+    with pytest.raises(RuntimeError):
+        execute_gate(tmp_path, {
+            "checks": {"result": "success"},
+            "unit-tests": {"result": "success", "outputs": outputs},
+        })
+
+
+@pytest.mark.parametrize("change", [
+    {"if": "steps.impact.outputs.run == 'true'"},
+    {"continue-on-error": True}, {"uses": "actions/upload-artifact@v3"},
+    {"with": {"name": "invented", "path": "/unverified"}},
+])
+def test_verified_reuse_cannot_be_reuploaded_as_fresh_execution(tmp_path, change):
+    routing, ci = declarations()
+    ci["jobs"]["unit-tests"]["steps"][2].update(change)
+    assert "only freshly executed units may publish exact-input reuse evidence" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("outputs", [

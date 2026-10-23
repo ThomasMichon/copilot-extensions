@@ -5,6 +5,95 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## October 23 repeated PR qualification: exact-input reuse boundary
+
+Query the already captured October 22-23 population, not another rolling
+cohort. Its 322 PR CI runs contain 49 repeated head SHAs and 53 additional
+run records at those heads. **Those are candidates, not 53 proven redundant
+validations:** a shared head alone says nothing about base, synthetic merge,
+recipe, toolchain or metadata epoch. The captured run records have empty PR
+arrays, so do not infer PR identity from that missing association.
+
+Close one concrete pair separately. #8120's CI runs `39913005748` and
+`39913119523`, both attempt one, execute unit jobs `120280077818` and
+`120280483775`. Their actual checkout and impact logs agree on:
+
+| Input | Observed value in both executions |
+|-------|-----------------------------------|
+| PR head | `f5c98b622ea39630b10e52e04e335725e4654713` |
+| Event base | `4e0a1e0e355c8b6c3682d4b7f60e02bae43151eb` |
+| Checked-out synthetic merge | `8b053e70095f3a86e7362f979fd43245cf5c7f78` |
+| Hosted image | `ubuntu-24.04`, `20261012.334.1` |
+| Interpreter / uv | CPython `3.12.15` / `0.12.6` |
+| Installed unit tooling | coverage `7.16.2`, pytest `9.1.1`, packaging `26.3`, PyYAML `6.0.3`, iniconfig `2.3.1`, pluggy `1.7.0`, Pygments `2.21.0` |
+| Actual unit outcome | The same 902 cases pass in 18.043 and 15.435 seconds |
+
+The first run is created at `06:41:07Z`; the second at `06:42:14Z`.
+Their actual required aggregates finish at `06:42:22Z` and `06:43:36Z`.
+Do not use later attached metadata-check refreshes as runner execution.
+The precise triggering edit/action is not established by those logs.
+
+Repeated **source PR unit qualification** is therefore a better next
+equivalence candidate than an unproved checkout speedup. Any reuse must bind
+the exact source/merge/base, workflow recipe, complete manifest/source closure,
+platform/interpreter/dependencies, original provider run/attempt and verified
+three-file packet. Never infer a pass from a matching SHA or artifact name
+alone. Missing, incompatible, expired, pending or failed evidence must retain
+fresh execution, not become a skipped-success result.
+
+This is not permission to omit current metadata/guard checks, retarget
+validation, the required aggregate, or independent unit execution for every
+Main release. The current packet has no explicit complete toolchain binding;
+its unchanged schema cannot by itself prove that reuse tuple. No reuse
+implementation, token-permission change, source-CI omission or Main activation
+had been made at that measurement boundary.
+
+The operator subsequently authorizes strict source-PR reuse and read-only
+Actions-artifact access. The source implementation binds the actual interpreter
+and installed distribution bytes, original provider PR/base/head association,
+exact attempt and fresh upload, immutable archive and canonical coverage
+packet. The credential/event-free child environment is explicit and hashed;
+only fresh execution uploads. Current-checkout contradictions fail rather
+than relabelling proof. Backend or old-proof incompatibility retains fresh
+units. This in-progress source work still needs contained packet, real consumer,
+ordinary CI/review and actual reuse/performance qualification; it is not a
+released controller or whole-flow savings claim.
+
+## October 23 historical-blob checkout candidate: not selected
+
+Plain shallow checkout remains rejected because PR retargets and earlier-head
+diffs need endpoints outside the synthetic merge's immediate parents. A
+separate candidate keeps `fetch-depth: 0` and the complete current checkout,
+but uses `filter: blob:none` to omit historical blobs. The actual checkout
+action fetches current blobs before removing its temporary credential; the
+unit selector needs trees, not historical file bodies. A real-Git fixture
+preserves all commits, tags, current files and the production selector's
+merge-parent/fork-head, earlier-head, retarget and historical-base results.
+Unknown endpoints still fail closed with the consumer transport unavailable.
+This closure applies only to the source unit consumer, not other checkouts.
+
+Measure actual public-origin fetch plus checkout at source
+`41011498bb8cce638a7daae6cca6d11d5a9da929` before editing CI. Each
+cold full/filtered pair uses one immutable advertised-ref snapshot, anonymous
+Git with system/global configuration and credential helpers disabled, and
+identical source, refs, all commits, index and every current file hash. The
+first pair covers 2,398 advertised refs/11,873 commits; the reversed-order pair
+covers 2,399/11,875. Both cover all 8,853 current files and disable the remote
+before the equivalence proof. Disposable stores are removed normally.
+
+| Pair order | Full fetch + checkout | Filtered fetch + checkout | Result |
+|------------|-----------------------|---------------------------|--------|
+| Full, filtered | 25.406 + 12.344 = 37.750 s | 16.625 + 17.515 = 34.140 s | 3.610 s faster |
+| Filtered, full | 25.641 + 11.843 = 37.484 s | 20.485 + 19.015 = 39.500 s | 2.016 s slower |
+
+The final Git object store falls from approximately 124.35 MB to 59.58 MB,
+but fetching current blobs makes checkout slower in both pairs and the total
+effect reverses direction. Object-store bytes are not measured wire bytes.
+This is native public-transport evidence, not controlled Actions latency.
+**Do not select or publish this optimization on those results.** Keep CI
+checkout, full history, event handling, credentials and release gates unchanged;
+do not substitute fixture byte savings for a reliable consumer-cost reduction.
+
 ## October 23 remaining source-CI recipe closure
 
 Actual source CI `39943737570` spends ten seconds in the unit checkout and
@@ -85,6 +174,22 @@ Remove those redundant benchmark traversals, not any contract assertion or
 test, and retain the unchanged bound. Both disposable containers are removed.
 Ordinary source review/required CI and release adoption remain outstanding.
 No workflow event, runner, controller pin, service or release-unit policy changes.
+
+#8227 merges at `2026-10-23T13:33:14Z` as
+`41011498bb8cce638a7daae6cca6d11d5a9da929`. Its actual publication tree
+retains independent intervening additions and passes all 92 focused cases,
+exact equality across 2,867 reads and original AST digests, and the real CLI;
+2,839 impossible analyses omit while 28 remain admitted. Current-head Copilot
+approval, complete feedback/closing-reference reads and the actual-source
+seven-read required-check verifier pass before managed merge.
+
+Actual final-head source CI `39961246652` retains all three scanner success
+messages, completes their group in fifteen seconds, and runs all 1,012
+admitted units in 19.969 seconds with coverage. The guards and required
+aggregate pass. This natural sample is not controlled hosted speedup; no
+workflow invocation or release gate disappears. The publication child
+finalizes normally after canonical merged-PR reconciliation. Qualified release
+adoption and the whole-parent measurement/portfolio gates remain open.
 
 ## October 23 documentation-count recipe reduction
 

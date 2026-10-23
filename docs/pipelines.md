@@ -27,9 +27,32 @@ It never falls back to standalone services, fleet, native or general plugin
 suites. Guards and the unit job remain independent and parallel. Combining
 impact and execution removes the separate planning runner and duplicate
 checkout without placing unit execution behind guards. The aggregate requires
-both jobs to succeed, a valid selection, and the actual test step's `success`
-or explicit `skipped` outcome matching that selection. Job success alone is
-not unit-execution evidence.
+both jobs to succeed, a valid selection, and the actual qualification step's
+`success` or explicit `skipped` outcome matching that selection. Selected
+qualification additionally identifies fresh execution or verified prior
+execution, the producing run/attempt and the canonical packet digest.
+Job success alone is not unit-execution evidence.
+
+For repeated PR inputs, `tools/ci_pr_unit_reuse.py` may reuse a successful
+packet only for the exact repository/PR, source/merge/base, workflow, manifest,
+hosted image, interpreter, installed dependency bytes and sealed child
+environment. The PR unit child receives no credentials or event-dependent
+environment; no intervening dependency installation occurs between binding
+and execution. The unit job alone receives read-only Actions access.
+A bounded lookup verifies the original successful run/attempt/job, actual
+fresh qualification and upload, immutable provider archive and unchanged
+three-file coverage packet. Missing, incompatible, expired, failed or
+unavailable proof executes fresh units; it never manufactures skipped success.
+An intervening failed, cancelled or pending qualification on the same head
+also retains fresh execution rather than searching past it for old success.
+Only fresh execution uploads a reusable artifact, preventing reuse chains.
+Artifact names include their producing run/attempt. A failed-job-only retry
+may retain an already-successful unit job from an earlier attempt of that
+same immutable run; future attempts and another run's unverified outputs
+remain rejected.
+Current guards/metadata, base-retarget handling and the required aggregate
+remain independent. Manual CI and every Main release still execute units;
+this PR-only reuse neither changes nor supplies promotion qualification.
 
 The nonblocking marketplace-isolation inventory runs on pushes and manual CI,
 not again on each PR update. Admitted Dev-push executions retain that diagnostic;
