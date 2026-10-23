@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from _promotion_workflow_test_support import source_workflow
+
 ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "promote-trigger.yml"
 
@@ -258,24 +260,10 @@ def test_only_superseded_pr_ci_is_cancelled(
     assert _ci_condition(condition, event=event, action=action) is expected
 
 
-@pytest.mark.parametrize("job", [
-    "agent-index-service-linux", "agent-index-service-windows",
-])
-@pytest.mark.parametrize("event,cancelled,standalone,expected", [
-    ("pull_request", True, "true", False),
-    ("pull_request", False, "true", True),
-    ("pull_request", False, "false", False),
-    ("push", True, "true", True),
-    ("workflow_dispatch", True, "false", True),
-    ("workflow_dispatch", False, "false", True),
-])
-def test_cancelled_pr_does_not_keep_standalone_ci_alive(
-    job: str, event: str, cancelled: bool, standalone: str, expected: bool,
-) -> None:
-    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
-    assert _ci_condition(
-        ci["jobs"][job]["if"], event=event, cancelled=cancelled, standalone=standalone,
-    ) is expected
+def test_source_ci_does_not_allocate_retired_standalone_integration_jobs() -> None:
+    ci = source_workflow(ROOT, "ci.yml")
+    assert set(ci["jobs"]) == {"checks", "unit-tests", "pr-gate"}
+    assert set(ci["jobs"]["pr-gate"]["needs"]) == {"checks", "unit-tests"}
 
 
 @pytest.mark.parametrize("event,cancelled,failed,base,expected", [
@@ -297,15 +285,21 @@ def test_pr_aggregate_reports_failures_but_never_waits_after_cancellation(
     ) is expected
 
 
-def test_queue_containment_does_not_change_promotion_aggregate() -> None:
-    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
-    condition = ci["jobs"]["promotion-gate"]["if"]
-    assert condition == (
-        "always() && github.event_name == 'workflow_dispatch' && inputs.promotion_run != ''"
+def test_manual_source_ci_keeps_units_without_restoring_candidate_qualification() -> None:
+    ci = source_workflow(ROOT, "ci.yml")
+    assert ci.get("on", ci.get(True))["workflow_dispatch"] == {}
+    assert "promotion-gate" not in ci["jobs"]
+    assert _ci_condition(ci["jobs"]["unit-tests"]["if"], event="workflow_dispatch")
+    execution = [
+        step for step in ci["jobs"]["unit-tests"]["steps"]
+        if step.get("id") == "units"
+    ]
+    assert len(execution) == 1
+    assert execution[0]["if"] == "steps.impact.outputs.run == 'true'"
+    assert execution[0]["run"] == (
+        'python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" '
+        '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
     )
-    assert _ci_condition(condition, event="workflow_dispatch", cancelled=True)
-    assert not _ci_condition(condition, event="workflow_dispatch", promotion_run="")
-    assert not _ci_condition(condition, event="pull_request")
 
 
 def test_main_pr_cutover_keeps_a_read_only_trusted_producer():
@@ -412,11 +406,13 @@ def test_promoter_completion_can_reconcile_a_merge_after_failed_confirmation(
     assert _filter_can_run(workflow_name=name, event=event, conclusion=conclusion) is expected
 
 
-def _filter_can_run(**changes: str) -> bool:
-    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    condition = workflow["jobs"]["filter-and-dispatch"]["if"]
+def _filter_can_run(*, condition: str | None = None, **changes: str) -> bool:
+    if condition is None:
+        workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+        condition = workflow["jobs"]["filter-and-dispatch"]["if"]
     replacements = {
         "github.event.workflow_run.conclusion": "conclusion",
+        "github.event.workflow_run.head_branch": "branch",
         "github.event.workflow_run.name": "workflow_name",
         "github.event.workflow_run.event": "event",
         "github.event.pull_request.head.repo.full_name": "head_repo",
@@ -432,11 +428,34 @@ def _filter_can_run(**changes: str) -> bool:
     executable = "(" + condition.replace("&&", "and").replace("||", "or") + ")"
     context: dict[str, str | bool] = {
         "trigger": "workflow_run", "event": "", "conclusion": "", "action": "",
-        "workflow_name": "CI",
+        "workflow_name": "CI", "branch": "dev",
         "author": "", "owner": "owner", "base": "", "head_repo": "", "repo": "owner/project",
         **changes,
     }
     return _boolean_expression(executable, context)
+
+
+@pytest.mark.parametrize("workflow_name,event,branch,conclusion,expected", [
+    ("CI", "push", "main", "success", False),
+    ("CI", "push", "dev", "success", True),
+    ("CI", "push", "unknown", "success", True),
+    ("CI", "push", "", "success", True),
+    ("CI", "workflow_dispatch", "main", "success", True),
+    ("CI", "workflow_dispatch", "promote-20261023062400-12345678", "success", True),
+    ("CI", "pull_request", "dev", "success", False),
+    ("CI", "push", "dev", "failure", False),
+    ("Validate and promote dev to main", "workflow_dispatch", "main", "success", True),
+    ("Validate and promote dev to main", "workflow_dispatch", "main", "failure", True),
+    ("Validate and promote dev to main", "repository_dispatch", "main", "cancelled", True),
+])
+def test_source_filter_omits_only_main_push_ci_before_allocation(
+    workflow_name, event, branch, conclusion, expected,
+):
+    condition = source_workflow(ROOT, "promote-trigger.yml")["jobs"]["filter-and-dispatch"]["if"]
+    assert _filter_can_run(
+        condition=condition, workflow_name=workflow_name, event=event,
+        branch=branch, conclusion=conclusion,
+    ) is expected
 
 
 @pytest.mark.parametrize("changes,expected", [
@@ -597,8 +616,10 @@ def baseline_fixture(tmp_path):
     })
 
     def run(code, **values):
+        script = tmp_path / "workflow-step.sh"
+        script.write_bytes(code.encode("utf-8"))
         return subprocess.run(
-            [bash, "-e", "-o", "pipefail", "-c", code], cwd=tmp_path,
+            [bash, "-e", "-o", "pipefail", script.as_posix()], cwd=tmp_path,
             env={**env, "LIVE_SHA": base, **values},
             capture_output=True, text=True, timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
