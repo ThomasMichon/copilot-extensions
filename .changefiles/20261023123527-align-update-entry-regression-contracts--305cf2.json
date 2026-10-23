@@ -1,0 +1,9 @@
+{
+  "comment": "Align update entry regression contracts with Manager publication scope",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
