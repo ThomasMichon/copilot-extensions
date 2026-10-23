@@ -1,6 +1,6 @@
 """Actual owner ControlServer + real H2 backend + guarded native Node consumer.
 
-An unmerged provider may be supplied as an explicitly staged immutable source
+A separately owned provider may be supplied as an explicitly staged immutable source
 fixture. Neither provider nor client path is a production lookup mechanism.
 """
 
@@ -25,11 +25,14 @@ def load_provider(name, monkeypatch):
     root = os.environ.get("RECEIPT_PROVIDER_SOURCE")
     if root:
         path = Path(root) / (name + ".py")
-        module_name = f"agent_worktrees.{name}" if name == "handoff_prompt_receipt_control" else f"agent_worktrees._fixture_{name}"
+        canonical = name in {"handoff_prompt_receipt_control", "handoff_diagnostics", "worktree_trust"}
+        module_name = f"agent_worktrees.{name}" if canonical else f"agent_worktrees._fixture_{name}"
         spec = importlib.util.spec_from_file_location(module_name, path)
         module = importlib.util.module_from_spec(spec)
         monkeypatch.setitem(sys.modules, module_name, module)
         spec.loader.exec_module(module)
+        if canonical:
+            monkeypatch.setattr(sys.modules["agent_worktrees"], name, module, raising=False)
         return module
     return __import__(f"agent_worktrees.{name}", fromlist=[name])
 
@@ -73,9 +76,15 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
     state = SimpleNamespace(drop_reply=False, delay_sync=False, hold_sync=hold_sync,
                             release_sync=release_sync, counts=counts, cancel_path=None)
     popen = subprocess.Popen
+    driver = Path(__file__).with_name("receipt_node_driver.mjs")
 
     def guarded_popen(*args, **kwargs):
-        if threading.current_thread() is not threading.main_thread():
+        command = args[0] if args else kwargs.get("args")
+        if (
+            threading.current_thread() is not threading.main_thread()
+            or not isinstance(command, (list, tuple))
+            or list(command[:2]) != [node, str(driver)]
+        ):
             counts["helpers"] += 1
             raise AssertionError("resident path started a helper")
         return popen(*args, **kwargs)  # Only the test harness launches its Node peer.
@@ -154,8 +163,6 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
     (guidance_dir / "session-guidance.instructions.md").write_text(
         "```json\n" + json.dumps(catalog) + "\n```\n", encoding="utf-8",
     )
-    driver = Path(__file__).with_name("receipt_node_driver.mjs")
-
     def observe(*, pending=None, locator="task:native-fixture", concurrent=0,
                 cancel_before=False, cancel_on_fsync=False):
         request_file = tmp_path / "node-request.json"
@@ -445,3 +452,70 @@ def test_unqualified_legacy_receipt_is_not_backfilled(resident):
     first = resident.observe()
     assert first["status"] == "unknown" and first["reason"] == "legacy-incarnation-unavailable"
     assert path.read_bytes() == before and resident.counts["fsync"] == 0
+
+
+@pytest.fixture
+def registration_resident(monkeypatch_config, request):
+    return request.getfixturevalue("resident")
+
+
+def test_actual_registration_producer_composes_with_resident_and_node(registration_resident, monkeypatch):
+    from agent_worktrees import sessions
+
+    resident = registration_resident
+    load_provider("handoff_diagnostics", monkeypatch)
+    load_provider("worktree_trust", monkeypatch)
+    producer = load_provider("session_binding_cli", monkeypatch)
+    config.set_active_project(resident.record.repo)
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: resident.session_dir.parent)
+    # The fixture owns no production lifecycle services or real trusted checkout.
+    # Preserve the actual registration, sidecar, uncached reader and atomic stamp.
+    monkeypatch.setattr(producer, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(producer, "_register_manager_owned_monitor_session", lambda *a, **kw: True)
+    monkeypatch.setattr(producer.worktree_trust, "ensure_record_trusted", lambda _record: None)
+    monkeypatch.setattr(producer.profile_assignment, "bind", lambda *a, **kw: None)
+    monkeypatch.setattr(producer.profile_assignment, "maintain", lambda: None)
+    current = tracking._load_record_uncached(resident.record_path)
+    tracking.set_head_session(current, "different-head", save=False)
+    tracking.save_record(current, resident.record_path)
+    binding = resident.session_dir / "worktree-binding.json"
+    binding.unlink()
+    assert producer.cmd_register_session(SimpleNamespace(
+        worktree_id=current.worktree_id, session_id=resident.subject["sessionId"],
+        pane="%fixture", resident_environment=True,
+    )) == 0
+    projected = json.loads(binding.read_text(encoding="utf-8"))
+    assert projected["project"] == current.repo
+    assert projected["creationNonce"] == current.creation_nonce
+    assert projected["sessionId"] == resident.subject["sessionId"]
+    assert tracking._load_record_uncached(resident.record_path).resolved_head_session == "different-head"
+    assert resident.observe()["status"] == "logged"
+    assert resident.counts["record"] == 1 and resident.counts["helpers"] == 0
+
+
+def test_actual_subject_writer_projects_pending_candidate_and_omits_legacy(resident, monkeypatch):
+    from agent_worktrees import sessions
+
+    producer = load_provider("handoff_diagnostics", monkeypatch)
+    config.set_active_project(resident.record.repo)
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: resident.session_dir.parent)
+    current = tracking._load_record_uncached(resident.record_path)
+    current.sessions = [tracking.SessionEntry("different-head", "2026-01-02")]
+    tracking.set_head_session(current, "different-head", save=False)
+    current.handoffs = [tracking.SessionHandoff(
+        ordinal=1, token="fixture-handoff", predecessor="different-head",
+        state="pending", opened_at="2026-01-02", candidate=resident.subject["sessionId"],
+    )]
+    tracking.save_record(current, resident.record_path)
+    projected = producer.stamp_session_state_worktree_binding(
+        resident.subject["sessionId"], current.worktree_id, worktree_record=current,
+    )
+    assert projected["creationNonce"] == current.creation_nonce
+    assert resident.observe()["status"] == "logged"
+    assert tracking._load_record_uncached(resident.record_path).resolved_head_session == "different-head"
+    legacy = producer.stamp_session_state_worktree_binding(
+        resident.subject["sessionId"], current.worktree_id,
+    )
+    assert "creationNonce" not in legacy and "project" not in legacy
+    assert resident.observe()["status"] == "unavailable"
+    assert resident.counts["record"] == 1

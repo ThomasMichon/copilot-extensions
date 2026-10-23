@@ -50,3 +50,22 @@ append/fsync. Exact resident queries and recording replays synchronize the
 matching existing trace under the same admission and trace locks before
 reporting `received`. A failed or late synchronization remains `unknown`;
 reconciliation does not append another receipt.
+
+## Focused source integration
+
+The opt-in native `tests/native/test_resident_prompt_receipt_integration.py`
+composes the actual registration caller/subject writer, ControlServer, resident
+backend and Node observer using isolated selected-installation, session and
+tracking files. Registration-only lifecycle services and checkout trust are
+fixture-owned seams, not live services. The fixture allows only the harness's
+exact Node invocation; producer, backend and observation helper launches fail.
+It checks a registered non-head subject, an exact pending candidate, and an
+actual legacy rewrite that removes trusted subject fields.
+
+Run it through `tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+--test-file tests/native/test_resident_prompt_receipt_integration.py`, with
+`RECEIPT_CLIENT_ROOT` naming the explicit test client payload. A separately
+owned provider can be supplied through `RECEIPT_PROVIDER_SOURCE` as an
+immutable, byte-verified source fixture; it is never a production fallback.
+These contained source tests do not establish installed/native-host readiness
+or authorize enabling the backend's ready capability.

@@ -349,3 +349,43 @@ new authority or ownership behavior requires a separate proposal.
   still points at `fb6d1592e103de14826e700207c9606b18b07960`. Resolve retained
   test-material disposition through the owning integration lane before retrying
   normal publication; no force, history rewrite or guard override was used.
+
+### Merged subject-producer source composition
+
+- The separately owned subject producer is now merged in #8331 as
+  `827860f080ccf9bda456fb0324de785bcc3de85e`. Its reviewed writer adds only
+  actual-record `project` and `creationNonce`; registration retains its
+  nonblocking record guard, uncached identity/revision/association validation
+  and best-effort atomic stamp. No producer source was edited in this lane.
+- Fetched only that immutable commit and added its `handoff_diagnostics.py`,
+  `session_binding_cli.py` and required `worktree_trust.py` import to the
+  retained test-owned provider copy. The adapter/ControlServer files remain
+  pinned to merged #8224; their relevant bytes also match #8331's tree.
+- Added a real `cmd_register_session` → actual writer → ControlServer →
+  backend → Node composition case, with authoritative head-ledger verification
+  that the registered subject remains non-head. A second case uses the actual
+  writer for an exact pending candidate and a legacy rewrite; the latter
+  removes both trusted fields and the Node observer stays unavailable.
+- Initial registration composition failed on a missing import in the staged
+  older-branch fixture, then on its missing isolated project-authority setup.
+  Retained both failures. Added only the immutable missing import and reused
+  the repository's existing contained project-authority fixture; no live
+  authority guard was weakened. Registration lifecycle services, assignment
+  maintenance and checkout trust remain explicit fixture-owned seams.
+- Tightened process interception: only the harness's exact Node driver
+  invocation is allowed, including on the main thread. The actual producer
+  cases cannot silently start a main-thread helper. Both focused composition
+  cases pass with zero helpers; Node observations measured 136.83 ms,
+  1,024.02 ms and 43.93 ms in that finite run. These are source-composition
+  observations, not full native performance acceptance on the saturated host.
+- Raw results: `.resident-integration-validation/`
+  `run-merged-subject-producer-composition.log`,
+  `run-merged-registration-import-fix.log`,
+  `run-merged-registration-authority-fixture.log` and
+  `run-merged-producer-strict-helper-guard.log`.
+- Real producer source availability is no longer the blocker. The unchanged
+  full native selector now has 29 cases; quiet-host full/windowless validation,
+  complete startup/catalog/SDK-host composition, installed proof and source
+  publication/review/CI/merge remain open. The retained fixture/evidence
+  publication refusal is unchanged. `RESIDENT_RECEIPT_CONTRACT` stays absent;
+  no source or installed readiness/rollout is claimed.
