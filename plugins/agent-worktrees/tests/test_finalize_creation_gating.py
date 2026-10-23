@@ -88,6 +88,22 @@ def test_report_history_snapshot_never_survives_into_a_later_decision(
     assert len(reads) == 3
 
 
+@pytest.mark.parametrize("mutation", ["expire", "delete", "shadow"])
+def test_reset_tip_batch_rechecks_remote_proof_after_a_report(env, mutation):
+    _git("checkout", "-q", "--detach", cwd=env.clone)
+    tip = landing_support._sync_worktree_branch_to_a_newer_main(env)
+    branch = f"worktree/{env.worktree_id}"
+    with finalize_ref.report_history_snapshot():
+        assert finalize_ref.creation_point(branch, str(env.clone)) == tip
+    if mutation == "expire":
+        _git("reflog", "expire", "--expire=now", "refs/remotes/origin/main", cwd=env.clone)
+    elif mutation == "delete":
+        _git("update-ref", "-d", "refs/remotes/origin/main", cwd=env.clone)
+    else:
+        _git("branch", "origin/main", tip, cwd=env.clone)
+    assert finalize_ref.creation_point(branch, str(env.clone)) != tip
+
+
 @pytest.mark.parametrize(
     "returncode,stdout",
     [(1, ""), (0, ""), (0, "unknown"), (0, "-1"), (0, "1\n2"), (0, "\u00b2")],
@@ -123,8 +139,10 @@ def test_a_reset_after_earlier_local_work_still_reads_qualified_tips(monkeypatch
 
     def evidence(*args, **kwargs):
         calls.append(args)
-        if args[0] == "rev-parse":
-            return SimpleNamespace(returncode=1, stdout="")
+        if args[0] == "for-each-ref":
+            return SimpleNamespace(
+                returncode=0, stdout="refs/remotes/origin/dev\nrefs/remotes/origin/main\n",
+            )
         return SimpleNamespace(returncode=0, stdout="published\n")
 
     monkeypatch.setattr(git_ops, "git", evidence)
@@ -136,8 +154,42 @@ def test_a_reset_after_earlier_local_work_still_reads_qualified_tips(monkeypatch
         ],
         "created", "origin/dev", ("refs/remotes/origin/main",), "unused",
     ) == "published"
-    assert any(args[:4] == ("reflog", "show", "--format=%H", "refs/remotes/origin/main")
-               for args in calls)
+    assert calls == [
+        (
+            "for-each-ref", "--format=%(refname)", "refs/heads/origin/dev",
+            "refs/heads/origin/main", "refs/remotes/origin/dev", "refs/remotes/origin/main",
+        ),
+        (
+            "reflog", "show", "--format=%H",
+            "refs/remotes/origin/dev", "refs/remotes/origin/main", "--",
+        ),
+    ]
+
+
+@pytest.mark.parametrize("failure", ["refs", "reflog", "missing", "shadow"])
+def test_reset_tip_batch_never_uses_unavailable_or_shadowed_evidence(monkeypatch, failure):
+    calls = []
+
+    def evidence(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "for-each-ref":
+            names = "refs/remotes/origin/main\n"
+            if failure == "missing":
+                names = ""
+            elif failure == "shadow":
+                names += "refs/heads/origin/main\n"
+            return SimpleNamespace(returncode=int(failure == "refs"), stdout=names)
+        return SimpleNamespace(returncode=1, stdout="published\n")
+
+    monkeypatch.setattr(git_ops, "git", evidence)
+    assert finalize_ref._later_resets_to_source(
+        [
+            "published\treset: moving to origin/main",
+            "created\tbranch: Created from origin/main",
+        ],
+        "created", "origin/main", (), "unused",
+    ) == "created"
+    assert len(calls) == (2 if failure == "reflog" else 1)
 
 
 @pytest.mark.parametrize("stdout", ["", "unknown", "-1", "1\n2", "\u00b2"])

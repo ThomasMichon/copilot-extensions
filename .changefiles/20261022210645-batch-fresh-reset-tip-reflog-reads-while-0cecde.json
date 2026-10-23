@@ -1,0 +1,9 @@
+{
+  "comment": "Batch fresh reset-tip reflog reads while retaining local-shadow and missing-proof guards",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -193,16 +193,20 @@ def _later_resets_to_source(
         return created
     prefix = f"refs/remotes/{source.partition('/')[0]}/"
     sources = {f"refs/remotes/{source}"} | {b for b in published_bases if b.startswith(prefix)}
-    held: set[str] = set()
-    for qualified in sources:
-        short = qualified.removeprefix("refs/remotes/")
-        if _history_read(
-            "rev-parse", "--verify", "-q", f"refs/heads/{short}", cwd=cwd,
-        ).returncode == 0:
-            continue
-        tips = _history_read("reflog", "show", "--format=%H", qualified, "--", cwd=cwd)
-        if tips.returncode == 0:
-            held.update(ln.strip() for ln in tips.stdout.splitlines())
+    shadows = {ref: ref.replace("refs/remotes/", "refs/heads/", 1) for ref in sources}
+    refs = _history_read(
+        "for-each-ref", "--format=%(refname)", *sorted(sources | set(shadows.values())), cwd=cwd,
+    )
+    if refs.returncode != 0:
+        return created
+    names = set(refs.stdout.splitlines())
+    qualified = sorted(ref for ref in sources if ref in names and shadows[ref] not in names)
+    if not qualified:
+        return created
+    tips = _history_read("reflog", "show", "--format=%H", *qualified, "--", cwd=cwd)
+    if tips.returncode != 0:
+        return created
+    held = {ln.strip() for ln in tips.stdout.splitlines()}
     point = created
     for entry in reversed(entries[:-1]):  # oldest first, after the creation
         sha, _, subject = entry.partition("\t")
