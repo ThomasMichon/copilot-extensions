@@ -1079,6 +1079,9 @@ Manager retains the complete original request before sending it, including
 file and directory publication barriers; a failed barrier prevents Submit.
 Identical retries re-establish those barriers before invoking Submit; receipt
 reads remain available when storage is unavailable.
+Recovered submissions refresh the original provider's original scope even
+when command output leaves acceptance uncertain; receipt-only reads do not
+mutate the display cache.
 New parent directories are published write-through on Windows; POSIX writes
 sync the containing directory and ancestors. Windows stages a local pending
 marker before publishing a new directory; a leftover marker requires a

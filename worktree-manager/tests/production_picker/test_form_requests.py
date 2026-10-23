@@ -599,6 +599,81 @@ def test_prepared_submit_refreshes_original_scope_and_retains_path_even_on_resol
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("outcome", ["success", "uncertain", "blocked", "receipt"])
+@pytest.mark.parametrize("account_scoped", [False, True])
+def test_recovered_submit_refreshes_original_scope_without_polling(
+    tmp_path, monkeypatch, outcome, account_scoped,
+):
+    from test_config_actions import _wait
+    from test_picker_tui import _fixture_source, _wait_for_initial_setup
+    from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
+    from worktree_manager.production_picker.picker_tui.configuration_form import CommandResultScreen
+    reg = replace(registered(), scope="account" if account_scoped else "machine")
+    record = original(reg)
+    path = retain_request(tmp_path, record)
+    invalidated, refreshed = [], []
+    monkeypatch.setattr(requests, "current_request_registrations", lambda: [reg])
+
+    def execute(*_args, **_kwargs):
+        if outcome == "blocked":
+            raise OSError("durable retention failed; no command")
+        return outcome != "uncertain", "original receipt or uncertain command output"
+
+    monkeypatch.setattr(requests, "run_retained_request", execute)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            picker = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, picker)
+            runtime = picker._pivot_runtime(reg)
+            monkeypatch.setattr(runtime, "invalidate", lambda: invalidated.append(True))
+            monkeypatch.setattr(runtime, "ensure", lambda scope: refreshed.append(scope))
+            monkeypatch.setattr(picker, "_pivot_scope_key", lambda: "unrelated-current-machine")
+            picker._run_form_recovery(path, record, receipt=outcome == "receipt")
+            await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
+            mutated = outcome in ("success", "uncertain")
+            assert invalidated == ([True] if mutated else [])
+            assert refreshed == (["" if account_scoped else "host"] if mutated else [])
+            assert path.exists() and str(path) in str(app.screen.query_one("#command-result", Static).content)
+    asyncio.run(run())
+
+
+def test_recovered_uncertain_submit_replaces_real_cached_rows_without_polling(tmp_path, monkeypatch):
+    from test_config_actions import _wait
+    from test_picker_tui import _fixture_source, _wait_for_initial_setup
+    from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
+    from worktree_manager.production_picker.picker_tui.configuration_form import CommandResultScreen
+    reg = replace(provider(tmp_path), list_cmd=(
+        sys.executable, "-c",
+        "import json,sys;from pathlib import Path;"
+        "print(json.dumps([dict(id='task-one',title='Answered' if Path(sys.argv[1]).exists() else 'Waiting')]))",
+        str(tmp_path / "accepted.json"),
+    ))
+    record = original(reg)
+    path = retain_request(tmp_path / "drafts", record)
+    monkeypatch.setattr(requests, "current_request_registrations", lambda: [reg])
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            picker = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, picker)
+            runtime = picker._pivot_runtime(reg)
+            runtime.ensure("host")
+            await _wait(pilot, lambda: runtime.get("host")[0] == "ready")
+            assert runtime.get("host")[1][0]["title"] == "Waiting"
+            monkeypatch.setattr(picker, "_pivot_scope_key", lambda: "unrelated-current-machine")
+            picker._run_form_recovery(path, record)
+            await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
+            assert "accepted response lost" in str(app.screen.query_one("#command-result", Static).content)
+            await _wait(pilot, lambda: runtime.get("host")[0] == "ready"
+                        and runtime.get("host")[1][0]["title"] == "Answered")
+            assert runtime.get("unrelated-current-machine")[0] == "idle"
+            assert path.exists()
+    asyncio.run(run())
+
+
 def test_retained_response_menu_scrolls_without_growing_beyond_terminal(tmp_path, monkeypatch):
     from test_config_actions import _wait
     from test_picker_tui import _fixture_source, _wait_for_initial_setup

@@ -224,12 +224,23 @@ class PivotFormRequestActionsMixin:
 
         def work():
             try:
-                return run_retained_request(path, record, receipt=receipt)
+                reg = None if receipt else resolve_request(record, current_request_registrations())[0]
+                ok, output = run_retained_request(path, record, receipt=receipt)
+                return ok, output, reg
             except Exception as exc:
-                return False, f"{type(exc).__name__}: {exc}"
+                return False, f"{type(exc).__name__}: {exc}", None
 
         def done(result):
-            ok, output = result
+            ok, output, reg = result
+            if reg is not None:
+                try:
+                    runtime = self._pivot_runtime(reg)
+                    runtime.invalidate()
+                    scope = "" if reg.account_scoped else str(record["context"].get("machine") or "")
+                    runtime.ensure(scope)
+                    self.refresh()
+                except Exception as exc:
+                    output += f"\nTask display refresh failed: {type(exc).__name__}: {exc}"
             screen.complete(ok, (
                 f"{output}\n\nOriginal request retained at: {path}\n"
                 "Command completion is not proof of acceptance, original-wake delivery or consumption."
