@@ -72,11 +72,18 @@ def test_valid_scoped_update_reaches_only_its_own_construction(
     assert not (case.runtime / "bin").exists()
 
 
-@pytest.mark.parametrize("source_state", ["present", "missing-payload", "legacy-unbound"])
+@pytest.mark.parametrize("source_state", [
+    "present", "missing-payload", "legacy-unbound", "legacy-snapshot",
+])
 def test_automatic_cell_selection_is_preserved_without_an_inherited_context(
     repair_case, monkeypatch, capsys, source_state,
 ):
     case = repair_case
+    snapshot = None
+    if source_state == "legacy-snapshot":
+        from test_update_engine_snapshot import _historical_snapshot
+
+        snapshot = _historical_snapshot(case)
     root, _durable, _context = _activate_scope(case, monkeypatch)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT")
     automatic = case.primitive.resolve_runtime_deployment(
@@ -86,10 +93,14 @@ def test_automatic_cell_selection_is_preserved_without_an_inherited_context(
     assert automatic["actualMode"] == "namespaced" and automatic["runtimeRoot"] == str(root)
     if source_state == "missing-payload":
         case.incumbent.rename(case.incumbent.with_name("retained-payload"))
-    elif source_state == "legacy-unbound":
+    elif source_state in {"legacy-unbound", "legacy-snapshot"}:
         from test_update_engine_repair import _legacy_publication
 
         _legacy_publication(case)
+        if snapshot is not None:
+            manifest = json.loads(case.manifest.read_text())
+            manifest["source"]["path"] = str(snapshot)
+            case.manifest.write_text(json.dumps(manifest), encoding="utf-8")
     before = case.manifest.read_bytes()
     rc = case.update.repair_engine(case.source)
     assert case.effect.is_file(), f"rc={rc}; {capsys.readouterr().err}"

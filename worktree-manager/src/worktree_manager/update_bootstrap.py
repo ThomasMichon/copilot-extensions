@@ -186,6 +186,14 @@ def _refresh_source(source: Path, environment: dict[str, str]) -> _RefreshedSour
             legacy = _legacy_owner_selection(helper, primitive, root)
             previous, hint = legacy.binding, legacy.payload
             fingerprint = previous["sourceFingerprint"] if previous is not None else None
+            if previous is None and not hint.is_relative_to(installed):
+                query = dict(environment)
+                query.pop("COPILOT_PLUGIN_ROOT", None)
+                provenance = primitive.resolve_payload_source(
+                    payload_root=hint, plugin_id="agent-worktrees", environment=query,
+                )
+                fingerprint = provenance["sourceFingerprint"]
+                marketplace = provenance["marketplaceId"]
     payload_hint = hint if hint.is_relative_to(installed) else None
     origin = select_registered_origin(
         primitive, copilot_home=copilot_home, plugin_id="agent-worktrees",
