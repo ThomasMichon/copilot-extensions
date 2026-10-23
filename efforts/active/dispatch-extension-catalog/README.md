@@ -171,6 +171,9 @@ implementation and validation choices remain proposed means.
 - [x] Prove independent graphical shared-draft adoption against both native
   contribution formatter/read/acknowledgement boundaries; retain graphical
   original-request durability and the full rendered cross-client journey.
+- [x] Prove graphical original-request retention before execution, restart and
+  row-independent receipt recovery, with separately confirmed identical retry
+  through the existing owner; retain the full rendered terminal comparison.
 - [ ] Reuse the existing command-emitter task-output contract for mapped
   external records. Extend only demonstrated gaps in stable record identity,
   column/field mapping, deduplication and acceptance receipts.
@@ -216,6 +219,9 @@ All items below are **agent-recommended acceptance checks** for execution.
   recovery with the original request identity. Race draft Save/Reset against
   card replacement and another client's edit; prove no stale restore, overwrite,
   duplicate answer or wrong-owner receipt, including older-owner refusal.
+- [x] Exercise graphical restart/vanished-row recovery, persistence refusal,
+  read-only receipt inspection and separately confirmed exact retry against
+  the real owner and both native category contribution boundaries.
 - [ ] Exercise mapped-record emission with missing/renamed columns, stable
   source identity, paging, repeated polls and lost responses. Prove malformed
   records remain visible and retries do not duplicate accepted work.
@@ -1320,3 +1326,43 @@ authorized installed proof remain distinct obligations.
   Broader source/configuration actions, history, templates, process/evaluator,
   mapped records, normal promotion and authorized installed proof remain open.
   No live task, source activation or installed/fleet rollout occurred.
+
+### 2026-10-23 - Graphical original-request recovery adopted
+
+- The independent graphical consumer now durably retains the complete
+  owner-prepared request before execution, separately from editable shared
+  drafts and task-creation receipts. Global recovery survives restart and
+  absent task rows. Receipt inspection is explicit and read-only; exact retry
+  always requires separate confirmation, including when ordinary confirmation
+  preferences are disabled. Attempts never become acceptance truth.
+- Invalid, legacy, changed or unpersistable recovery data remains visible and
+  non-executable rather than being reconstructed or erased. Cancel, Reset and
+  window closure preserve uncertainty. Original scope, sender (including
+  explicit absence), wake choice and consent remain immutable.
+- Source review identified and corrected confirmation-history leakage in the
+  rendered proof. The final source head received a no-open-issues review;
+  required consumer CI passed before the role-authorized source merge.
+  A complete serial suite passed 1,727 tests, with one separate launch-owner
+  lifecycle test; final typecheck, build, lint and 85 focused tests passed.
+- The final 16-case graphical recovery matrix passed across themes, engines
+  and main/dedicated windows, including narrow layout, fresh renderer without
+  a task row, stale-read fencing, corrupt data and generic arrays. The existing
+  16-case structured-input matrix also passed. Real Electron/preload/main
+  routing and profile persistence passed with synthetic external-runner and
+  dialog responses; this is not a live external-provider test.
+- Isolated real PowerShell/source-CLI/HTTP-owner proof passed retention before
+  response loss, fresh-client row-independent recovery, failed receipt reads,
+  cancellation without submission, exact replay after card replacement,
+  foreign-queue refusal, consumption and original-wake interpretation. Both
+  native category receipt/run formatters matched the same request fingerprint.
+  This proves contribution-boundary interoperability, not a rendered TUI.
+- Re-read the Plan and Validation Plan after source merge. Marked only the
+  bounded graphical recovery contract and its validation complete. Fresh
+  machine provisioning was not exercised because no setup path changed;
+  live external effects, activation and installed/fleet rollout were not
+  authorized or performed. Promotion and installed proof remain separate.
+- Next is the identical-fixture rendered terminal/graphical steering journey
+  under #7141, retaining economical terminal and graphical presentation.
+  Source/configuration actions, history, provenance-safe templates, generic
+  process/evaluator and mapped-record production remain open. #7091, #7141
+  and this effort remain Active; this source milestone is not convergence.
