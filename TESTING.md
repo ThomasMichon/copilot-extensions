@@ -127,6 +127,20 @@ stage deadline is still a failure, not a reason to omit health, skip an
 assertion or extend the timeout. Ordinary ownership/fault cases remain in
 `test_client_frontdoor.py`; the periodic standalone suite discovers both files.
 
+`fleet-manager/tests/test_client_recovery_native.py` separately exercises the
+real construction prerequisite, installed `recover-retained` CLI, actual
+platform commands/exact repeat, and concurrent independent installed owners.
+The CLI uses independently signed synthetic evidence valid at the real wall
+clock; no health, constructor, publication, clock or registration primitive is
+mocked. Existing build/constructor/owner/command/test/caller deadlines remain
+unchanged. On slower native hosts, select `construction_prerequisite` together
+with one of `cli_transition`, `commands_and_exact_rerun` or
+`independent_installed_retained_recovery_owners` per bounded invocation.
+`test_client_recovery.py` contains separate real-trust/physical-proof behavioral
+and fault controls, using explicitly labelled unit health stubs rather than
+claiming native proof. Split large behavioral selections into disjoint bounded
+groups when needed; an earlier timeout remains a failure, not a waived gate.
+
 `libs/versioned-runtime/tests/test_receipt_header_publication.py` exercises
 unpublished empty/partial/synced header attempts, abrupt producer death, a
 concurrent foreign final-name winner, identity-checked append reopening and the

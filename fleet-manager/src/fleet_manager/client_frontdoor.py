@@ -1,6 +1,6 @@
 """Explicit, physically attributed client commands; no PATH or hosting changes."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 import hashlib
 import os
 from pathlib import Path
@@ -124,8 +124,21 @@ def _health(directory, slot, checkpoint, descriptor, evidence, expected):
 
 
 def register_client_frontdoor(root, identity, selection, staged, *, command_directory,
-                             current_policy, current_target, clock=lambda: int(time.time())):
+                             current_policy, current_target, clock=lambda: int(time.time()),
+                             current_recovery=None):
     """Register only the exact active client into an explicit existing private directory."""
+    return _register_client_frontdoor(
+        root, identity, selection, staged, command_directory=command_directory,
+        current_policy=current_policy, current_target=current_target, clock=clock,
+        current_recovery=current_recovery,
+    )
+
+
+def _register_client_frontdoor(root, identity, selection, staged, *, command_directory,
+                              current_policy, current_target, clock,
+                              current_recovery=None, ownership=None, activation_health=None):
+    from . import client_recovery
+
     identity, selection, binding = construction._request(
         identity, selection, staged, current_policy, current_target,
     )
@@ -133,7 +146,8 @@ def register_client_frontdoor(root, identity, selection, staged, *, command_dire
     publishing = False
     try:
         with (
-            client_admission._owned(root) as (path, database_root, unchanged),
+            (client_admission._owned(root) if ownership is None else nullcontext(ownership))
+            as (path, database_root, unchanged),
             client_admission._root(command_directory) as (directory, _anchor, commands_unchanged),
             client_admission._connection(path, database_root=database_root, readonly=False) as connection,
             artifact_staging._primitive() as primitive,
@@ -163,15 +177,33 @@ def register_client_frontdoor(root, identity, selection, staged, *, command_dire
                         version, completion["runtime_sha256"],
                     ):
                         raise PlanError("client frontdoor requires the exact active admitted candidate")
+                    recovery = None
+                    if os.path.lexists(
+                        namespace / activation.HISTORY / active["publication"] / client_recovery.CONTEXT,
+                    ):
+                        recovery = client_recovery._decision(current_recovery, identity)
+                        if str(directory) != recovery["command_directory"]:
+                            raise PlanError("client recovered command directory differs from its decision")
+                    elif current_recovery is not None:
+                        raise PlanError("client active owner has no retained recovery context")
 
                     target_digest = None
 
                     def checkpoint():
                         commands_unchanged()
-                        _, target, admitted = construction._checkpoint(
-                            connection, identity, selection, binding, staged,
-                            current_policy, current_target, clock, unchanged,
-                        )
+                        if recovery is None:
+                            _, target, admitted = construction._checkpoint(
+                                connection, identity, selection, binding, staged,
+                                current_policy, current_target, clock, unchanged,
+                            )
+                        else:
+                            _, target, admitted = client_recovery._checkpoint(
+                                connection, identity, selection, binding, staged,
+                                current_policy, current_target, clock, unchanged,
+                                namespace=namespace, primitive=primitive, publication=publication,
+                                decision=recovery, current_recovery=current_recovery,
+                                completion=completion, require_active=True,
+                            )
                         if activation._active(namespace, identity, publication) != active:
                             raise PlanError("client active selection changed before frontdoor settlement")
                         if target_digest is not None and digest(target) != target_digest:
@@ -188,7 +220,15 @@ def register_client_frontdoor(root, identity, selection, staged, *, command_dire
                         ))
                     elif any(os.path.lexists(command) for command in commands):
                         raise PlanError("client command directory contains unattributed commands")
-                    health = construction._health(slot, checkpoint, descriptor, evidence)
+                    if activation_health is None:
+                        health = construction._health(slot, checkpoint, descriptor, evidence)
+                    else:
+                        if recovery is None:
+                            raise PlanError("client health reuse requires the current retained recovery context")
+                        health = client_recovery._activation_health(
+                            activation_health, ownership, active, identity, completion,
+                            target, admitted, recovery,
+                        )
                     checkpoint()
                     reused = previous is not None and (
                         previous["active"] == active and previous["target_digest"] == digest(target)
@@ -200,6 +240,8 @@ def register_client_frontdoor(root, identity, selection, staged, *, command_dire
                             _health(directory, slot, checkpoint, descriptor, evidence, health)
                             _receipt(namespace, identity, directory, publication)
                     else:
+                        if recovery is not None:
+                            client_recovery._command_attempt(namespace, active, recovery)
                         history = namespace / HISTORY
                         if not os.path.lexists(history):
                             history.mkdir(mode=0o700)
@@ -281,6 +323,7 @@ def register_client_frontdoor(root, identity, selection, staged, *, command_dire
                         "command_directory": str(directory), "commands": [str(command) for command in commands],
                         "active": True, "frontdoor_registered": True, "health": health,
                         "reused": reused, "mutations_performed": not reused,
+                        **({"recovery_decision_digest": digest(recovery)} if recovery is not None else {}),
                         "path_modified": False, "live_readiness_verified": False,
                     }
     except PlanError:

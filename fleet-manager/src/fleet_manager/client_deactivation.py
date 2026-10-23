@@ -167,6 +167,10 @@ def deactivate_client_runtime(root, identity):
                         if os.path.lexists(namespace / filename):
                             (namespace / filename).unlink()
                             client_admission._sync_directory(namespace)
+                    from .client_recovery import WITHDRAWN
+
+                    construction._write(workspace / "settled.json", marker)
+                    construction._write(namespace / WITHDRAWN, marker)
                     (namespace / activation.REMOVING).unlink()
                     client_admission._sync_directory(namespace)
                     removing = False
