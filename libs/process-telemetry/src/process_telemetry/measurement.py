@@ -112,6 +112,8 @@ def begin(
         return None
     if not _TAG.fullmatch(component) or stage not in STAGES:
         raise ValueError("invalid component or stage")
+    if identity is not None and (type(identity) is not dict or len(identity) > len(_IDENTITY)):
+        raise ValueError("invalid identity metadata")
     identity = dict(identity or {})
     if any(
         key not in _IDENTITY or type(value) is not str

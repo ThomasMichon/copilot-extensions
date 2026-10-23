@@ -95,6 +95,8 @@ def test_private_or_unbounded_measurement_attributes_refused():
     slot.set(lambda _: None)
     with pytest.raises(ValueError):
         begin(slot, "bridge", "spawn", identity={"path": "private"})
+    with pytest.raises(ValueError):
+        begin(slot, "bridge", "spawn", identity={str(index): "value" for index in range(5)})
     span = begin(slot, "bridge", "spawn")
     for fields in ({"argv": "private"}, {"spawn_count": True}, {"cpu_ns": -1}):
         with pytest.raises(ValueError):
