@@ -66,6 +66,36 @@ never acquires, releases or transfers the lock; `AssertOwned()` and `Dispose()`
 remain owner-thread-only. Disposing the original owner revokes every assertion,
 even if a new owner later acquires the same path.
 
+Linux bootstraps may source the packaged `single_instance_lease/operation.sh`.
+`enter_native_operation_lock <absolute-lock-file>` uses native `flock` on
+reserved FD 9 and returns 75 only for real contention. The existing parent
+must be normalized and unlinked; FD 9 must be free. The descriptor stays open
+without any file deletion, age/PID lease or Python prerequisite.
+`assert_native_operation_lock` checks the current path/inode and Linux's
+per-descriptor `/proc/self/fdinfo/9` exclusive whole-file flock evidence.
+`leave_native_operation_lock` closes that reference, never explicitly unlocks
+other inherited references.
+
+After a deliberate native `exec` handoff, the Python successor can consume
+the same open-file description with
+`OperationLock.from_inherited(Path(lock_file), 9)`. It does not acquire or reopen
+the lock: Linux's bounded per-descriptor kernel evidence must already show
+exclusive whole-file custody of that exact inode. A flag, descriptor number,
+PID record, unlocked/shared descriptor or different file is insufficient.
+Successful transfer closes the original FD and retains a non-inheritable
+duplicate in the ordinary thread/process-local registry. Refusal closes only
+the attempted duplicate, preserving the caller's original reference.
+Subsequent assertions recheck kernel evidence as well as path and execution
+identity. Normal Python acquisition, Windows byte locks and macOS custody are
+unchanged; this explicit transfer API requires Linux `/proc` evidence.
+
+The native helper is only a custody primitive. It does not detach a producer,
+settle child trees, acquire prerequisites, parse foundation progress or install
+anything. An inherited reference can keep exclusion after its parent exits;
+that is not proof of successful execution or descendant settlement. A Linux
+foundation producer still owes those independent lifecycle and durable-outcome
+contracts before any first-use publisher can adopt it.
+
 ### `lease` -- the single-instance lease
 
 `SingleInstance` takes an OS-level, exclusive, non-blocking lock on a lock file

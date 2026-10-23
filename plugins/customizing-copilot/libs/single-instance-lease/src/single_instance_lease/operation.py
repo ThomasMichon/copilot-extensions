@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import stat
+import sys
 import threading
 from pathlib import Path
 from typing import BinaryIO
@@ -65,6 +66,32 @@ def _plain_file(path: Path) -> os.stat_result:
     return info
 
 
+def _assert_linux_flock(stream: BinaryIO) -> None:
+    if sys.platform != "linux":
+        raise OperationOwnershipError("inherited native custody requires Linux descriptor evidence")
+    try:
+        with open(f"/proc/self/fdinfo/{stream.fileno()}", encoding="ascii") as source:
+            document = source.read(8193)
+        if len(document) > 8192:
+            raise OperationOwnershipError("inherited operation descriptor evidence exceeds its bound")
+        records = [line.split() for line in document.splitlines() if line.startswith("lock:")]
+        info = os.fstat(stream.fileno())
+        if (
+            len(records) != 1 or len(records[0]) != 9
+            or records[0][2:5] != ["FLOCK", "ADVISORY", "WRITE"]
+            or records[0][7:] != ["0", "EOF"]
+        ):
+            raise OperationOwnershipError("inherited descriptor does not hold an exclusive whole-file flock")
+        major, minor, inode = records[0][6].split(":")
+        if (
+            int(major, 16) != os.major(info.st_dev) or int(minor, 16) != os.minor(info.st_dev)
+            or int(inode) != info.st_ino
+        ):
+            raise OperationOwnershipError("inherited descriptor lock identity differs")
+    except (OSError, ValueError, UnicodeError) as error:
+        raise OperationOwnershipError("inherited operation descriptor evidence unavailable") from error
+
+
 class OperationLock:
     """Serialize one operation, not a daemon lifetime or a runtime installation.
 
@@ -80,6 +107,34 @@ class OperationLock:
         self._file: BinaryIO | None = None
         self._owner: tuple[int, threading.Thread] | None = None
         self._key: tuple[int, int, int] | None = None
+        self._inherited = False
+
+    @classmethod
+    def from_inherited(cls, path: Path, fd: int) -> OperationLock:
+        """Consume a positively flock-owned Linux descriptor without releasing custody."""
+        if sys.platform != "linux" or type(fd) is not int or fd < 3:
+            raise OperationOwnershipError("native custody requires a non-stdio Linux descriptor")
+        holder = cls(path)
+        with _guard:
+            if not holder.path.is_absolute() or holder.path.parent.resolve(strict=True) != holder.path.parent:
+                raise OperationOwnershipError("operation lock requires an absolute, unlinked parent")
+            stream = os.fdopen(os.dup(fd), "r+b", buffering=0)
+            try:
+                info = holder._assert_file(stream)
+                _assert_linux_flock(stream)
+                key = (os.getpid(), info.st_dev, info.st_ino)
+                if key in _holders:
+                    raise OperationLockedError(f"another execution holds {holder.path}")
+                os.close(fd)
+            except BaseException:
+                stream.close()
+                raise
+            holder._file = stream
+            holder._key = key
+            holder._owner = (os.getpid(), threading.current_thread())
+            holder._inherited = True
+            _holders[key] = holder
+        return holder
 
     def acquire(self) -> None:
         with _guard:
@@ -122,6 +177,7 @@ class OperationLock:
                     self._file = None
                     self._key = None
                     self._owner = None
+                    self._inherited = False
                 raise
 
     def _owned_file(self) -> BinaryIO:
@@ -144,6 +200,8 @@ class OperationLock:
             key = self._key
             if key is None or _holders.get(key) is not self:
                 raise OperationOwnershipError("operation's local reservation changed")
+            if self._inherited:
+                _assert_linux_flock(self._owned_file())
 
     def release(self) -> None:
         with _guard:
@@ -157,6 +215,7 @@ class OperationLock:
             self._file = None
             self._key = None
             self._owner = None
+            self._inherited = False
 
     def __enter__(self) -> OperationLock:
         self.acquire()

@@ -34,6 +34,9 @@ losing concurrent attempt on one instance cannot clear its successful owner.
 Fork preparation serializes descriptor setup/close; the child closes inherited
 operation descriptors without issuing an unlock against the parent's open-file
 description. Inherited operation objects remain invalid for the child's execution.
+If a native close reports an error, the child still processes every remaining
+descriptor and resets its local registry before reporting the first error through
+Python's unraisable-exception handling for fork callbacks.
 
 The lock file is never removed and no PID or age is used to reclaim it.
 Closing the descriptor releases custody; a process crash does the same through
@@ -42,6 +45,56 @@ or settle its unfinished work. A consumer must retain its own durable state
 and require the relevant positive completion witness before recovery.
 Uncooperative file replacement is detected at ownership checks, not prevented
 by filesystem compare-and-swap.
+
+Windows bootstraps without Python may dot-source the packaged
+`single_instance_lease/operation.ps1` and call
+`Enter-NativeOperationLock -Path <absolute-normalized-lock-file>`. Retain its
+returned object, call `AssertOwned()` before consequential stages, and
+`Dispose()` in `finally`. It takes the same kernel byte and offset as
+`OperationLock`, not another mutex, PID file or age-based protocol. The parent
+must already exist; reparse-point traversal, non-file targets, same-process
+alias contention and cross-thread custody are refused. The open handle denies
+deletion, and final-path/file-identity checks detect redirected ownership.
+It neither discovers Python nor installs anything. Like the Python API, owner
+death releases only the lock, not a consumer's interrupted-work fence.
+
+The acquiring thread may issue `CreateWitnessAssertion(expectedPath)`. Its
+returned .NET `Action` retains this exact lock object and rechecks its live
+handle, identity and path under the same guard from an IPC thread. Issuance
+requires owned custody and an exact matching path. This read-only assertion
+never acquires, releases or transfers the lock; `AssertOwned()` and `Dispose()`
+remain owner-thread-only. Disposing the original owner revokes every assertion,
+even if a new owner later acquires the same path.
+
+Linux bootstraps may source the packaged `single_instance_lease/operation.sh`.
+`enter_native_operation_lock <absolute-lock-file>` uses native `flock` on
+reserved FD 9 and returns 75 only for real contention. The existing parent
+must be normalized and unlinked; FD 9 must be free. The descriptor stays open
+without any file deletion, age/PID lease or Python prerequisite.
+`assert_native_operation_lock` checks the current path/inode and Linux's
+per-descriptor `/proc/self/fdinfo/9` exclusive whole-file flock evidence.
+`leave_native_operation_lock` closes that reference, never explicitly unlocks
+other inherited references.
+
+After a deliberate native `exec` handoff, the Python successor can consume
+the same open-file description with
+`OperationLock.from_inherited(Path(lock_file), 9)`. It does not acquire or reopen
+the lock: Linux's bounded per-descriptor kernel evidence must already show
+exclusive whole-file custody of that exact inode. A flag, descriptor number,
+PID record, unlocked/shared descriptor or different file is insufficient.
+Successful transfer closes the original FD and retains a non-inheritable
+duplicate in the ordinary thread/process-local registry. Refusal closes only
+the attempted duplicate, preserving the caller's original reference.
+Subsequent assertions recheck kernel evidence as well as path and execution
+identity. Normal Python acquisition, Windows byte locks and macOS custody are
+unchanged; this explicit transfer API requires Linux `/proc` evidence.
+
+The native helper is only a custody primitive. It does not detach a producer,
+settle child trees, acquire prerequisites, parse foundation progress or install
+anything. An inherited reference can keep exclusion after its parent exits;
+that is not proof of successful execution or descendant settlement. A Linux
+foundation producer still owes those independent lifecycle and durable-outcome
+contracts before any first-use publisher can adopt it.
 
 ### `lease` -- the single-instance lease
 

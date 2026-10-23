@@ -43,6 +43,12 @@ except OperationLockedError:
 """
 
 
+def test_inherited_custody_rejects_stdio_and_noninteger_descriptors(tmp_path):
+    for fd in (0, 1, 2, True, "9", None):
+        with pytest.raises(OperationOwnershipError, match="Linux descriptor"):
+            OperationLock.from_inherited(tmp_path / "operation.lock", fd)
+
+
 def _assert_kernel_held(path):
     python, extra_env = direct_python(sys.executable)
     result = subprocess.run(
