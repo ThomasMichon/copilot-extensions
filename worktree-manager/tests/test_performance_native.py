@@ -118,6 +118,31 @@ def test_bad_child_duration_still_saves_complete_run_accounting(tmp_path, monkey
     assert saved["modes"]["enabled"]["samples"][0]["error_code"] == "invalid_child_report"
 
 
+def test_receiver_decode_failure_preserves_collected_samples(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    module = probe_module()
+    monkeypatch.setattr(module, "source_identity", lambda _: ("a" * 40, True))
+    def capture(argv, *, cwd, **kwargs):
+        value = {
+            "mode": "enabled" if cwd.name.endswith("enabled") else "disabled", "outcome": "ok",
+            "points_ns": {"source_entry": 0, "first_refresh": 1, "input_ack": 1, "fixture_rows": 2},
+        }
+        return subprocess.CompletedProcess(argv, 0, "MANAGER_OBSERVATION " + json.dumps(value), "")
+    monkeypatch.setattr(module, "captured_child", capture)
+    receiver = tmp_path / "invalid-receiver.jsonl"
+    receiver.write_bytes(b"\xff\n")
+    root = tmp_path / "receiver-failed-run"
+    module.run(SimpleNamespace(
+        run_dir=str(root), endpoint=None, samples=1, timeout=1,
+        receiver_jsonl=str(receiver), readback_timeout=0,
+    ))
+    saved = json.loads((root / "report.json").read_text())
+    assert saved["modes"]["disabled"]["completed"] == saved["modes"]["enabled"]["completed"] == 1
+    assert not saved["readback"]["complete"]
+    assert saved["readback"]["reason"] == "UnicodeDecodeError"
+
+
 def test_git_overrides_cannot_redirect_source_identity(tmp_path, monkeypatch):
     from agent_procutil import no_window_kwargs
 

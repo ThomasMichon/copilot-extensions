@@ -337,7 +337,7 @@ def run(args) -> dict:
             try:
                 with Path(args.receiver_jsonl).open(encoding="utf-8") as stream:
                     report["readback"] = trace_readback(stream, identities, expected_labels=expected_labels)
-            except OSError as exc:
+            except (OSError, UnicodeError, ValueError, RecursionError) as exc:
                 report["readback"] = {"complete": False, "reason": type(exc).__name__}
             if report["readback"]["complete"] or time.monotonic() >= deadline:
                 break
