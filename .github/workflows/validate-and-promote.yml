@@ -23,7 +23,7 @@ permissions:
   pull-requests: write
   actions: read
 env:
-  RELEASE_HELPERS_SHA: ce77da58017442f83bf3d82a5f80b111b63b9737
+  RELEASE_HELPERS_SHA: dcdf3391ed0030d1355f268984ddf4b9609ea0b7
 jobs:
   gate:
     name: gate (confirm this is a dev commit)
