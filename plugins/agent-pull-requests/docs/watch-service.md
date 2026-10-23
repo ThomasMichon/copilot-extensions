@@ -72,6 +72,8 @@ performance qualification remain open in the parent effort.
 `await service.run(stop, drain_timeout=60)` owns startup, waits for the supplied
 stop event or either unit's exit, then drains. The container/service manager
 supplies that event; this API does not register another supervisor.
+Cancellation during initial adoption also enters that bounded drain path.
+A rejected second invocation never drains the already-starting/running owner.
 
 `await service.close(timeout=...)` immediately withdraws admission/readiness,
 stops later observation effects and requests connector shutdown. It joins the

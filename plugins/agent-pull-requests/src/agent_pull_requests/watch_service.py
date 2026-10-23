@@ -185,9 +185,12 @@ class WatchService:
     async def run(self, stop: asyncio.Event, *, drain_timeout: float = 60) -> None:
         """Foreground entry for the existing placement/supervision owner."""
         drain_timeout = positive_seconds(drain_timeout)
-        await self.start()
-        stopped = asyncio.create_task(stop.wait())
+        if self._started or self._closed:
+            raise RuntimeError("watch service instance already used")
+        stopped = None
         try:
+            await self.start()
+            stopped = asyncio.create_task(stop.wait())
             done, _ = await asyncio.wait(
                 {*self._tasks, stopped}, return_when=asyncio.FIRST_COMPLETED,
             )
@@ -196,6 +199,8 @@ class WatchService:
                     await task
                 raise RuntimeError("watch service unit stopped")
         finally:
-            stopped.cancel()
-            await asyncio.gather(stopped, return_exceptions=True)
-            await self.close(timeout=drain_timeout)
+            if stopped is not None:
+                stopped.cancel()
+                await asyncio.gather(stopped, return_exceptions=True)
+            if self._started:
+                await self.close(timeout=drain_timeout)

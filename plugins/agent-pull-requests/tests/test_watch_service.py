@@ -389,6 +389,90 @@ def test_start_cancellation_keeps_custody_of_initial_disk_read(setup, monkeypatc
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("timeout", [False, True])
+def test_foreground_startup_cancellation_drains_its_retained_adoption(setup, monkeypatch, timeout):
+    store, make, _ = setup
+    entered, release = threading.Event(), threading.Event()
+    targets = store.observation_targets
+
+    def held(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return targets(**kwargs)
+
+    monkeypatch.setattr(store, "observation_targets", held)
+
+    async def scenario():
+        service = make()
+        running = asyncio.create_task(service.run(
+            asyncio.Event(), drain_timeout=0.02 if timeout else 3,
+        ))
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            running.cancel()
+            await wait_for(lambda: service.status()["draining"])
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+            if timeout:
+                with pytest.raises(TimeoutError):
+                    await running
+                with pytest.raises(AlreadyRunningError):
+                    contender(store).acquire()
+            else:
+                assert not running.done()
+                release.set()
+                with pytest.raises(asyncio.CancelledError):
+                    await running
+                assert service._disk.done() and service.status()["closed"]
+                with contender(store):
+                    pass
+        finally:
+            release.set()
+            await asyncio.gather(running, return_exceptions=True)
+            await service.close(timeout=3)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("adopting", [False, True])
+def test_second_foreground_invocation_cannot_drain_existing_owner(setup, monkeypatch, adopting):
+    store, make, _ = setup
+    entered, release = threading.Event(), threading.Event()
+    targets = store.observation_targets
+
+    def held(**kwargs):
+        entered.set()
+        assert release.wait(5)
+        return targets(**kwargs)
+
+    if adopting:
+        monkeypatch.setattr(store, "observation_targets", held)
+
+    async def scenario():
+        service = make()
+        stop = asyncio.Event()
+        running = asyncio.create_task(service.run(stop, drain_timeout=3))
+        try:
+            if adopting:
+                assert await asyncio.to_thread(entered.wait, 3)
+            else:
+                await wait_for(lambda: service.status()["ready"])
+            with pytest.raises(RuntimeError, match="already used"):
+                await service.run(asyncio.Event(), drain_timeout=3)
+            assert not service.status()["draining"]
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+            release.set()
+            await wait_for(lambda: service.status()["ready"])
+        finally:
+            release.set()
+            stop.set()
+            await running
+        assert service.status()["closed"]
+
+    asyncio.run(scenario())
+
+
 def test_drain_timeout_on_serving_write_does_not_release_writer(setup, monkeypatch):
     store, make, _ = setup
     entered, release = threading.Event(), threading.Event()
