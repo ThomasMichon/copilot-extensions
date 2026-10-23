@@ -8,6 +8,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -77,8 +78,7 @@ def _literal(value: Path) -> str:
 def _native(copy_layout, tmp_path, body: str):
     _root, _payload, engine, guard = copy_layout
     env = _env(tmp_path)
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir(exist_ok=True)
+    fake_bin = Path(tempfile.mkdtemp(prefix="fake-bin-", dir=tmp_path))
     _fake_uv(fake_bin)
     isolate_installer_environment(env, tmp_path / "home", fake_bin, PWSH)
     script = tmp_path / "copy-contract.ps1"
@@ -108,6 +108,31 @@ def _copy(copy_layout, tmp_path, source, destination, *, baseline=False):
         f"Copy-InstallSnapshotItem -Source {_literal(source)} -Destination {_literal(destination)}"
     )
     return _native(copy_layout, tmp_path, command)
+
+
+def test_native_calls_use_distinct_fixture_bins(monkeypatch):
+    module = sys.modules[__name__]
+    bins = []
+
+    def isolate(env, home, fake_bin, pwsh):
+        with (fake_bin / "exclusive-shim").open("x"):
+            pass
+        bins.append(fake_bin)
+
+    monkeypatch.setattr(module, "_fake_uv", lambda path: None)
+    monkeypatch.setattr(module, "isolate_installer_environment", isolate)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        layout = (root, root, root / "engine.ps1", "")
+        for _ in range(2):
+            assert _native(layout, root, "exit 0").returncode == 0
+
+        assert len(set(bins)) == 2
+        assert all(path.parent == root for path in bins)
 
 
 def _tree(root: Path) -> None:
