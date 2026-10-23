@@ -238,3 +238,16 @@ new authority or ownership behavior requires a separate proposal.
 - Prior negative controls terminated their recorded test-child identities in
   cleanup and removed their fixtures; this continuation launched no controls or
   background helpers. Source worktree is retained for the same owning task.
+
+### Resident contract implementation admission
+
+- Read the complete merged #8193 contract. The coordinating owner admitted its
+  zero-helper resident direction with H2 retaining backend/Node responsibility.
+- The delivery/control owner accepted the exact bounds and backend ABI in the
+  [narrow lock-admission packet](lock-admission.md). That packet names the only
+  requested canonical helper extension, unchanged defaults and existing callers.
+- No helper or new resident implementation has been written while this narrow
+  admission is pending. The separate missing creation-nonce delivery field is
+  recorded as an owner gate, not inferred.
+- Mechanical index-only rebase completed; all other owners' current rows remain
+  unchanged. The retained implementation and original negative evidence remain.
