@@ -702,12 +702,17 @@ callback an implicit credential store.
   controls join the exact admitted unit manifest without weakening its observer
   or wall budget.
 - Added a separately selected Linux/Windows real-build and offline standalone
-  install lane. It has not run yet. It proves packaging only, not a governed
+  install lane. Initial run `40019289742` passed both platforms on
+  `e021b3b9dffbcc9b51bb0da6dc99cf3360da93d1`, building the existing MCP/SSH
+  plugin closures and PR/Fleet standalone wheels, then installing the latter
+  offline outside a checkout. It proves packaging only, not a governed
   runtime dependency closure, an approved native Worktrees selection, a built
   image or a working service/fleet deployment. Managed-host tests do not use the
   public-runner toolchain exception.
-- Implementation review, required hosted CI and native artifact checks remain
-  pending. No delivery or parent acceptance checkbox closes from local tests;
+- Required hosted unit execution passed on that head. Its independent workflow
+  guard rejected a dynamic runner matrix; the lane now names Linux and Windows
+  runners explicitly, preserving that guard. Final-head review, CI and a fresh
+  native run remain pending. No delivery or parent acceptance checkbox closes;
   release/authorized installed rollout and every retained parent gate remain open.
 
 ### 2026-10-23 - Shared artifact construction proposal merged

@@ -90,6 +90,11 @@ def main(*, standalone: bool = False) -> None:
             "plugins": [manifest["plugin"] for manifest in manifests if "plugin" in manifest],
             "projects": [project_key(manifest) for manifest in manifests],
             "standalone_installed_offline": standalone,
+            "artifacts": [
+                {"project": project_key(manifest), "version": manifest["version"],
+                 "artifact_id": manifest["artifact_id"], "payload_hash": manifest["payload_hash"]}
+                for manifest in manifests
+            ],
             "toolchain": toolchain.record,
             "wheel_counts": [len(manifest["wheels"]) for manifest in manifests],
         }, sort_keys=True))

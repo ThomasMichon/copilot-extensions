@@ -221,16 +221,12 @@ jobs:
           python tools/run-standalone-tests.py services/pr
           --prepare --timeout 180 --admission-wait 30
 
-  pr-artifacts:
+  pr-artifacts-linux:
     if: ${{ inputs.pr_artifacts }}
-    name: First-party PR artifacts (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: First-party PR artifacts (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 6
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
+    steps: &pr-artifacts-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -240,6 +236,13 @@ jobs:
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system packaging
       - name: Locked builds, source verification and offline standalone install
         run: python tools/smoke_public_toolchain.py --standalone
+
+  pr-artifacts-windows:
+    if: ${{ inputs.pr_artifacts }}
+    name: First-party PR artifacts (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *pr-artifacts-steps
 
   pr-service-windows:
     if: ${{ inputs.pr_service }}
