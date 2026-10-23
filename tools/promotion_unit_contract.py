@@ -174,3 +174,22 @@ def ci_requires_units(
     if event != "pull_request":
         return True
     return requires_units(changed_paths(base, head, read_diff))
+
+
+def ci_requires_source_ast_guards(
+    event: str, base: str, head: str, read_diff: Callable[[list[str]], bytes],
+) -> bool:
+    """Omit only PR inputs outside the three full scanners' source/policy roots."""
+    if event != "pull_request":
+        return True
+    paths = changed_paths(base, head, read_diff)
+    if not paths:
+        return True
+    relevant = [
+        path for path in paths
+        if path != "tools/promotion-unit-manifest.json" and not (
+            path.startswith(_PACKET)
+            and re.fullmatch(r"[^/\\]+\.py", path.removeprefix(_PACKET))
+        )
+    ]
+    return requires_units(relevant) if relevant else False

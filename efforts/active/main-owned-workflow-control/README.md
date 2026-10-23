@@ -352,6 +352,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   existing portfolio tracker and owner. Genuine Dev provenance must survive
   missing selection outputs; other manual refs remain inspection-only, and
   preparation failure cannot imply executed Linux or Windows coverage.
+- [ ] Omit the unchanged full AST scanner group on positively closed
+  packet-only PR inputs, preserving actual unit execution, every unknown/mixed
+  input, all scanner/policy dependencies and full non-PR scans. Keep source
+  delivery, natural omission and whole-flow measured savings distinct.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
@@ -485,11 +489,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
   Actual hosted source CI executes all 869 admitted cases in 12.971 seconds.
   Real process settlement, native Windows, full census and every-release
   acceptance remain separate.
-- [ ] Land the thirteen original remote-shell callable cases through five exact
+- [x] Land the thirteen original remote-shell callable cases through five exact
   function objects and unchanged parameterization, preserving all prior packet
   identities/hashes, actual call coverage and the 300-second budget. Keep the
   original constant-only vocabulary assertion as an explicit unmapped policy
-  residual; bounded source qualification is not full-census or Main acceptance.
+  residual (#8088). Actual hosted source CI executes all 890 admitted cases in
+  9.417 seconds; bounded source qualification is not full-census or Main acceptance.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this

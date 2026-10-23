@@ -97,8 +97,8 @@ jobs:
         from pathlib import Path
         import sys
         sys.path.insert(0, str(Path("tools").resolve()))
-        from promotion_unit_contract import ci_requires_units
-        needed = os.environ["EVENT"] != "pull_request" or ci_requires_units(
+        from promotion_unit_contract import ci_requires_source_ast_guards
+        needed = ci_requires_source_ast_guards(
             os.environ["EVENT"], os.environ["BASE"], os.environ["HEAD"],
             subprocess.check_output,
         )

@@ -130,12 +130,15 @@ success-shaped result.
 The report-only marketplace-isolation inventory remains in push/manual source
 CI. Omitting its duplicate PR execution removes no test or strict policy gate.
 
-The checks job uses that same conservative, pinned-diff narrative classifier
-only to omit the tracking-write, headless-launch and asyncio-timeout AST
-scans on known Markdown-only PRs. These scanners do not consume those narrative
-files. All non-narrative and unknown PR inputs select their complete scans;
-push, manual and other events always run them. Diff/encoding/admission errors
-fail the checks job rather than emitting a skipped-success selection. All other
+The checks job uses a separate conservative pinned-diff selector for the
+tracking-write, headless-launch and asyncio-timeout AST scans. Known narrative
+PRs and changes limited to direct Python files in `tools/promotion_unit_tests/`
+plus `tools/promotion-unit-manifest.json` omit these scans: none of the three
+scanners consumes those inputs. This does not omit the unit packet. Other
+paths, nested/lookalike packet paths, production, scanner/selector/workflow
+source, allowlists and mixed changes retain the complete scans. Empty evidence,
+pushes, manual and unknown events also run them. Diff/encoding/admission errors
+fail the checks job instead of emitting a skipped-success selection. All other
 guards, including the ungated workflow-policy guard, remain unchanged.
 
 Selected AST work runs through `tools/run-source-ast-guards.py`: three fixed

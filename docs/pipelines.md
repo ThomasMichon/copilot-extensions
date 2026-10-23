@@ -36,13 +36,17 @@ not again on each PR update. Admitted Dev-push executions retain that diagnostic
 strict source guards and required validation remain in PR CI. A cancelled or
 superseded execution is not diagnostic or test evidence.
 
-The checks job independently reuses the same pinned-diff narrative classifier
-for its tracking-write, headless-launch and asyncio-timeout AST scans. Only
-known Markdown-only PRs omit these three scans, whose inputs exclude those
-files. Non-narrative/unknown PR inputs retain complete scans; push, manual and
-other events always run them. Invalid or unavailable diff evidence fails the
-job, not a success-shaped skip. All other guards remain unchanged, and the
-ungated trusted-CI guard binds the selector and exact scan commands.
+The checks job independently selects its tracking-write, headless-launch and
+asyncio-timeout AST scans from the pinned diff. Known narrative PRs and changes
+limited to direct Python files in `tools/promotion_unit_tests/` plus the exact
+`tools/promotion-unit-manifest.json` omit the group: these inputs are outside
+all three scanners' read roots. Unit selection is unchanged and still executes
+the admitted packet for packet-file changes. Other, nested/lookalike, mixed,
+production, scanner/policy and workflow changes retain complete scans; empty
+evidence, push, manual and unknown events always run them. Invalid or
+unavailable diff evidence fails the job, not a success-shaped skip. All other
+guards remain unchanged; the ungated trusted-CI guard binds the selector and
+exact scan commands.
 
 Push CI performs source-policy admission without repeating promotion's unit
 execution. Manual CI runs the same admitted packet, not the old full portfolio.

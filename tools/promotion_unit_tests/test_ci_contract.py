@@ -211,6 +211,45 @@ def test_actual_source_ast_selector_preserves_non_narrative_and_non_pr_execution
     ] if event == "pull_request" else [])
 
 
+@pytest.mark.parametrize("event,paths,expected", [
+    ("pull_request", ["tools/promotion_unit_tests/test_example.py"], False),
+    ("pull_request", ["tools/promotion-unit-manifest.json"], False),
+    ("pull_request", [
+        "tools/promotion_unit_tests/test_example.py",
+        "tools/promotion-unit-manifest.json", "TESTING.md",
+    ], False),
+    ("pull_request", ["tools/promotion_unit_tests/nested/test_example.py"], True),
+    ("pull_request", ["tools/promotion_unit_tests_other/test_example.py"], True),
+    ("pull_request", ["plugins/example/tests/test_example.py"], True),
+    ("pull_request", ["libs/example/src/example.py"], True),
+    ("pull_request", ["tools/headless-guard.allow"], True),
+    ("pull_request", ["tools/daemon-spawn.allow"], True),
+    ("pull_request", ["tools/check-headless-launch.py"], True),
+    ("pull_request", ["tools/promotion_unit_contract.py"], True),
+    ("pull_request", [".github/workflows/ci.yml"], True),
+    ("pull_request", [
+        "plugins/example/src/moved.py", "tools/promotion_unit_tests/test_moved.py",
+    ], True),
+    ("push", ["tools/promotion-unit-manifest.json"], True),
+    ("workflow_dispatch", ["tools/promotion_unit_tests/test_example.py"], True),
+], ids=[
+    "packet-python", "packet-manifest", "packet-and-narrative", "nested-unknown",
+    "lookalike-unknown", "plugin-test", "library-source", "headless-policy",
+    "daemon-policy", "scanner-source", "selector-source", "workflow-source",
+    "source-to-packet-rename", "push-full", "manual-full",
+])
+def test_source_ast_selector_omits_only_closed_packet_inputs(tmp_path, event, paths, expected):
+    from promotion_unit_contract import ci_requires_units
+
+    output = tmp_path / "outputs"
+    raw = ("\0".join(paths) + "\0").encode()
+    execute_source_ast_selector(output, event, lambda _argv: raw)
+    assert output.read_text() == "run=" + str(expected).lower() + "\n"
+    assert ci_requires_units(event, "a" * 40, "b" * 40, lambda _argv: raw) is (
+        event != "push"
+    )
+
+
 @pytest.mark.parametrize("failure", ["unavailable", "encoding", "path"])
 def test_source_ast_selector_errors_never_emit_skipped_success(tmp_path, failure):
     output = tmp_path / "outputs"
