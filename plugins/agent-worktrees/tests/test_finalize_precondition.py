@@ -128,6 +128,23 @@ def test_checkout_ref_is_fresh_and_unborn_head_retains_tracked_fallback(refspec_
     ) == branch
 
 
+@pytest.mark.parametrize("separator", ["\u00a0", "\u0085", "\u2028", "\u2029"])
+def test_unicode_checkout_cannot_fall_back_to_landed_tracked_branch(refspec_worktree, separator):
+    env = refspec_worktree
+    _land_on_master(env, squash=False)
+    branch = f"later{separator}work"
+    _git("checkout", "-b", branch, cwd=env.clone)
+    _commit(env.clone, "unpublished.txt", "newer checkout content\n")
+    cwd = str(env.clone)
+    assert finalize_open_pr_gate._current_commit_ref(cwd) == branch
+    assert finalize_open_pr_gate.resolve_precondition_ref(
+        env.slug, env.worktree_id, cwd, cwd=cwd,
+    ) == branch
+    record, repo = _record_and_repo(env)
+    ok, err = finalize._pr_finalize_precondition(record, repo, cwd, cwd)
+    assert ok is False and err is not None
+
+
 @pytest.fixture(scope="session")
 def _refspec_worktree_seed(tmp_path_factory) -> Path:
     """Build immutable real Git setup before any test-specific landing.

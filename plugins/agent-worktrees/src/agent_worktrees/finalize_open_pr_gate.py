@@ -136,7 +136,7 @@ def _current_commit_ref(cwd: str) -> str | None:
     result = git_ops.git(
         "rev-parse", "HEAD", "--abbrev-ref", "HEAD", cwd=cwd, check=False,
     )
-    lines = result.stdout.splitlines()
+    lines = result.stdout.removesuffix("\n").split("\n")
     if (
         result.returncode != 0
         or len(lines) != 2
@@ -144,7 +144,7 @@ def _current_commit_ref(cwd: str) -> str | None:
     ):
         return None
     ref = lines[1]
-    if ref and not ref.startswith("-") and not any(c.isspace() for c in ref):
+    if ref and not ref.startswith("-") and not any(ord(c) <= 32 or ord(c) == 127 for c in ref):
         return ref
     return None
 

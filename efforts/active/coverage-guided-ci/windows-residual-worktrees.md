@@ -115,6 +115,15 @@ including cleanup); no timing waiver, selection change or completion claim
 follows from the complementary pass. Full same-head repeated qualification
 and the previously interrupted worker failure remain parent-owned.
 
+Review follow-up: Git permits non-ASCII whitespace in branch names. Output
+is therefore framed only on LF and rejects only ASCII whitespace/control
+characters, not Unicode whitespace or line separators. Four real checkouts
+with U+00A0, U+0085, U+2028 and U+2029 remain selected instead of falling
+back to their already-landed tracked branch, and their newer unpublished
+commits still block finalization. The complete corrected precondition module
+passes **81 tests**, **81.97 seconds including preparation and cleanup**,
+with the same two workers and 30-second item deadline.
+
 Documentation impact: no command, configuration, install, bootstrap or
 runtime contract changed. This ledger records the internal optimization and
 validation boundary; no additional user-facing documentation is needed.
