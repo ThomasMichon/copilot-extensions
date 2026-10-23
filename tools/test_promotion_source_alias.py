@@ -1,4 +1,4 @@
-"""Prepublished version aliases survive squash landings and failed Main merges."""
+"""Source-owned publication and direct historical alias-validator compatibility."""
 from __future__ import annotations
 
 import hashlib
@@ -163,29 +163,31 @@ def _publish(state: dict, cache: dict | None = None) -> None:
 
 
 @pytest.mark.parametrize("landed", [False, True], ids=["failed-main-merge", "squash-main-landing"])
-def test_two_releases_reuse_unchanged_version_alias_without_a_main_commit_semantic_key(
+def test_two_sources_publish_independently_without_a_main_commit_semantic_key(
     publication, landed: bool,
 ) -> None:
     state = publication(landed=landed)
     service = state["service"]
-    previous = list(service.releases["demo-v1.0"]["assets"])
+    first_tag = f"python-artifacts-{state['dev1']}"
+    second_tag = f"python-artifacts-{state['dev2']}"
+    previous = list(service.releases[first_tag]["assets"])
     cache: dict = {}
     _publish(state, cache)
     publisher.verify_published_artifacts(
         state["directory"], repository="example/plugins", candidate_commit=state["candidate2"],
         dev_head=state["dev2"], repo=state["repo"], admission_cache=cache,
     )
-    assert service.tags["demo-v1.0"] == state["candidate1"]
-    assert service.releases["demo-v1.0"]["assets"] == previous
-    assert service.tags["other-v1.1"] == state["candidate2"]
+    assert service.tags[first_tag] == state["dev1"]
+    assert service.releases[first_tag]["assets"] == previous
+    assert service.tags[second_tag] == state["dev2"]
+    assert not any(tag.startswith(("demo-v", "other-v")) for tag in service.tags)
     subjects = [argv for argv, _ in service.calls if argv[:2] == ["attestation", "verify"]]
-    assert len(subjects) == 1, "cache one authenticated index, not repeated per-plugin network proofs"
-    assert subjects[0][subjects[0].index("--signer-digest") + 1] == state["base"]
-    assert set(cache) == {("example/plugins", state["dev1"])}
+    assert not subjects, "source-set publication must not authenticate another source's alias"
+    assert not cache
 
 
 @pytest.mark.parametrize("failure", ["raw-index", "signature", "composition", "missing-index"])
-def test_failed_prior_source_authentication_refuses_without_new_version_writes(
+def test_direct_prior_alias_authentication_still_refuses_invalid_evidence(
     publication, failure: str,
 ) -> None:
     state = publication(landed=False)
@@ -206,16 +208,26 @@ def test_failed_prior_source_authentication_refuses_without_new_version_writes(
         del service.releases[f"python-artifacts-{state['dev1']}"]
     before = list(service.writes)
     with pytest.raises(artifacts.PromotionArtifactError):
-        _publish(state)
+        validate_prior_source_alias(
+            repository="example/plugins", tag_commit=state["candidate1"],
+            current_commit=state["candidate2"], current_index=state["index"],
+            repo=state["repo"], cache={},
+        )
     assert service.writes == before
     assert "other-v1.1" not in service.tags
 
 
-def test_prior_signed_composition_does_not_waive_actual_unchanged_plugin_source(publication) -> None:
+def test_direct_alias_validator_does_not_waive_changed_plugin_source(publication) -> None:
     state = publication(landed=False, changed_demo=True)
     before = list(state["service"].writes)
     with pytest.raises(artifacts.PromotionArtifactError, match="payload hash differs"):
-        _publish(state)
+        publisher._validate_tag_binding(
+            state["directory"], next(
+                entry for entry in state["index"]["artifacts"] if entry["plugin"] == "demo"
+            ),
+            repository="example/plugins", tag_commit=state["candidate1"],
+            merged_commit=state["candidate2"], repo=state["repo"],
+        )
     assert state["service"].writes == before
 
 
@@ -238,17 +250,21 @@ def test_alias_requires_a_real_single_parent_candidate_in_the_admitted_source_hi
             ["commit-tree", _git(["rev-parse", state["candidate1"] + "^{tree}"], root),
              "-p", state["base"], "-p", state["dev1"], "-m", "not a single-parent candidate"], root,
         )
-    state["service"].tags["demo-v1.0"] = previous
     before = list(state["service"].writes)
     with pytest.raises(artifacts.PromotionArtifactError):
-        _publish(state)
+        validate_prior_source_alias(
+            repository="example/plugins", tag_commit=previous,
+            current_commit=state["candidate2"], current_index=state["index"],
+            repo=root, cache={},
+        )
     assert state["service"].writes == before
 
 
-def test_current_raw_readback_is_still_required_after_prior_alias_authentication(publication) -> None:
+def test_current_source_raw_readback_is_required_without_alias_authentication(publication) -> None:
     state = publication(landed=False)
     cache: dict = {}
     _publish(state, cache)
+    assert not cache
     state["service"].failure = "digest"
     with pytest.raises(artifacts.PromotionArtifactError, match="downloaded published asset digest"):
         publisher.verify_published_artifacts(
@@ -260,7 +276,12 @@ def test_current_raw_readback_is_still_required_after_prior_alias_authentication
 def test_cached_source_index_is_not_blanket_authorization_for_another_candidate_composition(publication) -> None:
     state = publication(landed=False)
     cache: dict = {}
-    _publish(state, cache)
+    validate_prior_source_alias(
+        repository="example/plugins", tag_commit=state["candidate1"],
+        current_commit=state["candidate2"], current_index=state["index"],
+        repo=state["repo"], cache=cache,
+    )
+    assert set(cache) == {("example/plugins", state["dev1"])}
     root = state["repo"]
     (root / "unadmitted-control.txt").write_text("different composition\n", encoding="utf-8")
     changed = _candidate(root, state["dev1"], state["base"])

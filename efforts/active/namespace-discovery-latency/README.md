@@ -172,6 +172,21 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-23 - Coupled alias-regression migration
+
+- Review identified the retained real-Git alias suite as a directly coupled
+  consumer of schema-2 version aliases. Migrated its publication assertions to
+  the complete Dev-keyed sets, with both failed-Main-merge and squash-landing
+  histories. Source publication no longer reads another source's aliases.
+- Kept invalid prior-source provenance, signature, composition and payload
+  refusals by exercising the retained alias validators directly. The cache
+  regression now explicitly authenticates its input before testing reuse;
+  corrupt current-source raw bytes still refuse.
+- All twelve cases passed in their existing contained integration tier on
+  Windows. They were not added to required unit-only CI. This is native Git
+  fixture evidence, not successful historical hosted-asset verification or
+  trusted Main-control activation.
+
 ### 2026-10-22 - Source-keyed publication blocker
 
 - #7998 merged to Dev as `958d3e2046bb395d54c7fe8d63280a5bd68e848b`.
