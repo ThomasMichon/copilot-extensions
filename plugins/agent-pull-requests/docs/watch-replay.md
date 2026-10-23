@@ -90,6 +90,10 @@ Pending event IDs, original deadlines and completion receipts are unchanged.
 Provider unavailability does not cancel, reset or replace any subscription.
 Deadline sweeps continue while reads are pending, with current-authority checks
 at least every 100 ms between bounded replay transactions, and after each result.
+An unchanged sweep does not persist the envelope. Comparison excludes only
+the relative monotonic timeout projection; absolute deadlines, timeout events
+and receipt-retention cleanup remain durable changes. Other replay mutations
+retain their existing commit behavior and uncertainty contract.
 An otherwise valid native snapshot may exceed the smaller replay event budget.
 That target's application is refused without changing its state and counted as
 unavailable; timeout sweeps and later targets still run, including on repeated

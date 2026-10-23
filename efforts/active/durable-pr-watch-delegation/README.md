@@ -688,6 +688,16 @@ callback an implicit credential store.
   and graceful-cutover patterns; intended scope and placement authority do not
   change. Image construction, fresh container, update/rollback, live providers,
   installed activation and representative fleet performance remain open.
+- Publish #8209 at `54c1dd8aec`; required CI `39949621748` and native
+  Linux/Windows acceptance `39949759241` passed. Copilot review `5627918808`
+  identified repeated unchanged sweep writes. Keep authority/deadline polling,
+  but skip sweep persistence when the complete durable state is unchanged,
+  excluding only its relative monotonic timeout projection. Actual timeout
+  and retention changes retain normal pre-replace/uncertain-commit behavior.
+  The expanded 206-case local replay/core/store/Gateway/observer/service
+  selection passes, including zero idle-poll writes while all slots are
+  blocked and one durable timeout write. Current-head re-review and native
+  acceptance remain required before merging this correction.
 
 ### 2026-10-23 - Merge standalone foreground packaging and continue observation fairness
 

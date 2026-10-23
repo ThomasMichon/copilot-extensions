@@ -556,10 +556,16 @@ def test_deadlines_are_swept_while_every_read_slot_is_blocked(store, monkeypatch
     for number in range(1, 5):
         register(store, request=f"request-{number}", number=number)
     original, receipt = register(store, request="deadline", number=5, deadline_at=now[0] + 10)
-    full, release, swept = (threading.Event() for _ in range(3))
+    full, release, swept, idle = (threading.Event() for _ in range(4))
     lock = threading.Lock()
     calls, events = [], []
+    writes, polls = [], []
     sweep = store.sweep_timeouts
+    write = storage._atomic_write_json
+
+    def commit(path, state):
+        writes.append(state)
+        return write(path, state)
 
     def fetch(repo, number, *args, **kwargs):
         with lock:
@@ -571,6 +577,10 @@ def test_deadlines_are_swept_while_every_read_slot_is_blocked(store, monkeypatch
 
     def timeouts(**kwargs):
         result = sweep(**kwargs)
+        if full.is_set() and now[0] <= original["deadline_at"]:
+            polls.append(result)
+            if len(polls) >= 3:
+                idle.set()
         if now[0] > original["deadline_at"] and not swept.is_set():
             events.extend(execute(store, "pending")["events"])
             swept.set()
@@ -578,14 +588,18 @@ def test_deadlines_are_swept_while_every_read_slot_is_blocked(store, monkeypatch
 
     monkeypatch.setattr(observer, "fetch_snapshot", fetch)
     monkeypatch.setattr(store, "sweep_timeouts", timeouts)
+    monkeypatch.setattr(storage, "_atomic_write_json", commit)
     thread, result = start_cycle(ReplayObserver(store, bindings=(binding(),)))
     try:
         assert full.wait(3)
+        assert idle.wait(3)
+        assert writes == []
         now[0] += 11
         assert swept.wait(3)
         assert thread.is_alive() and sorted(calls) == [1, 2, 3, 4]
         assert len(events) == 1 and events[0]["timed_out"]
         assert events[0]["registration_id"] == receipt["registration_id"]
+        assert len(writes) == 1
     finally:
         release.set()
         thread.join(8)

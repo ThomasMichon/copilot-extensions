@@ -731,6 +731,8 @@ def test_drain_timeout_on_serving_write_does_not_release_writer(setup, monkeypat
 
     async def scenario():
         service = make()
+        # Exercise the separate serving write between observation cycles.
+        service.interval = 60
         await service.start()
         await wait_for(lambda: service.status()["ready"])
         monkeypatch.setattr(watch_replay_store, "_atomic_write_json", held)
