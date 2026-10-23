@@ -12,6 +12,7 @@ from .planning import PlanError, canonical, decode, identifier, integer
 
 MAX_REPLAY_EVENTS = 1024
 MAX_PAGE_ROWS = 64
+MAX_POINT_READS = 64
 APPLICATION_ID = 0x464D4F42
 _SCHEMA = {
     "identity": (
@@ -268,20 +269,34 @@ class ObservationStore:
             else "origin-resync-required",
         }
 
+    def _point(self, connection, origin, project, entity, head):
+        binding, _position = self._binding(connection, origin)
+        row = connection.execute(
+            f"SELECT entity,generation,source_revision,position,present,{_PAYLOAD} FROM current "
+            "WHERE origin=? AND project=? AND entity=?", (origin, project, entity),
+        ).fetchone()
+        return {"binding": binding, "row": self._row(row, binding, project, head)}
+
     def read(self, *, origin, project, entity):
         self._scope(origin, project)
         identifier(entity, "observation entity")
         with self._transaction(write=False) as (connection, store, head, _floor):
-            binding, _position = self._binding(connection, origin)
-            row = connection.execute(
-                f"SELECT entity,generation,source_revision,position,present,{_PAYLOAD} FROM current "
-                "WHERE origin=? AND project=? AND entity=?", (origin, project, entity),
-            ).fetchone()
             return {
                 "cursor": ObservationCursor(store, origin, project, head),
-                "binding": binding,
-                "row": self._row(row, binding, project, head),
+                **self._point(connection, origin, project, entity, head),
             }
+
+    def read_points(self, points):
+        if (type(points) is not tuple or not 1 <= len(points) <= MAX_POINT_READS
+                or any(type(point) is not tuple or len(point) != 3 for point in points)):
+            raise PlanError("an explicit bounded tuple of observation points is required")
+        for origin, project, entity in points:
+            self._scope(origin, project)
+            identifier(entity, "observation entity")
+        if len(set(points)) != len(points):
+            raise PlanError("duplicate observation points")
+        with self._transaction(write=False) as (connection, _store, head, _floor):
+            return tuple(self._point(connection, *point, head) for point in points)
 
     def page(self, *, origin, project, after_entity=None, limit=MAX_PAGE_ROWS, at=None):
         self._scope(origin, project)

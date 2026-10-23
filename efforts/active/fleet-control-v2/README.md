@@ -366,6 +366,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Review and implement the bounded
   [scoped point-set snapshot](scoped-observation-snapshot.md) prerequisite,
   preserving one committed read view without adding replay or wire authority.
+  The plan is reviewed in #8290; isolated source and local validation are
+  prepared, with implementation review and merged publication still required.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
   The subsequent operator approval permits only an isolated transport-neutral
@@ -449,6 +451,30 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-23 - Reviewed snapshot contract and isolated implementation
+
+- #8290 actually merged as `f69c0f3e560c5f8b08a0c9fc7678534b8874a2a9` after
+  exact-head approval and required checks. Reconciled tracking and synchronized
+  the original source before runtime edits; no other agent was contacted.
+- Added the bounded point-set read on one query-only SQLite transaction,
+  reusing indexed point lookup and complete-row validation. The reader shares
+  its existing fence, authorization, projection and terminal completion paths
+  with the unchanged single-point API; no new policy or serving owner.
+- The first run exposed a stale prepared package. Refreshing the declared
+  isolated environment resolved missing-module collection failures. The first
+  process proof then exposed writer initialization contending with the held
+  read transaction; initialize that fixture before triggering its update.
+  Neither failure was waived or used to enlarge a deadline.
+- Strengthened the process control to use one origin-generation transition
+  affecting both selected points, rather than a single row change that could
+  still describe a valid later view. The final owned packet passes 162 tests
+  in 50.23 seconds under the unchanged 120-second limit, including both APIs'
+  mixed-caller deadlock controls and a real signed-identity consumer.
+- Touched F/E9 lint and the 13-plugin install contract pass. The source and
+  documentation retain point-only coverage, no exposed cursor, no replay or
+  delayed emission authority, and the broader provider/integration gates.
+  Current-head review and required CI remain gates before implementation merge.
 
 ### 2026-10-23 - Isolated point-set snapshot prerequisite proposed
 
