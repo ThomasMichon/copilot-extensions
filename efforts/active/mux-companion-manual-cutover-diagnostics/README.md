@@ -307,8 +307,8 @@ as test setup before any handoff composition began:
   session can close on its own.
 
 ### 2026-10-06 — Live re-validated the #5455 fix; triaged 2 stray claims; new quiesce-before-trigger skill step
-Picked up via handoff (task `5bad80aac0b7435ea0b3585944d5025a`), whose two
-remaining items were: (1) live re-validate the #5455 predecessor-retire fix
+Resumed from an earlier handoff, whose two remaining items were:
+(1) live re-validate the #5455 predecessor-retire fix
 against real mechanism (not the old/broken code the original discovery ran
 against), and (2) triage two flagged worktree claims.
 

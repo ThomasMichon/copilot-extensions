@@ -237,8 +237,8 @@ given this inconclusive automated signal.
 
 ### 2026-10-07 — Operator report: Ctrl+K fires, popup content blank
 
-Operator's session (`wt-tmichon-cloud1-win-20260916-233618-927b`) predated
-the version that first stamped the Ctrl+K bind, so the automatic
+The operator's existing session predated the version that first stamped
+the Ctrl+K bind, so the automatic
 `Invoke-AwMuxCompanionBind` call never applied to it (expected "old session,
 new code" gap, not a code regression — see the companion handoff for that
 half of the investigation). A live manual `source-file` re-apply against
