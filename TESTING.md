@@ -33,7 +33,10 @@ retained lock-export API on Linux and Windows. `tools/test_installer_dependency_
 uses a synthetic loopback package index: ordinary UV selects a recent transitive
 wheel, while the retained export selects the seasoned version with exact hashes,
 ignores stale output pins, survives mutations of original project/requirement/
-configuration files, and refuses missing upload timestamps. The same bounded
+configuration files through canonical and absolute-dot input paths, and refuses
+missing upload timestamps. Directory requirement edges and local source mappings
+refuse before export; metadata-only project inputs still produce registry-only
+hashed output after the private snapshot is removed. The same bounded
 lane retains the existing transitive/isolated-build installer age cases.
 Pure option, effective-output and resolver-drift controls run alongside those
 native cases. This does not resolve a governed feed or approve a target profile;

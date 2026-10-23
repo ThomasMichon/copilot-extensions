@@ -2980,8 +2980,11 @@ hashes, a fresh resolution (`--upgrade`, ignoring existing output pins), and no
 header or source annotations. An explicit output path remains relative to the
 original effective working directory, never the temporary snapshot. Without
 an explicit output, UV writes to the caller's captured standard output;
-ambient file redirection, package omissions, index-URL emission, live editable
-graphs and unsupported compile options refuse. `prepare_uv_compile` is only
+ambient file redirection, package omissions, index-URL emission, directory
+dependencies (editable or not), local artifact mappings and unsupported compile
+options refuse. Metadata-only project inputs remain supported; every positional
+input is canonicalized into the retained graph, including absolute path aliases.
+`prepare_uv_compile` is only
 preflight. This is candidate lock construction, not target-profile approval,
 wheel acquisition, feed qualification or runtime activation.
 

@@ -56,6 +56,10 @@ class DependencyPolicyError(RuntimeError):
     """An installation could not establish the seasoning policy."""
 
 
+class _CompileMetadata(set):
+    """Compile project roots are metadata inputs, never directory dependencies."""
+
+
 def _captured_environment(env):
     result = {}
     for key, value in (os.environ if env is None else env).items():
@@ -184,6 +188,8 @@ def _check_requirement(
     candidate = _contained(candidate, roots)
     if not candidate.is_dir():
         raise DependencyPolicyError("local artifacts cannot prove release age; only owned source directories are exempt")
+    if isinstance(seen, _CompileMetadata):
+        raise DependencyPolicyError("lock export cannot retain directory dependencies or local artifacts")
     _check_project(candidate, roots, seen, expected)
     return candidate
 
@@ -241,6 +247,8 @@ def _inspect_project(
                         or not isinstance(entry["path"], str)):
                     raise DependencyPolicyError("local UV path source is unsupported")
                 child = _contained(source / entry["path"], roots)
+                if isinstance(seen, _CompileMetadata):
+                    raise DependencyPolicyError("lock export cannot retain directory dependencies or local artifacts")
                 if _bundled_dbus_next(identity, name, child):
                     continue
                 if not child.is_dir():
@@ -412,7 +420,7 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
             project_directory = value
     if directory:
         base = (base / directory).resolve()
-    seen: set[Path] = set()
+    seen: set[Path] = _CompileMetadata() if operation == "compile" else set()
     files: set[Path] = set()
     editables: set[Path] = set()
     for option, value in pairs:
@@ -499,8 +507,6 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
             for entry in entries if isinstance(entries, list) else [entries]:
                 if entry.get("editable") is True and "path" in entry:
                     editables.add(_contained(project / entry["path"], roots))
-    if operation == "compile" and editables:
-        raise DependencyPolicyError("lock export cannot retain live editable sources")
     return base, seen, files, editables
 
 
@@ -875,7 +881,7 @@ def retain_uv_install(
         for option, value in _argument_pairs(original):
             if option in ("--directory", "--config-file"):
                 continue
-            if option in _FILE_OPTIONS or option == "--project":
+            if (_operation == "compile" and not option) or option in _FILE_OPTIONS or option == "--project":
                 value = str(mirror(base / value))
             elif option in ("-p", "--python", "--target", "-t", "--prefix", "--cache-dir", "--cert"):
                 if (base / value).exists() or Path(value).is_absolute():

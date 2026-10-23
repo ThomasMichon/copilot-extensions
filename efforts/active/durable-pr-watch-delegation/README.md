@@ -704,10 +704,16 @@ callback an implicit credential store.
   URLs. Unsupported compile shapes and live editable graphs refuse. This does
   not approve a profile, acquire its exact closure, qualify a governed feed or
   construct an offline context/image.
-- The contained targeted Windows selection passes 218 tests. Four real compile
+- The contained targeted Windows selection passes 225 tests. Real compile
   cases establish a positive recent-version control, seasoned transitive hashes,
   refusal of missing upload timestamps, existing-output independence and
-  original-input mutation isolation. The separate native selection also passes
+  original-input mutation isolation, including absolute-dot aliases. Review
+  exposed directory dependency exports that could reference cleaned-up snapshots
+  and positional file aliases that could reopen mutable originals. Four new
+  cases failed before correction; compile now refuses directory requirement
+  edges/local artifact mappings while preserving metadata-only project inputs,
+  and maps every positional input through the canonical retained graph.
+  Positive exports are checked after snapshot cleanup. The separate native selection also passes
   all eight existing transitive/isolated-build age cases. All 59 workflow-scope
   tests pass after correcting stale artifact-lane and replay-store expectations.
   Fatal lint, all thirteen installer contracts and both canonical sync checks

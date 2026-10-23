@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -146,17 +147,41 @@ def test_compile_refuses_effective_editable_graph(tmp_path, monkeypatch):
         tmp_path / "root", sources='fixture-child={path="../child", editable=true}',
         dependencies='"fixture-child"',
     )
-    with pytest.raises(policy.DependencyPolicyError, match="live editable"):
+    with pytest.raises(policy.DependencyPolicyError, match="directory dependencies"):
         policy.prepare_uv_compile(
             "fixture-uv", [str(project / "pyproject.toml")], env={}, cwd=tmp_path,
             trusted_source_roots=(tmp_path,), now=NOW,
         )
 
 
+@pytest.mark.parametrize("reference", ["requirements", "project", "sources"])
+def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp_path, reference):
+    child = source_project(tmp_path / "child", name="fixture-child")
+    dependency = "fixture-child @ " + child.as_uri()
+    if reference == "requirements":
+        operand = tmp_path / "input.in"
+        operand.write_text(dependency + "\n", encoding="utf-8")
+    else:
+        source = source_project(
+            tmp_path / "source", dependencies='"fixture-child"' if reference == "sources" else json.dumps(dependency),
+            sources='fixture-child={path="../child"}' if reference == "sources" else "",
+        )
+        operand = source / "pyproject.toml"
+    output = tmp_path / "export.txt"
+    with pytest.raises(policy.DependencyPolicyError, match="directory dependencies"):
+        policy.run_uv_compile(
+            "uv", [str(operand), "-o", str(output), "--python", sys.executable, "--no-index"],
+            env=offline_environment(tmp_path), cwd=tmp_path, now=NOW,
+            trusted_source_roots=(tmp_path,), capture_output=True, text=True, timeout=30,
+        )
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("alias", [False, True], ids=["canonical-input", "absolute-dot-input"])
 @pytest.mark.parametrize("source_kind", ["project", "requirements"])
 @pytest.mark.parametrize("missing_age", [False, True])
 def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
-    tmp_path, monkeypatch, source_kind, missing_age,
+    tmp_path, monkeypatch, source_kind, missing_age, alias,
 ):
     artifacts = {}
     projects = {}
@@ -235,12 +260,14 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         operand = tmp_path / "requirements.in"
         operand.write_text("-r nested.in\n", encoding="utf-8")
         roots = ()
+    operand_argument = str(operand.parent) + os.sep + "." + os.sep + operand.name if alias else str(operand)
     included = tmp_path / "nested.in"
     included.write_text("fixture-root>=1\n", encoding="utf-8")
     output = tmp_path / "locked.txt"
     output.write_text("fixture-child==0.1\n", encoding="utf-8")
     actual_run = subprocess.run
     mutations = []
+    retained_directories = []
 
     def run(command, **options):
         if "--show-settings" not in command and command[1:3] == ["pip", "compile"]:
@@ -250,12 +277,13 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
             config.write_text("invalid config\n", encoding="utf-8")
             assert Path(options["env"]["UV_CONFIG_FILE"]) != config
             assert Path(options["cwd"]) != tmp_path
+            retained_directories.append(Path(options["cwd"]))
         return actual_run(command, **options)
 
     monkeypatch.setattr(policy.subprocess, "run", run)
     try:
         unguarded = actual_run(
-            [policy._select_uv_executable("uv"), "pip", "compile", str(operand),
+            [policy._select_uv_executable("uv"), "pip", "compile", operand_argument,
              "--python", sys.executable, "--no-header", "--no-annotate",
              "--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu",
              "--only-binary", ":all:"],
@@ -266,13 +294,14 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         assert "fixture-child==2.0" in unguarded.stdout
         downloads.clear()
         result = policy.run_uv_compile(
-            "uv", [str(operand), "-o", "locked.txt", "--python", sys.executable,
+            "uv", [operand_argument, "-o", "locked.txt", "--python", sys.executable,
                    "--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu",
                    "--only-binary", ":all:"],
             env=environment, cwd=tmp_path, now=NOW, trusted_source_roots=roots,
             capture_output=True, text=True, timeout=30,
         )
         assert mutations == [True]
+        assert retained_directories and all(not path.exists() for path in retained_directories)
         if missing_age:
             assert result.returncode != 0
             assert output.read_text(encoding="utf-8") == "fixture-child==0.1\n"
@@ -281,6 +310,7 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
             text = output.read_text(encoding="utf-8")
             assert "fixture-root==1.0" in text and "fixture-child==1.0" in text
             assert "fixture-child==2.0" not in text and "fixture-child==0.1" not in text
+            assert "file:" not in text
             for filename in ("fixture_root-1.0-py3-none-any.whl", "fixture_child-1.0-py3-none-any.whl"):
                 assert "--hash=sha256:" + hashlib.sha256(artifacts[filename]).hexdigest() in text
             assert not text.startswith("#")
