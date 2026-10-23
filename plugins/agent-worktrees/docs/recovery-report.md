@@ -5,6 +5,11 @@ report-only consumer of the [G1 envelope and placement contract](recovery-facts.
 It returns before normal doctor project/session discovery and cannot be
 combined with repair, GC, daemon-health or other targeted doctor options.
 The legacy doctor/default adoption guards are unchanged.
+`front_door_cli.resolve_invocation_project` recognizes this exact mode before
+explicit project lookup: `--project`, `--project=...` and `-p` do not discover a
+registry or change CWD for this report. Relative request filenames therefore
+remain relative to the invoking CWD. Unencodable/surrogate paths produce
+`invalid_root`, not a filesystem traceback.
 
 The caller supplies an independently resolved, exact selection:
 

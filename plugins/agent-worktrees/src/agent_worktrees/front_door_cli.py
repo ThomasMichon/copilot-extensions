@@ -42,6 +42,11 @@ def resolve_invocation_project(
     is_no_project: Callable[[list[str]], bool],
 ) -> bool:
     """Select project identity and assumed CWD before structured dispatch."""
+    if args_list[:1] == ["doctor"] and any(
+        arg == "--recovery-report" or arg.startswith("--recovery-report=")
+        for arg in args_list[1:]
+    ):
+        return False
     if args_list and args_list[0] == "record":
         from .record_config import metadata_project
 

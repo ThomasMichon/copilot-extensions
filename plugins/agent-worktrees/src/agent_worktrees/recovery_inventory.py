@@ -19,6 +19,7 @@ REQUEST_SCHEMA = "agent-worktrees.recovery-report-request"
 
 def read_bounded(path: Path, limit: int) -> bytes:
     """Read one ordinary explicit file, without discovery or repair."""
+    _root(str(path))
     try:
         _ordinary_chain(path.parent)
         info = path.lstat()
@@ -41,6 +42,10 @@ def read_bounded(path: Path, limit: int) -> bytes:
 def _root(value: object) -> Path:
     if not isinstance(value, str) or not value or "\0" in value:
         raise RecoveryError("invalid_root")
+    try:
+        value.encode("utf-8")
+    except UnicodeError:
+        raise RecoveryError("invalid_root") from None
     path = Path(value)
     if not path.is_absolute() or ".." in path.parts:
         raise RecoveryError("invalid_root")

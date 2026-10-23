@@ -260,3 +260,12 @@ supported rollback-reader floor are explicit decisions, not implied approval.
 - Ruff F/E9, install-contract, documentation consistency and effort structure
   passed. Full process/native Git, Linux, installed/runtime and live-resource
   qualification are not claimed; execution admission remains synthetic only.
+- Source review found explicit-project routing could precede the report handler.
+  Fresh claims/file checks found `front_door_cli.py` unclaimed; its existing
+  `resolve_invocation_project` now recognizes only the new report mode before
+  registry/CWD resolution. Claimed `__main__.py` and excluded files remain
+  untouched. Actual `__main__.main` fixtures forbid those effects.
+- Also scoped malformed Unicode paths to `invalid_root`. Updated contained
+  Windows evidence: **135 recovery tests passed** (79 G1 + 56 G3), plus **9
+  selected existing CLI-routing regressions passed** (166 deselected). Ruff
+  F/E9 remains green. No actual rollback binary floor is inferred.

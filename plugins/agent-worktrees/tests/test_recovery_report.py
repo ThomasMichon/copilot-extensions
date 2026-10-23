@@ -335,3 +335,48 @@ def test_text_report_is_not_a_readiness_signal(tmp_path, capsys):
     assert "migration=unknown" in output
     assert "effects=not-admitted" in output
     assert source.read_bytes() == raw
+
+
+@pytest.mark.parametrize("field", ["worktree_root", "git_common_dir", "central_record_path"])
+def test_unencodable_input_paths_are_typed(tmp_path, capsys, field):
+    request, _, _ = fixture(tmp_path)
+    request[field] = str(tmp_path / "\ud800")
+    code, report = run_report(tmp_path, request, capsys)
+    assert code == 1
+    assert report["error"] == "invalid_root"
+    assert_no_authority(report)
+
+
+def test_unencodable_request_filename_is_typed(tmp_path, capsys):
+    args = argparse.Namespace(recovery_report=str(tmp_path / "\ud800"), json=True)
+    assert recovery_doctor.targeted_report(args) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "invalid_root"
+
+
+@pytest.mark.parametrize("project", [
+    ["--project", "fixture"], ["--project=fixture"], ["-p", "fixture"], [],
+])
+@pytest.mark.parametrize("fix", [False, True])
+def test_actual_front_door_preserves_cwd_and_skips_project_discovery(
+    tmp_path, capsys, monkeypatch, project, fix,
+):
+    from agent_worktrees import __main__ as main
+    request, _, _ = fixture(tmp_path)
+    source = tmp_path / "request.json"
+    source.write_bytes(encode(request))
+    monkeypatch.chdir(tmp_path)
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("exact recovery report entered project discovery or CWD mutation")
+    monkeypatch.setattr(main, "_resolve_active_project", forbidden)
+    monkeypatch.setattr(main, "_cwd_is_inside_project", forbidden)
+    monkeypatch.setattr(main.os, "chdir", forbidden)
+    argv = [*project, "doctor", "--recovery-report=request.json", "--json"]
+    if fix:
+        argv.append("--fix")
+    assert main.main(argv) == int(fix)
+    report = json.loads(capsys.readouterr().out)
+    if fix:
+        assert report["error"] == "report_only_option_conflict"
+    else:
+        assert report["anchors"]["status"] == "candidate"
+    assert_no_authority(report)
