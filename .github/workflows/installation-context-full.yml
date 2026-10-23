@@ -61,7 +61,7 @@ jobs:
         env:
           PYTHONPATH: libs/single-instance-lease/src:libs/agent-procutil/src
         run: |
-          python tools/seasoned_uv.py --uv uv -- --system pytest
+          python tools/seasoned_uv.py --uv uv -- --system pytest psutil
           python -m pytest -q libs/single-instance-lease/tests/test_operation.py libs/single-instance-lease/tests/test_native_operation_linux.py
           python -m pytest -q libs/agent-procutil/tests/test_native_child.py libs/agent-procutil/tests/test_caller_owned.py libs/agent-procutil/tests/test_caller_owned_native.py
       - name: Qualify actual immutable foundation construction and custody
