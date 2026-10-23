@@ -1,0 +1,9 @@
+{
+  "comment": "Build the native offline test provider directly with the Framework compiler under the existing child deadline.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
