@@ -13,6 +13,7 @@
 - **Continuing supervision coordination:** #6467 and this Active Plan,
   Validation Plan and Journal; bounded source issues retain existing owners.
 - **Sub-issues:** #6467, #6470, #6471, #6793; proposed Phase 7: #7486;
+  startup communication/process clocks: #8051;
   coordinate #6185 and #6407.
 
 ## Guiding Intent
@@ -34,6 +35,7 @@ Preserve the owning ground-layer, installer and configuration authorities.
 | Source safety implementer | Trusted ownership snapshots and optional scoped GitHub authentication | `jittery-latch`, #6793 |
 | Existing scalar-repair owner | Preserve ownership of #6407 and its existing #6421 PR | Existing PR and its current source worktree |
 | Ordinary startup admission proposer | Prepare the proposed Phase 7 contract and bounded regression evidence; implementation remains review-gated | Coordinator and the existing #7486 public claim |
+| Startup observation implementer | Own the reviewed Phase 3 startup-clock slice without taking over lifecycle, hydration or active-turn control | `sluggish-beacon`, #8051 |
 
 ## Coordination
 
@@ -61,6 +63,12 @@ Preserve the owning ground-layer, installer and configuration authorities.
   relationship #7237. Represented admission #1453 and remote-carrier response
   loss #5843 remain separate owners. No implementation is authorized before
   this amendment clears normal public review and merge.
+- **Startup observation:** #8051 owns only the Phase 3
+  [startup-clock amendment](startup-progress-and-timeouts.md). Preserve
+  #6467's master-supervisor scope, #3194's complete hydration acceptance,
+  #4028/#6934/#7337 lifecycle ownership, #4171 active-turn control and
+  #6812 updater observability. No production rollout or uncertain-turn resend
+  follows from plan approval.
 
 ## Context
 
@@ -129,6 +137,15 @@ follow-up turns unchanged. The bounded design and validation matrix are in
 [ordinary-startup-admission.md](ordinary-startup-admission.md).
 This is a proposal, not an implementation or rollout authorization.
 
+### Startup communication/process-clock amendment
+
+The shared service/tool contract is reviewed in #8022 and
+[`docs/patterns/progress-and-timeouts.md`](../../../docs/patterns/progress-and-timeouts.md).
+The [Phase 3 adoption slice](startup-progress-and-timeouts.md) retains the
+operator's literal request and separates required behavior from proposed
+implementation sequencing. It qualifies the composed Dispatch-to-Bridge
+startup path first; it does not claim every suite entry point already conforms.
+
 ## Plan
 
 ### Phase 1 - Review intent and retain existing owners
@@ -166,6 +183,16 @@ This is a proposal, not an implementation or rollout authorization.
 - [ ] Bound post-timeout pipe draining as well as initial subprocess execution.
 - [ ] Compose #6185's conclusion boundary with terminal-cleanup recovery rather
   than replaying completed task work.
+
+### Phase 3a - Startup progress and timeout adoption
+
+- [ ] Review the [startup-clock amendment](startup-progress-and-timeouts.md)
+  before runtime implementation through #8051.
+- [ ] Implement and qualify the actual composed consumer: incremental nested
+  target progress, sliding communication silence and an independent long process
+  budget, without replay or replacement authority.
+- [ ] Resolve source/release and authorized adoption separately; preserve the
+  parent Phase 3 and all unrelated owners' open acceptance.
 
 ### Phase 4 - Resolve repository resources from one registry
 
@@ -462,6 +489,11 @@ is changed by this consolidation.
   after this plan amendment clears review and merge, and before the runtime
   repair lands. Retain the scoped passing control and honest failing
   counterexample without publishing a known failing test as a completed repair.
+- [ ] #8051 satisfies every row of the
+  [startup observation matrix](startup-progress-and-timeouts.md#validation-matrix),
+  including unknown updates, target versus local keepalives, both silence
+  cases, independent process expiry, nested flush, retained identity and
+  uncertain acceptance. Qualify the actual consumer, not only clock helpers.
 
 ## Proposal
 
@@ -476,6 +508,19 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-22 - Propose runtime adoption of the shared timeout contract
+
+- #8022 establishes the service/tool-wide design contract; it does not implement
+  the current Dispatch/Bridge consumer. Worktrees already emits incremental
+  phase and waiting output, while intermediate captured calls and fixed outer
+  deadlines still prevent that signal from composing end-to-end.
+- Added the bounded #8051 Phase 3 amendment, preserving the operator request,
+  independent clocks, existing operation custody and all broader owners.
+  Implementation awaits this proposal's normal review and merge.
+- #8015/#8046 remains the separate caller-discovery pipe-ownership correction;
+  its unchanged legacy budget is not startup-clock adoption or a new numeric
+  default. Source qualification, release and authorized rollout remain distinct.
 
 ### 2026-10-22 - Complete retained acceptance from #2395
 
