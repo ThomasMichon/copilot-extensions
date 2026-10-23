@@ -46,6 +46,10 @@ existing producer, process, maintenance, collector and rollout owners remain sep
 - The reviewed producer/export source slice is complete in #8002 and #8035.
   Remaining checklist items stay with the performance campaign coordinator under
   #7935/#5900; neither the effort nor its umbrella issues are closed.
+- The next explicitly assigned source episode is the bounded
+  [Manager observation slice](manager-observation.md), owned by the Telemetry
+  implementation owner. Reserved Manager/entry files and the retained #8036
+  qualification remain independently owned and unchanged.
 
 ## Context
 
@@ -78,6 +82,22 @@ none is selected by this plan. Pure code and isolated tests may proceed after
 plan review. Proposed overhead thresholds are recommendations to baseline,
 not pre-existing promises. Publish the interface early; prioritize Manager
 startup/new-resume, then hooks.
+
+### Next source-consumer direction
+
+> concrete nativeconsumer adoption/reporting, not more syntheticcanaries.
+>
+> Reuse existingreporter/queue/lifecycle, no secondbus/writer, no hotpathnetwork/fileflush/spawn/import/provisioning.
+>
+> Realexecutableentry/firstrefresh/input/authoritativerows evidence distinct; don'tclaimheadedpaint fromheadlessfixture.
+
+The assigned slice is existing Manager frame-health reporting and explicit
+source-native observation/report adapters only. Source-owned validation may
+export to the separately authorized local endpoint; no installed enrollment or
+service changes are authorized. If a reserved constructor/call-site signature
+is necessary, propose it to the coordinator first. The
+[slice plan](manager-observation.md) preserves these constraints, explicit
+sample/drop/missing evidence and the later structured-signal/hook work.
 
 ## Plan
 
@@ -119,6 +139,17 @@ startup/new-resume, then hooks.
   synthetic call timings are not a UI/launch overhead percentage (#7935).
 - [x] Complete producer/export source review, required checks and merge.
 - [ ] Verify release and authorized installed-serving rollout separately (#7935).
+
+### Phase 5 — Manager source observation
+- [ ] Review and merge the [bounded consumer plan](manager-observation.md).
+- [ ] Admit source observations once and reuse the existing reporter queue,
+  writer and lifecycle without editing reserved Manager/entry files.
+- [ ] Exercise actual source Picker refresh/input observations in owned native
+  processes; distinguish fixtures and unavailable headed/authority evidence.
+- [ ] Produce complete expected/completed/failure/drop/identity/overhead reports
+  and verify actual local receiver readback for the owned observations.
+- [ ] Pass source gates and merge the bounded slice, retaining broader
+  installed-native, structured-log/metric and hook acceptance.
 
 ### Plan addendum: retained Windows mention-guard whole-dispatch qualification (#8036)
 
@@ -186,6 +217,9 @@ afterward it is provenance, not a closed live implementation claim.
 
 ## Validation Plan
 
+- [ ] Complete the [Manager source-observation validation](manager-observation.md#validation)
+  at its stated evidence boundaries; do not turn headless callbacks into headed
+  paint or fixture rows into production authority.
 - [ ] Complete every directly retained #8036 Plan/Validation clause above at its original scope and evidence
   tier, preserving original alternatives, same owners, holds and current
   portfolio bounds. Tracker intake is not implementation or native acceptance.
@@ -218,6 +252,16 @@ independently of shared collector deployment. Missing deployment authorization
 blocks that acceptance item, not pure implementation.
 
 ## Journal
+
+### 2026-10-23 — Next bounded consumer episode admitted
+
+- Resumed the retained source workspace with a fresh scoped task; the completed
+  foundational producer/export episode is not reopened.
+- Read the existing reporter/callback and real Picker test seams. The source
+  observation proposal reuses that writer rather than introducing another bus.
+- Preserved the separately retained #8036 whole-dispatch qualification and
+  existing source claims. No reserved call-site edit or installed/service change
+  has been made. Plan review precedes implementation.
 
 ### 2026-10-22 - Complete retained acceptance from #8036
 
