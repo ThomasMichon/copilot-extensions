@@ -472,15 +472,17 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         output.err(f"Failed to register session: {e}")
         return 1
     try:
-        binding_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         from . import handoff_diagnostics
-
-        handoff_diagnostics.stamp_session_state_worktree_binding(
-            session_id,
-            wt_id,
-            worktree_dir=binding_record.worktree_path,
-            machine=binding_record.execution_machine,
-        )
+        registration_project = cfg.active_project()
+        binding_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        with tracking._RecordLock(binding_path, blocking=False, require_sidecar=True) as binding_guard:
+            if binding_guard.acquired:
+                binding_record = tracking._load_record_uncached(binding_path)
+                handoff_diagnostics.stamp_session_state_worktree_binding(
+                    session_id, wt_id, worktree_dir=binding_record.worktree_path,
+                    machine=binding_record.execution_machine,
+                    worktree_record=binding_record if binding_record.repo == registration_project else None,
+                )
     except Exception:
         pass
     profile_assignment.bind(

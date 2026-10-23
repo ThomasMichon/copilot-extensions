@@ -21,6 +21,101 @@ from agent_worktrees import activity, git_ops, session_projection, sessions, tra
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
+@pytest.mark.parametrize("registration_project", ["test-repo", "other-project"])
+def test_register_session_trusted_stamp_uses_uncached_record_under_guard(
+    tmp_path, tmp_tracking_dir, monkeypatch_config, monkeypatch, registration_project,
+):
+    from agent_worktrees import handoff_diagnostics
+
+    cfg.set_active_project(registration_project)
+    _save_record(tmp_tracking_dir, "wt-subject", str(tmp_path / "checkout"))
+    path = tmp_tracking_dir / "wt-subject.yaml"
+    record = tracking._load_record_uncached(path)
+    record.creation_nonce = "actual-incarnation"
+    save_record(record, path)
+    stale = tracking._load_record_uncached(path)
+    stale.creation_nonce = "cached-stale-incarnation"
+    session_dir = sessions._session_state_dir() / "sid-subject"
+    session_dir.mkdir(parents=True)
+    (session_dir / "worktree-binding.json").write_text(
+        '{"project":"old","creationNonce":"old"}',
+    )
+    original_register = tracking.register_session
+    original_stamp = handoff_diagnostics.stamp_session_state_worktree_binding
+    seen = []
+
+    def register_then_poison_cache(*args, **kwargs):
+        result = original_register(*args, **kwargs)
+        monkeypatch.setattr(tracking, "load_record", lambda *a, **kw: stale)
+        return result
+
+    def stamp_while_guarded(*args, **kwargs):
+        import os
+
+        key = os.path.normcase(os.path.abspath(path))
+        assert tracking._thread_sidecar_counts().get(key, 0) > 0
+        record = kwargs["worktree_record"]
+        seen.append(record.creation_nonce if record is not None else None)
+        return original_stamp(*args, **kwargs)
+
+    monkeypatch.setattr(tracking, "register_session", register_then_poison_cache)
+    monkeypatch.setattr(handoff_diagnostics, "stamp_session_state_worktree_binding", stamp_while_guarded)
+    assert m.cmd_register_session(_args(
+        worktree_id="wt-subject", session_id="sid-subject",
+    )) == 0
+    result = json.loads((session_dir / "worktree-binding.json").read_text())
+    if registration_project == "test-repo":
+        assert seen == ["actual-incarnation"]
+        assert result["project"] == "test-repo"
+        assert result["creationNonce"] == "actual-incarnation"
+    else:
+        assert seen == [None]
+        assert "project" not in result and "creationNonce" not in result
+
+
+def test_register_session_busy_optional_stamp_never_calls_writer(
+    tmp_path, tmp_tracking_dir, monkeypatch_config, monkeypatch,
+):
+    from agent_worktrees import handoff_diagnostics
+
+    _save_record(tmp_tracking_dir, "wt-subject", str(tmp_path / "checkout"))
+    session_dir = sessions._session_state_dir() / "sid-subject"
+    session_dir.mkdir(parents=True)
+    binding_path = session_dir / "worktree-binding.json"
+    binding_path.write_text('{"project":"newer","creationNonce":"newer"}')
+    original_lock = tracking._RecordLock
+    optional_attempts = []
+
+    class Busy:
+        acquired = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def lock(path, *args, **kwargs):
+        if kwargs.get("blocking") is False:
+            assert kwargs == {"blocking": False, "require_sidecar": True}
+            optional_attempts.append(path)
+            return Busy()
+        return original_lock(path, *args, **kwargs)
+
+    def unexpected_stamp(*args, **kwargs):
+        pytest.fail("contended optional stamp must not call the writer")
+
+    monkeypatch.setattr(tracking, "_RecordLock", lock)
+    monkeypatch.setattr(handoff_diagnostics, "stamp_session_state_worktree_binding", unexpected_stamp)
+    assert m.cmd_register_session(_args(
+        worktree_id="wt-subject", session_id="sid-subject",
+    )) == 0
+    assert optional_attempts == [tmp_tracking_dir / "wt-subject.yaml"]
+    assert json.loads(binding_path.read_text()) == {
+        "project": "newer", "creationNonce": "newer",
+    }
+
+
 @pytest.fixture(autouse=True)
 def synthetic_folder_trust(monkeypatch):
     """These registration-identity fixtures use deliberately nonexistent paths.
@@ -1116,6 +1211,8 @@ class TestDeregisterSessionStdin:
             "ancestors": [{"pid": 101, "start_time": "100"}],
         }
         monkeypatch.setattr(native_source_context, "epoch", lambda: epoch)
+        execution_platform = cfg.detect_platform()
+        monkeypatch.setattr(cfg, "detect_platform", lambda: execution_platform)
         monkeypatch.setattr(m.sys, "platform", "linux")
         monkeypatch.setattr(session_binding_cli, "_resolve_active_project", lambda project: (project, None))
         for wt_id, source in (

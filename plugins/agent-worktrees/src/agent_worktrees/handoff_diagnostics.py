@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import ExitStack
 from pathlib import Path
 
 from . import activity
@@ -97,6 +98,7 @@ def stamp_session_state_worktree_binding(
     *,
     worktree_dir: str | None = None,
     machine: str | None = None,
+    worktree_record: tracking.WorktreeRecord | None = None,
 ) -> dict[str, object] | None:
     """Best-effort, unconditional durable record of "this session registered
     against this worktree" -- written from the session-state side (mirrors
@@ -111,6 +113,10 @@ def stamp_session_state_worktree_binding(
     already owns it (mirrors context-handoff's `writeSessionStateHandoff`
     convention); a session-state dir that does not yet exist is a silent
     no-op, not an error. Atomic write via a temp-file rename.
+
+    An actual record may add trusted subject fields only under nonblocking
+    sidecar ownership and an uncached identity/revision/association recheck.
+    The registration caller keeps the same guard through this atomic stamp.
     """
     path = session_state_worktree_binding_path(session_id)
     if path is None or not worktree_id:
@@ -126,10 +132,44 @@ def stamp_session_state_worktree_binding(
         "registeredAt": tracking._now_iso(),
     }
     try:
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(record, indent=2), encoding="utf-8")
-        tmp.replace(path)
-    except OSError:
+        with ExitStack() as guards:
+            project = cfg.active_project()
+            if (
+                isinstance(worktree_record, tracking.WorktreeRecord)
+                and project
+                and re.fullmatch(r"[A-Za-z0-9_.-]+", worktree_id)
+            ):
+                record_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+                guard = guards.enter_context(tracking._RecordLock(
+                    record_path, blocking=False, require_sidecar=True,
+                ))
+                if not guard.acquired:
+                    return None
+                try:
+                    current = tracking._load_record_uncached(record_path)
+                except OSError:
+                    return None
+                except (ValueError, TypeError):
+                    current = None
+                if (
+                    current is not None
+                    and current.repo == worktree_record.repo == project
+                    and current.worktree_id == worktree_record.worktree_id == worktree_id
+                    and isinstance(current.creation_nonce, str)
+                    and current.creation_nonce
+                    and current.creation_nonce == worktree_record.creation_nonce
+                    and current.lifecycle_revision == worktree_record.lifecycle_revision
+                    and current.head_revision == worktree_record.head_revision
+                    and (
+                        current.session_entry(session_id) is not None
+                        or any(h.candidate == session_id for h in current.pending_handoffs)
+                    )
+                ):
+                    record.update(project=current.repo, creationNonce=current.creation_nonce)
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(record, indent=2), encoding="utf-8")
+            tmp.replace(path)
+    except (OSError, RuntimeError):
         return None
     return record
 
