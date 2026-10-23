@@ -342,6 +342,22 @@ class WatchReplay:
                 for key, identities in sorted(groups.items())
             )
 
+    def waiting_target(self, target: ObservationTarget) -> ObservationTarget | None:
+        """Refresh eligibility without admitting registrations added since capture."""
+        with self._lock:
+            registry = self._registries.get((target.account, target.repo))
+            if registry is None:
+                return None
+            waiting = frozenset(
+                identity for identity in target.registration_ids
+                if (sub := registry.subscriber(WatchKey(target.repo, target.number), identity))
+                is not None and sub.pending is None
+            )
+            return (
+                ObservationTarget(target.account, target.repo, target.number, waiting)
+                if waiting else None
+            )
+
     def observe(
         self, account: str, repo: str, number: int, snapshot: PRSnapshot, *,
         registration_ids: frozenset[str] | None = None,

@@ -133,6 +133,15 @@ class ReplayStore:
             ), expires_at=expires_at, checkpoint=checkpoint,
         )
 
+    def waiting_target(
+        self, target: ObservationTarget, *, expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> ObservationTarget | None:
+        return self._transaction(
+            lambda core: core.waiting_target(target),
+            expires_at=expires_at, checkpoint=checkpoint,
+        )
+
     def sweep_timeouts(
         self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
     ) -> dict:

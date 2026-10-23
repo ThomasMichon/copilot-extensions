@@ -503,6 +503,12 @@ callback an implicit credential store.
 
 ### 2026-10-22 - Connect replay groups to finite native observation
 
+- Added a read-only eligibility refresh before each native read: an earlier
+  read's timeout sweep or concurrent completion cannot leave a stale target
+  consuming provider/credential work ahead of another live target. The original
+  captured identity set remains the fence, including cancellation plus a new
+  registration for the same PR. This adds a short reload, not a held I/O lock.
+  The final focused selection passes 275 cases with ten existing platform skips.
 - The first #8028 pass identified valid native snapshots larger than replay's
   delivery budget as a per-target failure, not an owner failure. A reproduced
   two-target regression initially failed at the size refusal. A distinct

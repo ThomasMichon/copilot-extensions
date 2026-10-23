@@ -75,6 +75,10 @@ Apply reloads the current durable envelope under the same operation lock.
 Only the exact registration IDs captured before that read can receive the
 snapshot. Concurrent cancellation is preserved; a registration arriving during
 the read waits for the next cycle rather than adopting an older result.
+Before each read, a short read-only transaction also refreshes the captured
+registrations' eligibility. Targets already completed by a previous read's
+timeout sweep or concurrent cancellation/ACK produce no native or credential
+work. New registrations never substitute for a captured completed registration.
 Pending event IDs, original deadlines and completion receipts are unchanged.
 Provider unavailability does not cancel, reset or replace any subscription,
 and each attempted read is followed by an independent deadline sweep.

@@ -114,6 +114,47 @@ def test_fetch_releases_disk_custody_and_does_not_apply_to_new_registration(stor
     assert execute(store, "pending")["events"][0]["registration_id"] == fresh[0][1]["registration_id"]
 
 
+@pytest.mark.parametrize("completion", ["timeout", "replacement"])
+def test_earlier_read_skips_completed_target_and_preserves_later_progress(
+    store, monkeypatch, completion,
+):
+    now = [time.time()]
+    store.clock = lambda: now[0]
+    register(store)
+    original, receipt = register(store, request="second", number=2, deadline_at=now[0] + 10)
+    register(store, request="third", number=3)
+    calls = []
+    replacement = []
+
+    def fetch(repo, number, *args, **kwargs):
+        calls.append(number)
+        if number == 1:
+            if completion == "timeout":
+                now[0] += 11
+            else:
+                execute(store, "cancel", {
+                    "request_id": original["request_id"], "issued_at": original["issued_at"],
+                    "registration_id": receipt["registration_id"],
+                })
+                replacement.append(register(store, request="new-second", number=2))
+        return PRSnapshot(merged=True)
+
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    owner = ReplayObserver(store, bindings=(binding(),))
+    assert cycle(owner) == {"status": "observed", "observed": 2, "unavailable": 0, "unbound": 0}
+    assert calls == [1, 3]
+    events = execute(store, "pending")["events"]
+    assert {event["number"] for event in events if not event["timed_out"]} == {1, 3}
+    if completion == "timeout":
+        timeout = next(event for event in events if event["number"] == 2)
+        assert timeout["timed_out"] and timeout["registration_id"] == receipt["registration_id"]
+    else:
+        assert {event["number"] for event in events} == {1, 3}
+        assert execute(store, "register", replacement[0][0]) == replacement[0][1]
+        assert cycle(owner)["observed"] == 1
+        assert calls == [1, 3, 2]
+
+
 def test_provider_outage_preserves_identity_deadline_and_sweeps_during_read(store, monkeypatch):
     now = [time.time()]
     store.clock = lambda: now[0]

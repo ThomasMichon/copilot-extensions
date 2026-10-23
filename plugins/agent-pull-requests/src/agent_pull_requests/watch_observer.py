@@ -86,6 +86,9 @@ class ReplayObserver:
             if binding is None:
                 unbound += 1
                 continue
+            target = self.store.waiting_target(target, **authority)
+            if target is None:
+                continue
             try:
                 snapshot = fetch_snapshot(
                     target.repo, target.number, binding.command,
