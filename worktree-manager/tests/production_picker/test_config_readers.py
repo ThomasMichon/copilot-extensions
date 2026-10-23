@@ -22,7 +22,7 @@ def test_optional_bootstrap_scalars_avoid_legacy_calls(monkeypatch, tmp_path):
         assert project_config._repo_dir("demo") == str(tmp_path / "repo")
         assert project_config._machine_name("demo") == "host"
     finally:
-        project_config.clear_caches()
+        project_config.clear_caches(reset_binding=True)
 
 
 def test_legacy_scalars_are_single_flight_and_project_scoped(monkeypatch, tmp_path):
@@ -45,7 +45,7 @@ def test_legacy_scalars_are_single_flight_and_project_scoped(monkeypatch, tmp_pa
         assert project_config._project_dir("other") == tmp_path / "other"
         assert calls[-1] == ("other", "config-dir")
     finally:
-        project_config.clear_caches()
+        project_config.clear_caches(reset_binding=True)
 
 
 def _project(name: str, anchor: Path) -> harness_state.ProjectInfo:

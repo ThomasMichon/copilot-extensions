@@ -172,3 +172,17 @@ contract is introduced.
 - Clean first-touch state was provided by the contained test runner and fresh
   fixture roots. No installer or provisioning behavior changed; a complete
   clean-room installation was not needed for this source-only consumer slice.
+
+### 2026-10-23 — Review corrections
+
+- Reproduced the review's two functional findings: non-live setup/reload discarded
+  accepted scalar values before locality input, and environment-enabled mock
+  mode skipped implicit project selection.
+- Bound scalar lifetime now ends only at a new binding, not ordinary file-cache
+  invalidation. A real Textual non-live setup/reload regression exercises locality
+  input after both applications; no scalar subprocess is permitted.
+- Both environment mock switches now preserve implicit selection and ambiguity
+  refusal. Four parameter cases cover one and multiple registered projects.
+- Final targeted startup and adjacent mailbox/local-source cohort: **255 passed**.
+  Touched-file identifier scanning also exposed legacy fixture names; those test
+  values were made generic without changing the roster assertions.

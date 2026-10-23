@@ -114,3 +114,62 @@ def test_authoritative_loader_does_not_wait_for_advisory(monkeypatch):
     monkeypatch.setattr(screen, "_apply_live_source", lambda prepared, value: calls.append(value))
     screen._setup_live_async()
     assert calls == [{"focus_keys": {Source.LOCAL}}, loader]
+
+
+def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tmp_path):
+    from worktree_manager.production_picker import context, project_config as cfg
+    from worktree_manager.production_picker.picker_tui import data_local, tasks
+
+    class Source:
+        LOCAL = data_local.LOCAL
+        REPO, BRANCH = "example", "dev"
+        bucket = staticmethod(data_local.bucket)
+        for_machine = staticmethod(data_local.for_machine)
+
+        @staticmethod
+        def machines():
+            return [("Local", *Source.LOCAL, True)]
+
+        @staticmethod
+        def load():
+            cfg.load_config()
+            return []
+
+    calls = []
+
+    def legacy_read(*args):
+        calls.append(args)
+        raise AssertionError("bound scalars must survive setup/reload")
+
+    monkeypatch.setattr(cfg.engine_client, "get_value", legacy_read)
+    monkeypatch.setattr(tasks, "prewarm_optional_modules", lambda: None)
+    monkeypatch.setattr(engine.PickerScreen, "_scan_pivot_payload", lambda self: None)
+    monkeypatch.setattr(engine.PickerScreen, "_prewarm_machine_key_map", lambda self: None)
+    for name in ("_poll_update_state", "_poll_manager_update_state", "_poll_orphan_state"):
+        monkeypatch.setattr(engine.PickerScreen, name, lambda self: None)
+    context.set_project("example")
+    cfg.bind_bootstrap("example", {
+        "config_dir": str(tmp_path), "repo_dir": str(tmp_path), "machine": Source.LOCAL[0],
+    })
+
+    async def exercise():
+        app = engine.PickerApp(Source(), live=False)
+        async with app.run_test() as pilot:
+            screen = app.query_one(engine.PickerScreen)
+            for phase in ("initial", "reload"):
+                if phase == "reload":
+                    screen._start_setup_reload_worker()
+                for _ in range(50):
+                    if screen._setup_applied_epoch == screen._setup_epoch:
+                        break
+                    await pilot.pause(0.02)
+                assert screen._setup_applied_epoch == screen._setup_epoch
+                assert data_local.is_local(*Source.LOCAL)
+                assert calls == []
+            app.exit()
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        cfg.bind_bootstrap("example", None)
+        context.reset()

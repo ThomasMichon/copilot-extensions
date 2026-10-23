@@ -74,3 +74,33 @@ def test_deferred_selection_failure_retains_usage_exit(monkeypatch, capsys):
     monkeypatch.setattr(runner, "run", fail)
     assert cli._run_production_picker("") == 2
     assert "no project to open" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("key,value", [
+    ("AGENT_WORKTREES_PICKER_MOCK", "1"), ("AGENT_WORKTREES_PICKER_REAL_OPS", "0"),
+])
+@pytest.mark.parametrize("ambiguous", [False, True])
+def test_environment_mock_still_resolves_implicit_project(monkeypatch, key, value, ambiguous):
+    monkeypatch.setenv(key, value)
+    projects = [_project("example")]
+    if ambiguous:
+        projects.append(_project("second"))
+    monkeypatch.setattr(runner.harness_state, "build_projects", lambda: projects)
+    selected = []
+
+    def bootstrap(project):
+        selected.append(project)
+        return {"project": project, "default_live": True, "should_switch_cwd": False}
+
+    def run_picker(*, prepare, **kwargs):
+        prepare()
+
+    monkeypatch.setattr(runner.engine_group_b, "picker_bootstrap", bootstrap)
+    monkeypatch.setattr(runner, "run_tui_picker", run_picker)
+    if ambiguous:
+        with pytest.raises(runner.ProjectSelectionError, match="multiple projects"):
+            runner.run("")
+        assert selected == []
+    else:
+        assert runner.run("") is None
+        assert selected == ["example"]

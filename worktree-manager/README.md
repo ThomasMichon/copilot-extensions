@@ -354,8 +354,10 @@ and remote loading remains lazy. There is no advisory initial-row result that
 can subsequently overwrite current rows. Optional bootstrap `project_config`
 fields (`config_dir`, `repo_dir`, `machine`) seed the Manager's config cache.
 Older engines retain one memoized fallback call per missing scalar, on setup
-workers. This consumer support does not assert that every engine produces those
-optional fields.
+workers. Bound scalars survive ordinary setup/reload file-cache invalidation;
+accepting a new project binding resets them. Environment-enabled mock operations
+still resolve implicit project selection and refuse ambiguity. This consumer
+support does not assert that every engine produces those optional fields.
 
 First pending refresh is not first current rows, and neither alone proves visible
 native input acknowledgement. Existing launch tracing records

@@ -28,7 +28,7 @@ _scalars: dict[tuple[str, str], str] = {}
 
 def bind_bootstrap(project: str, values: object) -> None:
     """Adopt optional engine scalars; older engines keep the memoized fallback."""
-    clear_caches()
+    clear_caches(reset_binding=True)
     if not isinstance(values, dict):
         return
     with _scalar_lock:
@@ -96,9 +96,11 @@ def cached_load_config_scope():
     return contextlib.nullcontext(ConfigCacheSession())
 
 
-def clear_caches() -> None:
-    with _scalar_lock:
-        _scalars.clear()
+def clear_caches(*, reset_binding: bool = False) -> None:
+    """Refresh file snapshots without discarding the accepted engine binding."""
+    if reset_binding:
+        with _scalar_lock:
+            _scalars.clear()
     _project_dir.cache_clear()
     _repo_dir.cache_clear()
     _machine_name.cache_clear()

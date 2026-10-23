@@ -119,7 +119,7 @@ def run(
     root_lock = threading.Lock()
 
     def prepare():
-        selected = project if resolved_mock else _select_project(project)
+        selected = project if resolved_mock and project else _select_project(project)
         try:
             payload = engine_group_b.picker_bootstrap(selected)
         except engine_client.EngineFeatureUnavailable as error:
