@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-23
-- **Status:** Done
+- **Status:** Active
 - **Vision:** [Picker](../../../visions/picker/README.md), responsive-by-budget
 - **Umbrella issue:** #7939
 - **Sub-issues:** #7940 (shared configuration dependency; not absorbed)
@@ -101,7 +101,7 @@ effort is the finite Actions consumer slice, not completion of a wider campaign.
 
 - [x] Update the directly related runtime documentation and mandatory changefile.
 - [x] Complete focused functional tests, lint and required source checks.
-- [x] Obtain independent required review, resolve findings and verify actual merge.
+- [ ] Obtain independent required review, resolve findings and verify actual merge.
 - [x] Deferred to `#7939`: Record release/rollout and native qualification separately; do not change
   installed payloads, services or production UI as part of this source slice.
 
@@ -180,12 +180,12 @@ interfaces. Do not create a general request broker or shared polling layer.
 ### 2026-10-23 — Source slice merged; acceptance owners retained
 
 - Implementation #8150 merged as `dd21e7509342ac1e5d9f22ac6a171cafb0837d19`
-  after required checks passed and a clean current-head Copilot review. Its
+  after required checks passed. Its
   earlier alias-locality finding was fixed by calling the source's canonical
   `is_local` method on the worker, with the tuple fallback retained for old
   sources. The final contained Actions/menu packet passed 41 tests; lint,
   module-size and install-contract guards passed.
-- The finite source effort is Done, not the entire responsiveness campaign.
+- The finite source effort is separate from the entire responsiveness campaign.
   #7939 remains open for release/installed acceptance; #7935 retains actual
   cold/warm native Actions/input qualification; #7940 retains all configuration
   freshness and supplier/consumer integration work. No native budget or live
@@ -193,3 +193,19 @@ interfaces. Do not create a general request broker or shared polling layer.
 - Shared-cache proposal remains reviewed intent only. No `project_config.py`,
   startup binding, pending view, scalar API, telemetry reporter or authoritative
   row-feed code was edited.
+
+### 2026-10-23 — Corrected review assessment and pre-mount warning repair
+
+- The final #8150 review body contained a Medium pre-mount warning-loss finding
+  despite its "No open issues" heading and the absence of an unresolved inline
+  thread. The earlier clean-review/completion assessment was incorrect.
+- Reopened the finite source completion gate. The follow-up stores verification
+  status on `SubMenuScreen` before widget lookup and renders that stored value
+  during composition. Tests cover unbound, error, missing and successful results
+  arriving before the modal mounts. This is source repair, not native/cache
+  acceptance deferred elsewhere.
+- Source completion awaits review and actual merge of this repair. Inspect full
+  review bodies as well as threads before deciding that the review gate passed.
+- The corrected contained packet passes 46 tests, including a result delivered
+  after composition but before mount. Touched Python lint passes; native
+  qualification and installed rollout remain unperformed.

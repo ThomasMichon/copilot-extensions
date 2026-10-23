@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Actions verification warnings and accepted content across modal composition and mounting.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

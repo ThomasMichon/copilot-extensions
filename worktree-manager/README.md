@@ -1133,6 +1133,8 @@ rebinding the project discards late results. Accepted results update the header,
 verbs, modifiers and dialog-owned dispatch maps together without rewriting the
 authoritative row feed. Missing records or failed probes retain cached content
 with a `liveness not verified` footer instead of presenting a successful refresh.
+The accepted status survives results arriving before composition or mounting;
+mounting replays the accepted header, verbs and footer rather than clearing it.
 
 These are functional guarantees; headless modal tests do not establish the
 native Actions-under-one-second or input-under-100ms budgets.

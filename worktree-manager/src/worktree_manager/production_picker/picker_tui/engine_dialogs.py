@@ -398,6 +398,7 @@ class SubMenuScreen(ModalScreen[tuple]):
         # to refine the verbs in place when it lands. ``engine`` supplies the
         # shared ``spin()`` frame so the spinner is consistent across the app.
         self._loading = loading
+        self._verification_status = ""
         self._engine = engine
         self._foot_frame = 0
         self._spin_timer = None
@@ -448,7 +449,7 @@ class SubMenuScreen(ModalScreen[tuple]):
             yield Static(self._header(), id="sub-head")
             yield OptionList(*self._prompts(), id="sub-list")
             yield Static("", id="sub-desc")
-            yield Static("", id="sub-foot")
+            yield Static(Text(self._verification_status), id="sub-foot")
 
     def _header(self) -> Text:
         rec = self._rec
@@ -506,6 +507,8 @@ class SubMenuScreen(ModalScreen[tuple]):
             # the verbs above are already actionable from cached state.
             self._paint_foot()
             self._spin_timer = self.set_interval(0.1, self._paint_foot)
+        else:
+            self.refresh_actions(self._actions, status=self._verification_status)
 
     def _spin_char(self) -> str:
         """The current spinner glyph -- the engine's shared frame when available
@@ -533,6 +536,7 @@ class SubMenuScreen(ModalScreen[tuple]):
         cached state; this corrects the verbs without a re-open). Preserves the
         No-mux toggle and re-anchors the highlight."""
         self._loading = False
+        self._verification_status = status
         if self._spin_timer is not None:
             try:
                 self._spin_timer.stop()

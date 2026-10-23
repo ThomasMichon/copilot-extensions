@@ -300,3 +300,59 @@ def test_real_modal_updates_header_verbs_and_unknown_footer_together(bound):
             assert app.screen is not menu
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("outcome", ["unbound", "error", "missing", "success"])
+def test_pre_mount_refinement_keeps_verification_status(bound, outcome):
+    from textual.app import App
+    from textual.widgets import Static
+
+    async def run():
+        picker = Picker(record())
+        app = App()
+        picker.app = app
+        async with app.run_test() as pilot:
+            if outcome == "unbound":
+                context.reset()
+            picker._open_submenu()
+            menu = app.screen
+            assert not menu.is_mounted
+            if outcome != "unbound":
+                _, done = picker.requests.pop()
+                row = {"id": "example-win-row", "session_lock_live": True}
+                done((row, True) if outcome == "success" else (None, None))
+            await pilot.pause()
+            assert menu.is_mounted and not menu._loading
+            footer = menu.query_one("#sub-foot", Static).render().plain
+            if outcome == "success":
+                assert footer == ""
+                assert "lock live" in menu.query_one("#sub-head", Static).render().plain
+            else:
+                assert "liveness not verified" in footer
+
+    asyncio.run(run())
+
+
+def test_refinement_after_composition_is_replayed_on_mount():
+    from textual.app import App
+    from textual.widgets import Static
+
+    async def run():
+        app = App()
+        menu = SubMenuScreen(record(), ["Resume"], loading=True)
+        compose = menu.compose
+
+        def refine_after_compose():
+            yield from compose()
+            menu._rec["title"] = "Refined title"
+            menu.refresh_actions(["Reclaim"], status="cached · liveness not verified")
+
+        menu.compose = refine_after_compose
+        async with app.run_test() as pilot:
+            app.push_screen(menu)
+            await pilot.pause()
+            assert "not verified" in menu.query_one("#sub-foot", Static).render().plain
+            assert "Refined title" in menu.query_one("#sub-head", Static).render().plain
+            assert menu._actions == ["Reclaim"] and not menu._loading
+
+    asyncio.run(run())
