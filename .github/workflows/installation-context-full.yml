@@ -104,7 +104,23 @@ jobs:
           --test-file tests/test_first_use_genesis.py
           --test-file tests/test_first_use_vault.py
           --test-file tests/test_first_use_vault_command.py
+          --test-file tests/test_first_use_vault_bootstrap.py
           --test-timeout 900 --timeout 1080
+      - name: Qualify Vault bootstrap routing and publication admission
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_payload_invocation.py
+          --test-timeout 120 --timeout 360
+      - name: Qualify actual bootstrap policy and retained snapshot consumers
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_publication.py
+          --test-file tests/test_command_binding.py
+          --test-file tests/test_bridge_first_use_publication.py
+          -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
+          --allow-explicit-tiers --test-timeout 120 --timeout 540
   foundation-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
     name: foundation construction (Windows)
@@ -158,4 +174,20 @@ jobs:
           --test-file tests/test_first_use_genesis.py
           --test-file tests/test_first_use_vault.py
           --test-file tests/test_first_use_vault_command.py
+          --test-file tests/test_first_use_vault_bootstrap.py
           --test-timeout 1200 --timeout 1380
+      - name: Qualify Vault bootstrap routing and publication admission
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_payload_invocation.py
+          --test-timeout 120 --timeout 360
+      - name: Qualify actual bootstrap policy and retained snapshot consumers
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_publication.py
+          --test-file tests/test_command_binding.py
+          --test-file tests/test_bridge_first_use_publication.py
+          -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
+          --allow-explicit-tiers --test-timeout 120 --timeout 540

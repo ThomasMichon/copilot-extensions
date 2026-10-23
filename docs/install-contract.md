@@ -2345,13 +2345,17 @@ the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
 success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call in unadopted wrappers.
-Vault's cold primary and payload commands instead submit to the packaged
+Vault's cold primary/payload commands and legacy session bootstrap instead submit to the packaged
 installation driver's canonical queue before taking any outer provisioning
 lock. They retain the inner canonical installer lock, publication admission,
 source identity and default service recipe. Healthy invocation bypasses driver
 work; missing support and unsupported cold namespaced/platform paths refuse
-without a legacy foreground fallback. Bootstrap hooks and explicit installer
-entry points are separate, unadopted callers. The
+without a legacy foreground fallback. Vault's hook selects only canonical
+stamp or provision, retains its healthy/non-deployment no-ops and emits only
+`{}` plus a diagnostic launch acknowledgement, not a completion receipt.
+It neither holds nor reaps the old PID-based reconciliation guard.
+Other bootstrap hooks and explicit installer entry points remain separate,
+unadopted callers. The
 [driver contract](../libs/update-driver/README.md#fixed-first-use-handoff-and-vault-command-adoption)
 owns the native waiter, receipt/result and qualification boundaries.
 

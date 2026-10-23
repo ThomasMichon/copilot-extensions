@@ -665,8 +665,9 @@ queue or plugin mutation until separately qualified. Vault's cold payload comman
 and generated primary command use this recipe; the latter delegates to its
 selected owning source's runtime gate before taking a provisioning lock
 (the existing snapshot pointer for installed payloads).
-Other publishers, including Vault's bootstrap reconciliation hook and explicit
-installer entry points, have not adopted it. Other plugin identities and their
+Vault's legacy session bootstrap also uses the fixed stamp/provision actions.
+Explicit installer entry points remain separate, unadopted callers.
+Other plugin identities and their
 snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
 
@@ -695,12 +696,29 @@ stamps coalesce without absorbing a provision request. The default provision
 identity is unchanged. A stamp retains source/publication and no-self-provision/
 pinned-read admission, but does not build or select a Vault venv or register its
 service; constructing the independent driver foundation is separate. Combining
-stamp with client-only selection refuses before state creation. This qualified
-recipe is not adoption of the session bootstrap or explicit installer callers.
+stamp with client-only selection refuses before state creation. The recipe does
+not authorize arbitrary lifecycle actions or adopt explicit installer callers.
 The optional Windows `-Wait` and Linux `--wait` keep the launching client as an
 observer of its independently launched finite supervisor and relay its diagnostics
 and exit status. They do not move installation into the caller. Launch-only
 acknowledgement remains the default for existing native clients.
+
+Vault's bootstrap first reads its existing deployment/version/selected-runtime
+markers. A healthy runtime, selected cell or active bootstrap killswitch stays
+read-only without requiring driver support. No-self-provision and pinned reads
+return an explicit deferred no-op; nested ownership refuses. Otherwise the hook
+normalizes runtime routing through the same helper as command dispatch, checks
+the packaged `vault-stamp-v1` lifecycle contract and launches the fixed action
+through the native client. A stale `reconcile.lock` is neither modified nor
+used to kill another process. Its stdout remains only `{}`; stderr carries the
+launch acknowledgement and root-owned diagnostic location, never a durable
+acceptance claim. First stamping and drift retain their session-bound triggers;
+no recurring worker or schedule is added. Global command availability follows
+queued stamp completion, while the payload-local command can be used directly.
+The POSIX hook preserves its existing metadata-Python/no-Python no-op boundary;
+only actual native first-use commands claim Python-free genesis. Stock legacy
+Bash/macOS cold bootstrap explicitly refuses. Other session hook behavior and
+the independent guidance writer remain unchanged.
 
 Vault declares this library through the existing canonical `uv` source and
 release materializer. Its self-contained payload carries the fixed three-sibling
@@ -732,6 +750,10 @@ nonzero result. A changed input fingerprint, context, installation or action
 remains a separate request.
 The trusted runner is reconstructed internally as that foundation's retained
 module, never a caller-supplied executable, installer name or argument recipe.
+Windows admission is already in stock PowerShell 5.1 and invokes the same
+canonical read-only installation helper in-process, with explicit named source,
+root and project arguments. This avoids redundant interpreter startups while
+preserving both publication and provenance checks within the hook deadline.
 
 After `enqueue` commits, the existing queue's ID/state JSON is the **durable
 ordinary-request receipt**. It appears in the supervisor log even if worker
@@ -784,6 +806,13 @@ through the native supervisor, requires a successful ordinary queue result and
 the canonical primary/payload pointer, and proves no Vault venv, current-runtime
 selection or service artifact was created. Subsequent provisioning stays a
 separate request under the same authority.
+The hosted-only actual bootstrap case additionally enforces the declared hook
+deadline and output shape, closes its caller Job/group during cold construction,
+and verifies the same stamp operation/result survives. It then qualifies real
+drift provisioning with default service effects, normalized foreign routing,
+exact originating project and healthy hooks that submit no new work. Canonical
+uninstall and owned-supervisor settlement enclose that disposable service lane;
+it does not authorize operator-host enrollment.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;

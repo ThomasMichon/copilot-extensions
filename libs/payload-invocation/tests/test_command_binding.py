@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -39,13 +40,46 @@ def _write(path: Path, value: Any) -> None:
 
 
 def _snapshot(root: Path) -> dict:
-    return {
-        path.relative_to(root).as_posix(): (
+    def capture(path):
+        return path.relative_to(root).as_posix(), (
             path.is_dir(), path.stat().st_mtime_ns,
             path.read_bytes() if path.is_file() else None,
         )
-        for path in [root, *root.rglob("*")]
-    }
+
+    # Keep every byte and directory timestamp without serial per-file I/O stalls.
+    with ThreadPoolExecutor(max_workers=8) as reader:
+        return dict(reader.map(capture, [root, *root.rglob("*")]))
+
+
+def test_snapshot_retains_every_byte_even_when_size_and_timestamp_are_unchanged(tmp_path):
+    directory = tmp_path / "nested"
+    directory.mkdir()
+    path = directory / "resource"
+    path.write_bytes(b"old")
+    info = path.stat()
+    before = _snapshot(tmp_path)
+    assert before["nested"] == (True, directory.stat().st_mtime_ns, None)
+    assert before["nested/resource"] == (False, info.st_mtime_ns, b"old")
+    path.write_bytes(b"new")
+    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+    after = _snapshot(tmp_path)
+    assert after["nested/resource"] == (False, info.st_mtime_ns, b"new")
+    assert after != before
+
+
+def test_snapshot_surfaces_file_read_failure(tmp_path, monkeypatch):
+    path = tmp_path / "resource"
+    path.write_bytes(b"retained")
+    original = Path.read_bytes
+
+    def fail(target):
+        if target == path:
+            raise OSError("fixture snapshot read failure")
+        return original(target)
+
+    monkeypatch.setattr(Path, "read_bytes", fail)
+    with pytest.raises(OSError, match="fixture snapshot read failure"):
+        _snapshot(tmp_path)
 
 
 def _lifecycle_lock_path(root: Path) -> Path:

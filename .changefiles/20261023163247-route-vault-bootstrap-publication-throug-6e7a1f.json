@@ -1,0 +1,17 @@
+{
+  "comment": "Route Vault bootstrap publication through the existing installation execution owner and retain bounded native admission.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
