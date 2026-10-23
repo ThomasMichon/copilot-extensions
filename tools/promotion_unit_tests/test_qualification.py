@@ -48,6 +48,15 @@ def test_native_inventory_tracks_explicit_pr_registration_without_effects(monkey
     )
     assert ("services/pr/pyproject.toml" in observed) is include_pr
     assert all(row["job_minutes"] <= 360 for row in rows)
+    if include_pr:
+        import validate_materialized_candidate as candidate
+
+        monkeypatch.setattr(candidate, "_regular", regular)
+        recipe = candidate.recipes(Path("fixture"), "pr")
+        assert len(recipe) == 1
+        assert recipe[0][0][2:] == [
+            "services/pr", "--prepare", "--admission-wait", "60", "--timeout", "180",
+        ]
 
 
 @pytest.fixture
