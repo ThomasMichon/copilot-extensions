@@ -21,28 +21,23 @@ The completion gate is released, installed behavior that resolves every existing
 worktree on the adopting host's Windows and WSL environments, not a passing
 example, a source commit, or a merged individual pull request.
 
-**Current status (2026-10-22):** natural qualification `39912447859` successfully
-released the runtime ownership alignment #8010 and tag-aware allocation repair
-#8110 after reviewed helper adoption #8121 and Source mirror #8127. Independent
-provider and artifact readback verifies the exact candidate, qualified/Main tree,
-source tag and immutable artifact receipts within the unchanged timing bound.
-The subsequent publication-scope repair #8283 qualified in natural
-`40013348876`: Manager bootstrap no longer compares unrelated Worktrees helper
-bytes. Actual native recovery clears that refusal and activates Manager
-`0.6.105-dev1`, but its real update request completes with exit 1 and an empty
-diagnostic log; the selected Worktrees runtime remains unchanged. A reproduced
-native repair-child standard-stream fix #8289 qualified in natural
-`40017462768`. The next supported bootstrap stops before construction at another
-stale hash gate: its installed Manager launcher exactly matches the current
-producer but is absent from the historical hash list. Registered Manager
-admission is being aligned with its existing provider/package/path authority
-and construction-time change detection, rather than expanding that list.
-Complete native suite and normal-entry acceptance remain
-open; guest interrupted-request recovery still needs the separately confirmed
-disruptive restart. #7743's supported installed recovery remains ahead of
-local-first identity implementation. The
-[current journal](journal/2026/10.22%20progress.md) preserves the release,
-activation, request-outcome and installed-suite distinctions.
+**Current status (2026-10-23):** the containing promotion and #7743 native
+self-repair gates are verified. Runtime alignment #8010 and allocation repair
+#8110 released in natural `39912447859`; bounded follow-ups #8283, #8289 and
+#8297 released through independently verified natural qualifications. Supported
+native recovery and the ordinary installed project update both complete with
+settled successful durable requests. The normal-entry report verifies all
+16 registered suite targets current, no event-parse errors and no restart
+requirement. Selected native versions include Manager `0.6.108-dev1`,
+Worktrees `1.24.229-dev1`, Bridge `0.9.130-dev1` and Dispatch `0.18.76-dev1`.
+The registered native source and legacy runtime root are preserved. Guest
+recovery remains blocked by the deliberate `same_kernel_boot` fence; a real
+kernel restart still needs specific operator approval and a verified external
+baton. No guest recovery, replay or ordinary update has run. After that supported
+guest acceptance, resume local-first identity implementation and the full
+creation/resume/installed matrix. The
+[current journal](journal/2026/10.22%20progress.md) preserves the exact release
+and installed evidence; the parent effort remains Active.
 
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is
@@ -290,6 +285,15 @@ claims, queues and promotion progress during the coordinated transfer. No
 finalization, record rewrite, automatic claim release or new agent launch from
 this source repository is part of the wrap-up.
 
+**2026-10-23 self-repair guard proportionality (verbatim):**
+
+> Why do we need an ownership check? This is excessive
+
+The bounded correction removes cross-component helper-byte admission and
+historical launcher-hash gates for an explicitly registered Manager. Existing
+provider/package/path authority and construction-time change detection remain;
+this is not a request to remove wrong-target or source-selection boundaries.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite
@@ -431,6 +435,13 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       relabel, rename, policy widening or data migration.
 - [ ] Pass bounded in-process decision regressions and required Source CI, then
       qualify and release the implementation through normal promotion.
+- [x] Complete #7743 native supported fresh-bootstrap recovery, complete
+      registered-suite update and the normal installed project-update entry.
+      Both durable requests settle successfully; all 16 registered suite
+      targets are verified current, with native source/root preserved.
+- [ ] Complete supported guest interrupted-request recovery only after a
+      separately approved kernel restart and verified external baton; prove
+      no replay, then perform a separately explicit full update.
 - [ ] Verify the installed Windows/WSL deployment and all-worktree resolution
       matrix; record or explicitly transfer any reproducible Manager regression.
 

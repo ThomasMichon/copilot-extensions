@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent planning PR; separately admitted owner implementation
 - **Created:** 2026-10-23
-- **Status:** Draft
+- **Status:** Active; delivery/control implementation admitted, backend/subject producer prerequisites retained
 - **Vision:** [Worktree lifetime authority](../../../visions/plugins/agent-worktrees/README.md); [same-cell composition](../../../visions/plugin-services/installation-cells/README.md)
 - **Umbrella issue:** #7942 (dependency slice only; does not take over the consumer)
 
@@ -91,10 +91,11 @@ The concrete names, byte ceilings and decomposition in `contract.md` are
 - [x] Trace existing control, binding, exact-session delivery and receipt code.
 - [x] Obtain narrow interface/claim statements from the existing receipt and
   roster owners, without touching their files.
-- [ ] Integration owner reads and admits the exact proposed API, delivery and
+- [x] Integration owner reads and admits the exact proposed API, delivery and
   file ownership in `contract.md`.
-- [ ] Publish this planning-only change and clear source review/required CI.
-- [ ] Refresh overlapping claims immediately before any implementation
+- [x] Publish this planning-only change and clear source review/required CI.
+  #8193 merged as `57bcc244f8f2b7924f609c1001110a31e430168e`.
+- [x] Refresh overlapping claims immediately before any implementation
   assignment. Existing claim statements are not perpetual edit permission.
 
 ### Phase 2 — Separately admitted implementation
@@ -119,7 +120,7 @@ The concrete names, byte ceilings and decomposition in `contract.md` are
 
 ## Validation Plan
 
-- [ ] Source-plan structure, links, public-safe wording and scope checked.
+- [x] Source-plan structure, links, public-safe wording and scope checked.
 - [ ] Real owned synthetic existing control server plus real Node sockets, with
   isolated installation/state fixtures and known cleanup.
 - [ ] Wrong token, wrong source/installation, active/previous-route confusion,
@@ -161,3 +162,97 @@ All functional phases remain gated even if this proposal merges.
 - The request summary was checked against the selected constraints: per-user
   authority, successor support, zero lifecycle/fallback work, exact replay,
   unchanged timing boundary and separate implementation admission are retained.
+
+### 2026-10-23 — Source review cleared; implementation admission pending
+
+- #8193 received Copilot approval at its exact head and passed required CI,
+  then merged as `57bcc244f8f2b7924f609c1001110a31e430168e`.
+- The reviewer left one Low, non-blocking navigation suggestion: add this
+  effort's own row to the active index. The planning PR deliberately remained
+  limited to its two claimed files. Carry that navigation follow-up into the
+  next coordinated documentation update without altering the receipt owner's
+  existing row.
+- The integration owner's exact API/file admission remains open. No functional
+  implementation, runtime qualification, rollout or parent-issue completion is
+  claimed. The next action is that owner's review of `contract.md`, followed by
+  fresh claims and explicit implementation assignment.
+
+### 2026-10-23 — Bounded delivery/control slice admitted
+
+- The integration owner admitted the reviewed API and assigned the catalog,
+  fixed-purpose control adapter, existing control framing/health/drain and their
+  focused tests/documentation. Receipt backend/activity/Node/scheduler and
+  roster-owner hunks remain separately owned.
+- Source changes now keep the optional candidate separate from readiness,
+  constrain frames to 8 KiB, cap receipt admission at four with no queue, and
+  retain disconnected writes in drain accounting until settlement. An absent
+  qualified backend advertises no capability.
+- The backend owner accepted the callable/guard contract and bounded storage
+  ceilings recorded in the runtime documentation. The canonical trace-lock
+  deadline hunk and existing registration-producer project/nonce projection
+  remain explicit additional admission gates, not inferred edit authority.
+- Validation: 80 focused catalog/control/cutover tests passed, including real
+  sockets and real source binding against isolated fixtures; 180 resident
+  lifecycle tests passed. Install contract and touched-file lint passed.
+  No native/live deployment or full Node/backend qualification was performed.
+- The actual source-binding fixture observes one startup selection plus six
+  fixed binding calls across health/admission/checkpoints/completion and rejects
+  helper process starts. A changed selection cannot relabel the old resident.
+  This is not a claim about the full hook enrichment or an installed host.
+- The original local review journal was preserved through backed pull-forward.
+  Managed sync refused a deleted PR ref; only the distinct journal commit was
+  replayed onto the fetched reviewed default branch.
+- This source update adds this effort's own index row, resolving the prior
+  non-blocking navigation suggestion without modifying another owner's row.
+
+### 2026-10-23 — Source review corrections
+
+- Review identified the deployed hook-client layout as an invalid payload
+  anchor. The adapter now uses validated installation context or the existing
+  legacy command-binding receipt, then the runtime-packaged validator; an
+  isolated deployed-`bin` regression exercises that path. The resulting
+  catalog/control plus resident-lifecycle selection passed 229 tests.
+- Review also identified a final-delivery gap: a registration snapshot already
+  prefixed by the older catalog can hide the enriched catalog. Repair requires
+  one narrow final-guidance composition hunk and its regression beyond the
+  specifically assigned catalog-builder function. Source merge remains
+  blocked until that ownership amendment and correction clear; no readiness
+  or complete receipt delivery is claimed meanwhile.
+
+### 2026-10-23 — Final-guidance correction admitted
+
+- The integration owner admitted exactly the final-guidance catalog replacement
+  and its regression. The enriched catalog now replaces only the older JSON
+  block while registration text and a single catalog are preserved. No broader
+  hydration/lifecycle behavior changed.
+- The previous 229-test source selection plus five final-guidance regressions
+  passes: 234 tests. A separate existing-guidance selection and source re-review
+  remain the completion gates.
+- The trusted subject producer is a separate design-only proposal: inspect the
+  existing worktree-binding writer and its registration caller; do not edit
+  either until the exact additive fields and snapshot checks are admitted.
+- The existing-guidance compatibility selection subsequently passed 31 tests;
+  source re-review and required CI remain open.
+- Required CI rejected growth past the hook-client module cap. Catalog
+  insertion now lives in the existing projection helper, and final guidance
+  performs only the trusted producer's fenced-block replacement rather than
+  duplicating catalog validation. The unchanged cap passes without a baseline
+  edit; the combined source/guidance selection passes 265 tests.
+- Final review also identified that the last owner-validation read could itself
+  exhaust the budget. The adapter now checks the deadline after that read;
+  received and absent late-result regressions pass. The combined source/guidance
+  selection now passes 267 tests; module-size and lint gates remain unchanged.
+
+### 2026-10-23 — Final source qualification clarification
+
+- The final-owner deadline correction was published to #8224; its required CI
+  passed and fresh source review confirmed the deadline defect was resolved.
+  An independent isolated run of the two new deadline regressions passed.
+- Review retained the existing macOS route-publisher identity mismatch as a
+  separately gated platform prerequisite (#7659). The runtime documentation now
+  names that limitation explicitly; shared publication/identity code is unchanged
+  and the receipt check remains fail-closed. Synthetic route fixtures are not
+  actual macOS publisher qualification.
+- Fresh review and CI on this documentation clarification still precede source
+  merge. Backend/Node qualification, trusted subject production, native/live
+  validation, release and installed rollout remain separately owned and open.

@@ -363,6 +363,8 @@ def _command_catalog_context() -> str:
                 root, contract["plugin"], Path.home() / ".agent-worktrees"
             ),
         }
+        if callable(add_projection := getattr(_load_sibling("resident_control_projection.py"), "add_to_catalog", None)):
+            add_projection(catalog)
     except (OSError, UnicodeError, ValueError, KeyError, TypeError, StopIteration) as error:
         sys.stderr.write(f"[agent-worktrees] Command catalog unavailable: {error}\n")
         return ""
@@ -389,12 +391,17 @@ def _is_link_or_reparse(path: Path) -> bool:
 
 def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
     registration = _registration_context(enriched, home)
+    metadata = enriched.get("_agentWorktrees")
+    catalog = metadata.get("commandCatalog") if isinstance(metadata, dict) else None
     contexts = []
     if registration.startswith(_COMMAND_CATALOG_HEADING):
+        if isinstance(catalog, str) and catalog.startswith(_COMMAND_CATALOG_HEADING):
+            block = re.compile(r"(?ms)^```json\r?\n.*?\r?\n```(?=\r?\n|$)")
+            current = block.search(catalog)
+            if current is not None:
+                registration = block.sub(lambda _: current.group(0), registration, count=1)
         contexts.append(registration)
     else:
-        metadata = enriched.get("_agentWorktrees")
-        catalog = metadata.get("commandCatalog") if isinstance(metadata, dict) else None
         if not isinstance(catalog, str) or not catalog.startswith(_COMMAND_CATALOG_HEADING):
             catalog = _command_catalog_context()
         for context in (catalog, registration):

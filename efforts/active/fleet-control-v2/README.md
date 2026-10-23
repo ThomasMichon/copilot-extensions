@@ -363,11 +363,11 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [x] Land and validate the explicitly assigned
   [isolated scoped point-reader](scoped-observation-reader.md), composing only
   owned admission/storage libraries without wiring a resident consumer (#8052).
-- [ ] Review and implement the bounded
+- [x] Review and implement the bounded
   [scoped point-set snapshot](scoped-observation-snapshot.md) prerequisite,
   preserving one committed read view without adding replay or wire authority.
-  The plan is reviewed in #8290; isolated source and local validation are
-  prepared, with implementation review and merged publication still required.
+  The plan is reviewed in #8290 and the isolated implementation merged in
+  #8303. Resident integration and scope-safe recovery remain separate gates.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
   The subsequent operator approval permits only an isolated transport-neutral
@@ -451,6 +451,20 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-23 - Scoped point-set snapshot source merged
+
+- #8303 actually merged at `5ec4ed938679d9bc1bb5fc9d190953e1fddaf8b7`,
+  `2026-10-23T21:00:42Z`, from exact head `88bcca7275`. Current-head review
+  `5634365749` approved with no open issues; all required checks passed, no
+  review threads remained, and mergeability was rechecked before managed merge.
+- Reconciled all source PR tracking and synchronized the original worktree
+  through the normal managed flow. No claim, source responsibility or backup
+  was discarded; no other agent was contacted.
+- Closed only the bounded local snapshot prerequisite and its validation
+  checklist. The broader central serving/recovery, origin/provider, wire
+  emission, lifecycle, platform and adoption gates remain open. This source
+  merge neither implements the federated All view nor authorizes a rollout.
 
 ### 2026-10-23 - Reviewed snapshot contract and isolated implementation
 

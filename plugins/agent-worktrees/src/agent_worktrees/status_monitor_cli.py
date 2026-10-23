@@ -159,6 +159,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import locks as _locks
     from . import resident_push, self_retire, status_monitor_cutover, status_monitor_runtime, status_updater_cli
     from . import tracking_write
+    from . import handoff_prompt_receipt_control as receipt_control
     from . import worktree_status_daemon
     from .status_monitor_drain import DrainTrace, drain_with_diagnostics
     from .worktrees_runtime import READ_ACTION, WorktreesRuntime
@@ -361,6 +362,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     if hook_policy.ready():
         hook_policy.plugin_related_anchors()
     installation_context = registry_paths.installation_context()
+    receipts = receipt_control.for_runtime(
+        status_monitor_runtime._aw_runtime_home(), PROCESS_GENERATION,
+        lambda: published_lock and not admission_closed and not shutdown_requested.is_set(),
+        port=lambda: control_server.port,
+    )
 
     def _classify_compute(kind: str, payload: dict) -> dict:
         if os.environ.get("PYTEST_CURRENT_TEST"):
@@ -531,6 +537,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal admission_closed, published_lock
         admission_closed = True
         published_lock = False
+        receipts.close_admission()
         worktrees_runtime.close_admission("draining")
         _close_request_surface_admission()
         # Stop admitting new managed-mux push observations too (a genuine
@@ -625,6 +632,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("worktrees-feed")
         if control_server.current_read_count():
             reasons.append("worktrees-read")
+        if receipts.active_count():
+            reasons.append("prompt-receipt")
         return reasons
 
     def _drain_observations() -> dict[str, int]:
@@ -641,6 +650,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             "tracking-write-compute": int(tracking_write.has_inflight_write()),
             "worktrees-feed": worktrees_runtime.feed.active_count(),
             "worktrees-read": control_server.current_read_count(),
+            "prompt-receipt": receipts.active_count(),
             "lifecycle": lifecycle_count,
         }
 
@@ -658,6 +668,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal admission_closed, published_lock
         if action == "health":
             roster_health = worktrees_runtime.health()
+            receipt_health = receipts.health()
+            roster_health["capabilities"] = [
+                *roster_health["capabilities"], *receipt_health["capabilities"],
+            ]
             if shutdown_requested.is_set():
                 roster_health["worktrees"]["status"] = "shutdown"
             roster_ready = roster_health["worktrees"]["status"] in {"ready", "unready"}
@@ -668,10 +682,13 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 "published": published_lock,
                 "pid": os.getpid(),
                 **roster_health,
+                "promptReceipt": receipt_health["promptReceipt"],
                 "runtime_generation": PROCESS_GENERATION,
                 "version": PROCESS_VERSION,
                 "runtime_slot": os.path.basename(my_prefix),
             }
+        if action == receipt_control.ACTION:
+            return receipts.handle(payload)
         if action == READ_ACTION:
             if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
                 worktrees_runtime.close_admission("superseded")
@@ -694,6 +711,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         trace.emit("promotion-refused", "fail")
                         wake_event.set()
                         return {"adopted": False, "error": "current-roster authority unavailable"}
+                    receipts.open_admission()
                     with trace.stage("publish-lock"):
                         _locks.write_lock(lock, extra=_lock_extra())
             trace.emit("complete", "ok")
@@ -725,6 +743,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         trace.emit("undrain-refused", "fail")
                         wake_event.set()
                         return {"draining": True, "error": "current-roster authority unavailable"}
+                    receipts.open_admission()
                     with trace.stage("publish-lock"):
                         _locks.write_lock(lock, extra=_lock_extra())
             trace.emit("complete", "ok")
@@ -919,6 +938,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
         _close_request_surfaces()
         control_server.close()
+        receipts.wait_idle()
         resident_push.reset()
         worktrees_runtime.shutdown()
         worktree_status_runtime.shutdown()
