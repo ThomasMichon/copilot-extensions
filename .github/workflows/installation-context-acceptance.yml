@@ -15,13 +15,17 @@ on:
         description: Run isolated PR serving and observation lifecycle contracts instead
         type: boolean
         default: false
+      pr_artifacts:
+        description: Build and verify first-party PR/Fleet artifacts and install them offline
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -42,7 +46,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -216,6 +220,29 @@ jobs:
         run: >-
           python tools/run-standalone-tests.py services/pr
           --prepare --timeout 180 --admission-wait 30
+
+  pr-artifacts-linux:
+    if: ${{ inputs.pr_artifacts }}
+    name: First-party PR artifacts (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &pr-artifacts-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system packaging
+      - name: Locked builds, source verification and offline standalone install
+        run: python tools/smoke_public_toolchain.py --standalone
+
+  pr-artifacts-windows:
+    if: ${{ inputs.pr_artifacts }}
+    name: First-party PR artifacts (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *pr-artifacts-steps
 
   pr-service-windows:
     if: ${{ inputs.pr_service }}

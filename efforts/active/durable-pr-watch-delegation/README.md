@@ -686,6 +686,53 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-23 - Implement standalone first-party artifact construction
+
+- Added explicit PR-service and Fleet component identities to the shared locked
+  builder, candidate inventory, bundle verifier and publication naming. Existing
+  plugin schema-3 manifests and release names remain unchanged; standalone
+  schema-4 manifests bind the selected source and declared build resources.
+  Fleet's helper/setup admission and injected wheel members are checked against
+  trusted producer code and canonical resource bytes, not executed by verification.
+- Local contained controls passed: 207 existing builder cases, all 191 promotion
+  cases across bounded packets, and 36 standalone/pure-unit cases. Earlier
+  oversized packets timed out and are not passes. Synthetic Git tests needed
+  command-local Windows long-path support; no machine Git setting changed.
+  Lint, install-contract and documentation guards passed. The fifteen pure
+  controls join the exact admitted unit manifest without weakening its observer
+  or wall budget.
+- Added a separately selected Linux/Windows real-build and offline standalone
+  install lane. Initial run `40019289742` passed both platforms on
+  `e021b3b9dffbcc9b51bb0da6dc99cf3360da93d1`, building the existing MCP/SSH
+  plugin closures and PR/Fleet standalone wheels, then installing the latter
+  offline outside a checkout. It proves packaging only, not a governed
+  runtime dependency closure, an approved native Worktrees selection, a built
+  image or a working service/fleet deployment. Managed-host tests do not use the
+  public-runner toolchain exception.
+- Required hosted unit execution passed on that head. Its independent workflow
+  guard rejected a dynamic runner matrix; the lane now names Linux and Windows
+  runners explicitly, preserving that guard. Final-head review, CI and a fresh
+  native run remain pending. No delivery or parent acceptance checkbox closes;
+  release/authorized installed rollout and every retained parent gate remain open.
+
+### 2026-10-23 - Shared artifact construction proposal merged
+
+- #8275 merged as `79f6f114c4b86234b8ca885e1b5ea442b665f522` at
+  `2026-10-23T19:08:36Z`, from head
+  `39a2888ada6ab3ff299bb474fc5709341bda404e`. Copilot `5633200885`
+  approved that exact head with no findings; full reviews and paginated review/
+  issue comments contain no unresolved feedback. Required CI `40008173497`,
+  workflow lockdown `40008173546`, attribution and identifier checks passed.
+  Managed merge used only the authorized additional CODEOWNER-vote exception.
+- Re-read the complete current parent goal, Coordination, Plan and Validation
+  after merge. Only the construction proposal's review item closes. Begin
+  standalone first-party artifact support through the shared builder/verifier;
+  exact runtime closure, real offline image and every provider, lifecycle,
+  installed, fleet and retained client/dispatch gate remain open.
+- Managed completion confirmed the published change was merged and advanced
+  this continuing worktree onto its reviewed base. No artifact implementation,
+  release availability, runtime update or deployment is claimed.
+
 ### 2026-10-23 - Select the shared PR-service artifact construction path
 
 - Operator selected `extend-shared-artifacts` rather than a supplied-wheelhouse

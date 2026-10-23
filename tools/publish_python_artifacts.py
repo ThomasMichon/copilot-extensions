@@ -17,6 +17,7 @@ from promotion_python_artifacts import (
     validate_source_binding,
 )
 from verify_promotion_workflows import VerificationError
+from standalone_python_artifacts import artifact_label
 
 
 def _gh(
@@ -276,7 +277,7 @@ def publish_artifacts(
     if admission_cache is None:
         admission_cache = {}
     for entry in index["artifacts"]:
-        tag = f"{entry['plugin']}-v{entry['version']}"
+        tag = f"{artifact_label(entry)}-v{entry['version']}"
         asset = str(directory / entry["filename"])
         result = _gh(["api", f"repos/{repository}/releases/tags/{tag}"])
         absent = False
@@ -335,7 +336,7 @@ def verify_published_artifacts(
         admission_cache = {}
     downloads = []
     for entry in index["artifacts"]:
-        tag = f"{entry['plugin']}-v{entry['version']}"
+        tag = f"{artifact_label(entry)}-v{entry['version']}"
         release = _release(
             _gh(["api", f"repos/{repository}/releases/tags/{tag}"], verification=True), tag,
         )

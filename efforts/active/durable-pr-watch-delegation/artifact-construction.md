@@ -65,8 +65,8 @@ from this proposal.
 
 ## Delivery sequence
 
-- [ ] Review and merge this construction proposal before changing artifact
-  schemas, release selection or dependency acquisition.
+- [x] Review and merge this construction proposal before changing artifact
+  schemas, release selection or dependency acquisition (confirmed by #8275).
 - [ ] Deliver standalone first-party build/verification through the shared
   artifact path, initially scoped to the PR service's required distributions.
   Preserve existing release consumers and optional artifact/source fallback.
