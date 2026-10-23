@@ -386,7 +386,7 @@ def check_compile_projection(projection, arguments, *, argument_pairs, balanced,
         raise error_type("UV lock export output must be selected explicitly by the caller")
 
 
-def compile_requirement_includes(text, source, mirror):
+def compile_requirement_includes(text, source, mirror, remap=None):
     """Retain include targets by identity, not by lexical path replacement."""
     lines = []
     for line in re.sub(r"\\\r?\n", " ", text).splitlines():
@@ -394,6 +394,8 @@ def compile_requirement_includes(text, source, mirror):
         include = re.fullmatch(r"(-r|--requirements?|--constraints?|-c)\s+(.+)", requirement)
         if include:
             line = include[1] + " " + mirror(source.parent / include[2]).as_posix()
+        elif remap is not None:
+            line = remap(line)
         lines.append(line)
     return "\n".join(lines) + "\n"
 

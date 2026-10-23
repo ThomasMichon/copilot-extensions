@@ -704,7 +704,7 @@ callback an implicit credential store.
   URLs. Unsupported compile shapes and live editable graphs refuse. This does
   not approve a profile, acquire its exact closure, qualify a governed feed or
   construct an offline context/image.
-- The contained targeted Windows selection passes 232 tests. Real compile
+- The contained targeted Windows selection passes 234 tests. Real compile
   cases establish a positive recent-version control, seasoned transitive hashes,
   refusal of missing upload timestamps, existing-output independence and
   original-input mutation isolation, including absolute-dot aliases. Review
@@ -722,6 +722,12 @@ callback an implicit credential store.
   Fatal lint, all thirteen installer contracts and both canonical sync checks
   pass. Current-head review, required CI and the new explicitly selected native
   Linux/Windows compile lane remain publication gates.
+- A subsequent review identified double lexical remapping when a POSIX root
+  anchor leaves an original file path as a suffix inside its retained target.
+  Offline composition reproduced the corruption; canonical includes now bypass
+  later lexical remapping, while non-include lines retain their existing
+  transformation. Cross-platform unit and native root-working-directory
+  controls cover this boundary; exact-head Linux acceptance remains required.
 - The parent remains Active. Approved platform-specific runtime closure,
   separately selected native Worktrees artifact, image/container acceptance,
   provider/storage/update qualification, release/authorized rollout, actual

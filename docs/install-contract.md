@@ -2986,6 +2986,7 @@ options refuse. Metadata-only project inputs remain supported; every positional
 input is canonicalized into the retained graph, including absolute path aliases.
 Recursive requirement/constraint include targets are likewise rewritten by
 canonical identity rather than lexical text substitution.
+Already-retained include targets do not pass through lexical remapping again.
 `prepare_uv_compile` is only
 preflight. This is candidate lock construction, not target-profile approval,
 wheel acquisition, feed qualification or runtime activation.

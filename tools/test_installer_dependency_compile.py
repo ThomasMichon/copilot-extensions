@@ -9,7 +9,7 @@ import sys
 import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -120,6 +120,23 @@ def test_compile_include_paths_are_canonicalized_before_text_remapping(tmp_path,
     assert result == option + " " + retained.as_posix() + "\n"
 
 
+def test_compile_root_anchor_include_target_is_never_lexically_remapped_again():
+    original = PurePosixPath("/tmp/build/child.in")
+    retained = PurePosixPath("/private/inputs/hash/tmp/build/child.in")
+    lexical_inputs = []
+
+    def remap(line):
+        lexical_inputs.append(line)
+        return line.replace(str(original), str(retained))
+
+    text = "-r child.in\n# " + str(original) + "\n"
+    result = policy._configuration.compile_requirement_includes(
+        text, original.parent / "root.in", lambda path: retained, remap,
+    )
+    assert result == "-r " + str(retained) + "\n# " + str(retained) + "\n"
+    assert lexical_inputs == ["# " + str(original)]
+
+
 def test_compile_retains_project_and_nested_requirements_but_not_output(tmp_path, monkeypatch):
     project = source_project(tmp_path / "source")
     manifest = project / "pyproject.toml"
@@ -197,7 +214,7 @@ def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp
 @pytest.mark.parametrize("source_kind", ["project", "requirements"])
 @pytest.mark.parametrize("missing_age", [False, True])
 def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
-    tmp_path, monkeypatch, source_kind, missing_age, alias, nested_alias=False,
+    tmp_path, monkeypatch, source_kind, missing_age, alias, nested_alias=False, root_anchor=False,
 ):
     artifacts = {}
     projects = {}
@@ -268,6 +285,7 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         encoding="utf-8",
     )
     environment["UV_CONFIG_FILE"] = str(config)
+    working_directory = Path(tmp_path.anchor) if root_anchor else tmp_path
     if source_kind == "project":
         project = source_project(tmp_path / "source", dependencies='"fixture-root>=1"')
         operand = project / "pyproject.toml"
@@ -304,17 +322,17 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
              "--python", sys.executable, "--no-header", "--no-annotate",
              "--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu",
              "--only-binary", ":all:"],
-            env=environment, cwd=tmp_path, capture_output=True, text=True,
+            env=environment, cwd=working_directory, capture_output=True, text=True,
             timeout=30, creationflags=policy._HEADLESS,
         )
         assert unguarded.returncode == 0, unguarded.stderr
         assert "fixture-child==2.0" in unguarded.stdout
         downloads.clear()
         result = policy.run_uv_compile(
-            "uv", [operand_argument, "-o", "locked.txt", "--python", sys.executable,
+            "uv", [operand_argument, "-o", str(output) if root_anchor else "locked.txt", "--python", sys.executable,
                    "--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu",
                    "--only-binary", ":all:"],
-            env=environment, cwd=tmp_path, now=NOW, trusted_source_roots=roots,
+            env=environment, cwd=working_directory, now=NOW, trusted_source_roots=roots,
             capture_output=True, text=True, timeout=30,
         )
         assert mutations == [True]
@@ -342,4 +360,11 @@ def test_native_compile_nested_absolute_include_cannot_reopen_original(tmp_path,
     test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         tmp_path, monkeypatch, source_kind="requirements", missing_age=False, alias=False,
         nested_alias=True,
+    )
+
+
+def test_native_compile_root_working_directory_keeps_canonical_includes(tmp_path, monkeypatch):
+    test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
+        tmp_path, monkeypatch, source_kind="requirements", missing_age=False, alias=False,
+        root_anchor=True,
     )

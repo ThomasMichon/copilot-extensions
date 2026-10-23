@@ -841,9 +841,11 @@ def retain_uv_install(
             Path(_native_retained_path(destination.parent)).mkdir(parents=True, exist_ok=True)
             text = Path(_native_retained_path(path)).read_text(encoding="utf-8")
             if _operation == "compile":
-                text = _configuration.compile_requirement_includes(text, path, mirror)
+                text = _configuration.compile_requirement_includes(text, path, mirror, remap)
+            else:
+                text = remap(text)
             Path(_native_retained_path(destination)).write_text(
-                remap(text), encoding="utf-8")
+                text, encoding="utf-8")
         retained_config = {}
         for path, is_project in reversed(_config_inputs(arguments, environment, base)):
             data = _toml(path)

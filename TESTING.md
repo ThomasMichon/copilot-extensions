@@ -38,6 +38,8 @@ missing upload timestamps. Directory requirement edges and local source mappings
 refuse before export; metadata-only project inputs still produce registry-only
 hashed output after the private snapshot is removed. The same bounded
 lane retains the existing transitive/isolated-build installer age cases.
+Root-working-directory coverage prevents a canonical retained include from
+being remapped a second time when its original path remains a retained suffix.
 Pure option, effective-output and resolver-drift controls run alongside those
 native cases. This does not resolve a governed feed or approve a target profile;
 the subprocess/network cases remain outside required unit-only CI.
