@@ -21,6 +21,18 @@ The completion gate is released, installed behavior that resolves every existing
 worktree on the adopting host's Windows and WSL environments, not a passing
 example, a source commit, or a merged individual pull request.
 
+**Current status (2026-10-22):** the fresh-source updater repairs through #7987
+are qualified and released. The runtime ownership alignment #8010 is merged
+with current-head approval, but its containing qualification `39901978547`
+failed immutable publication with `manifest source closure differs from
+candidate`. Native complete-suite and normal-entry acceptance remain open;
+guest interrupted-request recovery still needs the separately confirmed
+disruptive restart. The next driver first repairs the promotion blocker under
+#3336, preserving immutable publication checks and the existing control writer,
+then completes #7743's installed acceptance before resuming local-first identity
+implementation. The [current journal](journal/2026/10.22%20progress.md) records
+the source, qualification and installed-state distinctions.
+
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is
 appropriate only where an interface needs one execution identifier; it must not
@@ -220,6 +232,17 @@ access failure. #7742 and #7743 carry the generic upstream repairs. The earlier
 explicit deployment/migration/restart authorization remains in force for
 necessary supported repair, not arbitrary permission or record rewrites.
 
+**2026-10-22 muxed continuation and promotion priority (verbatim):**
+
+> Let's update the main effort with current status, and I'd like to pick this up and drive it from a properly-muxed worktree. Can you package up everything, and then create a muxed worktree agent with a seeded prompt continuing your mandate? Its first initial task will be to unblock promotion by fixing whatever happened here.
+
+This explicitly assigns the promotion-blocker repair to the continuation
+driver; passive waiting is no longer its next action. Reuse the bound effort
+worktree and preserve its held resources rather than creating a duplicate
+effort or discarding the prior source. The assignment changes the first slice,
+not the parent completion gate or the authority of the existing release
+controller.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite
@@ -327,6 +350,11 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
 
 ### Phase 3d - Physical machine and environment boundaries
 _(Agent-recommended realization of the operator's explicit model clarification.)_
+- [ ] Unblock the containing promotion's source-closure publication failure
+      under #3336, through a reviewed fix and natural qualified release.
+      This is the operator-prioritized prerequisite to #7743's complete native
+      and guest installed acceptance, not permission to rewrite immutable tags,
+      weaken closure checks or introduce a second Main writer.
 - [x] Review the [structured identity contract](physical-machine-environment-boundary.md)
       before changing implementation.
 - [x] Reuse the shared map's physical-machine/environment selection; identify
@@ -343,6 +371,8 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       preserving retained allocations before any ordinary-default activation.
 - [ ] Review and execute the [manifest-independent local-identity amendment](manifest-independent-local-identity.md);
       machine maps customize rather than admit ordinary local use.
+      The intent and corrective plan passed review in #7773; implementation and
+      installed acceptance remain open.
 - [ ] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
       guest execution authority distinct and use the same policy in update and
@@ -360,14 +390,16 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
   report removed checkouts separately from identity-resolution failures.
 - [ ] Prove installed creation and resume for historical and current identity
   forms, including hostname/preferred-name differences.
-- [ ] Verify the current Manager source is in-process, its rows remain visible,
+- [x] Verify the current Manager source is in-process, its rows remain visible,
   and its logical sibling uses the correct separate transport.
   Actual selected Manager packages loaded each local source without SSH,
   preserved the real current publication's row IDs through normalization,
   and selected the configured sibling transport independently under the
-  administrative validation entry. The subsequently reported ordinary native
-  startup failure reopens this gate until #7742's installed user-access repair
-  passes; the administrative probe alone is not ordinary-user acceptance.
+  administrative validation entry. The subsequent ordinary native startup
+  failure was separately resolved by #7750 and #7772, released in natural
+  qualification `39725960073` and installed through the supported updater.
+  The operator confirmed ordinary, non-elevated PowerShell startup of Manager
+  `0.6.67-dev1`; the administrative probe alone was not counted as that proof.
 - [ ] Resolve or explicitly transfer every remaining Plan/Validation Plan item,
   capture durable behavior documentation, and archive only then.
 
