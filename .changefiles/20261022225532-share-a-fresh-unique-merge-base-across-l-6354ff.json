@@ -1,0 +1,9 @@
+{
+  "comment": "Share a fresh unique merge base across landing strategies, preserving independent selection for criss-cross history.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

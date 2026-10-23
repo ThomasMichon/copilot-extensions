@@ -87,6 +87,10 @@ def squash_landed(branch: str, upstream: str, cwd: str) -> bool | None:
     base_sha = base.stdout.strip()
     if base.returncode != 0 or not base_sha:
         return None
+    return _squash_from_base(branch, upstream, base_sha, cwd)
+
+
+def _squash_from_base(branch: str, upstream: str, base_sha: str, cwd: str) -> bool | None:
     trees = git_ops.git(
         "rev-parse", "--revs-only", "--end-of-options", f"{branch}^{{tree}}", f"{base_sha}^{{tree}}",
         cwd=cwd, check=False,
@@ -229,10 +233,21 @@ def landing(branch: str, upstream: str, cwd: str, *, explain: bool = False) -> L
         result.cherry = not [ln for ln in cherry_r.stdout.splitlines() if ln.startswith("+")]
     if result.landed and not explain:
         return result
-    result.squash = squash_landed(branch, upstream, cwd)
+    base = git_ops.git("merge-base", "--all", upstream, branch, cwd=cwd, check=False)
+    bases = base.stdout.splitlines() if base.returncode == 0 else []
+    if not all(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) for sha in bases):
+        bases = []
+    if len(bases) > 1:
+        # Preserve each strategy's original ordering when no unique base exists.
+        result.squash = squash_landed(branch, upstream, cwd)
+    else:
+        result.squash = _squash_from_base(branch, upstream, bases[0], cwd) if bases else None
     if result.landed and not explain:
         return result
-    result.blobs = _blobs_on_upstream(branch, upstream, cwd)
+    if len(bases) > 1:
+        result.blobs = _blobs_on_upstream(branch, upstream, cwd)
+    else:
+        result.blobs = _blobs_from_base(branch, upstream, bases[0], cwd) if bases else False
     return result
 
 
@@ -263,12 +278,16 @@ def _blobs_on_upstream(branch: str, upstream: str, cwd: str) -> bool:
     )
     if merge_base_r.returncode != 0:
         return False
+    return _blobs_from_base(branch, upstream, merge_base_r.stdout.strip(), cwd)
+
+
+def _blobs_from_base(branch: str, upstream: str, base_sha: str, cwd: str) -> bool:
 
     def run_git(*args: str):
         return git_ops.git(*args, cwd=cwd, check=False)
 
     try:
-        changed_files = git_tree_diff.read(run_git, merge_base_r.stdout.strip(), branch)
+        changed_files = git_tree_diff.read(run_git, base_sha, branch)
         if not changed_files:
             return True
         if any(name in os.environ for name in (

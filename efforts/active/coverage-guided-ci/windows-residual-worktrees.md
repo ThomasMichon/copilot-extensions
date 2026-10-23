@@ -87,6 +87,38 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-LANDING-BASE one fresh unique merge base per landing evaluation
+
+Squash and blob checks within one `landing` evaluation share a single fresh
+`merge-base --all` result only when it contains exactly one complete object
+ID. Failed, empty or malformed evidence does not run either strategy.
+Criss-cross histories with multiple merge bases retain each strategy's
+original query and argument order. Standalone squash/blob helpers still read
+their own base, and a later landing evaluation always queries again. There is
+no cross-call graph, ref, history, report or pruning cache.
+
+Real-Git controls verify one base query for a different change, another fresh
+query after an upstream mutation, refusal for an unreadable upstream, and
+both original strategy queries for an actual criss-cross graph. Focused
+controls additionally cover complete SHA-1/SHA-256 IDs and failed, empty,
+truncated or whitespace-corrupted results.
+
+Native functional validation retained exactly two workers and all original
+item, process, memory and native deadlines. All 150 creation, precondition,
+open-PR, blob-comparison and focused merge-base controls pass in 104.64 seconds
+preparation/cleanup inclusive. Complementary functional-only landing selections
+cover the prior 69-case roster: 59 pass in 157.34 seconds inclusive and ten
+historical-reset cases pass in 67.03 seconds; the six additional object-ID
+controls are in the 150-case run.
+
+These are not normal-group or aggregate qualifications. An unpartitioned
+landing/blob attempt lost a worker before reaching the 240-second group cap;
+subsequent immediate-reporting diagnostics covered every landing case without
+reproducing that loss. A separate unpartitioned landing attempt also hit the
+cap without an item failure. The timing and worker-loss investigation remain
+part of the open parent qualification gate; no deadline or selection change
+is credited as a fix.
+
 ### B-LANDING-SYNC private pre-rewrite reset inputs
 
 The five later-work variants and the missing-remote-proof case now copy one

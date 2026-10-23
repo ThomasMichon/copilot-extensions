@@ -337,18 +337,130 @@ def test_squash_probe_refuses_unreadable_malformed_or_unchanged_trees(
     assert len(commands) == expected_calls
 
 
-def test_a_different_change_is_not_squash_landed(env):
+def test_a_different_change_is_not_squash_landed(env, monkeypatch):
     tip = _two_commit_change(env.clone)
     _squash_onto(env.seed, "main", SQUASHED.replace("FOUR", "four (another fix)"))
     _git("fetch", "-q", "origin", cwd=env.clone)
+    git = finalize_ref.git_ops.git
+    merge_bases = []
+
+    def observe(*args, **kwargs):
+        if args[0] == "merge-base" and "--is-ancestor" not in args:
+            merge_bases.append(args)
+        return git(*args, **kwargs)
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", observe)
     result = finalize_ref.landing(tip, "origin/main", str(env.clone), explain=True)
     assert result.squash is False and not result.landed
+    assert merge_bases == [("merge-base", "--all", "origin/main", tip)]
+    _commit(env.seed, "a.txt", SQUASHED, "apply the actual change")
+    _git("push", "-q", "origin", "main", cwd=env.seed)
+    _git("fetch", "-q", "origin", cwd=env.clone)
+
+    result = finalize_ref.landing(tip, "origin/main", str(env.clone), explain=True)
+
+    assert result.blobs is True and result.landed
+    assert merge_bases == [("merge-base", "--all", "origin/main", tip)] * 2
 
 
-def test_an_unreadable_upstream_is_never_landed(env):
+def test_an_unreadable_upstream_is_never_landed(env, monkeypatch):
     tip = _two_commit_change(env.clone)
     assert finalize_ref.squash_landed(tip, "origin/no-such-branch", str(env.clone)) is None
+    git = finalize_ref.git_ops.git
+    commands = []
+
+    def observe(*args, **kwargs):
+        commands.append(args)
+        return git(*args, **kwargs)
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", observe)
+    result = finalize_ref.landing(tip, "origin/no-such-branch", str(env.clone), explain=True)
+    assert not result.landed and result.squash is None and result.blobs is False
+    assert [args for args in commands if args[0] == "merge-base"] == [
+        ("merge-base", "--is-ancestor", tip, "origin/no-such-branch"),
+        ("merge-base", "--all", "origin/no-such-branch", tip),
+    ]
+    assert {args[0] for args in commands} == {"merge-base", "cherry"}
     assert not finalize_ref.is_content_on_upstream(tip, "origin/no-such-branch", str(env.clone))
+
+
+def test_multiple_merge_bases_keep_each_strategy_selection(env, monkeypatch):
+    base, tree = _git(
+        "rev-parse", "HEAD", "HEAD^{tree}", cwd=env.clone,
+    ).splitlines()
+    first = _git("commit-tree", tree, "-p", base, "-m", "first side", cwd=env.clone)
+    second = _git("commit-tree", tree, "-p", base, "-m", "second side", cwd=env.clone)
+    left = _git("commit-tree", tree, "-p", first, "-p", second, "-m", "left", cwd=env.clone)
+    right = _git("commit-tree", tree, "-p", second, "-p", first, "-m", "right", cwd=env.clone)
+    assert set(_git("merge-base", "--all", left, right, cwd=env.clone).splitlines()) == {
+        first, second,
+    }
+    expected_squash = finalize_ref.squash_landed(left, right, str(env.clone))
+    expected_blobs = finalize_ref._blobs_on_upstream(left, right, str(env.clone))
+    git = finalize_ref.git_ops.git
+    merge_bases = []
+
+    def observe(*args, **kwargs):
+        if args[0] == "merge-base" and "--is-ancestor" not in args:
+            merge_bases.append(args)
+        return git(*args, **kwargs)
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", observe)
+
+    result = finalize_ref.landing(left, right, str(env.clone), explain=True)
+
+    assert result.squash is expected_squash
+    assert result.blobs is expected_blobs is True
+    assert merge_bases == [
+        ("merge-base", "--all", right, left),
+        ("merge-base", right, left),
+        ("merge-base", left, right),
+    ]
+
+
+@pytest.mark.parametrize(("code", "text", "expected_base"), [
+    (0, "a" * 40 + "\n", "a" * 40),
+    (0, "b" * 64 + "\n", "b" * 64),
+    (1, "a" * 40 + "\n", ""),
+    (0, "", ""),
+    (0, "a" * 39 + "\n", ""),
+    (0, " " + "a" * 40 + "\n", ""),
+])
+def test_shared_merge_base_requires_one_complete_object_id(
+    monkeypatch, code, text, expected_base,
+):
+    commands = []
+    strategies = []
+
+    def git(*args, **kwargs):
+        commands.append(args)
+        if args == ("merge-base", "--is-ancestor", "topic", "upstream"):
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+        if args == ("cherry", "upstream", "topic"):
+            return subprocess.CompletedProcess(args, 0, stdout="+ unpublished\n", stderr="")
+        assert args == ("merge-base", "--all", "upstream", "topic")
+        return subprocess.CompletedProcess(args, code, stdout=text, stderr="")
+
+    def squash(branch, upstream, base, cwd):
+        strategies.append(("squash", branch, upstream, base, cwd))
+        return False
+
+    def blobs(branch, upstream, base, cwd):
+        strategies.append(("blobs", branch, upstream, base, cwd))
+        return True
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", git)
+    monkeypatch.setattr(finalize_ref, "_squash_from_base", squash)
+    monkeypatch.setattr(finalize_ref, "_blobs_from_base", blobs)
+
+    result = finalize_ref.landing("topic", "upstream", "repo", explain=True)
+
+    assert len(commands) == 3
+    assert result.landed is bool(expected_base)
+    assert strategies == ([
+        ("squash", "topic", "upstream", expected_base, "repo"),
+        ("blobs", "topic", "upstream", expected_base, "repo"),
+    ] if expected_base else [])
 
 
 # -- the PR's own base ---------------------------------------------------------------
