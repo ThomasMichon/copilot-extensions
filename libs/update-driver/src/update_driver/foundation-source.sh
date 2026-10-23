@@ -110,15 +110,19 @@ native_foundation_source_digest() (
     printf '%s\n' "${inventory%% *}"
 )
 
-check_native_foundation_execution_root() {
-    local root="$1" plugin="$2" name package
-    _native_foundation_plain "$root" directory || return 1
-    _native_foundation_plain "$plugin" directory || return 1
+_native_foundation_outside_sources() {
+    local path="$1" plugin="$2" name package
     for name in update-driver agent-procutil single-instance-lease; do
         package="${plugin%/*}/$name"
-        [[ "$root" != "$package" && "$root" != "$package/"* ]] ||
-            { _native_foundation_error 'execution root cannot mutate source closure'; return 1; }
+        [[ "$path" != "$package" && "$path" != "$package/"* ]] ||
+            { _native_foundation_error 'execution paths cannot mutate source closure'; return 1; }
     done
+}
+
+check_native_foundation_execution_root() {
+    _native_foundation_plain "$1" directory || return 1
+    _native_foundation_plain "$2" directory || return 1
+    _native_foundation_outside_sources "$1" "$2"
 }
 
 freeze_native_foundation_source() (
@@ -128,6 +132,7 @@ freeze_native_foundation_source() (
     [[ "$destination" == "$root/"* && ! -e "$destination" && ! -L "$destination" ]] ||
         { _native_foundation_error 'source freeze must be new and inside execution root'; return 1; }
     _native_foundation_plain "${destination%/*}" directory || return 1
+    _native_foundation_outside_sources "$destination" "$plugin" || return 1
     [[ "$expected" =~ ^[0-9a-f]{64}$ && "$(native_foundation_source_digest "$plugin")" == "$expected" ]] ||
         { _native_foundation_error 'source changed before native freeze'; return 1; }
     _native_foundation_files "$plugin" || return 1

@@ -371,6 +371,8 @@ applies before native admission.
 same UTF-8, byte-sorted three-package inventory as Python and PowerShell,
 including both canonical installer-engine variants. Freezing requires a new
 destination inside the execution root, which cannot be inside a source package.
+Both the root and destination must remain outside all three source packages,
+including when the execution root is an ancestor of the selected sources.
 It rechecks the original and frozen inventories under custody. These Linux
 helpers do **not** launch a producer, acquire prerequisites, settle child groups,
 or implement Linux genesis/upgrade; those remain separate integration work.

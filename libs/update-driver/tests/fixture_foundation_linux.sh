@@ -28,6 +28,9 @@ case "$mode" in
         start_native_foundation_progress "$root" "$plugin"
         freeze_native_foundation_source "$root" "$plugin" "$root/frozen" "${__foundation_value[source_hash]}"
         ;;
+    refuse-freeze)
+        if freeze_native_foundation_source "$root" "$plugin" "$5" "$6"; then exit 18; fi
+        ;;
     stale-source)
         start_native_foundation_progress "$root" "$plugin"
         operation="$__foundation_document"

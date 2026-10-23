@@ -104,12 +104,18 @@ _native_foundation_validate() {
 }
 
 read_native_foundation_progress() {
-    local root="$1" path="$1/foundation-operation.json" size code
+    local root="$1" path="$1/foundation-operation.json" size code parent
     __foundation_document=''
     __foundation_present=0
     if [[ ! -e "$root" && ! -L "$root" ]]; then
         [[ "$root" == /* && "$(readlink -m -- "$root" && printf '.')" == "$root"$'\n.' ]] ||
             { _native_foundation_error 'root must be absolute and unlinked'; return 1; }
+        parent="$root"
+        while [[ ! -e "$parent" && ! -L "$parent" ]]; do
+            parent="${parent%/*}"
+            [[ -n "$parent" ]] || parent=/
+        done
+        _native_foundation_plain "$parent" directory || return 1
         return 0
     fi
     _native_foundation_plain "$root" directory || return 1

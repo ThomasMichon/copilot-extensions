@@ -71,6 +71,19 @@ def test_native_directory_creation_matches_queue_policy_without_acl_migration(na
     assert not (root / fs.FILENAME).exists()
 
 
+def test_native_freeze_cannot_mutate_sources_below_an_ancestor_execution_root(native_source, area):
+    before = {
+        path.relative_to(native_source.parent): path.read_bytes()
+        for path in native_source.parent.rglob("*") if path.is_file()
+    }
+    run_native(area, native_source, "refuse-freeze")
+    after = {
+        path.relative_to(native_source.parent): path.read_bytes()
+        for path in native_source.parent.rglob("*") if path.is_file()
+    }
+    assert after == before and not (area / fs.FILENAME).exists()
+
+
 def test_canonical_prerequisite_helpers_preserve_signed_preference_and_python_floor(native_source, area):
     root = area / "state"
     create_queue_directory(root)

@@ -91,6 +91,23 @@ def test_changed_source_preserves_running_fence_and_never_freezes(native_source,
     assert not (root / "frozen").exists()
 
 
+@pytest.mark.parametrize("package", ["update-driver", "agent-procutil", "single-instance-lease"])
+def test_ancestor_execution_root_never_freezes_into_source(native_source, area, tools, package):
+    root = area
+    destination = native_source.parent / package / "frozen"
+    before = {
+        path.relative_to(native_source.parent): path.read_bytes()
+        for path in native_source.parent.rglob("*") if path.is_file()
+    }
+    run_native(root, native_source, "refuse-freeze", tools, str(destination), inspect(native_source).digest)
+    after = {
+        path.relative_to(native_source.parent): path.read_bytes()
+        for path in native_source.parent.rglob("*") if path.is_file()
+    }
+    assert after == before
+    assert not destination.exists() and not (root / fs.FILENAME).exists()
+
+
 def test_mutations_refuse_without_actual_fd_custody(native_source, area, tools):
     root = area / "state"
     root.mkdir(mode=0o700)
@@ -172,6 +189,10 @@ def test_reader_status_is_read_only_and_absence_does_not_create(native_source, a
     root = area / "absent" / "nested"
     result = run_native(root, native_source, "read", tools)
     assert not root.exists() and not result.stdout
+    file_parent = area / "file-parent"
+    file_parent.write_text("not a directory")
+    run_native(file_parent / "state", native_source, "read", tools, success=False)
+    assert file_parent.read_text() == "not a directory"
 
 
 def test_native_reader_differential_protocol_corpus(native_source, area, tools):
