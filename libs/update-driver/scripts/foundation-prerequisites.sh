@@ -5,6 +5,10 @@ set -euo pipefail
 bootstrap="$1"
 helper="$(CDPATH= cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/installer-engine.sh"
 unset UPDATE_DRIVER_WITNESS
+_step() { printf '%s\n' "$*" >&2; }
+_ok() { printf '%s\n' "$*" >&2; }
+_warn() { printf '%s\n' "$*" >&2; }
+_fail() { printf '%s\n' "$*" >&2; }
 source "$helper"
 export UV_PYTHON_INSTALL_DIR="$bootstrap/python" UV_CACHE_DIR="$bootstrap/cache"
 export UV_NO_PROGRESS=1 UV_PYTHON=3.11 UV_PYTHON_PREFERENCE=only-managed
