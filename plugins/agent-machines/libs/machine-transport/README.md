@@ -5,6 +5,11 @@ identity, and local-vs-SSH transport resolution, vendored (shared, not
 duplicated) across every Copilot CLI plugin that dispatches a command to a
 named machine.
 
+Registry file reads use PyYAML's safe C loader when available, with its safe
+Python loader as the fallback. Every call opens and parses the current file;
+no registry, identity or authority result is cached by this parser. Missing,
+malformed and unsafe-tagged documents retain their normal failures.
+
 ## Why this exists
 
 Before this library existed, `agent-worktrees`, `worktree-manager`, and

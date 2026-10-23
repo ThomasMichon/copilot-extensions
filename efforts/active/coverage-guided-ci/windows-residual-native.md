@@ -223,6 +223,38 @@ reconciliation blocks admission rather than expanding a batch.
 
 ## Continuation hunk ledger
 
+### Subsequent admission: W4-TRANSPORT
+
+The original census and its counts below remain historical. This narrowly
+admitted implementation carries only the five W4-TRANSPORT keys:
+`96d6672d87b3`, `d6741aa0c62f`, `fcc53c6c01ac`, `50309299da22`, and
+`2bf4983b2622`, under their original three paths. The accepted candidate uses
+the available safe C loader without caching parsed topology or changing
+identity/authority lookup. The original file-parser cases run against both
+the Python and preferred safe loaders; replacement, malformed/unsafe YAML,
+missing files, aliases, merges and quoted scalars retain explicit assertions.
+A separate isolated-module import additionally proves the fallback when
+`yaml.CSafeLoader` is absent, including refusal of an unsafe tag.
+
+Both required consumer inventories identify `agent-bridge`, `agent-machines`,
+`agent-ssh`, `agent-worktrees`, and `worktree-manager` as canonical editable
+consumers, with no physical machine-transport copies to patch. A newly scoped
+patch changefile names all five. No installer, command-binding, control-plane,
+runtime installation, test selection, skip, timeout or containment policy is
+changed. Review and required CI still gate merge.
+
+Native Windows validation used exactly two workers and unchanged 30-second
+item, 240-second diagnostic and default process/memory/temp bounds. The complete
+library suite passed 347 cases (5.64 seconds including preparation and cleanup).
+The complete Worktrees `test_config.py`, `test_machines_yaml_location.py`, and
+`test_machine_identity.py` selection passed 192 cases (30.78 seconds inclusive),
+exercising real filesystem-backed consumers. Install-contract, vendored-library
+consistency, touched-Python lint and diff-whitespace checks passed. These are
+functional checks, not a complete same-head plugin replay or a claim that any
+normal group or the parent 900-second budget is qualified. No fresh-machine or
+external venue was provisioned: the change neither installs nor bootstraps
+anything, and the relevant native consumer is exercised locally.
+
 ### `libs/installer-engine/installer-engine.ps1`
 
 - `@@ -17,6 +17,27 @@` — `a26347235fb1` — B6909
