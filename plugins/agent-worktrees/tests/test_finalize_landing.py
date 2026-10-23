@@ -67,22 +67,21 @@ def _build_landing_seed(root: Path) -> None:
     _git("init", "-q", "--template=", "-b", "main", str(seed), cwd=root)
     _identity(seed)
     _commit(seed, "a.txt", "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n")
-    _git("remote", "add", "origin", str(origin), cwd=seed)
+    _git("remote", "add", "origin", "../origin.git", cwd=seed)
     _git("push", "-q", "origin", "main", "main:dev", cwd=seed)
     clone = root / "clone"
     _git("clone", "-q", "--template=", str(origin), str(clone), cwd=root)
+    _git("remote", "set-url", "origin", "../origin.git", cwd=clone)
     _identity(clone)
     _git("checkout", "-q", "-b", "worktree/wt-landing", "origin/main", cwd=clone)
 
 
 def _copy_landing_env(source: Path, tmp_path: Path) -> SimpleNamespace:
-    """Preserve all objects, refs and creation reflogs in private stores."""
+    """Copy private stores; sibling-relative remotes need no config repair."""
     shutil.copytree(source, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile)
     origin = tmp_path / "origin.git"
     seed = tmp_path / "seed"
     clone = tmp_path / "clone"
-    for repo in (seed, clone):
-        _git("remote", "set-url", "origin", str(origin), cwd=repo)
     return SimpleNamespace(tmp_path=tmp_path, origin=origin, seed=seed, clone=clone,
                            worktree_id="wt-landing", slug="pr/landing")
 
@@ -100,18 +99,25 @@ def _topology_snapshot(root: Path) -> dict[Path, bytes]:
         "_cross_dev_reset_seed", "_cross_main_reset_seed", "_synced_landing_seed",
     ],
 )
-def test_landing_copies_preserve_topology_and_isolate_mutations(tmp_path, request, seed_fixture):
+def test_landing_copies_preserve_topology_and_isolate_mutations(
+    tmp_path, request, seed_fixture, monkeypatch,
+):
     source = request.getfixturevalue(seed_fixture)
     source_before = _topology_snapshot(source)
-    first = _copy_landing_env(source, tmp_path / "first")
-    second = _copy_landing_env(source, tmp_path / "second")
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            f"{__name__}._git",
+            lambda *args, **kwargs: pytest.fail("private copies need no Git config repair"),
+        )
+        first = _copy_landing_env(source, tmp_path / "first")
+        second = _copy_landing_env(source, tmp_path / "second")
     unchanged = {source: source_before, second.tmp_path: _topology_snapshot(second.tmp_path)}
     for env_copy in (first, second):
         for repo in (env_copy.seed, env_copy.clone):
-            assert _git("remote", "get-url", "origin", cwd=repo) == str(env_copy.origin)
+            url = _git("remote", "get-url", "origin", cwd=repo)
+            assert (repo / url).resolve() == env_copy.origin.resolve()
         for relative, data in source_before.items():
-            if relative.name != "config":
-                assert (env_copy.tmp_path / relative).read_bytes() == data
+            assert (env_copy.tmp_path / relative).read_bytes() == data
         main = _git("--git-dir", str(env_copy.origin), "rev-parse", "main", cwd=env_copy.origin)
         dev = _git("--git-dir", str(env_copy.origin), "rev-parse", "dev", cwd=env_copy.origin)
         branch = _git("branch", "--show-current", cwd=env_copy.clone)

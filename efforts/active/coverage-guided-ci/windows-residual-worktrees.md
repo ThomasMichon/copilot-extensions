@@ -87,6 +87,39 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-RELATIVE-REMOTES self-relocating private finalization stores
+
+The landing and refspec-precondition seeds configure Git-supported
+`../origin.git` remotes once. Every copied publisher and checkout retains
+its sibling bare origin, so copying the complete fixture no longer needs
+two Git processes to rewrite absolute URLs. All consumer Git operations
+retain their explicit repository working directory. No production code or
+host Git configuration changes.
+
+The six landing-topology controls and two repeated refspec controls still
+perform real commits, fetches/pushes and source/sibling isolation checks.
+Their URL assertion resolves the configured path against its own repository
+and requires the private sibling origin. The byte-preservation assertion
+now includes config files, rather than excluding them for URL repair.
+Each control refuses any Git call during the two copy operations themselves;
+normal real-Git mutations and assertions resume immediately afterward.
+
+Native Windows functional evidence uses exactly two workers, the original
+30-second item timeout and existing process/memory/native deadlines:
+the full landing module passes **79 tests**, **189.16 seconds including
+preparation and cleanup**; the complete precondition, creation-gating and
+blob-comparison consumers pass **139 tests**, **98.55 seconds inclusive**.
+The six strengthened landing copy controls also pass during the unchanged
+25-file normal-group diagnostic. That normal group still exceeds 240
+seconds (**259.70 seconds including cleanup**) and is not qualified;
+neither is a complete repeated same-head portfolio.
+
+Documentation impact is limited to this ledger's fixture and validation
+contract. There is no command/configuration/architecture change to document.
+Actual local Git fetch/push consumers provide the integration evidence;
+install/bootstrap clean-room and external service lanes do not apply to
+this test-only local sibling-layout optimization. No rollout occurs.
+
 ### B-CHECKOUT-REF one fresh checkout identity and existence query
 
 Below-altitude subprocess reduction: `resolve_precondition_ref` reads HEAD's
