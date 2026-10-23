@@ -1174,3 +1174,51 @@ authorized installed proof remain distinct obligations.
   untouched strict-Confirm regression and combined form/Configuration selection
   passed 213 tests with two opt-in skips. This retains the same source slice,
   not an expansion into workflow state or a new input authority.
+
+### 2026-10-23 - Native guarded drafts merged; original-request recovery next
+
+- #8060 merged at 04:15Z as `4ffe429c00fd9e7b1c27413d92a1c592dd800d9e`.
+  Exact head `b675d7a8dc01439785cc0bea6751b9270f198989` had an approving
+  review, all threads resolved and the complete required PR gate green.
+- Re-read the full Plan and Validation Plan and the bounded terminal contract.
+  Generic contributed Save/Clear, queue-bound owner operations, provenance-bound
+  local recovery and acknowledgement-aware Reset are delivered at source.
+  The terminal receipt/recovery item remains unchecked: draft delivery alone
+  does not retain an original submitted request across restart or vanished rows.
+- Review fixed real consecutive-Reset, stale-revival, delayed-writer, local-only
+  cleanup and strict/custom multichoice fidelity defects. Final combined
+  Manager forms/Configuration coverage passed 213 tests with two opt-in skips;
+  owner/HTTP/SDK/board/native CLI coverage passed 310 with one opt-in skip.
+  Lint, unchanged module ceilings and install contracts passed. No failing
+  test or review finding was waived.
+- Current required CI is the eligible-unit packet, not native POSIX or
+  independent installed-client acceptance. Release and authorized installed
+  proof remain open. No live task, source activation or rollout occurred.
+- Next: retain the exact original request and immutable wire/sender/wake/
+  consent context, then expose explicit owner receipt reads independent of the
+  current card/board row through generic contributions. Persisted context is
+  data, never executable authority; no new receipt or task truth store.
+  #7141, #7091 and this effort remain Active.
+
+### 2026-10-23 - Prepared original-request owner contract
+
+- Implement the next dependency of #7141: read-only preparation freezes full
+  wire fields, sender, canonical wake message/consent, original status/card
+  basis and request ID in versioned JSON data. Prepared submit and receipt
+  reads require the complete existing queue/installation/machine scope.
+  This adds no identity, task or receipt store and no executable saved argv.
+- HTTP and SDK capability checks refuse old owners without legacy fallback;
+  scoped routes require explicit wire context. A fresh client can inspect and
+  exactly replay the original request after a lost response, consumption and
+  card replacement without duplicating an answer or waking a new owner.
+  The CLI never resolves today's sender for a prepared retry, including an
+  original null sender, and rejects request overrides.
+- Isolated owner/HTTP/CLI draft and acceptance coverage passed 90 tests.
+  The prepared-request, owner-atomic and legacy card/steer selection passed
+  150 tests. A cold native draft subprocess exceeded its existing deadline
+  once; the unchanged-deadline combined rerun passed. No deadline was widened.
+- This is the owner-side dependency, not complete terminal adoption. Generic
+  provider-declared preparation, durable local request retention and a
+  row-independent recovery surface remain next. Current-head review and
+  required CI are still required before merge. No live task, activation,
+  installed rollout or independent graphical parity is claimed.

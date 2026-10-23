@@ -22,6 +22,7 @@ from .coordinator_task_models import (
     CardDraftBody,
     GuardedCardDraftBody,
     ScopedCardDraftBody,
+    ScopedSteerBody,
     ClaimBody,
     CompleteBody,
     ConfirmBody,
@@ -866,6 +867,28 @@ def register_task_routes(
         if receipt is None:
             raise HTTPException(status_code=404, detail="no such steering receipt")
         return receipt
+
+    def _require_steering_scope(expected: dict) -> dict:
+        scope = _draft_scope(queue)
+        if expected != scope:
+            raise HTTPException(
+                status_code=409, detail="steering belongs to another scope; retain the original request",
+            )
+        return scope
+
+    @app.post("/tasks/{task_id}/steer/scoped")
+    def scoped_steer(task_id: str, body: ScopedSteerBody) -> dict:
+        scope = _require_steering_scope(body.expected_scope.model_dump())
+        return {**steer(task_id, body), "steering_scope": scope}
+
+    @app.get("/tasks/{task_id}/steer-receipt/scoped")
+    def scoped_steer_receipt(
+        task_id: str, request_id: str, queue: str, installation: str, machine: str,
+    ) -> dict:
+        scope = _require_steering_scope({
+            "queue": queue, "installation": installation, "machine": machine,
+        })
+        return {**get_steer_receipt(task_id, request_id), "steering_scope": scope}
 
     @app.post("/tasks/{task_id}/card-draft")
     def save_card_draft(task_id: str, body: CardDraftBody) -> dict:

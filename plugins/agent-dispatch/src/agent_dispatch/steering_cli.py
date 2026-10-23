@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import uuid
 from pathlib import Path
 
 from .loop_commands import _resolve_cli_module
@@ -112,6 +114,19 @@ def _draft_preconditions(args: argparse.Namespace) -> dict:
 
 def _cmd_steer(args: argparse.Namespace) -> int:
     """Submit an answer and have the coordinator resume the owning worktree."""
+    prepared = getattr(args, "prepared_json", None)
+    if prepared is not None:
+        try:
+            request = _prepared_request(args)
+            if (args.field or args.sender is not None or args.message is not None
+                    or not args.wake or args.expected_status is not None
+                    or args.expected_revision is not None or args.idempotency_key is not None):
+                raise ValueError("--prepared-json cannot be combined with request overrides")
+        except ValueError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 2
+        with _core()._client(args) as c:
+            return _emit_steer_result(c.steer_prepared(request), request["wake"])
     fields: dict[str, str] = {}
     for item in args.field or []:
         key, sep, value = item.partition("=")
@@ -134,15 +149,66 @@ def _cmd_steer(args: argparse.Namespace) -> int:
             expected_revision=getattr(args, "expected_revision", None),
             idempotency_key=getattr(args, "idempotency_key", None),
         )
-        woken = result.pop("steer_woken", None)
-        wake_status = result.pop("steer_wake_status", None)
-        receipt = result.pop("steer_receipt", None)
-        if args.wake and wake_status is None:
-            wake_status = "unsupported"
+    return _emit_steer_result(result, args.wake)
+
+
+def _emit_steer_result(result: dict, wake: bool) -> int:
+    woken = result.pop("steer_woken", None)
+    wake_status = result.pop("steer_wake_status", None)
+    receipt = result.pop("steer_receipt", None)
+    if wake and wake_status is None:
+        wake_status = "unsupported"
     return _core()._emit({"task": result, "woken": woken, "wake_status": wake_status, "receipt": receipt})
 
 
+def _prepared_request(args: argparse.Namespace) -> dict:
+    from .steering_requests import validate_prepared_request
+    request = validate_prepared_request(json.loads(args.prepared_json))
+    if request["task_id"] != args.task_id:
+        raise ValueError("prepared request belongs to another task")
+    return request
+
+
+def _cmd_steer_prepare(args: argparse.Namespace) -> int:
+    try:
+        fields = {}
+        for item in args.field or []:
+            key, separator, value = item.partition("=")
+            if not separator:
+                raise ValueError("--field must be key=value")
+            fields[key.strip()] = value
+        scope = json.loads(args.scope_json)
+    except ValueError as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+    sender = args.sender or _core()._owner_from_identity(args)
+    with _core()._client(args) as client:
+        try:
+            request = client.prepare_steer(
+                args.task_id, args.request_id or uuid.uuid4().hex, expected_scope=scope,
+                fields=fields, sender=sender, wake=args.wake, message=args.message,
+                expected_status=args.expected_status, expected_revision=args.expected_revision,
+            )
+        except ValueError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 2
+        return _core()._emit(request)
+
+
 def _cmd_steer_receipt(args: argparse.Namespace) -> int:
+    if getattr(args, "prepared_json", None) is not None:
+        try:
+            request = _prepared_request(args)
+            if args.request_id is not None:
+                raise ValueError("use request_id or --prepared-json, not both")
+        except ValueError as exc:
+            print(f"agent-dispatch: {exc}", file=sys.stderr)
+            return 2
+        with _core()._client(args) as client:
+            return _core()._emit(client.prepared_steer_receipt(request))
+    if not args.request_id:
+        print("agent-dispatch: receipt requires request_id or --prepared-json", file=sys.stderr)
+        return 2
     with _core()._client(args) as client:
         return _core()._emit(client.steer_receipt(args.task_id, args.request_id))
 
@@ -214,6 +280,7 @@ def register_steering_commands(sub) -> None:
     ssm.add_argument("--field", action="append", metavar="KEY=VALUE", help="one answer field (repeatable)")
     ssm.add_argument("--sender", help="who is answering (default: resolved identity)")
     ssm.add_argument("--message", help="override the wake nudge text")
+    ssm.add_argument("--prepared-json", help="exact saved request from steer prepare; no request overrides")
     ssm.add_argument(
         "--expected-status",
         dest="expected_status",
@@ -236,9 +303,22 @@ def register_steering_commands(sub) -> None:
     )
     ssm.set_defaults(func=_core()._cmd_steer, wake=True)
 
+    prepare = ssub.add_parser("prepare", help="freeze an exact scope-bound request without writing or waking")
+    prepare.add_argument("task_id")
+    prepare.add_argument("--field", action="append", metavar="KEY=VALUE")
+    prepare.add_argument("--sender", help="resolved once here, never again on prepared replay")
+    prepare.add_argument("--message")
+    prepare.add_argument("--no-wake", dest="wake", action="store_false")
+    prepare.add_argument("--expected-status", required=True)
+    prepare.add_argument("--expected-revision", required=True)
+    prepare.add_argument("--scope-json", required=True, help="complete owner-reported draft_scope JSON")
+    prepare.add_argument("--request-id", help="original request identity (default: new random identity)")
+    prepare.set_defaults(func=_cmd_steer_prepare, wake=True)
+
     receipt = ssub.add_parser("receipt", help="read exact-request acceptance, consumption and wake delivery")
     receipt.add_argument("task_id")
-    receipt.add_argument("request_id")
+    receipt.add_argument("request_id", nargs="?")
+    receipt.add_argument("--prepared-json", help="saved prepared request; checks scope and complete fingerprint")
     receipt.set_defaults(func=_cmd_steer_receipt)
 
     stk = ssub.add_parser("take", help="consume the next pending steer for a task you own (the wake-side read); identity auto-resolved from CWD")

@@ -2428,6 +2428,14 @@ agent-dispatch steer submit <id> --field decision=Proceed \
 # Inspect this request's acceptance, consumption and original wake independently:
 agent-dispatch steer receipt <id> <request-id>
 
+# Freeze the full original request before attempting delivery. Retain this JSON:
+agent-dispatch steer prepare <id> --field decision=Proceed \
+  --expected-status <status> --expected-revision <steering_revision> \
+  --scope-json '<draft_scope JSON>' --request-id <request-id>
+# Later, even from another process/CWD or after the board row has vanished:
+agent-dispatch steer submit <id> --prepared-json '<prepared request JSON>'
+agent-dispatch steer receipt <id> --prepared-json '<prepared request JSON>'
+
 # Save or clear only the card and shared draft that were actually viewed:
 agent-dispatch card draft save <id> --field notes="Unsent notes" \
   --expected-revision <steering_revision> \
@@ -2504,6 +2512,24 @@ agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "
   failure never loses the durable steer. `steer take --all` is the owner-gated
   wake-side read that atomically drains every pending answer for the resumed
   worker; plain `steer take` remains the one-at-a-time inspection form.
+- **Original-request recovery.** `steer prepare` is read-only: it freezes the
+  full wire fields, resolved sender, canonical wake message, wake consent,
+  status/card basis, request ID and owner-reported `draft_scope` as versioned
+  JSON data. Preserve that exact result before delivery. Preparation does not
+  save a draft, submit an answer or wake a worker, and is not a reservation:
+  a subsequent card/owner change still refuses a first submission. SDK callers
+  use `prepare_steer`, `steer_prepared` and `prepared_steer_receipt`.
+  Prepared submit/receipt require `steering_request_context: 1` and dedicated
+  scoped endpoints. Queue, installation and machine must all match; older
+  owners never receive a fallback unscoped call. A receipt must match the
+  original request fingerprint and revision, not just its request ID.
+  Prepared replay does not resolve today's sender/default message and rejects
+  request overrides. The fingerprint detects inconsistent data, not provenance
+  or authorization; clients must still resolve their current trusted provider.
+  Failed/missing/unverifiable reads leave acceptance uncertain. Retain the
+  original data; do not regenerate an ID, assume failure, or retarget a new card.
+  This API adds no task or receipt store. It does not by itself provide the
+  Manager's planned row-independent recovery UI.
 - **Safe to retry on an ambiguous timeout.** `submit_steer`'s own write is a
   single fast local transaction, but the full HTTP round trip can still
   exceed a client's request timeout under load even though the write already

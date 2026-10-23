@@ -207,6 +207,27 @@ class CardDraftBody(BaseModel):
     fields: dict = Field(default_factory=dict)
 
 
+class SteeringScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    queue: str = Field(min_length=1, strict=True)
+    installation: str = Field(min_length=1, strict=True)
+    machine: str = Field(min_length=1, strict=True)
+
+
+class ScopedSteerBody(SteerBody):
+    model_config = ConfigDict(extra="forbid")
+
+    fields: dict
+    sender: str | None
+    wake: bool = Field(strict=True)
+    message: str = Field(min_length=1, strict=True)
+    expected_scope: SteeringScope
+    expected_status: str = Field(min_length=1, strict=True)
+    expected_revision: str = Field(min_length=1, strict=True)
+    idempotency_key: str = Field(min_length=1, strict=True)
+
+
 class GuardedCardDraftBody(CardDraftBody):
     expected_revision: str = Field(min_length=1, strict=True)
     expected_draft_revision: str = Field(min_length=1, strict=True)
