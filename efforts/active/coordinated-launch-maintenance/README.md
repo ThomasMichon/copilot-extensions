@@ -48,8 +48,9 @@ no-new-service mechanism proved insufficient for the Windows lifetime guarantee.
 The source-only broker amendment below supersedes that mechanism without
 changing dependency policy or authorizing installed mutation.
 
-**Current delivery:** the operator selected scheduling-only completion of
-#7788. It submits optional work through the already-merged canonical execution
+**Current delivery:** scheduling-only #7788 merged into `dev` on 2026-10-23
+as `85544de549b2c8c32541e845d61e04177df5199f`. It submits optional work
+through the already-merged canonical execution
 driver and does not change daemon admission, add a broker or introduce another
 mutation owner. The canonical Windows implementation refuses a bootstrap or
 resident still in any Job. A rejected worker must remain a visible durable
@@ -124,19 +125,19 @@ the requested coordinated-background behavior.
 - [x] Move optional stage/bootstrap/reconcile work off the healthy handoff path
   on both PowerShell and Bash; remove the join and inline-download fallback
   from ordinary launches. Preserve explicit blocking recovery behavior.
-- [ ] Use one bounded on-demand owner and durable pending requests. Coalesce
+- [x] Use one bounded on-demand owner and durable pending requests. Coalesce
   equivalent requests without losing a different project, repository, source,
   installation context or stronger requested operation.
 - [x] Share operation custody with explicit update/reconcile entrypoints;
   retain canonical installer locks and execution admission. A busy owner is
   pending work, not permission for another installer.
-- [ ] Preserve exact action argv, scoped environment/unsets and project
+- [x] Preserve exact action argv, scoped environment/unsets and project
   context. Re-plan against the current installed state rather than execute a
   stale or foreign action. Keep runtime replacement and retention safety.
-- [ ] Use the canonical headless lifetime primitive, explicit logs and durable
+- [x] Use the canonical headless lifetime primitive, explicit logs and durable
   working directory. No inherited-Job fallback presented as durable success;
   preserve contained-test suppression and bounded child-tree cleanup.
-- [ ] Make queued/running/failed/completed outcomes inspectable and truthful.
+- [x] Make queued/running/failed/completed outcomes inspectable and truthful.
   Interrupted work must not be reported complete or retried over a possibly
   surviving child without ownership/completion evidence.
 - [x] Preserve `WORKTREE_NO_UPDATE` and `WORKTREE_NO_RECONCILE` independently,
@@ -144,7 +145,7 @@ the requested coordinated-background behavior.
   Missing prerequisites cannot be called a healthy launch merely to avoid waiting.
 
 ### Phase 3 - Release and acceptance
-- [ ] Land source, documentation and changefiles through review and required CI.
+- [x] Land source, documentation and changefiles through review and required CI.
 - [ ] Observe legitimate promotion, then use the authorized normal rollout
   owner; do not start a competing update to finish this effort.
 - [ ] Record installed handoff, maintenance completion and failure evidence.
@@ -155,22 +156,22 @@ the requested coordinated-background behavior.
 
 All detailed scenarios below are **agent-recommended** acceptance checks.
 
-- [ ] Unit tests cover queue equivalence, distinct contexts, stronger requests,
+- [x] Unit tests cover queue equivalence, distinct contexts, stronger requests,
   owner contention, crash/ambiguous-child handling and truthful terminal states.
-- [ ] Real shell fixture holds an installer behind a gate while two healthy
+- [x] Real shell fixture holds an installer behind a gate while two healthy
   launches reach handoff before that gate opens; maintenance remains automatic
   and single-owned. Measure handoff independently of installer completion.
-- [ ] Prove a different project's pending request is eventually processed,
+- [x] Prove a different project's pending request is eventually processed,
   and manual update/reconcile cannot overlap its mutation boundary.
-- [ ] Exercise exact argv/environment, admission refusal, malformed plans,
+- [x] Exercise exact argv/environment, admission refusal, malformed plans,
   failed spawn, failed installer, opt-outs and explicit blocking mode.
 - [ ] Prove first-use/missing-prerequisite handling in an isolated fresh home.
 - [x] Transfer Windows independent broker activation, all-caller-Job survival,
   native control/desktop observation and installer lifecycle qualification to
   #6859/#7833. The scheduling change retains existing strict admission; verify
   that its refusal produces no accepted receipt or foreground fallback.
-- [ ] Exercise native POSIX handoff, owner exit and pending-request delivery.
-- [ ] Run targeted contained suites, lint, install-contract and source guards;
+- [x] Exercise native POSIX handoff, owner exit and pending-request delivery.
+- [x] Run targeted contained suites, lint, install-contract and source guards;
   record native/live lanes separately from mocked wiring.
 - [ ] Verify a promoted installed release through the normal authorized flow;
   a payload version or queued receipt alone is not installed/running proof.
@@ -773,3 +774,33 @@ repository history.
   200 cases with 11 explicit native/platform skips and sandbox retirement,
   including native-foundation compatibility and actual healthy handoff.
   Lint and module ceilings passed. Final-source review and CI remain required.
+
+### 2026-10-23 - Scheduling source merged; release and installed acceptance retained
+
+- #7788 merged into `dev` as
+  `85544de549b2c8c32541e845d61e04177df5199f` after the actual Copilot review
+  approved exact source `18262e0f0d4763da369604bc4ae6fcabf99c0f83` with no
+  blocking findings. Both original inline threads were resolved; the later
+  producer-result and acquisition-custody findings were also fixed before
+  approval. Required PR CI passed. Managed completion verified the merge
+  using the repository owner's configured review-rule exception; no required
+  check was bypassed.
+- Exact-source Linux run
+  [39944492386](https://github.com/ThomasMichon/copilot-extensions/actions/runs/39944492386)
+  passed all three actual hardened-container targets: Worktrees, Manager and
+  the shared driver. Together with the recorded local Windows slice and
+  real-process interruption regression, this closes scheduling source
+  qualification, not an installed rollout. The hosted Windows lane stayed
+  disabled, as requested.
+- The checked source items reuse the existing bounded owner, queue,
+  authenticated witness and installer admission. Native Windows all-caller-Job
+  survival, broker activation and installer integration remain exclusively
+  in the independently owned #6859/#7833 repair. Historical native passes do
+  not qualify that repair's changed candidate.
+- This effort remains **Active** under #7694 with the same launch driver.
+  Next, observe the legitimate #3336/#6237 promotion route without dispatching
+  another updater. First-use/missing-prerequisite acceptance and actual
+  promoted installed handoff, maintenance completion and failure evidence
+  remain unchecked until proved through the separately authorized normal
+  rollout. No host registration, installation, restart or deployment was
+  performed to complete the merge.
