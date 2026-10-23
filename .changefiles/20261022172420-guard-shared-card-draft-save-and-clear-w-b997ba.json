@@ -1,0 +1,9 @@
+{
+  "comment": "Guard shared card draft save and clear with transactional card and observed-draft revisions.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -1054,3 +1054,31 @@ authorized installed proof remain distinct obligations.
   scope instead of a later selection. Both rendered paths now hold an older
   fetch across command completion and prove its stale result is discarded.
   The contained result/pivot selection passed 115 tests; changed lint passed.
+
+### 2026-10-23 - Terminal results merged; guarded shared drafts next
+
+- #7995 merged at 00:05Z as `3ffc695602134cecb290a09109615699168015b8`.
+  Exact head `1efd1dd9c451c0d8358d73474cfca12ceca2adf9` received an
+  approving review with no unresolved findings and complete green required CI.
+  Timeout-output loss and overlapping stale list results were substantive
+  review fixes, not waived findings. Re-read the Plan and Validation Plan;
+  full-result presentation does not complete #7141.
+- Current CI runs an eligible-unit coverage packet rather than the former
+  dedicated Manager consumer job. Its green aggregate is not native POSIX
+  Manager acceptance proof. Local contained native Windows evidence and the
+  explicit unavailable dedicated lane remain distinct; no installed rollout
+  or live task was used.
+- The next bounded owner implementation guards existing shared-draft Save
+  and Clear by the exact card/ownership revision and observed draft revision,
+  including explicit absence. Per-save nonces distinguish identical writes.
+  Guarded drafts retain card provenance; legacy unbound drafts stay readable.
+  Dedicated HTTP routes, capability-gated SDK calls and CLI flags refuse old
+  or downgraded owners without unsafe fallback.
+- Isolated queue concurrency, full refusal snapshots, actual HTTP/SDK and
+  native CLI first-touch/stale-clear/clear coverage passed 139 tests. Changed
+  lint and unchanged module ceilings passed. No new draft store, database
+  migration, workflow state, task wake or Manager-specific backend was added.
+- This owner slice is not yet published or reviewed. Native contribution
+  Save/Reset adoption, local provenance-bound restore, exact-request restart
+  recovery and independent client proof remain open. Normal review/CI/release
+  and separately authorized installed proof remain required.

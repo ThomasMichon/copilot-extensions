@@ -32,10 +32,17 @@ class SteeringClientMixin:
             )
         )
 
-    def save_card_draft(self, task_id: str, *, fields: dict) -> dict:
+    def save_card_draft(
+        self, task_id: str, *, fields: dict, expected_revision: str | None = None,
+        expected_draft_revision: str | None = None,
+    ) -> dict:
         """Persist an operator's not-yet-submitted draft answer. Never touches
         ``awaiting_steer``/status -- the task stays blocked exactly as before,
         durably visible from any surface/machine via ``get``/``card show``."""
+        if expected_revision is not None or expected_draft_revision is not None:
+            return self._guarded_card_draft(
+                task_id, fields, expected_revision, expected_draft_revision, clear=False,
+            )
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/card-draft",
@@ -43,9 +50,53 @@ class SteeringClientMixin:
             )
         )
 
-    def clear_card_draft(self, task_id: str) -> dict:
+    def clear_card_draft(
+        self, task_id: str, *, expected_revision: str | None = None,
+        expected_draft_revision: str | None = None,
+    ) -> dict:
         """Clear a task's saved draft. Never touches ``awaiting_steer``/status."""
+        if expected_revision is not None or expected_draft_revision is not None:
+            return self._guarded_card_draft(
+                task_id, {}, expected_revision, expected_draft_revision, clear=True,
+            )
         return self._unwrap(self._http.delete(f"/tasks/{task_id}/card-draft"))
+
+    def _guarded_card_draft(
+        self, task_id: str, fields: dict, expected_revision: str | None,
+        expected_draft_revision: str | None, *, clear: bool,
+    ) -> dict:
+        if not expected_revision or not expected_draft_revision:
+            raise ValueError("both expected card and draft revisions are required")
+        version = self.health().get("card_draft_cas")
+        if type(version) is not int or version < 1:
+            raise DispatchUpgradeRequired("coordinator lacks guarded card drafts")
+        operation = "guarded-clear" if clear else "guarded"
+        try:
+            result = self._unwrap(self._http.post(
+                f"/tasks/{task_id}/card-draft/{operation}",
+                json={
+                    "fields": fields, "expected_revision": expected_revision,
+                    "expected_draft_revision": expected_draft_revision,
+                },
+            ))
+        except DispatchError as exc:
+            if exc.status_code in (404, 405) and exc.detail in ("Not Found", "Method Not Allowed"):
+                raise DispatchUpgradeRequired("coordinator lacks guarded card drafts") from exc
+            raise
+        if (
+            not isinstance(result, dict) or result.get("id") != task_id
+            or result.get("steering_revision") != expected_revision
+            or not isinstance(result.get("card_draft_revision"), str)
+            or not result["card_draft_revision"]
+            or (clear and result.get("card_draft") is not None)
+            or (not clear and (
+                not isinstance(result.get("card_draft"), dict)
+                or result["card_draft"].get("fields") != fields
+                or result["card_draft"].get("steering_revision") != expected_revision
+            ))
+        ):
+            raise DispatchError(502, "no verifiable guarded draft acknowledgement; refresh before retrying")
+        return result
 
     def _coordinator_supports_steer_idempotency_key(self) -> bool:
         """Whether this coordinator's ``/health`` advertises that it

@@ -18,6 +18,7 @@ from .coordinator_task_models import (
     ActivityBody,
     CardBody,
     CardDraftBody,
+    GuardedCardDraftBody,
     ClaimBody,
     CompleteBody,
     ConfirmBody,
@@ -66,7 +67,10 @@ _NO_TELEMETRY_EVENT_TYPES = frozenset({"task.heartbeat", "task.activity_updated"
 
 
 def _task_dict(task: Task) -> dict:
-    return {**asdict(task), "steering_revision": task.steering_revision}
+    return {
+        **asdict(task), "steering_revision": task.steering_revision,
+        "card_draft_revision": task.card_draft_revision,
+    }
 
 
 def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict | None:
@@ -855,6 +859,26 @@ def register_task_routes(
     def clear_card_draft(task_id: str) -> dict:
         return _guard(
             lambda: queue.clear_card_draft(task_id),
+            "task.card_draft_cleared",
+        )
+
+    @app.post("/tasks/{task_id}/card-draft/guarded")
+    def save_guarded_card_draft(task_id: str, body: GuardedCardDraftBody) -> dict:
+        return _guard(
+            lambda: queue.save_card_draft(
+                task_id, fields=body.fields, expected_revision=body.expected_revision,
+                expected_draft_revision=body.expected_draft_revision,
+            ),
+            "task.card_draft",
+        )
+
+    @app.post("/tasks/{task_id}/card-draft/guarded-clear")
+    def clear_guarded_card_draft(task_id: str, body: GuardedCardDraftBody) -> dict:
+        return _guard(
+            lambda: queue.clear_card_draft(
+                task_id, expected_revision=body.expected_revision,
+                expected_draft_revision=body.expected_draft_revision,
+            ),
             "task.card_draft_cleared",
         )
 

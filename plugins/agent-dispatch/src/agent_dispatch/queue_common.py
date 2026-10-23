@@ -239,6 +239,18 @@ class Task:
     category: str = "work"
 
     @property
+    def card_draft_revision(self) -> str:
+        """Observed draft CAS basis, including explicit absence and legacy bytes."""
+        if self.card_draft is None:
+            return "absent"
+        return hashlib.sha256(
+            json.dumps(
+                {"task_id": self.id, "draft": self.card_draft},
+                sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+    @property
     def steering_revision(self) -> str:
         """Card/owner CAS basis; routine heartbeat and draft writes do not change it."""
         basis = {

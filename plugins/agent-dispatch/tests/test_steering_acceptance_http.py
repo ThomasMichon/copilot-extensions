@@ -267,3 +267,47 @@ def test_both_native_contributions_forward_the_owner_revision(name):
     action = next(action for action in document["actions"] if action["key"] == "steer")
     index = action["run"].index("--expected-revision")
     assert action["run"][index + 1] == "{steering_revision}"
+
+
+def test_native_cli_guarded_draft_first_touch_stale_reset_and_clear(native_url, owner):
+    queue, task_id = owner
+
+    def cli(*args):
+        return subprocess.run(
+            [sys.executable, "-m", "agent_dispatch", "--url", native_url, *args],
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    shown = cli("card", "show", task_id)
+    assert shown.returncode == 0, shown.stderr
+    original = json.loads(shown.stdout)
+    assert original["card_draft_revision"] == "absent"
+    basis = ("--expected-revision", original["steering_revision"],
+             "--expected-draft-revision", original["card_draft_revision"])
+    saved = cli("card", "draft", "save", task_id, "--field", "answer=first\nsecond, exact", *basis)
+    assert saved.returncode == 0, saved.stderr
+    draft = json.loads(saved.stdout)
+    assert draft["card_draft"]["fields"] == {"answer": "first\nsecond, exact"}
+    assert draft["card_draft"]["steering_revision"] == original["steering_revision"]
+    newer = queue.save_card_draft(
+        task_id, fields={"answer": "other client"},
+        expected_revision=draft["steering_revision"],
+        expected_draft_revision=draft["card_draft_revision"],
+    )
+    before = queue.get(task_id)
+    stale = cli(
+        "card", "draft", "clear", task_id, "--expected-revision", draft["steering_revision"],
+        "--expected-draft-revision", draft["card_draft_revision"],
+    )
+    assert stale.returncode != 0 and "draft changed" in stale.stderr
+    assert queue.get(task_id) == before
+    cleared = cli(
+        "card", "draft", "clear", task_id, "--expected-revision", newer.steering_revision,
+        "--expected-draft-revision", newer.card_draft_revision,
+    )
+    assert cleared.returncode == 0, cleared.stderr
+    assert json.loads(cleared.stdout)["card_draft_revision"] == "absent"
+    partial = cli("card", "draft", "clear", task_id, "--expected-revision", newer.steering_revision)
+    assert partial.returncode == 2 and "both --expected" in partial.stderr
+    assert queue.steer_log(task_id) == queue.list_wakes(task_id) == []

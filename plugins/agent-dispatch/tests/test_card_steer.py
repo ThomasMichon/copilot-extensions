@@ -870,7 +870,10 @@ def test_save_card_draft_never_touches_awaiting_steer_or_status(q):
 
     after = q.save_card_draft(t.id, fields={"feedback": "looks good, one nit"})
 
-    assert after.card_draft == {"fields": {"feedback": "looks good, one nit"}, "ts": after.card_draft["ts"]}
+    assert after.card_draft["fields"] == {"feedback": "looks good, one nit"}
+    assert isinstance(after.card_draft["ts"], (int, float))
+    assert after.card_draft["revision"]
+    assert "steering_revision" not in after.card_draft
     assert after.awaiting_steer is True
     assert after.status == Status.SUSPENDED
 

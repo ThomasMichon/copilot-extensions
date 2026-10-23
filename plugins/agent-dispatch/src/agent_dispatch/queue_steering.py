@@ -399,21 +399,26 @@ class QueueSteeringMixin:
         task_id: str,
         *,
         fields: dict,
+        expected_revision: str | None = None,
+        expected_draft_revision: str | None = None,
         now: float | None = None,
     ) -> Task:
         """Persist an operator's **not-yet-submitted** draft answer."""
         ts = self._now(now)
-        draft = {"fields": fields, "ts": ts}
-        payload = json.dumps(draft, separators=(",", ":"))
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            self._check_draft_basis(task, expected_revision, expected_draft_revision)
             if task.status in Status.CONCLUDED:
                 conn.execute("COMMIT")
                 raise TaskError(f"cannot save a draft on a {task.status!r} task")
+            draft = {"fields": fields, "ts": ts, "revision": uuid.uuid4().hex}
+            if expected_revision is not None:
+                draft["steering_revision"] = expected_revision
+            payload = json.dumps(draft, separators=(",", ":"))
             conn.execute(
                 "UPDATE tasks SET card_draft = ?, updated_at = ? WHERE id = ?",
                 (payload, ts, task_id),
@@ -422,7 +427,23 @@ class QueueSteeringMixin:
             conn.execute("COMMIT")
         return result  # type: ignore[return-value]
 
-    def clear_card_draft(self, task_id: str, *, now: float | None = None) -> Task:
+    @staticmethod
+    def _check_draft_basis(
+        task: Task, expected_revision: str | None, expected_draft_revision: str | None,
+    ) -> None:
+        if expected_revision is None and expected_draft_revision is None:
+            return
+        if not expected_revision or not expected_draft_revision:
+            raise TaskError("both expected card and draft revisions are required")
+        if task.steering_revision != expected_revision:
+            raise TaskError("task card or owner changed; refresh before changing its draft")
+        if task.card_draft_revision != expected_draft_revision:
+            raise TaskError("task draft changed; refresh before changing its draft")
+
+    def clear_card_draft(
+        self, task_id: str, *, expected_revision: str | None = None,
+        expected_draft_revision: str | None = None, now: float | None = None,
+    ) -> Task:
         """Clear a task's saved draft."""
         ts = self._now(now)
         with self._connect() as conn:
@@ -431,6 +452,7 @@ class QueueSteeringMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            self._check_draft_basis(task, expected_revision, expected_draft_revision)
             conn.execute(
                 "UPDATE tasks SET card_draft = NULL, updated_at = ? WHERE id = ?",
                 (ts, task_id),
