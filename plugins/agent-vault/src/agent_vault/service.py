@@ -576,24 +576,9 @@ class VaultService:
                 return {"ok": False, "code": exc.code, "error": str(exc)}
 
         if action == "ssh-key-prepare":
-            from .identity_key import IdentityKeyError
-            from .ssh_key import prepare, validate_request
+            from .ssh_key import handle_prepare_request
 
-            try:
-                entry = request.get("entry", "")
-                if not isinstance(entry, str) or (group is not None and not isinstance(group, str)):
-                    raise IdentityKeyError("invalid_entry", "Select a slash-delimited SSH key entry.")
-                validate_request(
-                    entry, request.get("initialize", False),
-                    request.get("confirm_initialization", False),
-                )
-                return prepare(
-                    self, kpdb, normalize_entry(entry, group),
-                    request.get("initialize", False),
-                    request.get("confirm_initialization", False),
-                )
-            except IdentityKeyError as exc:
-                return {"ok": False, "code": exc.code, "error": str(exc)}
+            return handle_prepare_request(self, kpdb, group, request)
 
         if action == "get":
             entry = request.get("entry", "")

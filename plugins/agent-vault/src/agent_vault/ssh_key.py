@@ -160,6 +160,24 @@ def prepare(service, kpdb: str, entry: str, initialize: bool, confirm: bool) -> 
         service._credential_lock.release()
 
 
+def handle_prepare_request(service, kpdb: str, group: str | None, request: dict) -> dict:
+    from .config import normalize_entry
+
+    try:
+        entry = request.get("entry", "")
+        if not isinstance(entry, str) or (group is not None and not isinstance(group, str)):
+            raise IdentityKeyError("invalid_entry", "Select a slash-delimited SSH key entry.")
+        validate_request(
+            entry, request.get("initialize", False), request.get("confirm_initialization", False),
+        )
+        return prepare(
+            service, kpdb, normalize_entry(entry, group),
+            request.get("initialize", False), request.get("confirm_initialization", False),
+        )
+    except IdentityKeyError as exc:
+        return {"ok": False, "code": exc.code, "error": str(exc)}
+
+
 def command(args) -> int:
     from . import cli, config
 
