@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from .db import Database, SCHEMA_VERSION
+from .runtime_custody import validate_schema
 
 
 def open_existing_writable(source: Database) -> Database:
@@ -37,7 +38,11 @@ def open_existing_writable(source: Database) -> Database:
         conn.execute("BEGIN")
         rows = conn.execute("SELECT version FROM schema_version").fetchall()
         if len(rows) != 1 or rows[0]["version"] != SCHEMA_VERSION:
-            raise ValueError("Writable adoption requires the prepared schema")
+            raise ValueError(
+                "Writable adoption requires the prepared schema; "
+                "supported writable preparation or migration is needed"
+            )
+        validate_schema(conn)
         if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
             raise ValueError("Writable adoption requires an existing WAL database")
         conn.rollback()

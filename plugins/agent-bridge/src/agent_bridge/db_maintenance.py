@@ -33,6 +33,9 @@ class _MaintenanceMixin:
         placeholders = ",".join("?" for _ in statuses)
         rows = self.execute_read(
             f"SELECT id FROM sessions WHERE status IN ({placeholders}) "
+            "AND runtime_custody_json IS NULL "
+            "AND NOT EXISTS (SELECT 1 FROM turns WHERE turns.session_id=sessions.id "
+            "AND turns.runtime_custody_json IS NOT NULL) "
             "AND updated_at < ? ORDER BY updated_at",
             (*statuses, cutoff_ts),
         )

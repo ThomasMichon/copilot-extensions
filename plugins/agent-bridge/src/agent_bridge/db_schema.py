@@ -12,12 +12,23 @@ class _SchemaMixin:
 
     def _init_schema(self) -> None:
         """Create tables if they don't exist, run migrations."""
+        from .runtime_custody import ensure_schema, validate_schema
+
         conn = self._get_conn()
         with self._write_lock:
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_version'"
+            ).fetchone():
+                recorded = conn.execute("SELECT version FROM schema_version").fetchone()
+                if recorded is not None and recorded["version"] >= 28:
+                    validate_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
             if row is None:
+                self._ensure_current_columns(conn)
+                ensure_schema(conn)
+                validate_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -27,54 +38,49 @@ class _SchemaMixin:
                 current = row["version"]
                 if current < SCHEMA_VERSION:
                     self._migrate(conn, current)
-            # Safety net: ensure post-base columns exist regardless of
-            # schema_version, so a DB stamped past a version-gated ADD COLUMN
-            # migration (or a table created without a column) self-heals rather
-            # than failing every write to that column (dotfiles #815).
-            self._ensure_columns(conn)
-            if "acquisition_delivery_id" not in {
-                item[1] for item in conn.execute("PRAGMA table_info(turns)")
-            }:
-                conn.execute("ALTER TABLE turns ADD COLUMN acquisition_delivery_id TEXT")
-            conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_acquisition_delivery "
-                "ON turns(acquisition_delivery_id) WHERE acquisition_delivery_id IS NOT NULL"
-            )
-            if "native_admission_json" not in {
-                item[1] for item in conn.execute("PRAGMA table_info(turns)")
-            }:
-                conn.execute("ALTER TABLE turns ADD COLUMN native_admission_json TEXT")
-            live_columns = {
-                row[1]
-                for row in conn.execute(
-                    "PRAGMA table_info(live_messages)"
-                ).fetchall()
-            }
-            if "delivery" not in live_columns:
-                conn.execute(
-                    "ALTER TABLE live_messages ADD COLUMN delivery TEXT "
-                    "NOT NULL DEFAULT 'queue'"
-                )
-                live_columns.add("delivery")
-            if "idempotency_key" not in live_columns:
-                conn.execute(
-                    "ALTER TABLE live_messages ADD COLUMN idempotency_key TEXT"
-                )
-                live_columns.add("idempotency_key")
-            for col in (
-                "claimed_at REAL", "outcome TEXT", "consumed_at REAL",
-                "consumption_tracked INTEGER NOT NULL DEFAULT 0",
-            ):
-                if col.split()[0] not in live_columns:
-                    conn.execute(f"ALTER TABLE live_messages ADD COLUMN {col}")
-                    live_columns.add(col.split()[0])
-            conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS "
-                "idx_live_messages_idempotency ON live_messages(idempotency_key)"
-                " WHERE idempotency_key IS NOT NULL"
-            )
-            self._ensure_live_session_aliases(conn)
+            self._ensure_current_columns(conn)
+            validate_schema(conn)
             conn.commit()
+
+    def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
+        """Apply the existing writable bootstrap's idempotent column ensures."""
+        self._ensure_columns(conn)
+        if "acquisition_delivery_id" not in {
+            item[1] for item in conn.execute("PRAGMA table_info(turns)")
+        }:
+            conn.execute("ALTER TABLE turns ADD COLUMN acquisition_delivery_id TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_acquisition_delivery "
+            "ON turns(acquisition_delivery_id) WHERE acquisition_delivery_id IS NOT NULL"
+        )
+        if "native_admission_json" not in {
+            item[1] for item in conn.execute("PRAGMA table_info(turns)")
+        }:
+            conn.execute("ALTER TABLE turns ADD COLUMN native_admission_json TEXT")
+        live_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(live_messages)").fetchall()
+        }
+        if "delivery" not in live_columns:
+            conn.execute(
+                "ALTER TABLE live_messages ADD COLUMN delivery TEXT NOT NULL DEFAULT 'queue'"
+            )
+            live_columns.add("delivery")
+        if "idempotency_key" not in live_columns:
+            conn.execute("ALTER TABLE live_messages ADD COLUMN idempotency_key TEXT")
+            live_columns.add("idempotency_key")
+        for col in (
+            "claimed_at REAL", "outcome TEXT", "consumed_at REAL",
+            "consumption_tracked INTEGER NOT NULL DEFAULT 0",
+        ):
+            if col.split()[0] not in live_columns:
+                conn.execute(f"ALTER TABLE live_messages ADD COLUMN {col}")
+                live_columns.add(col.split()[0])
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "idx_live_messages_idempotency ON live_messages(idempotency_key)"
+            " WHERE idempotency_key IS NOT NULL"
+        )
+        self._ensure_live_session_aliases(conn)
 
     def _ensure_live_session_aliases(self, conn: sqlite3.Connection) -> None:
         """Schema v24, idempotently: the alias table, its two triggers and
@@ -666,3 +672,13 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (27,))
             conn.commit()
             log.info("Schema migrated to version 27: retained remote relationships")
+
+        if from_version < 28:
+            from .runtime_custody import ensure_schema, validate_schema
+
+            self._ensure_current_columns(conn)
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (28,))
+            conn.commit()
+            log.info("Schema migrated to version 28: required runtime custody storage")
