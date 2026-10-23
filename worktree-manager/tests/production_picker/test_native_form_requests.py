@@ -178,13 +178,13 @@ def test_rendered_native_form_and_fresh_global_recovery_use_the_real_owner(
     ctx = json.loads(output)
     ctx.update(task_id=task_id, machine="host")
     answer = "original\nliteral {task_id} [red]plain"
+    monkeypatch.setattr(tasks.RegisteredPivotRuntime, "ensure", lambda *_args: None)
 
     async def run():
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=size) as pilot:
             picker = app.query_one(PickerScreen)
             await _wait_for_initial_setup(pilot, picker)
-            monkeypatch.setattr(picker._pivot_runtime(reg), "ensure", lambda *_args: None)
             picker._open_pivot_form(reg, action, ctx, ctx, "Original question")
             await _wait(pilot, lambda: isinstance(app.screen, PivotFormScreen))
             form = app.screen

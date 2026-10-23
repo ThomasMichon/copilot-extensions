@@ -3129,7 +3129,9 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   client without the row, inspect the original receipt, cancel and separately
   confirm exact retry. Assertions preserve original fields/fingerprint and
   one answer/wake. The owner, storage and provider attribution are isolated
-  fixtures; no installed registry, live task or worker is used. Ordinary runs
+  fixtures; list/subscription refresh is disabled on every fixture runtime,
+  including the fresh client, so replay cannot start an ambient board producer.
+  No installed registry, live task or worker is used. Ordinary runs
   skip this lane without the explicitly selected dependency interpreter.
 - **ai-attribution:** payload-only hook tests covering authoritative
   `sessionStart` payload cwd, malformed/missing payloads, git-repo gating, safe
