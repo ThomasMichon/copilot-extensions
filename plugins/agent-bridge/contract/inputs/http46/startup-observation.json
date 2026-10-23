@@ -50,6 +50,12 @@
     "resume_posts": 1,
     "prompt_posts": 0
   },
+  "canonical_session": {
+    "reference": "native-acp",
+    "session_id": "bridge-a",
+    "status": "stopped",
+    "resumed_ids": ["bridge-a"]
+  },
   "prompt_request": {
     "method": "POST", "path": "/api/v1/sessions/bridge-a/turns",
     "body": {"prompt": "one exact continuation", "no_resume": true},

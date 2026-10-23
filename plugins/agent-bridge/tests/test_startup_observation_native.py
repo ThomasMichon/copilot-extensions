@@ -20,6 +20,9 @@ class Backend:
         self, *, updates=True, disconnect=False, lost_admission=False,
         ack_failure=None, protocol=46, delayed_preflight=None, resume_ack_failure=None,
     ):
+        from agent_bridge.routes.sessions import _controlled_cursor_key
+        from fastapi import HTTPException
+
         self.updates = updates
         self.disconnect = disconnect
         self.lost_admission = lost_admission
@@ -65,8 +68,6 @@ class Backend:
                     })
                 elif parsed.path.endswith("/original/events"):
                     parameters = urllib.parse.parse_qs(parsed.query)
-                    from agent_bridge.routes.sessions import _controlled_cursor_key
-                    from fastapi import HTTPException
                     try:
                         caller = _controlled_cursor_key(parameters.get("caller_id", [None])[0])
                     except HTTPException as exc:
@@ -105,7 +106,9 @@ class Backend:
                             cursor = event_id
                             if close_first:
                                 return
-                elif parsed.path == "/api/v1/sessions/original":
+                elif parsed.path in {
+                    "/api/v1/sessions/original", "/api/v1/sessions/native-acp",
+                }:
                     self.reply({
                         "session_id": "original", "status": backend.state,
                         "turn_count": 0, "target_type": "local",
@@ -204,9 +207,9 @@ def launch_prefix(backend):
     return [sys.executable, "-c", script, backend.url, "--json"]
 
 
-def invoke(backend, *, communication=2, process=8):
+def invoke(backend, *, communication=2, process=8, reference="original"):
     argv = [
-        *launch_prefix(backend), "send", "original",
+        *launch_prefix(backend), "send", reference,
         "--prompt-file", "-", "--no-wait",
         "--startup-communication-timeout", str(communication),
         "--startup-process-timeout", str(process),
@@ -372,3 +375,13 @@ def test_incomplete_resume_ack_never_admits_a_followup_prompt(failure):
         assert backend.resume_calls == 1
         assert backend.resumed.is_set()
         assert backend.turns == []
+
+
+def test_distinct_native_reference_uses_canonical_bridge_id_before_observing():
+    with Backend() as backend:
+        result, _ = invoke(backend, reference="native-acp")
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["outcome"] == "delivered"
+        assert backend.resume_calls == 1
+        assert len(backend.turns) == 1
+        assert backend.cursors == [0]

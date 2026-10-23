@@ -241,6 +241,20 @@ def test_http46_incomplete_resume_ack_cannot_authorize_prompt(monkeypatch, index
         release.set()
 
 
+def test_http46_native_reference_is_canonical_before_observed_resume():
+    from agent_bridge.session_targeting_cli import _resolve_known_session
+
+    expected = packet()["canonical_session"]
+    resumed = []
+    client = SimpleNamespace(resume_session=lambda session_id, **kw: resumed.append(session_id))
+    result = _resolve_known_session(
+        client, expected["reference"],
+        {"session_id": expected["session_id"], "status": expected["status"]}, force=False,
+    )
+    assert result == expected["session_id"]
+    assert resumed == expected["resumed_ids"]
+
+
 def test_http46_local_timer_does_not_renew_and_process_budget_is_independent(capsys):
     item = observer.StartupObservation(StartupTimeouts())
     now = [0.0]

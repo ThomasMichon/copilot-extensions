@@ -516,7 +516,9 @@ def test_authority_probe_does_not_hold_coordinator_write_lock(tmp_path, monkeypa
                                  repo=task["repo"], task_id=task["id"])
 
 
-@pytest.mark.parametrize("delivery", ["accepted", "unknown", "receipt_failure", "unavailable"])
+@pytest.mark.parametrize("delivery", [
+    "accepted", "unknown", "receipt_failure", "receipt_failure_masked_unknown", "unavailable",
+])
 def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeypatch, delivery):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -538,14 +540,14 @@ def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeyp
     def deliver(*args, **kwargs):
         if delivery == "unavailable":
             raise bridge.BridgeUnavailable("protocol support is unconfirmed")
-        if delivery != "accepted":
+        if delivery in {"unknown", "receipt_failure_masked_unknown"}:
             from agent_procutil.startup import StartupExpiry, StartupTimeouts
             raise bridge.StartupOutcomeUnknown(
                 StartupExpiry("communication", 30, 30, "prompt-admission"), StartupTimeouts(),
             )
         return True
     monkeypatch.setattr(bridge, "resume_worker", deliver)
-    if delivery == "receipt_failure":
+    if delivery in {"receipt_failure", "receipt_failure_masked_unknown"}:
         from contextlib import contextmanager
         import sqlite3
         from agent_dispatch.coordinator_execution_sender import CoordinatorExecutionSender, ExecutionSendAttempt
@@ -585,6 +587,9 @@ def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeyp
     else:
         assert result.json()["coordinator_launch"]["outcome"] == "unknown"
         assert result.json()["coordinator_launch"]["retryable"] is False
+        assert result.json()["coordinator_launch"]["delivery_accepted"] is (
+            True if delivery == "receipt_failure" else None
+        )
         retained = client.queue.get_reservation(result.json()["reservation"]["key"])
         assert retained.state == "spawned"
         assert retained.session_handle == "local-body:trusted"

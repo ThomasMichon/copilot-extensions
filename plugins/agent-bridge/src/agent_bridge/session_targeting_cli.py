@@ -459,6 +459,9 @@ def _resolve_known_session(client, session_id: str, session: dict, *, force: boo
     busy dispatch and return the session id to operate on (which the caller
     delivers to). Exits on an unrecoverable busy-without-force conflict."""
     core = _core()
+    canonical_id = session.get("session_id")
+    if isinstance(canonical_id, str) and canonical_id:
+        session_id = canonical_id
     status = session.get("status", "")
     if status == "idle":
         from .startup_observation import ready
