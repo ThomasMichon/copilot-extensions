@@ -32,19 +32,6 @@ def observe(predicate, timeout, diagnostic):
     raise AssertionError(diagnostic())
 
 
-@pytest.fixture
-def native_window_observation():
-    if os.name != "nt":
-        yield
-        return
-    from test_foundation_genesis_process import window_observer
-
-    with window_observer(Path(__file__).resolve().parents[2]) as observation:
-        yield
-        assert observation.surfaced == {}
-        assert observation.focus_changes == {}
-
-
 def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
     owning_payload, area, native_window_observation,
 ):

@@ -775,6 +775,8 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
         )
         for ext in ("sh", "ps1"):
             installer = consumer_dir / "scripts" / f"install.{ext}"
+            if not installer.is_file():
+                installer = consumer_dir / "scripts" / f"init.{ext}"
             if installer.is_file():
                 scripts = actual_consumer_dir / "scripts"
                 scripts.mkdir(exist_ok=True)

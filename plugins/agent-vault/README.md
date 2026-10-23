@@ -9,6 +9,13 @@ Out-of-session automation, Git credential-helper registration, supervision,
 and `vault-askpass` remain explicit compatibility/management boundaries until
 they receive attributable installation context.
 
+The payload also carries the canonical Python installer-engine helpers for
+the shared execution driver's fixed provision recipe to inspect and freeze
+its complete materialized inputs. Ordinary Vault hooks and first-use wrappers
+have not adopted that driver; this packaging does not enable another installer,
+service or maintenance owner. The explicit native qualification portfolio is
+documented in `libs/update-driver/README.md`.
+
 ## Setup in one pass
 
 1. **Enable the plugin payload** through Copilot's plugin mechanism (or work from a local checkout of this repo).

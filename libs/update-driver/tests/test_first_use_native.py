@@ -10,12 +10,13 @@ import time
 
 import pytest
 from agent_procutil import no_window_kwargs
+from update_driver import RequestSpec, TrustedRunner, drain, enqueue, status
 from update_driver.foundation_inputs import GENERATED, PACKAGES
 
 from test_first_use import primitive
 
 
-def native_command(root, payload, installation, project, *, source=None):
+def native_command(root, payload, installation, project, *, source=None, client_only=False):
     source = source or Path(__file__).resolve().parents[1]
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -23,13 +24,48 @@ def native_command(root, payload, installation, project, *, source=None):
             str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
             str(source / "scripts" / "first-use.ps1"), "-Root", str(root),
             "-Payload", str(payload), "-RuntimeRoot", str(installation), "-Project", str(project),
+            *(("-ServiceMode", "client-only") if client_only else ()),
         ]
     if sys.platform != "linux":
         pytest.skip("native first-use bootstrap is not qualified here")
     return [
         shutil.which("bash"), str(source / "scripts" / "first-use.sh"),
         str(root), str(payload), str(installation), str(project),
+        *(("--client-only",) if client_only else ()),
     ]
+
+
+@pytest.mark.parametrize("same_root", [False, True])
+def test_native_live_owner_refuses_before_launch_or_queue_mutation(owning_payload, area, same_root):
+    payload, installation, project = owning_payload
+    root = area / "owner"
+    destination = root if same_root else area / "foreign"
+    request = enqueue(
+        RequestSpec("native-nested-admission-control"), root=root,
+        runner=TrustedRunner((sys.executable, "-c", "pass"), str(project)),
+    )
+
+    def executor(transaction):
+        before = sorted(path.name for path in root.iterdir())
+        result = subprocess.run(
+            native_command(destination, payload, installation, project),
+            env={**os.environ, **transaction.participant_env()}, cwd=project,
+            capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        assert result.returncode != 0
+        assert "first-use submission is unsupported" in result.stderr
+        # participant_env creates the live endpoint, not a first-use operation.
+        after = sorted(path.name for path in root.iterdir())
+        assert [name for name in after if not name.startswith("w-")] == before
+        assert len(status(root=root)) == 1
+        if not same_root:
+            assert not destination.exists()
+        transaction.assert_owned()
+        return 0
+
+    drain(root=root, executor=executor)
+    assert status(request.id, root=root).state == "completed"
+    assert not installation.exists()
 
 
 @pytest.mark.parametrize("reason", ["no-self", "managed", "malformed", "wrong-root"])
@@ -154,8 +190,11 @@ def test_invalid_native_execution_root_never_creates_directories(
     assert sorted(str(path.relative_to(installation)) for path in installation.rglob("*")) == before_runtime
 
 
+@pytest.mark.parametrize("mixed_case", [False, pytest.param(
+    True, marks=pytest.mark.skipif(os.name != "nt", reason="PowerShell case-insensitive binding"),
+)])
 def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_diagnostics(
-    owning_payload, area,
+    owning_payload, area, mixed_case,
 ):
     payload, installation, project = owning_payload
     library = Path(__file__).resolve().parents[2]
@@ -180,8 +219,11 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
         encoding="utf-8",
     )
     root = area / "cold"
+    command = native_command(root, payload, installation, project, source=source)
+    if mixed_case:
+        command += ["-Mode", "LaUnCh", "-ServiceMode", "Client-Only"]
     result = subprocess.run(
-        native_command(root, payload, installation, project, source=source),
+        command,
         env=dict(os.environ), capture_output=True, text=True, timeout=60,
         **no_window_kwargs(),
     )

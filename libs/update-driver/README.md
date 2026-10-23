@@ -613,6 +613,15 @@ and ask its existing native installation helper for publication permission
 and source provenance. They neither create an installation cell nor adopt
 management purpose. Managed, malformed, mismatched and unsupported evidence
 refuses before prerequisite acquisition or plugin writes.
+An existing installation participant cannot submit another first-use request,
+even to another root. Both native and Python admission refuse nested evidence
+before state creation rather than queuing behind the caller's own custody.
+This is an explicit unsupported outcome, not a second owner or inline retry.
+The optional Windows `-ServiceMode client-only`, Linux `--client-only` and
+Python `client_only=True` select only the canonical installer's existing
+`-NoService`/`--no-service` option. This boolean participates in durable request
+and runner identity; ordinary service-enabled behavior is still the default.
+No arbitrary installer options are accepted.
 
 The canonical native daemon helper launches one finite, caller-independent
 supervisor. **Its launch acknowledgement and diagnostic log are not request
@@ -651,6 +660,10 @@ authenticated copy; unrelated ambient staging hints are discarded. Frozen inputs
 remain under `<execution-root>/provision-inputs/<request-id>` because published
 runtime/source metadata may retain those paths. No new source-selection policy
 or package construction mechanism is introduced.
+The owned native installer receives the executing retained interpreter's
+directory on its process-local PATH. It can therefore use its existing Python
+and prerequisite selectors even when the original caller had no Python. No
+user PATH, registry, source or alternate runtime is enrolled by that handoff.
 The existing canonical process owner encloses that
 entire native tree, including staging, construction and integration. Installer
 staging, dependency policy, per-generation ownership and publication safeguards
@@ -668,6 +681,13 @@ foundation acquisition, then proves the actual queued native invocation,
 ordinary request receipt and nonzero final status. That controlled native
 product fixture qualifies the handoff, **not** a real Vault deployment,
 production publisher adoption, maintenance enrollment, macOS or host rollout.
+The same opt-in portfolio exercises the actual canonically materialized Vault
+payload, native installer, installed CLI and completion marker in explicit
+canonical client-only mode with all user/configuration/cache roots private. It checks
+source-independent healthy dispatch without another queue request; it is not a
+service deployment or production publisher adoption test. Vault carries the
+canonical Python installer helpers for admitted-input inspection/freezing,
+through the existing installer-engine sync owner, not a bespoke copier.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;
