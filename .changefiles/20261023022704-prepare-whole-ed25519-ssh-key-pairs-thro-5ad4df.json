@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare whole Ed25519 SSH key pairs through create-only Vault records with explicit initialization and public-only output",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

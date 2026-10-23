@@ -19,6 +19,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_vault.keepassxc import KeePassXCBackend
 from agent_vault.rendezvous import read_endpoint_strict
@@ -74,6 +75,7 @@ class DisposableVault:
         return subprocess.run(
             [*self.argv, *args], env=env or self.env, cwd=self.root,
             capture_output=True, text=True, timeout=30,
+            **no_window_kwargs(),
         )
 
 
@@ -128,6 +130,7 @@ def disposable_vault(
         [backend._cli_path, "db-create", "-q", "-p", "-t", "100", database],
         input=master + "\n" + master + "\n", capture_output=True,
         text=True, env=env, cwd=root, timeout=15,
+        **no_window_kwargs(),
     )
     require(created.returncode == 0, "Disposable database creation failed")
     backend.set_password(database, master)
@@ -137,13 +140,20 @@ def disposable_vault(
         backend.create_identity_key(database, ENTRY, expected_key, time.monotonic() + 15)
         observed = backend.read_identity_key(database, ENTRY, time.monotonic() + 10)
         require(observed == expected_key, "Disposable seed did not persist authoritatively")
+    # Retain base-executable PID custody while loading the test venv's .pth files.
+    bootstrap = (
+        "import runpy,site;"
+        f"[site.addsitedir(path) for path in {site.getsitepackages()!r}];"
+        "runpy.run_module('agent_vault.service',run_name='__main__',alter_sys=True)"
+    )
     process = subprocess.Popen(
         [
             sys._base_executable if os.name == "nt" else sys.executable,
-            "-m", "agent_vault.service", "--foreground", "--tcp-port", "0",
+            "-c", bootstrap, "--foreground", "--tcp-port", "0",
         ],
         env=env, cwd=root, stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **no_window_kwargs(),
     )
     fixture = DisposableVault(
         root, env, [sys.executable, "-m", "agent_vault"], database,
@@ -301,9 +311,10 @@ print(json.dumps(receipt))
                 env["AGENT_VAULT_HOME"] = str(fixture.root / f"independent-cell-{index}")
                 env["AGENT_VAULT_INSTALLATION_ID"] = uuid.uuid4().hex
                 worker = subprocess.Popen(
-                    [sys._base_executable if os.name == "nt" else sys.executable, "-c", program],
+                    [sys.executable, "-c", program],
                     env=env, cwd=fixture.root, stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    **no_window_kwargs(),
                 )
                 workers.append(worker)
                 worker.stdin.write(json.dumps({

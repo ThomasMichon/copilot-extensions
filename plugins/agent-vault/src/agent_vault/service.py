@@ -65,7 +65,7 @@ PASSWORD_MUTATION_MAX_QUEUE_SECONDS = 30.0
 UNLOCK_REQUIRED_ACTIONS = frozenset({
     "get", "has", "search", "add", "set-password", "set-username",
     "import-key", "export-key", "list", "ls", "show", "remove", "rm",
-    "move", "mv", "identity-key-setup",
+    "move", "mv", "identity-key-setup", "ssh-key-prepare",
 })
 
 log = logging.getLogger("agent-vault.service")  # marketplace-isolation: allow logger-namespace
@@ -571,6 +571,26 @@ class VaultService:
                     self, kpdb, normalize_entry(request.get("entry", ""), group),
                     request.get("initialize_owner") is True,
                     request.get("confirm_first_owner") is True,
+                )
+            except IdentityKeyError as exc:
+                return {"ok": False, "code": exc.code, "error": str(exc)}
+
+        if action == "ssh-key-prepare":
+            from .identity_key import IdentityKeyError
+            from .ssh_key import prepare, validate_request
+
+            try:
+                entry = request.get("entry", "")
+                if not isinstance(entry, str) or (group is not None and not isinstance(group, str)):
+                    raise IdentityKeyError("invalid_entry", "Select a slash-delimited SSH key entry.")
+                validate_request(
+                    entry, request.get("initialize", False),
+                    request.get("confirm_initialization", False),
+                )
+                return prepare(
+                    self, kpdb, normalize_entry(entry, group),
+                    request.get("initialize", False),
+                    request.get("confirm_initialization", False),
                 )
             except IdentityKeyError as exc:
                 return {"ok": False, "code": exc.code, "error": str(exc)}
