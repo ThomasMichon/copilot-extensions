@@ -1706,6 +1706,8 @@ that first instantiates them, including its explicit `execution_repo`,
 preserving normal repository-local overrides. An authored selector likewise
 retains that defining declaration's effective identity context, even if a
 later hop selects a different execution repository.
+Pure `extends`/`params` aliases remain transparent: they carry an unbound
+global identity default until the first specializing declaration.
 Direct declarations retain their existing leaf-file/repository behavior.
 
 Expansion preserves the identity context separately as generated emitter

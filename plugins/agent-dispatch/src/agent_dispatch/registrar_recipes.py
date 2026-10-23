@@ -979,8 +979,11 @@ def _resolve_extends_tracking_cwd_origin(
         execution_repo=merged.get("execution_repo"), params=scalar_params,
     )
     if global_identity_default and "worker_identity" not in overrides:
-        # A newly adopted context has the merged field's current value. Unlike
-        # inherited fields, this hop's raw overrides are not substituted yet.
+        origins.pop("worker_identity", None)
+    if overrides and "worker_identity" in merged and "worker_identity" not in origins:
+        # Pure extends/params aliases do not adopt a default. Bind it at the
+        # first specializing declaration, after inherited substitutions but
+        # before any later hop substitutes this declaration's raw overrides.
         origins["worker_identity"] = identity_context_origin(
             _base_resource or base_dir, merged.get("execution_repo"),
         )

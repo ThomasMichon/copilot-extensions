@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -282,6 +283,47 @@ def test_global_identity_needs_no_attributed_payload_in_a_wheel(tmp_path, monkey
     source, _ = read_declaration_file_set(leaf, repo_root=tmp_path)
     emitter.validate_spec(source.spec, resolve_resources=True)
     assert source.spec["worker_identity_cwd"] == str(tmp_path)
+
+
+@pytest.mark.parametrize("execution", [False, True])
+def test_shipped_goal_driven_alias_keeps_direct_adoption_identity_context(
+    tmp_path, monkeypatch, execution,
+):
+    leaf_root = tmp_path / "leaf"
+    execution_root = tmp_path / "execution"
+    _identity(leaf_root, "LEAF-OVERRIDE", name="goal-driven")
+    _identity(execution_root, "EXECUTION-OVERRIDE", name="goal-driven")
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository",
+        lambda name, **kwargs: (execution_root, "worktree"),
+    )
+    shipped_alias = (
+        Path(__file__).resolve().parents[1]
+        / ".agent-dispatch" / "registrar" / "templates" / "goal-driven.json"
+    )
+    assert json.loads(shipped_alias.read_text(encoding="utf-8")) == {
+        "extends": "global:goal-driven",
+    }
+    middle_alias = _write(
+        tmp_path / "middle" / "alias.json",
+        {"extends": str(shipped_alias), "params": {"unused": "not-an-adopter"}},
+    )
+    contexts = []
+    for index, ref in enumerate(("global:goal-driven", str(shipped_alias), str(middle_alias))):
+        data = {"extends": ref, **_config(name=f"fixture-{index}")}
+        if execution:
+            data["execution_repo"] = "execution"
+        leaf = _write(leaf_root / f"loop-{index}.json", data)
+        source, _ = read_declaration_file_set(leaf, repo_root=leaf_root)
+        contexts.append(source.spec["worker_identity_cwd"])
+        config = validate_config(
+            source.spec["repository_issue_loop"], cwd=source.spec["cwd"],
+            worker_identity_cwd=source.spec["worker_identity_cwd"],
+        )
+        assert config["worker_guidance"] == (
+            "EXECUTION-OVERRIDE" if execution else "LEAF-OVERRIDE"
+        )
+    assert contexts == [contexts[0]] * 3
 
 
 @pytest.mark.parametrize(("authored", "deferred", "leaf_override"), [
