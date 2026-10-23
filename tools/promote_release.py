@@ -350,16 +350,8 @@ def consume_pending_changes(
                 "escaping pointer would otherwise ship as an unexpanded stub "
                 "in the main snapshot:\n  " + "\n  ".join(unresolved)
             )
-        from promotion_version_allocation import VersionReservationError, allocate_versions
-
-        try:
-            reserved = allocate_versions(scratch, repo=repo, accumulator=acc)
-        except VersionReservationError as exc:
-            raise PromotionError(str(exc)) from exc
-        for consumer, (old, new) in reserved.items():
-            computed[consumer] = computed.get(consumer, (old, old))[0], new
-            if consumer not in applied:
-                applied.append(consumer)
+        from promotion_version_allocation import apply_version_reservations
+        apply_version_reservations(scratch, repo, acc, computed, applied)
         projections_synced = _sync_instruction_projections(scratch, trusted_source=trusted_source)
     finally:
         if previous_changefile_mod is not None:
