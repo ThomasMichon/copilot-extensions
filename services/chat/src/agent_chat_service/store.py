@@ -310,7 +310,8 @@ class ChatStore:
                     reply_to INTEGER REFERENCES events(id),
                     supersedes INTEGER REFERENCES collaborations(event_id),
                     channel TEXT NOT NULL REFERENCES channels(name),
-                    reply_author TEXT REFERENCES actors(codename)
+                    reply_author TEXT REFERENCES actors(codename),
+                    author_codename TEXT NOT NULL REFERENCES actors(codename)
                 );
                 CREATE INDEX IF NOT EXISTS collaborations_thread
                     ON collaborations(thread_root, event_id);
@@ -318,6 +319,8 @@ class ChatStore:
                     ON collaborations(reply_to, kind, event_id);
                 CREATE INDEX IF NOT EXISTS collaborations_review
                     ON collaborations(channel, reply_author, kind, event_id);
+                CREATE INDEX IF NOT EXISTS collaborations_answer
+                    ON collaborations(reply_to, author_codename, event_id) WHERE kind='answer';
                 CREATE INDEX IF NOT EXISTS collaborations_supersedes
                     ON collaborations(supersedes, event_id);
                 CREATE TABLE IF NOT EXISTS collaboration_recipients (
@@ -594,11 +597,12 @@ class ChatStore:
         if value is not None:
             self._db.execute(
                 """INSERT INTO collaborations
-                (event_id, kind, metadata, thread_root, reply_to, supersedes, channel, reply_author)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (event_id, kind, metadata, thread_root, reply_to, supersedes, channel,
+                 reply_author, author_codename)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (row_id, value["kind"], json_bytes(value).decode("utf-8"),
                  root if root is not None else row_id, reply, value.get("supersedes"),
-                 channel, reply_author),
+                 channel, reply_author, codename),
             )
             self._db.executemany(
                 "INSERT INTO collaboration_recipients (event_id, codename, channel) VALUES (?, ?, ?)",

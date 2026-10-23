@@ -149,9 +149,9 @@ WITH directed AS (
     WHERE recipient.channel=:channel AND recipient.codename=:viewer
     AND recipient.event_id>:after AND recipient.event_id<=:head AND q.kind='question'
     AND NOT EXISTS (
-        SELECT 1 FROM collaborations answer JOIN events ae ON ae.id=answer.event_id
+        SELECT 1 FROM collaborations answer INDEXED BY collaborations_answer
         WHERE answer.kind='answer' AND answer.reply_to=q.event_id
-        AND answer.event_id<=:head AND ae.codename=:viewer
+        AND answer.author_codename=:viewer AND answer.event_id<=:head
     )
     AND {LIVE_QUESTION}
     ORDER BY recipient.event_id LIMIT :limit

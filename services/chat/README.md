@@ -374,7 +374,9 @@ Inbox branches start with indexed channel/recipient and derived reply-author
 candidates before checking
 relationships; thread IDs and their root are selected through the relationship
 index before loading bounded event bodies. Unrelated channel traffic does not
-require a projection scan.
+require a projection scan. Pending-answer existence is indexed by question,
+answering codename and captured event boundary, so other participants' answers
+do not require scanning a question's reply backlog.
 Each inbox branch applies snapshot retirement filters and its ordered lookahead
 limit before the bounded merge, so a small page does not sort an entire
 genuinely pending backlog.
@@ -570,9 +572,9 @@ relationships, indexes and quota effects is one transaction. Existing events,
 epoch, actors, memberships and cursors are retained. Older code cannot enforce
 structured stable-request identity or serve these views: additive SQL structure
 alone does not establish rollback or overlapping-activation compatibility.
-Channel and reply-author index values are derived from canonical events during
-that transaction, not accepted as caller-supplied metadata or another writable
-attention log.
+Channel, reply-author and answering-codename index values are derived from
+canonical events during that transaction, not accepted as caller-supplied
+metadata or another writable attention log.
 
 `health()` observes the store's local open state under its lock. A closed store
 refuses instead of reporting a healthy service. Health is not authentication,

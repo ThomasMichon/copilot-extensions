@@ -455,3 +455,33 @@ def test_inbox_lookahead_work_is_bounded_before_merging_pending_branches(store, 
     following = inbox(store, limit=1, **last["next"])
     assert following["entries"][0]["event"]["id"] > last["entries"][0]["event"]["id"]
     assert read(store, "agent-b")["cursor"] == 0
+
+
+def test_pending_question_lookup_work_ignores_other_participants_answers(store):
+    for name in ("agent-a", "agent-b", "agent-c"):
+        join(store, name)
+    question = collaborate(store, "question", to=["agent-b"])["event"]
+
+    def seed(start, count):
+        with store._transaction():
+            for number in range(start, start + count):
+                store._post({
+                    "channel": "room", "codename": "agent-c", "text": "third-party answer",
+                    "request_id": f"third-party-{number}",
+                    "collaboration": annotation("answer", reply_to=question["id"]),
+                })
+
+    seed(0, 100)
+    small, first = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
+    seed(100, 4900)
+    large, last = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
+    assert len(first["entries"]) == len(last["entries"]) == 1
+    assert first["entries"] == last["entries"]
+    assert last["entries"][0]["event"] == question
+    assert last["entries"][0]["attention"] == "reply"
+    assert not first["more"] and not last["more"]
+    assert large <= small + 1000, (small, large)
+    collaborate(store, "own-answer", codename="agent-b", kind="answer",
+                reply_to=question["id"])
+    assert inbox(store, recent_limit=0)["entries"] == []
+    assert read(store, "agent-b")["cursor"] == 0
