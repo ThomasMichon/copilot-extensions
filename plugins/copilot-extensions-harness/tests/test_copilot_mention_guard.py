@@ -500,7 +500,7 @@ def test_remote_discovery_is_one_process_with_remaining_budget(monkeypatch):
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
         lines = [
-            f"remote{i}\thttps://github.com/o/r{i}.git (fetch)\n"
+            f"remote{i}\thttps://github.com/o/r{i}.git (fetch) [blob:none]\n"
             f"remote{i}\thttps://github.com/o/push{i}.git (push)\n"
             for i in range(100)
         ]
@@ -595,6 +595,8 @@ def test_repo_probe_preserves_fetch_url_rewrites_and_ignores_push_urls(tmp_path)
     git("init", "-q")
     git("config", "url.https://github.com/example/.insteadOf", "fixture:")
     git("remote", "add", "upstream", "fixture:target.git")
+    git("config", "remote.upstream.promisor", "true")
+    git("config", "remote.upstream.partialclonefilter", "blob:none")
     git("config", "--add", "remote.upstream.url", "https://github.com/example/second.git")
     git("remote", "set-url", "--push", "upstream", "https://github.com/example/push.git")
     assert guard.current_repo_candidates(str(tmp_path)) == ["example/target"]

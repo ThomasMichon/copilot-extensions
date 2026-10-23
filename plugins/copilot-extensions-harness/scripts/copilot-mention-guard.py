@@ -162,8 +162,12 @@ def current_repo_candidates(
     repos: list[str] = []
     seen: set[str] = set()
     for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) != 3 or fields[2] != "(fetch)" or fields[0] in seen:
+        fields = line.split(maxsplit=2)
+        if (
+            len(fields) != 3
+            or not re.match(r"^\(fetch\)(?:\s|$)", fields[2])
+            or fields[0] in seen
+        ):
             continue
         # Like `remote get-url NAME`, use the first fetch URL, including
         # Git's insteadOf expansion, never a push-only URL.
