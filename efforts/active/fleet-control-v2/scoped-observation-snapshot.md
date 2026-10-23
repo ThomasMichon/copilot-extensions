@@ -1,7 +1,7 @@
 # Isolated scoped point-set snapshot
 
-**Status:** Plan reviewed (#8290); implementation source and local validation
-prepared, with current-head review, required CI and merged publication pending.
+**Status:** Implemented local prerequisite (#8303), following reviewed plan
+#8290. Resident integration, scope-safe recovery and adoption remain separate.
 
 Back to [Fleet Control V2](README.md). This is an **agent-recommended bounded
 implementation contract** for the next observation prerequisite under #5862,
@@ -87,8 +87,8 @@ existing owners.
 
 ## Validation plan
 
-The following are **agent-recommended gates**; completed local proofs are
-distinguished from the remaining publication gates:
+The following **agent-recommended gates** are complete for this bounded local
+prerequisite; they do not complete the parent effort's serving/adoption gates:
 
 - [x] Invalid/implicit/empty/over-limit/duplicate selections perform zero
   storage access; one forbidden branch in a mixed request performs zero entity
@@ -113,11 +113,11 @@ distinguished from the remaining publication gates:
 - [x] An independent fresh-process consumer uses production modules, actual
   cryptographic verification and SQLite; importing the reader remains
   dependency-free without optional cryptography.
-- [ ] Run the smallest affected reader/store/admission selection under the
+- [x] Run the smallest affected reader/store/admission selection under the
   unchanged contained budget, touched-code lint and relevant repository guards.
   Record unit, process E2E, clean-room and available live tiers honestly;
   no installer/provider/deployment claim follows from this isolated library.
-- [ ] Complete documentation-impact review, the standalone consumer changefile,
+- [x] Complete documentation-impact review, the standalone consumer changefile,
   actual current-head review and required CI before implementation merge.
 
 The parent effort remains Active. This contract closes neither the central
@@ -142,3 +142,8 @@ The available periodic hosted Linux portfolio does not include standalone
 Fleet Manager, and its Windows execution is unenrolled; required unit/guard CI
 is not a replacement for native full-Fleet integration. No Linux or live
 provider acceptance is asserted and no shared CI lane or deadline was changed.
+
+Implementation #8303 actually merged as
+`5ec4ed938679d9bc1bb5fc9d190953e1fddaf8b7` after current-head approval,
+required CI and feedback resolution. The parent Journal records publication
+history; the runtime API documentation records the delivered local behavior.
