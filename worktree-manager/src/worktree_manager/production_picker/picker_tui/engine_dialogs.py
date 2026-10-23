@@ -369,8 +369,12 @@ class SubMenuScreen(ModalScreen[tuple]):
             from .. import project_config, engine_group_c
 
             wt_id = rec["raw"]["id"]
-            local = getattr(source, "LOCAL", None)
-            is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
+            local_check = getattr(source, "is_local", None)
+            if callable(local_check):
+                is_local = bool(local_check(rec.get("machine"), rec.get("env")))
+            else:
+                local = getattr(source, "LOCAL", None)
+                is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
             if not is_local or not (project_config.tracking_dir(project) / f"{wt_id}.yaml").exists():
                 return None, is_local
             batch = engine_group_c.picker_reconcile_local(project, worktree_ids=[wt_id])

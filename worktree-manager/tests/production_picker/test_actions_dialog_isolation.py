@@ -161,6 +161,29 @@ def test_remote_source_never_reconciles_local_tracking(bound, monkeypatch):
     assert picker.app.screen._rec["is_local"] is False
 
 
+def test_worker_uses_source_local_alias_canonicalization(bound, monkeypatch, tmp_path):
+    picker = Picker(record())
+    calls = []
+    picker.src = SimpleNamespace(
+        LOCAL=("raw-hostname", "Win"),
+        is_local=lambda machine, env: calls.append((machine, env)) or True,
+    )
+    (tmp_path / "example-win-row.yaml").write_text("id: example-win-row\n")
+    monkeypatch.setattr(project_config, "tracking_dir", lambda project: tmp_path)
+    monkeypatch.setattr(engine_group_c, "picker_reconcile_local",
+                        lambda *a, **kw: SimpleNamespace(rows=[{
+                            "id": "example-win-row", "session_lock_live": True,
+                        }]))
+    picker._source_local = ("raw-hostname", "Win")
+    picker._open_submenu()
+    assert calls == []
+    work, done = picker.requests.pop()
+    done(work())
+    assert calls == [("example", "Win")]
+    assert picker.app.screen._rec["is_local"] is True
+    assert picker.app.screen._rec["session_lock_live"] is True
+
+
 def test_worker_uses_captured_project_and_missing_record_skips_probe(bound, monkeypatch, tmp_path):
     picker = Picker(record())
     calls = []
