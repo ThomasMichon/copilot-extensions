@@ -117,6 +117,10 @@ bytes with the current payload: payload refresh can legitimately leave older or
 damaged helpers awaiting repair. Worktrees source, installation-cell and
 environment admission remain with the subsequent engine repair and its own
 transactional publisher; Manager construction does not modify those helpers.
+Repair-child launches explicitly forward standard input, output and error to
+the existing caller handles while retaining hidden native children and their
+completion custody. Redirected diagnostics must reach the durable request log,
+not disappear behind an exit code.
 
 The **One-line bootstrap** below remains the fresh-install entry, not a required
 manual migration step for an adopted Manager. Do not rewrite a deployed launcher,

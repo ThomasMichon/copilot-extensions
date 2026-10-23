@@ -1,0 +1,9 @@
+{
+  "comment": "Forward repair child standard streams to the update caller",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

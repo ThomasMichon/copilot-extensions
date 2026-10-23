@@ -327,7 +327,8 @@ def _identity(installation: _Installation) -> dict[str, Any]:
 def _wait(command: list[str], environment: dict[str, str], cwd: Path) -> int:
     """Do not kill the admitting lifecycle parent before its native child settles."""
     with subprocess.Popen(
-        command, env=environment, cwd=cwd, **no_window_kwargs(),
+        command, env=environment, cwd=cwd,
+        stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, **no_window_kwargs(),
     ) as process:
         interrupted = False
         while True:
