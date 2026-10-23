@@ -39,8 +39,52 @@ latency, fewer workflow invocations or review-throughput evidence.
 A preceding shared-child-edge cache candidate also preserved semantics but
 regressed paired whole-guard median from 37.190 to 42.254 seconds. Discard
 that implementation rather than mistaking fewer edge enumerations for a
-real improvement. Publication, isolated Linux qualification, natural source
-CI and qualified release adoption of the retained candidate remain separate.
+real improvement.
+
+#8213 merges at `2026-10-23T12:29:36Z` as
+`c1e4e48867c7242e0a7f62b35930f01eb27a1376`. The isolated publication tree
+passes all 113 cases and exact whole-guard equivalence across 2,372 reads,
+2,313 parses and 99 raw hits, retaining independent intervening source additions.
+Actual final-head CI `39952588491` runs all three scanners successfully in
+twelve seconds and all 1,012 admitted units in 16.114 seconds with coverage.
+The exact source passes approval, complete-feedback and required-check gates.
+These are natural source observations, not controlled hosted speedup or
+qualified release adoption.
+
+## October 23 tracking-alias recipe admission
+
+The remaining sibling tracking-write guard always reads and parses every
+Python file in every non-owning plugin. Its alias fixed point and reflective
+access checks can only recognize a root introduced by a static import of the
+package/protected module, or by an exact literal dynamic-import target.
+Inspect those necessary roots in the already parsed, breadth-first node tuple
+before entering the unchanged alias analysis. Literal targets use Python's
+decoded AST values, including escape sequences and adjacent string literals;
+import identifiers retain Python's Unicode normalization. This is not a
+source-text prefilter or a broader dynamic-expression analyzer.
+
+An in-memory prototype on the unchanged native 2,859-file corpus preserves
+every read, parsed AST digest and ordered diagnostic. Three alternating
+whole-guard pairs have median **40.715 seconds before** and **33.683 seconds
+after**. One pair reverses direction, so retain the visible native variance;
+these measurements are not controlled hosted or whole-flow speedup.
+
+The candidate's 92 focused cases pass, including forced-unfiltered
+differentials, encoded/adjacent targets, normalized imports, wildcard imports,
+lazy helpers, queue/reflection access, read/parse errors, changed-input refresh
+and absence of downstream alias work for impossible trees. Existing scope,
+denylist, alias propagation and diagnostic ordering remain unchanged.
+
+Committed source qualification passes in hardened, network-disconnected Linux
+with the existing four-CPU/memory/process limits: all 92 cases, exact
+unfiltered/admitted equality across 2,859 reads and original parsed AST digests,
+and the real guard CLI. Only 28 trees enter alias analysis; 2,831 omit
+impossible passes. An initial ad hoc recipe combined this contract check with
+six additional benchmark traversals and exhausted its 300-second bound.
+Remove those redundant benchmark traversals, not any contract assertion or
+test, and retain the unchanged bound. Both disposable containers are removed.
+Ordinary source review/required CI and release adoption remain outstanding.
+No workflow event, runner, controller pin, service or release-unit policy changes.
 
 ## October 23 documentation-count recipe reduction
 

@@ -163,10 +163,11 @@ def _refspec_worktree_seed(tmp_path_factory) -> Path:
                 _git("init", "-b", "master", str(seed), cwd=root)
                 _init_identity(seed)
                 _commit(seed, "base.txt", "base\n")
-                _git("remote", "add", "origin", str(origin), cwd=seed)
+                _git("remote", "add", "origin", "../origin.git", cwd=seed)
                 _git("push", "origin", "master", cwd=seed)
                 clone = root / "worktree"
                 _git("clone", str(origin), str(clone), cwd=root)
+                _git("remote", "set-url", "origin", "../origin.git", cwd=clone)
                 _init_identity(clone)
                 _git("checkout", "-b", "worktree/anomalous-potato-wsl-test", cwd=clone)
                 _commit(clone, "fix.txt", "the fix\n")
@@ -174,15 +175,13 @@ def _refspec_worktree_seed(tmp_path_factory) -> Path:
 
 
 def _copy_refspec_worktree(source: Path, tmp_path: Path) -> SimpleNamespace:
-    """Copy every object, ref and reflog, relocating only remote URLs."""
+    """Copy every byte; sibling-relative remotes already name private stores."""
     shutil.copytree(
         source, tmp_path, dirs_exist_ok=True, copy_function=shutil.copyfile,
     )
     origin = tmp_path / "origin.git"
     seed = tmp_path / "seed"
     clone = tmp_path / "worktree"
-    for repo in (seed, clone):
-        _git("remote", "set-url", "origin", str(origin), cwd=repo)
     return SimpleNamespace(
         tmp_path=tmp_path,
         origin=origin,
@@ -206,10 +205,17 @@ def _topology_snapshot(root: Path) -> dict[Path, bytes]:
 
 
 @pytest.mark.parametrize("iteration", range(2))
-def test_refspec_copies_isolate_commits_and_pushes(tmp_path, _refspec_worktree_seed, iteration):
+def test_refspec_copies_isolate_commits_and_pushes(
+    tmp_path, _refspec_worktree_seed, iteration, monkeypatch,
+):
     source_before = _topology_snapshot(_refspec_worktree_seed)
-    first = _copy_refspec_worktree(_refspec_worktree_seed, tmp_path / "first")
-    second = _copy_refspec_worktree(_refspec_worktree_seed, tmp_path / "second")
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            f"{__name__}._git",
+            lambda *args, **kwargs: pytest.fail("private copies need no Git config repair"),
+        )
+        first = _copy_refspec_worktree(_refspec_worktree_seed, tmp_path / "first")
+        second = _copy_refspec_worktree(_refspec_worktree_seed, tmp_path / "second")
     unchanged = {
         _refspec_worktree_seed: source_before,
         second.tmp_path: _topology_snapshot(second.tmp_path),
@@ -226,10 +232,10 @@ def test_refspec_copies_isolate_commits_and_pushes(tmp_path, _refspec_worktree_s
     assert not (first.seed / "fix.txt").exists()
     for env in (first, second):
         for repo in (env.clone, env.seed):
-            assert _git("remote", "get-url", "origin", cwd=repo) == str(env.origin)
+            url = _git("remote", "get-url", "origin", cwd=repo)
+            assert (repo / url).resolve() == env.origin.resolve()
         for relative, data in source_before.items():
-            if relative.name != "config":
-                assert (env.tmp_path / relative).read_bytes() == data
+            assert (env.tmp_path / relative).read_bytes() == data
     _commit(first.clone, "isolated.txt", f"only in the first copy {iteration}\n")
     head = _git("rev-parse", "HEAD", cwd=first.clone)
     _git("push", "origin", "HEAD:refs/heads/master", cwd=first.clone)

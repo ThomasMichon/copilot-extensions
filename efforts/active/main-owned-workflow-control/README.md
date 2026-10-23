@@ -302,10 +302,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [x] Land and observe bounded headless-guard analysis reuse (#7700), preserving
   all production roots, six enforcement rules, allowlists and failure handling.
   Keep local paired timing distinct from natural hosted observations.
-- [ ] Land bounded AST-fact admission for the headless guard's later visitors,
+- [x] Land bounded AST-fact admission for the headless guard's later visitors,
   preserving every source read/parse, all six rules, scope/alias semantics and
-  ordered diagnostics. Qualify actual empty-pass removal separately from
-  comparable whole-flow latency; retain full source-CI invocation.
+  ordered diagnostics (#8213). Actual source CI retains all three scanners,
+  completes their group in twelve seconds and executes all 1,012 admitted
+  units. Empty-pass removal and local paired timing are not controlled
+  whole-flow latency; the full source-CI invocation remains.
+- [ ] Observe qualified release adoption of #8213 separately from source-CI
+  execution and comparable whole-flow timing; this changes no controller pin.
+- [ ] Land and observe necessary parsed-root admission for the sibling
+  tracking-write guard, retaining every read/parse, alias fixed point, dynamic
+  import/reflection boundary and ordered diagnostic. Keep recipe timing,
+  required source CI and qualified release adoption distinct.
 - [x] Land and observe conservative narrative-only PR omission of the three
   source AST scans (#7706), retaining full non-narrative and non-PR execution,
   pinned input/error handling, every other guard and all required unit evidence.
