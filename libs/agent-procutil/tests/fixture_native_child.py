@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import stat
 import sys
 
 sys.path.insert(0, sys.argv[1])
@@ -13,6 +14,7 @@ from agent_procutil._linux_pidfd import open_pidfd  # noqa: E402
 
 child = int(sys.argv[2])
 area = Path(sys.argv[3])
+assert stat.S_ISFIFO(os.fstat(8).st_mode), "native lifetime writer did not survive exec"
 custody = NativeChildCustody(child)
 try:
     custody.assert_owned()
