@@ -103,8 +103,14 @@ namespace CopilotExtensions {
             var serializer = new JavaScriptSerializer();
             serializer.MaxJsonLength = MaxFrame;
             serializer.RecursionLimit = 8;
-            var frame = serializer.Deserialize<Dictionary<string, object>>(
-                new UTF8Encoding(false, true).GetString(data, 0, count));
+            Dictionary<string, object> frame;
+            try {
+                frame = serializer.Deserialize<Dictionary<string, object>>(
+                    new UTF8Encoding(false, true).GetString(data, 0, count));
+            } catch (MemberAccessException error) {
+                // Malformed __type values can trigger reflection errors inside this serializer.
+                throw new InvalidDataException("invalid native participant type metadata", error);
+            }
             if (frame == null) throw new InvalidDataException("invalid native participant frame");
             return frame;
         }

@@ -140,8 +140,17 @@ def test_native_witness_requires_matching_actual_handle(area, mode):
 
 
 @pytest.mark.parametrize(
-    "payload", [b"null", b"[]", b"{", b"x" * 16385],
-    ids=["null", "array", "malformed", "oversized"],
+    "payload", [
+        b"null", b"[]", b"{", b"x" * 16385,
+        b'{"nonce":1e99999}', b'{"nonce":922337203685477580812345678901234567890}',
+        b'{"nonce":{"value":[[[[[[[[[0]]]]]]]]]}}',
+        b'{"__type":[]}', b'{"__type":null}', b'{"__type":{}}', b'{"__type":0}',
+        b'{"nonce":{"__type":{}}}',
+    ],
+    ids=[
+        "null", "array", "malformed", "oversized", "numeric-overflow", "large-integer", "recursion",
+        "type-array", "type-null", "type-object", "type-number", "nested-type-object",
+    ],
 )
 def test_malformed_native_handshake_is_bounded_without_retiring_real_witness(area, payload):
     with owner(area) as (root, child):
