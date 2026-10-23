@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -57,6 +58,27 @@ def prepared(tmp_path):
     return n, g, intent
 
 
+@pytest.fixture(scope="session")
+def _active_allocation_seed(tmp_path_factory):
+    root = tmp_path_factory.mktemp("active-allocation")
+    prepared(root)
+    original = {name: (root / name).read_bytes() for name in ("node.db", "gateway.db")}
+    yield root
+    assert all((root / name).read_bytes() == content for name, content in original.items())
+
+
+def _copy_prepared_allocation(seed, destination):
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in ("node.db", "gateway.db"):
+        shutil.copyfile(seed / name, destination / name)
+    return node(destination / "node.db"), gateway(destination / "gateway.db"), request()
+
+
+@pytest.fixture
+def prepared_allocation(tmp_path, _active_allocation_seed):
+    return _copy_prepared_allocation(_active_allocation_seed, tmp_path)
+
+
 def release(g, intent, proof, **changes):
     arguments = {"resource": "workspace-1", "installation": "node-install-1"}
     arguments.update(changes)
@@ -67,8 +89,26 @@ def forbidden(_):
     pytest.fail("stale or duplicate callback must not run")
 
 
-def test_retirement_release_and_successor_preserve_original_operations(tmp_path):
-    n, g, intent = prepared(tmp_path)
+def test_active_allocation_copies_isolate_retirement_and_gateway_release(
+    tmp_path, _active_allocation_seed,
+):
+    left, gateway_left, intent = _copy_prepared_allocation(_active_allocation_seed, tmp_path / "left")
+    right, gateway_right, _ = _copy_prepared_allocation(_active_allocation_seed, tmp_path / "right")
+    proof = left.release_cooperative(intent, retire, resource="workspace-1")
+    release(gateway_left, intent, proof)
+
+    assert active(left.path) == 0 and active(right.path) == 1
+    assert left.allocation_owner(resource="workspace-1") is None
+    assert right.allocation_owner(resource="workspace-1") is not None
+    assert gateway_left.inspect_allocation(resource="workspace-1") is None
+    assert gateway_right.inspect_allocation(resource="workspace-1") is not None
+    assert right.allocation_release(intent) is None
+    assert gateway_right.allocation_release(intent) is None
+    assert active(_active_allocation_seed / "node.db") == 1
+
+
+def test_retirement_release_and_successor_preserve_original_operations(tmp_path, prepared_allocation):
+    n, g, intent = prepared_allocation
     result = n.inspect(intent)
     assert n.allocation_release(intent) is None
     assert g.allocation_release(intent) is None
@@ -103,8 +143,8 @@ def test_retirement_release_and_successor_preserve_original_operations(tmp_path)
     {"operation": "op-2"}, {"operation": "op-2", "generation": 1},
     {"principal": "other"}, {"account": "other"},
 ])
-def test_released_generation_cannot_be_reused_across_identities(tmp_path, changes):
-    n, g, intent = prepared(tmp_path)
+def test_released_generation_cannot_be_reused_across_identities(tmp_path, changes, prepared_allocation):
+    n, g, intent = prepared_allocation
     proof = n.release_cooperative(intent, retire, resource="workspace-1")
     release(g, intent, proof)
     candidate = request(**changes)
@@ -122,8 +162,8 @@ def test_released_generation_cannot_be_reused_across_identities(tmp_path, change
     ("account", "other"), ("target", "other"), ("generation", 2),
     ("request_digest", "f" * 64), ("resource", "other"), ("installation", "other"),
 ])
-def test_mismatched_proof_never_releases_gateway_claim(tmp_path, field, value):
-    n, g, intent = prepared(tmp_path)
+def test_mismatched_proof_never_releases_gateway_claim(tmp_path, field, value, prepared_allocation):
+    n, g, intent = prepared_allocation
     proof = n.release_cooperative(intent, retire, resource="workspace-1")
     data = proof.to_dict()
     data[field] = value
@@ -137,8 +177,8 @@ def test_mismatched_proof_never_releases_gateway_claim(tmp_path, field, value):
     {"request_digest": "F" * 64}, {"resource": "../bad"},
     {"installation": ""}, {"unknown": "field"}, {"resource": True},
 ])
-def test_release_shape_is_strict_and_immutable(tmp_path, changes):
-    n, _, intent = prepared(tmp_path)
+def test_release_shape_is_strict_and_immutable(tmp_path, changes, prepared_allocation):
+    n, _, intent = prepared_allocation
     proof = n.release_cooperative(intent, retire, resource="workspace-1")
     data = proof.to_dict()
     data.update(changes)
@@ -151,8 +191,8 @@ def test_release_shape_is_strict_and_immutable(tmp_path, changes):
         AllocationRelease(json.dumps(proof.to_dict(), indent=1).encode())
 
 
-def test_release_binding_and_legacy_acceptance_do_not_retire(tmp_path):
-    n, g, intent = prepared(tmp_path)
+def test_release_binding_and_legacy_acceptance_do_not_retire(tmp_path, prepared_allocation):
+    n, g, intent = prepared_allocation
     for candidate, resource in ((intent, "other"), (request(generation=2), "workspace-1")):
         with pytest.raises(PlanError):
             n.release_cooperative(candidate, forbidden, resource=resource)
@@ -176,8 +216,8 @@ def test_release_binding_and_legacy_acceptance_do_not_retire(tmp_path):
 
 
 @pytest.mark.parametrize("failure", ["callback", "return", "owner", "storage", "transaction"])
-def test_retirement_or_tombstone_failure_rolls_back_everything(tmp_path, failure):
-    n, _, intent = prepared(tmp_path)
+def test_retirement_or_tombstone_failure_rolls_back_everything(tmp_path, failure, prepared_allocation):
+    n, _, intent = prepared_allocation
     if failure == "storage":
         with closing(sqlite3.connect(n.path)) as connection:
             connection.execute(
@@ -200,8 +240,8 @@ def test_retirement_or_tombstone_failure_rolls_back_everything(tmp_path, failure
     assert n.allocation_release(intent) is None
 
 
-def test_gateway_release_audit_failure_is_atomic(tmp_path, monkeypatch):
-    n, g, intent = prepared(tmp_path)
+def test_gateway_release_audit_failure_is_atomic(tmp_path, monkeypatch, prepared_allocation):
+    n, g, intent = prepared_allocation
     proof = n.release_cooperative(intent, retire, resource="workspace-1")
     original = g._event
     def fail(*args):
@@ -218,8 +258,10 @@ def test_gateway_release_audit_failure_is_atomic(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("kind,version", [("node", 2), ("gateway", 3)])
-def test_upgrade_preserves_held_ownership_and_old_writer_refuses(tmp_path, kind, version):
-    n, g, intent = prepared(tmp_path)
+def test_upgrade_preserves_held_ownership_and_old_writer_refuses(
+    tmp_path, kind, version, prepared_allocation,
+):
+    n, g, intent = prepared_allocation
     store = n if kind == "node" else g
     with closing(sqlite3.connect(store.path)) as connection:
         connection.execute("DROP TABLE allocation_releases")
@@ -257,8 +299,8 @@ def run(n, g, intent, body):
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
 
 
-def test_installed_retirement_and_gateway_crashes_and_lost_replies(tmp_path):
-    n, g, intent = prepared(tmp_path)
+def test_installed_retirement_and_gateway_crashes_and_lost_replies(tmp_path, prepared_allocation):
+    n, g, intent = prepared_allocation
     crashed = run(n, g, intent, """
 def crash(c):
     retire(c)
@@ -292,8 +334,8 @@ os._exit(26)
     assert g.inspect_allocation(resource="workspace-1") is None
 
 
-def test_four_installed_release_clients_retire_once_and_replay_same_proof(tmp_path):
-    n, g, intent = prepared(tmp_path)
+def test_four_installed_release_clients_retire_once_and_replay_same_proof(tmp_path, prepared_allocation):
+    n, g, intent = prepared_allocation
     with closing(sqlite3.connect(n.path)) as connection:
         connection.execute("CREATE TABLE retirements(value TEXT)")
     body = """
@@ -315,8 +357,8 @@ print(p.encoded.decode())
             "SELECT count(*) FROM audit WHERE event='allocation-released'").fetchone()[0] == 1
 
 
-def test_installed_successor_race_and_stale_effect_after_reassignment(tmp_path):
-    n, g, intent = prepared(tmp_path)
+def test_installed_successor_race_and_stale_effect_after_reassignment(tmp_path, prepared_allocation):
+    n, g, intent = prepared_allocation
     proof = n.release_cooperative(intent, retire, resource="workspace-1")
     release(g, intent, proof)
     body = """
@@ -352,8 +394,8 @@ except PlanError:
     assert g.inspect_allocation(resource="workspace-1")["intent"] == successor.to_dict()
 
 
-def test_generation_high_water_survives_multiple_retirements(tmp_path):
-    n, g, first = prepared(tmp_path)
+def test_generation_high_water_survives_multiple_retirements(tmp_path, prepared_allocation):
+    n, g, first = prepared_allocation
     release(g, first, n.release_cooperative(first, retire, resource="workspace-1"))
     second = request(operation="second", generation=7)
     n.accept_allocation(second, resource="workspace-1")
@@ -371,8 +413,10 @@ def test_generation_high_water_survives_multiple_retirements(tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["node", "gateway"])
-def test_release_upgrade_refuses_reserved_table_collision_without_mutation(tmp_path, kind):
-    n, g, _ = prepared(tmp_path)
+def test_release_upgrade_refuses_reserved_table_collision_without_mutation(
+    tmp_path, kind, prepared_allocation,
+):
+    n, g, _ = prepared_allocation
     store, old = (n, 2) if kind == "node" else (g, 3)
     with closing(sqlite3.connect(store.path)) as connection:
         connection.execute("DROP TABLE allocation_releases")
@@ -402,8 +446,10 @@ def test_release_upgrade_refuses_reserved_table_collision_without_mutation(tmp_p
     "DELETE FROM receipts",
     "DELETE FROM allocation_owners",
 ])
-def test_callbacks_cannot_mutate_older_tombstones_or_core_state(tmp_path, action, sql):
-    n, g, first = prepared(tmp_path)
+def test_callbacks_cannot_mutate_older_tombstones_or_core_state(
+    tmp_path, action, sql, prepared_allocation,
+):
+    n, g, first = prepared_allocation
     proof = n.release_cooperative(first, retire, resource="workspace-1")
     release(g, first, proof)
     successor = request(operation="second", generation=7)
@@ -433,8 +479,10 @@ def test_callbacks_cannot_mutate_older_tombstones_or_core_state(tmp_path, action
 
 
 @pytest.mark.parametrize("kind", ["node", "gateway"])
-def test_indexed_generation_lookup_is_bounded_with_large_permanent_history(tmp_path, kind):
-    n, g, _ = prepared(tmp_path)
+def test_indexed_generation_lookup_is_bounded_with_large_permanent_history(
+    tmp_path, kind, prepared_allocation,
+):
+    n, g, _ = prepared_allocation
     store = n if kind == "node" else g
     with closing(sqlite3.connect(store.path)) as connection:
         # Only the generation lookup is exercised here; proof parsing is deliberately absent.
@@ -463,8 +511,10 @@ def test_indexed_generation_lookup_is_bounded_with_large_permanent_history(tmp_p
     "CREATE INDEX allocation_release_generations ON allocation_releases(resource,generation DESC)"
     " WHERE generation>1",
 ])
-def test_open_refuses_missing_or_incompatible_generation_index(tmp_path, kind, index):
-    n, g, _ = prepared(tmp_path)
+def test_open_refuses_missing_or_incompatible_generation_index(
+    tmp_path, kind, index, prepared_allocation,
+):
+    n, g, _ = prepared_allocation
     store = n if kind == "node" else g
     with closing(sqlite3.connect(store.path)) as connection:
         connection.execute("DROP INDEX allocation_release_generations")
