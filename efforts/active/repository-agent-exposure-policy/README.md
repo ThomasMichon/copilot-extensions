@@ -91,7 +91,7 @@ operator authorization.
 ### Phase 0 - Reviewed proposal
 
 - [x] Capture the request and accepted `expose_agent` naming; claim #8332.
-- [ ] Land the proposal through the repository's review gate. Stop this planning
+- [x] Land the proposal through the repository's review gate. Stop this planning
   assignment there; leave the effort Draft and the implementation backlog open.
 
 ### Phase 1 - Intent and effective policy
@@ -199,3 +199,7 @@ machine metadata/project enumeration with hosting eligibility.
   its validation obligations; no runtime, config, registry or agent changed.
 - Runtime implementation, vision amendment, deployment and live reconciliation
   remain unassigned and require execution authorization.
+- Proposal #8335 merged after a current-head Copilot approval with no findings
+  and passing checks. Phase 0 is complete; #8332 and the effort remain open.
+  The next slice is the separately authorized Phase 1 vision/policy work, not an
+  implicit runtime rollout.
