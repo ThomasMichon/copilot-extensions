@@ -47,7 +47,7 @@ def receiver(tmp_path):
             self.send_response(config["status"])
             if config["location"]:
                 self.send_header("Location", config["location"])
-            self.send_header("Content-Length", str(len(config["response"])))
+            self.send_header("Content-Length", str(config.get("declared_length", len(config["response"]))))
             self.end_headers()
             self.wfile.write(config["response"])
 
@@ -168,6 +168,18 @@ def test_unsuccessful_acknowledgement_is_not_export_success(receiver, kind):
         "malformed": b"not-protobuf",
         "oversize": b"a" * 65537,
     }[kind]
+    sink = LocalOtlpSink(endpoint, timeout=.2)
+    try:
+        with pytest.raises(RuntimeError, match="OTLP export failed"):
+            sink(record())
+    finally:
+        sink.close()
+
+
+@pytest.mark.parametrize("length", [12, "invalid", "-1", "0,0", 70000])
+def test_truncated_or_invalid_length_is_not_export_success(receiver, length):
+    endpoint, _, config = receiver
+    config["declared_length"] = length
     sink = LocalOtlpSink(endpoint, timeout=.2)
     try:
         with pytest.raises(RuntimeError, match="OTLP export failed"):

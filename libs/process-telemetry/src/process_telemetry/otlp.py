@@ -95,8 +95,16 @@ class LocalOtlpSink:
                     response = connection.getresponse()
                     if not 200 <= response.status < 300:
                         return SpanExportResult.FAILURE
+                    declared = response.getheader("Content-Length")
+                    expected = None
+                    if declared is not None:
+                        if response.chunked or not re.fullmatch(r"[0-9]{1,10}", declared.strip()):
+                            return SpanExportResult.FAILURE
+                        expected = int(declared)
+                        if expected > 65536:
+                            return SpanExportResult.FAILURE
                     result = response.read(65537)
-                    if len(result) > 65536:
+                    if len(result) > 65536 or (expected is not None and len(result) != expected):
                         return SpanExportResult.FAILURE
                     acknowledgement = ExportTraceServiceResponse.FromString(result)
                     if acknowledgement.partial_success.rejected_spans:
