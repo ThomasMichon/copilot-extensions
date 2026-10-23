@@ -176,6 +176,14 @@ On Windows, pytest's existing Colorama console adapter is initialized before
 unit observation starts. Unit-side native-loader attempts remain rejected;
 `tools/test_promotion_unit_windows_io.py` exercises that distinction in a fresh
 native process outside the admitted unit packet.
+
+Version-reservation decisions and complete source-root/checkout-attribute
+comparison are admitted as pure units in
+`tools/promotion_unit_tests/test_version_reservations.py`.
+`tools/test_promotion_version_allocation.py` separately exercises actual Git
+unlanded-candidate collisions, dependency-closure changes, immutable tag
+preservation, exact retries and malformed-tag refusal. Run that development
+cohort under the bounded supervisor; it is not part of unit-only promotion.
 Open-flag cases use semantic node IDs rather than platform-dependent constant
 values; the descriptor mock preserves an opaque extra bit without requiring a
 POSIX-only flag on Windows.

@@ -243,6 +243,15 @@ effort or discarding the prior source. The assignment changes the first slice,
 not the parent completion gate or the authority of the existing release
 controller.
 
+**Promotion allocation choice (operator-selected form):** `tag-aware`:
+
+> Preserve existing version scheme; skip occupied incompatible version tags, reuse only exact matching payloads (recommended)
+
+The bounded repair accounts for aliases reserved by an unsuccessful Main
+landing. It does not authorize tag replacement or weaker publication checks;
+reviewed helper adoption and natural qualification remain with the existing
+control path.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite

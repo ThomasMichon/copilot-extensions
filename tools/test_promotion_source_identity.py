@@ -98,7 +98,7 @@ def test_same_source_tag_cannot_hide_changed_artifact_bytes(
     readiness.prepare_artifacts(directory, **kwargs)
     server.failure = "download-digest"
     writes = list(server.writes)
-    with pytest.raises(artifacts.PromotionArtifactError, match="downloaded readiness asset digest"):
+    with pytest.raises(artifacts.PromotionArtifactError, match="downloaded published asset digest"):
         readiness.prepare_artifacts(directory, **kwargs)
     assert server.writes == writes
 

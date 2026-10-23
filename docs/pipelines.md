@@ -437,7 +437,13 @@ version tag may point to an older shipped ancestor only when its exact
 plugin/vendored closure, distributions/versions and payload hash still match.
 Unrelated promotions must not move unchanged plugins' stable version tags,
 and a toolchain-only rebuild may add a new content-addressed asset to that
-same version. An unshipped or different-payload tag is rejected.
+same version. An unlanded alias requires the authenticated frozen-source
+provenance described below; an unauthenticated or different-payload tag is rejected.
+The composer accounts for versions reserved before an unsuccessful Main landing:
+it retains an occupied version only for an unchanged complete first-party source
+closure and advances incompatible reservations before artifact construction.
+See [occupied version allocation](pipelines/source-owned-release-identity.md#occupied-version-allocation).
+This does not relax the publisher's independent source-binding checks.
 The release PAT and verification token are scoped to their readiness/final
 publisher shell steps, not exposed to checkout, Python setup or transfer-artifact
 actions. Final version publication remains its own job so a partial upload can be retried with
