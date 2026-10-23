@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import Any, Protocol
 
 from .ado_discovery_scope import (
@@ -50,7 +50,7 @@ from .script_provider import (
     SCRIPT_FORGE_KEYS, _backlog_identifier, build_provider, script_resource_namespace,
     validate_repo_field, validate_script_forge_config,
 )
-from .worker_identities import load_worker_identity
+from .worker_identities import load_worker_identity, resolve_identity_context
 
 _TERMINAL = frozenset({"submitted", "completed", "abandoned", "dead_letter"})
 _KNOWN_KEYS = frozenset(
@@ -183,21 +183,9 @@ def validate_config(
     it selects identity tiers only, never script execution context."""
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
-    from .repository_resources import (
-        RepositoryResourceSnapshot, execution_root, is_repository_resource,
-        validate_resource_arguments,
-    )
+    from .repository_resources import RepositoryResourceSnapshot, execution_root
 
-    if worker_identity_cwd is not None:
-        if not isinstance(worker_identity_cwd, str) or not worker_identity_cwd:
-            raise RegistrarError("worker_identity_cwd: expected a non-empty source root")
-        validate_resource_arguments([worker_identity_cwd])
-        if not is_repository_resource(worker_identity_cwd) and not any(
-            cls(worker_identity_cwd).is_absolute()
-            for cls in (Path, PurePosixPath, PureWindowsPath)
-        ):
-            raise RegistrarError("worker_identity_cwd: expected an absolute or named source root")
-
+    resolve_identity_context(worker_identity_cwd)
     extra = sorted(set(data) - _KNOWN_KEYS)
     if extra:
         raise RegistrarError(
@@ -385,11 +373,9 @@ def validate_config(
         )
     identity_name = ""
     if worker_identity and resolve_resources:
-        identity_cwd = cwd
-        if worker_identity_cwd is not None:
-            identity_cwd = snapshot.resolve(
-                worker_identity_cwd, directory=True, execution=False,
-            )
+        identity_cwd = resolve_identity_context(
+            worker_identity_cwd, snapshot=snapshot, resolve_resources=True,
+        ) if worker_identity_cwd is not None else cwd
         identity = load_worker_identity(
             worker_identity, cwd=Path(identity_cwd) if identity_cwd else None,
         )

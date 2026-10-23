@@ -18,7 +18,7 @@ def _identity_origin_root(origin: Path | str, leaf_root: Path) -> str:
     if is_repository_resource(origin):
         name, _ = split_repository_resource(origin)
         return f"repo:{name}:."
-    directory = Path(origin)
+    directory = Path(origin).expanduser().resolve()
     surface_root = repo_config.repo_root_from_surface_path(directory, "registrar")
     if surface_root is not None:
         return str(surface_root)

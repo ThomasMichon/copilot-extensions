@@ -262,6 +262,51 @@ def test_global_identity_default_keeps_adopting_repository_override(tmp_path, ch
     assert config["worker_guidance"] == ("SUPPLIER-DEFAULT" if chained else "LEAF-DEFAULT")
 
 
+def test_global_identity_accepts_relative_repository_root(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _identity(tmp_path, "RELATIVE-ROOT", name="goal-driven")
+    leaf = _write(tmp_path / "loop.json", {"extends": "global:goal-driven", **_config()})
+    source, _ = read_declaration_file_set(leaf, repo_root=".")
+    assert source.spec["worker_identity_cwd"] == str(tmp_path)
+    emitter.validate_spec(source.spec, resolve_resources=True)
+
+
+def test_global_identity_needs_no_attributed_payload_in_a_wheel(tmp_path, monkeypatch):
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.setattr(
+        registrar_recipes, "__file__",
+        str(tmp_path / "wheel" / "site-packages" / "agent_dispatch" / "registrar_recipes.py"),
+    )
+    _identity(tmp_path, "WHEEL-ROOT", name="goal-driven")
+    leaf = _write(tmp_path / "loop.json", {"extends": "global:goal-driven", **_config()})
+    source, _ = read_declaration_file_set(leaf, repo_root=tmp_path)
+    emitter.validate_spec(source.spec, resolve_resources=True)
+    assert source.spec["worker_identity_cwd"] == str(tmp_path)
+
+
+def test_cli_discovery_reads_supplier_only_identity_without_live_effects(
+    tmp_path, monkeypatch, capsys,
+):
+    from agent_dispatch import __main__ as cli, repository_issue_loops as loops
+    from tests.test_repository_issue_loop_cli import FakeClient as DiscoveryClient
+
+    supplier = tmp_path / "supplier"
+    _identity(supplier, "SUPPLIER-ONLY")
+    base = _write(
+        supplier / ".copilot-extensions" / "agent-dispatch" / "registrar" / "base.json",
+        _config(worker_identity="worker"),
+    )
+    leaf = _write(
+        tmp_path / "leaf" / ".copilot-extensions" / "agent-dispatch" / "registrar" / "loop.json",
+        {"extends": str(base)},
+    )
+    monkeypatch.setattr(cli, "_client", lambda args: DiscoveryClient())
+    monkeypatch.setattr(loops.GitHubProvider, "list_open_issues", lambda *a: [])
+    assert cli.main(["repository-issue-loop", "discover", str(leaf)]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["created"] == output["reserved"] == output["eligible"] == []
+
+
 @pytest.mark.parametrize("field", ["command", "cwd"])
 def test_deferred_cross_repo_relative_script_field_is_still_refused(tmp_path, field):
     forge = {

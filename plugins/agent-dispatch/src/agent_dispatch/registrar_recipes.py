@@ -924,17 +924,18 @@ def _resolve_extends_tracking_cwd_origin(
             template, base_dir=next_base_dir, _chain=(*_chain, identity), _snapshot=snapshot,
             _base_resource=next_base_resource,
         )
-    elif _path_origins(template, base_dir):
+    else:
         # Unlike spec.cwd normalization, provenance also applies to high-level
         # declarations and partial bases that acquire their kind at a later hop.
-        directory = next_base_resource or (
-            resolved_path.parent if resolved_path is not None else _plugin_payload_root()
-        )
-        origins = _path_origins(template, directory)
-        if ref.startswith("global:") and "worker_identity" in origins:
-            # A shipped identity selector is a default instantiated in the
-            # adopting declaration's repository, retaining repo-local overrides.
-            origins["worker_identity"] = _base_resource or base_dir
+        origins = _path_origins(template, _base_resource or base_dir)
+        # Shipped identity defaults bind at adoption without requiring payload
+        # files. Only fields that actually use payload-relative paths need it.
+        fields = origins.keys() - ({"worker_identity"} if ref.startswith("global:") else set())
+        if fields:
+            directory = next_base_resource or (
+                resolved_path.parent if resolved_path is not None else _plugin_payload_root()
+            )
+            origins.update(dict.fromkeys(fields, directory))
     if pending_cwd_origin is None and next_base_dir is not None:
         # This hop's own (non-inherited, or no-longer-pending) template
         # may itself carry a relative spec.cwd -- that field was written
