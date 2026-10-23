@@ -225,7 +225,7 @@ match the merged source byte-for-byte. This includes #7841 and supersedes the
 earlier publication observation, not the requirement to verify subsequent
 slices, perform only authorized rollout or prove the effective running version.
 
-The latest verified Main is `c02050ae353fee8d36fb37f4531c9037b009e2cd`,
+An earlier verified Main is `c02050ae353fee8d36fb37f4531c9037b009e2cd`,
 whose unpaused state records Dev `258a4dd71b4f667bb24f6abb921ea276b633d32f`
 promoted at `2026-10-22T20:49:07Z`. Promotion PR #7957 merged that snapshot;
 the earlier retained promotion #7905 has also merged. Privileged source #7899
@@ -235,7 +235,23 @@ records have identical Git blobs in that Dev snapshot and Main. The released
 agent-bridge version is `0.9.111-dev1`. This proves publication, not authorized
 rollout or the effective running version; those obligations remain open.
 
-- [ ] Verify publication from `dev` to `main`; perform only authorized rollout
+The correction was first verified in Main `1310525ffd5ff03b5442f04523e4f19569b554e6`,
+whose unpaused state records Dev `01d45627a7227d655025b3bc238f2542e60ef043`
+promoted at `2026-10-23T08:41:16Z`. Both canonical and vendored registration
+modules exactly match #8165's merged source. Released versions are
+agent-bridge `0.9.120-dev1`, agent-worktrees `1.24.211-dev1`,
+agent-codespaces `0.5.108-dev1`, agent-containers `0.2.89-dev1` and
+agent-ssh `0.1.99-dev1`. Unified controller rollout completed and the actual
+running Bridge reported `0.9.120.dev1`, healthy and ready. All five controller
+runtime interpreters imported the exact corrected registration module.
+The disposable venue's later unified update selected agent-worktrees
+`1.24.212-dev1` and agent-bridge `0.9.122-dev1`, also importing the exact
+correction. Main `1899e2e5eed5ccfc4e87cae1b3f43b4d4f71ea70` records
+Dev `8086afc7db615beb3ca01f003e8608e90be409af` at
+`2026-10-23T09:14:35Z`, which includes #8165. Native Codespace acceptance
+below used those effective runtime versions, not a source-only patch.
+
+- [x] Verify publication from `dev` to `main`; perform only authorized rollout
   through the unified update path and record the effective running version.
 - [ ] Complete the validation matrix below, or explicitly transfer any
   unavailable lane to a named tracked objective.
@@ -281,6 +297,8 @@ rollout or the effective running version; those obligations remain open.
   trusted-container control. Retain explicit disables and target-local
   precedence, correlate source/cwd/settings/readiness, and leave global
   preferences unchanged; separate single-plugin proofs do not close this row.
+  The combined Codespace proof now passes in both modes on the published
+  correction; the corresponding trusted-container proof remains open.
 - [x] Codespace proof: the same narrow discovery check succeeds for both launch
   modes, with effective paths/settings and launch version recorded.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
@@ -335,6 +353,48 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-23 - Verify published correction in both native Codespace modes
+
+- The authorized full unified controller update completed, including normal
+  managed service cutovers. Actual Bridge health and all five relevant runtime
+  imports matched the published correction. The venue's own unified update
+  retained its existing forwarded control route; no local broker, account
+  switch, new elevation or unmerged runtime patch was introduced.
+- Resumed the previously failed headed conversation without discarding its
+  history. Its native readiness control reported the complete 34-plugin
+  selection ready, with no missing entries, before task delivery or either
+  skill invocation. Remote cache-version expectations were absent; 29 local
+  version expectations remained. Both requested skills loaded successfully,
+  with real native tool starts/completions and context-delivery records.
+- A separate fresh ACP session on the updated venue loaded both the
+  target-user-enabled skill and the repository-staged skill in one turn.
+  This proves the combined selection in each mode, not two disconnected
+  single-plugin checks.
+- Full user-global settings and config stayed byte-for-byte unchanged across
+  the successful headed and ACP checks. Native listing outside the repository
+  still exposed only the user's global enabled selection, not the staged
+  repository plugins.
+- Captured the results, then stopped only the completed headed body through
+  its provider and ended only the idle ACP session through Bridge.
+  Trusted-container combined acceptance and the static/SSH/privileged lanes
+  remain open; this closes the publication/authorized-rollout row, not the
+  effort or the cross-venue acceptance row.
+
+### 2026-10-23 - Land Git cache-version readiness correction
+
+- #8165 merged to Dev as `01d45627a7227d655025b3bc238f2542e60ef043`
+  after current-head Copilot approval, no open review findings and every
+  required check passing. The merge retains both provenance trailers, and
+  #5286 remains open.
+- Shared resolver coverage passed 304 tests with one platform skip; the
+  native observer passed 28 tests, including the unchanged strict local-version
+  negative case. The Bridge contract registry passed 83 tests without fixture
+  rewrites. Vendoring, source lint, module-size and changefile checks passed.
+- The compiled Git requirement no longer pins an isolated cache's manifest
+  version. Git declarations and local expectations remain unchanged.
+  Publication, authorized unified rollout and the failed headed native
+  acceptance's controlled revalidation are the next slice, not completion.
 
 ### 2026-10-23 - Diagnose native Git cache-version readiness mismatch
 
