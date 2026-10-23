@@ -2,9 +2,9 @@
 
 Back to [Performance Telemetry](README.md). Part of #7935 / #5900.
 
-**Status: design reviewed and merged in #8187; implementation not admitted.**
-The campaign coordinator must accept the exact shared API and file scope
-below before functional changes. Neither approval enrolls an installed producer
+**Status: design reviewed in #8187; listed source implementation admitted.**
+The campaign coordinator accepted the exact shared API and file scope
+below. Neither approval enrolls an installed producer
 or authorizes collector configuration, ports, installation or restart.
 
 ## Request and reconciliation
@@ -347,7 +347,7 @@ exact amended proposal rather than extending scope silently.
 
 ## Validation and completion gates
 
-- [ ] Coordinator accepts shared API, first-consumer mapping and exact file
+- [x] Coordinator accepts shared API, first-consumer mapping and exact file
   ownership. Plan clears normal source review/CI/merge before any execution.
 - [ ] Pure stdlib tests: disabled new signals have no extra clock/UUID/import/
   queue/file/network effects; closed schema rejects unknown/hostile values,

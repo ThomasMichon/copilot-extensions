@@ -142,14 +142,97 @@ It prints generated trace/span IDs only after actual SDK export and explicitly
 reports `persistence: not-verified`. The receive owner must independently read
 that ID from durable local storage; an HTTP success is not persistence proof.
 The canary never starts a listener, discovers an endpoint or installs anything.
-Traces are the first interoperability slice. Structured logging/metric mapping,
-native product spans, overhead qualification and actual adopter receive/persist
+Traces are the first interoperability slice. The closed source-signal adapter
+below adds real Logs and Metrics protobuf, not a generic log forwarding surface.
+Native product spans, overhead qualification and actual adopter receive/persist
 proof remain explicit effort acceptance; this is not all-telemetry completion.
 
 Manager first-frame/new-resume and composed hook instrumentation remain with
 their existing owners. Short-lived hooks must not create writers: use their
 existing owner result/IPC if available, otherwise drop diagnostics. No default
 fleet host, shared collector, off-site exporter or storage lifecycle is created.
+
+### Closed Manager source signals
+
+`signals.SignalEndpoints(traces=None, logs=None, metrics=None)` and
+`SignalIdentity(source_revision=None, payload_version=None, selected_version=None,
+serving_version=None)` are frozen stdlib configuration. Each requested endpoint
+is independently explicit, with a literal loopback address, port and matching
+`/v1/traces`, `/v1/logs` or `/v1/metrics` path. No sibling URL is inferred.
+
+`otlp.LocalOtlpSignalsSink(endpoints, identity=identity, timeout=2)` is a
+**single-writer** adapter, not another queue, worker, provider or logger.
+`export_batch(spans)` consumes 1–32 existing typed source spans from one trace;
+only the fixed `worktree-manager-source` component and six source stages are
+admitted. Identities in a record must agree with the once-admitted metadata.
+The existing Manager source writer calls it; Bridge/Dispatch legacy lifecycle
+dicts are not newly eligible log content.
+
+Logs use public SDK `LogRecord`, `ReadableLogRecord` and `LogRecordExporter`
+with official Logs protobuf classes. No private SDK log encoder is imported.
+Body/event name are `agent.source.observation`; `ce.schema` is
+`agent.source-observation.log.v1`. Fixed outcome/severity mapping is
+ok/cancelled → INFO, error → ERROR, unavailable → WARN. Attributes contain only
+component, stage, outcome, measured duration/queue wait, optional fixture roster
+and the four admitted identity fields. Unavailable duration is absent, not zero.
+Correlation uses actual trace/span fields. Resources contain only service name
+and namespace; scope is `copilot-extensions.process-telemetry`, version `1`.
+No prompt, raw message, code, exception text, environment, path or arbitrary
+attribute map is accepted.
+
+Metrics use public SDK data models, `MetricExporter` and public `encode_metrics`:
+
+| Name | Type / unit | Population |
+|---|---|---|
+| `ce.source.observations` | monotonic DELTA Sum / `{observation}` | observed eligible records |
+| `ce.source.duration` | DELTA Histogram / `s` | actual first-refresh and input-receipt durations |
+| `ce.source.queue_wait` | DELTA Histogram / `s` | independently measured queue waits |
+
+Only `ce.stage`/`ce.outcome` labels are admitted; there are at most 56 data
+points per batch, no dynamic resource dimensions, identity labels or exemplars.
+Histogram bounds are 1, 5, 10, 25, 50, 100, 250, 500 ms and 1, 2, 5, 10 s,
+plus +Inf. Count/sum/min/max remain measurements, not a percentile estimate.
+Sampling is not inverse-weighted. Local drop/loss counters are not silently
+converted into remote measurements.
+
+The metric epoch starts at the observed `source_entry` marker. Missing origin
+or a non-advancing collection clock yields not-attempted points, never
+a fabricated zero interval. Collection and log observed-time use one
+writer-admitted wall/high-resolution monotonic (`perf_counter_ns`) anchor;
+source timestamps/durations remain the
+source's measurements, with no cross-clock duration subtraction. Subsequent
+DELTA intervals begin at the previous collection boundary, even when a batch
+is lost. Each explicit source lifetime has one trace and resets its epoch.
+Qualification is sequential source processes only, not concurrent installed
+metric-stream ownership.
+
+`SignalBatchResult` has one closed `SignalResult` per signal. Generated records
+partition into accepted + rejected + unknown + not-attempted; attempted is the
+accepted + rejected + unknown subtotal. Units are spans/log records/**metric
+data points**, respectively. Request counts and attempted payload bytes are
+reported; the latter are not a claim about bytes successfully transferred.
+
+The three signals share one monotonic batch deadline, including mapping time
+before transport. No network starts after it expires. The finite transport
+budgets each socket operation, including header/body slow-drip reads, uses
+256-KiB request and 64-KiB body/72-KiB wire response caps, closes every socket,
+and never follows redirects or retries. This is not OS cancellation of an
+arbitrarily blocked Python import. UI callbacks/close never wait for delivery.
+Logs/Metrics require HTTP 200, protobuf MIME and their matching protobuf ACK.
+Partial-success counts remain aggregate (which records failed is unknown);
+remote error text is discarded. Trace-only ACK behavior remains compatible.
+
+A failed/unsupported signal becomes inactive for that source lifetime; siblings
+remain independent. A signal not attempted because a sibling exhausted the
+budget can try on the next batch. No failed DELTA is replayed or carried into a
+later success. 404 is unsupported, not accepted. Empty/full/partial ACKs are
+transport acceptance only: collector policy filters may still drop accepted
+data, so independent exact readback is required for persistence.
+
+The optional floor and current seasoned resolution are SDK/proto/proto-common
+1.45.1. Missing/incompatible optional APIs mark the affected signal unavailable;
+there is no provider, global SDK/environment mutation, handler or exit hook.
+No runtime installs the extra automatically.
 
 ## Validation
 
@@ -165,5 +248,12 @@ owned port-zero loopback receiver, file readback/decoding, hostile ambient
 export configuration, redirect refusal and receiver outage. Without the extra
 that optional module is explicitly skipped, not counted as export proof.
 An isolated `-I -S` native control proves base imports work without the SDK.
+`tests/test_otlp_signals.py` adds closed-schema/aggregation/count tests and
+optional genuine SDK/protobuf loopback fixtures, malformed/partial ACKs,
+slow-drip/deadline controls, missing SDK and legacy trace compatibility.
+Manager's existing source-observation tests exercise the same writer through
+actual SDK export and protobuf-derived JSONL readback. Test receivers own
+their port-zero socket/thread and close them; they never configure a shared
+collector. These are isolated API/wire controls, not a live native rollout.
 Native source/installed/serving measurements and overhead qualification are
 separate acceptance, not asserted by these unit/integration tests.

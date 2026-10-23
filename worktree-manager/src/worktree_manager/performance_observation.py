@@ -35,6 +35,7 @@ class SourceObservation:
     def __init__(
         self, identity: dict, *, endpoint: str | None = None, sampled: bool = True,
         origin_ns: int | None = None, wall_ns: int | None = None, source_clean: bool | None = None,
+        signal_endpoints=None,
     ):
         if type(identity) is not dict or identity.keys() - _IDENTITIES:
             raise ValueError("unsupported observation identity")
@@ -46,8 +47,14 @@ class SourceObservation:
         if endpoint is not None:
             from process_telemetry.otlp import validate_endpoint
             validate_endpoint(endpoint)
+        if signal_endpoints is not None:
+            from process_telemetry.signals import SignalEndpoints
+            if type(signal_endpoints) is not SignalEndpoints or endpoint is not None:
+                raise ValueError("explicit signal endpoints cannot accompany legacy endpoint")
         self._identity = MappingProxyType({key: identity.get(key) for key in sorted(_IDENTITIES)})
         self._endpoint = endpoint
+        self._signal_endpoints = signal_endpoints if signal_endpoints and signal_endpoints.requested else None
+        self._signal_totals = {}
         self._sampled = sampled
         self._source_clean = source_clean
         self._origin_ns = time.perf_counter_ns() if origin_ns is None else origin_ns
@@ -68,6 +75,7 @@ class SourceObservation:
 
     identity = property(lambda self: self._identity)
     endpoint = property(lambda self: self._endpoint)
+    signal_endpoints = property(lambda self: self._signal_endpoints)
     sampled = property(lambda self: self._sampled)
     source_clean = property(lambda self: self._source_clean)
     origin_ns = property(lambda self: self._origin_ns)
@@ -140,6 +148,9 @@ class SourceObservation:
             record["span"]["queue_wait_ns"] = max(0, time.perf_counter_ns() - record["enqueued_ns"])
             stream.write(json.dumps(record, separators=(",", ":")) + "\n")
             self.increment("written")
+        if self.signal_endpoints is not None:
+            self._deliver_signals(stream, records)
+            return
         if self.endpoint is None:
             return
         if not self._sink_attempted:
@@ -159,6 +170,42 @@ class SourceObservation:
         else:
             self.increment("exported", len(records))
 
+    def _deliver_signals(self, stream, records):
+        from dataclasses import asdict
+        from process_telemetry.otlp import LocalOtlpSignalsSink
+        from process_telemetry.signals import SIGNALS, SignalIdentity
+
+        if not self._sink_attempted:
+            self._sink_attempted = True
+            self._sink = LocalOtlpSignalsSink(
+                self.signal_endpoints, identity=SignalIdentity(**dict(self.identity)),
+            )
+        result = self._sink.export_batch([record["span"] for record in records])
+        totals = {}
+        for signal in SIGNALS:
+            current = getattr(result, signal)
+            row = asdict(current)
+            row["generated_records"] = current.generated_records
+            previous = self._signal_totals.get(signal, {})
+            totals[signal] = {
+                key: value + previous.get(key, 0) if type(value) is int else value
+                for key, value in row.items()
+            }
+            totals[signal]["first_failure"] = previous.get("first_failure") or (
+                current.status if current.status not in ("accepted", "accepted_warning", "not_requested") else None
+            )
+        self._signal_totals = totals
+        if self.signal_endpoints.traces:
+            self.increment("exported", result.traces.accepted_records)
+            self.increment("export_failed", len(records) - result.traces.accepted_records)
+        if any(getattr(result, signal).status == "sdk_unavailable" for signal in SIGNALS):
+            self.increment("sdk_unavailable")
+        stream.write(json.dumps({
+            "schema": "manager.signal-batch.v1",
+            "trace_id": self.trace_id, "signals": asdict(result),
+            "metrics": self._sink.metric_expectations,
+        }, separators=(",", ":")) + "\n")
+
     def close(self):
         """Writer-owned shutdown, never called from a UI callback."""
         if self._sink is not None:
@@ -170,6 +217,10 @@ class SourceObservation:
             "trace_id": self.trace_id, "sampled": self.sampled,
             "source_clean": self.source_clean, "identity": dict(self.identity),
             "identity_missing": [key for key, value in self.identity.items() if value is None],
-            "export_requested": self.endpoint is not None, "counts": self.counts(),
+            "export_requested": self.endpoint is not None or bool(
+                self.signal_endpoints and self.signal_endpoints.traces
+            ), "counts": self.counts(),
+            "signals_requested": list(self.signal_endpoints.requested) if self.signal_endpoints else [],
+            "signals": {key: dict(value) for key, value in self._signal_totals.items()},
             "clock_domain": "child-perf-counter", "persistence": "not-verified",
         }

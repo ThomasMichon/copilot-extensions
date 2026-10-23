@@ -89,6 +89,20 @@ Bridge runner. It uses an owned port-zero loopback receiver and synthetic
 protobuf file readback, never a shared collector. A missing extra skips the
 module and is not passing wire proof. Normal producer installs remain SDK-free.
 
+For the closed source Logs/Metrics adapter, add
+`--test-file tests/test_otlp_signals.py` to the Bridge selection. Its pure models
+run without the SDK; genuine protobuf cases explicitly skip when the optional
+extra is absent. The floor and currently seasoned SDK/proto/proto-common
+resolution are 1.45.1. Required unit CI is not widened into the native portfolio.
+The owned port-zero fixtures cover actual public SDK objects, official protobuf,
+partial/unsupported/malformed ACKs, total-batch slow-drip deadlines, per-signal
+loss accounting and trace-only compatibility. No SDK-private encoders, global
+providers, environment mutation or extra producer workers are used.
+Manager's source-observation selection includes the same-writer SDK/readback
+control; its receiver is a finite test fixture, not the shared collector.
+Actual native Logs/Metrics receiver qualification and installed enrollment stay
+separately authorized in the [reviewed plan](efforts/active/performance-telemetry/structured-signals.md).
+
 ## Static SSH plugin preparation
 
 Bridge's `tests/test_ssh_plugin_preparation.py` executes the streamed stdlib

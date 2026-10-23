@@ -44,7 +44,35 @@ def child_result(stdout: str, *, mode: str, returncode: int) -> dict:
             for key in ("sampled", "writer_started", "writer_alive", "export_requested"):
                 if key in telemetry and type(telemetry[key]) is not bool:
                     raise ValueError("invalid child telemetry flag")
-    except (ValueError, IndexError, TypeError):
+            from process_telemetry.signals import SIGNALS, STATUSES, SignalResult, SignalIdentity
+            identity = telemetry.get("identity", {})
+            if type(identity) is not dict:
+                raise ValueError("invalid child identity")
+            SignalIdentity(**identity)
+            requested = telemetry.get("signals_requested", [])
+            rows = telemetry.get("signals", {})
+            if (
+                type(requested) is not list or any(type(s) is not str or s not in SIGNALS for s in requested)
+                or len(set(requested)) != len(requested) or type(rows) is not dict
+                or rows.keys() - set(SIGNALS)
+            ):
+                raise ValueError("invalid requested signals")
+            from dataclasses import fields
+            required_signal_fields = {field.name for field in fields(SignalResult)} | {"generated_records"}
+            for row in rows.values():
+                if (
+                    type(row) is not dict or not required_signal_fields <= row.keys()
+                    or row.keys() - (required_signal_fields | {"first_failure"})
+                ):
+                    raise ValueError("incomplete child signal accounting")
+                generated = row["generated_records"]
+                failure = row.get("first_failure")
+                if failure is not None and failure not in STATUSES:
+                    raise ValueError("invalid signal failure")
+                signal = SignalResult(**{k: v for k, v in row.items() if k not in ("generated_records", "first_failure")})
+                if type(generated) is not int or generated != signal.generated_records:
+                    raise ValueError("invalid signal generated count")
+    except (ValueError, IndexError, TypeError, KeyError, RecursionError):
         value = {"mode": mode, "outcome": "error", "error_code": "invalid_child_report"}
     value["exit_code"] = returncode
     if returncode != 0:
@@ -83,6 +111,15 @@ def source_report(runs: list[dict], *, expected_per_mode: int) -> dict:
                     ))
                     or counts.get("queued") != counts.get("written")
                     or (telemetry.get("export_requested") and counts.get("exported") != counts.get("written"))
+                    or any(
+                        not telemetry.get("signals", {}).get(signal)
+                        or telemetry["signals"][signal]["accepted_records"] != telemetry["signals"][signal]["generated_records"]
+                        or (signal in ("traces", "logs")
+                            and telemetry["signals"][signal]["generated_records"] != counts.get("written"))
+                        or (signal == "metrics" and counts.get("written", 0) > 0
+                            and telemetry["signals"][signal]["generated_records"] == 0)
+                        for signal in telemetry.get("signals_requested", [])
+                    )
                 )
         for point in POINTS:
             samples = []
@@ -206,4 +243,183 @@ def trace_readback(lines, identities: set[tuple[str, str]], *, expected_labels=N
                     for trace, span in sorted(identities - matched)],
         "invalid_matching_lines": invalid,
         "complete": bool(identities) and matched == identities and invalid == 0 and not mismatched,
+    }
+
+
+def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -> dict:
+    """Exact owned log correlations or metric intervals; no raw receiver content."""
+    import json
+    import base64
+    import math
+    from collections import Counter
+
+    resources = {"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"}
+
+    def unsigned(value):
+        if type(value) is str:
+            if not 1 <= len(value) <= 20 or not value.isascii() or not value.isdecimal():
+                raise ValueError("invalid unsigned integer")
+            value = int(value)
+        if type(value) is not int or not 0 <= value < 2**64:
+            raise ValueError("invalid unsigned integer")
+        return value
+
+    def real(value):
+        if type(value) not in (int, float) or not math.isfinite(value):
+            raise ValueError("invalid measured scalar")
+        return value
+
+    def correlation(value, width):
+        try:
+            raw = bytes.fromhex(value)
+        except ValueError:
+            raw = b""
+        if len(raw) != width:
+            raw = base64.b64decode(value, validate=True)
+        if len(raw) != width:
+            raise ValueError("invalid correlation ID")
+        return raw.hex()
+
+    def attrs(entries):
+        values = {}
+        for entry in entries:
+            key, wrapped = entry["key"], entry["value"]
+            if key in values or len(wrapped) != 1:
+                raise ValueError("duplicate or malformed attribute")
+            if "stringValue" in wrapped:
+                value = wrapped["stringValue"]
+                if type(value) is not str:
+                    raise ValueError("invalid string")
+            elif "intValue" in wrapped:
+                value = wrapped["intValue"]
+                if type(value) not in (int, str) or not str(value).isdigit():
+                    raise ValueError("invalid integer")
+                value = int(value)
+            else:
+                raise ValueError("unexpected attribute type")
+            values[key] = value
+        return values
+
+    def point_key(point):
+        return (
+            point["name"], point["unit"], point["stage"], point["outcome"],
+            int(point["start_time_ns"]), int(point["time_ns"]),
+        )
+
+    if signal == "logs":
+        expected = {}
+        for (trace, span), wanted in (expected_logs or {}).items():
+            key = (correlation(trace, 16), correlation(span, 8))
+            if key in expected:
+                return {"complete": False, "reason": "duplicate_sender_log_identity"}
+            expected[key] = wanted
+        owned_traces = {trace for trace, _ in expected}
+        selectors = {trace for trace, _ in expected}
+        selectors.update(base64.b64encode(bytes.fromhex(trace)).decode("ascii") for trace, _ in expected)
+    elif signal == "metrics":
+        expected = {point_key(p): p for p in expected_metrics}
+        if len(expected) != len(expected_metrics):
+            return {"complete": False, "reason": "duplicate_sender_metric_interval"}
+        selectors = {str(key[-1]) for key in expected}
+        owned_ends = {key[-1] for key in expected}
+    else:
+        raise ValueError("unsupported readback signal")
+    seen, matched, mismatched, extra = Counter(), set(), set(), 0
+    invalid = 0
+    candidate_selectors = {value.lower() for value in selectors} if signal == "logs" else selectors
+    for line in lines:
+        candidate = line.lower() if signal == "logs" else line
+        if not any(selector in candidate for selector in candidate_selectors):
+            continue
+        try:
+            value = json.loads(line)
+            for resource in value.get("resourceLogs" if signal == "logs" else "resourceMetrics", []):
+                for scope in resource.get("scopeLogs" if signal == "logs" else "scopeMetrics", []):
+                    def common():
+                        scope_data = scope.get("scope", {})
+                        return (
+                            attrs(resource.get("resource", {}).get("attributes", [])) == resources
+                            and scope_data.get("name") == "copilot-extensions.process-telemetry"
+                            and scope_data.get("version") == "1" and not scope_data.get("attributes")
+                        )
+                    if signal == "logs":
+                        for log in scope.get("logRecords", []):
+                            try:
+                                trace = correlation(log.get("traceId", ""), 16)
+                            except (ValueError, TypeError):
+                                continue
+                            if trace not in owned_traces:
+                                continue
+                            key = (trace, correlation(log.get("spanId", ""), 8))
+                            if key not in expected:
+                                extra += key[0] in selectors
+                                continue
+                            seen[key] += 1
+                            wanted = expected[key]
+                            good = (
+                                common() and attrs(log.get("attributes", [])) == wanted["attributes"]
+                                and log.get("body") == {"stringValue": "agent.source.observation"}
+                                and log.get("eventName") == "agent.source.observation"
+                                and log.get("severityNumber") == wanted["severity_number"]
+                                and log.get("severityText") == wanted["severity_text"]
+                                and unsigned(log.get("timeUnixNano", -1)) == wanted["time_ns"]
+                            )
+                            (matched if good else mismatched).add(key)
+                    else:
+                        for metric in scope.get("metrics", []):
+                            kinds = [kind for kind in ("sum", "histogram", "gauge", "exponentialHistogram", "summary")
+                                     if kind in metric]
+                            entries = [(kind, metric[kind], point) for kind in kinds
+                                       for point in metric[kind].get("dataPoints", [])]
+                            for kind, data, point in entries:
+                                try:
+                                    end = unsigned(point.get("timeUnixNano", -1))
+                                except (ValueError, TypeError):
+                                    continue
+                                if end not in owned_ends:
+                                    continue
+                                interval = (unsigned(point.get("startTimeUnixNano", -1)), end)
+                                labels = attrs(point.get("attributes", []))
+                                key = (
+                                    metric.get("name"), metric.get("unit"), labels.get("ce.stage"),
+                                    labels.get("ce.outcome"), *interval,
+                                )
+                                if key not in expected:
+                                    extra += str(key[-1]) in selectors
+                                    continue
+                                seen[key] += 1
+                                wanted = expected[key]
+                                temporality = data.get("aggregationTemporality")
+                                good = (
+                                    common() and len(kinds) == 1
+                                    and kind == ("sum" if "value" in wanted else "histogram")
+                                    and set(labels) == {"ce.stage", "ce.outcome"}
+                                    and (type(temporality) is int and temporality == 1
+                                         or temporality == "AGGREGATION_TEMPORALITY_DELTA")
+                                    and unsigned(point.get("flags", 0)) == 0
+                                    and not point.get("exemplars")
+                                )
+                                if kind == "sum":
+                                    good = (
+                                        good and data.get("isMonotonic") is True and "asDouble" not in point
+                                        and unsigned(point.get("asInt", -1)) == wanted["value"]
+                                    )
+                                elif kind == "histogram":
+                                    good = (
+                                        good and unsigned(point.get("count", -1)) == wanted["count"]
+                                        and all(real(point.get(field)) == wanted[field] for field in ("sum", "min", "max"))
+                                        and [unsigned(v) for v in point.get("bucketCounts", [])] == wanted["bucket_counts"]
+                                        and [real(v) for v in point.get("explicitBounds", [])] == wanted["bounds"]
+                                    )
+                                (matched if good else mismatched).add(key)
+        except (ValueError, TypeError, KeyError, AttributeError, OverflowError):
+            invalid += 1
+    duplicates = sum(count - 1 for count in seen.values())
+    return {
+        "expected": len(expected), "matched": len(matched), "missing": len(expected.keys() - matched),
+        "mismatched": len(mismatched), "duplicates": duplicates, "extra": extra,
+        "invalid_matching_lines": invalid,
+        "complete": bool(expected) and matched == expected.keys() and not (
+            mismatched or duplicates or extra or invalid
+        ),
     }
