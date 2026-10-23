@@ -2,7 +2,7 @@
 
 [Parent effort](README.md) · [Reviewed design](codespaces.md)
 
-- **Status:** Active
+- **Status:** Blocked
 - **Tracker:** #7949
 - **Participant:** placid-battery, source implementation and PR owner.
 - **Scope:** qualified owner-wave inventory, batched mux checks, bounded venue
@@ -114,6 +114,19 @@ defers to the next due wave, with no hidden per-venue refresh.
   awaits; negative results allow fresh stopped evidence without requiring
   Available. Scope-change, expiry and fresh negative controls cover both stopped
   rows and completed mux negatives. Final scoped run: **223 tests passed**.
+- Subsequent review identified a material performance regression outside the
+  existing counter fixture: each production scope capture performs account
+  discovery and fresh credential CLI calls, repeated at per-venue/per-tenant
+  admission. The constant-scope fixture proves listing/mux reductions, not
+  reduced total subprocess work. This source must not merge in that state.
+- Execution is blocked pending admission of a bounded authority-revision
+  contract with the account/configuration/credential owners. Cheap revisions
+  must actually invalidate on selection/config/provider/credential replacement;
+  neither a guessed filesystem watch list nor stale-token TTL reuse supplies
+  that contract. The proposed seam is an account-authority snapshot plus a
+  cheap current-revision check, with production-path counters covering discovery
+  and auth as well as listing and mux work. No shared source signature has been
+  changed for this follow-up.
 
 ## Reproduction and remaining cells
 
@@ -130,8 +143,8 @@ development/integration lane, not an addition to required unit-only CI.
 
 | Cell | State |
 |------|-------|
-| Source tests | Local count and invariant controls passed; final review/CI/merge pending |
+| Source tests | 223 scoped tests pass; CI passed, but review blocks total authority-process fanout and merge remains pending |
 | Release | Pending source merge and ordinary promotion; no release claim |
 | Installed/native venue | Unavailable by scope; no updater or live CodeSpace probe |
-| CPU/whole-wave metadata/latency tails | Unmeasured; retained by #7949 |
+| CPU/whole-wave metadata/latency tails | CPU/tails unmeasured; repeated authority CLI fanout is a known blocking source defect retained by #7949 |
 | S3c transport reuse | Excluded and retained by #7949 |
