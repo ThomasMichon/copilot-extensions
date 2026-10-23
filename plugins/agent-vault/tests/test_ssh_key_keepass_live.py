@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -88,3 +89,57 @@ def test_real_legacy_attachment_entry_is_not_replaced(tmp_path):
         require(json.loads(result.stdout).get("error") == "malformed_key", "Legacy conflict was hidden")
         require(hashlib.sha256(Path(fixture.database).read_bytes()).digest() == before,
                 "Preparation replaced a legacy entry")
+
+
+def test_real_local_installation_fresh_reuse_recovery_and_locked_refusal(tmp_path):
+    with disposable_vault(tmp_path / "fixture", seed_owner=False) as fixture:
+        destination = fixture.root / "local keys"
+        command = (
+            "ssh-key", "install", "--entry", ENTRY, "--directory", str(destination),
+            "--require-running", "--json",
+        )
+        missing = fixture.run(*command)
+        require(missing.returncode == 1, "Installation initialized a missing identity")
+        require(json.loads(missing.stdout).get("error") == "entry_missing", "Absence was not explicit")
+        require(not destination.exists(), "Missing record created local key state")
+        created = fixture.run(
+            "ssh-key", "prepare", "--entry", ENTRY, "--require-running",
+            "--initialize", "--confirm-initialization", "--json",
+        )
+        require(created.returncode == 0, "Disposable identity initialization failed")
+        public = json.loads(created.stdout)["public_key"]
+        database_before = hashlib.sha256(Path(fixture.database).read_bytes()).digest()
+        installed = fixture.run(*command)
+        require(installed.returncode == 0, "Disposable native key installation failed")
+        result = json.loads(installed.stdout)
+        require(result.get("status") == "installed", "First materialization was not reported")
+        key = Path(result["private_key_path"])
+        key_before = key.stat().st_mtime_ns
+        repeated = fixture.run(*command)
+        require(repeated.returncode == 0, "Fresh installation reader failed")
+        require(json.loads(repeated.stdout).get("status") == "reused", "Fresh reader did not reuse")
+        require(key.stat().st_mtime_ns == key_before, "Reuse rewrote the private key")
+        Path(result["public_key_path"]).unlink()
+        recovered = fixture.run(*command)
+        require(recovered.returncode == 0, "Matching private key recovery failed")
+        require(json.loads(recovered.stdout).get("status") == "recovered", "Recovery was not explicit")
+        require(key.stat().st_mtime_ns == key_before, "Recovery rewrote the private key")
+        executable = shutil.which("ssh-keygen")
+        require(executable is not None, "Native OpenSSH prerequisite unavailable for live qualification")
+        derived = subprocess.run(
+            [executable, "-y", "-f", str(key)], stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+        )
+        require(derived.returncode == 0, "Native OpenSSH refused the installed private key")
+        require(derived.stdout.strip() == public, "Native OpenSSH derived a different identity")
+        require(hashlib.sha256(Path(fixture.database).read_bytes()).digest() == database_before,
+                "Installation rewrote the encrypted database")
+        locked = fixture.request({"action": "lock", "kpdb": fixture.database})
+        require(locked.get("ok") is True, "Disposable lock failed")
+        refused = fixture.run(*command)
+        require(refused.returncode == 1, "Installation bypassed the locked owner using local files")
+        require(json.loads(refused.stdout).get("error") == "needs_unlock", "Lock was not explicit")
+        output = installed.stdout + installed.stderr + repeated.stdout + recovered.stdout
+        output += (fixture.root / "daemon.log").read_text(encoding="utf-8")
+        require("BEGIN OPENSSH PRIVATE KEY" not in output, "Private key material leaked")
+        require(not (fixture.root / "cache-root").exists(), "Installation created a protected cache")
