@@ -266,6 +266,13 @@ class FrameHealthReporter:
             pass
 
     def _enqueue(self, event: dict) -> None:
+        if self.observation is None:
+            self._enqueue_locked(event)
+        else:
+            with self._lifecycle_lock:
+                self._enqueue_locked(event)
+
+    def _enqueue_locked(self, event: dict) -> None:
         if self.observation is not None:
             if self._source_closed:
                 self.observation.increment("after_close")

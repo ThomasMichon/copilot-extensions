@@ -189,6 +189,49 @@ def test_source_write_failure_is_visible_and_not_restarted(tmp_path):
     assert reporter.observation_summary()["queued_remaining"] > 0
 
 
+def test_admission_finishes_before_close_and_owner_summary(tmp_path, monkeypatch):
+    observation = admitted()
+    reporter = frame_health.FrameHealthReporter(tmp_path / "events", observation=observation)
+    entered, release = threading.Event(), threading.Event()
+    closing, finished = threading.Event(), threading.Event()
+    captured = []
+    original = observation.capture
+    def capture(event):
+        if event["event"] == "input_ack":
+            entered.set()
+            assert release.wait(3)
+        return original(event)
+    monkeypatch.setattr(observation, "capture", capture)
+    reporter.start()
+    producer = threading.Thread(target=lambda: reporter.observe("input_ack", duration_ns=0))
+    def close():
+        closing.set()
+        reporter.close(wait=True)
+        assert reporter.drain()
+        captured.append(reporter.observation_summary())
+        finished.set()
+    closer = threading.Thread(target=close)
+    producer.start()
+    try:
+        assert entered.wait(2)
+        closer.start()
+        assert closing.wait(2)
+        assert not finished.wait(.05)
+    finally:
+        release.set()
+        producer.join(3)
+        if closer.ident is not None:
+            closer.join(4)
+        reporter.close()
+        reporter.drain()
+    assert not producer.is_alive() and not closer.is_alive()
+    assert finished.is_set()
+    state = captured[0]
+    assert state["counts"]["queued"] == state["counts"]["written"] == 3
+    assert state["queued_remaining"] == state["abandoned"] == 0
+    assert state["counts"]["after_close"] == 0
+
+
 @pytest.mark.parametrize("initialization_failure", [False, True])
 def test_export_failure_preserves_local_observations(tmp_path, monkeypatch, initialization_failure):
     from process_telemetry import otlp
