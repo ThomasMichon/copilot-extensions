@@ -19,9 +19,11 @@ dependencies = [
     "agent-procutil",
     "agent-zdd",
     "agent-single-instance-lease",
+    "agent-update-driver",
 ]
 
 [tool.uv.sources]
+agent-update-driver = { path = "../../libs/update-driver", editable = true }
 # `path` escapes this plugin's own root and resolves live to
 # `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
 # manually in sync -- only a real `main`-branch release

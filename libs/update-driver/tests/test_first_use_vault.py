@@ -15,6 +15,7 @@ from agent_procutil import no_window_kwargs
 from update_driver import foundation_status, status
 from update_driver import first_use as provision
 from update_driver.foundation_inputs import GENERATED, PACKAGES
+from update_driver.foundation_inputs import inspect as inspect_foundation
 
 from test_first_use_genesis import observe
 from test_first_use_native import native_command
@@ -58,6 +59,8 @@ def test_actual_materialized_vault_admits_without_external_source_or_installatio
     before = {str(path.relative_to(payload)): path.read_bytes()
               for path in payload.rglob("*") if path.is_file()}
     admission = provision.inspect(payload, installation, project)
+    foundation = inspect_foundation(payload / "libs" / "update-driver")
+    assert {package.name for package in foundation.packages} == set(PACKAGES)
     assert admission["plugin"] == "agent-vault" and admission["mode"] == "legacy"
     assert admission["source"]["kind"] == "directory"
     assert not installation.exists()
@@ -65,26 +68,116 @@ def test_actual_materialized_vault_admits_without_external_source_or_installatio
             for path in payload.rglob("*") if path.is_file()} == before
 
 
-@native_genesis
-def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
-    materialized_vault, area, native_window_observation,
+def vault_command(payload):
+    if os.name == "nt":
+        shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        return [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+                str(payload / "bin" / "agent-vault.ps1"), "--help"]
+    if sys.platform != "linux":
+        pytest.skip("cold payload first use is not qualified on this platform")
+    return [str(payload / "bin" / "agent-vault"), "--help"]
+
+
+def stamp_vault(payload, installation, project):
+    if os.name == "nt":
+        command = [
+            str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+            str(payload / "scripts" / "install.ps1"), "-Action", "stamp",
+            "-InstallDir", str(installation),
+        ]
+    else:
+        command = [shutil.which("bash"), str(payload / "scripts" / "install.sh"),
+                   "stamp", "--install-dir", str(installation)]
+    result = subprocess.run(
+        command, env=dict(os.environ), cwd=project, stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, timeout=90, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    assert snapshot.is_relative_to(installation / "snapshots")
+    command = installation.parent / ".local" / "bin" / (
+        "agent-vault.ps1" if os.name == "nt" else "agent-vault"
+    )
+    if os.name == "nt":
+        return snapshot, [
+            str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+            "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(command), "--help",
+        ]
+    return snapshot, [shutil.which("bash"), str(command), "--help"]
+
+
+@pytest.mark.parametrize(("entry", "reason"), [
+    (entry, reason)
+    for entry in ("payload", "primary")
+    for reason in ("foundation-refused", "missing-driver", "no-self", "pinned")
+] + [("primary", "old-dispatcher")])
+def test_actual_cold_payload_command_uses_packaged_owner_or_refuses_without_plugin_mutation(
+    materialized_vault, monkeypatch, reason, entry,
 ):
     payload, installation, project = materialized_vault
-    library = Path(__file__).resolve().parents[2]
-    inputs = area / "foundation-source"
-    for name in PACKAGES:
-        shutil.copytree(
-            library / name, inputs / name,
-            ignore=lambda _path, names: {
-                name for name in names if name in GENERATED
-                or name.endswith((".egg-info", ".dist-info", ".pyc", ".pyo"))
-            },
+    if entry == "primary":
+        payload, command = stamp_vault(payload, installation, project)
+    else:
+        command = vault_command(payload)
+    root = installation.parent / ".copilot-extensions" / "update-driver"
+    scripts = payload / "libs" / "update-driver" / "scripts"
+    if reason == "foundation-refused":
+        (scripts / "foundation-produce.ps1").write_text(
+            "param([string]$Root,[string]$SourceHash)\n"
+            "[IO.File]::WriteAllText((Join-Path $Root 'entered'), $SourceHash)\n"
+            "exit 37\n", encoding="utf-8",
         )
-    source = inputs / "update-driver"
-    root = area / "cold"
+        (scripts / "foundation-produce.sh").write_text(
+            '#!/usr/bin/env bash\nprintf "%s" "$2" >"$1/entered"\n'
+            "printf 'fixture foundation refusal\\n' >&2\nexit 37\n", encoding="utf-8",
+        )
+    elif reason == "missing-driver":
+        shutil.rmtree(scripts)
+    elif reason == "old-dispatcher":
+        gate = payload / "scripts" / ("runtime-gate.ps1" if os.name == "nt" else "runtime-gate.sh")
+        gate.write_text(
+            "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'foreground-entered'), 'yes')\nexit 0\n"
+            if os.name == "nt" else
+            '#!/usr/bin/env bash\nprintf yes >"$(dirname "$0")/foreground-entered"\nexit 0\n',
+            encoding="utf-8",
+        )
+    elif reason == "no-self":
+        monkeypatch.setenv("AGENT_VAULT_NO_SELFPROVISION", "1")
+    else:
+        monkeypatch.setenv("AGENT_VAULT_PINNED_CONTEXT", "{}")
+    before = {str(path.relative_to(payload)): path.read_bytes()
+              for path in payload.rglob("*") if path.is_file()}
+    before_installation = {str(path.relative_to(installation)): path.read_bytes()
+                           for path in installation.rglob("*") if path.is_file()}
+    result = subprocess.run(
+        command, env=dict(os.environ), cwd=project,
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8",
+        timeout=90, **no_window_kwargs(),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert not (installation / "versions").exists(), result.stdout + result.stderr
+    assert not (installation / ".provision.lock").exists()
+    assert not (installation / ".provision-status").exists()
+    if entry == "payload":
+        assert not installation.exists(), result.stdout + result.stderr
+    if reason in {"no-self", "pinned"}:
+        assert {str(path.relative_to(installation)): path.read_bytes()
+                for path in installation.rglob("*") if path.is_file()} == before_installation
+    assert {str(path.relative_to(payload)): path.read_bytes()
+            for path in payload.rglob("*") if path.is_file()} == before
+    if reason == "foundation-refused":
+        assert (root / "entered").is_file(), result.stdout + result.stderr
+        assert not status(root=root)
+        assert list(root.glob("first-use-*.log"))
+        assert "Foundation construction failed" in result.stderr or "fixture foundation refusal" in result.stderr
+    else:
+        assert not root.exists(), result.stdout + result.stderr
+
+
+def cold_environment(installation, project, area):
     profile = installation.parent
     env = dict(os.environ)
-    # Isolate user state and explicitly request the canonical client-only recipe.
     for key, relative in {
         "APPDATA": "AppData/Roaming", "LOCALAPPDATA": "AppData/Local",
         "PROGRAMDATA": "ProgramData", "PSModulePath": "powershell-modules",
@@ -126,6 +219,29 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
             assert executable, f"native tool unavailable: {name}"
             (tools / name).symlink_to(executable)
         env["PATH"] = str(tools)
+    return env
+
+
+@native_genesis
+def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
+    materialized_vault, area, native_window_observation,
+):
+    payload, installation, project = materialized_vault
+    library = Path(__file__).resolve().parents[2]
+    inputs = area / "foundation-source"
+    for name in PACKAGES:
+        shutil.copytree(
+            library / name, inputs / name,
+            ignore=lambda _path, names: {
+                name for name in names if name in GENERATED
+                or name.endswith((".egg-info", ".dist-info", ".pyc", ".pyo"))
+            },
+        )
+    source = inputs / "update-driver"
+    root = area / "cold"
+    profile = installation.parent
+    env = cold_environment(installation, project, area)
+    tools = Path(env["PATH"])
 
     def diagnostic():
         return "\n".join(

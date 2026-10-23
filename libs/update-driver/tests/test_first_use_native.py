@@ -193,8 +193,9 @@ def test_invalid_native_execution_root_never_creates_directories(
 @pytest.mark.parametrize("mixed_case", [False, pytest.param(
     True, marks=pytest.mark.skipif(os.name != "nt", reason="PowerShell case-insensitive binding"),
 )])
+@pytest.mark.parametrize("wait", [False, True])
 def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_diagnostics(
-    owning_payload, area, mixed_case,
+    owning_payload, area, mixed_case, wait,
 ):
     payload, installation, project = owning_payload
     library = Path(__file__).resolve().parents[2]
@@ -222,12 +223,17 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
     command = native_command(root, payload, installation, project, source=source)
     if mixed_case:
         command += ["-Mode", "LaUnCh", "-ServiceMode", "Client-Only"]
+    if wait:
+        command += ["-Wait" if os.name == "nt" else "--wait"]
     result = subprocess.run(
         command,
         env=dict(os.environ), capture_output=True, text=True, timeout=60,
         **no_window_kwargs(),
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert (result.returncode != 0 if wait else result.returncode == 0), result.stdout + result.stderr
+    if wait:
+        assert "Foundation construction failed" in result.stderr or "fixture foundation refusal" in result.stderr
+        assert "launched" not in result.stdout
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         logs = list(root.glob("first-use-*.log"))

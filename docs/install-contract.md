@@ -2327,7 +2327,16 @@ distinguishes the two non-success outcomes: another install holding the lock for
 the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
 success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
-first-use provisioning around the installer call.
+first-use provisioning around the installer call in unadopted wrappers.
+Vault's cold primary and payload commands instead submit to the packaged
+installation driver's canonical queue before taking any outer provisioning
+lock. They retain the inner canonical installer lock, publication admission,
+source identity and default service recipe. Healthy invocation bypasses driver
+work; missing support and unsupported cold namespaced/platform paths refuse
+without a legacy foreground fallback. Bootstrap hooks and explicit installer
+entry points are separate, unadopted callers. The
+[driver contract](../libs/update-driver/README.md#fixed-first-use-handoff-and-vault-command-adoption)
+owns the native waiter, receipt/result and qualification boundaries.
 
 ### Update-in-progress marker — installer self-reports a live transition (#5066)
 

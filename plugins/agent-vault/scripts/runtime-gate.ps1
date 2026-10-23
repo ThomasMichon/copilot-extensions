@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+# Installation driver contract: vault-first-use-v1
 $env:PYTHONUTF8 = '1'
 Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
@@ -317,81 +318,40 @@ try {
     )
     exit 3
 }
-$runtimePython = Resolve-RuntimePython -TraceMode normal
+$runtimePython = Resolve-RuntimePython
 if ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
 }
-New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
-$statusPath = Join-Path $runtimeRoot '.provision-status'
-$_lockPath = Join-Path $runtimeRoot '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open(
-            $_lockPath,
-            [IO.FileMode]::OpenOrCreate,
-            [IO.FileAccess]::ReadWrite,
-            [IO.FileShare]::None
-        )
-    } catch {
-        Start-Sleep -Milliseconds 200
-    }
-}
-
-$_provisionedPy = $null
-$_provisionRc = 0
-try {
-    $_provisionedPy = Resolve-RuntimePython
-    if (-not $_provisionedPy) {
-        [Console]::Error.WriteLine(
-            '[agent-vault] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.'
-        )
-        [Console]::Error.WriteLine(
-            "::agent-provisioning:: plugin=agent-vault eta_seconds=120 reason=first-use status=$statusPath"
-        )
-        try {
-            "provisioning $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-                Set-Content -LiteralPath $statusPath -Encoding utf8
-        } catch {}
-
-        Set-RuntimeEnvironment
-        $previousEap = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
-                ForEach-Object { [Console]::Error.WriteLine($_) }
-        } finally {
-            $ErrorActionPreference = $previousEap
-        }
-        $_provisionRc = $LASTEXITCODE
-        if ($_provisionRc -eq 0) {
-            $_provisionedPy = Resolve-RuntimePython
-        }
-    }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
-}
-
-if ($_provisionRc -ne 0) {
-    try {
-        "failed rc=$_provisionRc $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-            Set-Content -LiteralPath $statusPath -Encoding utf8
-    } catch {}
+if ($context) {
     [Console]::Error.WriteLine(
-        "[agent-vault] provisioning FAILED. See the log above; retry, or run: $installer provision -InstallDir $runtimeRoot"
+        '[agent-vault] cold namespaced provisioning requires a qualified installation driver; use explicit installation management.'
     )
-    exit $_provisionRc
+    exit 126
 }
-
-if ($_provisionedPy) {
-    try {
-        "ready $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-            Set-Content -LiteralPath $statusPath -Encoding utf8
-    } catch {}
-    Invoke-Runtime -Python $_provisionedPy
+$firstUse = Join-Path $payloadRoot 'libs\update-driver\scripts\first-use.ps1'
+if (-not (Test-Path -LiteralPath $firstUse -PathType Leaf)) {
+    [Console]::Error.WriteLine(
+        '[agent-vault] packaged installation driver is unavailable; update or repair the owning payload.'
+    )
+    exit 126
 }
-
+$executionRoot = Join-Path $env:USERPROFILE '.copilot-extensions\update-driver'
+$project = [IO.Directory]::GetCurrentDirectory()
 [Console]::Error.WriteLine(
-    '[agent-vault] provisioning completed without a resolvable runtime.'
+    "[agent-vault] submitting first-use provisioning to the installation driver: $executionRoot"
 )
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    $nativeShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & $nativeShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $firstUse `
+        -Root $executionRoot -Payload $payloadRoot -RuntimeRoot $runtimeRoot -Project $project -Wait
+    $provisionCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $previousEap
+}
+if ($provisionCode -ne 0) { exit $provisionCode }
+$runtimePython = Resolve-RuntimePython
+if ($runtimePython) { Invoke-Runtime -Python $runtimePython }
+[Console]::Error.WriteLine('[agent-vault] driver completed without a resolvable runtime.')
 exit 1

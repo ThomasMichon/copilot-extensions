@@ -6,7 +6,8 @@ param(
     [ValidateSet('launch', 'owner')][string]$Mode = 'launch',
     [string]$ExpectedSource,
     [string]$ReceiptLog,
-    [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default'
+    [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default',
+    [switch]$Wait
 )
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
@@ -107,6 +108,12 @@ if ($Mode -ceq 'launch') {
         $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode
     ) -WorkingDirectory $Project -LogPath $log
     try {
+        if ($Wait) {
+            $worker.WaitForExit()
+            $code = $worker.ExitCode
+            Get-Content -LiteralPath $log | ForEach-Object { [Console]::Error.WriteLine($_) }
+            exit $code
+        }
         # This is launch acknowledgement, never a durable ordinary-request receipt.
         [Console]::Out.WriteLine((@{
             launched = $true; log = $log; pid = $worker.Id
