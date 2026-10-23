@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-23
-- **Status:** Active
+- **Status:** Done
 - **Vision:** [Picker](../../../visions/picker/README.md), responsive-by-budget
 - **Umbrella issue:** #7939
 - **Sub-issues:** #7940 (shared configuration dependency; not absorbed)
@@ -100,9 +100,9 @@ effort is the finite Actions consumer slice, not completion of a wider campaign.
 ### Phase 3 — Review, land and retain qualification obligations
 
 - [x] Update the directly related runtime documentation and mandatory changefile.
-- [ ] Complete focused functional tests, lint and required source checks.
-- [ ] Obtain independent required review, resolve findings and verify actual merge.
-- [ ] Record release/rollout and native qualification separately; do not change
+- [x] Complete focused functional tests, lint and required source checks.
+- [x] Obtain independent required review, resolve findings and verify actual merge.
+- [x] Deferred to `#7939`: Record release/rollout and native qualification separately; do not change
   installed payloads, services or production UI as part of this source slice.
 
 ## Validation Plan
@@ -176,3 +176,20 @@ interfaces. Do not create a general request broker or shared polling layer.
   Dialog lifetime, dispatch-map ownership and worker-only verification helpers
   were moved into the existing `SubMenuScreen` component, within the admitted
   two-file consumer boundary. The guard is retained unchanged.
+
+### 2026-10-23 — Source slice merged; acceptance owners retained
+
+- Implementation #8150 merged as `dd21e7509342ac1e5d9f22ac6a171cafb0837d19`
+  after required checks passed and a clean current-head Copilot review. Its
+  earlier alias-locality finding was fixed by calling the source's canonical
+  `is_local` method on the worker, with the tuple fallback retained for old
+  sources. The final contained Actions/menu packet passed 41 tests; lint,
+  module-size and install-contract guards passed.
+- The finite source effort is Done, not the entire responsiveness campaign.
+  #7939 remains open for release/installed acceptance; #7935 retains actual
+  cold/warm native Actions/input qualification; #7940 retains all configuration
+  freshness and supplier/consumer integration work. No native budget or live
+  deployment claim follows from the source merge.
+- Shared-cache proposal remains reviewed intent only. No `project_config.py`,
+  startup binding, pending view, scalar API, telemetry reporter or authoritative
+  row-feed code was edited.
