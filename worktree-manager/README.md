@@ -1083,9 +1083,10 @@ Recovered submissions refresh the original provider's original scope even
 when command output leaves acceptance uncertain; receipt-only reads do not
 mutate the display cache.
 New parent directories are published write-through on Windows; POSIX writes
-sync the containing directory and ancestors. Windows stages a local pending
-marker before publishing a new directory; a leftover marker requires a
-successful parent-directory flush before the directory can be reused.
+sync the containing directory and each newly published parent's entry, not
+unrelated existing ancestors. Both platforms stage a local pending marker
+before publishing a new directory; a leftover marker requires a successful
+parent-directory flush before the directory can be reused.
 Inspection loads observations
 off the UI thread and reports unreadable observations without hiding the
 original request. **Retained

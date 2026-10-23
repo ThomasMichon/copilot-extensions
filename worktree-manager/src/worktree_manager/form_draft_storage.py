@@ -52,7 +52,7 @@ def _windows_flush_directory(path: Path) -> None:
         kernel.CloseHandle(handle)
 
 
-def _windows_directory(path: Path) -> None:
+def _ensure_directory(path: Path) -> None:
     if path.is_dir():
         pending = path / _PENDING_DIRECTORY
         try:
@@ -61,28 +61,32 @@ def _windows_directory(path: Path) -> None:
             return
         if content != _PENDING_CONTENT:
             raise OSError(f"Unrecognized directory publication marker: {pending}")
-        _windows_flush_directory(path.parent)
+        _sync_directory(path.parent)
         pending.unlink(missing_ok=True)
         return
     if path.parent == path:
         raise FileNotFoundError(errno.ENOENT, "Draft directory root is unavailable", str(path))
-    _windows_directory(path.parent)
+    _ensure_directory(path.parent)
     temporary = Path(tempfile.mkdtemp(dir=path.parent))
     pending = temporary / _PENDING_DIRECTORY
     try:
-        # Persist uncertainty before the rename: a failed write-through move
+        # Persist uncertainty before the rename: a failed publication barrier
         # may still leave the destination name visible, even after restart.
         with pending.open("wb") as stream:
             stream.write(_PENDING_CONTENT)
             stream.flush()
             os.fsync(stream.fileno())
-        _windows_flush_directory(temporary)
+        _sync_directory(temporary)
         try:
-            _windows_move(temporary, path, replace=False)
+            if os.name == "nt":
+                _windows_move(temporary, path, replace=False)
+            else:
+                os.rename(temporary, path)
+                _sync_directory(path.parent)
         except FileExistsError:
             if not path.is_dir():
                 raise
-            _windows_directory(path)
+            _ensure_directory(path)
         else:
             (path / _PENDING_DIRECTORY).unlink(missing_ok=True)
     finally:
@@ -92,6 +96,9 @@ def _windows_directory(path: Path) -> None:
 
 
 def _sync_directory(path: Path) -> None:
+    if os.name == "nt":
+        _windows_flush_directory(path)
+        return
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         os.fsync(descriptor)
@@ -112,10 +119,7 @@ def write_record(path: Path, record: dict) -> None:
     path = path.absolute()
     temporary = None
     try:
-        if os.name == "nt":
-            _windows_directory(path.parent)
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_directory(path.parent)
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
             temporary = stream.name
             json.dump(record, stream, allow_nan=False)
@@ -125,10 +129,7 @@ def write_record(path: Path, record: dict) -> None:
             _windows_move(temporary, path, replace=True)
         else:
             os.replace(temporary, path)
-            # Include ancestors on every attempt: a previous failed barrier may
-            # have left an existing but not yet durable first-touch directory.
-            for directory in path.parents:
-                _sync_directory(directory)
+            _sync_directory(path.parent)
     finally:
         if temporary is not None:
             try:

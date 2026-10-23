@@ -479,6 +479,7 @@ def test_recovered_retry_reestablishes_durability_and_still_allows_receipt_reads
     from worktree_manager.production_picker.picker_tui import tasks
     reg, record = registered(), original()
     directory = tmp_path / "new-parent" / "new-child"
+    directory.mkdir(parents=True)
     calls = []
 
     def denied(_path):
