@@ -41,7 +41,7 @@ from agent_procutil import no_window_kwargs
 from machine_transport import detect_platform
 
 from . import bare_anchor_sync, git_ops, output, registry_paths
-from .repo_accounts import account_for_remote as account_for_remote
+from .repo_accounts import AccountLookupIndex, account_for_remote as account_for_remote
 from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
 # ---------------------------------------------------------------------------
@@ -393,6 +393,7 @@ def github_slug(remote: str) -> str | None:
 
 def account_from_map(
     owner: str | None, *, registry: ReposRegistry | None = None,
+    index: AccountLookupIndex | None = None,
 ) -> str | None:
     """Return the ``account_map`` login for a GitHub ``owner``, or None.
 
@@ -403,6 +404,8 @@ def account_from_map(
     """
     if not owner:
         return None
+    if index is not None:
+        return index.account_map.get(owner.casefold())
     try:
         registry = registry if registry is not None else read_registry()
     except Exception:
@@ -415,6 +418,7 @@ def account_from_map(
 
 def resolve_account(
     entry: RepoEntry | None, *, registry: ReposRegistry | None = None,
+    index: AccountLookupIndex | None = None,
 ) -> str | None:
     """Resolve the preferred GitHub account for a repo entry: explicit
     ``account:`` -> ``account_map`` -> remote owner -> None (ambient)."""
@@ -423,7 +427,10 @@ def resolve_account(
     if entry.account:
         return entry.account
     owner = github_owner(entry.remote)
-    mapped = account_from_map(owner) if registry is None else account_from_map(owner, registry=registry)
+    mapped = (
+        account_from_map(owner) if registry is None and index is None
+        else account_from_map(owner, registry=registry, index=index)
+    )
     if mapped:
         return mapped
     return owner
@@ -512,6 +519,7 @@ def unset_copilot_account(name: str) -> bool:
 
 def account_for_github_owner(
     owner: str | None, *, registry: ReposRegistry | None = None,
+    index: AccountLookupIndex | None = None,
 ) -> str | None:
     """Resolve the effective account for a github ``owner`` (from a repo slug).
 
@@ -532,6 +540,8 @@ def account_for_github_owner(
     """
     if not owner:
         return None
+    if index is not None:
+        return index.owners.get(owner.casefold()) or index.account_map.get(owner.casefold()) or owner
     if registry is None:
         try:
             registry = read_registry()
@@ -591,6 +601,7 @@ def is_unresolved_registered_target(target: str | None) -> bool:
 
 def account_for_github_slug(
     slug: str | None, *, registry: ReposRegistry | None = None,
+    index: AccountLookupIndex | None = None,
 ) -> str | None:
     """Resolve a GitHub slug or registry alias to its configured account.
 
@@ -601,6 +612,11 @@ def account_for_github_slug(
     if not slug:
         return None
     if "/" in slug:
+        if index is not None:
+            entry = index.slugs.get(slug.casefold())
+            if entry is not None:
+                return resolve_account(entry, registry=registry, index=index)
+            return account_for_github_owner(slug.split("/", 1)[0], index=index)
         entries = (registry if registry is not None else read_registry()).repos
         for entry in entries.values():
             remote_slug = github_slug(entry.remote)
@@ -609,11 +625,14 @@ def account_for_github_slug(
     if "/" not in slug:
         entry = find_repo(slug) if registry is None else registry.repos.get(slug)
         if entry is not None:
-            return resolve_account(entry) if registry is None else resolve_account(entry, registry=registry)
+            return (
+                resolve_account(entry) if registry is None and index is None
+                else resolve_account(entry, registry=registry, index=index)
+            )
     owner = resolve_slug_owner(slug) if registry is None else slug.split("/", 1)[0]
     return (
         account_for_github_owner(owner) if registry is None
-        else account_for_github_owner(owner, registry=registry)
+        else account_for_github_owner(owner, registry=registry, index=index)
     )
 
 

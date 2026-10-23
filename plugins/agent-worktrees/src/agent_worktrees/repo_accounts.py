@@ -3,8 +3,38 @@
 from __future__ import annotations
 
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
+
+if TYPE_CHECKING:
+    from .repos import RepoEntry, ReposRegistry
+
+
+@dataclass(frozen=True)
+class AccountLookupIndex:
+    """Per-snapshot first-match indexes for canonical account lookups."""
+
+    slugs: dict[str, RepoEntry]
+    owners: dict[str, str]
+    account_map: dict[str, str]
+
+    @classmethod
+    def from_registry(cls, registry: ReposRegistry) -> AccountLookupIndex:
+        from . import repos
+
+        slugs: dict[str, RepoEntry] = {}
+        owners: dict[str, str] = {}
+        account_map: dict[str, str] = {}
+        for owner, login in registry.account_map.items():
+            if login:
+                account_map.setdefault(owner.casefold(), login)
+        for entry in registry.repos.values():
+            if slug := repos.github_slug(entry.remote):
+                slugs.setdefault(slug.casefold(), entry)
+            if entry.account and (owner := repos.github_owner(entry.remote)):
+                owners.setdefault(owner.casefold(), entry.account)
+        return cls(slugs, owners, account_map)
 
 
 def resolution_snapshot() -> dict:
@@ -12,6 +42,7 @@ def resolution_snapshot() -> dict:
     from . import repos
 
     registry = repos.read_registry(strict=True)
+    index = AccountLookupIndex.from_registry(registry)
     targets = set(registry.repos)
     owners = set(registry.account_map)
     for entry in registry.repos.values():
@@ -24,12 +55,12 @@ def resolution_snapshot() -> dict:
         "unmapped_owner_fallback": True,
         "repository_accounts": {
             (target.casefold() if "/" in target else target): repos.account_for_github_slug(
-                target, registry=registry,
+                target, registry=registry, index=index,
             )
             for target in sorted(targets)
         },
         "owner_accounts": {
-            owner.casefold(): repos.account_for_github_owner(owner, registry=registry)
+            owner.casefold(): repos.account_for_github_owner(owner, registry=registry, index=index)
             for owner in sorted(owners)
         },
     }

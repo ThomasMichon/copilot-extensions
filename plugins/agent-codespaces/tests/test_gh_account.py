@@ -123,7 +123,7 @@ def test_bulk_inventory_retains_alias_case_and_explicit_owner_fallback(monkeypat
 def test_bulk_inventory_falls_back_for_an_old_peer_or_unknown_owner(monkeypatch):
     monkeypatch.setattr(
         gh_account, "_lookup",
-        lambda *args: subprocess.CompletedProcess([], 0, '{"account_map": {}}', ""),
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, '{"account_map": {}}', ""),
     )
     fallback = MagicMock(return_value="resolved")
     monkeypatch.setattr(gh_account, "account_for_repo", fallback)
@@ -135,19 +135,72 @@ def test_malformed_bulk_resolution_is_not_an_empty_success(monkeypatch):
     payload = '{"account_map": {}, "resolution_version": 1, "repository_accounts": []}'
     monkeypatch.setattr(
         gh_account, "_lookup",
-        lambda *args: subprocess.CompletedProcess([], 0, payload, ""),
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, payload, ""),
     )
     with pytest.raises(RuntimeError, match="malformed account resolution"):
         gh_account.account_inventory()
 
 
-def test_strict_snapshot_failure_is_not_confirmed_empty(monkeypatch):
+@pytest.mark.parametrize("mapping", [[], {"Example": []}, {"Example": ""}])
+def test_malformed_snapshot_mapping_is_not_confirmed_empty(monkeypatch, mapping):
     monkeypatch.setattr(
         gh_account, "_lookup",
-        lambda *args: subprocess.CompletedProcess([], 2, '{"error":"unreadable"}', ""),
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            [], 0, json.dumps({"account_map": mapping}), "",
+        ),
+    )
+    with pytest.raises(gh_account.AccountInventoryError, match="malformed account mapping"):
+        gh_account.account_inventory()
+
+
+@pytest.mark.parametrize("returncode", [1, 2, -9])
+def test_strict_snapshot_failure_is_not_confirmed_empty(monkeypatch, returncode):
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            [], returncode, '{"error":"unreadable"}', "",
+        ),
     )
     with pytest.raises(gh_account.AccountInventoryError, match="could not read"):
         gh_account.account_inventory()
+
+
+@pytest.mark.parametrize("error", [OSError("startup failed"), subprocess.TimeoutExpired("aw", 10)])
+def test_snapshot_process_failure_is_not_confirmed_empty(monkeypatch, error):
+    monkeypatch.setattr(gh_account.worktrees, "explicit_context", lambda: False)
+    monkeypatch.setattr(gh_account, "_agent_worktrees_bin", lambda: "aw")
+    monkeypatch.setattr(
+        gh_account.subprocess, "run", MagicMock(side_effect=error),
+    )
+    with pytest.raises(gh_account.AccountInventoryError, match="unavailable"):
+        gh_account.account_inventory()
+
+
+def test_each_discovery_refreshes_bulk_routing_once(monkeypatch):
+    from types import SimpleNamespace
+
+    from agent_codespaces import account_candidates, config, picker_auth
+
+    payload = {
+        "account_map": {}, "resolution_version": 1, "repository_accounts": {},
+        "owner_accounts": {}, "unmapped_owner_fallback": True,
+    }
+    lookup = MagicMock(
+        side_effect=lambda *args, **kwargs: subprocess.CompletedProcess(
+            [], 0, json.dumps(payload), "",
+        ),
+    )
+    monkeypatch.setattr(gh_account, "_lookup", lookup)
+    monkeypatch.setattr(gh_account, "active_account", lambda: "active")
+    monkeypatch.setattr(picker_auth, "authorized_configs", lambda: {})
+    monkeypatch.setattr(
+        config, "load_merged_config",
+        lambda **_: SimpleNamespace(repos={"Alias": {}}),
+    )
+    assert account_candidates.candidates() == ("Alias", "active")
+    payload["repository_accounts"]["Alias"] = "newly-configured"
+    assert account_candidates.candidates() == ("newly-configured", "active")
+    assert lookup.call_count == 2
 
 
 def test_conflicting_case_insensitive_resolution_is_not_arbitrarily_selected(monkeypatch):
@@ -157,7 +210,7 @@ def test_conflicting_case_insensitive_resolution_is_not_arbitrarily_selected(mon
     }
     monkeypatch.setattr(
         gh_account, "_lookup",
-        lambda *args: subprocess.CompletedProcess([], 0, json.dumps(payload), ""),
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, json.dumps(payload), ""),
     )
     with pytest.raises(gh_account.AccountInventoryError, match="conflicting account resolution"):
         gh_account.account_inventory()

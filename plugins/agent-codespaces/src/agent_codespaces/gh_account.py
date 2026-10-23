@@ -295,14 +295,13 @@ def mapped_accounts() -> tuple[str, ...]:
 
 
 def account_inventory() -> AccountInventory:
-    """Keep bulk resolution scoped to the same validated installation read."""
+    """Read fresh routing once per discovery call, never across calls."""
     if worktrees.explicit_context():
         worktrees.validate_context()
-        return _account_inventory.__wrapped__()
     return _account_inventory()
 
 
-def _lookup(*args: str) -> subprocess.CompletedProcess[str] | None:
+def _lookup(*args: str, strict: bool = False) -> subprocess.CompletedProcess[str] | None:
     if worktrees.explicit_context():
         return worktrees.run(*args, timeout=10)
     aw = _agent_worktrees_bin()
@@ -313,7 +312,11 @@ def _lookup(*args: str) -> subprocess.CompletedProcess[str] | None:
             [aw, *args], capture_output=True, text=True, timeout=10,
             creationflags=_creation_flags(),
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError) as exc:
+        if strict:
+            raise AccountInventoryError(
+                "agent-worktrees account resolution snapshot is unavailable",
+            ) from exc
         return None
 
 
@@ -330,15 +333,12 @@ def _mapped_accounts() -> tuple[str, ...]:
     return account_inventory().accounts
 
 
-@functools.lru_cache(maxsize=1)
 def _account_inventory() -> AccountInventory:
-    result = _lookup("repos", "account", "list", "--json", "--with-resolutions")
+    result = _lookup("repos", "account", "list", "--json", "--with-resolutions", strict=True)
     if result is None:
         return AccountInventory()
-    if result.returncode == 2:
-        raise AccountInventoryError("agent-worktrees could not read its account resolution snapshot")
     if result.returncode != 0:
-        return AccountInventory()
+        raise AccountInventoryError("agent-worktrees could not read its account resolution snapshot")
     try:
         data = json.loads(result.stdout)
     except (ValueError, TypeError) as exc:
@@ -346,11 +346,16 @@ def _account_inventory() -> AccountInventory:
     if not isinstance(data, dict):
         raise AccountInventoryError("agent-worktrees returned a non-object account inventory")
     raw = data.get("account_map", {})
+    if not isinstance(raw, dict) or not all(
+        isinstance(owner, str) and owner.strip()
+        and isinstance(login, str) and login.strip()
+        for owner, login in raw.items()
+    ):
+        raise AccountInventoryError("agent-worktrees returned malformed account mapping")
     seen: list[str] = []
-    if isinstance(raw, dict):
-        for login in raw.values():
-            if login and login not in seen:
-                seen.append(str(login))
+    for login in raw.values():
+        if login not in seen:
+            seen.append(login)
     repositories: dict[str, str | None] = {}
     owners: dict[str, str | None] = {}
     supported = (
@@ -387,4 +392,3 @@ def clear_caches() -> None:
     _account_for_repo.cache_clear()
     _token_for_account.cache_clear()
     _mapped_accounts.cache_clear()
-    _account_inventory.cache_clear()

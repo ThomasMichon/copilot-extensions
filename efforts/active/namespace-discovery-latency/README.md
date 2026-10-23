@@ -149,6 +149,33 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-22 - Routing review corrections and native requalification
+
+- Addressed both High findings and both newly reported Medium findings on
+  #7998. Every nonzero account-snapshot exit and process startup/timeout
+  failure now raises an inventory error; strict storage and peer decoding
+  reject malformed account mappings instead of confirming an empty map.
+- Routing is read once per discovery call, never cached across calls. A
+  regression adds an alias between two refreshes and observes its newly
+  configured account with exactly one bulk read per refresh.
+- A per-snapshot index feeds the existing canonical account helpers. Regression
+  cases preserve first-match registry precedence, exact alias casing and
+  owner policy, while 200/400/800-repository cases require at most two slug
+  parses per repository rather than quadratic scans.
+- Focused contained suites passed: CodeSpaces 137 and Worktrees 157. Lint and
+  the changed-source module-size gate passed without raising ceilings.
+- Rebuilt only the contained Worktrees developer runtime and exercised the
+  actual Bridge scan/default eight-second deadline in five fresh consumer
+  processes: 7.844, 6.313, 6.235, 5.672 and 5.906 seconds. Each found the
+  target and then served five warm reads. Native and sampling holders settled.
+- A malformed stored account map produced an incomplete namespace in 7.078
+  seconds, not a complete empty roster; restoring the exact fixture bytes
+  restored complete discovery in 5.875 seconds. No shared runtime changed.
+- The refreshed unit-source admission passed required Linux source CI before
+  these routing corrections. A subsequent review and required CI on the new
+  head remain necessary. Focused Linux threaded/I/O qualification and rollout
+  are still explicit open gates.
+
 ### 2026-10-22 - Code review and unit-admission reconciliation
 
 - #7998 opened for implementation review. The publication rebase conflicted

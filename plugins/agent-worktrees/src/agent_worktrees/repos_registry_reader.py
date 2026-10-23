@@ -74,6 +74,17 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
         if not isinstance(srcroot, dict):
             srcroot = {}
         raw_map = data.get("account_map", {})
+        if strict and (
+            not isinstance(raw_map, dict)
+            or not all(
+                isinstance(owner, str) and owner.strip()
+                and isinstance(login, str) and login.strip()
+                for owner, login in raw_map.items()
+            )
+        ):
+            raise RepositoryResolutionError(
+                "repository registry 'account_map' must map non-empty owners to logins"
+            )
         account_map: dict[str, str] = {}
         if isinstance(raw_map, dict):
             for owner, login in raw_map.items():
@@ -124,6 +135,8 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                     )
                 if strict and not isinstance(entry.get("copilot_account", ""), str):
                     raise RepositoryResolutionError("registered repository has invalid Copilot preference")
+                if strict and not isinstance(entry.get("account", ""), str):
+                    raise RepositoryResolutionError("registered repository has invalid account")
                 repos[name] = RepoEntry(
                     name=name,
                     repo_class=norm_class,

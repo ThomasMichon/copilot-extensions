@@ -1167,7 +1167,9 @@ to the effort after release.
 
 This optional read-only form adds versioned `repository_accounts`,
 `owner_accounts` and `unmapped_owner_fallback` metadata to `account_map`.
-It uses one strict registry snapshot and the canonical `account-for` policy.
+It uses one strict registry snapshot and the canonical `account-for` policy,
+with per-snapshot first-match indexes rather than repeated registry scans.
+Malformed account mappings are refused, not treated as an empty map.
 Exact registered targets take precedence over owner policy; bare registry names
 remain case-sensitive, while GitHub slugs and owners match case-insensitively.
 The explicit fallback flag means an otherwise unknown owner resolves to its
