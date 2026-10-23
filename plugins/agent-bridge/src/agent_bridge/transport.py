@@ -290,7 +290,16 @@ async def _resolve_worktree(
             env=env,
             creationflags=_creation_flags(),
         )
-        out, err = await p.communicate()
+        from .startup_progress import current, preparation_output
+        if current() is None:
+            out, err = await p.communicate()
+        else:
+            from agent_procutil.streaming import communicate_progress
+            out, err = await communicate_progress(
+                p, on_output=lambda name, chunk: preparation_output(
+                    chunk, parse_phase=name == "stderr",
+                ),
+            )
         return p.returncode, out, err
 
     # The shared compatibility policy never discards supplied caller metadata.
@@ -449,7 +458,13 @@ async def _resolve_worktree_remote(
     async def _run(extra: list[str]):
         cmd = " ".join(shlex.quote(a) for a in base_args + extra)
         log.info("Resolving remote worktree on %s: %s", target.host, cmd)
-        return await manager.exec_command(target.host, cmd, timeout=timeout)
+        from .startup_progress import current, preparation_output
+        options = {}
+        if current() is not None:
+            options["on_output"] = lambda name, chunk: preparation_output(
+                chunk, parse_phase=name == "stderr",
+            )
+        return await manager.exec_command(target.host, cmd, timeout=timeout, **options)
 
     result = await _run(new_extra)
     if creating_new and not result.timed_out and new_extra and can_retry_legacy_resolve(

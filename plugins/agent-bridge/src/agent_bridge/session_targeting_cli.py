@@ -94,13 +94,17 @@ def _companion_seed_prompt(prompt: str | None) -> str | None:
 
 def _cmd_send(args: argparse.Namespace) -> None:
     from .send_outcome import run_send
+    from .startup_observation import observing_send
 
-    run_send(args, _send)
+    with observing_send(args):
+        run_send(args, _send)
 
 
 def _send(args: argparse.Namespace) -> None:
     from .send_outcome import SendRefused
+    from .startup_observation import configure_client, validate_options
 
+    validate_options(args)
     core = _core()
     if getattr(args, "native_invocation_file", None) is not None:
         from .native_keyed_client import send, validate_options
@@ -122,6 +126,7 @@ def _send(args: argparse.Namespace) -> None:
                           retryable=False, target=args.target,
                           error="--receipt-only requires --native-invocation-file")
     client = core._get_client()
+    configure_client(client, args)
     min_protocol = getattr(args, "min_daemon_protocol", None)
     if min_protocol and not client.daemon_supports(min_protocol):
         if getattr(args, "plugin_context_stdin", False):
@@ -179,6 +184,8 @@ def _send(args: argparse.Namespace) -> None:
     from .live_peer_address import peer_target_after_lookup
     live = client.resolve_live_session(target)
     address = peer_target_after_lookup(target, prompt, live=bool(live))
+    from .startup_observation import refuse_live_target
+    refuse_live_target(live, address, target)
     if live:
         expected_session_id = getattr(args, "expected_session_id", None)
         # The delivery carries expected_session_id, which an alias-aware daemon checks
@@ -452,12 +459,19 @@ def _resolve_known_session(client, session_id: str, session: dict, *, force: boo
     busy dispatch and return the session id to operate on (which the caller
     delivers to). Exits on an unrecoverable busy-without-force conflict."""
     core = _core()
+    canonical_id = session.get("session_id")
+    if isinstance(canonical_id, str) and canonical_id:
+        session_id = canonical_id
     status = session.get("status", "")
     if status == "idle":
+        from .startup_observation import ready
+        ready()
         return session_id
     if status == "stopped":
         print(f"[>] Resuming stopped session {session_id}...")
         client.resume_session(session_id, request_timeout=core._startup_request_timeout(resume=True))
+        from .startup_observation import ready
+        ready()
         return session_id
     agent = session.get("agent_name") or ""
     if not force:
@@ -508,6 +522,9 @@ def _resolve_target(
     except BridgeClientError as exc:
         if exc.status != 404:
             raise
+
+    from .startup_observation import refuse_missing
+    refuse_missing(target)
 
     # `target` may be a *worktree handle*, not a session id -- the case a
     # bridge-managed session created via `agent-bridge create --worktree-id`
@@ -907,6 +924,8 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     reply_group.add_argument("--no-wait", action="store_true", help="Return immediately without waiting for response")
     reply_group.add_argument("--wait-reply", action="store_true", help="For live sessions, opt into a bounded post-consumption reply wait (default: return the send receipt immediately)")
     send_p.add_argument("--reply-timeout", type=float, default=120.0, metavar="SECONDS", help="With --wait-reply, maximum reply wait (0..600 seconds; default 120). A timeout is not a failed send.")
+    from .startup_observation import add_arguments as add_startup_arguments
+    add_startup_arguments(send_p)
     send_p.add_argument("--new", action="store_true", help=argparse.SUPPRESS)
     send_p.add_argument("--full-history", action="store_true", help="When resuming an existing session, replay its prior conversation instead of fast-forwarding past it (default hides the backlog and prints a marker)")
     send_p.add_argument("--force", action="store_true", help="If the target's session is busy running a turn, terminate that in-flight turn and start a fresh session to deliver this prompt (discards the in-flight turn's work). Without --force, a busy target is rejected with guidance to wait/observe or end it.")

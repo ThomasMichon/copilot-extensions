@@ -166,6 +166,51 @@ def test_original_expired_deadline_fires_timeout_without_observation(owner):
     assert restored.snapshot()["records"][0]["deadline_at"] == now[0] - 1
 
 
+@pytest.mark.parametrize("mutation", ["timeout", "retention"])
+@pytest.mark.parametrize("failure", [None, "pre-replace", "uncertain"])
+def test_timeout_sweep_skips_unchanged_commit_but_preserves_real_changes(mutation, failure):
+    now = [time.time()]
+    writes = []
+    core = WatchReplay("fleet/service", state=None, commit=writes.append, clock=lambda: now[0])
+    issued = now[0]
+    receipt = register(core, issued, deadline_at=issued + 10)
+    if mutation == "retention":
+        core.cancel(SCOPE, "request-1", issued, registration_id=receipt["registration_id"])
+    before = core.snapshot()
+    writes.clear()
+    for _ in range(3):
+        assert core.sweep_timeouts() == {"status": "swept"}
+    assert writes == [] and core.snapshot()["records"] == before["records"]
+
+    def commit(state):
+        if failure == "pre-replace":
+            raise OSError("synthetic")
+        writes.append(state)
+        if failure == "uncertain":
+            raise StateCommitUncertain("synthetic")
+
+    core._commit = commit
+    now[0] += 11 if mutation == "timeout" else RETENTION_SECONDS
+    if failure == "pre-replace":
+        with pytest.raises(OSError, match="synthetic"):
+            core.sweep_timeouts()
+        assert writes == [] and core.snapshot()["records"] == before["records"]
+        assert core.pending(SCOPE)["events"] == []
+        return
+    assert core.sweep_timeouts() == (
+        {"status": "uncertain", "reason": "state_commit_uncertain"}
+        if failure else {"status": "swept"}
+    )
+    assert len(writes) == 1 and core.snapshot() == writes[0]
+    if mutation == "timeout":
+        pending = core.pending(SCOPE)["events"][0]
+        assert pending["timed_out"] and pending["registration_id"] == receipt["registration_id"]
+    else:
+        assert core.snapshot()["records"] == []
+    assert core.sweep_timeouts() == {"status": "swept"}
+    assert len(writes) == 1
+
+
 @pytest.mark.parametrize("deadline", [2**53 + 1, 10**400])
 def test_deadline_precision_refusal_preserves_another_scope_after_reload(owner, deadline):
     core, disk, now = owner

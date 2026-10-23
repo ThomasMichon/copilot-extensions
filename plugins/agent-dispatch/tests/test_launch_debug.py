@@ -53,6 +53,7 @@ def test_observation_does_not_mutate_arguments_or_result(tmp_path, monkeypatch, 
     assert (prefix, argv, payload, result.stdout, result.stderr, result.returncode) == before
     if value:
         started, completed = records(root)
+        assert "startup_policy" not in started
         assert started["prefix"] == prefix and started["argv"] == argv
         assert started["argv_exact"] is True
         assert started["cwd"] == os.getcwd()
@@ -250,20 +251,29 @@ def test_local_resume_observes_exact_call_without_changing_result(
         calls.append((argv, kwargs))
         return subprocess.CompletedProcess(argv, returncode, "opaque stdout", "connection refused")
 
-    monkeypatch.setattr(bridge.subprocess, "run", run)
+    monkeypatch.setattr(bridge, "run_startup", run)
     assert bridge.resume_worker("session-a", "private continuation", wait=wait) is (returncode == 0)
     expected = [*prefix, "send", "session-a", "--prompt-file", "-"]
     if not wait:
         expected.append("--no-wait")
+    expected.extend([
+        "--startup-communication-timeout", "30.0", "--startup-process-timeout", "300.0",
+    ])
+    from agent_procutil.startup import StartupTimeouts
+
     assert len(calls) == 1
     assert calls[0] == (expected, {
-        "input": "private continuation", "check": False, "capture_output": True,
-        "text": True, "timeout": 20.0, **no_window_kwargs(),
+        "input_text": "private continuation", "policy": StartupTimeouts(),
     })
     if enabled:
         started, finished = records(root)
         assert [*started["prefix"], *started["argv"]] == expected
-        assert started["timeout_seconds"] == 20.0
+        assert started["timeout_seconds"] == 30.0
+        assert started["startup_policy"] == {
+            "communication_seconds": 30.0,
+            "process_seconds": 300.0,
+            "expected_seconds": 60.0,
+        }
         assert started["stdin"]["source"] == "continuation_prompt"
         assert started["stdin"]["reference"] == "session-a"
         assert finished["returncode"] == returncode
@@ -285,7 +295,7 @@ def test_local_resume_records_and_preserves_exception(tmp_path, monkeypatch, err
         calls.append((args, kwargs))
         raise error
 
-    monkeypatch.setattr(bridge.subprocess, "run", run)
+    monkeypatch.setattr(bridge, "run_startup", run)
     with pytest.raises(type(error)) as caught:
         bridge.resume_worker("session-a", "private continuation")
     assert caught.value is error
@@ -309,7 +319,8 @@ def test_real_local_resume_trace_survives_caller_exit(tmp_path, monkeypatch, tim
     child = tmp_path / "bridge_child.py"
     child.write_text(
         "import pathlib,sys,time\n"
-        "assert sys.argv[1:]==['send','session-a','--prompt-file','-','--no-wait']\n"
+        "assert sys.argv[1:]==['send','session-a','--prompt-file','-','--no-wait',"
+        "'--startup-communication-timeout','5','--startup-process-timeout','5']\n"
         "assert sys.stdin.read()=='private continuation'\n"
         f"with pathlib.Path({str(marker)!r}).open('a') as sink: sink.write('once\\n')\n"
         "print('opaque stdout',flush=True)\n"
@@ -323,7 +334,7 @@ def test_real_local_resume_trace_survives_caller_exit(tmp_path, monkeypatch, tim
         "from agent_dispatch import bridge\n"
         f"bridge._agent_bridge_launch_prefix=lambda:[sys.executable,{str(child)!r}]\n"
         "try:\n"
-        " result=bridge.resume_worker('session-a','private continuation',timeout=5)\n"
+        " result=bridge.resume_worker('session-a','private continuation',timeout=5,startup_process=5)\n"
         "except subprocess.TimeoutExpired as error:\n"
         f" assert {timeout!r} and error.timeout==5\n"
         "else:\n"
@@ -338,6 +349,11 @@ def test_real_local_resume_trace_survives_caller_exit(tmp_path, monkeypatch, tim
     started, finished = records(root)
     assert started["stdin"]["source"] == "continuation_prompt"
     assert started["timeout_seconds"] == 5
+    assert started["startup_policy"] == {
+        "communication_seconds": 5,
+        "process_seconds": 5,
+        "expected_seconds": 60.0,
+    }
     assert finished["outcome"] == ("unknown_timeout" if timeout else "exited")
     assert finished["returncode"] == (None if timeout else 7)
     assert finished["stderr"]["diagnostics"] == ["connection refused"]

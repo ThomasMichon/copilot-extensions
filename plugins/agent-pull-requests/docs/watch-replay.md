@@ -70,6 +70,13 @@ pending subscriptions do not trigger more reads. Unbound groups remain
 untouched except for deadline sweeps; the cycle reports their count rather than
 selecting another binding. The existing replay record bound limits each pass.
 Every native read retains the bridge's time/output bounds.
+The one cycle admits at most four native reads at a time, with no per-subscriber
+executor or unbounded submission queue. Completed results are applied by the
+cycle's single writer, independent of submission order; each freed slot admits
+the next still-eligible target. A slow target cannot hold back another completed
+read or monopolize all four slots. If all slots are occupied, later targets
+wait for bounded native work to settle; this is not an unlimited-concurrency
+or production-latency guarantee.
 
 Apply reloads the current durable envelope under the same operation lock.
 Only the exact registration IDs captured before that read can receive the
@@ -80,19 +87,29 @@ registrations' eligibility. Targets already completed by a previous read's
 timeout sweep or concurrent cancellation/ACK produce no native or credential
 work. New registrations never substitute for a captured completed registration.
 Pending event IDs, original deadlines and completion receipts are unchanged.
-Provider unavailability does not cancel, reset or replace any subscription,
-and each attempted read is followed by an independent deadline sweep.
+Provider unavailability does not cancel, reset or replace any subscription.
+Deadline sweeps continue while reads are pending, with current-authority checks
+at least every 100 ms between bounded replay transactions, and after each result.
+An unchanged sweep does not persist the envelope. Comparison excludes only
+the relative monotonic timeout projection; absolute deadlines, timeout events
+and receipt-retention cleanup remain durable changes. Other replay mutations
+retain their existing commit behavior and uncertainty contract.
 An otherwise valid native snapshot may exceed the smaller replay event budget.
 That target's application is refused without changing its state and counted as
 unavailable; timeout sweeps and later targets still run, including on repeated
 cycles. Other invalid-state, authority and commit failures still stop the pass.
 
-The caller supplies the cycle's finite authority expiry and optional current
-lifetime checkpoint. Checks occur between reads and at lookup, commit and
+The caller supplies the cycle's finite authority expiry and optional current,
+bounded, thread-safe lifetime checkpoint. Checks occur before read admission
+and native execution, between results, and at lookup, commit and
 result boundaries, including after provider failure. Known loss stops later
 reads and application; an already-started write can still finish uncertain,
 using the same disconnect/reconcile-original-identity contract as the Gateway
 adapter. Never wait for remote rollback or arm a second waiter.
+On loss, invalid state or uncertain commit, queued reads are withdrawn and the
+cycle joins every already-started read before releasing its non-overlap lock.
+An embedding drain timeout therefore cannot mistake a cancelled Future for
+settled native work or release the service's writer lease early.
 These owner-only methods are not added to the Gateway operation allowlist.
 
 ## Reconciliation and retention

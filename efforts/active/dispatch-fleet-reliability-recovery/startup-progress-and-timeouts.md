@@ -20,6 +20,23 @@ default is prescribed. Short communication and very long process budgets are
 separate policy choices; existing generic timeout values cannot silently
 serve both purposes.
 
+### Selected startup policy
+
+Subsequent operator form response, verbatim:
+
+> communication_seconds=30, process_minutes=5
+
+Subsequent operator clarification, verbatim:
+
+> There is no way that any process should take longer to start than 1 minute end-to-end, so I'm allowing 5
+
+For this startup boundary, expect completion within one minute and allow
+five minutes of independent end-to-end startup grace. Renew 30-second
+communication silence on target updates, never the five-minute total.
+The rejected two-hour recommendation is not a startup default. This is
+not a five-minute execution limit on a long-running turn after readiness.
+It does not select one universal lifetime for all service/tool operations.
+
 ## Scope and retained ownership
 
 Qualify one actual composed startup path first: an ordinary Dispatch continuation
@@ -93,6 +110,7 @@ where safe; clock-helper unit tests are supporting evidence only.
 | Case | Required observation |
 |------|----------------------|
 | Healthy slow startup | Total duration exceeds the communication window while updates keep it observable; no short outer process deadline preempts it |
+| Startup latency and grace | Measure the real composed path against the one-minute expected latency and separate five-minute ceiling; readiness ends the startup clock, not the turn |
 | Recognized and unknown events | Both renew contact at receipt; unknown meaning does not fail or drop liveness |
 | Target keepalive versus local timer | Received target keepalive renews contact; an observer's own timer does not |
 | Silence before first update | Communication clock expires from initial wait, with no accepted-work claim |

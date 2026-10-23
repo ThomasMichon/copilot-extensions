@@ -186,7 +186,7 @@ startup path first; it does not claim every suite entry point already conforms.
 
 ### Phase 3a - Startup progress and timeout adoption
 
-- [ ] Review the [startup-clock amendment](startup-progress-and-timeouts.md)
+- [x] Review the [startup-clock amendment](startup-progress-and-timeouts.md)
   before runtime implementation through #8051.
 - [ ] Implement and qualify the actual composed consumer: incremental nested
   target progress, sliding communication silence and an independent long process
@@ -508,6 +508,53 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-23 - Corrected startup consumer qualifies on Windows and offline Linux
+
+- Corrected executable source `6dca21f9fd450d98e94f631504c80dac4d7c73ad`
+  (tree `919ea4cfedf76cbf2387433491bf5f0ee608a5b0`) passed the real controlled
+  route, native CLI/HTTP/SSE and actual Dispatch-parent witnesses. The focused
+  Windows Bridge cohort passes 46 cases and CI repair passes 48; earlier
+  Dispatch startup/diagnostic qualification passes 128 plus the added local
+  unknown-outcome wrapper regression.
+- The same corrected source passes 46 Bridge and 177 Dispatch cases on an
+  exact-source, pinned, nonroot/NNP1/cap0 Linux box, with zero failures, errors
+  or skips. Networks were removed before testing; no model, host credentials,
+  home, socket or ports were supplied. Final census and exact-resource absence
+  were independently checked, and the resource obligation was settled.
+- Narrow independent follow-up review confirmed all three original findings
+  resolved, with no significant issue in the corrections. Carrier-only CRLF
+  and caller/report-path errors remain recorded; they did not change the
+  source under test or license a repeated mutation.
+- This qualifies the bounded source consumer, not every suite entry point,
+  real-agent startup performance, release, deployment or retained-task
+  acceptance. Normal publication and those subsequent gates remain open.
+
+### 2026-10-23 - Correct actual subscription and uncertain delivery contracts
+
+- Independent review rejected the first local Phase 3a candidate before
+  publication: its synthetic HTTP fixture missed the real controlled stream's
+  caller/continuity requirements; truncated admission acknowledgements could
+  escape as ordinary failure; and an existing coordinator timeout catch could
+  release a possibly active CI body.
+- Retain the authoritative cursor snapshot and separate observer audience,
+  including the existing empty-log bootstrap. Add conformance through the real
+  service route, not only a permissive synthetic endpoint.
+- Normalize incomplete/invalid admission responses to unknown without replay,
+  and retain coordinator custody after transport or receipt-settlement
+  uncertainty. Known pre-delivery failures keep their existing cleanup path.
+- Current-source Windows/Linux qualification, focused re-review and normal
+  publication remain required; the earlier candidate's passes are not
+  relabelled as corrected-source acceptance. No deployment or retained-task
+  resend occurred.
+
+### 2026-10-22 - Startup-clock proposal reviewed; implementation begins
+
+- #8058 merged after an exact-head approving review with no findings and green
+  required checks. The source worktree was pulled forward before implementation.
+- Phase 3a now proceeds under #8051. Existing phase budgets, target event streams
+  and progress writers are the starting seams; no runtime adoption, new numeric
+  default, replay or production action follows from this plan milestone.
 
 ### 2026-10-22 - Propose runtime adoption of the shared timeout contract
 

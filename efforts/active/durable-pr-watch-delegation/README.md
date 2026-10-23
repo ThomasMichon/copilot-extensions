@@ -290,6 +290,15 @@ _Operator-required scope; agent-recommended implementation and validation._
   native/disk work before releasing the writer. Failed drain retains custody.
   Source confirmed by #8157. This prerequisite is not standalone packaging,
   fleet activation, cross-host fencing or slow-target fairness acceptance.
+- [x] Land the independent foreground host distribution, normal wheel/sdist,
+  explicit credential/configuration references, separate provisioning, passive
+  readiness and existing `container.service` role inputs (source confirmed by
+  #8196). Actual image construction, deployment lifecycle, live providers and
+  slow-target fairness remain open; the source recipe is not an installed role.
+- [ ] Land bounded concurrent native observation with completion-order replay
+  application, ongoing deadline sweeps and actual-read drain custody. Preserve
+  exact authorized groups and original registration/event identities; this
+  source leaf does not close representative production performance or fleet proof.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -651,6 +660,83 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-23 - Bound native observation IO without adding another owner
+
+- Replace serial native reads with one four-read rolling window inside the
+  existing finite observer. Only the cycle thread performs replay transactions;
+  completed reads apply without waiting for earlier slow targets. Captured
+  registration identities, account/repository bindings and native time/output
+  limits remain unchanged. No per-subscriber waiter or credential source is added.
+- Continue authority checks and deadline sweeps while reads are pending. On
+  disconnect, invalid state or uncertain commit, stop admission, withdraw queued
+  work and join actual reads before releasing the cycle lock. The service's
+  existing shielded task/drain keeps its writer lease until every read settles;
+  partial fast-target progress does not satisfy whole-service readiness.
+- Local focused observation/lifecycle/real TLS transport selection passed 70
+  cases, including real native child completion order, rolling refill past a
+  blocked target, four-read maximum, distinct shared-target deliveries and
+  failed-drain writer exclusion and saturated-window deadline sweeps.
+  The independent installed standalone selection passed 25 cases after source
+  preparation; all 13 install contracts, fatal lint and doc consistency passed.
+  The first test attempt hit a test-side nonblocking
+  read/sweep contention; capture the durable event inside the single writer's
+  completed-result boundary instead of weakening store custody or adding retry.
+- Documentation impact: update the observer, service and test guides for the
+  rolling bound, timeout behavior and retained drain. This closes an existing
+  central-observation vision/plan requirement under the same independent-service
+  and graceful-cutover patterns; intended scope and placement authority do not
+  change. Image construction, fresh container, update/rollback, live providers,
+  installed activation and representative fleet performance remain open.
+- Publish #8209 at `54c1dd8aec`; required CI `39949621748` and native
+  Linux/Windows acceptance `39949759241` passed. Copilot review `5627918808`
+  identified repeated unchanged sweep writes. Keep authority/deadline polling,
+  but skip sweep persistence when the complete durable state is unchanged,
+  excluding only its relative monotonic timeout projection. Actual timeout
+  and retention changes retain normal pre-replace/uncertain-commit behavior.
+  The expanded 206-case local replay/core/store/Gateway/observer/service
+  selection passes, including zero idle-poll writes while all slots are
+  blocked and one durable timeout write. Current-head re-review and native
+  acceptance remain required before merging this correction.
+
+### 2026-10-23 - Merge standalone foreground packaging and continue observation fairness
+
+- #8196 merged as `1de7102e0c77d83d5baf43f0f1618fdb6fc58066` at
+  `2026-10-23T11:06:09Z`, from head
+  `fd9be575715fa9c37fb210337119b2a45618eae6`. Copilot review `5627331624`
+  approved that exact head with no open issues. Read the complete review and
+  all thread/comment pages; the earlier missing-version finding is fixed and
+  resolved. Required CI and attribution/lockdown checks passed. Managed merge
+  used only the documented additional CODEOWNER exception, not a CI or
+  blocking-feedback bypass. Closing references were empty; #7188 stays open.
+- Required source CI `39942689605` passed the full 919-node admitted Linux unit
+  packet with coverage, plus guards and the aggregate gate. The changed native
+  inventory/recipe seam has two explicit effect-free cases and exact reviewed
+  source-byte admission; no node, effect boundary or budget was weakened.
+  Exact-head native acceptance `39942822074` passed the selected Linux and
+  Windows jobs, including the installed standalone process and core lifecycle.
+- Local owning checks passed 25 standalone, 16 Fleet credential/worker,
+  10 runner/candidate and 58 workflow-scope cases, fatal lint, all 13 install
+  contracts and the Python declaration-age audit. An attempted full local
+  Windows unit packet was rejected for a native-loader effect and a skipped
+  node; it is not recorded as passing. The accepted whole packet is Linux CI;
+  Windows service proof is the separate actual native lane. Secure local npm
+  metadata remained unavailable; neither TLS nor CI was bypassed.
+- Re-read the current parent goal, Coordination, full Plan and Validation Plan.
+  Close only the foreground packaging source leaf. Broad artifact/fleet,
+  provider, installed adoption, release/authorized rollout and every retained
+  direct client/presentation/reviewer/migration/idle-record/nonevent clause
+  remain open. No production credentials, placement, runtime update or
+  finalization follows from this source merge.
+- The managed pull-forward aborted a squash-history conflict without changing
+  the branch. A backup was preserved and only the provider-confirmed merged
+  range was excluded before retrying; completion then pulled the same source worktree onto
+  current `dev`, with no unmerged work discarded.
+- Next: close the remaining source-level slow-target observation gap with
+  bounded authorized-target IO, preserving the single existing observer,
+  writer/drain custody, original identities and native credential owner.
+  Do not add a per-subscriber waiter, parallel controller or production
+  activation. Image/fresh-container and actual deployment gates stay separate.
 
 ### 2026-10-23 - Prepare the independent foreground service package
 

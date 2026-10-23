@@ -55,7 +55,7 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/ordinary-native-admission-generation-45.json")
+    fixture = _fixture("fixtures/http/current/startup-observation-generation-46.json")
     body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
@@ -72,7 +72,7 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
     assert bridge_protocol.REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION == 43
     assert bridge_protocol.PLUGIN_READINESS_PROTOCOL_VERSION == 44
     assert bridge_protocol.KEYED_NATIVE_PROMPT_PROTOCOL_VERSION == 45
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 45
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 46
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 

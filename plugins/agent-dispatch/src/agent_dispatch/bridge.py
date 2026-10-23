@@ -37,6 +37,7 @@ from .procutil import (
     run_ssh_command,
 )
 from .worker_charter import OPERATING_PROCEDURES_CHARTER_NAME
+from .startup_process import StartupOutcomeUnknown as StartupOutcomeUnknown, run_startup
 
 # Re-exported from bridge_agent_registry (extracted for module size) so
 # every existing `bridge.X` call/patch site is unaffected.
@@ -603,37 +604,57 @@ def resume_worker(
     prompt: str,
     *,
     wait: bool = False,
-    timeout: float | None = 20.0,
+    timeout: float | None = 30.0,
+    startup_process: float = 300.0,
 ) -> bool:
-    """Resume an existing stopped ACP session and enqueue its next task turn."""
+    """Send once; observe startup with renewable silence and a fixed startup cap.
+
+    ``timeout`` is the compatibility alias for communication silence (None uses
+    the default). Readiness ends both startup clocks, not a subsequent turn.
+    Unknown observation outcomes raise rather than authorize a replacement.
+    """
+    from agent_procutil.startup import StartupTimeouts
+
+    policy = StartupTimeouts(
+        communication=30.0 if timeout is None else timeout, process=startup_process,
+    )
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
     argv = ["send", session_id, "--prompt-file", "-"]
     if not wait:
         argv.append("--no-wait")
+    argv.extend([
+        "--startup-communication-timeout", str(policy.communication),
+        "--startup-process-timeout", str(policy.process),
+    ])
     from .launch_debug import begin
 
     trace = begin(
         exe, argv, prompt_input=prompt, input_reference=session_id,
-        timeout=timeout, input_source="continuation_prompt",
+        timeout=policy.communication, input_source="continuation_prompt",
+        startup_policy=policy,
     )
     try:
-        completed = subprocess.run(  # noqa: S603 -- fixed argv + validated id
-            [*exe, *argv],
-            input=prompt,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            **no_window_kwargs(),
+        completed = run_startup(
+            [*exe, *argv], input_text=prompt, policy=policy,
         )
-    except (subprocess.TimeoutExpired, OSError) as exc:
+    except (subprocess.SubprocessError, OSError) as exc:
         if trace:
             trace.finish(error=exc)
         raise
     if trace:
         trace.finish(result=completed)
+    if completed.returncode == 2:
+        raise BridgeUnavailable(
+            "Bridge continuation CLI refused its arguments; existing session "
+            "absence is unproven; replacement is not authorized"
+        )
+    if completed.returncode == 69:
+        raise BridgeUnavailable(
+            "Bridge continuation refused availability or protocol support; "
+            "existing session absence is unproven; replacement is not authorized"
+        )
     return completed.returncode == 0
 
 
@@ -660,6 +681,8 @@ def resume_session(
     if host is None:
         try:
             return resume_worker(session_id, prompt, wait=wait, timeout=timeout)
+        except StartupOutcomeUnknown:
+            raise
         except (subprocess.SubprocessError, OSError):
             return False
     normalized_host = bridge_remote.normalize_host(host)

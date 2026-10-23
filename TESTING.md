@@ -48,7 +48,11 @@ durable restart and exact ACK use synthetic identities/provider snapshots.
 Windows uses the public embedding stop event; Linux exercises CLI SIGTERM.
 Windows passive-reader rename sharing is tested at the actual file boundary.
 These controls do not qualify a live provider, built container or fleet
-placement, and do not close the remaining slow-target fairness/update gates.
+placement, and do not close the remaining production-performance/update gates.
+The focused observer/service tests additionally exercise a four-read admission
+bound, rolling progress past a blocked target, distinct subscriber identities,
+real native-child completion order and retained writer custody until every
+parallel read settles. These source controls are not a fleet latency benchmark.
 
 ## Optional diagnostic telemetry
 

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from .session_preferences import client_preferences
 from .models import SessionStatus
+from .startup_progress import lifecycle_lock, observed, phase
 from .transport import SpawnTarget
 from .privileged_plugins import CONTEXT_KEY, PrivilegedLaunchRefused, relay_agent, start_client
 from .session_manager import (
@@ -102,6 +103,7 @@ class _SessionResumeMixin:
         self._sessions[session_id] = session
         return session
 
+    @observed
     async def resume_session(
         self,
         session_id: str,
@@ -154,7 +156,7 @@ class _SessionResumeMixin:
                 if drain:
                     await self._drain_pending_prompts(resumed)
                 return resumed
-            async with session._lifecycle_lock:
+            async with lifecycle_lock(session._lifecycle_lock):
                 if session.status != SessionStatus.STOPPED or not session.acp_session_id:
                     raise ValueError("Remote resume requires a stopped durable session")
                 resumed = await connect_remote_session(
@@ -166,7 +168,7 @@ class _SessionResumeMixin:
                 await self._drain_pending_prompts(resumed)
             return resumed
 
-        async with session._lifecycle_lock:
+        async with lifecycle_lock(session._lifecycle_lock):
             from .acquisition_gates import assert_resume_allowed
             assert_resume_allowed(self._db, session)
             if relay_agent(session.target) is not None or CONTEXT_KEY in (session.target.venue or {}):
@@ -216,7 +218,9 @@ class _SessionResumeMixin:
             # providers finish loading, or for a legacy session that predates
             # request-override provenance -- even though a perfectly
             # reattachable Session Host was waiting on the other end.
-            if await self._try_reattach_live_host(session):
+            with phase("session-host-reattach"):
+                reattached = await self._try_reattach_live_host(session)
+            if reattached:
                 log.info(
                     "Session %s (%s) resumed by reattaching to its live "
                     "Session Host (no respawn)", session_id, session.name,
@@ -224,7 +228,8 @@ class _SessionResumeMixin:
                 session.touch()
                 return session
 
-            await self._refresh_provider_target(session)
+            with phase("provider-target"):
+                await self._refresh_provider_target(session)
             original_target = session.target
             resume_target = original_target
             if owner_native_resume:
@@ -249,18 +254,20 @@ class _SessionResumeMixin:
                 try:
                     session.target = resume_target
                     load_existing = bool(session.acp_session_id)
-                    host_result = await self._resume_via_new_remote_host(
-                        session,
-                        on_acp_event=on_acp_event,
-                        permission_callback=permission_callback,
-                        load_existing=load_existing,
-                    )
+                    with phase("session-host-preparation"):
+                        host_result = await self._resume_via_new_remote_host(
+                            session,
+                            on_acp_event=on_acp_event,
+                            permission_callback=permission_callback,
+                            load_existing=load_existing,
+                        )
                     resumed_acp_id = (
                         host_result[1] if host_result is not None else None
                     )
                     client = host_result[0] if host_result is not None else None
                     if client is None:
-                        agent_proc = await core.spawn(session.target)
+                        with phase("process-preparation"):
+                            agent_proc = await core.spawn(session.target)
                         client = core.AcpClient(
                             on_event=on_acp_event,
                             on_permission=permission_callback,
@@ -273,23 +280,25 @@ class _SessionResumeMixin:
                         # Bound each round so a stalled Copilot ACP launch (the
                         # "Resuming…"/extension-reload race, #1468) fails fast and
                         # we re-roll, rather than hanging in STARTING.
-                        await asyncio.wait_for(
-                            start_client(client, agent_proc.proc, session),
-                            timeout=self._timeouts.session_start,
-                        )
-                        if session.acp_session_id:
+                        with phase("acp-initialize"):
                             await asyncio.wait_for(
-                                client.load_session(
-                                    cwd=(
-                                        _venue_workspace_cwd(session.target)
-                                        or session.target.cwd
-                                        or _default_cwd(session.target)
-                                    ),
-                                    session_id=session.acp_session_id,
-                                    mcp_servers=session.mcp_servers,
-                                ),
-                                timeout=self._timeouts.session_new,
+                                start_client(client, agent_proc.proc, session),
+                                timeout=self._timeouts.session_start,
                             )
+                        if session.acp_session_id:
+                            with phase("native-session-load"):
+                                await asyncio.wait_for(
+                                    client.load_session(
+                                        cwd=(
+                                            _venue_workspace_cwd(session.target)
+                                            or session.target.cwd
+                                            or _default_cwd(session.target)
+                                        ),
+                                        session_id=session.acp_session_id,
+                                        mcp_servers=session.mcp_servers,
+                                    ),
+                                    timeout=self._timeouts.session_new,
+                                )
                             resumed_acp_id = session.acp_session_id
                         else:
                             resumed_acp_id = await asyncio.wait_for(

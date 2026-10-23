@@ -167,6 +167,20 @@ ordinary Windows workers rather than claiming enforcement or deployed recovery.
 
 ## Bounded owned children
 
+`agent_procutil.startup.StartupClock` separates receipt-time communication
+silence from a fixed startup lifetime. `StartupTimeouts` defaults to 30 seconds
+of silence, 300 seconds of startup grace and a 60-second expected startup
+latency. Every target update can renew contact without understanding its
+meaning; local timers and cached metadata cannot. `mark_ready()` ends startup
+observation, not a later turn. Expiry returns its clock, elapsed time, silence
+and last phase; this pure observer never grants cancellation or replay rights.
+
+`agent_procutil.streaming.communicate_progress()` incrementally forwards
+`(stream_name, bytes)` from an existing async process while preserving captured
+stdout/stderr and stdin framing. The caller still owns process creation,
+execution budgets, cancellation and descendant cleanup. This helper is not a
+new launcher or a permission to terminate work on communication silence.
+
 Minimal lifecycle bundles may copy only `agent_procutil/__init__.py` and load
 it directly, with or without registering the module in `sys.modules`.
 The short-lived containment helpers and their typed process-creation errors

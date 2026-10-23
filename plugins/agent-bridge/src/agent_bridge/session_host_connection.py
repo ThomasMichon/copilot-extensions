@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .local_launch_preparation import PreparedLocalLaunch
 from .transport import SpawnTarget
 from .session_preferences import client_preferences
+from .startup_progress import step
 
 
 def _core() -> Any:
@@ -88,7 +89,9 @@ class _SessionHostConnectionMixin:
             args, work_dir, env = (
                 prepared_local_launch.resolve(target, session_id)
                 if prepared_local_launch is not None
-                else await resolve_local_launch(target, tracker=tracker, session_id=session_id)
+                else await step("worktree-preparation", resolve_local_launch(
+                    target, tracker=tracker, session_id=session_id,
+                ))
             )
             if work_dir and not target.cwd:
                 target.cwd = work_dir
@@ -98,7 +101,7 @@ class _SessionHostConnectionMixin:
                 from .local_static_preparation import prepare_for_launch
 
                 try:
-                    await prepare_for_launch(work_dir)
+                    await step("instruction-sync", prepare_for_launch(work_dir))
                 except Exception:
                     log.warning("Local guidance refresh failed before spawn", exc_info=True)
 
@@ -119,7 +122,7 @@ class _SessionHostConnectionMixin:
         if prepare_child is not None:
 
             async def prepare_bound_child(argv):
-                prepared = await prepare_child(argv)
+                prepared = await step("plugin-sync", prepare_child(argv))
                 bound = bind_launch_purpose(
                     prepared, preference_options["preference_source"], preserving=preserving,
                 )
@@ -142,9 +145,9 @@ class _SessionHostConnectionMixin:
             # 127.0.0.1:<local_port>. spawn() blocks briefly on host readiness,
             # so it is already off-loop.
             step_started = time.monotonic()
-            spawned = await spawner.spawn(
+            spawned = await step("session-host-start", spawner.spawn(
                 args, cwd=work_dir, env=child_env, session_id=session_id,
-            )
+            ))
             timing.add("host_spawn", time.monotonic() - step_started)
             # Retain a remote-boundary forward so reattach can refresh it and
             # teardown can cancel it.
@@ -158,13 +161,15 @@ class _SessionHostConnectionMixin:
                 if relays:
                     self._relays[session_id] = relays
             step_started = time.monotonic()
-            sock = await SessionHostClient.connect(port=spawned.local_port)
+            sock = await step(
+                "session-host-connect", SessionHostClient.connect(port=spawned.local_port),
+            )
             timing.add("host_connect", time.monotonic() - step_started)
             step_started = time.monotonic()
-            hello = await sock.attach(0, nonce=spawned.nonce.encode())
+            hello = await step("session-host-attach", sock.attach(0, nonce=spawned.nonce.encode()))
             timing.add("host_attach", time.monotonic() - step_started)
             step_started = time.monotonic()
-            streams = await open_acp_streams(sock)
+            streams = await step("session-host-streams", open_acp_streams(sock))
             timing.add("host_streams", time.monotonic() - step_started)
 
             async def _closer() -> None:
@@ -195,13 +200,13 @@ class _SessionHostConnectionMixin:
                         args, getattr(hello, "preference_receipt", None), expected_instance,
                     )
                     step_started = time.monotonic()
-                    await asyncio.wait_for(
+                    await step("acp-initialize", asyncio.wait_for(
                         client.start_streams(
                             streams.reader, streams.writer,
                             child_pid=spawned.child_pid, closer=_closer,
                         ),
                         timeout=self._timeouts.session_start,
-                    )
+                    ))
                     timing.add("acp_initialize", time.monotonic() - step_started)
                     if streams.child_exit_code is not None:
                         client.mark_host_child_exited(streams.child_exit_code)
@@ -212,7 +217,7 @@ class _SessionHostConnectionMixin:
                     session_cwd = remote_cwd or target.cwd or _default_cwd(target)
                     if load_session_id:
                         step_started = time.monotonic()
-                        await asyncio.wait_for(
+                        await step("native-session-load", asyncio.wait_for(
                             client.load_session(
                                 cwd=session_cwd,
                                 session_id=load_session_id,
@@ -220,19 +225,19 @@ class _SessionHostConnectionMixin:
                                 timing_callback=timing.add,
                             ),
                             timeout=self._timeouts.session_new,
-                        )
+                        ))
                         timing.add("session_load_total", time.monotonic() - step_started)
                         acp_sid = load_session_id
                     else:
                         step_started = time.monotonic()
-                        acp_sid = await asyncio.wait_for(
+                        acp_sid = await step("native-session-new", asyncio.wait_for(
                             client.new_session(
                                 cwd=session_cwd,
                                 mcp_servers=mcp_servers,
                                 timing_callback=timing.add,
                             ),
                             timeout=self._timeouts.session_new,
-                        )
+                        ))
                         timing.add("session_new_total", time.monotonic() - step_started)
                     log.info("ACP launch timing: result=ok %s", timing.summary())
                 except (TimeoutError, asyncio.TimeoutError) as exc:

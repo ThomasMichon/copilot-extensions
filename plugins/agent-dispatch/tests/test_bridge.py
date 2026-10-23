@@ -598,10 +598,10 @@ def test_resume_worker_sends_to_existing_session(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls["cmd"] = cmd
-        calls["input"] = kwargs.get("input")
+        calls["input"] = kwargs.get("input_text")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(bridge, "run_startup", fake_run)
     assert bridge.resume_worker("session-1", "continue") is True
     assert calls["cmd"] == [
         "/usr/bin/agent-bridge",
@@ -610,6 +610,10 @@ def test_resume_worker_sends_to_existing_session(monkeypatch):
         "--prompt-file",
         "-",
         "--no-wait",
+        "--startup-communication-timeout",
+        "30.0",
+        "--startup-process-timeout",
+        "300.0",
     ]
     assert calls["input"] == "continue"
 

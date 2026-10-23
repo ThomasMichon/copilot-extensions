@@ -192,6 +192,11 @@ from the target renews the communication budget, including progress a caller
 does not otherwise interpret. Progress does not renew the total process budget.
 Healthy, observable work is not cut off by a short fixed wall-clock deadline.
 
+Ordinary process and session startup reaches readiness within a minute
+end-to-end. A separate disruption allowance is grace, not acceptable startup
+latency. Readiness ends the startup budget; it does not impose that same budget
+on a long-running turn or task after the process has started.
+
 Progress is incremental and end-to-end across nested preparation and execution,
 including state negotiation, lock waits, transport setup, session hosting,
 repository synchronization, terminal preparation and capability synchronization.

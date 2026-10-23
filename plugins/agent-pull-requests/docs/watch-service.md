@@ -65,8 +65,13 @@ Readiness requires current local authority, the held lease, live owned units,
 an attached authenticated connector and a completed observation cycle without
 unavailable or unbound targets. It is not evidence of provider enrollment,
 production latency, installed activation, volume fencing or fleet acceptance.
-The finite observer remains serial: slow-target fairness and representative
-performance qualification remain open in the parent effort.
+The finite observer shares a four-read rolling window across authorized targets.
+Its single writer applies completed reads without waiting for an earlier slow
+target, while retaining every in-flight read through drain. Saturating all four
+slots still waits for the existing native command bounds. Readiness continues
+to require a completed cycle; a partial fast-target result is not whole-service
+readiness. Representative production performance qualification remains open
+in the parent effort.
 
 ## Drain, restart and replacement boundary
 

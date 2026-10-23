@@ -1,0 +1,76 @@
+{
+  "response": {
+    "protocol_version": 45,
+    "min_protocol_version": 1
+  },
+  "request": {
+    "version": 1,
+    "invocation_key": "stable",
+    "expected_native_session_id": "native-a",
+    "prompt": "préambule \"quoted\"\n第二行\r\nlast",
+    "binding": {
+      "task_id": "task-a",
+      "admission_generation": 0,
+      "original_reservation_key": "reservation-a",
+      "creation_key": "creation-a",
+      "allocation_revision": 1,
+      "expected_turn_index": 0,
+      "origin_kind": "created",
+      "worktree_id": "wt-a",
+      "project": "fixture",
+      "path": ".",
+      "creation_nonce": "nonce"
+    }
+  },
+  "admission_response": {
+    "version": 1,
+    "session_id": "bridge-a",
+    "native_session_id": "native-a",
+    "invocation_key": "stable",
+    "turn_index": 0,
+    "queued": false,
+    "admission": "accepted"
+  },
+  "changed_prompt_refusal": {
+    "detail": {
+      "code": "native_invocation_conflict"
+    }
+  },
+  "missing_receipt_refusal": {
+    "detail": {
+      "code": "native_receipt_missing"
+    }
+  },
+  "cli_mixed_option_refusal": {
+    "outcome": "refused_invalid",
+    "target": "bridge-a",
+    "retryable": false,
+    "reason": "mixed_native_invocation",
+    "error": "keyed native invocation cannot mix alternate prompt/delivery options"
+  },
+  "cli_empty_selector_refusal": {
+    "outcome": "refused_invalid",
+    "target": "bridge-a",
+    "retryable": false,
+    "reason": "invalid_native_invocation",
+    "error": "invalid UTF-8 native invocation request"
+  },
+  "scope": "Independently authored synthetic HTTP vectors, replayed through ASGI and the real turn journal with a mock SDK. Admission is not execution or native-source qualification.",
+  "evidence_family": "ordinary-native-keyed-admission-v1",
+  "shared_operation_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-admission-generation-45.json",
+    "sha256": "02db74cd05d1a2a951e575d9fcd6ccbed5162e8dc6712723f56a4d87c6f6a883"
+  },
+  "captured_from": {
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/db_events.py",
+    "source_git_blob": "d92e67f51a7ba2bc2c8fbd5b5e350b9818eaefd6",
+    "protocol_generation": 46,
+    "source_sha256": "1483d7f431d4056cfc432d0843a8da1898f95050622fcce3ef73524f9cdf5a71"
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-db_events-generation-45.json",
+    "sha256": "ccacb3fb57ffa56f987794391a60c42eaa0c68f57b1f00f9c421afa543679eba"
+  }
+}
