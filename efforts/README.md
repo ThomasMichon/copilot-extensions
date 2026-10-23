@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Reconstructible Runtime State](active/reconstructible-runtime-state/README.md) | Draft; source-only recovery and rollback-compatible reconstruction plan; implementation admission pending | #7947; preserves #1460/#1915 compatibility and #3761 ground-state ownership; no live rebuild or rollout |
 | [Prompt Receipt Observation](active/prompt-receipt-observation/README.md) | Draft; bounded async non-provisioning first-prompt receipt plan before implementation | #7942; unchanged consumption authority; no installed rollout |
 | [Performance Telemetry](active/performance-telemetry/README.md) | Draft; existing-seam interface review before bounded producers, optional OpenTelemetry and native qualification | #7935 / #5900; preserves #7938/#7943 production owners and #5215 readiness |
 | [Picker Pending Binding](active/picker-pending-binding/README.md) | Draft; responsive consumer startup and current-feed plan before implementation | #7938; preserves #7974 engine and #7788 native launch owners |
