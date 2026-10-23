@@ -468,6 +468,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             if kind == "confirm":
                 self._run_pivot_form_submit(
                     reg, action, ctx, title, values, draft_binding=screen._draft_binding,
+                    draft_path=screen._draft_path(), draft_cleanup=screen._delete_draft,
                 )
             elif kind == "save" and draft:
                 self._run_pivot_form_draft(reg, action, ctx, title, values, screen)
@@ -481,7 +482,10 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             draft_binding=binding, draft_values=shared_values(draft, rec, fields),
         )
         self.app.push_screen(screen, _after)
-    def _run_pivot_form_submit(self, reg, action, ctx, title, values, *, draft_binding=None):
+    def _run_pivot_form_submit(
+        self, reg, action, ctx, title, values, *, draft_binding=None,
+        draft_path=None, draft_cleanup=None,
+    ):
         """Run a submitted form off the render flow with single-pass values.
 
         Declared text results retain full provider output in the shared command
@@ -548,7 +552,9 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
                 # future card for this task doesn't restore stale content
                 # (the coordinator clears its own ``card_draft`` server-side on
                 # a successful steer; this is just the local copy).
-                if task_id:
+                if draft_cleanup is not None:
+                    draft_cleanup()
+                elif task_id:
                     path = _steer_draft_path(str(task_id), draft_binding)
                     try:
                         if path and path.exists():
@@ -581,16 +587,16 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
                 # richer error surface replaces it instead of stacking on
                 # top of it.
                 self.debug = f"{action.label} failed · {short or 'see command output'}"
-                draft_path = _steer_draft_path(str(task_id), draft_binding) if task_id else None
+                retained_path = draft_path or (_steer_draft_path(str(task_id), draft_binding) if task_id else None)
                 if self.progress is prog:
                     self.progress = None
                     self.app.pop_screen()
                 if result_screen is None:
                     self.app.push_screen(
-                        SubmitErrorScreen(action.label, msg or short, draft_path)
+                        SubmitErrorScreen(action.label, msg or short, retained_path)
                     )
-                elif draft_path:
-                    msg = (msg or "") + f"\n\nLocal draft retained at: {draft_path}"
+                elif retained_path:
+                    msg = (msg or "") + f"\n\nLocal draft retained at: {retained_path}"
             if result_screen is not None and result_screen.is_mounted:
                 result_screen.complete(ok, msg)
 

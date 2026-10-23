@@ -177,14 +177,23 @@ or ambiguous response is an error, never permission to replay.
 
 The Manager restores shared values only when the saved/current card versions
 match. Local recovery is atomically written before Confirm, Save or Escape
-closes the modal; a write failure leaves the form open. Its key and envelope
+closes the modal; a write failure leaves the form open. Each bound write gets
+its own immutable record in the existing draft directory, so a delayed
+acknowledgement cannot remove another window/process's newer response. Its key and envelope
 bind contributing source/resolved commands, machine, task, action/schema, card,
 provider scope and observed draft revision. Unbound legacy or mismatched files
 are left untouched, never automatically adopted. Local content supplies values,
 not executable command authority. Save/Escape preserve hidden partial answers;
-Confirm submits only currently applicable fields.
+Confirm submits only currently applicable fields. Copies written for shared
+operations are marked unconfirmed **before** invocation. Reopening restores
+the authoritative shared draft, not an unconfirmed local copy; **Restore local**
+explicitly copies the latest matching preserved response into the form without
+submitting. This also prevents an old copy from reviving after an owner Clear
+returns to the same absence token, even when unlink failed.
 After a verified shared Save, its old-revision local fallback is removed so a
 later Clear cannot revive it when the owner returns to explicit absence.
+Cleanup failures are visible. Acknowledgements retire only records owned by
+that form/attempt, never a mutable path shared with another writer.
 
 Reset asks first, freezes input during Clear and retains fields/local recovery
 until a valid acknowledgement arrives. It updates only this form's observed

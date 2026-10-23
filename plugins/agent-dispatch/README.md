@@ -2484,6 +2484,10 @@ agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "
   card version; local recovery additionally binds provider, installation/queue,
   machine, task, action/schema, card and observed draft revision. Reset clears
   fields/local recovery only after acknowledgement; a conflict retains both.
+  Local shared-operation copies use immutable per-write records. A delayed
+  acknowledgement retires only its own copies; cleanup failures stay visible.
+  Unconfirmed copies never automatically override the owner draft: Restore
+  local explicitly copies the latest matching response without submitting.
   Neither Save nor Reset submits answers or wakes a worker. Exact-original-request
   restart/vanished-row recovery remains separate from draft persistence.
 - **`steer submit`** appends the operator's answer to the task's append-only steer

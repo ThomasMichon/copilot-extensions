@@ -1141,3 +1141,13 @@ authorized installed proof remain distinct obligations.
   the card; remove the old local fallback only after verified shared Save.
   A native Save/reopen/Reset/second-Reset/restart regression and the coupled
   form/result/local-write selection pass 94 tests. Re-review remains required.
+- A second review found failed-unlink revival and delayed acknowledgements
+  deleting a newer local write. Use immutable per-write records in the existing
+  local draft directory and mark shared-operation copies unconfirmed before
+  invocation. Auto-open restores owner-backed values; Restore local is an
+  explicit value-only adoption. Cleanup failures remain visible but cannot
+  automatically restore obsolete answers. Save, Reset and Confirm retire only
+  their own attempt's records, preserving a newer process's response.
+  The coupled selection passed 98 tests, including real-process newer writers,
+  native Confirm cleanup and fail-first-unlink Save/Reset/restart coverage. Updated-head review is
+  still required; this does not complete original-request receipt recovery.

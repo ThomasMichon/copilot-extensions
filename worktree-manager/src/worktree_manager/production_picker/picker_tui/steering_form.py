@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
+from worktree_manager.form_draft_storage import read_drafts, write_draft
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -35,6 +33,9 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
     dismissal. A failed local write keeps the form open. Production callers
     bind recovery to provider, installation/queue, task, action/schema, card
     and observed shared-draft revision; unbound legacy files are not adopted.
+    Shared-operation copies are immutable per write and unconfirmed before
+    invocation. Restore local explicitly copies a matching preserved response;
+    cleanup failure never makes an obsolete copy automatically restorable.
     Save/Escape return all answers (including hidden partial work), whereas
     Confirm returns only currently applicable fields.
 
@@ -89,6 +90,9 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         self._draft_binding = draft_binding
         self._draft_values = draft_values or {}
         self._draft_pending = False
+        self._draft_file = None
+        self._draft_files = []
+        self._local_recoveries = []
         # The caller must finish a pending Reset with draft_reset_complete.
         self._on_clear_draft = on_clear_draft
         # Per-question runtime refs, filled during compose:
@@ -107,10 +111,10 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
             with Vertical(id="steer-dock"):
                 yield from self._compose_questions()
                 yield Static(self._foot(), id="steer-foot")
-                yield SteerButtonRow(
-                    [("confirm", "Confirm"), ("save", "Save"), ("reset", "Reset")],
-                    self._on_button, id="steer-buttons",
-                )
+                buttons = [("confirm", "Confirm"), ("save", "Save"), ("reset", "Reset")]
+                if self._on_clear_draft is not None:
+                    buttons.append(("restore", "Restore local"))
+                yield SteerButtonRow(buttons, self._on_button, id="steer-buttons")
 
     def _compose_questions(self):
         if not self._fields:
@@ -149,10 +153,15 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         return label + (f"  ({hint})" if hint else "") + ":"
 
     def _foot(self) -> str:
+        recovery = (
+            f" · {len(self._local_recoveries)} unconfirmed local response(s); "
+            "Restore local copies the latest without sending"
+            if self._local_recoveries else ""
+        )
         return ("Enter accept+next · Shift+Enter newline · Space toggle · "
                 "Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
                 "Confirm sends this response to the agent · "
-                "Reset clears the fields (asks first)")
+                "Reset clears the fields (asks first)" + recovery)
 
     # ---- lifecycle ----------------------------------------------------------
     def on_mount(self) -> None:
@@ -161,6 +170,7 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         restored = self._load_draft()
         if restored:
             self._restore(restored)
+        self.query_one("#steer-foot", Static).update(self._foot())
         self._sync_conditional_fields()
         # Focus the first question's input (or the card scroll when there is none).
         visible = self._visible_question_indexes()
@@ -185,59 +195,55 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
             pass
 
     def _write_draft(self) -> bool:
-        path = self._draft_path()
+        path = _steer_draft_path(self._task_id, self._draft_binding)
         if not path:
             return True
-        temporary = None
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=path.parent, delete=False,
-            ) as stream:
-                temporary = stream.name
-                json.dump({
-                    "task_id": self._task_id,
-                    "values": self._collect(include_hidden=True),
-                    "binding": self._draft_binding,
-                }, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temporary, path)
+            self._draft_file = write_draft(
+                path, self._draft_binding, self._task_id, self._collect(include_hidden=True),
+                pending=self._on_clear_draft is not None,
+            )
+            self._draft_files.append(self._draft_file)
             return True
         except OSError as error:
             self.app.push_screen(SubmitErrorScreen(
                 "Local recovery", f"Cannot preserve this response: {error}\nThe form remains open.", None,
             ))
             return False
-        finally:
-            if temporary is not None:
-                try:
-                    os.unlink(temporary)
-                except OSError:
-                    pass
 
     def _load_draft(self) -> dict:
-        path = self._draft_path()
-        try:
-            if path and path.exists():
-                data = json.loads(path.read_text(encoding="utf-8"))
-                if (isinstance(data, dict) and isinstance(data.get("values"), dict)
-                        and data.get("binding") == self._draft_binding):
+        base = _steer_draft_path(self._task_id, self._draft_binding)
+        if base:
+            records = read_drafts(base, self._draft_binding)
+            self._local_recoveries = [(path, data) for path, data in records if data.get("pending")]
+            for path, data in records:
+                if not data.get("pending"):
+                    self._draft_file = path
+                    self._draft_files.append(path)
                     return data["values"]
-        except (OSError, ValueError):
-            pass
         return self._draft_values
 
     def _draft_path(self):
-        return _steer_draft_path(self._task_id, self._draft_binding)
+        return self._draft_file or _steer_draft_path(self._task_id, self._draft_binding)
 
-    def _delete_draft(self) -> None:
-        path = self._draft_path()
-        try:
-            if path and path.exists():
-                path.unlink()
-        except OSError:
-            pass
+    def _delete_draft(self) -> bool:
+        failures = []
+        for path in set(self._draft_files):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                failures.append((path, error))
+        self._draft_files = [path for path, _ in failures]
+        if failures:
+            detail = "\n".join(f"{path}: {error}" for path, error in failures)
+            self.app.push_screen(SubmitErrorScreen(
+                "Local recovery cleanup",
+                ("Shared state was acknowledged, but local cleanup failed. "
+                 "Unconfirmed copies are never automatically restored.\n"
+                 if self._on_clear_draft is not None else "Local cleanup failed; the form is retained.\n") + detail,
+                failures[0][0],
+            ))
+        return not failures
 
     # ---- actions ------------------------------------------------------------
     def _on_button(self, key: str) -> None:
@@ -245,8 +251,23 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
             self._confirm()
         elif key == "save":
             self.action_save()
+        elif key == "restore":
+            self.action_restore_local()
         else:
             self._on_reset_pressed()
+
+    def action_restore_local(self) -> None:
+        if self._draft_pending:
+            return
+        if not self._local_recoveries:
+            self.query_one("#steer-foot", Static).update("No matching unconfirmed local response. " + self._foot())
+            return
+        path, data = self._local_recoveries[0]
+        self._clear_fields()
+        self._restore(data["values"])
+        self._sync_conditional_fields()
+        self._draft_file = path
+        self._draft_files.append(path)
 
     def _confirm(self) -> None:
         if self._draft_pending:
@@ -294,10 +315,20 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         self.query_one("#steer-foot", Static).update(self._foot())
         if not ok:
             return
-        self._delete_draft()
+        if not self._delete_draft() and self._on_clear_draft is None:
+            return
         if revision is not None and self._draft_binding is not None:
             self._draft_binding = {**self._draft_binding, "revision_from": revision}
         self._draft_values = {}
+        self._local_recoveries = []
+        self._clear_fields()
+        self.query_one("#steer-foot", Static).update(self._foot())
+        try:
+            self.query_one("#steer-buttons", SteerButtonRow).focus()
+        except Exception:
+            pass
+
+    def _clear_fields(self) -> None:
         for rec in self._q:
             ftype = rec["type"]
             prim, other = rec["primary"], rec["other"]
@@ -315,10 +346,6 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
                 other.text = ""
                 other.display = False
         self._sync_conditional_fields()
-        try:
-            self.query_one("#steer-buttons", SteerButtonRow).focus()
-        except Exception:
-            pass
 
     def action_save(self) -> None:
         if self._draft_pending:

@@ -30,14 +30,18 @@ class PivotFormDraftActionsMixin:
         def done(outcome):
             ok, message, result = outcome
             if ok:
+                cleaned = True
                 if clear:
                     update_draft_context(spec, ctx, result)
                     screen.draft_reset_complete(True, read_path(result, spec["revision_from"]))
                 else:
-                    screen._delete_draft()
+                    cleaned = screen._delete_draft()
                 rt.ensure(scope)
                 self.refresh()
-                self.debug = f"{label} · {title}"
+                self.debug = (
+                    f"{label} · {title}" if cleaned
+                    else "Shared Save acknowledged; local recovery cleanup failed"
+                )
             else:
                 if clear:
                     screen.draft_reset_complete(False)
