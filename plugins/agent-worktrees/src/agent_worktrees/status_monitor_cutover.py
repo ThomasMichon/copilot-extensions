@@ -441,6 +441,34 @@ def _monitor_lock_is_live() -> bool:
     return locks.lock_is_live(locks.read_lock(smr._monitor_lock_path()))
 
 
+def _routed_monitor_is_live() -> bool:
+    from zdd import diagnostics
+
+    snapshot = routing.read_table(routing_dir())
+    endpoint = routing.read_active_endpoint(routing_dir(), verify_listener=False)
+    if endpoint is None:
+        return False
+    pid = endpoint.pid
+    if type(pid) is not int or pid <= 0:
+        raise ValueError("Routed monitor has no attributable PID")
+    if not locks.lock_is_live({"pid": pid}):
+        return False
+    before = diagnostics.process_start_time(pid)
+    if before is None or (
+        endpoint.process_start_time is not None and endpoint.process_start_time != before
+    ):
+        raise ValueError("Routed monitor process identity is unconfirmed")
+    health = ControlClient(endpoint.base_url).health()
+    if (
+        health.get("pid") != pid
+        or health.get("status") not in {"ready", "draining", "unavailable"}
+        or diagnostics.process_start_time(pid) != before
+        or routing.read_table(routing_dir()) != snapshot
+    ):
+        raise ValueError("Routed monitor identity changed during admission")
+    return True
+
+
 def _health_check(host: str, port: int) -> bool:
     try:
         status = ControlClient(f"http://{host}:{port}").health()
@@ -578,7 +606,19 @@ def activate_after_update(
         restart_arguments["runtime_python"] = runtime_python
     if spawned_handles is not None:
         restart_arguments["spawned_handles"] = spawned_handles
-    if not _monitor_lock_is_live():
+    lock_live = _monitor_lock_is_live()
+    if not lock_live:
+        try:
+            routed_live = _routed_monitor_is_live()
+        except (OSError, ValueError, ConnectionError):
+            summary.update(
+                action="refused", reason="routed-monitor-unverified",
+                result={"ok": False, "error": "Routed monitor identity could not be verified"},
+            )
+            return summary
+    else:
+        routed_live = False
+    if not lock_live and not routed_live:
         if monitor_was_live:
             summary["action"] = "restart"
             summary["restart"] = smr._restart_status_monitor(**restart_arguments)

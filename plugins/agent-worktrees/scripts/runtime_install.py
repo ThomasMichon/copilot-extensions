@@ -314,15 +314,17 @@ def _publish_helpers(
             plan_state = publication.state_fd(stream.fileno())
         digest = hashlib.sha256(data).hexdigest()
         entry = content / "scripts" / f"install.{frontend['shell']}"
+        # Windows st_dev differs across Python versions; callbacks use the
+        # plan owner's interpreter without weakening its file identity check.
         if frontend["shell"] == "ps1":
             argv = [str(executable), "-NoProfile", "-NonInteractive", "-File", str(entry),
                     "publish-runtime-helpers", "-InstallDir", str(governance.root),
-                    "-BootstrapPython", str(base_python),
+                    "-BootstrapPython", sys._base_executable,
                     "-RuntimePublicationPlan", str(plan_path), "-RuntimePublicationDigest", digest]
         else:
             argv = [str(executable), entry.as_posix(), "publish-runtime-helpers",
                     "--install-dir", str(governance.root),
-                    "--runtime-publication-python", str(base_python),
+                    "--runtime-publication-python", sys._base_executable,
                     "--runtime-publication-plan", str(plan_path), "--runtime-publication-digest", digest]
         environment = dict(os.environ)
         environment["COPILOT_PLUGIN_STAGED_FROM"] = str(governance.payload)

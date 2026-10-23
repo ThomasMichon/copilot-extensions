@@ -11,7 +11,7 @@ import pytest
 
 from test_global_binstub_publication import inject_copy_fault
 from test_source_python_publication import (
-    admitted, native_hosts, publication_case as shared_publication_case,
+    CALLBACK_TIMEOUT, admitted, native_hosts, publication_case as shared_publication_case,
 )
 from test_source_install_transactions import _function
 
@@ -51,6 +51,7 @@ def publication_transform(fault, shell, monkeypatch, asset):
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("asset", TARGETS, ids=["resolver", "hook", "setup", "conduct"])
 @pytest.mark.parametrize("fault", ["healthy", "initial-directory", "directory-race", "partial-write"])
+@pytest.mark.timeout(90)
 def test_required_callback_file_publication(publication_case, asset, shell, executable, fault, monkeypatch):
     driver, root, slot, owner, content, _identity = publication_case
     name, source_path, relative = asset
@@ -81,7 +82,7 @@ def test_required_callback_file_publication(publication_case, asset, shell, exec
             if fault == "healthy":
                 transaction = driver._publish_helpers(
                     governance, {"shell": shell, "executable": executable, "scope": scope},
-                    content, slot, descriptor, timeout=20, base_python=Path(sys._base_executable),
+                    content, slot, descriptor, timeout=CALLBACK_TIMEOUT, base_python=Path(sys._base_executable),
                 )
                 assert target.read_bytes() == (content / source_path).read_bytes()
                 if os.name != "nt" and not name.endswith(".md"):
@@ -92,7 +93,7 @@ def test_required_callback_file_publication(publication_case, asset, shell, exec
                 with pytest.raises((OSError, ValueError, subprocess.CalledProcessError)) as caught:
                     driver._publish_helpers(
                         governance, {"shell": shell, "executable": executable, "scope": scope},
-                        content, slot, descriptor, timeout=20, base_python=Path(sys._base_executable),
+                        content, slot, descriptor, timeout=CALLBACK_TIMEOUT, base_python=Path(sys._base_executable),
                     )
                 diagnostic = str(caught.value) + str(getattr(caught.value, "stderr", ""))
                 assert name in diagnostic.casefold(), diagnostic

@@ -24,6 +24,8 @@ REPO = Path(__file__).resolve().parents[3]
 PLUGIN = REPO / "plugins" / "agent-worktrees"
 DECLARED_VERSION = "1.5.5-dev285"
 NORMALIZED_VERSION = "1.5.5.dev285"
+# Publication invariants, not a cold native-shell startup latency contract.
+CALLBACK_TIMEOUT = 60 if os.name == "nt" else 20
 
 
 def load(path: Path, name: str):
@@ -231,14 +233,21 @@ def admitted(driver, root, owner, content, monkeypatch, *, hold=True):
 
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("fault", ["healthy", "publisher", "full-pin", "invalid-ack"])
+@pytest.mark.timeout(90)
 def test_actual_native_callback_preserves_owner_and_selected_runtime(
     publication_case, monkeypatch, shell, executable, fault,
 ):
     driver, root, slot, owner, content, identity = publication_case
     original = driver.engine.run_owned
+    bootstrap_python = Path(sys._base_executable).with_name("unused-bootstrap-python")
 
     def invoke(argv, **kwargs):
         assert kwargs["env"].get("COPILOT_EXTENSIONS_CONTEXT") == os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+        interpreter_option = "-BootstrapPython" if shell == "ps1" else "--runtime-publication-python"
+        assert argv[argv.index(interpreter_option) + 1] == sys._base_executable
+        plan_option = "-RuntimePublicationPlan" if shell == "ps1" else "--runtime-publication-plan"
+        plan = json.loads(Path(argv[argv.index(plan_option) + 1]).read_text())
+        assert plan["bootstrap"] == str(bootstrap_python)
         if fault == "full-pin":
             changed = {**identity.document(), "source_tree": "c" * 40}
             (content / "runtime-source.json").write_text(json.dumps(changed), encoding="utf-8")
@@ -265,8 +274,8 @@ def test_actual_native_callback_preserves_owner_and_selected_runtime(
                 if fault == "healthy":
                     transaction = driver._publish_helpers(
                         governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
-                        content, slot, descriptor, timeout=20,
-                        base_python=Path(sys._base_executable),
+                        content, slot, descriptor, timeout=CALLBACK_TIMEOUT,
+                        base_python=bootstrap_python,
                     )
                     transaction.keep()
                 else:
@@ -276,8 +285,8 @@ def test_actual_native_callback_preserves_owner_and_selected_runtime(
                     with pytest.raises(errors) as caught:
                         driver._publish_helpers(
                             governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
-                            content, slot, descriptor, timeout=20,
-                            base_python=Path(sys._base_executable),
+                            content, slot, descriptor, timeout=CALLBACK_TIMEOUT,
+                            base_python=bootstrap_python,
                         )
                     diagnostic = str(caught.value) + str(getattr(caught.value, "stderr", ""))
                     normalized = diagnostic.replace("\\", "/").casefold()

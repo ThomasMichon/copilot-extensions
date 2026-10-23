@@ -9,7 +9,9 @@ import tempfile
 
 import pytest
 
-from test_source_python_publication import admitted, native_hosts, publication_case as shared_publication_case
+from test_source_python_publication import (
+    CALLBACK_TIMEOUT, admitted, native_hosts, publication_case as shared_publication_case,
+)
 
 CRITICAL = "agent-worktrees.cmd"
 NAMES = ("agent-worktrees", "agent-worktrees.cmd", "agent-worktrees.ps1")
@@ -60,6 +62,7 @@ def publication_transform(fault, shell, monkeypatch, publication_target):
 @pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("fault", ["healthy", "same-content", "initial-directory", "directory-race", "partial-write"])
+@pytest.mark.timeout(90)
 def test_actual_callback_global_file_publication(
     publication_case, shell, executable, fault, monkeypatch,
 ):
@@ -97,7 +100,7 @@ def test_actual_callback_global_file_publication(
             if fault in ("healthy", "same-content"):
                 transaction = driver._publish_helpers(
                     governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
-                    content, slot, descriptor, timeout=20, base_python=Path(sys._base_executable),
+                    content, slot, descriptor, timeout=CALLBACK_TIMEOUT, base_python=Path(sys._base_executable),
                 )
                 for name in NAMES:
                     if fault == "same-content" and shell == "ps1":
@@ -111,7 +114,7 @@ def test_actual_callback_global_file_publication(
                 with pytest.raises((OSError, ValueError, subprocess.CalledProcessError)) as caught:
                     driver._publish_helpers(
                         governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
-                        content, slot, descriptor, timeout=20, base_python=Path(sys._base_executable),
+                        content, slot, descriptor, timeout=CALLBACK_TIMEOUT, base_python=Path(sys._base_executable),
                     )
                 diagnostic = (str(caught.value) + str(getattr(caught.value, "stderr", ""))).casefold()
                 assert CRITICAL in diagnostic, diagnostic

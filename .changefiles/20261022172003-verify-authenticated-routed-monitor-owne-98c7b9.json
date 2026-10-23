@@ -1,0 +1,9 @@
+{
+  "comment": "Verify authenticated routed monitor ownership when a stale legacy lock would suppress runtime cutover",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,93 @@
+"""A dead legacy lock cannot hide an authenticated live routed monitor."""
+
+from __future__ import annotations
+
+import os
+from types import SimpleNamespace
+
+import pytest
+from zdd import diagnostics, routing
+
+from agent_worktrees import status_monitor_cutover as control
+from agent_worktrees import status_monitor_runtime, status_monitor_reap_stale
+
+
+@pytest.mark.parametrize("failure", [None, "pid", "native", "authentication", "route"])
+def test_missing_legacy_lock_uses_only_a_verified_routed_owner(tmp_path, monkeypatch, failure):
+    token = "fixture-token"
+    pid = os.getpid()
+    events = []
+
+    def handle(action, payload):
+        assert action == "health"
+        if failure == "route":
+            routing.clear_if_owner(tmp_path, pid=pid)
+        return {
+            "status": "ready", "pid": pid + 1 if failure == "pid" else pid,
+            "published": True,
+            "worktrees": {"status": "unavailable", "error": "fixture fenced writer"},
+        }
+
+    server = control.ControlServer(handle, token=token)
+    server.start()
+    try:
+        routing.publish_active(
+            tmp_path, bind="127.0.0.1", port=server.port, pid=pid, version="old",
+        )
+        monkeypatch.setattr(control, "routing_dir", lambda: tmp_path)
+        monkeypatch.setattr(control, "_monitor_lock_is_live", lambda: False)
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+        monkeypatch.setattr(
+            status_monitor_runtime, "_restart_status_monitor",
+            lambda **kwargs: pytest.fail("live routed owner bypassed the normal cutover"),
+        )
+        monkeypatch.setattr(
+            control, "_acquire_cutover_lock",
+            lambda directory: SimpleNamespace(release=lambda: events.append("released")),
+        )
+        monkeypatch.setattr(control, "_reap_abandoned_passive", lambda record: {})
+        monkeypatch.setattr(
+            status_monitor_reap_stale, "schedule_delayed_daemon_health_reap", lambda: None,
+        )
+        original_client = control.ControlClient
+
+        class Client(original_client):
+            def __init__(self, url, **kwargs):
+                super().__init__(
+                    url, token="wrong-token" if failure == "authentication" else token, **kwargs,
+                )
+
+        monkeypatch.setattr(control, "ControlClient", Client)
+        if failure == "native":
+            monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: None)
+
+        class Orchestrator:
+            def __init__(self, *args, **kwargs):
+                events.append("cutover")
+
+            def run(self, **kwargs):
+                return SimpleNamespace(to_dict=lambda: {"ok": True, "committed": True})
+
+        monkeypatch.setattr(control, "CutoverOrchestrator", Orchestrator)
+        result = control.activate_after_update(
+            runtime_python="fixture-python", monitor_was_live=False,
+        )
+        if failure is None:
+            assert result["action"] == "cutover"
+            assert result["result"]["ok"] is True
+            assert events == ["cutover", "released"]
+        else:
+            assert result["action"] == "refused"
+            assert result["reason"] == "routed-monitor-unverified"
+            assert events == []
+    finally:
+        server.close()
+
+
+def test_absent_route_and_legacy_lock_keep_no_monitor_semantics(tmp_path, monkeypatch):
+    monkeypatch.setattr(control, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr(control, "_monitor_lock_is_live", lambda: False)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+    result = control.activate_after_update(monitor_was_live=False)
+    assert result["action"] == "noop"
+    assert result["reason"] == "no-live-monitor"
