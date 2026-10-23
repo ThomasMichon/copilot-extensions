@@ -44,7 +44,7 @@ def _clean_verb_registry():
 @pytest.fixture
 def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
     config = cfg.Config(
-        srcroot=str(tmp_tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+        srcroot=str(tmp_tracking_dir), machine="test", platform=cfg.detect_platform(), repo_name="test-repo",
         repos={"test-repo": cfg.RepoConfig(
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
@@ -58,10 +58,11 @@ def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
     rec = WorktreeRecord(
         worktree_id="wt-reg", branch="worktree/wt-reg",
         worktree_path=str(tmp_tracking_dir / "trees" / "wt-reg"),
-        repo="test-repo", machine="test", platform="wsl",
+        repo="test-repo", machine="test", platform=config.platform,
         started_at="2026-06-01T10:00:00", last_resumed_at="2026-06-01T10:00:00",
         resume_count=0, title=None, status="active", completed_at=None, sessions=[],
     )
+    Path(rec.worktree_path).mkdir(parents=True)
     save_record(rec, path)
     return path
 

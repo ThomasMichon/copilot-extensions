@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent managed worktree; proposal and implementation target `dev`
 - **Created:** 2026-10-20
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** extends [Source-Owned Release Pipeline](../../../visions/release-pipeline/README.md#configured-feed-construction-and-first-launch); realizes governed runtime assembly and independent installer readiness
 - **Umbrella issue:** #7529
 - **Related owners:** #3336, #6237, #4876, #6476, #7420, #7446, #7514
@@ -78,7 +78,7 @@ not reproduced here. The inventory, execution and evidence design below is
 
 ### Phase 1 - Review the policy and complete inventory
 
-- [ ] Review and merge this release-vision exception and canonical effort.
+- [x] Review and merge this release-vision exception and canonical effort.
 - [ ] Reconcile the complete environment census against existing authoritative
   declarations: runtime plugins, standalone applications, bootstrap/build
   environments and selected optional/server/profile closures.
@@ -154,11 +154,22 @@ not reproduced here. The inventory, execution and evidence design below is
 - [ ] Existing installer/rollback, publication integrity, required review and
   eligible-unit proof contracts remain intact.
 
-## Proposal
+## Review and activation status
 
-Pending automated review. No construction runner, CI controller, feed
-configuration, runtime deployment or enforcement cutover is implemented by this
-proposal.
+The release and test-portfolio vision exception and canonical effort were
+reviewed and merged in #7655. Implementation is permitted under that plan;
+complete inventory and the accepted control integration seams remain open.
+No construction runner, CI controller, feed configuration or enforcement
+cutover is activated by the reviewed documentation.
+
+| Boundary | Current evidence |
+|----------|------------------|
+| Checked-in policy | #7655 merged the construction/first-launch exception and canonical effort; implementation is permitted within that reviewed scope. |
+| Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate has landed for this effort. |
+| Released gate | None: the existing release pipeline does not yet enforce this effort's configured-feed construction and first-launch contract. |
+| Installed evidence | Earlier consumer-specific Manager capture/origin results remain bounded observations, not full environment/profile coverage. The launch-maintenance effort separately records current selected-slot observations. |
+| Hosted/native qualification | Configured-feed execution, complete declared native matrix and negative publication controls remain unproved. Missing feed or capacity must fail qualification, not be called an unsupported row or successful skip. |
+| Deployment | No feed configuration, trusted-controller activation or host rollout is performed or implied by these status records. |
 
 ## Journal
 
@@ -188,3 +199,65 @@ proposal.
 - Reconciled the test-portfolio vision's blanket integration exclusions with
   the same bounded construction/launch exception; unit eligibility, coverage
   and the general periodic integration portfolio remain unchanged.
+
+### 2026-10-21 - Reviewed intent and current inventory reconciliation
+
+- #7655 merged after current-head automated approval and required checks. Its
+  review also reconciled the standing test-portfolio vision with the same
+  bounded exception; the general integration portfolio remains separate.
+- The current authoritative standalone roster contains five products:
+  Worktree Manager, index service, fleet-manager, Dispatch service and Chat
+  service. The earlier census covered only Manager and index-related
+  environments and is not complete release coverage.
+- Source-only evidence distinguishes thirteen runtime plugin environments,
+  the five standalone products, selected index service profiles and the
+  independently constructed torch engine. Optional extras are not automatically
+  independent environments; development-only test extras are not implicitly
+  release profiles.
+- Complete supported native OS, interpreter architecture/ABI, profile and
+  bootstrap/build closure declarations remain unqualified. Missing declarations
+  must become explicit inventory failures, not unsupported-by-assumption rows
+  or successful skips.
+- The separate Picker readiness repair #7652 reached published Manager
+  0.6.55-dev1. Retained installed real-data captures succeeded on native Windows
+  ARM64 and x64 environments; this does not qualify every platform or profile.
+  A native WSL consumer exposed further engine/current-roster prerequisites,
+  confirming that version, import and preference-file evidence alone cannot
+  stand in for running consumer readiness.
+- Existing #6237 compact-unit/control work remains independently owned.
+  Coordination has been updated, but an accepted qualification-result
+  integration seam and hosted feed execution evidence are still outstanding.
+
+### 2026-10-21 - Architecture correction and launch-maintenance interruption
+
+- Correction to the preceding installed-capture entry: the ARM64 Windows host
+  ran an AMD64 interpreter and launcher. PE machine headers and
+  `sysconfig.get_platform()` identify the actual Python ABI; the host-level
+  `platform.machine()` value was not native ARM64 interpreter proof. Native
+  Windows ARM64 Python remains unqualified.
+- The operator prioritized a separate blocking-launch problem. #7694 and
+  `efforts/active/coordinated-launch-maintenance/README.md` own that bounded
+  repair. This effort remains Active with its complete construction, native
+  matrix, trusted integration and activation gates unchanged. No feed gate,
+  hosted secret or promotion requirement was installed during the interruption.
+
+### 2026-10-23 - Resume the original gate after scheduling source delivery
+
+- The interrupting scheduling change #7788 and its completion journal #8207
+  merged. Promotion #8268 subsequently released that source. Its canonical
+  launch-maintenance effort distinguishes released launchers, observed
+  installed files and still-unproved installed execution-driver behavior;
+  none closes this effort's construction or first-launch requirements.
+- Resume the reviewed Phase 1 inventory reconciliation against current source.
+  The earlier thirteen-plugin/five-product census is evidence to reconcile,
+  not an immutable roster or completed matrix. Reuse authoritative owners and
+  constructors, classify actual environment/profile identities and reject
+  missing declarations before implementing qualification.
+- Retain #3336/#6237 ownership of shared CI and trusted promotion. A bounded
+  inventory/result-contract slice can proceed without installing a feed
+  credential or changing their controller. Accepted integration seams,
+  actual hosted feed access, native construction and required negative
+  controls remain explicit completion gates.
+- Existing deployment holds and independently owned Windows broker
+  #6859/#7833 qualification are unchanged. No updater, service, registration
+  or dependency-policy exception was introduced to resume this work.

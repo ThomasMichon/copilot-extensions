@@ -6,8 +6,9 @@ Handles the permissions-config.json lifecycle:
 - Remove: clean up the worktree entry after merge
 
 All mutations (including extension approvals and config.json folder trust)
-share persistent per-file, user-wide locks. Acquisition failures warn and skip
-the update; no helper proceeds with an unlocked read-modify-write.
+share persistent per-file, user-wide locks. Best-effort acquisition failures
+warn and skip; required folder-trust entry failures raise. No helper proceeds
+with an unlocked read-modify-write.
 """
 
 from __future__ import annotations
@@ -25,13 +26,19 @@ from typing import Any, Callable
 _PERMISSION_LOCK_TIMEOUT = 2.0
 
 
-def _serialized(path_for_lock: Callable[[], Path], *, merge: bool = False) -> Callable:
+class FolderTrustError(RuntimeError):
+    """An admitted checkout could not be made trusted."""
+
+
+def _serialized(
+    path_for_lock: Callable[[], Path], *, merge: bool = False, strict: bool = False,
+) -> Callable:
     """Serialize each user-wide file's entire RMW, including first creation.
 
     Reuse the persistent ``config.lock`` / ``permissions-config.lock`` sidecars
     and portable OS/thread locking from tracking. Never remove a sidecar: an
     atomic JSON replacement must not change the inode carrying the lock.
-    Failed acquisition warns and retains the helpers' best-effort return values.
+    Best-effort acquisition failures warn; strict entry failures raise.
     """
     def decorate(mutator: Callable) -> Callable:
         @wraps(mutator)
@@ -39,7 +46,12 @@ def _serialized(path_for_lock: Callable[[], Path], *, merge: bool = False) -> Ca
             from .tracking import _RecordLock
 
             path = path_for_lock()
-            if not path.parent.exists():
+            if strict:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    raise FolderTrustError(f"Could not prepare Copilot folder trust: {exc}") from exc
+            if not strict and not path.parent.exists():
                 return [] if merge else False
             lock = _RecordLock(
                 path, timeout=_PERMISSION_LOCK_TIMEOUT, require_sidecar=True,
@@ -50,6 +62,10 @@ def _serialized(path_for_lock: Callable[[], Path], *, merge: bool = False) -> Ca
                     raise OSError("no cross-process locking backend")
             except (OSError, TimeoutError) as exc:
                 lock.__exit__()
+                if strict:
+                    raise FolderTrustError(
+                        f"Could not lock Copilot folder trust ({type(exc).__name__}): {exc}"
+                    ) from exc
                 warnings.warn(
                     f"Copilot permission update skipped: could not lock {path.name} "
                     f"({type(exc).__name__}).",
@@ -300,6 +316,50 @@ def ensure_extension_permission_approvals(worktree_path: str) -> bool:
         return False
 
 
+def _add_trusted_folder(config_file: Path, worktree_path: str) -> bool:
+    header, data = _read_config_jsonc(config_file) if config_file.exists() else ("", {})
+    if not isinstance(data, dict):
+        raise ValueError("Copilot config.json must contain an object")
+    folders = data.get("trustedFolders", [])
+    if not isinstance(folders, list) or not all(isinstance(item, str) for item in folders):
+        raise ValueError("Copilot trustedFolders must be a list of paths")
+    if worktree_path in folders:
+        return False
+    folders.append(worktree_path)
+    data["trustedFolders"] = folders
+    _atomic_json_write(config_file, data, header=header)
+    return True
+
+
+@_serialized(lambda: _config_path(), strict=True)
+def _ensure_trusted_folder(worktree_path: str) -> bool:
+    try:
+        root = Path(worktree_path)
+        if not root.is_dir() or root.is_symlink():
+            raise ValueError("native checkout disappeared before folder trust could be established")
+        return _add_trusted_folder(_config_path(), worktree_path)
+    except (OSError, ValueError, TypeError) as exc:
+        raise FolderTrustError(f"Could not ensure Copilot folder trust: {exc}") from exc
+
+
+def ensure_trusted_folder(worktree_path: str) -> bool:
+    """Ensure native folder trust after the caller admits this checkout.
+
+    False means already trusted, never failure. This does not clone tool
+    permissions or approve extensions.
+    """
+    try:
+        root = Path(worktree_path)
+        if (
+            not root.is_absolute() or not root.is_dir() or root.is_symlink()
+            or root.resolve() == Path(root.anchor)
+        ):
+            raise ValueError("folder trust requires an existing native checkout directory")
+        return _ensure_trusted_folder(str(root.resolve()))
+    except (OSError, ValueError, TypeError) as exc:
+        raise FolderTrustError(f"Could not ensure Copilot folder trust: {exc}") from exc
+
+
 @_serialized(lambda: _config_path())
 def add_trusted_folder(worktree_path: str) -> bool:
     """Add a worktree path to trustedFolders in config.json.
@@ -321,16 +381,9 @@ def add_trusted_folder(worktree_path: str) -> bool:
         return False
 
     try:
-        header, data = _read_config_jsonc(config_file)
-        folders: list[str] = data.get("trustedFolders", [])
-        if worktree_path in folders:
-            return False
-
-        folders.append(worktree_path)
-        data["trustedFolders"] = folders
-        _atomic_json_write(config_file, data, header=header)
-        return True
-    except Exception:
+        return _add_trusted_folder(config_file, worktree_path)
+    except (OSError, ValueError, TypeError) as exc:
+        warnings.warn(f"Copilot folder trust update skipped: {exc}", RuntimeWarning, stacklevel=2)
         return False
 
 
@@ -354,13 +407,19 @@ def remove_trusted_folder(worktree_path: str) -> bool:
 
     try:
         header, data = _read_config_jsonc(config_file)
-        folders: list[str] = data.get("trustedFolders", [])
-        if worktree_path not in folders:
+        if not isinstance(data, dict):
+            raise ValueError("Copilot config.json must contain an object")
+        folders = data.get("trustedFolders", [])
+        if not isinstance(folders, list) or not all(isinstance(item, str) for item in folders):
+            raise ValueError("Copilot trustedFolders must be a list of paths")
+        names = {worktree_path, str(Path(worktree_path).resolve())}
+        remaining = [folder for folder in folders if folder not in names]
+        if remaining == folders:
             return False
 
-        folders.remove(worktree_path)
-        data["trustedFolders"] = folders
+        data["trustedFolders"] = remaining
         _atomic_json_write(config_file, data, header=header)
         return True
-    except Exception:
+    except (OSError, ValueError, TypeError) as exc:
+        warnings.warn(f"Copilot folder trust removal skipped: {exc}", RuntimeWarning, stacklevel=2)
         return False

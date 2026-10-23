@@ -21,6 +21,15 @@ from agent_worktrees import activity, git_ops, session_projection, sessions, tra
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
+@pytest.fixture(autouse=True)
+def synthetic_folder_trust(monkeypatch):
+    """These registration-identity fixtures use deliberately nonexistent paths.
+
+    Native entry/trust integration is exercised by test_worktree_trust.py.
+    """
+    monkeypatch.setattr("agent_worktrees.worktree_trust.ensure_record_trusted", lambda record: False)
+
+
 def _save_record(tracking_dir: Path, wt_id: str, wt_path: str) -> None:
     rec = WorktreeRecord(
         worktree_id=wt_id,

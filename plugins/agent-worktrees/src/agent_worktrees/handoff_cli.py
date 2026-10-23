@@ -769,14 +769,9 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
 
 def _restore_before_resume(record: tracking.WorktreeRecord) -> bool:
     """Prepare one unreachable bound session for a normal muxed resume."""
-    session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
-    result = _perform_remux(
-        worktree_id=record.worktree_id,
-        session_id=session_id,
-        worktree_path=record.worktree_path,
-        force_sudo=None,
-        apply_windows=True,
-    )
+    from . import restore_launch
+
+    result = restore_launch.restore_for_launch(record, perform_remux=_perform_remux)
     if result.get("ok") and not result.get("requires_resume"):
         if result.get("verified"):
             return True

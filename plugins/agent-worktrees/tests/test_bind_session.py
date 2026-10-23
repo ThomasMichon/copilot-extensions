@@ -23,6 +23,12 @@ from agent_worktrees import status_updater_cli
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
+@pytest.fixture(autouse=True)
+def synthetic_folder_trust(monkeypatch):
+    """Native trust has separate coverage; these identity fixtures use fake paths."""
+    monkeypatch.setattr("agent_worktrees.worktree_trust.ensure_record_trusted", lambda record: False)
+
+
 def _save_record(tracking_dir: Path, wt_id: str, wt_path: str) -> None:
     rec = WorktreeRecord(
         worktree_id=wt_id,

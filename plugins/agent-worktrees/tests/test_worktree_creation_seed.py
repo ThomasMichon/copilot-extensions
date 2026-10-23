@@ -20,7 +20,7 @@ def _create_config(tmp_path: Path) -> cfg.Config:
     config = cfg.Config(
         srcroot=str(tmp_path),
         machine="test",
-        platform="windows",
+        platform=cfg.detect_platform(),
         repo_name="demo-repo",
         repos={
             "demo-repo": cfg.RepoConfig(
@@ -45,7 +45,7 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path, config: cf
     )
     monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
-    monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *_a: False)
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(
         m.state_root_mod,
@@ -212,3 +212,47 @@ def test_any_post_record_tail_failure_preserves_recovery_identity(
     path = records / f"{payload['worktree']['id']}.yaml"
     assert path.exists() and launch_seed_state.peek(path).text == "New task"
     assert len(tracking.list_records(records)) == 1
+
+
+@pytest.mark.parametrize("seed", [None, "New task"])
+def test_companion_trust_failure_cannot_return_a_successful_launch(
+    tmp_path, monkeypatch, capfd, seed,
+):
+    from agent_worktrees import launch_seed_state, permissions, resolve_cli, tracking
+    from test_resolve_seed_delivery import _args
+
+    config = _create_config(tmp_path)
+    records = tmp_path / "tracking"
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: records)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    companion = str(tmp_path / "companion")
+    trust_calls = []
+
+    def trust(path):
+        trust_calls.append(path)
+        if path == companion:
+            raise permissions.FolderTrustError("companion trust update refused")
+        return False
+
+    def carve(*args, **kwargs):
+        permissions.ensure_trusted_folder(companion)
+
+    monkeypatch.setattr(permissions, "ensure_trusted_folder", trust)
+    monkeypatch.setattr(m, "_carve_paired_knowledge", carve)
+    monkeypatch.setattr(
+        m, "_stamp_and_compose_paired_knowledge",
+        lambda *a, **k: pytest.fail("companion trust failed; do not continue the launch tail"),
+    )
+    assert resolve_cli.cmd_resolve(
+        _args(new_worktree=True, worktree_id=None, seed=seed),
+    ) == 3
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["created"] is True
+    assert payload["recovery"]["repeat_new"] is False
+    assert "companion trust update refused" in payload["error"]
+    assert "launch" not in payload
+    assert len(trust_calls) == 2 and trust_calls[-1] == companion
+    retained = tracking.list_records(records)
+    assert len(retained) == 1
+    staged = launch_seed_state.peek(retained[0].yaml_path)
+    assert (staged.text if staged else None) == seed

@@ -63,6 +63,7 @@ def _record(
     interface: tracking.WorktreeInterface | None = None,
     origin: tracking.WorktreeOrigin | None = None,
 ) -> tracking.WorktreeRecord:
+    (tmp_path / worktree_id).mkdir(parents=True, exist_ok=True)
     return tracking.WorktreeRecord(
         worktree_id=worktree_id,
         branch=f"worktree/{worktree_id}",
@@ -117,6 +118,7 @@ def _assert_profile_launch_effects(
 
 @pytest.fixture
 def assignment_home(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     assignment._DIAGNOSTIC_KEYS.clear()
     cfg.set_active_project("test-project")
     project = tmp_path / ".test-project"
@@ -1558,7 +1560,7 @@ def test_new_worktree_survives_optional_assignment_state_failure(
     )
     monkeypatch.setattr(
         m.permissions,
-        "add_trusted_folder",
+        "ensure_trusted_folder",
         lambda *_args, **_kwargs: False,
     )
     monkeypatch.setattr(m.activity, "log_event", lambda *_args, **_kwargs: None)
@@ -2182,4 +2184,5 @@ def test_selected_profile_remains_an_ordinary_launch_profile():
     )
     inner = _inner_command(command)
     assert inner[:1] == ["copilot"]
-    assert profile.copilot_args == inner[1:-2]
+    assert profile.copilot_args == inner[1:1 + len(profile.copilot_args)]
+    assert "-C=/worktrees/wt" in inner[1 + len(profile.copilot_args):]

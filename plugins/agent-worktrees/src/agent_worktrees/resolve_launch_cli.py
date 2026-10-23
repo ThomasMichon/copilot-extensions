@@ -529,11 +529,6 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         elif ff.reason in ("ahead", "diverged"):
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
-    if not args.dry_run and not getattr(args, "defer_projections", False):
-        local_cache_refresh.prepare_for_launch(
-            record.worktree_path, compose_pair=True, config=config,
-        )
-
     native_resume = getattr(args, "native_resume_session", None)
     resume_target = None
     if not getattr(args, "no_resume", False):
@@ -616,6 +611,17 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     seed_pending = bool(staged_seed and not bare_resume)
     if native_resume and (seed_pending or not no_resume):
         return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
+    if not args.dry_run:
+        from . import permissions, worktree_trust
+
+        try:
+            worktree_trust.prepare_for_launch(
+                record, config, defer_projections=getattr(args, "defer_projections", False),
+            )
+        except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
+            output.err(str(exc))
+            _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+            return 3
     if seed_pending:
         launch_cmd = deferred_command(
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,

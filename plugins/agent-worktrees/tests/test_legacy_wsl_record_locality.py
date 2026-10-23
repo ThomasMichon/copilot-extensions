@@ -91,6 +91,21 @@ def test_legacy_wsl_owner_ref_remains_locally_addressable(legacy_records):
     assert path == legacy_records.paths["wsl"]
 
 
+def test_folder_trust_accepts_only_the_proven_legacy_guest_record(legacy_records):
+    from agent_worktrees import permissions, worktree_trust
+    from agent_worktrees.execution_spaces import ExecutionSpaceError
+
+    record = tracking.load_record(legacy_records.paths["wsl"])
+    assert worktree_trust.ensure_record_trusted(record, legacy_records.config)
+    before = permissions._config_path().read_bytes()
+    for platform in ("windows", "linux", ""):
+        with pytest.raises(ExecutionSpaceError):
+            worktree_trust.ensure_record_trusted(
+                tracking.load_record(legacy_records.paths[platform]), legacy_records.config,
+            )
+    assert permissions._config_path().read_bytes() == before
+
+
 def test_legacy_wsl_owner_ref_has_local_claimant_liveness(legacy_records):
     assert claimant.local_claimant_alive(legacy_records.owner_ref) is True
 
