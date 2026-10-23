@@ -242,6 +242,8 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] Qualify Python-free Windows source-inventory admission and durable progress under that same custody, preserving existing queues and canonical malformed/absent-state behavior.
 - [x] Qualify the finite Windows producer with real private prerequisite acquisition, immutable construction, submitting-Job loss, concurrent cold callers, source-independent queued execution and protected native-root creation.
 - [x] Qualify native Windows upgrades through retained queue-aware admission, preserving active requests, pending old-slot workers, immutable selections and later source-independent execution; refuse legacy/unsupported authority without mutating its queue.
+- [x] Qualify Linux native whole-file custody and exact-descriptor exec transfer independently of a cold producer, including path loss, foreign-descriptor refusal and failed stream construction.
+- [ ] Qualify direct unreaped Linux child adoption across native exec and whole-group settlement before integrating pre-Python acquisition.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

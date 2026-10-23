@@ -17,6 +17,7 @@ import time
 from agent_procutil.owned_process import (
     OutputLimitExceeded,
     OwnedCleanupError,
+    UnreapedChild,
     _observe_unreaped,
     _run_owned,
     require_contained_worker,
@@ -84,7 +85,7 @@ def _pidfd_exited(fd: int) -> bool:
     return any(mask & select.POLLIN for _fd, mask in events)
 
 
-def _confirm_group(process: subprocess.Popen) -> None:
+def _confirm_group(process: UnreapedChild) -> None:
     if sys.platform == "darwin":
         from agent_procutil._darwin_caller_owned import GroupCensus
 

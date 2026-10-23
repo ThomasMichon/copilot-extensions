@@ -192,6 +192,35 @@ completion. Standalone entry points must supervise that worker with the default
 owned-root mode, not assume ambient containment. This is a lifetime contract,
 not application-level authorization.
 
+## Native Linux child handoff
+
+`agent_procutil.native_child.NativeChildCustody(pid)` adopts an actual direct,
+unreaped Linux child after its original native parent deliberately execs the
+selected Python interpreter. Admission requires default `SIGCHLD`, a matching
+kernel pidfd and the child's own session/group leadership. It does not create
+a `Popen`, reopen an arbitrary persisted PID, launch a process, or confer
+installation authority. A native launcher must keep the child alive until
+handoff; a shell may already have reaped a child that exited earlier.
+
+Keep the returned custody on its adopting process and thread. Duplicate
+adoption refuses, and a fork child closes its inherited pidfd without gaining
+parent-child authority. `assert_owned()` rechecks the kernel relationship.
+`retire()` kills and confirms the same pinned group through the existing
+owned-process machinery, then reaps its original child and returns that root's
+native status. An already-exited but unreaped root remains admissible.
+Idempotent retirement does not repeat signalling. A root exit status alone
+does not attest successful prerequisite acquisition or installation.
+
+On `NativeChildCleanupError`, retain its `custody` and the application's
+interrupted fence; the root stays unreaped until positive group settlement.
+Retrying observation of that same custody is not permission to repeat the
+application operation. External reaping, changed signal disposition or
+unavailable kernel identity refuses rather than signalling an unproved group.
+As with the existing POSIX owned-process contract, descendants must remain in
+the original group; this is not a cgroup or privileged escape-containment API.
+Linux native handoff tests do not qualify a complete Python-free producer,
+caller-loss acquisition, macOS, fresh-host installation or rollout.
+
 ## Caller-owned native execution with streaming limits
 
 An ordinary synchronous caller that also needs caller-death cleanup uses the

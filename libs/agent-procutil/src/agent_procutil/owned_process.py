@@ -11,8 +11,17 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Protocol
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+
+
+class UnreapedChild(Protocol):
+    @property
+    def pid(self) -> int: ...
+
+    @property
+    def returncode(self) -> int | None: ...
 
 
 class OutputLimitExceeded(subprocess.SubprocessError):
@@ -27,7 +36,7 @@ class OutputLimitExceeded(subprocess.SubprocessError):
 class OwnedCleanupError(subprocess.SubprocessError):
     """Cleanup is unconfirmed; retain exact process/Job custody for the owner."""
 
-    def __init__(self, process: subprocess.Popen, job=None) -> None:
+    def __init__(self, process: UnreapedChild, job=None) -> None:
         self.process = process
         self.job = job
         super().__init__("native child cleanup did not complete")
@@ -72,7 +81,7 @@ def _remaining(deadline: float, argv: list[str], timeout: float) -> float:
     return remaining
 
 
-def _observe_unreaped(process: subprocess.Popen):
+def _observe_unreaped(process: UnreapedChild):
     if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
         raise RuntimeError("native child custody requires the default SIGCHLD disposition")
     if process.returncode is not None:
@@ -93,7 +102,7 @@ def _observe_unreaped(process: subprocess.Popen):
 
 
 def _retire_posix_group(
-    process: subprocess.Popen, *, inherit_process_group: bool = False,
+    process: UnreapedChild, *, inherit_process_group: bool = False,
 ) -> None:
     # Exclusive Popen ownership plus WNOWAIT pins the original PID through termination.
     # Never poll, communicate or wait this child before this boundary.
