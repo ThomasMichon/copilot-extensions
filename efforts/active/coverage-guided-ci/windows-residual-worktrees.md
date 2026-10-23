@@ -87,6 +87,58 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### I immutable-seed assertions are preserved by stronger accepted controls
+
+This is a semantic disposition of exactly two immutable source hunks, not
+permission to replace the newer tests with the historical whole-file
+after-images. The source is
+`8b7b8778b69e6bd1b6a6f2b0018fa6e1f59d961f`; the accepted comparison is
+`0ec17554ea0a6cbf7d890e9b4704433ae061e0e5`.
+
+The original published commit
+`339dc00123964d84a117afd55197a192895ebac8` contains the exact same two
+source blobs. Their public bodies are
+[`test_pr_repo_fixture.py`](https://github.com/ThomasMichon/copilot-extensions/blob/339dc00123964d84a117afd55197a192895ebac8/plugins/agent-worktrees/tests/test_pr_repo_fixture.py)
+and
+[`test_pr_seed_cache.py`](https://github.com/ThomasMichon/copilot-extensions/blob/339dc00123964d84a117afd55197a192895ebac8/plugins/agent-worktrees/tests/test_pr_seed_cache.py);
+neither source comparison requires unpublished local history.
+
+| Source hunk | Source Git blob | Accepted Git blob | Disposition |
+|---|---|---|---|
+| `tests/test_pr_repo_fixture.py:1`, `6289ec5ea07d` | `61f9c3ce112b3479165a0cd9eb01447dfc7c6ce9` | `aceb5e88bea1ba132134cc7efa2ba2a1d0c6f76d` | Preserve the stronger accepted assertions; no historical file replay. |
+| `tests/test_pr_seed_cache.py:1`, `d865d4959914` | `7c758c6b8ddae239033ad298017b1ec7716662e1` | `86bb83a2fb6f84b75a8a8ebb476d612f252cef84` | Preserve the stronger accepted publication/locking controls and companion real-Git isolation coverage. |
+
+Both source after-images and both complete accepted files were read.
+The assertion mapping is behavioral, not a filename or test-count match:
+
+| Immutable source obligation | Accepted control and retained evidence |
+|---|---|
+| Base-copy worktree links, two-commit head, relocated origin, independent hook, commit/push and unchanged seed config/link/remote refs | The same twice-parameterized `test_pr_repo_copy_relocates_links_and_isolates_mutations` retains these assertions and adds empty hooks, disabled automatic maintenance, absolute common-Git-dir resolution, no alternate object store, distinct files, private config/record mutation and an all-file seed snapshot. |
+| Published snapshot/refspec copies preserve open record, repository identity, rewrite identity and published head while independently pushing a later commit | `test_published_pr_copy_preserves_state_and_isolates_updates` retains both schemes and both iterations, plus explicit scheme/config-loader checks and a persisted-record reread. Its complete seed-byte snapshot remains unchanged after the real update. |
+| Legacy fork-only publication remains absent from origin, present on the fork, with empty legacy rewrite owner/identity and an unchanged source seed | `test_fork_seed_copy_preserves_legacy_topology_and_isolates_publication` retains these checks in two iterations and adds unpublished-feedback ancestry, exact files/message, another private sibling, distinct fork files, hook/config/record mutation and unchanged source/sibling snapshots. |
+| Completed run-local seed is shared across independent group factories, not built in group-local directories | `test_distinct_group_factories_reuse_only_completed_seed` checks the exact readiness version/key/path object, factory call counts and data, including absence of readiness before the builder completes. |
+| Uncontained calls remain independent; failed or interrupted builders never publish readiness or silently rebuild partial state | The corresponding uncontained, failed-builder and process-exit controls retain those behaviors. The uncontained branch covers both a disabled containment flag and a missing sandbox; interrupted work still requires the recorded process exit and a later incomplete-seed refusal. |
+| Invalid readiness, redirected cache controls and escaping keys fail closed | The same controls retain the original cases and add malformed/object-shape/key/path/version-type cases, sandbox/seed redirects, invalid sandbox forms, missing published directories and sidecar-lock failure. No failure silently becomes an unlocked build. |
+| Two processes build once, obtain identical completed data and reuse the cache after group-temp cleanup | `test_two_processes_publish_once_and_reuse_after_group_cleanup` replaces timing-based overlap with observed real cross-process sidecar contention. It still requires one build, equal seed paths, complete data and reuse after cleanup, with bounded waits and owned-process cleanup. |
+| Historical `test_real_git_copies_do_not_mutate_cached_seed_or_sibling`: a committed/pushed change in one copy cannot alter another copy, the cached remote refs or relocated links | `test_sibling_copy_has_independent_stores_config_index_hooks_refs_and_records` checks the same real copy/commit/push and clean sibling behavior, plus private config, hooks and records. Its all-file cached-seed snapshot includes every original remote ref and config/gitdir/worktree-link byte; the twice-parameterized base-copy control separately verifies common-dir relocation and distinct object-store files. |
+
+The last source function is not replayed merely to restore its old name:
+its obligations already have the named, stronger current owners above.
+No assertion, platform mark or test selection is deleted. This disposition
+does not absorb any separately partitioned `conftest.py` implementation
+hunk, other residual token, or the still-open original publication.
+
+At the pinned accepted head, both complete current files pass **54 tests**
+on native Windows with exactly two workers, the original 30-second item
+timeout and existing containment/process/memory/native limits:
+**73.94 seconds including preparation and cleanup**. This is targeted
+semantic evidence, not an unchanged 25-file group or repeated complete
+900-second qualification. Every parent timing gate remains open.
+
+Documentation impact is this mapping only. No plugin/runtime, CLI/config,
+install/bootstrap, external adapter or rollout changes; no new changefile
+is needed for this ledger-only disposition.
+
 ### B-REPORT-BASES one availability read per base in a read-only report
 
 `explain` reads each candidate base's commit existence once and supplies that
