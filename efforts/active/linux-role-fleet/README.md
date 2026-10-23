@@ -111,6 +111,18 @@ keep the admission floor unchanged." This selects a source contract, not a
 live rollback or rollout. [The scoped recovery proposal](client-retained-good-recovery.md)
 separates that choice from agent-recommended implementation details.
 
+For installation generations, the operator directed:
+
+> Always reinstall forward. We never want to block a new install unless the new
+> generation fails to start; graceful handoff from the old generation is a
+> "nice to have"
+
+The [client lifecycle proposal](client-lifecycle-admission.md) must therefore
+make new-generation installation/start independent of old-generation retirement,
+cleanup and graceful handoff. This is source design direction, not authorization
+to deploy, force-stop an old owner, bypass release authentication or erase the
+accepted floor. The isolation and fencing details remain agent-recommended.
+
 ## Plan
 
 ### Mission amendment - Setup, refresh and first useful services
@@ -190,11 +202,14 @@ Implementation sequencing below is **agent-recommended**:
   Attempt-local metadata journals and staged namespace retry are merged in #8038.
   Complete producer headers before client pending ownership are merged in #8093;
   existing missing/malformed legacy proofs still refuse.
-  Retained-good implementation,
-  identity retirement/reinstall fencing and a managed installer remain open.
   [Explicit retained-good recovery](client-retained-good-recovery.md) is the
-  operator-selected contract reviewed in #8106; executable implementation and
-  its complete validation remain open.
+  operator-selected contract reviewed in #8106; its client source implementation
+  and focused Windows/Linux qualification merged in #8185. The accepted floor
+  remains unchanged. The operator-directed
+  [forward-first generation contract](client-lifecycle-admission.md#forward-first-installation-generations)
+  is proposed next: replacement construction/start must not wait for old
+  retirement, cleanup or graceful handoff. Generation/floor fencing and a
+  complete managed installer remain open.
   None of these local prerequisites authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner
