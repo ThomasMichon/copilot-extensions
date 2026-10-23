@@ -91,7 +91,7 @@
       "status": 401
     }
   },
-  "execution_closure_sha256": "6015b39806ea82cf88877767cac9c9e9e48318cc8e2cf74646fd59b7fe182c50",
+  "execution_closure_sha256": "855d220269209509f95ecd8bfc702f690eba4098693f282b5ae1e7ce59621275",
   "execution_closure": {
     "libs/agent-procutil/src/agent_procutil/__init__.py": {
       "blob": "055e20131efdc966b58de8ad46699d9ba31305b2",
@@ -2298,8 +2298,8 @@
       "sha256": "d450d18940b6a9320efd3e5530b34828ed8b63ca0aafbe443a1792441f63361b"
     },
     "tools/check-feed-neutrality.py": {
-      "blob": "bc87563b71baea7b2877c9df6b777d0a5f2df19f",
-      "sha256": "8ad975e83b2b55f5e5a2555deaa1ac7dd47089273c9ec92fc8f21716e5eb0cdf"
+      "blob": "fb6c19d72896cbade814713fc30d7b3fee6adf85",
+      "sha256": "581cfffce787c7dfb7ae5b4d6316763857663ee87752e4d20952b9200a13386e"
     },
     "tools/check-gh-aw-action-pins.py": {
       "blob": "e8a14daa4502d6e0b03c069eb18947d2fef064d3",
@@ -2318,8 +2318,8 @@
       "sha256": "783e87b648f2fc8deac6e2a36f88ce62133f6c9558a3f179cb772180eef61821"
     },
     "tools/check-install-contract.py": {
-      "blob": "de8616451a43d2576065d1d7e2badee7feab39b6",
-      "sha256": "9ae23fdae00ebd19fe79e70a8b342b4128a6d371a66dd2fd759125df4782d151"
+      "blob": "c876c700482a32476078b5cf504af4fde3c2218e",
+      "sha256": "f7f87dc0ff15619c7ceb28948ac9a48cad9a210999934448f60673881d605449"
     },
     "tools/check-large-files.py": {
       "blob": "8283e6cc5700725e018abd3606202dfcdd7fe9ff",
@@ -2438,8 +2438,8 @@
       "sha256": "17c3368e1252af05611893468606db815af234c367440ca4fb7f809f093bbd26"
     },
     "tools/install_contract_guard.py": {
-      "blob": "72c7fd35e015998d0ad5f8f09a7134d067a1ad32",
-      "sha256": "7dc19a8d154f2901e187ef654337897257dfeb5a6f905e8bd51a5127e03443a8"
+      "blob": "f675509b683bde060a1dedd4f771bccb30246616",
+      "sha256": "2a1e9753b770edaefd738572f8a901ac4fb481d83bc1211d4a74365bd6c00b67"
     },
     "tools/installation_context_ci_scope.py": {
       "blob": "68c063df91dde216f2d220c5c52173b150d1806c",
@@ -2710,8 +2710,8 @@
       "sha256": "014dc54cb1e0ca4e2aa26b75dcd12bb7926fc8c370e060f573d04cb6552da28f"
     },
     "tools/test_check_feed_neutrality.py": {
-      "blob": "e1a250479ccd4414f8bb94b359c27e6e25769a14",
-      "sha256": "f65c481275f24983b809f5909e7893fbdb0b730af8e518637cd9197d6efc9891"
+      "blob": "d7950dc01721b6585356fc429503d7113ba20282",
+      "sha256": "5bbd5185a2d2fdcbdd6b7c88ed6d3a547e809b10763491f43f827de8d97454f2"
     },
     "tools/test_check_gh_aw_action_pins.py": {
       "blob": "fc8d66b5db5c79827b5921c95fd435a4de6a11d7",
@@ -2726,8 +2726,8 @@
       "sha256": "106a859d72ca725d0495984de115812e406a19c3a8bcfba45e0dc14687cdd1de"
     },
     "tools/test_check_install_contract.py": {
-      "blob": "fb2b7d0e4aa6b19ac8384111d042d187381f0a19",
-      "sha256": "d7447a47b258570c3637ecb321671d5c63f0ec963db9809fdc52d0315f3bc618"
+      "blob": "eb93d51aa1ba1c4c7a3da709006225ce05c9d950",
+      "sha256": "4bcc190f09e47c179d9a48031d5c47e7c8faa64568a6a038897de652126159cb"
     },
     "tools/test_check_large_files.py": {
       "blob": "0cffdd5d67dd5d5d6411aeb037710d1cab964443",
@@ -3170,7 +3170,7 @@
   },
   "scope": "model-free ASGI and owned stdio fixtures; not real Copilot, deployment or host qualification",
   "captured_from": {
-    "commit": "8b0015f501354c1c32241d7308b7b300c2a46cbe",
+    "commit": "09f194af0f44162b6506cfcc11ef4ff7a6e0042e",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
