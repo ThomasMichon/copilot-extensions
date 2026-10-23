@@ -257,7 +257,7 @@ directory), and the active version is selected **atomically** (a `current`
 junction/symlink swap), never by mutating a shared venv. Switching versions —
 forward or a rollback — is a selection, not a rewrite; a running service keeps
 serving its own immutable files until it is cut over or retired, and two live
-versions are reconciled by drain-and-cutover + shared routing/port state rather
+versions are reconciled by best-effort handoff or cold takeover + shared routing/port state rather
 than by racing to overwrite one install. This makes a concurrent-update
 corruption (two installers mutating one venv → duplicate/broken daemons)
 impossible by construction, and rollback a swap rather than a rebuild. The
@@ -278,7 +278,8 @@ edits. Installed code remains usable without its source checkout.
 
 Explicit development ownership preserves the original restore target across
 successive generations. Each iteration freezes its inputs, builds or reuses
-the corresponding generation, and selects it through ordinary healthy cutover.
+the corresponding generation, and selects it through the ordinary replacement
+lifecycle, including best-effort handoff and recoverable cold takeover.
 A failed candidate preserves the working generation and restore target.
 Clean merged Dev deployment uses the same lifecycle without impersonating an
 interactive worktree claim or a promoted release.
@@ -673,13 +674,19 @@ contract's declared tolerance: a newer caller reaches an older endpoint, and a
 newer endpoint serves an older caller, each **degrading a version-gated feature
 gracefully** — negotiating shared capability instead of assuming a matched build
 — rather than erroring. This extends *degrade-gracefully* from an **absent** peer
-to a **present-but-skewed** one. A contract evolves only by **tolerant, additive
+to a **present-but-skewed** one. Within a supported compatibility range, contracts evolve by **tolerant, additive
 change**: unknown fields are ignored, existing fields keep their meaning, and a
 breaking change carries a **deprecation window** across which both the old and the
 new form are honored — so an endpoint, its discovery handshake, and its wire
 protocol each advertise a version and a supported range, never a single required
 match. A version mismatch that falls **outside** the tolerance
 *fail-loud-on-endpoint-error*'s the real version gap, never silently misbehaves.
+
+Compatibility negotiation is not a veto on an authorized service replacement.
+A selected development generation may deliberately break every predecessor
+handoff or wire contract and take over cold. It does not pretend incompatible
+RPCs succeeded or require the outgoing version to understand the newcomer.
+Durable-state recovery remains the incoming service's separate responsibility.
 
 ### local-first-exposure
 A service is machine-local by default — reachable by processes on the same host
@@ -717,26 +724,34 @@ repo-altering effect is explicit, ownership-aware, and travels through the
 repository's normal contribution flow; it is never a side effect of deployment.
 
 ### zero-downtime-cutover
-Replacing a running service with a new version is **zero-downtime** for both the
-**requests** it is serving and the **scheduled or background work** it owns. A
-cutover **health-gates** the new version on a fresh endpoint, flips a
-client-followed **routing record atomically**, then **drains** the old version —
-letting in-flight requests finish and **handing off queued/scheduled work** to the
-new version rather than dropping it or running it twice — before the old version
-retires. The switch is **reversible up to a commit point**: roll back to the old
-version, or commit forward to the healthy new one if the old endpoint is already
-gone, rather than stranding clients. A version swap therefore never drops a
-request, double-runs a scheduled job, or opens a window with no live service.
-*How* the routing record and drain are implemented (a shared cutover primitive) is
-spec-level, not fixed here.
+Service handoffs are **best effort**. Zero downtime is the preferred compatible
+path, not an unconditional guarantee or a veto on replacement. Where contracts
+interoperate, health-gate the incoming owner, switch routing, hand off work and
+drain the predecessor before retirement. An incompatible, unavailable or
+non-settling handoff instead permits bounded cold takeover: the outgoing daemon
+stops the work and sub-daemons it owns and exits promptly; the selected newcomer
+recovers from reasonably durable state. A transient outage, cut-off stream or
+interrupted in-memory unit is an expected failure mode, not by itself a reason
+to refuse the selected generation.
+
+The incoming daemon or its lifecycle owner may force-terminate an uncooperative
+predecessor and its owned process scope when handoff cannot complete. This is
+authorized service replacement, not arbitrary reaping: validate the exact
+service, installation and process identity, preserve one mutation authority,
+and prevent concurrent exclusive owners. The outgoing version neither fights
+shutdown nor waits indefinitely for compatible contracts or a perfect drain.
+Incoming readiness must be established after cold recovery; success is never
+reported solely because the predecessor stopped.
 
 Supersession is identity inequality: an owner is displaced because its full
 generation identity is no longer current, not because another package version,
 source hash or generation sorts after it. Selecting a different completed
 generation starts that incoming owner through the same lifecycle in either
-direction, including rollback. The displaced owner keeps serving until healthy
-handoff and drain settle; observing "not current" alone never authorizes an
-immediate exit. State and work compatibility still gate the reverse handoff.
+direction, including rollback. Prefer healthy handoff and drain, but a confirmed
+replacement may retire the displaced owner before incoming readiness when cold
+takeover is necessary. An ambiguous marker read alone is not replacement
+authority. State compatibility still gates rollback; breaking an in-memory
+handoff contract is not the same as being unable to recover durable state.
 Release-channel ordering may choose a desired release; it never determines
 which already-running owner is superseded.
 
@@ -747,6 +762,24 @@ through that same authority rather than repairing one another's live work.
 An unfinished transition is not automatically abandoned: recovery establishes
 that its owner is gone or has yielded before changing the serving generation,
 releasing its drain, or retiring its candidate.
+
+### crash-tolerant-service-recovery
+Consumers tolerate momentary unavailability, dropped replies and truncated
+streams as network failures: re-resolve the current endpoint, reconnect and
+resume or retry through the service's contract. A missing reply is not proof
+that a side effect did not happen. Retriable flows use durable operation
+identity, deduplication or outcome reconciliation; genuinely unrecoverable
+in-memory work is reported as interrupted, not silently declared successful.
+
+Daemons and their sub-daemons tolerate abrupt shutdown like a power outage.
+Reasonably durable state, checkpoints and recoverable ownership let a cold
+successor roughly continue without orphaned execution or uncontrolled duplicate
+effects. Recovery does not depend on a final flush, shutdown notification or
+successful state-transfer RPC. Cleanup and graceful checkpointing are useful
+best efforts, not shutdown vetoes. This is crash consistency and retriable
+progress, not a promise of perfect preservation or universal exactly-once
+execution. Durable-state incompatibility needs explicit safe migration or a
+visible recovery outcome, never silent corruption or an implicit data wipe.
 
 ### one-authority-per-lifecycle-decision
 Every lifecycle decision has exactly one owner. Composing the suite never
@@ -819,8 +852,8 @@ deferred or refused, and why.
 A lifecycle supervisor is bound **once** to a stable launcher and remains
 unchanged across ordinary version updates. The launcher resolves the selected
 immutable runtime generation dynamically; an update installs the new generation
-beside the old one and uses *zero-downtime-cutover* to move work before retiring
-the predecessor. A routine version bump therefore requires neither
+beside the old one and uses *zero-downtime-cutover*'s preferred graceful path or
+bounded cold takeover to replace the predecessor. A routine version bump therefore requires neither
 re-registration nor renewed elevation, and changing runtime configuration does
 not rewrite the supervisor definition.
 
@@ -842,6 +875,11 @@ reproducing the same incoherence under a different name; a native identity
 handoff, or a thin version-agnostic intermediary the service manager tracks
 permanently and which itself mediates the handoff, are the mechanisms that
 actually close this case) — *which* mechanism is spec-level, not fixed here.
+
+If cold takeover leaves no live successor yet, the same supervisor recovers the
+selected generation. Forced predecessor exit does not authorize resurrecting
+the displaced version, racing the newcomer or claiming readiness during the
+outage.
 
 ### payload-remains-replaceable
 The marketplace payload remains replaceable while services and launchers are

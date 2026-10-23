@@ -1,6 +1,7 @@
-# Pattern: graceful daemon cutover (update without killing in-flight work)
+# Pattern: graceful daemon cutover and bounded cold takeover
 
-> **Serves the vision:** a runtime update is invisible to work in progress.
+> **Serves the vision:** best-effort service handoff with crash-tolerant recovery;
+> seamless compatible cutover is preferred, not a veto on replacement.
 > **Embodied by:** `agent-bridge`, `agent-dispatch`, `agent-index`,
 > `agent-mcp`, `agent-worktrees`, and `worktree-manager`; `agent-vault`
 > remains the main planned adopter still to land.
@@ -32,13 +33,21 @@ that (stop the old process, start the new one) **destroys whatever the old
 process was doing**. On Windows that is worse: a stopped daemon that held an open
 handle blocks the swap, and a mid-turn kill loses a non-resumable Copilot turn.
 
-The rule (from the effort charge):
+The current rule:
 
-> An update must never kill in-flight, non-resumable work owned by a service.
+> Handoff is best effort. Prefer preserving in-flight work, but an incompatible,
+> unavailable or non-settling handoff permits prompt owned-scope shutdown and
+> cold takeover. Consumers and sub-daemons must tolerate interruption.
+
+This is the target contract. The API and per-plugin adoption sections below
+describe the existing graceful path; they do not prove that every adopter
+already implements cold takeover, crash recovery or the required retry behavior.
+This rule concerns daemon replacement, not Copilot context/session succession.
 
 ## The protocol (the shape)
 
-The installer triggers this **automatically** during activation (see *Wiring* below) —
+This is the preferred compatible path. The installer triggers it
+**automatically** during activation (see *Wiring* below) —
 cut over **without a stop** by standing the new version up *beside* the old one
 and moving work to it at a safe point:
 
@@ -70,6 +79,61 @@ RETIRE the old daemon      ── on abort after commit ⇒ commit-forward, neve
 This is exactly the **active/passive, routing-table (no-proxy)** model the shared
 `zdd` library already implements — do **not** reinvent it per plugin, and do
 **not** surface it as an operator-run command.
+
+## Bounded cold takeover
+
+An authorized selected generation must not be held hostage by an incompatible
+predecessor, a failed control-plane handshake, a stuck drain or a missing final
+checkpoint. A development generation may break every old handoff/wire contract.
+Use the existing installation and service lifecycle authority, not a second
+reaper or a parallel update loop:
+
+1. Confirm a completed, admitted target is still selected and that this
+   replacement owns the service/installation transition. Serialize it with
+   cutover/recovery, rechecking selection and target identity before mutation.
+   A failed build or an ambiguous owner record is not takeover authority.
+2. Attempt cooperative admission closure, durable checkpointing, child cleanup
+   and exit only within a bounded budget. Incompatibility may skip a handshake
+   that cannot work. Outgoing daemons stop everything in their owned process
+   scope and quick-terminate rather than veto shutdown because they are busy.
+3. The newcomer or its lifecycle owner may force-terminate that exact
+   predecessor and its attributable owned process scope if cooperation fails.
+   Reuse the shared identity-bound/native-handle termination and custody
+   primitives, including immediate owner/selection revalidation and exit
+   confirmation. Never kill by process name or a bare/reused PID; never sweep
+   another installation, the incoming generation, or separately owned workers.
+4. Establish predecessor exit or equivalent write exclusion before the newcomer
+   acquires exclusive resources or resumes mutations. Cold recovery may follow
+   old-owner retirement: health/promotion-before-retire is not a precondition on
+   this fallback. The supervisor follows the selected generation and does not
+   resurrect the displaced owner. Retain durable recovery evidence if the
+   replacement caller dies, so the same authority can finish recovery.
+5. Reconstruct owned work from durable state, publish the recovered endpoint and
+   verify incoming readiness. A temporary outage or stream cut-off is allowed;
+   report failed/partial recovery explicitly, never success just because the
+   old process exited. State migration and compatible rollback remain explicit;
+   handshake incompatibility does not authorize corrupting or wiping state.
+
+### Consumer and child-daemon fault tolerance
+
+- Outer consumers treat refusal, connection loss, missing replies and truncated
+  streams as network failures. Re-resolve discovery and reconnect/resume or
+  retry with bounded backoff. Going-away notices are useful but never required
+  for recovery; a crash cannot guarantee delivery.
+- A retry must not assume a missing reply means no side effect occurred. Use
+  durable operation identity/checkpoints, deduplication or outcome reconciliation
+  at the actual effect boundary. Expose unknown/interrupted outcomes when the
+  flow cannot safely replay; no universal exactly-once guarantee is implied.
+- Sub-daemons tolerate abrupt parent death or forced owned-scope termination
+  like power loss. Persist reasonable progress and ownership before relying on
+  it, recover incomplete work, and avoid orphaned or duplicate exclusive
+  execution. Final shutdown flushes and handoff RPCs are optimizations, not the
+  sole durable state store or a prerequisite for the newcomer to start.
+- Qualify compatible graceful replacement and incompatible/refused/hung handoff,
+  abrupt child death, lost reply, mid-stream cut-off, retry deduplication,
+  replacement-caller death and native identity mismatch on isolated processes.
+  Prove old-owner exclusion and recoverable progress, not impossible zero loss
+  of all in-memory work. Keep platform gaps explicit.
 
 ## The shared primitive: `zdd` (`libs/zdd/`)
 
@@ -124,7 +188,8 @@ established by HTTP health or installer configuration alone.
    *stop accepting new work and wait for in-flight work to reach a boundary
    where retiring the old daemon loses nothing.* Each daemon defines that
    boundary (see per-plugin below). Expose `drain`/`undrain`; return busy vs.
-   drained so the installer/ExecStop can gate on it.
+   drained for the compatible path. This is not an unbounded veto: the cold
+   takeover contract applies when that path cannot settle.
 2. **The edge adapter** — how *this* service's clients follow the flip.
    Short-lived clients re-read `active.json` directly. A service reached through
    a **fixed external port** (a reverse tunnel, a shared relay) instead has a hop
@@ -160,9 +225,9 @@ separate step, no operator action, nothing to remember.
 
 - **Trigger:** the same automatic paths that already run the installer — the
   Picker/operator `update` flow and the versioned-runtime reconciler on a routine
-  version bump. They update the venv in place (no stop) and **cut over as part of
-  activation**, falling back to stop-and-swap only if the cutover cannot run or
-  fails. A human never runs a cutover verb.
+  version bump. They build an immutable venv beside its predecessor and **cut over as part of
+  activation**, falling back to bounded cold takeover if handoff cannot run or
+  settle. A human never needs a separate cutover verb.
 - **Mechanism, not interface:** the drain/flip/retire logic lives in `zdd` (a
   library) and is invoked by the installer directly. Any `drain`/`undrain`/
   cutover entry points a daemon exposes are **internal seams the installer
@@ -200,24 +265,25 @@ handles the orphaned-by-a-dead-orchestrator case that the reap never reaches.
 Each daemon reads the routing table and asks a single question with a deliberately
 narrow "yes":
 
-> Is the `active` entry a **different pid**, at a **strictly higher generation**,
-> that is **actually listening**?
+> Does authoritative current selection identify a **different full runtime
+> generation**, and does this transition actually replace this service owner?
 
-Only then is it a *confirmed live successor* that has superseded us. Every
-ambiguous state — no table, an absent/unparseable `active`, our **own** pid still
-active, a not-higher generation, or a successor that is not (yet) accepting
-connections — returns **False (stay alive)**. The consequence that makes this safe
-to run inside a live daemon: the genuinely-active daemon always reads *its own* pid
-as `active`, so it can **never** self-retire; only a demoted generation with a
-confirmed live successor ever can. (Implemented as a pure, injectable
-`self_retire.is_superseded(config_dir, my_pid, my_generation)` in each consumer.)
+Numeric package-version, hash or generation ordering is irrelevant; compatible
+rollback and same-version/different-source replacement must work too. On the
+graceful route, confirmed successor readiness still protects ongoing service.
+On an authorized cold takeover, incoming listening/health is not required
+before the outgoing owner exits. Ambiguous selection or process identity alone
+never authorizes destructive action. Distinguish this target from legacy
+numeric/routed `is_superseded` helper behavior, whose adopter migration and
+native qualification remain implementation work.
 
 ### Two more gates before it actually exits
 
 The predicate decides *superseded?*; two additional gates decide *safe to exit
-now?*:
+now on the compatible graceful path?* These gates do not override the bounded
+cold takeover decision:
 
-1. **Safe cutover point (never drop in-flight work).** Exit is gated on the same
+1. **Safe cutover point for graceful preservation.** Exit is gated on the same
    drain boundary the cutover uses (§ consumer contract, point 1): agent-bridge
    waits for no active session; the agent-dispatch coordinator waits for the
    `DrainGate` to report no in-flight `/claim` or outbound satellite intake
@@ -268,34 +334,32 @@ already has, but must never let its own bounded scope grow further:
   an old one still holds a stale source list," but literally refuse to grow
   the set from here on. An update to something *already* tracked is not new
   scope and may still be accepted/served.
-- **Single-shot (request/response) callers get an explicit, actionable
-  rejection — never a bare connection-refused.** A caller that opens a
-  connection, asks once, and expects one reply must receive a structured
+- **Prefer an explicit, actionable rejection while able to respond.** A caller
+  that opens a connection, asks once, and expects one reply should receive a structured
   "I'm going away, here's why, re-resolve discovery and call the replacement"
-  response (the existing `{"fallback": true, ...}` wire shape this suite's
+  response when possible (the existing `{"fallback": true, ...}` wire shape this suite's
   `work-coalescing-singleton` servers already use for a deadline-exceeded
   case is the right shape to extend with a `reason` — not a hard-closed
-  listening socket that degrades to an ambiguous OS-level connection-refused
-  the caller has to guess at).
-- **Persistent subscribers get a notice, then an explicit close — never a
-  silent drop.** A caller that holds an open streaming channel (SSE,
+  listening socket). A refusal or missing reply during cold takeover is still
+  a supported network-failure case; the caller must re-resolve/retry safely.
+- **Prefer a going-away notice and explicit close; tolerate a silent drop.**
+  A caller that holds an open streaming channel (SSE,
   WebSocket) — the expected shape for **daemon-to-daemon** communication
   between two long-running resident services in this suite, as opposed to an
-  ordinary CLI-to-daemon single-shot call — must be sent an explicit
+  ordinary CLI-to-daemon single-shot call — should be sent an explicit
   going-away notice over that same channel (reason: superseded/updating)
   before the daemon closes it. A subscriber that only ever sees its socket
-  die with no message has no way to distinguish "the daemon updated" from "the
-  daemon crashed."
+  die with no message recovers as from either an update or a crash; distinguishing
+  the two is not a recovery precondition.
 - **Immediately drop, never queue, anything that would still need to be
   started.** If a request arrives after admission has closed, it is rejected
-  per the two bullets above — it must never be accepted into an internal
-  backlog to run "once there's room." There is no "once there's room" once
-  superseded.
-- **Only already-admitted, already-in-flight transactional work for which this
-  daemon is the sole custody bearer may still be allowed to finish.** That is
-  the *only* class of work a superseded daemon still owes completion — not new
-  work, not queued-but-unstarted work, just the bounded unit(s) genuinely
-  already running that no successor could resume in its place.
+  per the two best-effort response forms above — it must never be accepted into
+  an internal backlog to run "once there's room." There is no "once there's
+  room" once superseded.
+- **Only already-admitted bounded work may finish during graceful drain.**
+  No in-memory unit is an indefinite shutdown veto. Cold takeover may interrupt
+  it; recover from durable operation state or report its uncertain/interrupted
+  outcome rather than claim it completed or blindly replay an unsafe effect.
 
 ### Opt-in until validated on a real cutover
 
@@ -380,6 +444,9 @@ failure degrades to `active`/`previous: null` rather than failing the whole
 
 ## Per-plugin adoption
 
+These are existing graceful-path implementations and historical acceptance,
+not proof of each adopter's new cold-takeover/retry/crash-recovery obligations.
+
 | Plugin | Daemon(s) | State today | Safe cutover point | Work |
 |--------|-----------|-------------|--------------------|------|
 | **agent-bridge** | session-host (hosts a live Copilot CLI per session) | ✅ **Cutover already the default** — full `zdd` (active/passive, `drain`/`undrain`, breadcrumb recover), and `install.ps1 update`/POSIX `update` already run the cutover unconditionally whenever a live daemon is running (Thread B, invariant #1) -- no flag, no opt-in. `-ZeroDowntime` is accepted only as a deprecated no-op for back-compat callers. A public `deploy` verb also exists as an operator escape hatch / self-triggered-update spawn target | **turn boundary with no active background task** — drain refuses new turns, waits for the in-flight turn to finish | Keep it the exemplar; extract shared shapes into `zdd`. Per invariant #1's target state, eventually demote the `deploy` verb to an installer-internal seam once nothing external needs to trigger a cutover by hand |
@@ -442,16 +509,19 @@ agent-bridge needs.
    > trigger, has soaked enough to be trusted end to end), demote that
    > plugin's verb back to an installer-internal seam per this invariant --
    > don't treat its present existence as the target state.
-2. **No stop-then-start for a routine version bump.** The default is a cutover
+2. **Prefer no stop-then-start for a compatible routine version bump.** The default is a cutover
    (new slot beside old → flip → drain → retire). Stop-and-swap is the fallback
-   only when a cutover cannot run or fails.
-3. **The old daemon is retired only after its drain reaches the safe cutover
-   point** (or forced past a bounded timeout, logged). Define that point per
-   daemon; never retire mid-non-resumable-work.
-4. **Never strand clients.** After the commit point, if the old endpoint is
+   when a handoff cannot run or settle; incompatibility does not veto replacement.
+3. **Drain is best effort and bounded.** Prefer a safe cutover point, but cold
+   takeover permits owned-scope shutdown or identity-checked force termination
+   without successor health or a final flush. Non-resumable work can be
+   interrupted; durable recovery and honest outcome reporting are mandatory.
+4. **Do not strand recovery.** On the compatible path after the commit point, if the old endpoint is
    unreachable, **commit-forward** to the healthy new one (never roll back into a
    dead daemon). An aborted pre-commit cutover **rolls back** (old stays live).
-   A demoted daemon's own admission-closing and caller-notification obligations
+   Cold takeover may leave a temporary outage and cut-off streams; callers
+   reconnect/retry while the selected newcomer cold-recovers and proves health.
+   A demoted daemon's own admission-closing and best-effort caller-notification obligations
    are the daemon-side half of this same invariant — see
    [§ Admission discipline once superseded](#admission-discipline-once-superseded--stop-growing-scope-finish-whats-already-yours)
    and [§ A bounded ceiling on the K-confirmation gate](#a-bounded-ceiling-on-the-k-confirmation-gate--never-an-unbounded-wait).
@@ -464,38 +534,27 @@ agent-bridge needs.
    live-daemon activation is operator-gated (agent-bridge is the launcher the
    harness itself runs under).
    (agent-bridge is the launcher the harness itself runs under).
-8. **Cross-version process isolation: no reach-in, discovery + IPC only, and
-   old versions self-retire.** A process belonging to version `N` must never
-   (a) spawn a child with its `cwd`, working directory, or any other
-   filesystem presence pinned inside a *different* version's slot — not an
-   older version's, and not a newer one mid-install — or (b) terminate
-   another version's resident daemon by a bare PID lookup. The only sanctioned
-   way to interact with another version's daemon is to **discover** its
-   reserved endpoint via the routing table (`zdd.routing`) and **talk to it
-   over the existing control-plane IPC** (health/drain/shutdown). The daemon
-   being cut away from is responsible for **retiring itself** on receiving
-   that request (or, for a pre-protocol legacy resident, on losing the
-   routing table's "active" claim) — the orchestrating process only ever
-   asks, it never reaches in and kills. A kill-by-PID fallback is permitted
-   **only** for a legacy resident that predates this protocol entirely (no
-   routing-table entry, hence no IPC endpoint to ask), lives in one central,
-   shared primitive (`zdd.diagnostics.terminate_pid_if_identity` —
-   identity-bound via a captured process-start-time token, immediately before
-   signaling, never a bare `os.kill`/`taskkill` by PID alone), and is only
-   ever invocable against a version strictly older than the caller's own.
-   Violating (a) is what let a spawned/stranded passive's open `cwd` handle
-   block every later `shutil.rmtree(slot)` self-install attempt on Windows
-   (copilot-extensions#4999); violating (b) with a bare PID kill reopens the
-   TOCTOU race where the OS reuses that PID for an unrelated process between
-   the identity check and the signal (copilot-extensions#5006).
+8. **Cross-version isolation and identity-bound replacement.** Never pin a
+   child into another generation's immutable slot or mutate its runtime files.
+   Prefer discovered control-plane health/drain/shutdown IPC, but a working IPC
+   contract is not required for bounded cold takeover. The authorized newcomer
+   or lifecycle owner may terminate the exact displaced daemon and its owned
+   scope through shared native identity/custody primitives; this is not limited
+   to pre-protocol legacy residents or numerically older versions. A raw PID,
+   process name, stale route or version comparison is never sufficient. Confirm
+   exit/write exclusion before the incoming generation owns exclusive work, and
+   keep unrelated installations, current successors and separately owned
+   processes outside the termination scope.
 
 ## Cross-platform parity (Windows `install.ps1` ↔ POSIX `install.sh`)
 
 The cutover **mechanism** is the OS-agnostic `zdd` library + the daemon's own
 Python seam (`_cutover` / `deploy`), so the *hard part is shared*. What
 legitimately differs is the **service-manager integration**, and the two
-platforms reach the **same behavioral guarantee** (an update never hard-kills
-in-flight, non-resumable work) by different, OS-appropriate routes:
+platforms share the **same target**: prefer compatible graceful replacement,
+permit bounded cold takeover, and recover interruption through durable state
+and retriable consumers. The existing graceful routes use different,
+OS-appropriate mechanisms:
 
 For non-marketplace peers such as **worktree-manager**, read the
 `install.ps1`/`install.sh` shorthand here as "the equivalent update activation
@@ -511,11 +570,13 @@ cutover behavior on both platforms even though it has no plugin manifest.
 
 Consequences of this equivalence:
 
-- **The binding invariant holds on both platforms.** POSIX meets it *natively*
-  via SIGTERM-graceful drain even without the zdd cutover; the cutover on POSIX
+- **These existing routes describe graceful behavior, not cold-takeover
+  qualification.** POSIX can drain via SIGTERM even without the zdd cutover;
+  a hung/unsupported shutdown still needs the bounded termination contract
+  above. The cutover on POSIX
   is the **zero-downtime enhancement** (removes the brief blip), gated on a live
-  *routed* (Thread-B) daemon with the `systemctl restart` as the always-safe
-  fallback.
+  *routed* (Thread-B) daemon, with a lifecycle-owned restart as fallback rather
+  than an unconditional no-loss guarantee.
 - **Detached daemons still participate, but via activation-seam parity rather
   than a service-manager fallback.** `agent-worktrees` reaches the same
   cross-platform guarantee through `install.ps1`/`install.sh` plus the routed
@@ -554,15 +615,19 @@ cheaper than a review round.
    path that also touches promotion/retirement state — an audit/`doctor`
    snapshot may read without the lease, but anything that could mutate
    generation state must hold it.
-2. **Promote before you retire — never the reverse.** The old generation may
+2. **Compatible path: promote before you retire.** The old generation may
    only retire once the successor's promotion is *confirmed*, not merely
    attempted. A failure between "route flipped" and "successor confirmed
-   live" must roll back or retry, never leave both generations gone.
+   live" must roll back or retry. The explicit cold path instead permits
+   retiring the old owner before readiness; require bounded owned-scope
+   termination, old-owner exclusion, durable recovery and truthful outage/
+   readiness outcomes, not the impossible graceful ordering.
 3. **Drain boundary = admission closed AND every already-admitted unit of
    work finished** — not "between sweep ticks." If the daemon serves any
    concurrent request surface (a hook/classify/control-plane endpoint)
    *separate* from its periodic sweep, both must be drained; a sweep-only
-   drain boundary misses in-flight requests.
+   drain boundary misses in-flight requests. This governs a claimed graceful
+   success, not a veto on a declared bounded cold takeover.
 4. **A repair/self-heal path must re-validate its target immediately before
    acting, not just at snapshot time.** Between an audit snapshot and a
    repair action, the routed active daemon can change, a passive can be

@@ -158,11 +158,16 @@ is unchanged. A new edit requires a new immutable generation or exact healthy
 reuse, not mutation of the selected environment. This does not relax the clean,
 merged-source admission required for unattended Dev deployment.
 
-Selecting a generation initiates ordinary start, health-gated handoff and drain.
+Selecting a generation initiates ordinary start and best-effort handoff.
 The displaced owner is identified by inequality with current selection, never
 by numeric version or hash ordering. Forward and compatible reverse selection
-use the same baton-passing contract without retiring the serving owner before
-its replacement is ready.
+prefer the same healthy baton-passing contract. Incompatible or failed handoff
+permits prompt predecessor retirement and cold startup, even before incoming
+readiness; a breaking development generation is not refused merely because
+its predecessor cannot cooperate. The service lifecycle owns identity-checked
+termination and exclusive ownership, and consumers tolerate the outage while
+the newcomer recovers durable work. Immutable construction, source admission
+and state-safe recovery are not waived.
 
 ### optional-client-artifacts-complete-promotion
 

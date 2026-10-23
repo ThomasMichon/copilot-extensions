@@ -15,9 +15,11 @@
 ## The problem
 
 [`graceful-daemon-cutover`](graceful-daemon-cutover.md) already solves
-zero-downtime for a service's **external** behavior: the new version is
+the preferred compatible path for a service's **external** behavior: the new version is
 health-gated, the routing table flips, the old version drains and retires —
-clients never see a dropped request or a double-run job. But a
+clients avoid interruption where the handoff succeeds. Incompatible or
+non-settling handoff may instead use bounded cold takeover and retriable
+durable-state recovery. But a
 **spawn-new-retire-old** cutover (as opposed to a restart-in-place) is
 necessarily **two overlapping processes**, and the host's native service
 manager (a systemd unit, a Windows Scheduled Task) tracks only **one**. When
@@ -54,11 +56,12 @@ end-to-end exemplar. Remaining restart-loop/rollout validation belongs to
 historical disable-requester investigation remains separate in
 [#6137](https://github.com/ThomasMichon/copilot-extensions/issues/6137).
 
-A daemon that owns a shared endpoint and in-flight, non-resumable work (the
-coordinator) cannot collapse to that single-process shape — the whole point of
-`graceful-daemon-cutover` is the brief overlap. This pattern is what closes the
-gap for *that* case, without touching the already-correct cutover protocol
-itself.
+A daemon that owns a shared endpoint and in-flight work prefers brief overlap
+for a compatible graceful cutover. It must also support the cold replacement
+path; non-resumable in-memory work is not a shutdown veto. This pattern closes
+the manager-tracking gap for the overlapping case. When no healthy successor
+survives a cold replacement, supervision restarts the selected generation from
+durable state rather than resurrecting the displaced one or fighting takeover.
 
 ## Platform scope
 

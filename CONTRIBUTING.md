@@ -608,7 +608,12 @@ statement in the PR description.
    rollout.
 2. State how the change satisfies
    [`docs/patterns/graceful-daemon-cutover.md`](docs/patterns/graceful-daemon-cutover.md),
-   including the safe cutover/drain boundary; or, if claiming an exemption,
+   including the preferred compatible cutover/drain boundary and bounded cold
+   takeover when handoff is incompatible or cannot settle. State how the
+   lifecycle owner verifies termination scope, prevents overlapping exclusive
+   owners, and supports consumer retries and crash-consistent child recovery.
+   Do not claim zero interruption or make old-contract compatibility a
+   replacement veto. If claiming a lifecycle exemption,
    explain either **why the process is not a long-lived resident daemon** and
    which lifecycle pattern governs it instead, **or** why it fits the
    documented lighter
@@ -1317,7 +1322,10 @@ generation, not just a passing test venv. See the
 [Immutable Dev Slot effort](efforts/active/immutable-dev-slot/README.md) (#5472).
 Freeze source and build inputs, construct non-editable code in a distinct
 source-hashed generation (or reuse its exact healthy match), select it current,
-and use normal start, healthy handoff and drain. Source edits require another
+and use normal start with best-effort handoff and drain. An incompatible or
+non-settling handoff permits bounded identity-checked old-owner shutdown and
+cold recovery, with retriable clients and crash-tolerant children, rather than
+refusing the selected development generation. Source edits require another
 generation; never hot-patch completed runtime files or depend on live editable
 imports. Reverse selection uses the same lifecycle, subject to state
 compatibility; version ordering does not determine owner supersession.

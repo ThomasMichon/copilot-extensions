@@ -76,11 +76,22 @@ locks describe different facts; no new competing artifact authority is needed.
 **Accepted alignment:** retain this effort's clean merged Dev source, Manager,
 maintenance, driver and installed-adoption owners/gates. All deployments use
 immutable venvs identified by complete source and admitted build inputs.
-Current selection starts the incoming owner through ordinary healthy handoff;
+Current selection starts the incoming owner through ordinary best-effort handoff;
 full identity inequality, not version ordering, identifies the displaced owner.
-Reverse baton-passing remains state-compatible and never exits the serving
-owner merely on observing "not current". This documentation revision neither
+Reverse baton-passing prefers compatible health-gated drain, but permits bounded
+identity-checked old-owner shutdown and cold recovery when handoff contracts
+are incompatible or fail. This documentation revision neither
 restarts completed Phase 2 work nor claims remaining cutover/adoption proven.
+
+**Best-effort follow-on (2026-10-22), summary:** the operator permits outgoing
+daemons to quick-terminate their owned scope, and the selected newcomer to
+force-terminate an identity-verified predecessor when handoff cannot complete.
+Clients tolerate transient network-like outages/stream cut-offs; child daemons
+tolerate power-loss-like interruption and recover retriable durable work.
+A breaking development contract must not veto replacement. The
+[canonical verbatim capture](../immutable-dev-slot/README.md#request) preserves
+the complete operator input. Existing source/maintenance/driver and native
+acceptance owners remain; no live shutdown or rollout is authorized here.
 
 **Settled request summary:** add a local gate only around service payload
 publication and installed runtime redirect updates; retain all other hook
@@ -184,7 +195,7 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
-- [ ] **Agent-recommended alignment qualification:** prove forward and compatible reverse current-generation cutover, including same-package/different-source selection, using ordinary start/readiness/work handoff/drain and identity inequality rather than version ordering.
+- [ ] **Agent-recommended alignment qualification:** prove forward/reverse current-generation replacement, including same-package/different-source selection, with preferred compatible handoff and bounded identity-checked cold takeover when contracts break or drain fails; use identity inequality, not version ordering.
 - [ ] Maintain a separate installation source with main, stable/exact pin and opt-in merged-dev selection resolved once per run.
 - [ ] Keep service-source selection independent of Manager self-update and Copilot plugin-content selection.
 - [ ] Route the selected source through the same assembly, readiness, activation and observable update-outcome path.
@@ -198,7 +209,7 @@ matrix; no schedule or cadence is enabled by this plan.
 - [x] Land the portable source-backed maintenance intent and implementation plan through review before adding that capability.
 - [ ] Review the ownership revision, default-off policy, trusted-harness setup consent and current-user Windows Autorun lifecycle before implementation.
 - [ ] Implement Manager-owned enrollment, background lifetime, bounded recurring invocation and status through the existing canonical update path, without requiring Agent Machines or an open Picker.
-- [ ] Upgrade the resident maintenance worker safely when Manager changes, preserving an active update and exclusive scheduling without waiting for another logon.
+- [ ] Upgrade the resident maintenance worker safely when Manager changes, preserving durable update requests and exclusive scheduling through best-effort handoff or bounded cold recovery without waiting for another logon.
 - [ ] Preserve explicit local choice and support an exclusive external-controller owner; hand over legacy suite-update responsibility without disabling general machine/dependency convergence.
 - [ ] Add the portable setup enrollment seam and qualify an explicitly consenting adopter after Manager installation; keep private adopter implementation and evidence in its own repository.
 - [ ] Prove default-off, trusted-setup enrollment, no-elevation Windows startup, durable headless operation, failure visibility and unchanged/advancing cycles on native Windows and Linux.
@@ -248,7 +259,8 @@ transaction execution from the existing recurring-maintenance assignment.
 
 ## Validation Plan
 
-- [ ] **Bidirectional selection:** the selected incoming generation starts and becomes healthy before the displaced owner retires; forward, lower-version and same-package/different-source handoffs preserve work and rollback compatibility without ordering hashes or versions to identify supersession.
+- [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality; compatible handoff health-gates before retirement, while incompatible/refused/hung handoff allows bounded owned-scope shutdown or identity-checked force termination before cold-start readiness.
+- [ ] **Cold recovery and retries:** breaking all predecessor handoff contracts does not veto selected Dev deployment. Qualify durable recovery after abrupt child death, consumer reconnect after stream/reply loss, safe retry/deduplication or unknown-outcome reconciliation, exclusive ownership and explicit failed-recovery reporting.
 - [ ] **Source admission:** reject dirty, worktree-backed, unmerged or substituted source; preserve the exact resolved commit throughout a run.
 - [ ] **Materialization:** actual installer imports the complete vendor closure from a non-editable install with no source-checkout dependency.
 - [ ] **Identity:** identical inputs reuse unchanged completion bytes; different commits or assembly/dependency/profile inputs cannot overwrite a completed slot.
@@ -259,7 +271,7 @@ transaction execution from the existing recurring-maintenance assignment.
 - [ ] **Source modes:** main tracking, stable/exact pins and dev tracking converge through one source-assembly path without moving midway through a run.
 - [ ] **Maintenance:** the existing owner runs bounded, observable source health/sync/install cycles at the selected cadence; unchanged input is reused and source/candidate/overlap failures preserve healthy runtimes and edits.
 - [ ] **Background ownership:** default-off enrollment accepts explicit user or trusted-setup consent, current-user Windows Autorun requires no UAC registration, the worker survives its setup caller without visible consoles, and only the selected owner performs suite updates.
-- [ ] **Worker upgrade:** native old-to-new worker replacement preserves an in-flight update, prevents concurrent scheduling and retains healthy operation or an explicit recovery outcome when the successor fails.
+- [ ] **Worker upgrade:** native replacement preserves durable in-flight request/operation identity across graceful or cold recovery, prevents concurrent scheduling or duplicate unsafe effects, and reports actual readiness or a recovery outcome when the successor fails.
 - [ ] **Execution driver:** concurrent ordinary callers observe one durable operation, caller exit preserves it, distinct explicit selections stay distinct, interrupted execution remains explicit, and supervised debugging cannot overlap the same transaction authority.
 - [ ] **Setup adoption:** approved consuming-harness setup finishes with verified enrollment or a precise activation/readiness blocker; unrelated repository discovery cannot enroll maintenance and external-controller ownership cannot overlap Manager.
 - [ ] **Management continuity:** Manager and the selected service runtimes can use distinct clean merged-source selections; the management tools remain usable for update and supported recovery.
@@ -282,6 +294,16 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-10-22 - Best-effort service replacement alignment
+
+Aligned this effort with the operator follow-on captured verbatim by Immutable
+Dev Slot. Compatible handoff remains preferred; incompatible or exhausted
+handoff permits bounded identity-checked retirement and cold recovery, including
+the maintenance worker's durable update requests. Added explicit outer-client
+retry and abrupt child-shutdown qualification. This does not waive source
+admission, state-safe recovery, exclusive execution or installed/native evidence,
+and does not claim the new fallback implemented.
 
 ### 2026-10-22 - Align immutable development and retained Dev deployment
 

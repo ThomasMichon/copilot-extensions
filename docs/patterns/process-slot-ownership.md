@@ -3,9 +3,9 @@
 **Serves:** *Vision agent-fabric* §Behaviors/**reclaim-idle-process** and
 §Behaviors/**claimed-resource-not-reclaimed** — a background process is
 memory-safe only when it is both single-occupancy (a role/slot never gains a
-second live holder) and owner-tethered (its lifetime ends only once the
-thing that justified it is *confirmed* gone, never while a live claimant
-remains).
+second live holder) and owner-tethered. Liveness-based reclamation requires
+the thing that justified it to be *confirmed* gone, never merely slow or
+ambiguous; explicit service replacement has the separate authority below.
 **Exemplars:** `libs/single-instance-lease` (vendored into agent-bridge,
 agent-dispatch, agent-mcp, agent-vault, agent-worktrees) — `SingleInstance`
 (the lease), `is_superseded` + `pid_alive` (the fail-safe supersession
@@ -17,6 +17,13 @@ plugins — agent-bridge, agent-dispatch, agent-index, agent-mcp, agent-vault
 single-owner-slot exemplar is the token election below); agent-worktrees'
 `status-updater` `@aw_updater` token election (the original proof of both
 pillars together).
+
+Liveness-based background reclamation is distinct from **authorized service
+replacement**. The latter may intentionally retire a live displaced owner
+through [bounded cold takeover](graceful-daemon-cutover.md#bounded-cold-takeover)
+when handoff is incompatible or fails. It still verifies exact identity,
+installation and owned process scope, serializes replacement and confirms exit
+or write exclusion; it never pretends a live process is dead to bypass a lease.
 
 ## Problem
 
@@ -62,12 +69,13 @@ pillars, applied together — one alone leaves the other failure mode intact:
    (can't tell, or momentarily dark) must never be treated as gone.
    - **Generation supersession** (`single_instance_lease.supersession
      .is_superseded`): a demoted daemon self-retires only when the routing
-     table's `active` entry is a *different* pid, at a *strictly higher*
-     generation, that is *actually listening* — every ambiguous case (no
-     table, unparsable entry, our own pid still active, a not-higher
-     generation, a successor that isn't yet accepting connections) returns
-     `False` (stay alive). This is the daemon retiring *itself* from the
-     inside.
+     selection identifies a different full generation, not a numerically higher
+     version or hash. Prefer confirmed successor readiness for compatible
+     graceful retirement, but an authoritative cold replacement may retire the
+     old owner before the newcomer listens. Ambiguous ownership is not an exit
+     order. Legacy numeric/routed `is_superseded` behavior is implementation
+     evidence, not proof that this target is adopted. This is the daemon
+     retiring *itself*, not permission for arbitrary background reaping.
    - **Abandoned-passive reap** (`zdd.breadcrumb.reap_abandoned_passive`):
      the complementary *outside* backstop for the case self-retire cannot
      cover — a passive daemon whose promoting cutover died before ever
@@ -86,7 +94,9 @@ pillars, applied together — one alone leaves the other failure mode intact:
    spawning, a spawner checks whether a live holder already occupies the
    role/task-keyed slot; if so, it reuses, awaits, or debounces that holder
    instead of piling on a duplicate. Only a *confirmed-dead* holder is
-   reclaimed — never a merely-slow one.
+   reclaimed by liveness GC — never a merely-slow one. An explicitly selected
+   replacement uses the distinct transition authority above and may terminate
+   its verified live predecessor before acquiring the released slot.
    - **OS-level exclusive lease** (`single_instance_lease.lease
      .SingleInstance`): an advisory OS byte-range lock (`flock`/`msvcrt
      .locking`), held for the process's life, keyed on a lock file (plus an

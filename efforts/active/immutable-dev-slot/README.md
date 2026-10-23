@@ -14,10 +14,12 @@
 Dev identifies source, not a mutable environment. Deploy only immutable venvs
 whose generation identity binds the complete frozen source hash and admitted
 build/dependency inputs. Build beside the serving generation or reuse its exact
-healthy match, select it as current, start the incoming owner, and settle normal
-health-gated handoff and drain. A running owner is superseded by full identity
+healthy match, select it as current, and start the incoming owner. Prefer
+health-gated handoff and drain, but permit bounded cold takeover when contracts
+are incompatible or handoff fails. A running owner is superseded by full identity
 inequality with current selection, not version ordering. Compatible forward and
-reverse baton-passing use the same contract.
+reverse baton-passing use the same best-effort contract. Interrupted clients
+and owned sub-daemons recover through reconnect/retry and durable state.
 
 This replaces the mutable premise, not its unfinished acceptance. Preserve
 delivered primitives and all thirteen adopters' construction, admission,
@@ -70,9 +72,19 @@ Operator execution instruction, verbatim:
 
 > Great. Update relevant visions and efforts to align; close out and abandon superseded efforts and off-course work.
 
-**Accepted interpretation:** "not current" does not mean exit before the
-successor is healthy and drain/work handoff have settled. State compatibility
-still gates rollback. The decomposition and validation matrix below are
+Operator follow-on, verbatim (2026-10-22):
+
+> One rule we need to add about handoffs: handoffs are *best effort*. If the contracts are incompatible, outgoing daemons are welcome to just shut down everything they own and quick-terminate, leaving the newcomer service to recover from cold. Both sides need a degree of fault-tolerance: the outer consumer of the service needs to be able to handle a momentary outage or cut-off of stream (it's like a network failure), and the sub-daemons need to be able to handle an abrupt shutdown and support a retriable flow (it's like a power outage). If we produce a new version of a service in the dev slot, with breaking versions of all contracts, and start it up, we expect it to basically abruptly take over. One way to ensure the "drop on the floor" effect is for the newcomer daemon to force-terminate the old daemon if it can't facilitate a successful handoff. Rather than fighting or refusing handoff or shutdown, outgoing daemons just need to maintain (reasonably) durable state, such that a cold-start form the new version can roughly continue without major chaoes ensuing.
+
+**Accepted interpretation:** graceful handoff is preferred, never an
+incompatibility or indefinite-drain veto. A confirmed selected replacement may
+retire the old daemon and its owned scope before incoming readiness, including
+identity-checked force termination, then recover cold. Clients tolerate network-
+like interruption; children tolerate power-loss-like shutdown and retriable
+flows. Durable-state compatibility still gates safe recovery/rollback; breaking
+handoff contracts alone must not block takeover. This is a documentation rule,
+not authorization to terminate live services in this task.
+The decomposition and validation matrix below are
 **agent-recommended**, preserving earlier reviewed acceptance rather than
 adding operator-requested runtime scope to this documentation task.
 
@@ -96,9 +108,11 @@ adding operator-requested runtime scope to this documentation task.
 
 ### Phase 2 - Bidirectional owner cutover
 - [ ] Propagate full generation identity through selectors, manifests, discovery, running-owner evidence and recovery; package-version ordering never defines supersession.
-- [ ] Current selection starts the incoming owner through the existing service lifecycle. The displaced owner serves until successor readiness, work handoff and drain settle.
-- [ ] Prove forward and compatible reverse handoff, same-package different-source replacement, failed successor preservation, interrupted transition recovery and exact claim-release restoration.
-- [ ] Keep release-channel ordering separate from owner obsolescence; incompatible durable state refuses reverse selection explicitly.
+- [ ] Current selection starts the incoming owner through the existing service lifecycle. Prefer compatible readiness/handoff/drain, but incompatible or non-settling contracts permit bounded owned-scope shutdown and cold takeover before readiness.
+- [ ] **Agent-recommended decomposition of the follow-on:** route cooperative and forced predecessor retirement through existing serialized lifecycle authority, revalidate installation/selection/process identity, confirm old-owner exit or write exclusion, and never terminate unrelated/current incoming owners.
+- [ ] Prove forward/reverse and same-package/different-source graceful replacement, breaking-contract cold takeover, interrupted transition recovery and exact claim-release restoration. Failed construction still preserves the working generation; cold-start failure reports an actual outage/recovery outcome.
+- [ ] Qualify retriable consumers after lost replies/cut-off streams and crash-consistent child recovery after abrupt owned-scope shutdown; reconcile duplicate/unknown effects rather than promising exactly-once execution.
+- [ ] Keep release-channel ordering separate from owner obsolescence; incompatible durable state requires explicit safe recovery or refusal, not an implicit wipe. Handoff incompatibility alone is not state incompatibility.
 
 ### Phase 3 - Complete each adopter and reconcile guidance
 - [ ] Finish agent-worktrees on PowerShell and POSIX through the full lifecycle, not just shared-core completion.
@@ -114,7 +128,9 @@ adding operator-requested runtime scope to this documentation task.
 - [ ] **Concurrency:** real competing installers yield one exact-input build and bounded healthy reuse; conflicting content refuses after the winner publishes. Exercise cancellation, process death and storage/permission errors separately.
 - [ ] **Immutability:** both native entrypoints leave completed numbered and development generations byte-for-byte unchanged on reuse and forced/content-conflicting attempts; legitimate out-of-slot reconciliation still runs.
 - [ ] **Retention/repair:** concurrent GC cannot collect ready/rollback-pinned generations; repair retains whole-operation authority through promotion, drain or rollback without lock inversion or changing the old slot.
-- [ ] **Baton both ways:** replace numerically higher with lower, same-package different source, and return to the prior generation; prove readiness before retirement, exactly-once work ownership and explicit incompatible-state refusal.
+- [ ] **Baton both ways:** replace numerically higher with lower, same-package different source, and return to the prior generation; prove preferred graceful ordering and bounded cold takeover when all handoff contracts break, without version-ordering or old-owner consent vetoes.
+- [ ] **Cold recovery:** incompatible/refused/hung handoff permits owned-scope quick exit or identity-checked termination before incoming health, followed by exclusive recoverable execution, durable/checkpointed progress and explicit readiness or failure.
+- [ ] **Fault tolerance:** simulate abrupt child death, truncated streams, lost side-effect replies, replay, replacement-caller death and PID/owner mismatch. Prove reconnect/retry and deduplication/outcome reconciliation, not universal exactly-once or zero-outage behavior.
 - [ ] **Claims:** competing owners refuse; iterative builds preserve the original restore target; deployed release works without the source checkout and failed restore retains attributable ownership.
 - [ ] **Portfolio:** record every canonical adopter's actual two-entrypoint, native process and installed acceptance evidence. Shared primitives or one pilot never close #5472.
 - [ ] **Platforms:** qualify Windows, Linux and macOS separately, with named tracked gaps where a lane is unavailable; use isolated roots and owned processes, never live user state as a fixture.
@@ -128,6 +144,16 @@ This reconciliation changes intent and effort ownership only. Implementation,
 native installation and rollout remain separately assigned and gated.
 
 ## Journal
+
+### 2026-10-22 - Best-effort handoff and cold takeover amendment
+
+Captured the follow-on verbatim and re-read it against the literal operator
+input, including prompt owned-scope shutdown, newcomer force termination,
+network-like client interruption and power-loss-like child recovery. Replaced
+the unconditional successor-readiness-before-retirement premise with a
+preferred graceful path plus bounded cold takeover. Existing lifecycle owners
+retain identity, serialization and state-recovery duties; no process is
+terminated or runtime changed by this finite documentation amendment.
 
 ### 2026-10-22 - Reviewed intent landed; finite reconciliation complete
 

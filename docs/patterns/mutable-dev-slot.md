@@ -36,12 +36,22 @@ selectors unchanged, and propagates a nonzero result.
 
 Select the completed target as current and request its normal start. An owner
 is superseded because its full generation identity differs from current, never
-because a version or hash sorts later. The existing lifecycle health-gates the
-incoming owner, hands off queued/scheduled work, switches routing and drains the
-displaced owner before retirement. "Not current" is not an immediate-exit rule.
-Compatible reverse selection uses the same protocol; incompatible durable state
-refuses explicitly. Release-channel ordering remains a separate selection
-policy, not an owner-obsolescence test.
+because a version or hash sorts later. Prefer the existing healthy
+handoff/routing/drain path in either direction, but handoff is best effort:
+incompatible contracts or an exhausted handoff budget permit prompt shutdown of
+the displaced owner and its owned sub-daemons, then cold recovery by the
+newcomer. The authorized lifecycle owner or incoming daemon may force-terminate
+the identity-verified predecessor under the same serialized replacement
+authority; no numeric ordering or working old control-plane RPC is required.
+Readiness follows cold recovery rather than gating predecessor exit.
+
+A breaking dev generation must therefore be able to take over without the old
+version's cooperation. Consumers reconnect/retry after outages or cut-off
+streams; children recover durable/checkpointed work after abrupt shutdown.
+Use the [bounded cold takeover contract](graceful-daemon-cutover.md#bounded-cold-takeover)
+for ownership, retry and interruption safeguards. Handoff incompatibility is
+not durable-state compatibility: unsafe state rollback still refuses explicitly.
+Release-channel ordering remains a separate selection policy.
 
 Clean merged Dev deployment uses this same immutable lifecycle under
 [Source-Managed Runtime Installs](../../efforts/active/source-managed-runtime-installs/README.md)

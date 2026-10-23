@@ -70,7 +70,13 @@ boundary, never in the task/unit definition.
 **Cut over behind the stable boundary.** An update installs a new immutable slot
 without changing the supervisor definition. A live daemon follows
 [`graceful-daemon-cutover`](graceful-daemon-cutover.md): start the new slot
-passive, health-gate it, flip routing, drain the predecessor, then retire it.
+passive, health-gate it, flip routing, drain the predecessor, then retire it
+when handoff is compatible. Handoff is best effort, not replacement consent:
+incompatible/unavailable contracts or an exhausted drain budget permit bounded,
+identity-checked owned-scope termination and cold startup through the same
+lifecycle owner. Clients reconnect/retry, children recover durable work, and
+incoming readiness is verified after cold recovery; an outage is permitted but
+never hidden as successful activation.
 The update path does not re-register the supervisor or ask for elevation again.
 
 **Default-on where it belongs.** The service installs and starts by default on a
@@ -102,8 +108,9 @@ for the ownership/visibility distinction and supported primitives.
   [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md)). The task
   *definition* then never changes across updates, so an update never needs to
   re-register. A live daemon picks up the new build through
-  [`graceful-daemon-cutover`](graceful-daemon-cutover.md); a bounded restart is
-  not the routine version-update path. `Set-ScheduledTask` (an in-place edit of
+  [`graceful-daemon-cutover`](graceful-daemon-cutover.md); a bounded cold restart
+  is its fallback, not a reason to require compatible old contracts forever.
+  `Set-ScheduledTask` (an in-place edit of
   an existing task you own) is non-elevated and fine for a trigger/action tweak;
   a forced `Register -Force` is only for a principal change (interactive ⇄ S4U).
 - **Nothing pins the plugin payload.** The supervisor's action, working
@@ -151,12 +158,13 @@ for the ownership/visibility distinction and supported primitives.
   running an old version well after a new one is published. Give the daemon
   its own live version-staleness check (poll the `current-version` marker, see
   [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md)) and, once
-  stale, hand off to the newer interpreter itself — either the full
+  displaced, hand off to the selected interpreter itself, irrespective of
+  version ordering — either the full
   [`graceful-daemon-cutover`](graceful-daemon-cutover.md) protocol when the
   daemon owns a shared endpoint/routing table, or, for a plain singleton
   daemon with no in-flight request to drain (agent-dispatch's `supervise
   serve`, #2259), the lighter shape: wind down owned units, release the
-  single-instance lease, spawn a successor on the new interpreter with the
+  single-instance lease, spawn a successor on the selected interpreter with the
   same argv, then exit on Windows/non-native launches. An identity-confirmed
   Linux systemd supervisor instead drains/releases and exits with a failure
   sentinel so its native `Restart=on-failure` owns the replacement; its stable
@@ -164,6 +172,10 @@ for the ownership/visibility distinction and supported primitives.
   that unit's kill-on-exit cgroup or mark its restart-request sentinel as success.
   Native ownership ambiguity defers before mutation. See agent-dispatch's
   `docs/supervisor-lifecycle.md` for the evidence and remaining validation limits.
+  Neither form may wait indefinitely for an incompatible predecessor's help.
+  The same lifecycle authority can settle an identity-verified owned process
+  scope and cold-restart the selected generation; durable operations, not an
+  unbroken child-process lifetime, carry recoverable work across that boundary.
   Make it **default-ON with an opt-out env var**, not
   opt-in — this harness's launch paths have no protocol for flipping an
   opt-in flag before a daemon's first boot, so an opt-in gate here simply
@@ -188,7 +200,8 @@ for the ownership/visibility distinction and supported primitives.
   under `conhost.exe --headless`, which **detaches** the pwsh+python from the task's
   tracked process tree — so `Stop-ScheduledTask` alone does not kill the live
   daemon. An explicit stop, uninstall, or cutover fallback must terminate the
-  detached `python -m <pkg> …` process by command line, or the old build
+  exact identity-verified detached daemon and its attributable owned scope,
+  not every process matching a command-line/name pattern, or the old build
   survives and the next generation stands down on the single-instance lease.
 - **Supervision ≠ binding.** The supervisor keeps the process *alive*; it does not
   make a contended endpoint bind. Endpoint contention is the endpoint pattern's
