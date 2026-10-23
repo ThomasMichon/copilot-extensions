@@ -2,7 +2,7 @@
 
 **Proposed catalog, not an inventory of hooks already installed.**
 Use the [QoS/Engagement contract](patterns/telemetry-qos-engagement.md) and the
-[design effort](../efforts/active/telemetry-measurement-contract/README.md).
+[design effort](../efforts/2026/10/22%20telemetry-measurement-contract/README.md).
 `Q` means QoS operation; `E` means point-in-time Engagement/diagnostic event.
 All Q rows have matched attempt starts and terminal records. Shared custom
 metrics are `agent.operation.started`, `agent.operation.completed`,
@@ -181,4 +181,4 @@ Agent-recommended, not an expansion of already authorized implementation:
   delivery overhead, so missing data is not reported as healthy tooling.
 
 Priorities and source owners are in the
-[instrumentation plan](../efforts/active/telemetry-measurement-contract/instrumentation-plan.md).
+[instrumentation plan](../efforts/2026/10/22%20telemetry-measurement-contract/instrumentation-plan.md).

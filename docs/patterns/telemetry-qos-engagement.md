@@ -1,7 +1,7 @@
 # QoS and Engagement measurement contract
 
 **Status: proposed; no runtime behavior is enabled by this document.**
-Design slice: [measurement effort](../../efforts/active/telemetry-measurement-contract/README.md).
+Design slice: [measurement effort](../../efforts/2026/10/22%20telemetry-measurement-contract/README.md).
 Intent: [Portable Telemetry](../../visions/telemetry/README.md).
 Operations: [event catalog](../telemetry-event-catalog.md).
 

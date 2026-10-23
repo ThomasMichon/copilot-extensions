@@ -10,7 +10,6 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Telemetry Measurement Contract](active/telemetry-measurement-contract/README.md) | Active; QoS/Engagement schema, catalog and instrumentation plan only | #8102; bounded design sub-effort of Performance Telemetry, no runtime admission |
 | [Producer Work Reuse](active/producer-work-reuse/README.md) | Draft; code-grounded producer caching/batching/indexing plan only; execution admission pending | #7948/#7949/#7950 and retained #2110 declaration/health acceptance; no rollout |
 | [Reconstructible Runtime State](active/reconstructible-runtime-state/README.md) | Active; G1 disconnected facts/readers and isolated fixtures admitted; later slices gated | #7947; preserves #1460 compatibility (including consolidated #1915) and #3761 ground-state ownership; no live rebuild or rollout |
 | [Prompt Receipt Observation](active/prompt-receipt-observation/README.md) | Draft; bounded async non-provisioning first-prompt receipt plan before implementation | #7942; unchanged consumption authority; no installed rollout |
@@ -137,6 +136,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Telemetry Measurement Contract](2026/10/22%20telemetry-measurement-contract/README.md) | Done; QoS/Engagement contract, 58-entry catalog and future instrumentation plan merged; no runtime adoption | #8102; existing Performance Telemetry and production owners retain implementation/rollout |
 | [Dynamic Reverse Reservations](2026/10/22%20dynamic-reverse-reservations/README.md) | Done; bounded coordinator/finite-forward composition and isolated SSH consumers merged; no rollout | #7719; remaining production integration explicitly transferred to #7238, source custodians retained |
 | [CodeSpaces Authentication CTA](2026/10/22%20codespaces-authentication-cta/README.md) | Done; reviewed provider/Manager source merged, no native authorization or rollout | #7793 retains native acceptance and rollout; #4180 remains separate |
 | [RedirectionGuard Adoption](2026/10/20%20redirectionguard-adoption/README.md) | Done; shared interpreter and failed-front-door source repairs merged to Dev and qualified; no rollout | #7445; publication and installed-consumer recovery retained by #7305, construction by #7420 |

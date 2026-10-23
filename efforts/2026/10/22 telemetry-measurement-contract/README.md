@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent documentation slice targeting `dev`
 - **Created:** 2026-10-22
-- **Status:** Active
-- **Vision:** [Portable Telemetry](../../../visions/telemetry/README.md)
+- **Status:** Done
+- **Vision:** [Portable Telemetry](../../../../visions/telemetry/README.md)
 - **Umbrella issue:** #8102
 - **Sub-issues:** none; existing implementation owners remain independent
 
@@ -15,7 +15,7 @@ Agree on what is measured, how it maps to OpenTelemetry, and which meaningful
 producer boundaries must eventually be instrumented. This effort delivers a
 contract, catalog and reviewed future plan, **not runtime hooks or rollout**.
 It is a bounded design sub-effort of
-[Performance Telemetry](../performance-telemetry/README.md), not a second bus,
+[Performance Telemetry](../../../active/performance-telemetry/README.md), not a second bus,
 campaign coordinator or replacement for its retained acceptance.
 
 ## Participants
@@ -39,8 +39,8 @@ campaign coordinator or replacement for its retained acceptance.
 
 Existing `libs/process-telemetry` has `agent.performance.v1` typed measurements,
 bounded sink delivery and a real optional traces-only OTLP adapter. The retained
-[interface](../performance-telemetry/interface.md) and
-[Manager observation slice](../performance-telemetry/manager-observation.md)
+[interface](../../../active/performance-telemetry/interface.md) and
+[Manager observation slice](../../../active/performance-telemetry/manager-observation.md)
 already distinguish source callbacks from native headed/authority evidence.
 Do not reimplement them or mistake that partial adoption for all signals.
 
@@ -96,8 +96,8 @@ and inception record distinguish the operator's measurements and clarifications.
 
 ### Phase 3 - Review and delivery
 
-- [ ] Publish the design through review and required CI, addressing findings.
-- [ ] Verify actual merge, record delivered artifacts and conclude/archive this
+- [x] Publish the design through review and required CI, addressing findings.
+- [x] Verify actual merge, record delivered artifacts and conclude/archive this
   design-only sub-effort without closing broader implementation acceptance.
 
 ## Validation Plan
@@ -109,14 +109,14 @@ and inception record distinguish the operator's measurements and clarifications.
   against the cited OTel specifications; distinguish stable/development guidance.
 - [x] Check source links and evidence limitations, issue ownership and public
   content; do not claim model admission, native credits or paint from proxies.
-- [ ] Verify no runtime/plugin/configuration/SDK dependency changes, then pass
+- [x] Verify no runtime/plugin/configuration/SDK dependency changes, then pass
   applicable document/schema/effort gates and confirm review/CI/merge.
 
 ## Proposal
 
-- [QoS and Engagement contract](../../../docs/patterns/telemetry-qos-engagement.md)
-- [Proposed JSON Schema](../../../schemas/telemetry-qos-engagement.schema.json)
-- [Event catalog](../../../docs/telemetry-event-catalog.md)
+- [QoS and Engagement contract](../../../../docs/patterns/telemetry-qos-engagement.md)
+- [Proposed JSON Schema](../../../../schemas/telemetry-qos-engagement.schema.json)
+- [Event catalog](../../../../docs/telemetry-event-catalog.md)
 - [Future instrumentation plan](instrumentation-plan.md)
 
 ## Journal
@@ -140,3 +140,16 @@ and inception record distinguish the operator's measurements and clarifications.
   interpreter reported no `jsonschema`; no runtime dependency was added.
 - Runtime/native/clean-room/export tests are not exercised by this design-only
   change. Their exact acceptance remains in the future instrumentation plan.
+
+### 2026-10-22 - Design delivered
+
+- #8117 merged into `dev` after Copilot Approved the published head with no
+  findings and all required CI passed. The native merge owner confirmed completion.
+- Delivered the canonical QoS/Engagement contract, proposal schema, 58-entry
+  catalog, exact measurement semantics and issue-backed future integration plan.
+- Every design Plan/Validation item is resolved. Runtime hook implementation,
+  native host gaps, complete log/metric interoperability and rollout were never
+  this sub-effort's completion gate and remain with the existing owners.
+- Archived this design-only effort; #7935/#5900, #5215, #6819 and the existing
+  Manager/entry/collector owners retain their broader requirements. No runtime
+  or installed-serving adoption is claimed.
