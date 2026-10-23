@@ -443,6 +443,8 @@ def _monitor_lock_is_live() -> bool:
 
 def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str, str | None] | None:
     """Authenticate a stable routed owner before installer retention or cutover."""
+    from zdd import diagnostics
+
     directory = routing_dir() if runtime_home is None else routing_dir(runtime_home)
     snapshot = routing.read_table(directory, strict=True)
     endpoints = []
@@ -456,7 +458,7 @@ def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str,
         endpoints.append((key, endpoint))
     endpoint = None
     for key, candidate in endpoints:
-        if locks.lock_is_live({"pid": candidate.pid}):
+        if diagnostics._pid_alive(candidate.pid):
             if key != "active":
                 raise ValueError("Live fallback monitor requires owner-led route recovery")
             endpoint = candidate
@@ -466,7 +468,7 @@ def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str,
     pid = endpoint.pid
     if type(pid) is not int or pid <= 0:
         raise ValueError("Routed monitor has no attributable PID")
-    if not locks.lock_is_live({"pid": pid}):
+    if not diagnostics._pid_alive(pid):
         return None
     before = locks.process_start_time(pid)
     if before is None or (

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 import json
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
+from agent_procutil import no_window_kwargs
 from zdd import diagnostics, routing
 
 from agent_worktrees import locks, status_monitor_cutover as control
@@ -108,6 +111,7 @@ def test_darwin_routed_owner_uses_native_birth_identity(tmp_path, monkeypatch):
         monkeypatch.setattr(locks.platform, "system", lambda: "Darwin")
         monkeypatch.setattr(locks, "_start_time_darwin", lambda observed: "123456:789" if observed == pid else None)
         monkeypatch.setattr(locks, "lock_is_live", lambda *_args: True)
+        monkeypatch.setattr(diagnostics, "_pid_alive", lambda observed: observed == pid)
         original_client = control.ControlClient
         monkeypatch.setattr(
             control, "ControlClient",
@@ -154,3 +158,38 @@ def test_damaged_or_fallback_routing_cannot_certify_monitor_absence(tmp_path, mo
         assert result["reason"] == "routed-monitor-unverified"
     finally:
         server.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows retained process object semantics")
+@pytest.mark.parametrize("route_role", ["active", "previous"])
+def test_exited_routed_process_with_retained_handle_is_not_a_live_monitor(
+    tmp_path, monkeypatch, route_role,
+):
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-B", "-c", "pass"],
+        stdin=subprocess.DEVNULL, **no_window_kwargs(),
+    )
+    try:
+        endpoint = routing.publish_active(
+            tmp_path, bind="127.0.0.1", port=1, pid=process.pid,
+            process_start_time=locks.process_start_time(process.pid),
+        )
+        if route_role == "previous":
+            routing.routing_table_path(tmp_path).write_text(
+                json.dumps({"active": None, "previous": endpoint.to_dict()}),
+                encoding="utf-8",
+            )
+        assert process.wait(timeout=10) == 0
+        assert locks.lock_is_live({"pid": process.pid}), "fixture must retain the exited process object"
+        assert not diagnostics._pid_alive(process.pid)
+        monkeypatch.setattr(control, "routing_dir", lambda: tmp_path)
+        monkeypatch.setattr(control, "_monitor_lock_is_live", lambda: False)
+        monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
+        assert control.routed_monitor_identity() is None
+        result = control.activate_after_update(monitor_was_live=False)
+        assert result["action"] == "noop"
+        assert result["reason"] == "no-live-monitor"
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=10)
