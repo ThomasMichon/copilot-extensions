@@ -363,6 +363,9 @@ their original binding/epoch. Failed scalar lookups may retry after reload,
 without discarding accepted bootstrap values.
 An event-loop caller with an unprepared scalar receives a configuration-pending
 error instead of starting a process or waiting on a setup worker's scalar lock.
+Previously worker-prepared local fallbacks remain usable during reload, including
+configured local-machine aliases; workers retry failed fields and replace those
+snapshots when authoritative values recover.
 
 First pending refresh is not first current rows, and neither alone proves visible
 native input acknowledgement. Existing launch tracing records

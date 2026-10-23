@@ -27,11 +27,22 @@ class _ScalarCache:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.values: dict[tuple[str, str], str] = {}
+        self.fallbacks: dict[tuple[str, str], str] = {}
         self.failures: dict[tuple[str, str], int] = {}
         self.epoch = 0
 
 
 _scalar_cache = _ScalarCache()
+
+
+def _input_scalar(cache: _ScalarCache, project: str, key: str) -> str | None:
+    """Keep the last worker-prepared value usable while a reload retries."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    identity = (project, key)
+    return cache.values.get(identity, cache.fallbacks.get(identity))
 
 
 def bind_bootstrap(project: str, values: object) -> None:
@@ -138,6 +149,9 @@ def clear_caches(*, reset_binding: bool = False) -> None:
 
 def _project_dir(project: str) -> Path:
     cache = _scalar_cache
+    value = _input_scalar(cache, project, "config-dir")
+    if value is not None:
+        return Path(value)
     return _cached_project_dir(cache, cache.epoch, project)
 
 
@@ -146,11 +160,16 @@ def _cached_project_dir(cache: _ScalarCache, epoch: int, project: str) -> Path:
     value = _scalar(cache, epoch, project, "config-dir")
     if value:
         return Path(value)
-    return harness_state.home() / f".{project}"
+    fallback = harness_state.home() / f".{project}"
+    cache.fallbacks[project, "config-dir"] = str(fallback)
+    return fallback
 
 
 def _repo_dir(project: str) -> str:
     cache = _scalar_cache
+    value = _input_scalar(cache, project, "repo-dir")
+    if value is not None:
+        return value
     return _cached_repo_dir(cache, cache.epoch, project)
 
 
@@ -161,12 +180,17 @@ def _cached_repo_dir(cache: _ScalarCache, epoch: int, project: str) -> str:
         return value
     for info in harness_state.build_projects():
         if info.name == project and info.anchor:
+            cache.fallbacks[project, "repo-dir"] = info.anchor
             return info.anchor
+    cache.fallbacks[project, "repo-dir"] = ""
     return ""
 
 
 def _machine_name(project: str) -> str:
     cache = _scalar_cache
+    value = _input_scalar(cache, project, "machine")
+    if value is not None:
+        return value
     return _cached_machine_name(cache, cache.epoch, project)
 
 
@@ -175,7 +199,9 @@ def _cached_machine_name(cache: _ScalarCache, epoch: int, project: str) -> str:
     value = _scalar(cache, epoch, project, "machine")
     if value:
         return value
-    return str(harness_state.project_config(project).get("machine") or "")
+    fallback = str(harness_state.project_config(project).get("machine") or "")
+    cache.fallbacks[project, "machine"] = fallback
+    return fallback
 
 
 @lru_cache(maxsize=None)
@@ -218,22 +244,21 @@ def _read_yaml(path: Path) -> dict:
 
 def _load_project_yaml(project: str) -> dict:
     cache = _scalar_cache
-    return _cached_project_yaml(cache, cache.epoch, project)
+    return _cached_project_yaml(cache, cache.epoch, project, default_config_path(project))
 
 
 @lru_cache(maxsize=None)
-def _cached_project_yaml(cache: _ScalarCache, epoch: int, project: str) -> dict:
-    return _read_yaml(default_config_path(project))
+def _cached_project_yaml(cache: _ScalarCache, epoch: int, project: str, path: Path) -> dict:
+    return _read_yaml(path)
 
 
 def _load_repo_yaml(project: str) -> dict:
     cache = _scalar_cache
-    return _cached_repo_yaml(cache, cache.epoch, project)
+    return _cached_repo_yaml(cache, cache.epoch, project, _repo_dir(project).strip())
 
 
 @lru_cache(maxsize=None)
-def _cached_repo_yaml(cache: _ScalarCache, epoch: int, project: str) -> dict:
-    repo_dir = _repo_dir(project).strip()
+def _cached_repo_yaml(cache: _ScalarCache, epoch: int, project: str, repo_dir: str) -> dict:
     if not repo_dir:
         return {}
     root = Path(repo_dir)

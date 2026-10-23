@@ -6,6 +6,7 @@ import threading
 import asyncio
 
 import pytest
+from types import SimpleNamespace
 
 from worktree_manager import harness_state
 from worktree_manager.production_picker import context, project_config
@@ -110,6 +111,48 @@ def test_old_project_file_read_cannot_repopulate_new_binding(monkeypatch, tmp_pa
         release.set()
         old.join(2)
         project_config.clear_caches(reset_binding=True)
+
+
+def test_worker_recovery_replaces_fallback_after_input_read(monkeypatch, tmp_path):
+    recovered = tmp_path / "recovered"
+    recovered.mkdir()
+    (recovered / "config.yaml").write_text("repo_name: recovered\n", encoding="utf-8")
+    calls, recovering = [], False
+
+    def read(project, key):
+        calls.append(key)
+        if not recovering:
+            raise project_config.engine_client.EngineError("temporary timeout")
+        return "recovered-host" if key == "machine" else str(recovered)
+
+    monkeypatch.setattr(project_config.engine_client, "get_value", read)
+    monkeypatch.setattr(harness_state, "home", lambda: tmp_path)
+    monkeypatch.setattr(harness_state, "project_config", lambda name: {"machine": "fallback-host"})
+    monkeypatch.setattr(
+        harness_state, "build_projects",
+        lambda: [SimpleNamespace(name="example", anchor=str(tmp_path / "fallback"))],
+    )
+    monkeypatch.setattr(harness_state, "repos_registry", lambda: {})
+    context.set_project("example")
+    project_config.bind_bootstrap("example", None)
+    try:
+        assert project_config.load_config().machine == "fallback-host"
+        assert len(calls) == 3
+        project_config.clear_caches()
+        recovering = True
+
+        async def exercise():
+            assert project_config.load_config().machine == "fallback-host"
+            assert len(calls) == 3
+            result = await asyncio.to_thread(project_config.load_config)
+            assert result.repo_name == "recovered" and result.machine == "recovered-host"
+            assert project_config.load_config() == result
+            assert len(calls) == 6
+
+        asyncio.run(exercise())
+    finally:
+        project_config.clear_caches(reset_binding=True)
+        context.reset()
 
 
 def test_optional_bootstrap_scalars_avoid_legacy_calls(monkeypatch, tmp_path):

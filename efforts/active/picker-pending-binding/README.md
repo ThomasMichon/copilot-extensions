@@ -202,3 +202,10 @@ contract is introduced.
   but cannot remove the three fallback scalar commands. Optional producer work
   and the complete cold/native budget remain explicitly with #7938; no existing
   agent session was contacted or inspected.
+- Review also reproduced alias-locality loss when a failed/empty legacy scalar's
+  prepared fallback was invalidated at setup publication. Binding-scoped fallback
+  snapshots now remain available to input consumers while workers retry by epoch;
+  recovered path values select fresh file-cache entries. Real non-live
+  setup/reload tests cover complete, failed and empty scalar paths and the actual
+  alias-based resume decision. Worker recovery after an intervening input read is
+  covered separately. The final targeted cohort is **262 passed**.

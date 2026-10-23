@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from types import SimpleNamespace
+
+import pytest
 
 from worktree_manager.production_picker.picker_tui import engine
 from worktree_manager.production_picker.picker_tui.engine_loading import PickerBinding
@@ -60,8 +63,12 @@ def test_binding_failure_is_visible_and_preserved():
 
 
 def test_successful_binding_mounts_operational_widget_in_original_app(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import data_local
+
     class Source:
         LOCAL = ("host", "Win")
+        bucket = staticmethod(data_local.bucket)
+        for_machine = staticmethod(data_local.for_machine)
 
     monkeypatch.setattr(engine.PickerScreen, "_finish_mount", lambda self: None)
     monkeypatch.setattr(engine.PickerScreen, "_after_first_refresh", lambda self: None)
@@ -116,7 +123,8 @@ def test_authoritative_loader_does_not_wait_for_advisory(monkeypatch):
     assert calls == [{"focus_keys": {Source.LOCAL}}, loader]
 
 
-def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode", ["batched", "failed", "empty"])
+def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tmp_path, mode):
     from worktree_manager.production_picker import context, project_config as cfg
     from worktree_manager.production_picker.picker_tui import data_local, tasks
 
@@ -125,6 +133,7 @@ def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tm
         REPO, BRANCH = "example", "dev"
         bucket = staticmethod(data_local.bucket)
         for_machine = staticmethod(data_local.for_machine)
+        is_local = staticmethod(data_local.is_local)
 
         @staticmethod
         def machines():
@@ -136,12 +145,24 @@ def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tm
             return []
 
     calls = []
+    alias = "fixture-local"
 
     def legacy_read(*args):
         calls.append(args)
+        if mode == "failed":
+            raise cfg.engine_client.EngineError("temporary timeout")
+        if mode == "empty":
+            return ""
         raise AssertionError("bound scalars must survive setup/reload")
 
     monkeypatch.setattr(cfg.engine_client, "get_value", legacy_read)
+    monkeypatch.setattr(cfg.harness_state, "home", lambda: tmp_path)
+    monkeypatch.setattr(cfg.harness_state, "project_config", lambda name: {"machine": alias})
+    monkeypatch.setattr(
+        cfg.harness_state, "build_projects",
+        lambda: [SimpleNamespace(name="example", anchor=str(tmp_path))],
+    )
+    monkeypatch.setattr(cfg.harness_state, "repos_registry", lambda: {})
     monkeypatch.setattr(tasks, "prewarm_optional_modules", lambda: None)
     monkeypatch.setattr(engine.PickerScreen, "_scan_pivot_payload", lambda self: None)
     monkeypatch.setattr(engine.PickerScreen, "_prewarm_machine_key_map", lambda self: None)
@@ -149,8 +170,8 @@ def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tm
         monkeypatch.setattr(engine.PickerScreen, name, lambda self: None)
     context.set_project("example")
     cfg.bind_bootstrap("example", {
-        "config_dir": str(tmp_path), "repo_dir": str(tmp_path), "machine": Source.LOCAL[0],
-    })
+        "config_dir": str(tmp_path), "repo_dir": str(tmp_path), "machine": alias,
+    } if mode == "batched" else None)
 
     async def exercise():
         app = engine.PickerApp(Source(), live=False)
@@ -164,8 +185,17 @@ def test_nonlive_setup_reload_retains_scalars_for_locality_input(monkeypatch, tm
                         break
                     await pilot.pause(0.02)
                 assert screen._setup_applied_epoch == screen._setup_epoch
-                assert data_local.is_local(*Source.LOCAL)
-                assert calls == []
+                prepared_calls = list(calls)
+                assert data_local.is_local(alias, Source.LOCAL[1])
+                decision = screen._resume_decision({
+                    "raw": {"id": "fixture"}, "machine": alias, "env": Source.LOCAL[1],
+                })
+                assert decision["action"] == "resume" and decision["is_local"] is True
+                assert calls == prepared_calls
+                if mode == "batched":
+                    assert calls == []
+                else:
+                    assert len(calls) == (3 if phase == "initial" else 6)
             app.exit()
 
     try:
