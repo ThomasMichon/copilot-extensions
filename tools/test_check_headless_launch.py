@@ -75,6 +75,64 @@ def test_ignores_non_adopting_plugin(repo):
     assert guard.verify() == []
 
 
+@pytest.mark.parametrize("body", [
+    *(f"import subprocess\nsubprocess.{name}(['git'])\n" for name in (
+        "Popen", "run", "call", "check_call", "check_output",
+    )),
+    "from subprocess import run as launch\nlaunch(['git'])\n",
+    "import os\nos.system('git status')\n",
+    "from os import system as launch\nlaunch('git status')\n",
+    "import subprocess\nsubprocess.\uff52un(['git'])\n",
+    "from subprocess import \uff30open as launch\nlaunch(['git'])\n",
+    "import subprocess as sp\nfrom agent_procutil import detached_kwargs\n"
+    "sp.Popen(['worker'], **detached_kwargs())\n",
+    "from subprocess import Popen as launch\n"
+    "from agent_procutil import detached_kwargs as detach\n"
+    "launch(['worker'], **detach())\n",
+    "import subprocess\nsubprocess.Popen(['worker'], **helper.windowless_daemon_kwargs())\n",
+    "import subprocess\nsubprocess.Popen(['worker'], **\uff44etached_kwargs())\n",
+    "import subprocess\n"
+    "def worker():\n"
+    "    settings = detached_kwargs()\n"
+    "    subprocess.Popen(['worker'], **settings)\n",
+])
+def test_ast_admission_preserves_unfiltered_spawn_diagnostics(repo, monkeypatch, body):
+    _mk_plugin(repo, "agent-foo", adopts=True, body=body)
+    actual = guard.verify()
+    assert actual
+    original = guard._FlagFinder
+
+    class Unfiltered(original):
+        def __init__(self):
+            super().__init__()
+            self.has_spawn_reference = True
+            self.has_popen_reference = True
+            self.has_detach_reference = True
+
+    monkeypatch.setattr(guard, "_FlagFinder", Unfiltered)
+    assert guard.verify() == actual
+
+
+def test_ast_admission_skips_only_impossible_visitors_and_still_parses(repo, monkeypatch):
+    _mk_plugin(
+        repo, "agent-foo", adopts=True,
+        body=("description = 'subprocess.Popen detached_kwargs'\n"
+              "value = subprocess.CREATE_NEW_CONSOLE\n"),
+    )
+    def unexpected(*_args):
+        raise AssertionError("an impossible spawn visitor was constructed")
+
+    monkeypatch.setattr(guard, "_SpawnFinder", unexpected)
+    monkeypatch.setattr(guard, "_DetachedSpawnFinder", unexpected)
+    assert "unsafe 'CREATE_NEW_CONSOLE'" in guard.verify()[0]
+    source = repo / "plugins/agent-foo/src/agent_foo/mod.py"
+    source.write_text("def broken(:\n", encoding="utf-8")
+    assert "cannot parse production Python" in guard.verify()[0]
+    source.write_text("import subprocess\nsubprocess.run(['git'])\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="impossible spawn visitor"):
+        guard.verify()
+
+
 @pytest.mark.parametrize("visitor_name", ["_FlagFinder", "_SpawnFinder", "_DetachedSpawnFinder"])
 def test_visitor_dispatch_resolves_each_node_type_once_per_file(visitor_name, monkeypatch):
     text = "from subprocess import Popen\n" + "value = alias\n" * 50
