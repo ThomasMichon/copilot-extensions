@@ -94,6 +94,38 @@ the specific already-merged findings below.
 
 ## Named retained batches and explicit blocked owners
 
+### Subsequent admission: G-PS-SCAN only
+
+Admit S030/S031/S068 and only G-PS-SCAN's explicit S027/S029 subspans:
+the `fnmatch`/`os` imports, error-propagating traversal helpers and two actual
+scan consumers. The strict plugin sweep remains unpruned, including otherwise
+ignored virtual-environment directories inside plugins. Only the repo-wide
+backstop prunes the existing plugin subtree and ignored names; ignored
+ancestors still suppress that backstop. No new exclusion is introduced.
+Sorted candidates retain platform suffix matching, directory/file-link
+behavior and script read errors. Directory links are
+not followed.
+
+The immutable scan definitions are reconciled to the current guard without
+changing its lexical detector, runtime helper or error handling. Tests compare
+legacy strict/backstop candidates and exact complete-guard diagnostics,
+observe traversal, exercise real readable file/directory links and retain
+script read failures. Enumeration failure is tested in both scan modes.
+Seven scan cases plus the actual complete-guard retention consumer passed,
+eight tests with no skips on native Windows and exactly two workers. The
+standalone real guard also passed for 13 runtime plugins; combined time was
+33.83 seconds including preparation/cleanup, with unchanged item deadline,
+diagnostic bound and containment caps. Ruff and diff checks passed.
+
+This independent below-altitude traversal change does not re-extract the
+already-landed G-RETENTION function or alter native Bash/writer fixtures.
+Helper documentation and the backstop comment record the boundary. Existing
+usage/runtime docs remain accurate; no plugin payload, changefile, installer,
+external venue, required-unit admission or workflow-policy change applies.
+Fresh synthetic trees and actual guard execution cover the lightweight clean
+consumer path, not full-module/plugin or parent timing qualification.
+Review and required CI still gate merge.
+
 ### Subsequent admission: G-RETENTION only
 
 Admit S028/S033/S034 and only G-RETENTION's explicit S027/S029 subspans:

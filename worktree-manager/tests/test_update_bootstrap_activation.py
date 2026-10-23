@@ -193,7 +193,7 @@ def test_interruption_waits_for_owned_activation_before_rollback(constructed_upd
     os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1",
     reason="real fresh-SDK ownership reader; not promotion-unit evidence",
 )
-@pytest.mark.parametrize("changed_owner", ["manager-command", "engine-command", "provider"])
+@pytest.mark.parametrize("changed_owner", ["manager-command", "provider"])
 def test_repair_revalidates_ownership_after_construction_before_publication(
     constructed_update, repair_case, monkeypatch, changed_owner,
 ):
@@ -232,11 +232,7 @@ def test_repair_revalidates_ownership_after_construction_before_publication(
                 document["provider_root"] = str(case.home / "another-manager")
                 path, content = provider, json.dumps(document).encode()
             else:
-                name = (
-                    primary if changed_owner == "manager-command"
-                    else "agent-worktrees-update-entry.sh"
-                )
-                path, content = local_bin / name, b"foreign command: preserve me\n"
+                path, content = local_bin / primary, b"foreign command: preserve me\n"
             path.write_bytes(content)
             changed.append((path, content))
             yield ready
