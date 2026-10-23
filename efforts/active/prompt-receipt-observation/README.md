@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** managed proposal and implementation PRs
 - **Created:** 2026-10-22
-- **Status:** Active
+- **Status:** Blocked
 - **Vision:** `visions/plugins/context-handoff/README.md`: continuous work,
   durable recovery locator, objective and authority boundary
 - **Umbrella issue:** #7942
@@ -75,16 +75,16 @@ Manager, telemetry, mention guard, installed payload and shared services.
   calls; prefer existing launch identity without inventing authority.
 - [x] Use one bounded async observation, with coalesced duplicates, explicit
   pending/unavailable/logged outcomes and later reconciliation.
-- [x] Prevent provisioning and bound the complete child lifecycle, including
+- [ ] Prevent provisioning and bound the complete child lifecycle, including
   cancellation/cleanup, rather than only promise scheduling.
-- [x] Preserve receipt format, replay behavior and all consumption/ownership checks.
+- [ ] Preserve receipt format, replay behavior and all consumption/ownership checks.
 - [ ] Update consumer documentation, add changefile, review and merge source.
 
 ## Validation Plan
 
-- [x] Unit coverage: launch identity, missing runtime, blocked identity, absent
+- [ ] Unit coverage: launch identity, missing runtime, blocked identity, absent
   service, concurrent duplicates/replay and deferred availability.
-- [x] Native consumer integration: exercise the actual registered callback with
+- [ ] Native consumer integration: exercise the actual registered callback with
   blocked child processes and verify return latency, event-loop responsiveness,
   process cleanup and no installer descendants.
 - [x] Isolated first-touch execution with no provisioned runtime.
@@ -150,3 +150,24 @@ new authority or ownership behavior requires a separate proposal.
   Release promotion and installed adoption remain separately owned, not claimed.
 - Documentation impact: the plugin README now explains observation scheduling,
   failure/retry and cleanup. No configuration, consumption or ownership change.
+
+### 2026-10-22 — Independent review blocks source completion
+
+- The implementation review identified five substantive unresolved cases:
+  cross-process check/append races; failed tree termination retaining inherited
+  pipes; output-limit termination bypassing tree cleanup; unbounded retained
+  activity history; and a captured missing session ID not being refreshed.
+- Prior passing measurements remain evidence for their exact controlled cases,
+  not complete lifecycle/idempotency qualification. Reopened the corresponding
+  plan/validation checks. No implementation merge or installed rollout occurred.
+- **Decision needed:** the scoped implementation needs an atomic receipt
+  operation at the existing data owner and a reliable process-custody primitive
+  that survives root exit/termination failure. The current context-handoff-only
+  CLI composition cannot make the backend check/append atomic, and best-effort
+  `taskkill` is not a custody guarantee. Confirm the owner and permission for
+  those additional source seams, or select a reviewed replacement design within
+  context-handoff. Do not introduce a parallel activity store or silently widen
+  this lane into shared backend/lifecycle work.
+- Preserve this worktree and draft implementation PR pending that decision;
+  source review and merge remain required. Continue without contacting existing
+  agents, agent-chat, remote workers or shared installed services.
