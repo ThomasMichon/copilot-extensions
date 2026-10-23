@@ -2046,6 +2046,16 @@ def test_windows_first_install_decodes_real_non_ascii_child_diagnostics(monkeypa
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows cold hook consumer")
 def test_windows_first_install_direct_hook_stamps_without_runtime(monkeypatch, tmp_path):
+    import shutil
+    from test_first_install_bootstrap import PLUGIN, _materialize_installed_payload
+
+    payload = tmp_path / "payload"
+    shutil.copytree(
+        PLUGIN, payload,
+        ignore=shutil.ignore_patterns("tests", "__pycache__", "*.pyc", "libs"),
+    )
+    _materialize_installed_payload(payload)
+    monkeypatch.setattr(hook_client, "__file__", str(payload / "scripts" / "hook_client.py"))
     home = Path.home()
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(tmp_path / "absent"))

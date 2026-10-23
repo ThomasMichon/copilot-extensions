@@ -131,6 +131,87 @@ def test_standalone_module_copies_without_projection_engine(standalone_workspace
     assert not (home / ".copilot" / "installed-plugins" / "example" / "customizing-copilot").exists()
 
 
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_separate_launch_processes_reuse_prepared_generation(standalone_workspace):
+    standalone, _, repo, _, env = standalone_workspace
+    code = (
+        "import json,sys; from dataclasses import asdict; "
+        "from agent_worktrees import local_cache_refresh as r,static_instructions as s\n"
+        "if sys.argv[2]=='reuse':\n"
+        " def forbidden(*a,**kw): raise AssertionError('repeated preparation')\n"
+        " s._snapshot=s._git=forbidden\n"
+        "print(json.dumps(asdict(r.prepare_for_launch(sys.argv[1]))))\n"
+    )
+    results = []
+    for mode in ("first", "reuse"):
+        child = subprocess.run(
+            [sys.executable, "-c", code, str(repo), mode], env=env, cwd=standalone,
+            capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert child.returncode == 0, child.stderr
+        results.append(json.loads(child.stdout))
+    assert results[0]["status"] == results[1]["status"] == "ready"
+    assert results[0]["generation"] == results[1]["generation"]
+    assert results[0]["reused"] is False and results[1]["reused"] is True
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_newer_cross_process_publication_cannot_be_overwritten(standalone_workspace):
+    standalone, home, repo, _, env = standalone_workspace
+    entered, release = standalone / "entered", standalone / "release"
+    code = (
+        "import pathlib,json,sys,time; from dataclasses import asdict; "
+        "from agent_worktrees import local_cache_refresh as r,static_instructions as s\n"
+        "if sys.argv[2]=='old':\n"
+        " original=s._snapshot\n"
+        " def held(*a,**kw):\n"
+        "  value=original(*a,**kw); pathlib.Path(sys.argv[3]).touch()\n"
+        "  until=time.monotonic()+10\n"
+        "  while not pathlib.Path(sys.argv[4]).exists():\n"
+        "   if time.monotonic()>until: raise TimeoutError('fixture release missing')\n"
+        "   time.sleep(.01)\n"
+        "  return value\n"
+        " s._snapshot=held\n"
+        "print(json.dumps(asdict(r.prepare_for_launch(sys.argv[1]))))\n"
+    )
+    children = []
+    try:
+        for mode in ("old", "new"):
+            child = subprocess.Popen(
+                [sys.executable, "-c", code, str(repo), mode, str(entered), str(release)],
+                env=env, cwd=standalone, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            children.append(child)
+            if mode == "old":
+                until = time.monotonic() + 10
+                while not entered.exists() and time.monotonic() < until:
+                    time.sleep(.01)
+                assert entered.exists()
+                (home / ".copilot/installed-plugins/example/guidance/body.md").write_bytes(b"new generation")
+        release.touch()
+        results = []
+        for child in children:
+            stdout, stderr = child.communicate(timeout=15)
+            assert child.returncode == 0, stderr
+            results.append(json.loads(stdout))
+        assert results[0]["status"] == "failed"
+        assert results[1]["status"] == "ready"
+        output = repo / ".github/instructions/agent-worktrees-generated/example/guidance/nested/body.local.instructions.md"
+        assert output.read_bytes() == b"new generation"
+    finally:
+        release.touch()
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=5)
+
+
 @pytest.mark.skipif(
     sys.platform != "linux" or not hasattr(os, "pidfd_open"),
     reason="native Linux process-group and identity-safe cleanup unavailable",

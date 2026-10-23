@@ -13,12 +13,14 @@ import time
 import unicodedata
 
 from plugin_resolve import (
-    RepoPluginSettings, SETTINGS_RELS, load_marketplace, marketplace_manifest_name,
+    PLUGIN_MANIFEST_RELS, RepoPluginSettings, SETTINGS_RELS, load_marketplace, marketplace_manifest_name,
     plugin_dir, split_source,
 )
 from plugin_activation import validate_identity
 from plugin_activation._installed_root import _installed_root
 from plugin_activation.state import _reject_duplicates, _split_jsonc_header
+
+from . import static_preparation as preparation
 
 NAMESPACE = ".github/instructions/agent-worktrees-generated"
 _RESERVED_NAMES = {
@@ -42,9 +44,13 @@ def _remaining(deadline: float | None, ceiling: float | None = None) -> float | 
 
 
 def _read_regular_bytes(path: Path) -> bytes:
+    preparation.observe(path)
     if not stat.S_ISREG(path.stat().st_mode):
         raise ValueError(f"instruction input is not a regular file: {path}")
-    return path.read_bytes()
+    content = path.read_bytes()
+    preparation.observe(path)
+    preparation.remember_bytes(path, content)
+    return content
 
 
 def _object(path: Path, *, jsonc_header: bool = False) -> dict:
@@ -157,66 +163,108 @@ def _plugin(identity: str, markets: dict, home: Path, *, deadline: float | None 
     return candidate.root
 
 
-def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[str, bytes]:
+def _selection(root: Path, home: Path, *, deadline: float | None = None) -> tuple[list, dict, list]:
     enabled, markets = _settings(root, home, deadline=deadline)
-    result: dict[str, bytes] = {}
-    folded: set[str] = set()
+    selection, plugins, failures = [], {}, []
     for identity in sorted(enabled):
         _remaining(deadline)
         if not enabled[identity]:
             continue
-        plugin = _plugin(identity, markets, home, deadline=deadline).resolve(strict=True)
-        source_key = unicodedata.normalize("NFC", plugin.as_posix()).casefold()
-        output_key = unicodedata.normalize("NFC", (root / NAMESPACE).as_posix()).casefold()
-        if source_key == output_key or source_key.startswith(output_key + "/"):
-            raise ValueError(f"instruction source overlaps the disposable output namespace: {identity}")
-        declaration = plugin / "instruction-projections.json"
-        data = _optional_object(declaration)
-        if data is None:
+        try:
+            plugin = _plugin(identity, markets, home, deadline=deadline).resolve(strict=True)
+            selection.append([identity, str(plugin), [
+                preparation.stamp(plugin.joinpath(*relative), content_digest=True)
+                for relative in PLUGIN_MANIFEST_RELS
+            ]])
+            plugins[identity] = plugin
+        except (OSError, ValueError) as exc:
+            failures.append(f"{identity}: {exc}")
+    return selection, plugins, failures
+
+
+class _Snapshot(dict):
+    def __init__(self, selection: list, failures: list):
+        super().__init__()
+        self.selection = selection
+        self.failures = failures
+
+
+def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> _Snapshot:
+    selection, plugins, failures = _selection(root, home, deadline=deadline)
+    result = _Snapshot(selection, failures)
+    folded: set[str] = set()
+    for identity, plugin in plugins.items():
+        _remaining(deadline)
+        try:
+            entries = _plugin_snapshot(root, identity, plugin, deadline=deadline)
+        except TimeoutError:
+            raise
+        except (OSError, ValueError) as exc:
+            result.failures.append(f"{identity}: {exc}")
             continue
-        if (
-            data.get("schema") != "copilot-extensions.instruction-projections"
-            or type(data.get("version")) is not int or data["version"] != 1
-            or not isinstance(data.get("projections"), list)
-        ):
-            raise ValueError(f"invalid instruction declarations: {declaration}")
-        for entry in data["projections"]:
-            _remaining(deadline)
-            if not isinstance(entry, dict):
-                raise ValueError(f"invalid instruction declaration: {declaration}")
-            if entry.get("customizationKind", "instructions") != "instructions":
-                raise ValueError(f"unsupported instruction customization kind: {declaration}")
-            source_id = entry.get("id")
-            if not isinstance(source_id, str) or not source_id:
-                raise ValueError(f"missing instruction identity: {identity}")
-            template = entry.get("template")
-            if not isinstance(template, str):
-                raise ValueError(f"missing instruction template: {identity}/{source_id}")
-            source = (plugin / template).resolve(strict=True)
-            if Path(template).is_absolute() or not source.is_relative_to(plugin):
-                raise ValueError(f"instruction template escapes plugin: {identity}/{source_id}")
-            source_key = unicodedata.normalize("NFC", source.as_posix()).casefold()
-            if source_key == output_key or source_key.startswith(output_key + "/"):
-                raise ValueError(f"instruction template overlaps disposable output: {identity}/{source_id}")
-            name, market = split_source(identity)
-            destination = entry.get("destination")
-            prefix = ".github/instructions/"
-            if (
-                not isinstance(destination, str) or not destination.startswith(prefix)
-                or not destination.endswith(".instructions.md") or "\\" in destination
-            ):
-                raise ValueError(f"invalid instruction destination: {identity}/{source_id}")
-            parts = destination[len(prefix):].split("/")
-            for part in parts:
-                _component(part)
-            local = "/".join(parts)[:-len(".instructions.md")] + ".local.instructions.md"
-            relative = f"{market}/{local}"
+        for relative, content in entries.items():
             key = unicodedata.normalize("NFC", relative).casefold()
             if any(key == previous or key.startswith(previous + "/") or previous.startswith(key + "/") for previous in folded):
                 raise ValueError(f"colliding instruction destination: {relative}")
             folded.add(key)
-            result[relative] = _read_regular_bytes(source)
+            result[relative] = content
     _remaining(deadline)
+    return result
+
+
+def _plugin_snapshot(root: Path, identity: str, plugin: Path, *, deadline: float | None) -> dict:
+    source_key = unicodedata.normalize("NFC", plugin.as_posix()).casefold()
+    output_key = unicodedata.normalize("NFC", (root / NAMESPACE).as_posix()).casefold()
+    if source_key == output_key or source_key.startswith(output_key + "/"):
+        raise ValueError(f"instruction source overlaps the disposable output namespace: {identity}")
+    declaration = plugin / "instruction-projections.json"
+    data = _optional_object(declaration)
+    if data is None:
+        return {}
+    if (
+        data.get("schema") != "copilot-extensions.instruction-projections"
+        or type(data.get("version")) is not int or data["version"] != 1
+        or not isinstance(data.get("projections"), list)
+    ):
+        raise ValueError(f"invalid instruction declarations: {declaration}")
+    result, folded = {}, set()
+    for entry in data["projections"]:
+        _remaining(deadline)
+        if not isinstance(entry, dict):
+            raise ValueError(f"invalid instruction declaration: {declaration}")
+        if entry.get("customizationKind", "instructions") != "instructions":
+            raise ValueError(f"unsupported instruction customization kind: {declaration}")
+        source_id = entry.get("id")
+        if not isinstance(source_id, str) or not source_id:
+            raise ValueError(f"missing instruction identity: {identity}")
+        template = entry.get("template")
+        if not isinstance(template, str):
+            raise ValueError(f"missing instruction template: {identity}/{source_id}")
+        preparation.observe(plugin / template)
+        source = (plugin / template).resolve(strict=True)
+        if Path(template).is_absolute() or not source.is_relative_to(plugin):
+            raise ValueError(f"instruction template escapes plugin: {identity}/{source_id}")
+        source_key = unicodedata.normalize("NFC", source.as_posix()).casefold()
+        if source_key == output_key or source_key.startswith(output_key + "/"):
+            raise ValueError(f"instruction template overlaps disposable output: {identity}/{source_id}")
+        _, market = split_source(identity)
+        destination = entry.get("destination")
+        prefix = ".github/instructions/"
+        if (
+            not isinstance(destination, str) or not destination.startswith(prefix)
+            or not destination.endswith(".instructions.md") or "\\" in destination
+        ):
+            raise ValueError(f"invalid instruction destination: {identity}/{source_id}")
+        parts = destination[len(prefix):].split("/")
+        for part in parts:
+            _component(part)
+        local = "/".join(parts)[:-len(".instructions.md")] + ".local.instructions.md"
+        relative = f"{market}/{local}"
+        key = unicodedata.normalize("NFC", relative).casefold()
+        if any(key == previous or key.startswith(previous + "/") or previous.startswith(key + "/") for previous in folded):
+            raise ValueError(f"colliding instruction destination: {relative}")
+        folded.add(key)
+        result[relative] = _read_regular_bytes(source)
     return result
 
 
@@ -292,7 +340,12 @@ def _safe_path(root: Path, path: Path, *, removable_files: set[Path] | None = No
             raise ValueError(f"instruction output parent is not a directory: {candidate}")
 
 
-def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[int, int, int]:
+def current(root: Path, home: Path, *, deadline: float | None = None) -> preparation.Publication | None:
+    selection, _, failures = _selection(root, home, deadline=deadline)
+    return None if failures else preparation.read(root, home, selection)
+
+
+def publish(root: Path, home: Path, *, deadline: float | None = None) -> preparation.Publication:
     """Resolve inside the publication lock; preflight the whole set before copying."""
     with publication_lock(root, deadline=deadline):
         try:
@@ -301,7 +354,13 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
             pass
         else:
             raise ValueError("paired worktree preparation is incomplete; repair the pair before publishing instructions")
-        desired = _snapshot(root, home, deadline=deadline)
+        cached = current(root, home, deadline=deadline)
+        if cached is not None:
+            return cached
+        with preparation.capture() as inputs:
+            desired = _snapshot(root, home, deadline=deadline)
+        if desired.failures and not desired:
+            raise ValueError("; ".join(desired.failures))
         output = root / NAMESPACE
         _safe_path(root, output)
         existing: set[str] = set()
@@ -318,7 +377,7 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                         existing.add(path.relative_to(output).as_posix())
                     else:
                         existing_directories.add(path)
-        stale = existing - desired.keys()
+        stale = set() if desired.failures else existing - desired.keys()
         removable_files = {output / relative for relative in stale}
         exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
         if not exclude.is_absolute():
@@ -341,7 +400,8 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
             _safe_path(root, path, removable_files=removable_files)
             if path.exists() and not path.is_file() and not path.is_dir():
                 raise ValueError(f"instruction destination is not a regular file: {path}")
-        if desired != _snapshot(root, home, deadline=deadline):
+        selected, _, _ = _selection(root, home, deadline=deadline)
+        if not preparation.matches(inputs) or desired.selection != selected:
             raise ValueError("instruction sources changed during preparation; retry publication")
         rule = f"/{NAMESPACE}/"
         previous = _read_regular_bytes(exclude).decode("utf-8") if exclude.exists() else ""
@@ -366,7 +426,10 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
             for relative in existing & desired.keys()
             for parent in (output / relative).parents
         }
-        for directory in sorted(existing_directories, key=lambda path: len(path.parts), reverse=True):
+        for directory in sorted(
+            () if desired.failures else existing_directories,
+            key=lambda path: len(path.parts), reverse=True,
+        ):
             if directory not in retained_parents:
                 _remaining(deadline)
                 directory.rmdir()
@@ -390,4 +453,11 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                     temporary.unlink(missing_ok=True)
             changed += 1
         _remaining(deadline)
-        return changed, unchanged, len(stale)
+        if not preparation.matches(inputs):
+            raise ValueError("instruction sources changed during publication; retry preparation")
+        identity = ""
+        if not desired.failures:
+            identity = preparation.save(root, home, selected, inputs, desired, NAMESPACE)
+        return preparation.Publication(
+            changed, unchanged, len(stale), identity, failures=tuple(desired.failures),
+        )

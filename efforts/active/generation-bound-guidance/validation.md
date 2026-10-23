@@ -1,0 +1,127 @@
+# Source validation and remaining native acceptance
+
+Parent contract: [Generation-Bound Guidance](README.md), #7943.
+
+## Scope and source identity
+
+The implementation owns static instruction preparation/reuse, its bounded
+SessionStart backup and post-tool completion notice, and Bridge's local
+prelaunch preparation seam. It does not change production bootstrap,
+native launch scripts, optional maintenance, Manager loading or other owners'
+APIs. No shared installation, service restart or deployment was performed.
+
+- Pre-E source: `943e2ca139fd15e25003b6b4e863227afcabeaf1`.
+- Preserved implementation: `0f43df6a4`.
+- These are source-validation identities, not release/installed receipts.
+
+## Completed checks
+
+The unchanged initial focused baseline was **107 passed, 4 skipped**.
+Seven newly added generation/partial-delivery regressions failed before the
+implementation. Focused implementation validation subsequently completed:
+
+| Worktrees group | Passed | Skipped |
+|---|---:|---:|
+| `test_local_cache_lifecycle.py` | 32 | 0 |
+| `test_local_cache_refresh.py` | 104 | 4 |
+| `test_local_cache_worker.py` | 17 | 0 |
+| `test_nudge_status.py` | 10 | 0 |
+| `test_static_instructions_standalone.py` | 6 | 6 |
+| **Total** | **169** | **10** |
+
+Bridge's `test_local_static_preparation.py` and `test_local_cache_refresh.py`
+completed **65 passed, 3 skipped**. Skips are explicit platform/opt-in tiers,
+not successful native qualification. Install-contract (13 plugins),
+headless-launch, module-size and touched-Python lint checks passed.
+
+The Worktrees runner used one selected file per existing bounded group; no
+deadline was raised. An earlier six-file group reached the existing 300-second
+group ceiling and was replaced by those smaller groups, not treated as passing.
+The real native process fixtures cover first-touch publication without the
+authoring renderer, reuse in a second process, and an old delayed publisher
+losing to the current source selection. A real post-tool script receives the
+late completion notice. Bridge's consumer-order test holds preparation before
+allowing spawn; these are source-consumer proofs, not a live Copilot admission
+or installed end-to-end launch.
+
+## Matched publication-phase measurements
+
+One synthetic provider, identical declared bytes and isolated empty homes.
+Each of three paired trials performs one first touch and two unchanged calls.
+The old publisher is loaded unchanged from the pre-E source capsule; the new
+publisher uses the preserved candidate. Both use the same interpreter and
+unchanged library environment. The measured boundary is `publish`, **not**
+process entry, registration, first prompt, frame display or end-to-end launch.
+
+| Publisher / boundary | n | Median ms | Range ms | Desired-set builds/call | Git calls/call |
+|---|---:|---:|---:|---:|---:|
+| Pre-E first touch | 3 | 1781.0 | 1141–2703 | 2 | 4 |
+| Candidate first touch | 3 | 1360.0 | 1219–1516 | 1 | 4 |
+| Pre-E unchanged | 6 | 1179.5 | 953–1390 | 2 | 4 |
+| Candidate unchanged | 6 | 85.5 | 78–156 | 0 | 0 |
+
+The earlier 1.50-second first touch and 141/78-millisecond reuse probe was
+unmatched; the table above supersedes it for comparison. Small local samples
+and shared-host variation do not establish a broader launch-speed claim.
+
+## Cold-bootstrap comparison: independent, still failing
+
+Exact case:
+`tests/test_hook_ipc.py::test_windows_first_install_direct_hook_stamps_without_runtime`.
+The raw-source fixture first failed because the payload lacked its vendored
+`agent-procutil`. The fixture now uses the existing
+`test_first_install_bootstrap._materialize_installed_payload` helper, which
+calls the canonical release materializer. It does not install a shared runtime.
+
+Only this case was then compared against pre-E and candidate source:
+
+```text
+python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_hook_ipc.py -k windows_first_install_direct_hook
+```
+
+The comparison temporarily substituted the pre-E fixture source, retaining the
+same canonical materialization, `{"sessionId":"cold-hook"}` input, absent
+killswitch, isolated home and deadlines. The same case was run serially against
+each source twice; both sources failed both times. The second pair emitted
+pre-invocation identity receipts before the test's timeout.
+
+The failure phase is `_bootstrap_first_install` waiting in
+`subprocess.communicate` for the direct Windows deferred-runtime stamp:
+
+```text
+<python> -I -B -X utf8 <payload>/scripts/command_binding.py
+  --payload-root <payload> --plugin-id agent-worktrees
+  --legacy-root <isolated-home>/.agent-worktrees
+  --source-payload-root <payload> --deferred-runtime --run-lifecycle
+  --lifecycle-timeout 10.0 --
+  <powershell> -NoLogo -NoProfile -ExecutionPolicy Bypass
+  -File <payload>/scripts/install.ps1 stamp -BootstrapPython <python>
+```
+
+The lifecycle's **10-second** deadline is unchanged. The direct wrapper's
+subprocess timeout is `None`; the existing **30-second pytest item limit**
+terminated the matched cases, followed by runner-owned containment cleanup.
+No outer or inner limit was raised. An earlier candidate-only staged attempt
+returned the lifecycle's own exit 124; it is not the matched comparison result.
+
+The staged `plugin.json`, materialized `pyproject.toml`, `hook_client.py`,
+`install.ps1`, `command_binding.py` and `command_lifecycle.py` hashes matched
+between sources. Representative unchanged bootstrap hashes:
+
+- `hook_client.py`: `65bf9f373d7c172b077c4fa1f9addbdb7a46e12b6b7b05930451a17285e9b237`
+- `command_lifecycle.py`: `949c796a2683f8915d939a5475465870429e1a6e46cf5e0e365b5bc7ea17182a`
+- Pre-E source capsule: `fce371ad3838568207b6335b6a023bf58ea36fb4a6da17283c103fcf10cd8873`
+
+This establishes an independent native-bootstrap failure, not a passing native
+tier or a complete root-cause diagnosis. Follow-up ownership is the unchanged
+`scripts/hook_client.py` → `command_binding.py` → `command_lifecycle.py` →
+`install.ps1 stamp` boundary. Lane E does not modify those production paths or
+take over their owners.
+
+## Completion boundary
+
+Source partial delivery may proceed only with normal review and green required
+CI. The cold-bootstrap/native entry and installed acceptance obligations remain
+open under #7943 and the coordinating campaign. No failing required check may
+be bypassed. Source merge, release promotion, installed verification and actual
+model admission remain separate states.

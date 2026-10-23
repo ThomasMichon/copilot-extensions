@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse generation-bound static preparation and surface late refresh restart requirements",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

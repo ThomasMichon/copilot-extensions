@@ -139,6 +139,52 @@ def _nudge_text(calls: int, minutes: int) -> str:
     )
 
 
+def _late_guidance_notice(payload: dict, home: Path) -> str | None:
+    session_id = payload.get("sessionId")
+    if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
+        return None
+    watch_path = home / ".copilot" / "session-state" / session_id / "local-guidance-watch.json"
+    try:
+        if not watch_path.is_file() or watch_path.stat().st_size > 8192:
+            return None
+        watch = json.loads(watch_path.read_text(encoding="utf-8"))
+        if (
+            watch.get("version") != 1
+            or not Path(payload.get("cwd") or "").resolve().is_relative_to(Path(watch["root"]).resolve())
+        ):
+            return None
+        request = Path(watch["metadata"]) / "request.json"
+        if not request.is_file() or request.stat().st_size > 256 * 1024:
+            return None
+        state = json.loads(request.read_text(encoding="utf-8"))
+        if (
+            state.get("version") != 1 or state.get("root") != watch["root"]
+            or state.get("phase") not in ("done", "failed")
+            or state.get("completed_at", 0) < watch["started_at"]
+        ):
+            return None
+        result = state["result"]
+        status = result.get("status")
+        if status not in ("ready", "partial", "skipped", "failed", "timeout"):
+            return None
+        watch_path.unlink()
+        if status in ("failed", "timeout"):
+            return "[local-guidance] Backup refresh failed; retain reviewed fallback. Model admission is unknown."
+        if result.get("restart_required") is True:
+            coverage = "partially refreshed" if status == "partial" else "refreshed"
+            return (
+                f"[local-guidance] Static guidance files {coverage} after session discovery. "
+                "Restart/new context is required to discover the refreshed guidance; "
+                "this is file publication, not proof of model admission. "
+                "Do not restart automatically; preserve current work first."
+            )
+        if status == "partial":
+            return "[local-guidance] Backup refresh is incomplete; retain reviewed fallback. Model admission is unknown."
+        return "[local-guidance] Backup verified unchanged guidance; no new model admission is asserted."
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+
+
 def decide(
     payload: dict, *, env=None, home=None, now: float | None = None,
     tracking_record=_UNSET, deadline: float | None = None,
@@ -150,11 +196,14 @@ def decide(
     (per-project) at ``<home>/.<project>/worktrees/<id>.yaml``.
     """
     env = env if env is not None else os.environ
-    if _truthy_off(env.get("AGENT_WORKTREES_NUDGE")):
-        return None
     home = Path(home) if home is not None else Path.home()
     now = time.time() if now is None else now
     if deadline is not None and time.time() >= deadline:
+        return None
+    notice = _late_guidance_notice(payload, home)
+    if notice:
+        return notice
+    if _truthy_off(env.get("AGENT_WORKTREES_NUDGE")):
         return None
 
     cwd = str(payload.get("cwd") or "") or os.getcwd()

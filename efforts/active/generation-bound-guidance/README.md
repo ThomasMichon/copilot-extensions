@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential managed PRs against `dev`
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/harness-guidance` — closes `simple-local-static-delivery`, `generated-output-is-disposable-source-is-not`, and `resume-stable-context`
 - **Umbrella issue:** #7943
 
@@ -26,6 +26,9 @@ running model received it.
 - **Topology:** sequential plan and implementation PRs.
 - **Host (owns PRs):** Guidance driver.
 - **Delegates:** none.
+- Do not contact, read, subscribe to or reuse pre-existing Bridge agents.
+  No agent-chat or remote worker dispatch. Detect collisions through read-only
+  forge/task state and escalate them to the coordinating owner.
 - **Handoff:** #7943 and this effort retain the incomplete objective.
 - #7694/#7788 retain native launch scripts and optional maintenance ownership.
 - #7974 retains bootstrap context and worktree identity ownership.
@@ -67,48 +70,48 @@ this work does not replace skill/hook discovery with an instruction-only claim.
 ## Plan
 
 ### Phase 1 — Reviewed contract
-- [ ] Land this plan through normal automated review before implementation.
-- [ ] Record baseline consumer order, publication count and local timings.
+- [x] Land this plan through normal automated review before implementation.
+- [x] Record baseline consumer order, publication count and local timings.
 
 ### Phase 2 — Preparation and reuse
 
 The following code mechanisms are **agent-recommended**.
 
-- [ ] Extend `static_instructions.py` with one complete resolved preparation
+- [x] Extend `static_instructions.py` with one complete resolved preparation
   and a checkout-local, versioned successful-publication receipt. Bind it to
   canonical checkout/home, exact enabled source identities, effective settings,
   resolved payload roots/declarations/templates and pair-composition state.
   A partial/error/timeout result never creates reusable readiness.
-- [ ] Retain one publication lock and revalidate captured inputs at its mutation
+- [x] Retain one publication lock and revalidate captured inputs at its mutation
   boundary. Avoid a second complete desired-set reconstruction when captured
   input evidence is unchanged. Preserve current index/path/link checks,
   namespace-only cleanup and protection of tracked/staged removals.
   A concurrent newer source selection must never be replaced by an older one.
-- [ ] Preserve per-source independence: an unavailable enabled payload reports
+- [x] Preserve per-source independence: an unavailable enabled payload reports
   partial readiness while safe independent sources remain deliverable. Incomplete
   discovery never authorizes stale cleanup for unresolved sources or a reusable
   complete-readiness receipt. Allocation may succeed with an honest degraded
   diagnostic; it must not imply all guidance was delivered or repair payloads.
-- [ ] Reuse the receipt only while source, destination and Git-protection
+- [x] Reuse the receipt only while source, destination and Git-protection
   evidence still matches. Missing/corrupt evidence, changed outputs, settings,
   payload identity or paired composition forces safe preparation, not optimistic
   success. Do not rely on age, version text alone or an inherited environment
   flag as readiness authority.
-- [ ] Keep `local_cache_refresh.prepare_for_launch` as the foreground owner,
+- [x] Keep `local_cache_refresh.prepare_for_launch` as the foreground owner,
   with explicit generation/reuse fields in its structured result. Preserve
   final composition ordering and operation-specific limits; do not impose a
   broad timeout that silently permits an unprepared launch.
-- [ ] Route the Bridge prelaunch seam through the existing attributable
+- [x] Route the Bridge prelaunch seam through the existing attributable
   Worktrees preparation command when available, consuming its structured result
   rather than rendering a competing namespace. Preserve standalone optional
   compatibility, same-cell identity and async cancellation/tree cleanup.
   A missing owner or failed preparation reports degraded fallback honestly.
-- [ ] Make `sessionstart_diagnostic` skip background regeneration for a verified
+- [x] Make `sessionstart_diagnostic` skip background regeneration for a verified
   current preparation. Otherwise retain one bounded backup owner. Completion
   persists a visible refresh/restart-required status through the existing
   guidance/status surface, with explicit unknown model admission and no hook
   invented to originate a turn. Failure remains failure, not restart success.
-- [ ] Clarify the compatibility renderer's skill advice: same-generation
+- [x] Clarify the compatibility renderer's skill advice: same-generation
   ordinary reads do not regenerate; managed prelaunch owns static readiness.
   Update the startup pattern and relevant plugin docs, with changefiles.
 
@@ -156,6 +159,54 @@ If the existing command/status contract cannot carry the required result,
 coordinate the smallest additive owner API before changing another slice.
 
 ## Journal
+
+### 2026-10-22 — Matched baseline and source-only continuation
+
+- Collected all outstanding validation processes; they completed and no owned
+  validation shell remained. Preserved implementation in `0f43df6a4`.
+- The exact cold-hook case fails against unchanged pre-E and candidate source
+  using the same canonical staged payload/input/deadlines. Bootstrap input
+  hashes match; both reach the unchanged 30-second test limit while waiting for
+  the direct stamp, whose declared lifecycle deadline remains 10 seconds.
+- The scoped [validation report](validation.md) records commands, phase,
+  identities, counts and matched publication measurements. Native/bootstrap
+  root-cause repair and installed acceptance remain open under #7943; source
+  publication is permitted only through passing review and required CI.
+
+### 2026-10-22 — Reviewed plan and baseline
+
+- #7994 merged with current-head approval and successful required checks.
+- Baseline focused Worktrees suites: 107 passed, 4 platform skips in 110.54s
+  (121.00s including preparation/cleanup). An initial overly long Windows test
+  root hit Git's path limit; rerunning the four affected migration controls
+  under a shorter owned root passed, followed by the full focused green run.
+- Baseline foreground publication resolves the complete desired set twice;
+  Bridge separately renders before spawn; SessionStart always queues backup.
+  No installed readiness or model-admission claim follows from these tests.
+
+### 2026-10-22 — Source implementation and bounded validation
+
+- Implemented generation reuse, safe partial delivery, the existing Bridge
+  owner-command seam and one-time post-tool late-completion diagnostics.
+- Five focused Worktrees groups completed: 169 passed, 10 explicit platform/tier
+  skips; Bridge completed 65 passed, 3 platform skips. Install-contract,
+  headless-launch, module-size and touched-Python lint checks passed.
+- Expanded cold-hook validation exposed a separate native-bootstrap question:
+  the raw-source fixture omitted the vendored process helper. With the existing
+  release materializer, the real cold stamp instead reached its unchanged
+  lifecycle deadline. No production bootstrap change or deadline increase is
+  authorized. A same-input pre-change comparison is required before assigning
+  causality or attempting source-only publication.
+- A single-provider source-publication probe measured one first touch at
+  1.50 seconds (one desired-set construction, four Git calls), followed by two
+  unchanged calls at 141 and 78 milliseconds (zero constructions/Git calls).
+  This is not an end-to-end entry measurement and lacks a matched old-publisher
+  timing baseline; neither broad launch improvement nor installed qualification
+  is established.
+- Source partial delivery may proceed through normal review and green required
+  checks if the matched baseline establishes an independent native defect.
+  The parent #7943 native/campaign acceptance gate remains explicitly open;
+  no red required check may be bypassed and source merge is not full acceptance.
 
 ### 2026-10-22 — Intake and ownership
 

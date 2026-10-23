@@ -287,10 +287,13 @@ source set a more recent call has already superseded. See
 `docs/patterns/worktree-scoped-dynamic-guidance.md`: any session, regardless
 of push rights or scheduled-worker opt-in, can always see a fresh render of
 what's currently installed without a privileged sync. Call it
-unconditionally -- worktree create/resume, non-dry-run JSON launch planning,
-local bridge session preparation, `sessionStart`, or any read path --
-since a failure on one source never blocks another and nothing it does
-mutates a checked-in file or git history.
+only as the compatibility renderer when no managed startup publisher owns the
+boundary. Managed worktree create/resume and local Bridge preparation publish
+the final complete static set before discovery and reuse a verified unchanged
+generation. SessionStart is a bounded backup, not another unconditional render;
+ordinary same-generation reads do not regenerate files. A failure on one source
+must remain visible without withholding independently safe guidance, and no
+compatibility operation mutates checked-in files or git history.
 
 Local delivery never withholds safe guidance because of a context-budget excess.
 Template, per-file and aggregate excess, and invalid budget configuration, are

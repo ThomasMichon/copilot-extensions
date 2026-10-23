@@ -115,7 +115,26 @@ def test_rendering_keeps_no_administrative_lease_open(tmp_path, monkeypatch):
     state = json.loads((directory / "request.json").read_text())
     assert state["phase"] == "done"
     assert state["result"]["installed"] == 3
+    assert state["result"]["restart_required"] is True
+    assert state["result"]["model_admission"] == "unknown"
     assert "3 installed" in (directory / "refresh.log").read_text()
+
+
+@pytest.mark.parametrize("status,changed,phase,restart", [
+    ("ready", 0, "done", False), ("partial", 1, "done", True),
+    ("failed", 0, "failed", False), ("timeout", 0, "failed", False),
+])
+def test_completion_status_preserves_failure_and_admission(
+    tmp_path, monkeypatch, status, changed, phase, restart,
+):
+    directory = tmp_path / "worker"
+    directory.mkdir()
+    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root: lcr.RefreshResult(status, changed=changed))
+    worker.run(tmp_path, directory)
+    state = json.loads((directory / "request.json").read_text())
+    assert state["phase"] == phase
+    assert state["result"]["restart_required"] is restart
+    assert state["result"]["model_admission"] == "unknown"
 
 
 def test_latest_result_is_a_bounded_utf8_snapshot(tmp_path):

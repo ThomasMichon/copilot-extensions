@@ -1,0 +1,9 @@
+{
+  "comment": "Scope compatibility rendering to boundaries without a managed preparation owner",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

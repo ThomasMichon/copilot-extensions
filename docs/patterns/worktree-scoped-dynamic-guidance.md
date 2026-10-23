@@ -131,9 +131,12 @@ It resolves user, repository and local activation settings in process and uses
 the existing vendored `plugin_resolve` marketplace/path helpers and host
 installed-root resolver. Built-in unqualified plugin settings are outside this
 marketplace projection surface. Local catalog identity uses the existing
-`source.manifestName` mapping when a registration name differs. Missing enabled
-payloads, invalid declarations and inconclusive index checks report failure
-before publication instead of treating incomplete discovery as an empty set.
+`source.manifestName` mapping when a registration name differs. Missing enabled payloads and invalid per-plugin declarations report failures
+without withholding independently resolved sources. Such a publication is
+partial, never complete readiness; it retains all old generated outputs because
+incomplete discovery is not removal authority. Invalid effective settings,
+cross-source destination ambiguity and inconclusive index/path checks still
+refuse the batch before mutation.
 Index queries include case aliases of the generated namespace and neutralize
 inherited Git pathspec flags, so caller environment cannot narrow the protection.
 Settings use the host's leading-comment and exact-duplicate JSON semantics,
@@ -169,6 +172,43 @@ untracked files and unused empty generated directories are removed before
 installing replacements, allowing file/directory destination migrations in
 either direction without manual cleanup. Tracked blockers still fail the batch
 before any of those removals.
+
+Successful publication records a versioned `prepared.json` in the checkout's
+existing Git-administrative guidance directory. It binds the canonical root and
+home, exact current settings-derived plugin identities and payload roots,
+manifest generations, captured input-file identities/timestamps/content hashes, generated
+files/directories and Git index/HEAD evidence. A subsequent unchanged boundary
+revalidates that evidence (including current file bytes) without rebuilding the desired set, running Git or
+copying files. Changed settings, payloads, template links, pairing output,
+generated files, index/HEAD or malformed receipts require preparation again.
+Pending paired composition always refuses reuse. Partial/failed publications
+never create reusable readiness. The receipt is disposable local evidence, not
+a source of instruction authority or a model-admission receipt.
+
+The complete desired set is built once inside the publication lock. Captured
+input identities and current source selection are checked again before copying,
+rather than reconstructing every desired byte a second time. All mutation-path
+Git protection remains in place. Cross-process callers use the same gate and
+resolve current inputs after acquiring it; an older waiting caller cannot
+publish its pre-lock selection over a newer generation.
+
+Bridge's local Session-Host path invokes the attributable optional Worktrees
+`knowledge compose-plugins --prepare-projections --json` owner after static
+plugin preparation and before spawn. Its successful generation is reused, not
+rendered into a competing namespace. This foreground call retains async
+cancellation/tree custody and operation-specific owner limits, without a broad
+five-second render cutoff. Without a Worktrees owner, the independent bounded
+compatibility renderer remains available; refused identity or a failed owner
+does not authorize switching to another installation.
+
+SessionStart verifies current readiness before queueing its bounded backup.
+For a late backup, the exact session retains a watch on the checkout-local
+completion status. The existing post-tool hook surfaces completion once:
+changed/removed files explicitly require restart/new context before discovery;
+partial and failed outcomes retain reviewed-fallback guidance. An idle session
+is not awakened and no restart is automatic. Written files, a successful hook
+result and an acknowledgment never assert that the running model admitted the
+new instructions.
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
 purely checked-in: a gitignored, locally re-rendered cache of auto-discovered

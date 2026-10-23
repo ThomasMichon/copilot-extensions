@@ -113,6 +113,7 @@ class TestSessionstartDiagnostic:
     def test_worker_is_headless_survivable_and_reaped(self, tmp_path, monkeypatch):
         from agent_worktrees import status_monitor_runtime, local_cache_worker
 
+        (tmp_path / ".git").mkdir()
         calls = []
         waits = []
         monkeypatch.setattr(lcr, "_worker_directory", lambda root: tmp_path / "worker")

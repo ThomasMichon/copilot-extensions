@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -111,6 +112,108 @@ def provider(root, home, name="demo", *, content=b'---\r\napplyTo: "**"\r\n---\r
     current.setdefault("enabledPlugins", {})[f"{name}@market"] = True
     write_json(settings, current)
     return template, root / static.NAMESPACE / "market" / name / "fallback.local.instructions.md"
+
+
+def test_prepared_generation_reused_before_discovery_and_hook(copy_workspace, monkeypatch):
+    root, home = copy_workspace
+    _, output = provider(root, home)
+    calls = []
+    original = static._snapshot
+
+    def snapshot(*args, **kwargs):
+        calls.append("snapshot")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(static, "_snapshot", snapshot)
+    first = lcr.prepare_for_launch(root)
+    assert first.status == "ready"
+    assert first.generation
+    assert not first.reused
+    assert output.exists(), "publication precedes the consumer's first discovery"
+    monkeypatch.setattr(static, "_git", lambda *a, **kw: pytest.fail("unchanged preparation spawned Git"))
+    monkeypatch.setattr(lcr, "_queue_refresh", lambda *a: pytest.fail("current generation queued a worker"))
+    second = lcr.prepare_for_launch(root)
+    assert second.reused and second.generation == first.generation
+    assert "ready" in lcr.sessionstart_diagnostic(str(root), deadline=time.time() + 3)
+    assert calls == ["snapshot"]
+
+
+@pytest.mark.parametrize("change", ["payload", "settings", "missing-output", "extra-output", "receipt"])
+def test_preparation_invalidates_actual_changes(copy_workspace, change):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    first = lcr.prepare_for_launch(root)
+    if change == "payload":
+        template.write_bytes(b"next payload")
+    elif change == "settings":
+        provider(root, home, "second")
+    elif change == "missing-output":
+        output.unlink()
+    elif change == "extra-output":
+        (output.parent / "extra.local.instructions.md").write_text("stale")
+    else:
+        (lcr._worker_directory(root) / "prepared.json").write_text("{")
+    second = lcr.prepare_for_launch(root)
+    assert second.status == "ready" and not second.reused
+    assert output.read_bytes() == template.read_bytes()
+    if change in ("payload", "settings"):
+        assert second.generation != first.generation
+
+
+@pytest.mark.parametrize("failure", ["missing", "declaration", "template"])
+def test_missing_payload_does_not_withhold_independent_guidance(copy_workspace, failure):
+    root, home = copy_workspace
+    _, old = provider(root, home, "old")
+    assert lcr.prepare_for_launch(root).status == "ready"
+    _, safe = provider(root, home, "safe")
+    if failure != "missing":
+        broken, _ = provider(root, home, "missing")
+        if failure == "template":
+            broken.unlink()
+        else:
+            (broken.parents[1] / "instruction-projections.json").write_text("{")
+    settings = root / ".github" / "copilot" / "settings.json"
+    write_json(settings, {"enabledPlugins": {"safe@market": True, "missing@market": True}})
+    result = lcr.prepare_for_launch(root)
+    assert result.status == "partial"
+    assert result.blocking == 1 and "missing@market" in result.detail
+    assert safe.is_file() and old.is_file()
+    assert not result.reused
+
+
+def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, monkeypatch):
+    from agent_worktrees import local_cache_worker
+
+    root, home = copy_workspace
+    _, output = provider(root, home, content=b"fresh guidance")
+    session = home / ".copilot" / "session-state" / "example-session"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(lcr, "_queue_refresh", lambda *a: lcr.RefreshResult("queued"))
+    assert "queued" in lcr.sessionstart_diagnostic(
+        str(root), deadline=time.time() + 5, session_id="example-session",
+    )
+    assert not output.exists(), "backup has not delivered at discovery"
+    directory = lcr._worker_directory(root)
+    directory.mkdir()
+    assert local_cache_worker.run(root, directory) == 0
+    script = Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py"
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_WORKTREES_NUDGE="off")
+
+    def post():
+        result = subprocess.run(
+            [sys.executable, str(script)], env=env,
+            input=json.dumps({"sessionId": "example-session", "cwd": str(root), "toolName": "view"}),
+            text=True, capture_output=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout) if result.stdout.strip() else {}
+
+    notice = post()["additionalContext"]
+    assert "Restart/new context is required" in notice
+    assert "not proof of model admission" in notice
+    assert not post()
+    assert output.read_bytes() == b"fresh guidance"
 
 
 @pytest.mark.guard
@@ -344,6 +447,7 @@ def test_exclude_is_reread_after_index_queries(copy_workspace, monkeypatch):
     root, home = copy_workspace
     template, output = provider(root, home)
     assert lcr.refresh_local_cache(root).status == "ready"
+    template.write_bytes(b"new generation requires index preflight")
     exclude = root / ".git" / "info" / "exclude"
     original_git = static._git
 

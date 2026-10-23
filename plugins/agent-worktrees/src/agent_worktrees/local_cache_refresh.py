@@ -30,6 +30,9 @@ class RefreshResult:
     blocking: int = 0
     detail: str = ""
     removed: int = 0
+    generation: str = ""
+    reused: bool = False
+    elapsed_ns: int | None = None
 
     @property
     def diagnostic(self) -> str:
@@ -135,13 +138,20 @@ def refresh_local_cache(
 ) -> RefreshResult:
     from .static_instructions import publish
 
+    started = time.monotonic_ns()
     deadline = time.monotonic() + timeout if timeout is not None else None
     try:
         with step("Copying declared instructions", enabled=timeout is None):
-            changed, unchanged, removed = publish(
+            published = publish(
                 _checkout_root(repo_root).resolve(), home or Path.home(), deadline=deadline,
             )
-        result = RefreshResult("ready", changed=changed, unchanged=unchanged, removed=removed)
+        result = RefreshResult(
+            "partial" if published.failures else "ready",
+            changed=published.changed, unchanged=published.unchanged, removed=published.removed,
+            generation=published.generation, reused=published.reused,
+            blocking=len(published.failures), detail="; ".join(published.failures),
+            elapsed_ns=time.monotonic_ns() - started,
+        )
     except (TimeoutError, subprocess.TimeoutExpired) as exc:
         result = RefreshResult("timeout", blocking=1, detail=f"instruction copy timed out: {exc}")
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
@@ -174,11 +184,27 @@ def _run_refresh_worker(cwd: str) -> int:
     return local_cache_worker.run(root, _worker_directory(root))
 
 
-def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> str:
+def sessionstart_diagnostic(cwd: str, *, deadline: float | None, session_id: str | None = None) -> str:
     """Queue the bounded backup without waiting inside SessionStart."""
     try:
         if deadline is not None and deadline - time.time() < 1.5:
             return RefreshResult("skipped", detail="backup refresh deadline too short").diagnostic + "\n"
+        from .static_instructions import current
+        from .local_cache_worker import watch_completion
+
+        root = _checkout_root(cwd).resolve()
+        remaining = max(0, deadline - time.time()) if deadline is not None else 1.0
+        cached = current(
+            root, Path.home(),
+            deadline=time.monotonic() + min(remaining, 1.0),
+        )
+        if cached is not None:
+            watch_completion(root, session_id, prepared=True)
+            return RefreshResult(
+                "ready", unchanged=cached.unchanged, generation=cached.generation,
+                reused=True, detail="prepared generation reused; model admission unknown",
+            ).diagnostic + "\n"
+        watch_completion(root, session_id)
         return _queue_refresh(cwd).diagnostic + "\n"
     except Exception as exc:
         return _report(RefreshResult("failed", detail=f"backup refresh failed: {exc}")).diagnostic + "\n"

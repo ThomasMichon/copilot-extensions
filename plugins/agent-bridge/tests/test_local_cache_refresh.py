@@ -20,6 +20,7 @@ import asyncio
 import json
 import os
 import sys
+import subprocess
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -121,7 +122,7 @@ class TestSessionHostConnectionLocalCacheOrdering:
             raise SpawnReached
 
         monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
-        monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
+        monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", refresh)
         task = asyncio.create_task(_SessionHostConnectionMixin._connect_via_session_host(
             SimpleNamespace(_db=None),
             SpawnTarget(type="local", project="example", cwd=None),
@@ -160,7 +161,7 @@ class TestSessionHostConnectionLocalCacheOrdering:
             AsyncMock(return_value=(["agent"], str(tmp_path), {})),
         )
         error = asyncio.CancelledError() if cancelled else RuntimeError("refresh defect")
-        monkeypatch.setattr(lcr, "refresh_local_cache", AsyncMock(side_effect=error))
+        monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", AsyncMock(side_effect=error))
         spawn = AsyncMock(side_effect=RuntimeError("spawn reached"))
         with pytest.raises(asyncio.CancelledError if cancelled else RuntimeError):
             await _SessionHostConnectionMixin._connect_via_session_host(
@@ -467,6 +468,11 @@ class TestRefreshLocalCache:
 
         repo = tmp_path / "repo"
         repo.mkdir()
+        subprocess.run(
+            ["git", "init", "--quiet", str(repo)], check=True, capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        (repo / ".gitignore").write_text("*.local.instructions.md\n", encoding="utf-8")
         destination = (
             repo
             / ".github"
@@ -533,6 +539,7 @@ class TestRefreshLocalCache:
 
         repo = tmp_path / "repo"
         repo.mkdir()
+        (repo / ".git").mkdir()
         await lcr.refresh_local_cache(repo, home=tmp_path, timeout=12.0)
 
         assert len(calls) == 1
@@ -971,7 +978,8 @@ class TestRefreshLocalCache:
         grandchild_script = tmp_path / "grandchild.py"
         grandchild_script.write_text(
             f"import os, time\n"
-            f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+            f"with open({str(pidfile) + '.new'!r}, 'w') as handle: handle.write(str(os.getpid()))\n"
+            f"os.replace({str(pidfile) + '.new'!r}, {str(pidfile)!r})\n"
             f"time.sleep(60)\n"
         )
         script = tmp_path / "hangs.py"
@@ -1061,7 +1069,8 @@ class TestRefreshLocalCache:
         grandchild_script = tmp_path / "grandchild.py"
         grandchild_script.write_text(
             "import os, time\n"
-            f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+            f"with open({str(pidfile) + '.new'!r}, 'w') as handle: handle.write(str(os.getpid()))\n"
+            f"os.replace({str(pidfile) + '.new'!r}, {str(pidfile)!r})\n"
             "time.sleep(60)\n"
         )
         # No stdout/stderr redirection on the grandchild Popen call below --
@@ -1149,7 +1158,8 @@ class TestRefreshLocalCache:
         grandchild_script = tmp_path / "grandchild.py"
         grandchild_script.write_text(
             "import os, time\n"
-            f"open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+            f"with open({str(pidfile) + '.new'!r}, 'w') as handle: handle.write(str(os.getpid()))\n"
+            f"os.replace({str(pidfile) + '.new'!r}, {str(pidfile)!r})\n"
             "time.sleep(60)\n"
         )
         script = tmp_path / "hangs.py"

@@ -201,7 +201,16 @@ def run(root: Path, directory: Path, request_id: str | None = None) -> int:
         if current is None or current["request_id"] != request_id:
             raise ValueError("guidance worker ownership changed before completion")
         _log(directory, result.diagnostic)
-        current.update(phase="done", result={"status": result.status, "installed": result.changed, "unchanged": result.unchanged})
+        current.update(
+            phase="done" if result.status in ("ready", "partial", "skipped") else "failed",
+            completed_at=time.time(),
+            result={
+                "status": result.status, "installed": result.changed,
+                "unchanged": result.unchanged, "removed": result.removed,
+                "generation": result.generation, "model_admission": "unknown",
+                "restart_required": bool(result.changed or result.removed),
+            },
+        )
         _save(directory, current)
     finally:
         gate.release()
@@ -226,6 +235,27 @@ def metadata_directory(root: str | Path) -> Path | None:
     else:
         return None
     return git_dir.resolve() / "agent-worktrees-local-guidance"
+
+
+def watch_completion(root: Path, session_id: str | None, *, prepared: bool = False) -> None:
+    """A hook-owned watch lets the next post-tool hook surface late completion."""
+    import re
+
+    if not session_id or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
+        return
+    directory = Path.home() / ".copilot" / "session-state" / session_id
+    if not directory.is_dir() or directory.is_symlink():
+        return
+    path = directory / "local-guidance-watch.json"
+    if prepared:
+        path.unlink(missing_ok=True)
+        return
+    metadata = metadata_directory(root)
+    if metadata is not None:
+        _write(path, json.dumps({
+            "version": 1, "root": str(root), "metadata": str(metadata),
+            "started_at": time.time(),
+        }) + "\n")
 
 
 def is_active(root: str | Path) -> bool:

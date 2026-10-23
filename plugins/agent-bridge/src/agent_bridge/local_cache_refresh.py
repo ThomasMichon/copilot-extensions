@@ -75,6 +75,8 @@ class RefreshResult:
     blocking: int = 0
     detail: str = ""
     removed: int = 0
+    generation: str = ""
+    reused: bool = False
 
     @property
     def diagnostic(self) -> str:
@@ -306,7 +308,7 @@ async def _kill_tree(
 
 
 async def _run_bounded_result(
-    argv: list[str], *, timeout: float, env: dict[str, str] | None = None
+    argv: list[str], *, timeout: float | None, env: dict[str, str] | None = None
 ) -> _RunResult:
     """Run ``argv``, bounded by ``timeout``; kill the whole process tree
     (see ``_kill_tree``) rather than just the direct child if it runs over.
