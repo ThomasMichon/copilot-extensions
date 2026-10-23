@@ -289,3 +289,78 @@ def test_legacy_readers_also_report_markdown_directories(tmp_path, monkeypatch):
     assert mod.check_readme_completeness([])
     assert mod.check_plugin_skill_lists(["example"])
     assert mod.check_counts({"total": 0, "runtime": 0, "payload": 0, "cc_skills": 0})
+
+
+COUNT_PHRASES = [
+    ("{n} plugins, one marketplace", "total"),
+    ("How the {n} copilot-extensions plugins", "total"),
+    ("all {n} copilot-extensions plugins", "total"),
+    ("{n}-plugin suite", "total"),
+    ("{n}-plugin marketplace", "total"),
+    ("{n} ship a runtime", "runtime"),
+    ("{n} runtime plugins", "runtime"),
+    ("{n} are payload-only", "payload"),
+    ("{n} is payload-only", "payload"),
+    ("bundles {n} focused skills", "cc_skills"),
+]
+
+
+@pytest.mark.parametrize("phrase,kind", COUNT_PHRASES)
+@pytest.mark.parametrize("token", ["two", "2", "unknown"])
+@pytest.mark.parametrize("style", ["plain", "emphasis", "unicode-case"])
+def test_count_prefilters_preserve_grammar(tmp_path, monkeypatch, phrase, kind, token, style):
+    text = phrase.format(n=token)
+    if style == "emphasis":
+        text = text.replace(token, f"**`{token}`**").replace(" ", "\t\n")
+    elif style == "unicode-case":
+        text = text.upper().replace("I", "\u0131").replace("S", "\u017f")
+    (tmp_path / "README.md").write_text("intro\n" + text, encoding="utf-8")
+    monkeypatch.setattr(mod, "REPO", tmp_path)
+    problems = mod.check_counts(dict.fromkeys(("total", "runtime", "payload", "cc_skills"), 1))
+    assert len(problems) == (0 if token == "unknown" else 1)
+    if problems:
+        assert f"README.md:2: says {token.upper() if style == 'unicode-case' else token!r}" in problems[0]
+        assert f"for {kind} (expected 1/one)" in problems[0]
+
+
+def test_counts_keep_file_pattern_match_order_and_line_numbers(tmp_path, monkeypatch):
+    text = (
+        "two runtime plugins\n"
+        "three plugins, one marketplace\n"
+        "four runtime plugins\n"
+        "five plugins, one marketplace\n"
+    )
+    for name in ("b.md", "a.md"):
+        (tmp_path / name).write_text(text, encoding="utf-8")
+    monkeypatch.setattr(mod, "REPO", tmp_path)
+    problems = mod.check_counts(dict.fromkeys(("total", "runtime", "payload", "cc_skills"), 1))
+    assert problems == [
+        f"  {name}:{line}: says {token!r} for {kind} (expected 1/one): \"{phrase}\""
+        for name in ("a.md", "b.md")
+        for line, token, kind, phrase in (
+            (2, "three", "total", "three plugins, one marketplace"),
+            (4, "five", "total", "five plugins, one marketplace"),
+            (1, "two", "runtime", "two runtime plugins"),
+            (3, "four", "runtime", "four runtime plugins"),
+        )
+    ]
+
+
+def test_count_prefilters_skip_only_impossible_pattern_scans(tmp_path, monkeypatch):
+    class UnexpectedScan:
+        def finditer(self, text):
+            pytest.fail("The absent required suffix must prevent the full pattern scan")
+
+    (tmp_path / "README.md").write_text("unrelated words " * 100, encoding="utf-8")
+    monkeypatch.setattr(mod, "REPO", tmp_path)
+    monkeypatch.setattr(mod, "COUNT_PATTERNS", [
+        (UnexpectedScan(), kind, suffix) for _, kind, suffix in mod.COUNT_PATTERNS
+    ])
+    assert mod.check_counts({}) == []
+
+
+def test_count_prefilters_do_not_hide_markdown_read_errors(tmp_path, monkeypatch):
+    (tmp_path / "README.md").write_bytes(b"\xff")
+    monkeypatch.setattr(mod, "REPO", tmp_path)
+    with pytest.raises(UnicodeDecodeError):
+        mod.check_counts({})
