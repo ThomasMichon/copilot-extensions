@@ -342,3 +342,10 @@ new authority or ownership behavior requires a separate proposal.
   project/creation-nonce registration producer is admitted but not implemented
   or qualified by this slice. Full producer/control/Node qualification, final
   source review/CI/merge, installed/native-host proof and rollout remain open.
+- Normal managed `push-changes --dry-run --json` refused publication because
+  the two retained untracked fixture/evidence directories make its worktree
+  check dirty. Neither directory was staged, deleted, moved or hidden from
+  that guard. The corrective source commit remains local; the existing draft
+  still points at `fb6d1592e103de14826e700207c9606b18b07960`. Resolve retained
+  test-material disposition through the owning integration lane before retrying
+  normal publication; no force, history rewrite or guard override was used.
