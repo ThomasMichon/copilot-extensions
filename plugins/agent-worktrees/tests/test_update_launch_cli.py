@@ -166,6 +166,25 @@ def test_automatic_phase_failure_is_not_a_successful_completion(monkeypatch, cap
     assert next(item for item in result["executed"] if item["phase"] == failed)["returncode"] == 7
 
 
+def test_automatic_custody_loss_does_not_continue_independent_mutation(monkeypatch):
+    from update_driver import ParticipantError
+
+    monkeypatch.setattr(launch.update_stage, "stage", lambda: dict(
+        stage_done=True, acquisition_ok=True, plugin_changed=True,
+    ))
+    observed = []
+
+    def execute(args):
+        observed.append(args.phase)
+        raise ParticipantError("synthetic custody loss")
+
+    monkeypatch.setattr(launch, "_execute_phase", execute)
+    monkeypatch.setattr(launch, "_staged_snapshot", lambda *a: pytest.fail("staged after custody loss"))
+    with pytest.raises(ParticipantError, match="custody loss"):
+        launch._execute(_args(phase="automatic", with_reconcile=True))
+    assert observed == ["bootstrap"]
+
+
 def test_reconcile_phase_calls_canonical_executor_only_under_request_custody(monkeypatch):
     seen = []
     monkeypatch.setattr(launch.update_cli, "cmd_reconcile_plugins", lambda args: (
