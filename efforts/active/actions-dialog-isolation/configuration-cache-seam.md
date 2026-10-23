@@ -2,12 +2,14 @@
 
 Back to [Actions Dialog Isolation](README.md).
 
-**Reviewed design; functional source review pending.** The initial evidence and
+**Source complete; native and installed qualification remain separate.** #8286
+merged to `dev` as `087befb0b8ef9ba3cb2538c0ea67bc461f0cae5f` after approval
+and required CI. The initial evidence and
 proposals below record the pre-change baseline. The execution amendment and
 README journal carry current admission and validation: file store, selected
 supplier API, locality refusal and the three exact immediate-caller guards are
-admitted and implemented locally. This does not claim source merge, native
-qualification or installed rollout. The #7940 episode does not take startup ownership.
+admitted and merged. This does not claim native qualification or installed
+rollout. The #7940 episode does not take startup ownership.
 
 ## Evidence and invariants
 
@@ -352,6 +354,6 @@ coverage.
   source/setup completions are rejected and unrelated selection remains intact.
 - [x] Template non-applicability cites the actual readers above; any newly found
   expanding provider requires its real dependency contract.
-- [ ] Reviewed source plan, focused tests, required CI and actual source merges;
+- [x] Reviewed source plan, focused tests, required CI and actual source merges;
   original failure/command evidence retained before cleanup. Native timing and
   installed rollout remain separate, unperformed gates.
