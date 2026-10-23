@@ -533,7 +533,7 @@ def selectable_tests(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("name,extra", [
     ("agent-index", "auth"), ("agent-pull-requests", "service-gateway"),
-    ("agent-dispatch", "service-gateway"),
+    ("agent-dispatch", "service-gateway"), ("agent-ssh", ""),
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -542,7 +542,8 @@ def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatc
     plugin.mkdir(parents=True)
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
     (plugin / "pyproject.toml").write_text(
-        f'[project.optional-dependencies]\ndev = ["fleet-manager[{extra}]>=0.1.0.dev1"]\n',
+        '[project.optional-dependencies]\ndev = ["fleet-manager'
+        + (f"[{extra}]" if extra else "") + '>=0.1.0.dev1"]\n',
         encoding="utf-8",
     )
     fleet = tmp_path / "fleet-manager"
@@ -570,7 +571,7 @@ def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatc
     if name == "agent-dispatch":
         assert str(tmp_path / "plugins" / "agent-pull-requests") + "[fleet]" in install
     assert install[-len(runner.RUNNER_DEPENDENCIES) - 2:] == [
-        "-e", str(fleet) + f"[{extra}]", *runner.RUNNER_DEPENDENCIES,
+        "-e", str(fleet) + (f"[{extra}]" if extra else ""), *runner.RUNNER_DEPENDENCIES,
     ]
     assert not any("http" in argument for argument in install)
     assert retained == [(

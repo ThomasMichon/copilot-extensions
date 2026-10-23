@@ -1,0 +1,9 @@
+{
+  "comment": "Project selected admitted Gateway public bindings through existing directional SSH policy and the canonical installed profile consumer",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

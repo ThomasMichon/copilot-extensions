@@ -47,6 +47,7 @@ registry plus a transport `module.yaml` it writes one managed SSH fragment:
 ```powershell
 agent-ssh emit-profile registry.yaml --module transports\direct\module.yaml
 agent-ssh gateway-profile selected-gateway.json --json
+agent-ssh gateway-provider --policy policy.json --directory admitted.json --machine worker-a --environment linux --gateway chosen-gateway --identity-file <absolute-key> --public-key-file <absolute-public-key> --json
 agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
@@ -106,6 +107,13 @@ approved peer names, finite reverse-listener ports and public host pins through
 an existing Gateway SSH alias. It retains source-independent local inputs and
 uses the same profile writer; it does not enroll peers, fetch keys, open a
 connection or start another controller.
+
+The optional `fleet` extra adds the
+[Fleet policy/public-directory provider](../../fleet-manager/docs/gateway-ssh-provider.md).
+`gateway-provider` previews independent-direction filtering; `--apply` uses
+the same writer and refuses superseded or equal-revision/changed directories.
+Missing SDK support is actionable, not a fallback to unfiltered peer routes.
+Ordinary standalone profile commands remain SDK-free.
 
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates
