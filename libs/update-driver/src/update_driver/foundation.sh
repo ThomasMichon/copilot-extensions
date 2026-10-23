@@ -104,6 +104,15 @@ _native_foundation_validate() {
 }
 
 read_native_foundation_progress() {
+    local attempt code
+    for attempt in 1 2 3; do
+        if _read_native_foundation_snapshot "$1"; then return 0; else code=$?; fi
+        [[ "$code" == 76 ]] || return "$code"
+    done
+    _native_foundation_error 'operation changed during repeated observation'
+}
+
+_read_native_foundation_snapshot() {
     local root="$1" path="$1/foundation-operation.json" size code parent
     __foundation_document=''
     __foundation_present=0
@@ -124,7 +133,7 @@ read_native_foundation_progress() {
             { _native_foundation_error 'progress missing for existing artifacts'; return 1; }
         return 0
     fi
-    _native_foundation_open "$path" || return 1
+    _native_foundation_open "$path" || return "$?"
     size="$(stat -Lc '%s' "/proc/self/fd/$__foundation_fd")" || {
         exec {__foundation_fd}<&-; return 1;
     }

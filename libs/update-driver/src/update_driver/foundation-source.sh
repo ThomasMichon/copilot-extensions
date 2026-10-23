@@ -21,19 +21,23 @@ _native_foundation_plain() {
 }
 
 _native_foundation_open() {
-    local path="$1" identity opened
+    local path="$1" identity opened current
     _native_foundation_plain "$path" file || return 1
     identity="$(stat -Lc '%d:%i' -- "$path")" || return 1
     exec {__foundation_fd}<"$path" || return 1
     opened="$(stat -Lc '%d:%i' "/proc/self/fd/$__foundation_fd")" || {
         exec {__foundation_fd}<&-; return 1;
     }
-    if [[ ! -f "/proc/self/fd/$__foundation_fd" || "$identity" != "$opened" ||
-        "$(stat -Lc '%d:%i' -- "$path")" != "$opened" ]] ||
+    if [[ ! -f "/proc/self/fd/$__foundation_fd" ]] ||
         ! _native_foundation_plain "$path" file; then
         exec {__foundation_fd}<&-
-        _native_foundation_error 'file changed during observation'
+        _native_foundation_error 'opened input must remain plain and unlinked'
         return 1
+    fi
+    current="$(stat -Lc '%d:%i' -- "$path")" || { exec {__foundation_fd}<&-; return 1; }
+    if [[ "$identity" != "$opened" || "$current" != "$opened" ]]; then
+        exec {__foundation_fd}<&-
+        return 76
     fi
 }
 
@@ -99,7 +103,8 @@ native_foundation_source_digest() (
         for path in "${__foundation_files[@]}"; do
             relative="${path#"${plugin%/*}/"}"
             printf '%s' "$relative" | iconv -f UTF-8 -t UTF-8 >/dev/null || return 1
-            _native_foundation_open "$path" || return 1
+            _native_foundation_open "$path" ||
+                { _native_foundation_error 'source input changed or became unavailable'; return 1; }
             hash="$(sha256sum <&"$__foundation_fd")" || {
                 exec {__foundation_fd}<&-; return 1;
             }
@@ -142,7 +147,8 @@ freeze_native_foundation_source() (
         target="$destination/${path#"${plugin%/*}/"}"
         mkdir -p -- "${target%/*}" || return 1
         _native_foundation_plain "${target%/*}" directory || return 1
-        _native_foundation_open "$path" || return 1
+        _native_foundation_open "$path" ||
+            { _native_foundation_error 'source input changed or became unavailable'; return 1; }
         if ! (umask 077; set -o noclobber; cat <&"$__foundation_fd" >"$target"); then
             exec {__foundation_fd}<&-; return 1
         fi

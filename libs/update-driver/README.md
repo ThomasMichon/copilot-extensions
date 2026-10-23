@@ -260,6 +260,10 @@ commands, credentials or participant capabilities belong there. A recorded
 `running` state is journal evidence, not proof that its owner remains live.
 Missing progress alongside existing `foundation/` artifacts is a readiness
 error, never permission to fall back to a legacy installer.
+Python and Linux native readers retry at most three times when an ordinary
+file's path/descriptor identity changes during atomic replacement. Each attempt
+reopens and validates the complete snapshot; persistent replacement, nonplain
+inputs and malformed data remain explicit errors, not stale/default results.
 
 Trusted producers use `foundation_state.begin`/`finish` only while holding the
 actual canonical `OperationLock` for this execution root, or a live authenticated

@@ -4,6 +4,22 @@ root="$1" plugin="$2" library="$3" mode="$4"
 source "$library/single-instance-lease/src/single_instance_lease/operation.sh"
 source "$library/update-driver/src/update_driver/foundation.sh"
 
+if [[ "$mode" == replace-once || "$mode" == replace-always ]]; then
+    stat() {
+        command stat "$@" || return "$?"
+        if [[ "${@: -1}" == "$root/foundation-operation.json" &&
+            ( "$mode" == replace-always || -f "$root/replacement.json" ) ]]; then
+            if [[ "$mode" == replace-always ]]; then
+                cp -- "$root/foundation-operation.json" "$root/replacement.json" || return 1
+            fi
+            mv -T -- "$root/replacement.json" "$root/foundation-operation.json" || return 1
+            printf 'replaced\n' >>"$root/replacements"
+        fi
+    }
+    read_native_foundation_progress "$root"
+    _native_foundation_encode
+    exit
+fi
 if [[ "$mode" == read ]]; then
     read_native_foundation_progress "$root"
     if [[ "$__foundation_present" == 1 ]]; then _native_foundation_encode; fi

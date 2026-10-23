@@ -195,6 +195,25 @@ def test_reader_status_is_read_only_and_absence_does_not_create(native_source, a
     assert file_parent.read_text() == "not a directory"
 
 
+@pytest.mark.parametrize("continuous", [False, True])
+def test_status_retries_only_bounded_actual_snapshot_replacement(native_source, area, tools, continuous):
+    root = area / "state"
+    root.mkdir(mode=0o700)
+    initial = document()
+    selected = document(operation_id="c" * 32)
+    (root / fs.FILENAME).write_text(json.dumps(initial))
+    (root / "replacement.json").write_text(json.dumps(selected))
+    mode = "replace-always" if continuous else "replace-once"
+    result = run_native(root, native_source, mode, tools, success=not continuous)
+    count = len((root / "replacements").read_text().splitlines())
+    if continuous:
+        assert "repeated observation" in result.stderr
+        assert 3 <= count <= 6
+    else:
+        assert json.loads(result.stdout) == selected and count == 1
+    assert not (root / "queue.sqlite3").exists()
+
+
 @pytest.mark.parametrize("mode", ["reconcile", "recover", "near-limit-complete"])
 def test_oversized_mutation_preserves_readable_near_limit_progress(native_source, area, tools, mode):
     root = area / "state"
