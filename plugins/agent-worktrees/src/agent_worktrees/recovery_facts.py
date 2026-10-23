@@ -116,6 +116,18 @@ def require_capabilities(value: dict, operation: str, supported: frozenset[str])
         raise RecoveryError("required_capability_unsupported")
 
 
+def _canonical(value: dict) -> bytes:
+    try:
+        return json.dumps(
+            value, ensure_ascii=True, allow_nan=False, sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        raise RecoveryError("malformed_json") from None
+    except RecursionError:
+        raise RecoveryError("record_limit") from None
+
+
 def decode_fact(raw: bytes, *, supported: frozenset[str]) -> dict:
     """Read one bounded fact, preserving unknown additive fields recursively.
 
@@ -136,20 +148,14 @@ def decode_fact(raw: bytes, *, supported: frozenset[str]) -> dict:
         raise RecoveryError("record_limit") from None
     result = _validate(value)
     require_capabilities(result, "read", supported)
+    if len(_canonical(result)) > MAX_BYTES:
+        raise RecoveryError("record_limit")
     return result
 
 
 def encode_fact(value: dict, *, supported: frozenset[str]) -> bytes:
     """Canonical serialization only: no write, acknowledgement or revision bump."""
-    try:
-        raw = json.dumps(
-            value, ensure_ascii=True, allow_nan=False, sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    except (TypeError, ValueError):
-        raise RecoveryError("malformed_json") from None
-    except RecursionError:
-        raise RecoveryError("record_limit") from None
+    raw = _canonical(value)
     decoded = decode_fact(raw, supported=supported)
     if decoded != value:
         raise RecoveryError("malformed_json")

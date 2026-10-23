@@ -103,7 +103,7 @@ as a substitute for an isolated loss test.
 
 - Windows contained runner:
   `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_recovery_facts.py`:
-  **66 passed**, including file-backed close/reopen and relocated/backup fixture
+  **73 passed**, including file-backed close/reopen and relocated/backup fixture
   roots. All actual file creation is in test-owned roots, not live installations.
 - Ordinary placement opens exactly two identity markers and performs no history
   enumeration with 0, 100 and 1,000 real synthetic historical files.
@@ -121,6 +121,8 @@ as a substitute for an isolated loss test.
   decimal underflow/excess precision before exposing a candidate. Exact decimal
   oracle tests verify that supported numeric values survive unrelated edits;
   fact and marker paths share the same parser.
+- Near-limit Unicode checks include both input and canonical escaped output;
+  future marker versions produce `unsupported_schema`, not identity conflict.
 - Ruff F/E9, install-contract, documentation consistency and effort-structure
   checks passed. Linux/native Git adoption, process-crash/power-loss, actual old
   runtime and external-venue qualification remain unexecuted: G1 has no live

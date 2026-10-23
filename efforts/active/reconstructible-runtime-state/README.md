@@ -222,3 +222,6 @@ supported rollback-reader floor are explicit decisions, not implied approval.
   cannot serialize unchanged now return `number_precision_unsupported` before
   candidate exposure; supported values pass an independent Decimal oracle.
   Final contained Windows run: **66 passed**, with Ruff F/E9 green.
+- Addressed subsequent review's Unicode canonical-size and marker-version
+  classification findings. Final contained Windows run: **73 passed**; Ruff
+  F/E9 remains green. These checks still add no production persistence path.

@@ -38,6 +38,8 @@ and CAS must be checked separately at any future effect.
 
 `decode_fact` rejects duplicate keys, invalid JSON/nonfinite numbers, unsupported
 envelope versions and malformed required fields, within 64 KiB / depth 32.
+Both input bytes and canonical ASCII-escaped output must fit the byte limit;
+Unicode expansion cannot expose a candidate that fails unchanged serialization.
 Unknown optional JSON fields survive encoding and candidate edits recursively.
 Decimal tokens whose value would change on float serialization (including
 underflow or excess precision) return `number_precision_unsupported` before a

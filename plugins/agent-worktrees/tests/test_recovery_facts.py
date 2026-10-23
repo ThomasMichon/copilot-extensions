@@ -144,6 +144,24 @@ def test_supported_decimal_values_survive_unrelated_edits(number):
     assert json.loads(encoded, parse_float=Decimal)["future_numeric"] == Decimal(number.decode())
 
 
+@pytest.mark.parametrize(("character", "count"), [("é", 12000), ("😀", 6000)])
+def test_canonical_unicode_expansion_is_refused_before_candidate(character, count):
+    value = fact()
+    value["future_unicode"] = character * count
+    raw = json.dumps(value, ensure_ascii=False).encode("utf-8")
+    assert len(raw) < MAX_BYTES
+    assert_reason("record_limit", lambda: decode_fact(raw, supported=READ))
+
+
+@pytest.mark.parametrize(("character", "count"), [("é", 10000), ("😀", 5000)])
+def test_near_limit_unicode_round_trips(character, count):
+    value = fact()
+    value["future_unicode"] = character * count
+    parsed = decode_fact(json.dumps(value, ensure_ascii=False).encode(), supported=READ)
+    edited = patch_payload(parsed, {}, supported=WRITE, known_paths=KNOWN)
+    assert decode_fact(encode_fact(edited, supported=READ), supported=READ) == value
+
+
 @pytest.mark.parametrize("changes", [
     {"writer_incarnation": "replacement"},
     {"opaque": None},
@@ -234,6 +252,16 @@ def test_future_required_marker_semantics_remain_unsupported(tmp_path, required)
     value["required_capabilities"] = required
     seed_marker(layout.marker_directory, value)
     assert_reason("required_capability_unsupported", lambda: inspect(worktree, common))
+
+
+@pytest.mark.parametrize("version", [2, True, 1.0])
+def test_marker_version_is_not_an_identity_conflict(tmp_path, version):
+    worktree, common = roots(tmp_path)
+    layout = inspect(worktree, common)
+    value = marker_value(REPOSITORY, RESOURCE)
+    value["version"] = version
+    seed_marker(layout.marker_directory, value)
+    assert_reason("unsupported_schema", lambda: inspect(worktree, common))
 
 
 @pytest.mark.parametrize(("number", "reason"), [

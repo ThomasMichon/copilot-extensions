@@ -84,10 +84,12 @@ def _inspect(directory: Path, expected: dict) -> None:
         if isinstance(exc, RecoveryError):
             raise
         raise RecoveryError("malformed_marker") from None
-    if not isinstance(value, dict) or any(value.get(key) != item for key, item in expected.items()):
+    if not isinstance(value, dict) or value.get("schema") != expected["schema"]:
         raise RecoveryError("identity_conflict")
-    if type(value.get("version")) is not int:
+    if type(value.get("version")) is not int or value["version"] != expected["version"]:
         raise RecoveryError("unsupported_schema")
+    if any(value.get(key) != item for key, item in expected.items() if key != "version"):
+        raise RecoveryError("identity_conflict")
     # Unknown fields are retained on disk, but required future semantics cannot
     # be silently treated as a compatible marker.
     if value.get("required_capabilities", []) != []:
