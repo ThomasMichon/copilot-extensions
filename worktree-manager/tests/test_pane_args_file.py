@@ -23,12 +23,22 @@ pytestmark = pytest.mark.skipif(not PWSH, reason="PowerShell 7 is required")
 
 
 def _test_env(tmp_path: Path) -> dict[str, str]:
-    return dict(
+    env = dict(
         os.environ, USERPROFILE=str(tmp_path / "profile"),
         HOME=str(tmp_path / "profile"), WORKTREE_PANE_MIN_RUNTIME="0",
         TEMP=str(tmp_path), TMP=str(tmp_path),
         PSMUX_NO_WARM="1", PSMUX_DATA_DIR=str(tmp_path / "psmux-data"),
     )
+    env.pop("PSMUX_SESSION", None)
+    return env
+
+
+def test_native_pane_fixture_drops_parent_mux_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("PSMUX_SESSION", "unrelated-parent-pane")
+    env = _test_env(tmp_path)
+    assert "PSMUX_SESSION" not in env
+    assert env["PSMUX_DATA_DIR"] == str(tmp_path / "psmux-data")
+    assert os.environ["PSMUX_SESSION"] == "unrelated-parent-pane"
 
 
 def _powershell_producer(tmp_path: Path, wrapper: Path, argv: list[str]) -> list[str]:

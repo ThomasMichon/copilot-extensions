@@ -223,6 +223,45 @@ reconciliation blocks admission rather than expanding a batch.
 
 ## Continuation hunk ledger
 
+### Subsequent admission: W4-PANE
+
+This candidate carries only the W4-PANE source keys `818365a959b9`,
+`6eced593549d`, and `ea2912aeeebb`, plus their directly dependent native
+validation and release metadata. The README and wrapper retain their original
+paths. Both original Job Object test names move from the proposed new
+`test_pane_wrapper_job.py` into the existing `test_pane_wrapper_argv.py`;
+its three argv tests and existing Windows platform guard stay unchanged.
+No new skip is added, and missing PowerShell fails the new ownership tests.
+Each ownership test additionally exercises the real promotion materializer's
+Worktrees fallback, comparing its wrapper bytes to the canonical source.
+The new changefile therefore names both Manager and Worktrees.
+
+The native binding uses P/Invoke metadata rather than C# compilation. The
+zeroed extended-limit buffer retains the Windows 144/112-byte ABI, flag
+offset 16 and kill-on-close flag `0x2000`. It adds no process/memory limits,
+breakaway permission, child launch flags or lifetime escape. Wrapper handle
+ownership, existing fail-open behavior and all native deadlines remain intact.
+The two native regressions failed against the old compiler path, then passed
+with the retained binding; the actual-wrapper test observes child startup and
+kernel-signaled termination after force-killing its own wrapper.
+
+The existing opt-in PSMux lane initially exposed a test-environment isolation
+failure: an inherited `PSMUX_SESSION` prevented either new private test session
+from starting. The directly coupled fixture now removes only that inherited
+session marker from its copied environment, preserving the real host environment
+and private PSMux data directory; a regression asserts both properties.
+Both complete pane modules then passed all 41 cases with the real PSMux lane
+enabled, exactly two native workers and no skips, in 51.00 seconds including
+preparation and cleanup. Both producers exercised two cycles with zero owned
+visible windows, foreground transitions or leaked descendants. These checks
+also exercised canonical and fresh promotion-materialized fallback payloads.
+Touched-Python lint, install-contract, headless-launch and whitespace guards
+passed. No runtime was installed or updated; the available live local consumer
+was tested directly, rather than provisioning a separate external venue.
+This is functional/native consumer acceptance for this residual, not normal
+group or complete-plugin performance qualification. Review and required CI
+still gate merge; all wider census and parent timing obligations remain open.
+
 ### Subsequent admission: W4-TRANSPORT
 
 The original census and its counts below remain historical. This narrowly

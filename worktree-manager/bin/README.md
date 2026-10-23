@@ -12,6 +12,15 @@ of the `worktree-manager-control-plane` effort.
   cutover argv), then call `agent-worktrees post-exit` for finalization.
 - `pane-wrapper.sh` / `pane-wrapper.ps1` — wrap the actual mux pane command for
   graceful exit-code handling, initial-prompt injection, and AHP token handoff.
+  The Windows wrapper binds its kill-on-close Job Object calls directly through
+  .NET P/Invoke metadata, without starting a C# compiler during pane launch.
+  The wrapper still owns the native job handle for its entire lifetime, so
+  exiting or terminating the pane reaps its inherited child process tree.
+  Native ownership coverage in `../tests/test_pane_wrapper_argv.py` exercises
+  both this canonical wrapper and the promotion-materialized Worktrees fallback.
+  The existing `PSMUX_FILE_LAUNCH_E2E=1` lane in `../tests/test_pane_args_file.py`
+  exercises both producers over two real PSMux cycles, including window/focus
+  observation and owned-descendant cleanup.
 - `pane-launch.ps1` — Windows file-based argument transport. Producers invoke
   this shipped entrypoint with `pwsh -File` and `-Manifest <JSON path>`, using
   PowerShell single-quoted paths with doubled apostrophes across PSMux's space
