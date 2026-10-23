@@ -142,6 +142,30 @@ integration family. The disabled Windows rotation stays disabled; local
 contained Windows evidence is recorded separately. Required PR CI and promotion
 retain their existing unit-only policy.
 
+## Construction-source inventory
+
+With Python 3.11 or newer, `python tools/construction_inventory.py` reads the tracked Python projects,
+canonical marketplace and `standalone_consumers.py` roster without constructing
+or launching any runtime. It records declared package/Python requirements,
+optional dependency group names and script bindings. Products and optional
+extras are not assumed to be separate environments; canonical and identified
+vendored libraries remain construction inputs.
+
+Exit `1` reports unclassified Python projects, including nested projects and
+fixtures that have no established source-owner classification. Exit `2` reports
+invalid, missing, duplicate or escaping source declarations. Exit `0` means only
+that source-owner classification is complete: `runtime_qualification` remains
+`not-performed`. Actual environment composition, selected production profiles,
+native interpreter matrix, canonical construction/launch actions and bootstrap/
+build closure still require classification and execution. This diagnostic is
+not a configured-feed CI or promotion gate.
+
+Run `python -m unittest discover -s tools -p test_construction_inventory.py -v`
+for its local contracts. The real CLI control creates a private Git fixture and
+checks the actual tracked-tree invocation and nonzero unknown-owner result.
+That native subprocess control is separate from eligible-unit promotion
+evidence; this change does not add it to the admitted unit packet or alter CI.
+
 ## Native file-link prerequisites
 
 `tools/test_dependency_uv_executable_native.py` qualifies both absolute and

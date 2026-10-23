@@ -165,7 +165,8 @@ cutover is activated by the reviewed documentation.
 | Boundary | Current evidence |
 |----------|------------------|
 | Checked-in policy | #7655 merged the construction/first-launch exception and canonical effort; implementation is permitted within that reviewed scope. |
-| Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate has landed for this effort. |
+| Inventory implementation | The source-owner diagnostic derives canonical plugin/product rosters and tracked Python projects, identifies library inputs and refuses to hide unclassified nested owners. It does not yet classify complete construction environments or qualify runtimes. |
+| Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate is active for this effort. |
 | Released gate | None: the existing release pipeline does not yet enforce this effort's configured-feed construction and first-launch contract. |
 | Installed evidence | Earlier consumer-specific Manager capture/origin results remain bounded observations, not full environment/profile coverage. The launch-maintenance effort separately records current selected-slot observations. |
 | Hosted/native qualification | Configured-feed execution, complete declared native matrix and negative publication controls remain unproved. Missing feed or capacity must fail qualification, not be called an unsupported row or successful skip. |
@@ -261,3 +262,29 @@ cutover is activated by the reviewed documentation.
 - Existing deployment holds and independently owned Windows broker
   #6859/#7833 qualification are unchanged. No updater, service, registration
   or dependency-policy exception was introduced to resume this work.
+
+### 2026-10-23 - Executable source-owner census; construction coverage still open
+
+- Added a finite, read-only source inventory using the canonical marketplace,
+  standalone product roster and actual Git-tracked Python projects. The current
+  census contains thirteen runtime plugin owners and **six** standalone products,
+  including the newly declared PR service. The earlier five-product record is
+  historical, not a complete current roster.
+- The diagnostic keeps twenty-seven canonical library inputs and seven
+  identified vendored copies separate from product/runtime owners. An
+  independently constructed index engine remains an explicit unclassified
+  nested project and produces a nonzero result; it cannot disappear because it
+  is absent from the marketplace and standalone product rosters. Test fixtures
+  and future nested projects receive the same visible classification boundary.
+- Optional dependency group names and console scripts are inventory data, not
+  an inferred environment matrix or installed first-launch evidence. Reuse the
+  existing plugin-owned `runtime_install`/`runtime_install_modes` and versioned
+  runtime constructor when execution is implemented; no new installer was
+  added. Complete environment identities, production profile selections,
+  constructor/launch bindings and native matrix remain open Phase 1 work.
+- Local refusal/data contracts and a real fresh Git-fixture CLI control passed.
+  The real source invocation independently reported the expected unclassified
+  engine with `runtime_qualification: not-performed`. This is source discovery,
+  not a feed construction run, clean-room runtime installation or hosted/native
+  runtime qualification. No workflow, admitted unit packet, credential,
+  controller, dependency policy or installed state was changed.
