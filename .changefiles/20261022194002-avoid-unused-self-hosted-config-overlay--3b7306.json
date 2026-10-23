@@ -1,5 +1,5 @@
 {
-  "comment": "Avoid unused self-hosted config-overlay Git probes and isolate Git-only finalization fixtures from ambient CodeSpace commands.",
+  "comment": "Avoid unused self-hosted config-overlay Git probes, suppress windows for remaining state-root probes, and isolate Git-only finalization fixtures from ambient CodeSpace commands.",
   "changes": [
     {
       "plugin": "agent-worktrees",

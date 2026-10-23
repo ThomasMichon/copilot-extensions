@@ -25,7 +25,7 @@ if steward_probes:
     from maintainer_pr_completion import invoke
 else:
     sys.path.insert(0, sys.argv[1])
-    from agent_worktrees import front_door_cli, git_ops, pr_ops, pr_rebase
+    from agent_worktrees import front_door_cli, git_ops, pr_ops, pr_rebase, state_root
 
 
 class ProcessEntry(ctypes.Structure):
@@ -143,6 +143,8 @@ try:
             assert pr_ops._commit_patch_ids(sys.argv[3], sys.argv[4], cwd=sys.argv[2])
             assert git_ops.resolve_to_anchor(Path(sys.argv[2])).exists()
             assert front_door_cli._git_toplevel(Path(sys.argv[2])).exists()
+            assert state_root._git_common_dir(Path(sys.argv[2])).is_dir()
+            assert Path(state_root._git_toplevel(sys.argv[2])).resolve() == Path(sys.argv[2]).resolve()
         cycles += 1
         time.sleep(0.1)
 finally:

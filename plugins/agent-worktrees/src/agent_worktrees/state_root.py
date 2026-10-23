@@ -37,6 +37,8 @@ from pathlib import Path
 
 import yaml
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import git_ops
 from . import repos as repos_mod
@@ -206,6 +208,7 @@ def _git_common_dir(checkout: Path) -> Path:
             timeout=10,
             env=git_ops.repository_identity_env(),
             stdin=subprocess.DEVNULL,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError(
@@ -448,6 +451,7 @@ def _git_toplevel(cwd: str | None) -> str | None:
             timeout=10,
             env=git_ops.repository_identity_env(),
             stdin=subprocess.DEVNULL,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

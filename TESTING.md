@@ -1063,6 +1063,9 @@ The diverged-checkout Git fixtures
 hide only the unrelated CodeSpace CLI from discovery, leaving real Git,
 finalization, status polling and checkout-invalidation assertions intact.
 The claim-warning suite separately exercises CodeSpace CLI invocation.
+The native consoleless-parent observation in `test_pr_rebase.py` also executes
+both state-root Git probes over two cycles, observing windows and foreground
+transitions without pytest's subprocess-suppression hook.
 
 The optional profile-assignment-state failure guard follows both real command
 layers returned by worktree creation: exact record-bound execution admission,
