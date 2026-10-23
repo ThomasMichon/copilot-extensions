@@ -1,9 +1,9 @@
-# Pattern: claim-owned development generations
+# Pattern: immutable development generations
 
 **Serves:** *Vision plugin-services* `immutable-versioned-runtime` and
 `seasoned-external-dependencies`. The historical filename remains stable for
-existing links; editable source is mutable, completed dependency environments
-are not.
+existing links; it does not retain a mutable/editable deployment exception.
+This is the required target, not a claim that every installer has adopted it.
 
 **Owners:** `libs/versioned-runtime` supplies claim, construction, completion,
 selection and retention primitives. `agent-codespaces` supplies the explicit
@@ -25,15 +25,43 @@ The generation is an ordinary immutable slot: canonical construction ownership
 covers every dependency write, isolated health checks precede completion, and
 completion transfers to retention before publication.
 
-The package is installed editable against the owner's worktree. Source edits
-remain intentionally live; a dependency refresh never edits a completed venv.
-Every refresh uses a distinct generation, never a renamed built venv. Failure
+Freeze the complete source and admitted build/dependency inputs before
+construction. Install non-editable code from that snapshot; generation identity
+binds its source hash and assembly inputs separately from package version.
+A later source edit cannot change deployed imports. Every iteration builds a
+distinct generation or reuses its exact healthy completed match, never a
+renamed built venv or a live worktree link. Failure
 reclaims only the owned incomplete candidate, keeps the working generation and
 selectors unchanged, and propagates a nonzero result.
 
-Existing `versions/dev` environments remain readable for compatibility. New
-development builds never refresh or remove that completed legacy environment.
-An ordinary install/update never chooses development mode implicitly.
+Select the completed target as current and request its normal start. An owner
+is superseded because its full generation identity differs from current, never
+because a version or hash sorts later. The existing lifecycle health-gates the
+incoming owner, hands off queued/scheduled work, switches routing and drains the
+displaced owner before retirement. "Not current" is not an immediate-exit rule.
+Compatible reverse selection uses the same protocol; incompatible durable state
+refuses explicitly. Release-channel ordering remains a separate selection
+policy, not an owner-obsolescence test.
+
+Clean merged Dev deployment uses this same immutable lifecycle under
+[Source-Managed Runtime Installs](../../efforts/active/source-managed-runtime-installs/README.md)
+(#7028/#7029), without acquiring an interactive worktree claim. Neither path
+implicitly enables development mode for ordinary install/update.
+
+## Legacy behavior and migration
+
+The existing pilot's `dev` action installs editable packages against its
+owner's worktree, even when dependency environments are distinct protected
+generations. That is legacy behavior to replace, not full immutable deployment.
+Do not advertise source edits as immediately deployed or hot-patch a completed
+runtime. Until an adopter supplies frozen, non-editable construction and the
+complete cutover contract, report the gap rather than inventing a supported
+command. The [Immutable Dev Slot effort](../../efforts/active/immutable-dev-slot/README.md)
+retains #5472's per-adopter acceptance.
+
+Existing claims and `versions/dev` remain readable/restorable for compatibility.
+Migration never refreshes or removes a completed legacy environment in place;
+it retains the original rollback target until an authorized healthy transition.
 
 ## A claim gates who may build and publish
 
@@ -53,6 +81,8 @@ An ordinary install/update never chooses development mode implicitly.
 }
 ```
 
+The existing claim format above is retained compatibility, not a new identity
+format: frozen-source identity belongs in canonical generation evidence.
 `selected_generation` is optional for legacy claims and records the most recent
 completed development generation published by this owner. Construction,
 completion and activation validate the canonical claim; losing or replacing

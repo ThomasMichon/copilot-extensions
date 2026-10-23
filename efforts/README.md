@@ -58,7 +58,7 @@ that pattern to this repository.
 | [Status-monitor singleton correctness](active/status-monitor-singleton-correctness/README.md) | Draft; planning only, cold-start prerequisite satisfied | #5512 (restart), then #5453 (replacement and promotion/cutover) |
 | [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Active; primary documentation slice complete, preview/reference work unassigned | #5799 |
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
-| [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |
+| [Immutable Dev Slot](active/immutable-dev-slot/README.md) | Active; supersedes mutable/editable deployment; full admission/adopter and bidirectional-cutover acceptance retained | #5472; merged Dev deployment stays #7028/#7029 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974, #6039 |
 | [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; fleet integration reviewed, container image slice | #5768, #5769, #6383 |
 | [agent-dispatch Standalone + Container](active/agent-dispatch-standalone-container/README.md) | Active; Phase 1 landed | #6177 |
@@ -153,6 +153,7 @@ that pattern to this repository.
 | [PR Recovery Break Glass](2026/10/12%20pr-recovery-break-glass/README.md) | Done; released recovery demonstrated | #5817 |
 | [Mux Child Window Suppression](2026/10/12%20mux-child-window-suppression/README.md) | Done; published repair, verified reachable rollout, remaining adopter verification transferred | #6040 |
 | [Vision Backport Sweep](2026/10/09%20vision-backport-sweep/README.md) | Done; 35-vision source reconciliation, implementation owners retained | #5456 |
+| [Mutable dev slot](2026/10/22%20mutable-dev-slot/README.md) | Done; mutable/editable premise abandoned, not portfolio delivered | [Immutable Dev Slot](active/immutable-dev-slot/README.md), #5472; direct merged Dev deployment #7028/#7029 |
 
 ## Local conventions
 

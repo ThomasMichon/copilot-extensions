@@ -54,8 +54,11 @@ Promotion composes versions and expands development vendor pointers into a
 self-contained `main` tree. Raw-dev non-editable installs have an existing
 tracked gap (#3905). Canonical runtime helpers already provide immutable
 completion, activation, retention and claim-owned editable development
-generations. This campaign extends those building blocks, rather than treating
-editable development claims as clean source deployments.
+generations (legacy interactive behavior). The
+[Immutable Dev Slot effort](../immutable-dev-slot/README.md) replaces that
+editable target with frozen, non-editable source-hashed generations under
+#5472. This campaign remains the canonical deploy-from-Dev home and extends
+the same building blocks, not a second installer or mutable environment.
 
 The [source-owned release vision](../../../visions/release-pipeline/README.md)
 keeps the verified development commit as the release identity. Generated main
@@ -63,6 +66,21 @@ commits, materialized payload digests, package versions, profiles and dependency
 locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
+
+**Immutable development alignment (2026-10-22), operator verbatim:**
+
+> So, mutable dev slot should probably be superseded by "immutable dev slot", and the "deploy from dev branch" effort. Basically, always deploy using an immutable venv, tagged with the hash of the source. Just set the new dev slot as current and handle cutover normally by giving the incoming version a start command and letting the old version shut off. We should endeavor to support baton-passing both ways; a version knows it's "old" simply because it's "not current", not via any ordering relationship between the active and owner versions.
+
+> Great. Update relevant visions and efforts to align; close out and abandon superseded efforts and off-course work.
+
+**Accepted alignment:** retain this effort's clean merged Dev source, Manager,
+maintenance, driver and installed-adoption owners/gates. All deployments use
+immutable venvs identified by complete source and admitted build inputs.
+Current selection starts the incoming owner through ordinary healthy handoff;
+full identity inequality, not version ordering, identifies the displaced owner.
+Reverse baton-passing remains state-compatible and never exits the serving
+owner merely on observing "not current". This documentation revision neither
+restarts completed Phase 2 work nor claims remaining cutover/adoption proven.
 
 **Settled request summary:** add a local gate only around service payload
 publication and installed runtime redirect updates; retain all other hook
@@ -166,6 +184,7 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
+- [ ] **Agent-recommended alignment qualification:** prove forward and compatible reverse current-generation cutover, including same-package/different-source selection, using ordinary start/readiness/work handoff/drain and identity inequality rather than version ordering.
 - [ ] Maintain a separate installation source with main, stable/exact pin and opt-in merged-dev selection resolved once per run.
 - [ ] Keep service-source selection independent of Manager self-update and Copilot plugin-content selection.
 - [ ] Route the selected source through the same assembly, readiness, activation and observable update-outcome path.
@@ -229,6 +248,7 @@ transaction execution from the existing recurring-maintenance assignment.
 
 ## Validation Plan
 
+- [ ] **Bidirectional selection:** the selected incoming generation starts and becomes healthy before the displaced owner retires; forward, lower-version and same-package/different-source handoffs preserve work and rollback compatibility without ordering hashes or versions to identify supersession.
 - [ ] **Source admission:** reject dirty, worktree-backed, unmerged or substituted source; preserve the exact resolved commit throughout a run.
 - [ ] **Materialization:** actual installer imports the complete vendor closure from a non-editable install with no source-checkout dependency.
 - [ ] **Identity:** identical inputs reuse unchanged completion bytes; different commits or assembly/dependency/profile inputs cannot overwrite a completed slot.
@@ -262,6 +282,16 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-10-22 - Align immutable development and retained Dev deployment
+
+Re-read the two newly captured operator statements against their literal input.
+The canonical direct merged Dev home remains this effort; immutable interactive
+development and retained #5472 admission/adopter work move to Immutable Dev
+Slot. Mutable/editable deployment is abandoned as a target, not preserved as a
+special exception. Added explicit bidirectional current-identity cutover
+qualification without resetting delivered Phase 2 or taking over maintenance,
+driver, native pilot or installed-adoption owners. No runtime was changed.
 
 ### 2026-10-22 - Execution core and public consumer implementation
 - Implemented the shared durable request journal, kernel-owned finite worker, checked nested handoff, canonical outcome/log observation and explicit restart-confirmed interruption settlement under #7758.

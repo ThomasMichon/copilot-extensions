@@ -375,7 +375,10 @@ Round 2 (operator's response to that evaluation):
     owner = absolute worktree path, no TTL, released explicitly) —
     integrated directly into `libs/versioned-runtime`'s existing
     immutable-slot machinery. See `docs/patterns/mutable-dev-slot.md` and
-    `efforts/active/mutable-dev-slot/README.md`. This is exactly this
+    `efforts/active/immutable-dev-slot/README.md` for the current successor
+    contract: immutable non-editable source-hashed generations, not live
+    editable deployment. The mutable mechanism described here records the
+    original withdrawal, not a current recommendation. This is exactly this
     effort's Phase 1 item, done more correctly (a real runtime-slot
     primitive, not a from-scratch installed-plugins-directory copy-and-claim
     hack) — and it predates my draft by the same session's timestamp.
@@ -383,8 +386,8 @@ Round 2 (operator's response to that evaluation):
     prior to landing); this Plan item is resolved by cross-referencing that
     pattern rather than building a parallel one. `tools/preview_release.py`
     is kept — it answers a different question (what would this plugin's
-    *promoted* payload + version look like) than mutable-dev-slot (iterate
-    against the currently-deployed CLI with live, uncommitted code), so the
+    *promoted* payload + version look like) than immutable development
+    (validate a frozen source generation through the deployed CLI), so the
     two are complementary, not duplicative.
 - [x] _(agent-recommended; not explicitly re-confirmed by the operator)_
       Confirm Copilot CLI's actual update-detection behavior empirically

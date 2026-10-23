@@ -57,15 +57,17 @@ Two tools close the impatience gap without waiting on a real promotion:
   consumed right now — entirely read-only against your real checkout. Good
   for "what would ship" without touching anything.
 - **For actually running your own uncommitted/unmerged code against the real
-  deployed CLI**, use the **mutable-dev-slot** pattern instead of anything in
+  deployed CLI**, follow the **immutable development generation** target instead of anything in
   this effort: `docs/patterns/mutable-dev-slot.md` /
-  `efforts/active/mutable-dev-slot/README.md`
-  (ThomasMichon/copilot-extensions#3376). It gives each plugin a claimed,
-  first-class `versions/dev/` runtime slot rebuilt in place, GC-protected by
-  a `dev-claim.json` sidecar. This effort's own `tools/dev_slot.py` prototype
+  `efforts/active/immutable-dev-slot/README.md` (#5472).
+  Freeze the complete source/build inputs, use a non-editable source-hashed
+  generation, and perform ordinary healthy forward/reverse cutover. Existing
+  editable pilot behavior is legacy, not proof every plugin supports the
+  target. This effort's own `tools/dev_slot.py` prototype
   was **withdrawn** once that pattern was discovered mid-session — don't
-  resurrect it; this is the canonical mechanism for "preview my live code
-  against the real CLI now."
+  resurrect it. Clean merged Dev deployment is separately owned by
+  `efforts/active/source-managed-runtime-installs/README.md` (#7028/#7029),
+  not this release-promotion effort.
 
 ## What stays the same
 

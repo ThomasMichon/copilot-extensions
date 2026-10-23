@@ -1,5 +1,11 @@
 # Phase 3 runtime admission and build coalescing
 
+**Archived, superseded execution plan (2026-10-22).** Mutable/editable exceptions
+below are historical, not authorization. Every unfinished item transfers to
+`efforts/active/immutable-dev-slot/README.md` under #5472. Its immutable source
+and bidirectional-cutover contract replaces the old dev exception while
+retaining construction, retention, repair and full-adopter acceptance.
+
 Parent: [mutable-dev-slot](README.md), Phase 3.
 Coordination: #5472; prior numbered-slot overwrite incident #777.
 This is an agent-recommended execution decomposition of the existing reviewed
@@ -123,7 +129,7 @@ each adopter is already safe.
       wiring an adopter's *refusal* message/guidance for the
       `content-conflict` decision is each adopter's own integration work,
       tracked under 3b, not duplicated here.)
-- [ ] Serialize unfinished construction with a real OS-backed, installation/
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Serialize unfinished construction with a real OS-backed, installation/
       version-scoped lease. After acquiring it, revalidate the target before any
       write; after contention, wait within the caller's bounded budget and
       revalidate/reuse the winner. Different content must refuse after the
@@ -136,13 +142,13 @@ each adopter is already safe.
       owning descriptor through real construction, and every contender on a
       deployment path must use the same protocol. Ready/rollback candidate
       retention below is a prerequisite to releasing construction before cutover.
-- [ ] Release construction ownership on success, failure, cancellation, and
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Release construction ownership on success, failure, cancellation, and
       process death. Keep its lifetime scoped to construction, isolated health
       gating, and immutable publication, not unrelated binstub/service work.
       Preserve separate activation/cutover serialization and governance checks.
       A repair's outer cutover guard retains the whole-operation lifetime above;
       releasing the inner construction lease does not release repair authority.
-- [ ] Protect ready candidates and rollback generations through the owning GC
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Protect ready candidates and rollback generations through the owning GC
       retention protocol across construction release, cutover waits, concurrent
       cleanup, promotion, and drain. Matching-slot reuse needs the same atomic
       retention admission. Do not use immutable-slot mtime mutation as a pin.
@@ -162,30 +168,30 @@ each adopter is already safe.
       preserving their existing standalone/offline and artifact resource
       contracts avoids introducing a new deploy-time import/fan-out dependency
       merely to relocate this small kernel-ownership seam.
-- [ ] Surface timeout and actual storage/permission failures distinctly.
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Surface timeout and actual storage/permission failures distinctly.
       Diagnostic owner evidence is attributable to the actual lease holder,
       not a completion helper's PID or a mere lock-file timestamp. A surviving
       marker file is not evidence that the OS lease remains held.
-- [ ] Preserve unpublished candidate recovery without deleting or reconstructing
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Preserve unpublished candidate recovery without deleting or reconstructing
       an already-published/selected/rollback-pinned identity. A genuinely broken
       published slot enters the existing distinct-generation repair contract,
       never the ordinary incomplete-candidate cleanup path.
-- [ ] Vendor the shared seam using the canonical sync tool, update the executable
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Vendor the shared seam using the canonical sync tool, update the executable
       install-contract guard, and maintain standalone/offline plugin behavior.
       Installation-cell provenance and transaction authorization remain binding;
       legacy compatibility does not permit a new unqualified runtime root.
 
 ### 3b — First complete adopter, then phased portfolio rollout
 
-- [ ] Use agent-worktrees as the first complete adoption, on PowerShell and
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Use agent-worktrees as the first complete adoption, on PowerShell and
       POSIX entrypoints, with reuse/refusal/coalescing, claimed dev/release,
       and distinct-generation health repair. Do not check it off in the parent
       until every required adoption contract is implemented and verified.
-- [ ] Propagate generation identity through discovery, selectors, manifests,
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Propagate generation identity through discovery, selectors, manifests,
       running-version comparisons, recovery ordering, and process/lease evidence.
       Keep package version separate; a repair directory suffix alone must not
       cause repeated self-update or outrank a later genuine release.
-- [ ] Adopt the remaining runtime plugins in independently mergeable waves.
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Adopt the remaining runtime plugins in independently mergeable waves.
       Preserve plugin-specific health, service, broker, and cutover hooks;
       coordinate with live installer PRs instead of superseding their changes.
       The canonical adopter inventory, not a hand-maintained plugin list,
@@ -244,24 +250,24 @@ each adopter is already safe.
       agent-mcp use that filename instead) that the reuse gate already
       exists, THEN read its actual current hash function before assuming
       the narrow bug applies -- do not assume either from this list alone.**
-- [ ] For each wave, add plugin changefiles, run targeted contained suites and
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: For each wave, add plugin changefiles, run targeted contained suites and
       shared sync/contract gates, obtain review, merge, verify promotion, and
       deploy through the unified update flow. Preserve active service work
       throughout installation and generation cutover.
 
 ### 3c — Durable operator and contributor guidance
 
-- [ ] Document ordinary update as reuse-or-create plus out-of-slot reconciliation,
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Document ordinary update as reuse-or-create plus out-of-slot reconciliation,
       never stop-and-rewrite or unconditional reinstall into the selected venv.
-- [ ] Distinguish `--force` payload/config reconciliation from permission to
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Distinguish `--force` payload/config reconciliation from permission to
       mutate a completed numbered slot. Remove contradictory stale/corrupt
       recovery advice as adopters land; identify not-yet-adopting plugins
       honestly rather than advertising a nonexistent repair/dev verb.
-- [ ] Document bounded join/reuse for busy first builds, exact-version content
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Document bounded join/reuse for busy first builds, exact-version content
       drift refusal, explicit dev ownership/release, and distinct-generation
       health repair with rollback. Diagnose before retrying; never direct an
       operator to delete a held lease or kill an unattributed builder.
-- [ ] Reconcile install-contract, mutable-dev-slot, lifecycle/contribution
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Reconcile install-contract, mutable-dev-slot, lifecycle/contribution
       guidance, diagnosing-copilot-extensions, and touched plugin README/help.
       Installed-runtime fixes stay source-authored and versioned. Consumer
       projection refresh remains part of deployment, not an installed-file edit.

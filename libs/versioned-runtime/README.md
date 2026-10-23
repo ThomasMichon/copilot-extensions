@@ -18,6 +18,13 @@ immutable and versioned".
 
 ## Package releases and runtime generations
 
+The [immutable development pattern](../../docs/patterns/mutable-dev-slot.md)
+sets the target for frozen, non-editable, source-hashed venvs and bidirectional
+current-generation handoff. Existing editable dev claims described below are
+legacy compatibility, not proof of full adoption; #5472's
+[successor effort](../../efforts/active/immutable-dev-slot/README.md) retains
+the remaining gates. This documentation change does not change the API.
+
 Selectors and retention leases name concrete slots. `package_version(slot_name)`
 separates an installer-generated `+repair.<32-hex-id>` suffix (or `.repair.<id>`
 after an existing local version) from its unchanged package version. Python and

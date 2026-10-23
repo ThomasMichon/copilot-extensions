@@ -1458,4 +1458,5 @@ actually consumes them.
 - [`docs/install-contract.md`](install-contract.md) — what the marketplace
   vendors and the plugin-update vs. runtime-install distinction.
 - [`docs/patterns/mutable-dev-slot.md`](patterns/mutable-dev-slot.md) —
-  running unmerged code against the real deployed CLI.
+  immutable source-hashed development generations and legacy migration;
+  direct merged Dev deployment remains in #7028/#7029.

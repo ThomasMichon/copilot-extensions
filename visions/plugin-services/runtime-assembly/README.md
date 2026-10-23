@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-16
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -150,6 +150,19 @@ representation rather than a second approximation of promotion. The
 assembled runtime contains no live dependency on the source checkout.
 Source identity, package version, optional capability profile and exact
 assembly/dependency identity remain separately observable.
+
+Interactive development also freezes source and build inputs before assembly;
+it never deploys an editable venv linked to the working checkout. The complete
+source hash contributes to generation identity even when the package version
+is unchanged. A new edit requires a new immutable generation or exact healthy
+reuse, not mutation of the selected environment. This does not relax the clean,
+merged-source admission required for unattended Dev deployment.
+
+Selecting a generation initiates ordinary start, health-gated handoff and drain.
+The displaced owner is identified by inequality with current selection, never
+by numeric version or hash ordering. Forward and compatible reverse selection
+use the same baton-passing contract without retiring the serving owner before
+its replacement is ready.
 
 ### optional-client-artifacts-complete-promotion
 

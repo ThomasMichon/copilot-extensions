@@ -268,20 +268,20 @@ so a version swap never destroys state. Rollback still re-selects a generation
 only when it is compatible with that state (*state-aware-rollback*). Replacing a
 running version is governed by *zero-downtime-cutover* below.
 
-Explicit development installs retain editable source iteration without mutating
-the previously working dependency environment. Each dependency refresh builds a
-distinct, claim-owned development generation beside its predecessor, validates
-the selected closure, and only then selects it. A failed refresh preserves the
-working development generation and the original release rollback target.
-Development claims gate construction, publication and release; editable source
-is intentionally live, but completed dependency environments remain immutable.
+Development and released deployments share this immutable-generation contract.
+Dev identifies the selected source, not a mutable environment. Every deployed
+venv contains frozen, non-editable code and dependencies; its identity binds
+the hash of the complete source and admitted assembly inputs, separately from
+the package version. Identical healthy input can reuse its exact generation;
+changed input builds beside it, never rewrites it or follows live checkout
+edits. Installed code remains usable without its source checkout.
 
-An explicitly selected, merged development snapshot can also be deployed as a
-non-editable runtime. This is source deployment, not an editable development
-claim: its immutable generation distinguishes the exact source and assembly
-inputs even when package versions have not changed. Repeating an identical
-assembly reuses the completed generation; different admitted content never
-rewrites it. Installed code remains usable without its source checkout.
+Explicit development ownership preserves the original restore target across
+successive generations. Each iteration freezes its inputs, builds or reuses
+the corresponding generation, and selects it through ordinary healthy cutover.
+A failed candidate preserves the working generation and restore target.
+Clean merged Dev deployment uses the same lifecycle without impersonating an
+interactive worktree claim or a promoted release.
 
 A failed selected-dependency installation never publishes a completed runtime,
 active selection or service cutover. Construction cleans up only its owned,
@@ -730,6 +730,16 @@ request, double-runs a scheduled job, or opens a window with no live service.
 *How* the routing record and drain are implemented (a shared cutover primitive) is
 spec-level, not fixed here.
 
+Supersession is identity inequality: an owner is displaced because its full
+generation identity is no longer current, not because another package version,
+source hash or generation sorts after it. Selecting a different completed
+generation starts that incoming owner through the same lifecycle in either
+direction, including rollback. The displaced owner keeps serving until healthy
+handoff and drain settle; observing "not current" alone never authorizes an
+immediate exit. State and work compatibility still gate the reverse handoff.
+Release-channel ordering may choose a desired release; it never determines
+which already-running owner is superseded.
+
 The whole lifecycle transition has **one mutation authority**, including
 interrupted-transition recovery and retirement of abandoned candidates.
 Concurrent installers, maintenance callers, and recovery paths coordinate
@@ -775,8 +785,8 @@ host runs.
 "Installed" and "serving" are different facts. Every install, including one
 that changes nothing because the build already matches, reconciles what each
 authorized resident service is actually serving. It repairs a service that is
-missing, still running an older generation, or unhealthy. A matching build is
-never treated as proof of convergence. Convergence is reported only from
+missing, serving a generation different from the selected one, or unhealthy.
+A matching build is never treated as proof of convergence. Convergence is reported only from
 attributable evidence of what is serving.
 
 ### state-aware-rollback

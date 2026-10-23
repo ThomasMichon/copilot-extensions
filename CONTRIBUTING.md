@@ -1291,7 +1291,7 @@ per-mux shell writer or a render-path `#()`); the guard tests in
 mechanisms: psmux 3.3.6 and tmux 3.4 both support session-scoped `set-option -t`
 (isolated per session) and `#{@user-option}` expansion.
 
-### Hot-patching a deployed venv for fast pre-merge iteration
+### Immutable deployed generations for pre-merge iteration
 
 **A cached `.test-venvs/<platform>/<plugin>` venv installs a vendored
 path-dependency lib (e.g. `agent-ssh-manager`) as a normal, non-editable
@@ -1311,38 +1311,31 @@ fresh edit without a full rebuild:
   forces a real rebuild from the current vendored source, for a true
   integration-level check of that plugin's own suite.
 
-**Validating against the actual deployed CLI a human/agent would invoke** (not
-just the test venv) needs one more step beyond the *local installer* gotcha
-above (see *`<repo> update` does not validate an unmerged worktree's
-changes*): even a `source.kind = local` install rebuilds from a **checkout on
-disk**, so it still requires committing (or at least saving) your edit and
-re-running that plugin's installer to pick it up.
+**Validating the actual deployed CLI** requires an attributable immutable
+generation, not just a passing test venv. See the
+[immutable development pattern](docs/patterns/mutable-dev-slot.md) and
+[Immutable Dev Slot effort](efforts/active/immutable-dev-slot/README.md) (#5472).
+Freeze source and build inputs, construct non-editable code in a distinct
+source-hashed generation (or reuse its exact healthy match), select it current,
+and use normal start, healthy handoff and drain. Source edits require another
+generation; never hot-patch completed runtime files or depend on live editable
+imports. Reverse selection uses the same lifecycle, subject to state
+compatibility; version ordering does not determine owner supersession.
 
-**`agent-codespaces` uses claim-owned development generations
-(`docs/patterns/mutable-dev-slot.md`, #3376) as the preferred path** for this:
-from your worktree, run `pwsh -File plugins\agent-codespaces\scripts\install.ps1
-dev` (`./scripts/install.sh dev` on POSIX). This claims development ownership,
-builds a fresh protected generation as an **editable** install against your
-checkout, and activates it -- a plain source edit is then reflected by the
-deployed `agent-codespaces` CLI immediately, no rebuild needed; re-run `dev`
-only when you change a dependency. Each refresh preserves the working dependency
-environment until its replacement is healthy. Release with the DEPLOYED CLI's
-own verb: `agent-codespaces dev-release` (works even without a checkout
-present -- see the design doc's "Runtime accessibility" section), which
-restores the machine to whatever version was active before you claimed dev
-mode. `agent-worktrees finalize` warns (never silently releases) if your
-worktree still holds a live dev-slot claim when you try to retire it.
+**Compatibility is not adoption:** the existing `agent-codespaces` installer
+`dev` verb still uses editable source. It is not proof of this target contract
+and is no longer the recommended deployed validation path. Existing owners
+can use the deployed `agent-codespaces dev-status` / `dev-release` to inspect
+and restore their recorded predecessor; failed restoration retains ownership.
+`agent-worktrees finalize` warns rather than silently releasing a live claim.
+Do not invent an immutable-dev command for a plugin that has not adopted it.
+Keep pre-merge testing isolated until its canonical installer supports the
+required generation lifecycle.
 
-For any plugin that has **not yet** adopted this pattern, or when you need the
-fastest possible iteration loop on a live bug **before** even a dev-slot claim
-is worth setting up, it remains acceptable to hot-patch the **already-deployed**
-runtime's files directly (e.g. on Windows,
-`~/.agent-codespaces/versions/<version>/Lib/site-packages/ssh_manager/*.py`) —
-but treat this as strictly throwaway: it is silently overwritten by the next
-real install/update, must never be treated as "shipped," and the actual fix
-still needs to land through the normal commit → PR → merge → deploy flow
-before you consider it done. Re-verify against a real (non-hot-patched)
-deploy once your PR lands.
+[Source-Managed Runtime Installs](efforts/active/source-managed-runtime-installs/README.md)
+(#7028/#7029) owns clean merged Dev deployment, not unmerged worktree validation
+or the separate Dev/Main release promotion pipeline. A passing local candidate
+is not shipped; the normal PR, release and authorized rollout gates remain.
 
 ### Windows `ProxyCommand` bridge: a peer-gone-away read is not a failure
 

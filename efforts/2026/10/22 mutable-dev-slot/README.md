@@ -4,14 +4,23 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase PRs to `dev`; normal release promotion to `main`
 - **Created:** 2026-09-23
-- **Status:** Active
+- **Status:** Done
+- **Disposition:** Abandoned as superseded on 2026-10-22; unfinished acceptance
+  transfers to [Immutable Dev Slot](../../../active/immutable-dev-slot/README.md)
+  under the existing #5472, not claimed delivered.
 - **Coordination:** #5472
-- **Vision:** [`docs/patterns/mutable-dev-slot.md`](../../../docs/patterns/mutable-dev-slot.md)
+- **Vision:** [`docs/patterns/mutable-dev-slot.md`](../../../../docs/patterns/mutable-dev-slot.md)
   (a deliberate, narrow exception to
-  [`docs/patterns/durable-vs-versioned-runtime.md`](../../../docs/patterns/durable-vs-versioned-runtime.md)'s
+  [`docs/patterns/durable-vs-versioned-runtime.md`](../../../../docs/patterns/durable-vs-versioned-runtime.md)'s
   immutable-versioned-runtime invariant)
 
 ## Guiding Intent
+
+**Historical premise, no longer execution authority.** The operator replaced
+mutable/editable development deployment with immutable, source-hashed venvs.
+The text and delivered Phase 1/2 credit below are preserved as history.
+Follow the successor effort for all remaining work; clean merged Dev deployment
+remains owned by Source-Managed Runtime Installs (#7028/#7029).
 
 Give every plugin one first-class, protected, genuinely mutable install slot
 (`versions/dev`) a worktree can claim, iterate against with the real deployed
@@ -65,7 +74,7 @@ already-deployed slot's files directly -- is explicitly throwaway (see
 CONTRIBUTING.md's *Hot-patching a deployed venv for fast pre-merge
 iteration* gotcha, itself written up after diagnosing/fixing
 ThomasMichon/copilot-extensions#3323 -> #3340 this same session). See
-[`docs/patterns/mutable-dev-slot.md`](../../../docs/patterns/mutable-dev-slot.md)
+[`docs/patterns/mutable-dev-slot.md`](../../../../docs/patterns/mutable-dev-slot.md)
 for the full design.
 
 ## Request
@@ -184,14 +193,14 @@ Phase 3 contract, not a new parallel lifecycle framework.
       publication, without importing the source-checkout implementation.
       The 2026-10-12 revised-legacy delivery journal below records that proof.
 
-- [ ] Finish executing the shared, reviewed
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Finish executing the shared, reviewed
       [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
       through the shared core
       and phased adopter changes. This closes published-slot overwrite and
       transient first-builder contention at their owning seams, while preserving
       the full per-plugin guard/dev/distinct-generation repair gate below.
 
-- [ ] Repeat Phase 2's pilot shape for the other 12 plugins currently
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: Repeat Phase 2's pilot shape for the other 12 plugins currently
       vendoring `versioned_runtime.py` (see `tools/sync-versioned-runtime.py`'s
       target list; 13 vendoring plugins total, `agent-codespaces` is the
       one Phase 2 pilot) as their own installers need it -- not a mandatory
@@ -199,7 +208,7 @@ Phase 3 contract, not a new parallel lifecycle framework.
       vendoring plugin that isn't `agent-*` and so isn't named in the
       audit-prioritized list below -- it's still owed this same rollout
       under this generic bullet.
-- [ ] **Prioritize the plugins a separate invariant audit
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: **Prioritize the plugins a separate invariant audit
       (`ThomasMichon/copilot-extensions#5472`, `#5468`,
       `efforts/2026/10/09 vision-backport-sweep/`) found still silently
       mutating a completed numbered slot in place for a same-version,
@@ -224,7 +233,7 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Validation Plan
 
-- [ ] **Phase 3, per adopting plugin, on both installer entrypoints
+- [x] Deferred to `efforts/active/immutable-dev-slot/README.md`: **Phase 3, per adopting plugin, on both installer entrypoints
       (`install.ps1`/`install.sh` for most of the list; `init.ps1`/`init.sh`
       for `agent-mcp`, `agent-containers`, and `agent-machines`):** a
       matching-content same-version run is a true no-op (no rebuild, no
@@ -256,6 +265,21 @@ Phase 3 contract, not a new parallel lifecycle framework.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-22 -- Abandon mutable deployment; transfer valid acceptance
+
+The operator directed: "Great. Update relevant visions and efforts to align;
+close out and abandon superseded efforts and off-course work." The complete
+new direction is captured verbatim in the successor effort. Mutable/live
+editable deployment is abandoned, not a required compatibility target for new
+work. Delivered primitives, construction/retention custody, first-adopter work,
+and claim restoration remain useful and are not reverted. Every unresolved
+checklist transfers explicitly below; none is being reported as implemented.
+The archived Phase 3 detail is historical evidence, not a competing plan.
+Existing #5472, #6424/#6389 lifecycle custodians, #7028/#7029 source deployment,
+and #7758 execution-driver owners retain their valid responsibilities.
+No runtime, installed generation, live claim or worker is changed by this
+documentation disposition.
 
 ### 2026-10-19 -- Integrate the canonical retained transaction and current source identities
 
