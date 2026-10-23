@@ -234,9 +234,12 @@ def landing(branch: str, upstream: str, cwd: str, *, explain: bool = False) -> L
     """Every check of :func:`is_content_on_upstream` for *branch* on *upstream*,
     stopping at the first that proves it landed unless *explain* asks for all."""
     result = Landing(branch, upstream)
-    result.ancestor = git_ops.git(
+    ancestry = git_ops.git(
         "merge-base", "--is-ancestor", branch, upstream, cwd=cwd, check=False,
-    ).returncode == 0
+    )
+    if ancestry.returncode not in (0, 1):
+        return result
+    result.ancestor = ancestry.returncode == 0
     if result.landed and not explain:
         return result
     cherry_r = git_ops.git("cherry", upstream, branch, cwd=cwd, check=False)

@@ -1,0 +1,9 @@
+{
+  "comment": "Let landing graph queries validate revisions without redundant existence probes",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

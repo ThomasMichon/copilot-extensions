@@ -87,6 +87,32 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-LANDING-VALIDATION graph queries validate their own revisions
+
+The PR-content landing fast path no longer starts a separate upstream
+existence process before its real `merge-base --is-ancestor` query.
+That graph query already validates both revisions. Status zero still proves
+ancestry and status one still proceeds through the unchanged cherry,
+squash and blob strategy order. Any other status is explicitly inconclusive:
+all strategy verdicts remain unknown and no later strategy can turn the
+failed read into landing proof. The caller omits inconclusive evidence just
+as it previously omitted an unavailable upstream. Later merged-boundary and
+read-only explanation checks keep their own fresh existence reads.
+
+A real-Git fast-path control forbids the redundant existence helper and
+checks the exact ancestry query. The missing-upstream control requires a
+single failed graph read and unknown verdicts; three additional failure
+statuses prove misleading output cannot reach a later strategy.
+
+All native functional coverage retains exactly two workers and original
+item, process, memory and native deadlines. Complementary selections cover
+101 nonhistorical creation/landing controls in 167.48 seconds inclusive and
+120 historical-reset, copy-isolation, precondition, open-PR and blob controls
+in 209.53 seconds inclusive. An earlier unpartitioned behavior selection hit
+the 240-second cap with no item failure. Neither that failed attempt nor
+the successful complementary runs qualify a normal group or aggregate;
+the parent timing, worker-loss and residual-settlement gates remain open.
+
 ### B-CREATION-REFS one fresh ref map per creation-point call
 
 Creation-point inference includes every same-remote qualified source's local

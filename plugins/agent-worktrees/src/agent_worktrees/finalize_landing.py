@@ -97,9 +97,9 @@ def _pr_content_landed(
                 else complete.blobs,
             )
         else:
-            if not git_ops.ref_exists(upstream, cwd=cwd):
-                return False
             result = landing(content_ref, upstream, cwd)
+            if result.ancestor is None:
+                return False
         evidence.append(result)
         return result.landed and fopg.upstream_match_is_trustworthy(
             record, content_ref, upstream, cwd=cwd, repo=repo)

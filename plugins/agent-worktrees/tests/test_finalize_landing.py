@@ -375,13 +375,54 @@ def test_an_unreadable_upstream_is_never_landed(env, monkeypatch):
 
     monkeypatch.setattr(finalize_ref.git_ops, "git", observe)
     result = finalize_ref.landing(tip, "origin/no-such-branch", str(env.clone), explain=True)
-    assert not result.landed and result.squash is None and result.blobs is False
-    assert [args for args in commands if args[0] == "merge-base"] == [
+    assert not result.landed
+    assert (result.ancestor, result.cherry, result.squash, result.blobs) == (None,) * 4
+    assert commands == [
         ("merge-base", "--is-ancestor", tip, "origin/no-such-branch"),
-        ("merge-base", "--all", "origin/no-such-branch", tip),
     ]
-    assert {args[0] for args in commands} == {"merge-base", "cherry"}
     assert not finalize_ref.is_content_on_upstream(tip, "origin/no-such-branch", str(env.clone))
+
+
+@pytest.mark.parametrize("returncode", [2, 128, -9])
+def test_failed_ancestry_never_reaches_a_later_landing_strategy(monkeypatch, returncode):
+    calls = []
+
+    def failed(*args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=returncode, stdout="misleading output\n")
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", failed)
+    result = finalize_ref.landing("topic", "upstream", "unused", explain=True)
+    assert not result.landed
+    assert (result.ancestor, result.cherry, result.squash, result.blobs) == (None,) * 4
+    assert calls == [("merge-base", "--is-ancestor", "topic", "upstream")]
+
+
+def test_landing_fast_path_uses_its_own_revision_validation(env, monkeypatch):
+    from agent_worktrees import finalize_open_pr_gate as gate
+
+    original = finalize_ref.git_ops.git
+    commands = []
+
+    def observe(*args, **kwargs):
+        commands.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(finalize_ref.git_ops, "git", observe)
+    monkeypatch.setattr(
+        finalize_landing.git_ops, "ref_exists",
+        lambda *args, **kwargs: pytest.fail("the graph query validates its upstream"),
+    )
+    monkeypatch.setattr(gate, "upstream_match_is_trustworthy", lambda *args, **kwargs: True)
+    record = _record(env, state="open", number=7)
+    result, message, evidence = finalize_landing.pr_content_landed(
+        record, _repo(), f"worktree/{env.worktree_id}", cwd=str(env.clone),
+    )
+    assert result is True and message is None
+    assert len(evidence) == 1 and evidence[0].ancestor is True
+    assert commands == [
+        ("merge-base", "--is-ancestor", f"worktree/{env.worktree_id}", "refs/remotes/origin/main"),
+    ]
 
 
 def test_multiple_merge_bases_keep_each_strategy_selection(env, monkeypatch):
