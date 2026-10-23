@@ -239,3 +239,36 @@ def test_sdk_rejects_unverifiable_success_without_retrying(owner, clear):
             else:
                 client.save_card_draft(task.id, fields={}, **_basis(task))
     assert len(posts) == 1
+
+
+@pytest.mark.parametrize("scenario", ["missing-clear", "old-clear", "unchanged-save", "absent-save"])
+def test_sdk_does_not_acknowledge_an_unproven_draft_mutation(owner, scenario):
+    queue, task = owner
+    task = queue.save_card_draft(task.id, fields={"answer": "same"}, **_basis(task))
+    snapshot = {
+        **asdict(task), "steering_revision": task.steering_revision,
+        "card_draft_revision": task.card_draft_revision,
+    }
+    if scenario == "missing-clear":
+        snapshot.pop("card_draft")
+        snapshot["card_draft_revision"] = "absent"
+    elif scenario == "old-clear":
+        snapshot["card_draft"] = None
+    elif scenario == "absent-save":
+        snapshot["card_draft_revision"] = "absent"
+    posts = []
+
+    def handler(request):
+        if request.url.path == "/health":
+            return httpx.Response(200, json={"card_draft_cas": 1})
+        posts.append(request.url.path)
+        return httpx.Response(200, json=snapshot)
+
+    before = _snapshot(queue, task.id)
+    with DispatchClient("http://owner", transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(DispatchError, match="refresh before retrying"):
+            if scenario.endswith("clear"):
+                client.clear_card_draft(task.id, **_basis(task))
+            else:
+                client.save_card_draft(task.id, fields={"answer": "same"}, **_basis(task))
+    assert len(posts) == 1 and _snapshot(queue, task.id) == before

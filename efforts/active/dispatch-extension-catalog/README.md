@@ -1082,3 +1082,8 @@ authorized installed proof remain distinct obligations.
   Save/Reset adoption, local provenance-bound restore, exact-request restart
   recovery and independent client proof remain open. Normal review/CI/release
   and separately authorized installed proof remain required.
+- Review of #8013 found that acknowledgement checks could accept a missing
+  Clear draft or an unchanged Save snapshot. Require explicit null/`absent`
+  for Clear and a fresh non-absent Save revision before reporting success.
+  Four corrupt/stale-response regressions prove no automatic mutation replay.
+  The final contained draft/HTTP/native-CLI selection passed 46 tests.

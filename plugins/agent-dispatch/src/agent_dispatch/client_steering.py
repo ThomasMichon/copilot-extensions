@@ -88,9 +88,13 @@ class SteeringClientMixin:
             or result.get("steering_revision") != expected_revision
             or not isinstance(result.get("card_draft_revision"), str)
             or not result["card_draft_revision"]
-            or (clear and result.get("card_draft") is not None)
+            or "card_draft" not in result
+            or (clear and (
+                result["card_draft"] is not None or result["card_draft_revision"] != "absent"
+            ))
             or (not clear and (
                 not isinstance(result.get("card_draft"), dict)
+                or result["card_draft_revision"] in ("absent", expected_draft_revision)
                 or result["card_draft"].get("fields") != fields
                 or result["card_draft"].get("steering_revision") != expected_revision
             ))
