@@ -91,7 +91,7 @@
       "status": 401
     }
   },
-  "execution_closure_sha256": "2d15e8e00224603b36217c4c245c62127e3f6f3a8aee8764b4ba9d287620e294",
+  "execution_closure_sha256": "f410919cc6efd6dca641b798ca8718a19991599e40e174d72c61a4ac1c6be472",
   "execution_closure": {
     "libs/agent-procutil/src/agent_procutil/__init__.py": {
       "blob": "055e20131efdc966b58de8ad46699d9ba31305b2",
@@ -1226,8 +1226,8 @@
       "sha256": "70058bd55121a268307177aaa9b1e4ef1447b7b69334832e29da5eff4f37690d"
     },
     "plugins/agent-bridge/src/agent_bridge/client_drain.py": {
-      "blob": "efac3236b34a490129d5a4c46f078b056ec54397",
-      "sha256": "b22176295f7819f79ebffc7119d06ad9b3e23e183090d44a96bc42eaaf82644d"
+      "blob": "f7cc3f211faf882121903c43729c0fb1c88bcd5f",
+      "sha256": "e390fd1720c7187caa4dfeabe1d46ea771e0292d53d038186021d7c7ac980723"
     },
     "plugins/agent-bridge/src/agent_bridge/client_live_results.py": {
       "blob": "606b0eaad54380ead30086ce2eac85454d188f99",
@@ -2242,8 +2242,8 @@
       "sha256": "a4fc42f91705658ab43fb9a538cefec6701b5cd595a106b7d9236d76e0ad8e55"
     },
     "tools/bridge_http47_evidence.py": {
-      "blob": "1750148602a77a96d1a4b124f825620af1b441fb",
-      "sha256": "a6a8447d68f65302138d416e2a79edb1c152b03bc045c2ded672558f79b10b2d"
+      "blob": "be07fbe016900d3bd996d72172638ea16f85120f",
+      "sha256": "181a260830107a34da03431d4f90fa1aa46e50b8f3b3484da1e48f3a79be8563"
     },
     "tools/bridge_http47_runtime.py": {
       "blob": "7e27a8dfed6876fee91ed9c696025737dabfa328",
@@ -3195,13 +3195,14 @@
     "test_cold_handoff_rechecks_outage_after_awaited_resume": 1,
     "test_cold_drain_client_rejects_nonobject_outcome": 10,
     "test_cold_drain_client_requires_boolean_completion_flags": 21,
+    "test_cold_drain_client_does_not_accept_a_legacy_success_shape": 1,
     "test_ordinary_recovery_closed_cold_gate_is_503_without_effects": 2,
     "test_ordinary_recovery_entered_before_drain_is_counted": 4,
     "test_ordinary_recovery_cancellation_releases_drain_accounting": 2
   },
   "scope": "model-free ASGI and owned stdio fixtures; not real Copilot, deployment or host qualification",
   "captured_from": {
-    "commit": "4f7d10dd7267462c5949ffb20484f5c6e005a6bd",
+    "commit": "cc79ac2f812f89c005b8b71ae3f14c18e6d6350b",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
