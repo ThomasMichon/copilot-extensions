@@ -441,32 +441,34 @@ def _monitor_lock_is_live() -> bool:
     return locks.lock_is_live(locks.read_lock(smr._monitor_lock_path()))
 
 
-def _routed_monitor_is_live() -> bool:
-    from zdd import diagnostics
-
-    snapshot = routing.read_table(routing_dir())
-    endpoint = routing.read_active_endpoint(routing_dir(), verify_listener=False)
+def routed_monitor_identity(runtime_home: Path | None = None) -> tuple[int, str, str | None] | None:
+    """Authenticate a stable routed owner before installer retention or cutover."""
+    directory = routing_dir() if runtime_home is None else routing_dir(runtime_home)
+    snapshot = routing.read_table(directory)
+    endpoint = routing.read_active_endpoint(directory, verify_listener=False)
     if endpoint is None:
-        return False
+        return None
     pid = endpoint.pid
     if type(pid) is not int or pid <= 0:
         raise ValueError("Routed monitor has no attributable PID")
     if not locks.lock_is_live({"pid": pid}):
-        return False
-    before = diagnostics.process_start_time(pid)
+        return None
+    before = locks.process_start_time(pid)
     if before is None or (
         endpoint.process_start_time is not None and endpoint.process_start_time != before
     ):
         raise ValueError("Routed monitor process identity is unconfirmed")
-    health = ControlClient(endpoint.base_url).health()
+    client_options = {} if runtime_home is None else {"token": load_or_create_control_token(runtime_home)}
+    health = ControlClient(endpoint.base_url, **client_options).health()
     if (
         health.get("pid") != pid
         or health.get("status") not in {"ready", "draining", "unavailable"}
-        or diagnostics.process_start_time(pid) != before
-        or routing.read_table(routing_dir()) != snapshot
+        or locks.process_start_time(pid) != before
+        or routing.read_table(directory) != snapshot
     ):
         raise ValueError("Routed monitor identity changed during admission")
-    return True
+    slot = health.get("runtime_slot")
+    return pid, before, slot if isinstance(slot, str) else None
 
 
 def _health_check(host: str, port: int) -> bool:
@@ -609,7 +611,7 @@ def activate_after_update(
     lock_live = _monitor_lock_is_live()
     if not lock_live:
         try:
-            routed_live = _routed_monitor_is_live()
+            routed_live = routed_monitor_identity() is not None
         except (OSError, ValueError, ConnectionError):
             summary.update(
                 action="refused", reason="routed-monitor-unverified",

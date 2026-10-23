@@ -433,7 +433,7 @@ def test_uncertain_publication_requires_terminal_owner_witness(driver, tmp_path,
 
 def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from agent_worktrees import status_monitor_runtime as smr
+    from agent_worktrees import status_monitor_cutover, status_monitor_runtime as smr
 
     handle = object()
     handles = []
@@ -442,9 +442,41 @@ def test_restart_spawn_returns_the_real_process_handle_to_its_owner(tmp_path, mo
     monkeypatch.setattr(smr, "_daemon_cwd", lambda: str(tmp_path))
     monkeypatch.setattr(smr, "_daemon_environment", lambda: {})
     monkeypatch.setattr(smr, "direct_monitor_python", lambda python: (python, {}))
-    monkeypatch.setattr(smr.subprocess, "Popen", lambda *_args, **_kwargs: handle)
+    monkeypatch.setattr(status_monitor_cutover, "spawn_monitor", lambda *_args, **_kwargs: handle)
     assert smr._spawn_detached(["candidate-python", "-m", "agent_worktrees"], spawned_handles=handles)
     assert handles == [handle]
+
+
+@pytest.mark.parametrize("legacy_lock", ["absent", "stale"])
+@pytest.mark.parametrize("slot", ["serving", None, "..", "missing"])
+def test_routed_predecessor_is_captured_before_runtime_retention(driver, tmp_path, legacy_lock, slot):
+    from agent_worktrees import locks, status_monitor_cutover as cutover
+    from zdd import routing
+
+    root = tmp_path / "runtime"
+    (root / "versions" / "serving").mkdir(parents=True)
+    (root / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
+    if legacy_lock == "stale":
+        (root / "status-monitor.lock").write_text(json.dumps({"pid": 0}), encoding="utf-8")
+    pid = os.getpid()
+    server = cutover.ControlServer(
+        lambda *_args: {"pid": pid, "status": "ready", "runtime_slot": slot},
+        token="fixture-token",
+    )
+    server.start()
+    try:
+        routing.publish_active(
+            root / "status-monitor-routing", bind="127.0.0.1", port=server.port, pid=pid,
+        )
+        identity = driver._monitor_identity(root)
+        assert identity == (pid, locks.process_start_time(pid))
+        if slot == "serving":
+            assert driver._monitor_slot(root, identity) == "serving"
+        else:
+            with pytest.raises(driver.InstallationRefused):
+                driver._monitor_slot(root, identity)
+    finally:
+        server.close()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows retained process object semantics")
@@ -499,8 +531,9 @@ def test_native_exit_signal_preserves_ambiguous_process_liveness(
 
 
 @pytest.mark.timeout(900)
+@pytest.mark.parametrize("legacy_lock", ["live", "absent", "stale"])
 def test_real_installer_retains_the_serving_slot_until_monitor_drain(
-    driver, tmp_path, native_runtime_source,
+    driver, tmp_path, native_runtime_source, legacy_lock,
 ):
     from agent_worktrees import classify_daemon, locks
     from agent_worktrees.status_monitor_cutover import ControlClient
@@ -656,6 +689,10 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                 message="baseline did not begin its controlled request",
             )
             assert hook_thread.is_alive(), "baseline did not retain the delayed request"
+            if legacy_lock == "absent":
+                lock_path.unlink()
+            elif legacy_lock == "stale":
+                lock_path.write_text(json.dumps({"pid": 0}), encoding="utf-8")
             argv[-1] = str(tmp_path / "uv-must-not-run")
             with log.open("w", encoding="utf-8") as stream:
                 transition = subprocess.Popen(

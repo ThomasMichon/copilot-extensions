@@ -16,6 +16,11 @@ Ownership-transfer and serving-convergence follow-ups remain tracked by
    authenticated control health and an unchanged route before using the normal
    cutover. An unverified live route refuses convergence rather than reporting
    `no-live-monitor` success. This identity check does not certify roster health.
+   Before activation, the installer captures that routed identity and retains
+   its authenticated runtime slot even when the legacy lock is absent or stale.
+   Custody and manifest publication wait for actual predecessor exit, not just
+   a shutdown acknowledgement. Identity checks use the native Windows, Linux
+   or Darwin process-birth token; existing route tokens remain comparable.
    Native helper-publication callbacks use the plan owner's base interpreter,
    not an independently selected bootstrap Python. Windows file-device identity
    representations differ across Python versions; the exact copy-inventory

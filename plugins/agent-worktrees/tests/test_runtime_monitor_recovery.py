@@ -20,6 +20,7 @@ def owned(tmp_path, monkeypatch):
         41002: {"pid": 202, "status": "ready", "published": False},
     }
     monkeypatch.setattr(diagnostics, "process_start_time", identities.get)
+    monkeypatch.setattr(recovery.locks, "process_start_time", identities.get)
     old = routing.publish_active(
         route_root, bind="127.0.0.1", port=41001, pid=101, process_start_time="1001",
     )
@@ -134,6 +135,15 @@ def test_unattributable_or_corrupt_evidence_never_releases_custody(owned, invali
         assert not recovery.recover_owned_publication(root, record, (101, "1001"), [handle])
     assert events == []
     assert handle.poll() is None
+
+
+def test_rollback_preserves_route_token_when_native_birth_token_differs(owned, monkeypatch):
+    root, route_root, record, handle, _client, _health, _events, _identities = owned
+    monkeypatch.setattr(recovery.locks, "process_start_time", lambda pid: "123:456" if pid == 101 else None)
+    assert recovery.recover_owned_publication(root, record, (101, "123:456"), [handle])
+    restored = routing.read_active_endpoint(route_root, verify_listener=False)
+    assert restored.pid == 101
+    assert restored.process_start_time == "1001"
 
 
 def test_commit_forward_requires_actual_predecessor_drain(owned):

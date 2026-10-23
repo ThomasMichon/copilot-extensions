@@ -9,6 +9,7 @@ from pathlib import Path
 from zdd import breadcrumb, diagnostics, routing
 from zdd.cutover_lock import CutoverLock
 
+from . import locks
 from .status_monitor_cutover import ControlClient
 
 
@@ -35,7 +36,7 @@ def recover_owned_publication(
         return False
     if predecessor is not None and (
         old is None or old.pid != predecessor[0]
-        or diagnostics.process_start_time(old.pid) != predecessor[1]
+        or locks.process_start_time(old.pid) != predecessor[1]
     ):
         return False
     new_port = record.get("new_port")
@@ -84,7 +85,7 @@ def recover_owned_publication(
                 return False
             routing.publish_active(
                 route_root, bind=old.bind, port=old.port, pid=old.pid,
-                process_start_time=predecessor[1], demote_existing=True,
+                process_start_time=old.process_start_time, demote_existing=True,
             )
             client.undrain()
             restored = client.health()

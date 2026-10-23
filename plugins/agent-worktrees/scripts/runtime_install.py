@@ -411,11 +411,12 @@ def _restore_selectors(root: Path, version: str, snapshot: dict[str, bytes | Non
 
 
 def _wait_for_exit(pid: int, identity: str, *, label: str) -> None:
+    from agent_worktrees import locks
     from zdd import diagnostics
 
     announced = False
     while diagnostics._pid_alive(pid):
-        observed = diagnostics.process_start_time(pid)
+        observed = locks.process_start_time(pid)
         if observed is not None and observed != identity:
             return
         if not announced:
@@ -425,16 +426,16 @@ def _wait_for_exit(pid: int, identity: str, *, label: str) -> None:
 
 
 def _monitor_identity(root: Path) -> tuple[int, str] | None:
-    from agent_worktrees import locks
-    from zdd import diagnostics
+    from agent_worktrees import locks, status_monitor_cutover as cutover
 
     record = locks.read_lock(root / "status-monitor.lock")
     if not locks.lock_is_live(record):
-        return None
+        routed = cutover.routed_monitor_identity(root)
+        return routed[:2] if routed is not None else None
     pid = record.get("pid")
     if type(pid) is not int or pid <= 0:
         raise InstallationRefused("Serving monitor has no attributable PID")
-    identity = diagnostics.process_start_time(pid)
+    identity = locks.process_start_time(pid)
     if identity is None:
         raise InstallationRefused("Serving monitor process identity cannot be established")
     return pid, identity
@@ -466,22 +467,12 @@ def _candidate_serving(root: Path, slot: Path) -> bool:
 
 
 def _monitor_slot(root: Path, identity: tuple[int, str]) -> str | None:
-    from agent_worktrees import locks
-    from zdd import diagnostics
+    from agent_worktrees.runtime_monitor_identity import monitor_slot
 
-    record = locks.read_lock(root / "status-monitor.lock")
-    if (
-        not isinstance(record, dict)
-        or record.get("pid") != identity[0]
-        or diagnostics.process_start_time(identity[0]) != identity[1]
-        or not isinstance(record.get("prefix"), str)
-        or not record["prefix"]
-    ):
-        raise InstallationRefused("Serving monitor runtime identity changed before retention")
-    prefix = Path(record["prefix"]).resolve(strict=True)
-    if prefix.parent == (root / "versions").resolve():
-        return prefix.name
-    return None
+    try:
+        return monitor_slot(root, identity)
+    except (OSError, ValueError) as error:
+        raise InstallationRefused(str(error)) from error
 
 
 def _settle_monitor(

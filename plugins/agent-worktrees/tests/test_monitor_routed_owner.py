@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from zdd import diagnostics, routing
 
-from agent_worktrees import status_monitor_cutover as control
+from agent_worktrees import locks, status_monitor_cutover as control
 from agent_worktrees import status_monitor_runtime, status_monitor_reap_stale
 
 
@@ -59,7 +59,7 @@ def test_missing_legacy_lock_uses_only_a_verified_routed_owner(tmp_path, monkeyp
 
         monkeypatch.setattr(control, "ControlClient", Client)
         if failure == "native":
-            monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: None)
+            monkeypatch.setattr(locks, "process_start_time", lambda pid: None)
 
         class Orchestrator:
             def __init__(self, *args, **kwargs):
@@ -91,3 +91,27 @@ def test_absent_route_and_legacy_lock_keep_no_monitor_semantics(tmp_path, monkey
     result = control.activate_after_update(monitor_was_live=False)
     assert result["action"] == "noop"
     assert result["reason"] == "no-live-monitor"
+
+
+def test_darwin_routed_owner_uses_native_birth_identity(tmp_path, monkeypatch):
+    pid = os.getpid()
+    server = control.ControlServer(
+        lambda *_args: {"status": "ready", "pid": pid, "runtime_slot": "serving"},
+        token="fixture-token",
+    )
+    server.start()
+    try:
+        monkeypatch.setattr(diagnostics, "process_start_time", lambda *_args: None)
+        routing.publish_active(tmp_path, bind="127.0.0.1", port=server.port, pid=pid)
+        monkeypatch.setattr(control, "routing_dir", lambda: tmp_path)
+        monkeypatch.setattr(locks.platform, "system", lambda: "Darwin")
+        monkeypatch.setattr(locks, "_start_time_darwin", lambda observed: "123456:789" if observed == pid else None)
+        monkeypatch.setattr(locks, "lock_is_live", lambda *_args: True)
+        original_client = control.ControlClient
+        monkeypatch.setattr(
+            control, "ControlClient",
+            lambda url: original_client(url, token="fixture-token"),
+        )
+        assert control.routed_monitor_identity() == (pid, "123456:789", "serving")
+    finally:
+        server.close()
