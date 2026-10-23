@@ -11,7 +11,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from .session_preferences import client_preferences
-from .cold_outages import guarded_resume
+from .cold_outages import admitted_recovery, guarded_resume
 from .models import SessionStatus
 from .startup_progress import lifecycle_lock, observed, phase
 from .transport import SpawnTarget
@@ -104,6 +104,7 @@ class _SessionResumeMixin:
         self._sessions[session_id] = session
         return session
 
+    @admitted_recovery
     @guarded_resume
     @observed
     async def resume_session(
@@ -610,6 +611,7 @@ class _SessionResumeMixin:
             await self._drain_pending_prompts(session)
         return session
 
+    @admitted_recovery
     async def resync_session(self, session_id: str) -> int:
         """Rebuild a session's event log from the agent's authoritative replay.
 

@@ -119,6 +119,40 @@ def output_bytes(root: Path) -> dict[str, bytes | None]:
     }
 
 
+@pytest.mark.parametrize("fault", ["none", "dirty", "unregistered", "foreign"])
+def test_http47_capture_semantic_upgrade_requires_registered_same_source(
+    repository: tuple[Path, str], fault: str,
+) -> None:
+    root, commit = repository
+    source = evidence.PREFIX + "routes/sessions.py"
+    path = evidence.source_fixture_path(source)
+    registry = evidence.baseline(root, commit)
+    packet = json.loads((root / path).read_bytes())
+    packet["evidence_family"] = "http47-unchanged-source-link-v1"
+    if fault == "foreign":
+        packet["captured_from"]["source_path"] = evidence.PREFIX + "app.py"
+    data = evidence.encode(packet)
+    (root / path).write_bytes(data)
+    http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
+    record = next(item for item in http["fixtures"] if item["path"] == path)
+    record["sha256"] = evidence.digest(data)
+    (root / evidence.REGISTRY).write_bytes(evidence.encode(registry))
+    commit = commit_fixture(root, "Synthetic prior current-family ownership")
+    proof = evidence.source_snapshot(root, commit, registry)
+    outputs = evidence.build_outputs(
+        root, commit, registry, proof, capture.expected_input(root)["expected"],
+    )
+    if fault == "dirty":
+        (root / path).write_bytes(data + b"\n")
+    elif fault == "unregistered":
+        http["fixtures"].remove(record)
+    if fault == "none":
+        evidence.check_history(root, registry, outputs)
+    else:
+        with pytest.raises(ValueError, match="capture output"):
+            evidence.check_history(root, registry, outputs)
+
+
 def checker_environment() -> dict[str, str]:
     environment = evidence.git_evidence.clean_git_environment()
     # Static checker controls do not contribute native-operation observations.

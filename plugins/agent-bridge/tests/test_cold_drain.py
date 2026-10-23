@@ -9,6 +9,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -157,6 +158,44 @@ def test_cold_drain_client_does_not_accept_a_legacy_success_shape(monkeypatch) -
         client.drain()
     monkeypatch.setattr(client, "health", lambda: {"protocol_version": 45})
     assert client.drain()["contract_status"] == "legacy-unnegotiated"
+
+
+@pytest.mark.parametrize("negotiated", [False, True])
+@pytest.mark.parametrize("payload", [None, False, [], 1, "response"])
+def test_cold_drain_client_rejects_nonobject_outcome(
+    monkeypatch: pytest.MonkeyPatch, negotiated: bool, payload: Any,
+) -> None:
+    client = BridgeClient("http://127.0.0.1:1", "unused")
+    health = {"protocol_version": 47, "drain_contract": {"minimum": 1, "maximum": 1}}
+    monkeypatch.setattr(client, "health", lambda: health if negotiated else {"protocol_version": 45})
+    monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: payload)
+    with pytest.raises(BridgeClientError, match="outcome must be an object") as caught:
+        client.drain()
+    assert caught.value.status == 502
+
+
+@pytest.mark.parametrize("field", ["drained", "clean", "forced"])
+@pytest.mark.parametrize("value", [None, "false", 0, 1, [], {}, "missing"])
+def test_cold_drain_client_requires_boolean_completion_flags(
+    monkeypatch: pytest.MonkeyPatch, field: str, value: Any,
+) -> None:
+    client = BridgeClient("http://127.0.0.1:1", "unused")
+    monkeypatch.setattr(
+        client, "health",
+        lambda: {"protocol_version": 47, "drain_contract": {"minimum": 1, "maximum": 1}},
+    )
+    payload: dict[str, Any] = {
+        "drain_contract": 1, "contract_status": "compatible", "mode": "graceful",
+        "drained": True, "clean": True, "forced": False,
+    }
+    if value == "missing":
+        payload.pop(field)
+    else:
+        payload[field] = value
+    monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: payload)
+    with pytest.raises(BridgeClientError, match="completion flags must be booleans") as caught:
+        client.drain()
+    assert caught.value.status == 502
 
 
 @pytest.mark.parametrize(

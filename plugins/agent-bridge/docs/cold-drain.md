@@ -36,6 +36,10 @@ negotiated response. It does not assume the receiver's generation equals the
 caller's own. `drain_gracefully()` (or explicit refusal policy) rejects a
 confirmed mismatch during client preflight, before posting drain control.
 The server enforces refusal policy again at the effect boundary.
+Client responses must be objects; negotiated responses additionally require
+actual boolean completion flags. Missing or coercible `drained`, `clean` or
+`forced` values raise `BridgeClientError(502)` rather than supplying truthy
+permission to retire a predecessor.
 
 Unknown/legacy negotiation never becomes a destructive mismatch: the ordinary
 legacy path omits the speculative contract/policy fields, while a caller that
@@ -76,7 +80,10 @@ birth identity **before** any replacement launch. A different live recorded
 owner refuses even after the kernel descriptor was released. The operation
 holds custody through replacement registration and reconnect admission.
 Recovery also enters the existing drain admission accounting before its first
-await. A closed gate refuses new recovery, including heartbeat recovery.
+await. This includes ordinary resume/resync with no cold-outage row: a dormant
+session omitted from the execution census cannot launch after successful drain.
+A closed gate refuses new recovery, including heartbeat recovery; HTTP
+resume/resync report 503 without launching or tearing down a client.
 If drain begins after recovery entered, it waits through replacement and
 reconnect admission. Only that same task's exact reconnect prompt, native
 identity and delivery key may finish through the closed gate while kernel

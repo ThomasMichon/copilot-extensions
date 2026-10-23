@@ -70,11 +70,11 @@ _recovery_admission: ContextVar[_RecoveryAdmission | None] = ContextVar(
 
 @contextmanager
 def recovery_admission(manager: SessionManager, session_id: str) -> Iterator[None]:
-    """Serialize recovery admission with drain and count through reconnect admission."""
+    """Serialize native recovery with drain and count until its admission settles."""
     held = _recovery_admission.get()
     if held is not None and held.active and held.task is asyncio.current_task():
         if held.manager is not manager or held.session_id != session_id:
-            raise ValueError("cold recovery admission belongs to another session")
+            raise ValueError("native recovery admission belongs to another session")
         yield
         return
     if manager.is_draining:
@@ -90,6 +90,16 @@ def recovery_admission(manager: SessionManager, session_id: str) -> Iterator[Non
         held.active = False
         _recovery_admission.reset(token)
         manager._active_acquisitions -= 1
+
+
+def admitted_recovery(method: Any) -> Any:
+    @wraps(method)
+    async def run(manager: SessionManager, session_id: str, *args: Any, **kwargs: Any) -> Any:
+        session_id = manager._resolve_ref(session_id) or session_id
+        with recovery_admission(manager, session_id):
+            return await method(manager, session_id, *args, **kwargs)
+
+    return run
 
 
 def reconnect_admitted_before_drain(
@@ -417,7 +427,7 @@ def guarded_resume(method: Any) -> Any:
         session = manager.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
-        with recovery_admission(manager, session_id), operation(manager, session_id):
+        with operation(manager, session_id):
             row = claim(manager, session)
             partial = bool(
                 row["replacement_json"] and json.loads(row["replacement_json"]).get("child_exited")

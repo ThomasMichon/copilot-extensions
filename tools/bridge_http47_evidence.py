@@ -31,6 +31,7 @@ AFFECTED = tuple(
         "client_drain.py",
         "routes/admin.py",
         "routes/health.py",
+        "routes/sessions.py",
         "cold_outages.py",
         "session_cold_drain.py",
         "db_core.py",
@@ -78,6 +79,11 @@ PROBES = {
     "test_cold_handoff_allows_ordinary_and_confirmed_outage": 2,
     "test_cold_handoff_rechecks_outage_after_awaited_brief": 1,
     "test_cold_handoff_rechecks_outage_after_awaited_resume": 1,
+    "test_cold_drain_client_rejects_nonobject_outcome": 10,
+    "test_cold_drain_client_requires_boolean_completion_flags": 21,
+    "test_ordinary_recovery_closed_cold_gate_is_503_without_effects": 2,
+    "test_ordinary_recovery_entered_before_drain_is_counted": 4,
+    "test_ordinary_recovery_cancellation_releases_drain_accounting": 2,
 }
 FAMILY = "http47-owned-fixture-observations-v1"
 
@@ -493,6 +499,13 @@ def validate_outputs(root: Path, original: dict, outputs: dict[str, bytes]) -> N
         if relative != REGISTRY and target.exists():
             existing = json.loads(target.read_bytes())
             planned = json.loads(outputs[relative])
+            source = planned.get("captured_from", {}).get("source_path")
+            semantic_upgrade = (
+                source in AFFECTED and relative == source_fixture_path(source)
+                and existing.get("evidence_family") == "http47-unchanged-source-link-v1"
+                and planned.get("evidence_family") == "http47-shared-owned-fixture-v1"
+                and git_evidence.sha256_bytes(target.read_bytes()) == registered.get(relative)
+            )
             if (
                 existing.get("evidence_family")
                 not in {
@@ -501,7 +514,10 @@ def validate_outputs(root: Path, original: dict, outputs: dict[str, bytes]) -> N
                     "http47-unchanged-source-link-v1",
                 }
                 or existing.get("captured_from", {}).get("protocol_generation") != 47
-                or existing.get("evidence_family") != planned["evidence_family"]
+                or (
+                    existing.get("evidence_family") != planned["evidence_family"]
+                    and not semantic_upgrade
+                )
                 or existing.get("captured_from", {}).get("source_path")
                 != planned["captured_from"]["source_path"]
             ):

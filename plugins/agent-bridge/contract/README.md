@@ -58,6 +58,11 @@ not a replay of the interrupted request. See the
 As with every semantic generation, publication must capture matching committed
 source and update the registry; expected input vectors alone are not immutable
 capture provenance. Published generation-46 startup packets and older evidence remain unchanged.
+An explicitly affected source may promote its registered current-generation
+unchanged-source link to shared semantic observations. That transition requires
+the same canonical source path and the exact registered packet hash; dirty,
+unregistered or foreign packets still refuse. Older-generation packets and
+their provenance are never rewritten by that promotion.
 
 HTTP generation 45 adds distinct ordinary native keyed-admission and
 receipt-only endpoints. Immutable binding facts and an admission receipt are
@@ -186,7 +191,8 @@ same-native loading, actual reconnect RPC response evidence and unchanged
 no-native allocation. Supporting native-fixture regressions cover ownership
 races, interrupted drain/registration/claim windows, supersession ordering,
 partial exit and uncertain admission. The required portfolio also covers
-recovery versus concurrent drain and the unresolved-reconnect fence across
+ordinary and cold recovery versus concurrent drain, strict completion-flag
+decoding, and the unresolved-reconnect fence across
 prompt-triggered, automatic and externally seeded handoffs. These are source evidence, not native
 Copilot, deployment or host qualification.
 
