@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-23
-- **Status:** Active
+- **Status:** Done
 - **Vision:** [Picker](../../../visions/picker/README.md), responsive-by-budget
 - **Umbrella issue:** #7939
 - **Sub-issues:** #7940 (shared configuration dependency; not absorbed)
@@ -101,7 +101,7 @@ effort is the finite Actions consumer slice, not completion of a wider campaign.
 
 - [x] Update the directly related runtime documentation and mandatory changefile.
 - [x] Complete focused functional tests, lint and required source checks.
-- [ ] Obtain independent required review, resolve findings and verify actual merge.
+- [x] Obtain independent required review, resolve findings and verify actual merge.
 - [x] Deferred to `#7939`: Record release/rollout and native qualification separately; do not change
   installed payloads, services or production UI as part of this source slice.
 
@@ -209,3 +209,16 @@ interfaces. Do not create a general request broker or shared polling layer.
 - The corrected contained packet passes 46 tests, including a result delivered
   after composition but before mount. Touched Python lint passes; native
   qualification and installed rollout remain unperformed.
+
+### 2026-10-23 — Verified source closure
+
+- Follow-up #8162 merged as `339d029f2dbb73d62e08d579d54ad5058ea99c84`.
+  The full current-head review approved the repair and explicitly marked the
+  Medium warning-loss finding resolved. Its sole remaining Low metadata
+  observation referred to an older PR description; the corrected live title/body
+  were verified, explained and the thread resolved before merge. Required checks
+  passed. Managed post-merge reconciliation succeeded.
+- The finite Actions source effort is now Done. Every source item is resolved;
+  release/installed acceptance remains #7939, native timing remains #7935 and
+  the unimplemented configuration freshness seam remains #7940. No campaign,
+  release, installed-runtime or native-budget completion is asserted.
