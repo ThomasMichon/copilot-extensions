@@ -642,6 +642,38 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-10-15 - Historical implementation, freshness and publication receipts
+
+- #6697 merged at 01:26:21 UTC as
+  `5f871e58301e79f395f76be67f030675efb1e22b`. Published head
+  `8f615bc2b426d308f817050830868e683a903462` received review `5526821509`
+  with zero findings; [CI run 38663542017](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38663542017)
+  passed all 29 actual checks, including Index job `116191357279`.
+- The authorized rollout changed only
+  `strict_required_status_checks_policy` to `true` on existing main ruleset
+  `18553911`. Writable-field readback preserved its other rules, conditions
+  and Admin-role `always` repair bypass. This records the configuration
+  observed then, not a new policy operation or current ruleset attestation.
+- [Old-flow run 38664339697](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38664339697)
+  passed build, attestation, promotion and publication using trusted
+  workflow/signer source `f327cf44793c60321bc205eddadccaeda3d5ee43` and
+  validated dev `4f7b62facbe44df61f159dcde9b1afb11d34b3ea`. #6789 merged
+  to main `c33ccea3da5effc6f21b9e8c2ee726f8e4a85902`; the release-health
+  observer recorded thirteen non-draft first-party releases with nonempty
+  assets targeting that merge. This was old-flow publication, not evidence
+  of #6697 inclusion or its pre-merge availability gate.
+- [Containing run 38668602887](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38668602887)
+  checked out the #6697 merge under trusted main `c33ccea3...`, but Vault
+  job `116206228023` failed
+  `test_posix_pid_fallback_waits_for_live_owner_and_reaps_dead_one`: the
+  waited dead-child probe returned `refused`, not `acquired` (one failure,
+  288 passes, ten skips). Artifact build, attestation and publication were
+  skipped; the no-op promoter was not release proof. This dated failure
+  predates the final merged #6551 repair.
+- These historical receipts preserve the implementation/publication
+  distinction. They do not establish any subsequent promotion, installed
+  rollout or consumer acceptance, and do not complete the broader effort.
+
 ### 2026-10-14 - Non-admin merge authority and explicit post-merge verification
 
 - The operator selected an isolated Actions-token squash merge, rather than

@@ -248,6 +248,13 @@ owned admission/observation composition. Its plan requires actual review before
 code; retained producer, resident, provider, Manager and deployment boundaries
 and the no-other-agent-coordination instruction remain unchanged.
 
+Following the completed snapshot prerequisite, the next **agent-recommended
+bounded implementation** is [conditional point-set resnapshot
+recovery](scoped-observation-recovery.md). It selects the existing authoritative
+snapshot recovery option rather than exposing the trusted store's global
+retention/cursor activity. This is not historical replay or a resident
+subscription; actual plan review precedes its isolated reader implementation.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -368,6 +375,11 @@ All detailed slices are **agent-recommended** and remain subject to review.
   preserving one committed read view without adding replay or wire authority.
   The plan is reviewed in #8290 and the isolated implementation merged in
   #8303. Resident integration and scope-safe recovery remain separate gates.
+- [ ] Review and implement [conditional point-set resnapshot
+  recovery](scoped-observation-recovery.md), with fresh admission for both
+  full and unchanged results, opaque exact-view validators and no global
+  cursor/retention signal. Historical replay and resident subscription
+  consistency remain separate gates.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
   The subsequent operator approval permits only an isolated transport-neutral
@@ -451,6 +463,23 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-23 - Conditional current-view recovery proposed
+
+- Selected the authoritative-snapshot option already retained by #5862 for
+  the next isolated observation prerequisite. The global replay window can
+  expire due to unrelated activity; merely hiding its position would not
+  make that recovery outcome scope-safe.
+- Proposed a fixed-size opaque validator over the exact admitted binding,
+  request and visible point-set snapshot. Every call still freshly authorizes,
+  reads one consistent bounded current view and completes admission before
+  returning a full snapshot or an unchanged result. No client baseline cache,
+  raw cursor, global policy-revision signal or replay-validity oracle is added.
+- Recorded explicit implementation ownership and validation obligations in
+  [the recovery contract](scoped-observation-recovery.md). Actual plan review
+  and merge precede runtime edits. Retained producer/auth/resident/Manager and
+  adoption scopes, the no-other-agent constraint and every broader parent
+  serving/recovery gate remain unchanged.
 
 ### 2026-10-23 - Scoped point-set snapshot source merged
 
