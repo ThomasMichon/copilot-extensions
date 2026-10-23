@@ -365,7 +365,8 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
             if name == "agent-dispatch":
                 cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
-            if name in {"agent-pull-requests", "agent-dispatch"}:
+                cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
+            if name == "agent-pull-requests":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if reinstall:
                 # A new venv can still consume uv's stale local-path wheels.

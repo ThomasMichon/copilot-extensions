@@ -552,6 +552,18 @@ callback an implicit credential store.
   one, to avoid starvation. Tests also cover capability-before-prepare,
   immutable intent across awaits, duplicate bindings, stale generations,
   original deadlines, batch bounds and dependency-free default imports.
+- Initial publication as #8085 exposed a source-attribution regression in test
+  preparation: grouping the Fleet install condition hid the existing PR
+  plugin's literal per-consumer source branch from the dependency-age audit.
+  Restore explicit named branches; do not broaden the audit's exemption or
+  consult public metadata for the first-party source. Thirteen focused
+  attribution/preparation cases pass, including the actual three replay
+  dependency mappings. The full local audit cannot validate public npm TLS on
+  this host; the unchanged hosted audit remains required before merge.
+- Hosted installation-context run `39901162463` passed both Linux and Windows
+  on initial head `5344136a7da575fbae82eedb7530b5f21d74f2a3`. Retain the result
+  as source integration evidence and rerun the branch lane after the real
+  test-preparation fix; initial-head evidence is not current-head acceptance.
 - Documentation/architecture: this closes the finite-consumer part of the
   reviewed PR service contract without claiming its lifecycle. The optional
   embedding still owns stable authenticated scope, dedicated remote pending

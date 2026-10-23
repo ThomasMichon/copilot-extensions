@@ -436,6 +436,19 @@ def _ensure_venv(name, uv, reinstall=False):
     assert age.contract_source(Requirement("unrelated-package"), path, projects, tmp_path) is None
 
 
+@pytest.mark.parametrize("plugin,dependency,source", [
+    ("agent-pull-requests", "fleet-manager", "fleet-manager"),
+    ("agent-dispatch", "agent-pull-requests", "plugins/agent-pull-requests"),
+    ("agent-dispatch", "fleet-manager", "fleet-manager"),
+])
+def test_replay_preparation_keeps_attributable_source_branches(plugin, dependency, source):
+    _, projects = age.inventory(REPO)
+    path = REPO / "plugins" / plugin / "pyproject.toml"
+    assert age.contract_source(Requirement(dependency), path, projects, REPO) == (
+        REPO / source / "pyproject.toml"
+    )
+
+
 def test_standalone_source_contract_revoked_if_paths_or_registration_disappear(tmp_path):
     project(tmp_path, "services/demo", dependencies='"owned"')
     write(tmp_path / "libs" / "owned" / "pyproject.toml", '[project]\nname = "owned"\n')
