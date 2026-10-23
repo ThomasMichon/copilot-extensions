@@ -86,6 +86,10 @@ def run_probes(root: Path, proof: dict, expected: dict) -> dict:
             "tests/test_cold_drain.py",
             "--test-file",
             "tests/test_cold_recovery_races.py",
+            "--test-file",
+            "tests/test_cold_recovery_drain.py",
+            "--test-file",
+            "tests/test_cold_recovery_handoff_fence.py",
             "-k",
             " or ".join(evidence.PROBES),
         ]

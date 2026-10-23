@@ -55,6 +55,65 @@ class _Custody:
 _custody: ContextVar[_Custody | None] = ContextVar("cold-recovery-custody", default=None)
 
 
+@dataclass
+class _RecoveryAdmission:
+    manager: Any
+    session_id: str
+    task: Any
+    active: bool = True
+
+
+_recovery_admission: ContextVar[_RecoveryAdmission | None] = ContextVar(
+    "cold-recovery-admission", default=None,
+)
+
+
+@contextmanager
+def recovery_admission(manager: SessionManager, session_id: str) -> Iterator[None]:
+    """Serialize recovery admission with drain and count through reconnect admission."""
+    held = _recovery_admission.get()
+    if held is not None and held.active and held.task is asyncio.current_task():
+        if held.manager is not manager or held.session_id != session_id:
+            raise ValueError("cold recovery admission belongs to another session")
+        yield
+        return
+    if manager.is_draining:
+        from .session_manager import DaemonDrainingError
+
+        raise DaemonDrainingError("session")
+    held = _RecoveryAdmission(manager, session_id, asyncio.current_task())
+    token = _recovery_admission.set(held)
+    manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
+    try:
+        yield
+    finally:
+        held.active = False
+        _recovery_admission.reset(token)
+        manager._active_acquisitions -= 1
+
+
+def reconnect_admitted_before_drain(
+    manager: SessionManager, session_id: str, delivery_id: str | None, *,
+    prompt: str, no_resume: bool,
+) -> bool:
+    held = _recovery_admission.get()
+    if (
+        held is None or not held.active or held.manager is not manager
+        or held.session_id != session_id or held.task is not asyncio.current_task()
+    ):
+        return False
+    require_custody(manager, session_id)
+    row = latest(manager.db, session_id)
+    session = manager.get_session(session_id)
+    return (
+        row is not None and row["state"] == "interrupted"
+        and delivery_id == "cold-outage:" + row["outage_id"]
+        and prompt == RECONNECT_PROMPT and no_resume is True
+        and session is not None and session.acp_session_id == row["native_session_id"]
+        and session.target.to_json() == row["target_json"]
+    )
+
+
 def require_custody(manager: SessionManager, session_id: str) -> _Custody:
     held = _custody.get()
     if (
@@ -358,7 +417,7 @@ def guarded_resume(method: Any) -> Any:
         session = manager.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
-        with operation(manager, session_id):
+        with recovery_admission(manager, session_id), operation(manager, session_id):
             row = claim(manager, session)
             partial = bool(
                 row["replacement_json"] and json.loads(row["replacement_json"]).get("child_exited")
@@ -645,6 +704,8 @@ async def recover(
     )
     count = 0
     for row in rows:
+        if manager.is_draining:
+            break
         if automatic and row["state"] in {"reconnect_admitted", "reconnect_unknown"}:
             continue
         if confirmed_only and not _confirmed(row):

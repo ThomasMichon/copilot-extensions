@@ -75,6 +75,14 @@ A successor's existing host-recovery pass takes the existing crash-releasing
 birth identity **before** any replacement launch. A different live recorded
 owner refuses even after the kernel descriptor was released. The operation
 holds custody through replacement registration and reconnect admission.
+Recovery also enters the existing drain admission accounting before its first
+await. A closed gate refuses new recovery, including heartbeat recovery.
+If drain begins after recovery entered, it waits through replacement and
+reconnect admission. Only that same task's exact reconnect prompt, native
+identity and delivery key may finish through the closed gate while kernel
+operation custody remains held; ordinary prompts and inherited child tasks
+receive no exception. Cancellation releases the admission accounting without
+replaying an uncertain launch or send.
 An already-registered replacement is identity-checked and adopted, including
 when the former owner crashed between registration and its journal update.
 A launch marked in progress without provable replacement identity remains
@@ -99,6 +107,9 @@ or a crash between journal admission and SDK submission remains
 `reconnect_unknown` (or an unconfirmed admission until reconciliation), with no
 automatic resubmission. An actual later provider response may resolve the
 uncertainty without another send.
+The unresolved disposition also fences prompt-triggered, automatic and
+externally seeded context handoffs before brief authoring or successor
+creation. A handoff cannot escape uncertainty by creating a new conversation.
 The resumed agent decides what work to retry under the existing
 operation/key safeguards. No interrupted prompt or tool payload is replayed.
 Existing conversation history and original admission keys remain intact.

@@ -76,14 +76,16 @@ class _SessionPromptMixin:
         automatically re-spawned and the session resumed before
         delivering the prompt.
         """
-        if self._draining:
+        from .cold_outages import assert_prompt_allowed, reconnect_admitted_before_drain
+
+        if self._draining and not reconnect_admitted_before_drain(
+            self, session_id, delivery_id, prompt=prompt, no_resume=no_resume,
+        ):
             raise DaemonDrainingError("turn")
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
-        from .cold_outages import assert_prompt_allowed
-
         assert_prompt_allowed(self._db, session_id, delivery_id)
         if session.status not in (SessionStatus.IDLE, SessionStatus.STOPPED):
             raise ValueError(
@@ -120,7 +122,9 @@ class _SessionPromptMixin:
 
         from .remote_relationships import assert_admission
         await assert_admission(self, session)
-        if self._draining:
+        if self._draining and not reconnect_admitted_before_drain(
+            self, session_id, delivery_id, prompt=prompt, no_resume=no_resume,
+        ):
             raise DaemonDrainingError("turn")
         if native_admission is not None:
             from .native_keyed_admission import validate_holder

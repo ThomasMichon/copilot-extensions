@@ -185,7 +185,9 @@ strict refusal, authenticated default cold drain, real fixture-process exit,
 same-native loading, actual reconnect RPC response evidence and unchanged
 no-native allocation. Supporting native-fixture regressions cover ownership
 races, interrupted drain/registration/claim windows, supersession ordering,
-partial exit and uncertain admission. These are source evidence, not native
+partial exit and uncertain admission. The required portfolio also covers
+recovery versus concurrent drain and the unresolved-reconnect fence across
+prompt-triggered, automatic and externally seeded handoffs. These are source evidence, not native
 Copilot, deployment or host qualification.
 
 The affected semantic owners share this explicitly labelled operation evidence.

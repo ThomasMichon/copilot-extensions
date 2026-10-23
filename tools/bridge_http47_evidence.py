@@ -36,6 +36,7 @@ AFFECTED = tuple(
         "db_core.py",
         "session_core.py",
         "session_drain_gate.py",
+        "session_handoff.py",
         "session_host_recovery.py",
         "session_resume.py",
         "session_prompts.py",
@@ -51,6 +52,8 @@ TESTS = (
     "plugins/agent-bridge/tests/test_http47_capture_probes.py",
     "plugins/agent-bridge/tests/test_cold_drain.py",
     "plugins/agent-bridge/tests/test_cold_recovery_races.py",
+    "plugins/agent-bridge/tests/test_cold_recovery_drain.py",
+    "plugins/agent-bridge/tests/test_cold_recovery_handoff_fence.py",
     "plugins/agent-bridge/tests/cold_recovery_worker.py",
     "plugins/agent-bridge/tests/cold_drain_peer.py",
 )
@@ -65,6 +68,16 @@ PROBES = {
     "test_cold_recovery_unknown_admission_or_launch_is_never_replayed": 8,
     "test_cold_recovery_provider_failure_is_not_confirmation": 1,
     "test_cold_recovery_resync_routes_same_native_without_rebuild": 1,
+    "test_cold_recovery_closed_drain_has_no_launch_or_unknown_delivery": 1,
+    "test_cold_recovery_entered_before_drain_finishes_same_native_reconnect": 1,
+    "test_cold_recovery_admission_is_counted_by_destructive_drain": 1,
+    "test_cold_recovery_cancellation_releases_drain_accounting": 1,
+    "test_cold_recovery_drain_exception_requires_exact_task_and_kernel_custody": 1,
+    "test_cold_handoff_refuses_unconfirmed_outage": 15,
+    "test_cold_handoff_turn_settle_cannot_escape_unknown_reconnect": 1,
+    "test_cold_handoff_allows_ordinary_and_confirmed_outage": 2,
+    "test_cold_handoff_rechecks_outage_after_awaited_brief": 1,
+    "test_cold_handoff_rechecks_outage_after_awaited_resume": 1,
 }
 FAMILY = "http47-owned-fixture-observations-v1"
 

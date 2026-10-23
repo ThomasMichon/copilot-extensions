@@ -27,7 +27,7 @@ from agent_bridge.models import SessionStatus
 from agent_bridge.routes.admin import router
 from agent_bridge.routes.health import router as health_router
 from agent_bridge.session_cold_drain import cold_drain, owned_execution
-from agent_bridge.session_manager import Session, SessionManager
+from agent_bridge.session_manager import DaemonDrainingError, Session, SessionManager
 from agent_bridge.transport import SpawnTarget
 
 NATIVE = "11111111-2222-4333-8444-555555555555"
@@ -508,6 +508,9 @@ async def test_cold_drain_real_owned_termination_same_native_reconnect_once(
         refused = await manager.drain(timeout=0, force=True)
         assert refused["drained"] is False and refused["mode"] == "incompatible-contract-cold"
         assert manager.db.get_turns(session.session_id)[0]["stop_reason"] == "interrupted"
+        with pytest.raises(DaemonDrainingError):
+            await manager.resume_session(session.session_id)
+        manager.set_draining(False)
         with pytest.raises(ValueError, match="successor"):
             await manager.resume_session(session.session_id)
 

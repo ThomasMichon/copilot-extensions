@@ -248,7 +248,7 @@ async def _recover_owned_cold(
     if not getattr(app.state, "ready", False):
         return 0
     manager = getattr(app.state, "session_manager", None)
-    if manager is None:
+    if manager is None or manager.is_draining:
         return 0
     try:
         return await cold_outages.recover(
