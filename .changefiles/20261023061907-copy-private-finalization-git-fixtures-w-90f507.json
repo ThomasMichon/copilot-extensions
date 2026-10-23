@@ -1,0 +1,9 @@
+{
+  "comment": "Copy private finalization Git fixtures without per-copy remote rewrites",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
