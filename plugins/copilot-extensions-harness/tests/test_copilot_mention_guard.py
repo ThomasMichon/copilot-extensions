@@ -16,6 +16,12 @@ import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+LEGACY_POWERSHELL_LOOKUP = (
+    "$py = $null; foreach ($candidate in @('python3','python','py')) { "
+    "$found = Get-Command $candidate -CommandType Application -All -ErrorAction SilentlyContinue "
+    "| Where-Object { $_.Source -notmatch '\\\\WindowsApps\\\\' } | Select-Object -First 1; "
+    "if ($found) { $py = $found; break } }; "
+)
 
 
 def _load_guard():
@@ -620,6 +626,7 @@ def test_local_relevance_preserves_file_input_without_literal_mention(tmp_path, 
 @pytest.mark.parametrize("case", [
     "python_startup", "python_irrelevant", "python_relevant",
     "shell_startup", "shell_irrelevant", "shell_relevant",
+    "shell_legacy-irrelevant", "shell_legacy-relevant",
 ])
 def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
     """Observe real CLI boundaries without executing the proposed gh command."""
@@ -650,6 +657,13 @@ def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
         if os.name != "nt" or not shell:
             pytest.skip("Windows PowerShell hook measurement")
         hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
+        if name.startswith("legacy-"):
+            name = name.removeprefix("legacy-")
+            hook = (
+                hook[:hook.index("$py = $null;")]
+                + LEGACY_POWERSHELL_LOOKUP
+                + hook[hook.index("if (-not $py)"): ]
+            )
         argv = [shell, "-NoProfile", "-NonInteractive", "-Command",
                 "exit 0" if name == "startup" else hook]
     else:
@@ -671,7 +685,14 @@ def test_native_hook_process_counts_and_latency(tmp_path, capsys, case):
             expected = "git remote --verbose" if os.name == "nt" else ["git", "remote", "--verbose"]
             assert calls == ([] if name == "irrelevant" else [expected])
         assert bool(result.stdout) == (name == "relevant")
-    metrics = {f"{case}_median_seconds": round(statistics.median(elapsed), 4)}
+    metrics = {
+        "boundary": case,
+        "samples": len(elapsed),
+        "median_seconds": round(statistics.median(elapsed), 4),
+        "max_seconds": round(max(elapsed), 4),
+    }
+    if boundary == "python" and name != "startup":
+        metrics["git_children"] = len(calls)
     with capsys.disabled():
         print("\nmention-guard native measurement: " + json.dumps(metrics, sort_keys=True))
 
@@ -700,3 +721,35 @@ raise SystemExit(guard["main"]())
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)["permissionDecision"] == "deny"
     assert time.monotonic() - started < 6
+
+
+@pytest.mark.parametrize("names,expected", [
+    (["bin/python.cmd", "bin/python3.cmd"], "bin/python3.cmd"),
+    (["WindowsApps/python3.cmd", "bin/python3.cmd"], "bin/python3.cmd"),
+    (["WindowsApps/python3.cmd", "bin/python.cmd"], "bin/python.cmd"),
+    (["bin/py.cmd"], "bin/py.cmd"),
+    ([], None),
+])
+def test_powershell_lookup_preserves_selection_without_cmdlet_pipelines(tmp_path, names, expected):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if os.name != "nt" or not shell:
+        pytest.skip("Windows application resolver contract")
+    for directory in ("WindowsApps", "bin"):
+        (tmp_path / directory).mkdir()
+    for name in names:
+        (tmp_path / name).write_text("@echo off\n", encoding="utf-8")
+    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
+    lookup = hook[:hook.index("& $py.Source")] + "if ($py) { Write-Output $py.Source }"
+    legacy = LEGACY_POWERSHELL_LOOKUP + "if (-not $py) { exit 0 }; Write-Output $py.Source"
+    env = {
+        **os.environ,
+        "PATH": os.pathsep.join(str(tmp_path / directory) for directory in ("WindowsApps", "bin")),
+        "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+    }
+    for command in (legacy, lookup):
+        result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-Command", command],
+            env=env, capture_output=True, text=True, timeout=8, creationflags=NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == (str(tmp_path / expected) if expected else "")

@@ -97,6 +97,12 @@ that all installed hooks together finish within two seconds. The focused
 `test_copilot_mention_guard.py` native consumer test measures actual Python and
 shipped PowerShell-hook wall time, reports empty-shell startup separately, and
 audits zero/one Git children for irrelevant/relevant inputs against 24 remotes.
+Timing output includes sample count and maximum, not just the median. The
+PowerShell wrapper uses the engine's application lookup directly rather than
+repeated command/filter/select pipelines; it preserves `python3`, `python`,
+then `py` priority and excludes WindowsApps aliases. Fixture tests compare
+selection with the prior resolver, and native timing includes that resolver
+as a separate baseline. Shell and interpreter startup remain real costs.
 It never executes a proposed `gh` publication or performs a network request:
 
 ```text
