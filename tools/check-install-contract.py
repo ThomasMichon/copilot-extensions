@@ -44,7 +44,6 @@ import importlib.util
 import json
 import re
 import sys
-import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -54,6 +53,7 @@ from update_machine_gate_contract import check_machine_gate
 from install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
+    check_runtime_retention as _check_runtime_retention,
     declares_stamp_provision as _declares_stamp_provision,
     is_ignored_scan_path,
     persistent_environment_violations,
@@ -679,45 +679,6 @@ def _uses_engine_manifest_writer(text: str, ext: str) -> bool:
         "Write-DeployManifest",
         "write_deploy_manifest",
     )
-
-
-def _check_runtime_retention(runtime) -> None:
-    """Exercise the canonical lifetime contract without an installed runtime."""
-    with tempfile.TemporaryDirectory(prefix="runtime-retention-contract-") as temporary:
-        root = Path(temporary)
-        candidate = runtime.slot(root, "candidate")
-        payload = candidate / "payload"
-        payload.write_text("unchanged", encoding="utf-8")
-        with runtime.construction_lease(root, "candidate", timeout=0):
-            assert runtime.gc(root) == [], "GC removed a construction owner"
-            assert runtime.toss_incomplete(root) == [], "toss removed a construction owner"
-        with runtime.retention_lease(root, "candidate", timeout=0):
-            assert runtime.gc(root) == [], "GC removed a retained candidate"
-            assert runtime.toss_incomplete(root) == [], "toss removed a retained candidate"
-            try:
-                runtime.slot(root, "candidate", clean_incomplete=True)
-            except RuntimeError:
-                pass
-            else:
-                raise AssertionError("incomplete cleanup admitted a retained candidate")
-            assert payload.read_text(encoding="utf-8") == "unchanged"
-        assert runtime.toss_incomplete(root) == ["candidate"], "released candidate was not reclaimed"
-        marker = runtime.mark_complete(root, "candidate", payload_hash="same", pid=11)
-        before = marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns
-        runtime.mark_complete(root, "candidate", payload_hash="same", pid=22)
-        assert (marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns) == before, (
-            "matching completion rewrote immutable evidence"
-        )
-        try:
-            runtime.mark_complete(root, "candidate", payload_hash="different")
-        except RuntimeError:
-            pass
-        else:
-            raise AssertionError("numbered completion accepted conflicting content")
-        assert marker.read_bytes() == before[0], "conflict changed immutable evidence"
-        with runtime.retention_lease(root, "candidate", payload_hash="same", timeout=0):
-            runtime.activate(root, "candidate")
-        assert runtime.gc(root) == [], "GC removed the published candidate"
 
 
 def check() -> int:

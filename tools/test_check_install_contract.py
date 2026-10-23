@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 import pytest
+import install_contract_guard
 
 pytest.register_assert_rewrite("runtime_profile_cases")
 from runtime_profile_cases import TestExactRuntimeProfile as TestExactRuntimeProfile
@@ -231,7 +232,20 @@ def _runtime():
 
 
 def test_canonical_retention_contract_executes() -> None:
+    assert checker._check_runtime_retention is install_contract_guard.check_runtime_retention
     checker._check_runtime_retention(_runtime())
+
+
+def test_install_guard_executes_shared_retention_contract(monkeypatch) -> None:
+    calls = []
+
+    def check(runtime):
+        calls.append(Path(runtime.__file__))
+        install_contract_guard.check_runtime_retention(runtime)
+
+    monkeypatch.setattr(checker, "_check_runtime_retention", check)
+    assert checker.check() == 0
+    assert calls == [checker.VERSIONED_RUNTIME_CANONICAL]
 
 
 @pytest.mark.parametrize("cleanup", ["gc", "toss_incomplete"])
