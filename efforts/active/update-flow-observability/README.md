@@ -269,6 +269,77 @@ bounded source delta inspection.
 
 ## Journal
 
+### 2026-10-22 - Attribute real source CLI startup and context fan-out
+
+- The actual CLI `main`, parsers, adapters and configuration discovery ran
+  against disposable source-layout payloads and private synthetic state.
+  Pre-launch took 3.846 seconds externally, including 1.343 seconds in the
+  profiled CLI import; read-only reconciliation took 5.961 seconds, including
+  1.112 seconds in import and 4.415 seconds in `build_plan`.
+- Both returned clean JSON continue results without fallback reasons,
+  diagnostics or stderr, and retained all fixture bytes and modification
+  times. Only fixture-local Git reads and fresh read-only helper commands
+  were admitted. These are not host updater, queue, construction or serving
+  health measurements. Original test and child bounds were retained.
+- The [audit](audit.md#source-cli-startup-and-explicit-context-planning)
+  records the non-additive configuration profile and the populated-registry
+  limitation. No broad cache or safety-gate removal is justified by these
+  single synthetic samples.
+- A complete explicit-context planner took 8.786 seconds with eleven fresh
+  context resolves and eleven fresh legacy probes. It also retained an
+  unchanged fixture and returned no actions or diagnostics. The old
+  single-context shell-hop timing is not an equivalent whole-planner
+  baseline and is not extrapolated into claimed savings.
+- The existing #7743 owner merged its independently reproduced Windows
+  final-handoff wait/stdio repair in #7987. Release and actual installed
+  completion remain open; no further updater, installed modification or
+  protected recovery was performed.
+- Remaining source work includes the fresh bootstrap's actual human-output
+  producer and any still-unqualified standalone boundary. Whole-command,
+  populated-registry and healthy installed no-op proof remain open, as do
+  this effort and parent #6600. Neither the measurements nor the other
+  owner's merge grants another rollout attempt.
+
+### 2026-10-22 - Complete synthetic planner cost isolated
+
+- Measured the actual read-only `build_plan` with thirteen configured plugins,
+  twelve intended targets after self-exclusion and eleven fresh cell-mode
+  probes. Matching, changed and invalid-policy fixtures retained complete
+  baseline/current result parity and all fixture bytes/mtimes.
+- Current measured planner durations were 4.605, 4.253 and 4.598 seconds,
+  respectively; required probes account for approximately 97-98%. There were
+  zero update actions for matching versions, twelve for changed versions, and
+  eleven refusals plus the one non-cell target for invalid policy.
+- The [audit](audit.md#complete-synthetic-planner-without-an-explicit-context)
+  records the paired baseline and sampling limits. The fixture exercises no
+  explicit context, so the selected-context shell-hop change is not reached.
+  These are not healthy installed no-op or whole-command savings.
+- Preserved the original thirty-second item/300-second group limits after
+  the first four-sample harness exhausted its bound in fixture snapshot work.
+  Reduced sampling and parallelized only independent fixture preparation,
+  without dropping files, scenarios, probe calls or refusal assertions.
+- Next source boundary: attribute the actual pre-launch/CLI wrapper's
+  startup, import and configuration-discovery cost in a contained fixture.
+  Live verification remains blocked on #7743 and fresh explicit rollout
+  authorization; no additional updater was invoked.
+
+### 2026-10-22 - Construction presentation merged; planner measurement continues
+
+- Merged #7996 as `0d64ec41b475cbad90f0113cd0cd2bc81f84c60a`
+  after exact-head approval with no findings, no unresolved threads and every
+  required check passing. The newer upstream bootstrap source was preserved;
+  its generated installer declaration was refreshed after the backed sync.
+- The combined source again passed the full output/materialization file on
+  Windows (67 passed, one platform skip) and native Linux storage (62 passed,
+  six unavailable-host skips). Source synchronization completed after merge.
+- This closes the bounded construction-header slice, not the aggregate output,
+  healthy no-op, release/installation or parent #6600 gates. No active-effort
+  worktree was finalized and no host update was run.
+- Next: measure the complete read-only planner against equivalent synthetic
+  multi-plugin states, separating required probe counts and cost from the
+  earlier selected-context consumer result. The deployed whole-flow gate stays
+  blocked on the existing fresh-entry owner and new rollout authorization.
+
 ### 2026-10-22 - Worktrees and Codespaces construction output qualified
 
 - Replaced the actual PowerShell and POSIX construction-action headers with

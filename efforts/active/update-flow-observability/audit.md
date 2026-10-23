@@ -531,6 +531,104 @@ They neither time runtime construction nor establish the deployed planner's
 plugin count, repeated-context count or total reconciliation duration. Those
 remain separate evidence gates; no authorized host update or repair was run.
 
+### Complete synthetic planner, without an explicit context
+
+After #7996 merged, the actual `build_plan` consumer was measured against
+thirteen configured runtime plugins in isolated Windows fixtures. Each
+fixture included the current source-owned installation-context assets and
+matching or changed synthetic deployment versions. The planner's intentional
+Worktrees self-exclusion leaves twelve reconciliation targets; the separate
+Worktrees update phase is not included. Eleven eligible `agent-*` targets
+run fresh legacy-mode probes. Budget Guidance does not enter that cell-mode
+contract.
+
+Each pair used the same fixture files, fixed planning time, empty caller cache,
+`save=False`, and no payload refresh or explicit installation context. The
+baseline only restored site initialization in the actual isolated probe
+subprocess; the current variant retained `-S`. Complete result objects and
+every fixture file's bytes and modification time matched after both calls.
+No process record, endpoint, production state, runtime installation or service
+control was involved.
+
+| Synthetic state | Baseline planner (s) | Current planner (s) | Current probe subtotal (s) | Fresh probes in both | Outcome |
+|---|---:|---:|---:|---:|---|
+| Matching versions | 5.679 | 4.605 | 4.486 | 11 | No update action or diagnostic |
+| Changed versions | 4.624 | 4.253 | 4.135 | 11 | Twelve runtime actions, no diagnostic |
+| Invalid cell-mode policy | 5.705 | 4.598 | 4.501 | 11 | Eleven explicit refusals; only the non-cell target remains eligible |
+
+These are single paired samples per state, not statistically established
+savings. The current planner spent approximately 97-98% of its measured time
+in required fresh probes. The previous selected-context PowerShell-hop change
+is not reached in this no-context fixture and must not be credited for these
+numbers. Fixture preparation was outside the planner interval.
+
+The first four-sample harness exceeded its original thirty-second item bound
+while snapshotting fixture files. Sampling was reduced to one pair and
+independent fixture copies were prepared with four bounded workers, retaining
+all files, cases, child deadlines, snapshot assertions and refusal checks. No
+deadline was raised. An initial expectation of thirteen changed-target actions
+was corrected to the source's intentional twelve-target self-exclusion; the
+complete changed/refused result sets were then asserted and passed.
+
+This resolves a source-level multi-plugin measurement gap, not the reported
+deployed minute-long command. It excludes front-door interpreter startup,
+CLI imports, configuration/registry discovery outside this consumer, serving
+health and runtime construction. A matching-version fixture is not proof of a
+healthy installed no-op. Those boundaries and equivalent authorized live
+acceptance remain open.
+
+### Source CLI startup and explicit-context planning
+
+The next contained Windows measurement exercised the real CLI `main` and
+its actual adapters, not only `build_plan`. It used an unchanged source
+package copied into a disposable payload layout, a private synthetic Git
+repository, project configuration and thirteen matching-version payloads.
+The child imported the ordinary prepared interpreter's dependencies and ran
+`--project fixture pre-launch` or `--project fixture reconcile-plugins
+--repo <fixture> --machine fixture --peek`. Profiling began before importing
+the CLI module; fixture construction and snapshots were outside that interval.
+
+| Source command | Outer child time (s) | Profiled import (s) | Profiled `main` (s) | Main consumer (s) | Native child operations |
+|---|---:|---:|---:|---:|---|
+| `pre-launch` | 3.846 | 1.343 | 2.139 | `plan_pre_launch`: 2.017 | Nine local Git reads and one fresh legacy probe |
+| `reconcile-plugins --peek` | 5.961 | 1.112 | 4.536 | `build_plan`: 4.415 | One local Git read and eleven fresh legacy probes |
+
+Both commands returned zero, one clean JSON continue result, no diagnostics
+or fallback reason, and empty stderr. Every fixture file retained its bytes
+and modification time. A child-process guard permitted only local Git reads
+within that fixture and payload-owned read-only installation-context helpers;
+it admitted no acquisition, installation, service control or execution queue.
+The two cases passed within the existing thirty-second item and 300-second
+group bounds. The inherited scratch `PYTHONPATH` was removed from the child
+to avoid shadowing standard-library `profile`; explicit pytest root and
+configuration-discovery boundaries kept unrelated temporary directories out
+of collection.
+
+The pre-launch profile found five machine-registry loads totaling 0.708
+seconds, three configuration loads totaling 0.612 seconds, and one payload
+fingerprint taking 0.578 seconds. These cumulative call intervals overlap;
+they must not be added as independent costs. This simple configuration does
+not exercise a populated operator registry or bound knowledge overlay.
+The source CLI's roughly one-second import cost is measurable, but neither
+this fixture nor its configuration work explains a minute-long live command.
+
+A separate complete planner fixture supplied an explicit Worktrees receipt,
+created by the actual portable stamping command only during fixture setup.
+All other eligible targets retained matching legacy deployments. The current
+planner took 8.786 seconds and performed eleven fresh context `resolve`
+operations plus eleven fresh legacy probes. It returned no actions or
+diagnostics and left every fixture file unchanged; the case passed in
+16.10 seconds including setup under the original item bound.
+
+This confirms that the selected-context route is reached once for each of
+those eleven eligible targets; the previous no-context measurement did not
+reach it at all. It does not supply an equivalent whole-planner old-shell
+baseline. The earlier single-consumer shell-hop measurements cannot be
+multiplied into a claimed whole-command saving, especially with different
+registry, policy, publication and runtime-health state. Actual queued apply,
+fresh bootstrap, populated-registry discovery and authorized installed
+healthy no-op acceptance remain distinct unresolved boundaries.
+
 ### Promoted update and fresh-entry verification
 
 A later, explicitly authorized Windows field run used the normal repository
@@ -607,3 +705,11 @@ retained Worktrees and Codespaces decoration; the new fresh bootstrap emitted
 unframed progress and a duplicated PowerShell information record in encoded,
 redirected capture. These are actual producer boundaries to qualify, not
 permission to format protocol output or hide the failed request.
+
+The existing #7743 owner subsequently reproduced the Windows final-handoff
+completion loss in a native fixture and merged the wait/stdio repair in
+#7987. Its reported native coverage includes two-cycle completion, UTF-8
+streams, DEVNULL input, distinct exit statuses and window/focus observation.
+That source merge does not retroactively turn the failed field verification
+into success; containing release and newly authorized installed suite
+completion are still required.
