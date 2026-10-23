@@ -46,10 +46,11 @@ existing producer, process, maintenance, collector and rollout owners remain sep
 - The reviewed producer/export source slice is complete in #8002 and #8035.
   Remaining checklist items stay with the performance campaign coordinator under
   #7935/#5900; neither the effort nor its umbrella issues are closed.
-- The next explicitly assigned source episode is the bounded
-  [Manager observation slice](manager-observation.md), owned by the Telemetry
-  implementation owner. Reserved Manager/entry files and the retained #8036
-  qualification remain independently owned and unchanged.
+- The Manager source-observation slice is complete at its stated boundary.
+  The next assigned episode is [structured-signal design](structured-signals.md)
+  only, owned by the Telemetry implementation owner. Exact shared API and file
+  scope return to the coordinator before implementation; reserved Manager/entry
+  files and the retained #8036 qualification remain independently owned.
 
 ## Context
 
@@ -156,6 +157,15 @@ sample/drop/missing evidence and the later structured-signal/hook work.
 - [x] Pass source gates and merge the bounded slice, retaining broader
   installed-native, structured-log/metric and hook acceptance.
 
+### Phase 6 — Structured-signal design only
+- [ ] Review and merge the concrete [logs/metrics proposal](structured-signals.md),
+  including closed schemas, same-writer first consumer, public SDK/protobuf
+  boundaries, bounded transport/accounting and consumer-owned retention handshake.
+- [ ] Return exact shared API/file scope and claim to the campaign coordinator
+  before implementation. Plan merge is not implementation or deployment approval.
+- Preserve all native reports/environments and historical attribution corrections
+  until their durable copy is verified; no cleanup is authorized by this phase.
+
 ### Plan addendum: retained Windows mention-guard whole-dispatch qualification (#8036)
 
 <!-- backlog-reconciliation:7556:transfer:8036:to:efforts/active/performance-telemetry/README.md -->
@@ -222,6 +232,10 @@ afterward it is provenance, not a closed live implementation claim.
 
 ## Validation Plan
 
+- [ ] Review the [structured-signal contract and validation gates](structured-signals.md#validation-and-completion-gates).
+  No real logs/metrics acceptance from span attributes, arbitrary JSON or design
+  prose; implementation and collector authorization remain separate checkpoints.
+
 - [x] Complete the [Manager source-observation validation](manager-observation.md#validation)
   at its stated evidence boundaries; do not turn headless callbacks into headed
   paint or fixture rows into production authority.
@@ -257,6 +271,17 @@ independently of shared collector deployment. Missing deployment authorization
 blocks that acceptance item, not pure implementation.
 
 ## Journal
+
+### 2026-10-23 — Structured-signal design episode
+
+- Opened a fresh bounded design claim under #7935/#5900, preserving completed
+  source task history. Existing native reports and test environments are retained.
+- Read the existing source reporter and optional SDK export surfaces. Proposed
+  the same writer as first real consumer; the SDK log encoder's private namespace
+  is called out rather than presented as a public API.
+- No functional, dependency, collector, installed or process-custody change.
+  Source plan review and explicit coordinator API/scope acceptance precede code.
+  All ten retained #8036 clauses and independent owners remain unchanged.
 
 ### 2026-10-23 — Next bounded consumer episode admitted
 
