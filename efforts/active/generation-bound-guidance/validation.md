@@ -125,3 +125,24 @@ CI. The cold-bootstrap/native entry and installed acceptance obligations remain
 open under #7943 and the coordinating campaign. No failing required check may
 be bypassed. Source merge, release promotion, installed verification and actual
 model admission remain separate states.
+
+## Review corrections
+
+Automated review identified five defects. Six focused controls failed before
+the corrections (the symlink finding has settings and declaration variants).
+The resulting focused validation completed **19 passed, 127 deselected**:
+
+- A one-second reuse-probe timeout retains backup admission when sufficient
+  hook budget remains and refuses it when the overall budget is exhausted.
+- Initial/complete publication revisions detect intervening foreground and
+  partial publishers even when the backup itself copies zero files.
+- Unchanged regular-file symlink inputs publish and reuse successfully.
+- Creating an ignore negation invalidates prior readiness.
+- Index changes between preflight and mutation/save refuse publication or
+  receipt creation; a new unchecked index is never certified.
+- Existing exclude-reread behavior, independent-process reuse/contention and
+  completion-failure semantics remain covered in the same focused run.
+
+The publication measurements above identify the original preserved candidate,
+not these later correctness refinements. They remain phase-only historical
+evidence until a matched post-review measurement is recorded.

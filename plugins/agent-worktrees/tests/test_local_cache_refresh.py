@@ -181,7 +181,8 @@ def test_missing_payload_does_not_withhold_independent_guidance(copy_workspace, 
     assert not result.reused
 
 
-def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, monkeypatch):
+@pytest.mark.parametrize("publisher", ["backup", "foreground", "foreground-partial"])
+def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, monkeypatch, publisher):
     from agent_worktrees import local_cache_worker
 
     root, home = copy_workspace
@@ -193,9 +194,15 @@ def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, mo
         str(root), deadline=time.time() + 5, session_id="example-session",
     )
     assert not output.exists(), "backup has not delivered at discovery"
+    if publisher == "foreground-partial":
+        write_json(root / ".github/copilot/settings.json", {
+            "enabledPlugins": {"demo@market": True, "missing@market": True},
+        })
+    if publisher.startswith("foreground"):
+        assert lcr.prepare_for_launch(root).changed == 1
     directory = lcr._worker_directory(root)
-    directory.mkdir()
-    assert local_cache_worker.run(root, directory) == 0
+    directory.mkdir(exist_ok=True)
+    assert local_cache_worker.run(root, directory) == (1 if publisher == "foreground-partial" else 0)
     script = Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py"
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_WORKTREES_NUDGE="off")
 
@@ -214,6 +221,104 @@ def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, mo
     assert "not proof of model admission" in notice
     assert not post()
     assert output.read_bytes() == b"fresh guidance"
+
+
+def test_probe_timeout_still_admits_bounded_backup(copy_workspace, monkeypatch):
+    root, home = copy_workspace
+    session = home / ".copilot" / "session-state" / "probe-session"
+    session.mkdir(parents=True)
+    queued = []
+
+    def timeout(*args, **kwargs):
+        raise TimeoutError("reuse probe budget exhausted")
+
+    monkeypatch.setattr(static, "current", timeout)
+    monkeypatch.setattr(lcr, "_queue_refresh", lambda cwd: queued.append(cwd) or lcr.RefreshResult("queued"))
+    result = lcr.sessionstart_diagnostic(str(root), deadline=time.time() + 5, session_id="probe-session")
+    assert "queued" in result
+    assert queued == [str(root)]
+    assert (session / "local-guidance-watch.json").is_file()
+
+
+def test_probe_timeout_rechecks_remaining_hook_budget(copy_workspace, monkeypatch):
+    root, _ = copy_workspace
+    clock = [100.0]
+    monkeypatch.setattr(lcr, "time", SimpleNamespace(time=lambda: clock[0], monotonic=lambda: clock[0]))
+
+    def timeout(*args, **kwargs):
+        clock[0] = 101.0
+        raise TimeoutError("reuse probe budget exhausted")
+
+    monkeypatch.setattr(static, "current", timeout)
+    monkeypatch.setattr(lcr, "_queue_refresh", lambda *a: pytest.fail("remaining budget too short"))
+    assert "skipped" in lcr.sessionstart_diagnostic(str(root), deadline=102.0)
+
+
+@pytest.mark.parametrize("kind", ["settings", "declaration"])
+def test_symlinked_input_publishes_and_reuses(copy_workspace, kind):
+    root, home = copy_workspace
+    template, _ = provider(root, home)
+    path = (
+        root / ".github/copilot/settings.json" if kind == "settings"
+        else template.parents[1] / "instruction-projections.json"
+    )
+    target = path.with_suffix(".target.json")
+    path.rename(target)
+    try:
+        path.symlink_to(target.name)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("native file-link privilege unavailable")
+        raise
+    first = lcr.prepare_for_launch(root)
+    assert first.status == "ready", first.diagnostic
+    assert lcr.prepare_for_launch(root).reused
+
+
+def test_new_ignore_negation_invalidates_cached_readiness(copy_workspace):
+    root, home = copy_workspace
+    _, output = provider(root, home)
+    assert lcr.prepare_for_launch(root).status == "ready"
+    (root / ".gitignore").write_text("!**/\n!*.local.instructions.md\n", encoding="utf-8")
+    result = lcr.prepare_for_launch(root)
+    assert result.status == "failed", result.diagnostic
+    assert not result.reused
+    assert output.exists()
+
+
+def test_receipt_never_certifies_index_changed_after_preflight(copy_workspace, monkeypatch):
+    from agent_worktrees import static_preparation
+
+    root, home = copy_workspace
+    _, output = provider(root, home)
+    original = static_preparation.save
+
+    def stage_before_save(*args, **kwargs):
+        subprocess.run(["git", "-C", str(root), "add", "-f", str(output)], check=True, capture_output=True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(static_preparation, "save", stage_before_save)
+    assert lcr.prepare_for_launch(root).status == "failed"
+    assert lcr.prepare_for_launch(root).status == "failed"
+
+
+def test_changed_index_refuses_before_output_mutation(copy_workspace, monkeypatch):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.prepare_for_launch(root).status == "ready"
+    previous = output.read_bytes()
+    template.write_bytes(b"new source must not overwrite newly staged output")
+    original = static._git
+
+    def stage_after_read(path, *args, **kwargs):
+        value = original(path, *args, **kwargs)
+        if args[0] == "ls-files":
+            subprocess.run(["git", "-C", str(root), "add", "-f", str(output)], check=True, capture_output=True)
+        return value
+
+    monkeypatch.setattr(static, "_git", stage_after_read)
+    assert lcr.prepare_for_launch(root).status == "failed"
+    assert output.read_bytes() == previous
 
 
 @pytest.mark.guard

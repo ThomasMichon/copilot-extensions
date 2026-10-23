@@ -173,7 +173,7 @@ def _selection(root: Path, home: Path, *, deadline: float | None = None) -> tupl
         try:
             plugin = _plugin(identity, markets, home, deadline=deadline).resolve(strict=True)
             selection.append([identity, str(plugin), [
-                preparation.stamp(plugin.joinpath(*relative), content_digest=True)
+                preparation.stamp(plugin.joinpath(*relative), content_digest=True, allow_links=True)
                 for relative in PLUGIN_MANIFEST_RELS
             ]])
             plugins[identity] = plugin
@@ -385,11 +385,20 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
         # Git's index queries may read ignore rules before our later append.
         if exclude.exists():
             _read_regular_bytes(exclude)
+        validated_git = preparation.git_state(root)
         # Include staged removals, even when Git could classify one as a rename.
         tracked = (
             _git(root, "ls-files", "-z", "--", ":(icase).github", deadline=deadline)
             + _git(root, "diff", "--cached", "--name-only", "--diff-filter=D", "--no-renames", "-z", "--", ":(icase).github", deadline=deadline)
         ).split(b"\0")
+        # The exclude file is reread and checked by check-ignore below; an
+        # independent append must not be lost while index evidence stays fixed.
+        for path in validated_git:
+            if Path(path).resolve() == exclude.resolve():
+                validated_git[path] = preparation.stamp(
+                    Path(path), content_digest=True, allow_links=True,
+                )
+        preparation.require_git_state(root, validated_git)
         namespace = NAMESPACE.casefold()
         for raw in tracked:
             path = os.fsdecode(raw).casefold()
@@ -410,6 +419,11 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
             exclude.parent.mkdir(parents=True, exist_ok=True)
             with exclude.open("a", encoding="utf-8") as handle:
                 handle.write(f"\n{rule}\n")
+            for path in validated_git:
+                if Path(path).resolve() == exclude.resolve():
+                    validated_git[path] = preparation.stamp(
+                        Path(path), content_digest=True, allow_links=True,
+                    )
         if desired:
             paths = {os.fsencode(f"{NAMESPACE}/{relative}") for relative in desired}
             ignored = _git(
@@ -418,6 +432,7 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
             )
             if paths - set(ignored.split(b"\0")):
                 raise ValueError("instruction output namespace is not completely ignored by Git")
+        preparation.require_git_state(root, validated_git)
         for relative in sorted(stale):
             _remaining(deadline)
             (output / relative).unlink()
@@ -455,9 +470,15 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
         _remaining(deadline)
         if not preparation.matches(inputs):
             raise ValueError("instruction sources changed during publication; retry preparation")
+        preparation.require_git_state(root, validated_git)
+        revision = preparation.record_publication(root, changed=bool(changed or stale))
         identity = ""
         if not desired.failures:
-            identity = preparation.save(root, home, selected, inputs, desired, NAMESPACE)
+            identity = preparation.save(
+                root, home, selected, inputs, desired, NAMESPACE,
+                validated_git=validated_git, revision=revision,
+            )
         return preparation.Publication(
             changed, unchanged, len(stale), identity, failures=tuple(desired.failures),
+            publication_revision=revision,
         )

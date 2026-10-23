@@ -33,6 +33,7 @@ class RefreshResult:
     generation: str = ""
     reused: bool = False
     elapsed_ns: int | None = None
+    publication_revision: str = ""
 
     @property
     def diagnostic(self) -> str:
@@ -149,6 +150,7 @@ def refresh_local_cache(
             "partial" if published.failures else "ready",
             changed=published.changed, unchanged=published.unchanged, removed=published.removed,
             generation=published.generation, reused=published.reused,
+            publication_revision=published.publication_revision,
             blocking=len(published.failures), detail="; ".join(published.failures),
             elapsed_ns=time.monotonic_ns() - started,
         )
@@ -191,20 +193,27 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None, session_id: str
             return RefreshResult("skipped", detail="backup refresh deadline too short").diagnostic + "\n"
         from .static_instructions import current
         from .local_cache_worker import watch_completion
+        from .static_preparation import publication_revision
 
         root = _checkout_root(cwd).resolve()
+        initial_revision = publication_revision(root)
         remaining = max(0, deadline - time.time()) if deadline is not None else 1.0
-        cached = current(
-            root, Path.home(),
-            deadline=time.monotonic() + min(remaining, 1.0),
-        )
-        if cached is not None:
+        try:
+            cached = current(
+                root, Path.home(),
+                deadline=time.monotonic() + min(remaining, 1.0),
+            )
+        except (TimeoutError, subprocess.TimeoutExpired):
+            cached = None
+        if cached is not None and cached.publication_revision == initial_revision:
             watch_completion(root, session_id, prepared=True)
             return RefreshResult(
                 "ready", unchanged=cached.unchanged, generation=cached.generation,
                 reused=True, detail="prepared generation reused; model admission unknown",
             ).diagnostic + "\n"
-        watch_completion(root, session_id)
+        if deadline is not None and deadline - time.time() < 1.5:
+            return RefreshResult("skipped", detail="backup refresh deadline too short after probe").diagnostic + "\n"
+        watch_completion(root, session_id, initial_revision=initial_revision)
         return _queue_refresh(cwd).diagnostic + "\n"
     except Exception as exc:
         return _report(RefreshResult("failed", detail=f"backup refresh failed: {exc}")).diagnostic + "\n"

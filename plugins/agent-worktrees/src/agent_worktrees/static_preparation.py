@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import stat
+import uuid
 
 _READS: ContextVar[dict | None] = ContextVar("static_instruction_reads", default=None)
 _SCHEMA = "agent-worktrees.static-preparation"
@@ -22,9 +23,10 @@ class Publication:
     generation: str = ""
     reused: bool = False
     failures: tuple[str, ...] = ()
+    publication_revision: str = ""
 
 
-def stamp(path: Path, *, content_digest: bool = False) -> list | None:
+def stamp(path: Path, *, content_digest: bool = False, allow_links: bool = False) -> list | None:
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -33,7 +35,10 @@ def stamp(path: Path, *, content_digest: bool = False) -> list | None:
         str(path.resolve()), info.st_mode, info.st_dev, info.st_ino,
         info.st_size, info.st_mtime_ns, info.st_ctime_ns,
     ]
-    if content_digest and stat.S_ISREG(info.st_mode):
+    regular = stat.S_ISREG(info.st_mode)
+    if allow_links and stat.S_ISLNK(info.st_mode):
+        regular = stat.S_ISREG(path.stat().st_mode)
+    if content_digest and regular:
         value.append(hashlib.sha256(path.read_bytes()).hexdigest())
     return value
 
@@ -72,7 +77,10 @@ def capture():
 
 def matches(evidence: dict) -> bool:
     return all(
-        stamp(Path(path), content_digest=isinstance(value, list) and len(value) > 7) == value
+        stamp(
+            Path(path), content_digest=isinstance(value, list) and len(value) > 7,
+            allow_links=isinstance(value, list) and len(value) > 1 and stat.S_ISLNK(value[1]),
+        ) == value
         for path, value in evidence.items()
     )
 
@@ -92,6 +100,39 @@ def _directory(root: Path) -> Path:
     return directory
 
 
+def publication_revision(root: Path) -> str:
+    try:
+        path = _directory(root) / "publication.json"
+        if not path.is_file() or path.stat().st_size > 4096:
+            return ""
+        data = json.loads(path.read_text(encoding="utf-8"))
+        value = data.get("revision")
+        if (
+            data.get("version") == 1 and data.get("root") == str(root)
+            and isinstance(value, str) and len(value) == 32
+            and all(character in "0123456789abcdef" for character in value)
+        ):
+            return value
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return ""
+
+
+def record_publication(root: Path, *, changed: bool) -> str:
+    """Record actual generated-file writes, independently of readiness reuse."""
+    if not changed:
+        return publication_revision(root)
+    from .local_cache_worker import _write
+
+    revision = uuid.uuid4().hex
+    directory = _directory(root)
+    directory.mkdir(exist_ok=True)
+    _write(directory / "publication.json", json.dumps({
+        "version": 1, "root": str(root), "revision": revision,
+    }) + "\n")
+    return revision
+
+
 def git_state(root: Path) -> dict:
     """Detect index/HEAD changes without starting Git on an unchanged launch."""
     admin = _directory(root).parent
@@ -102,6 +143,11 @@ def git_state(root: Path) -> dict:
     paths = {root / ".git", common_pointer, admin / "index", admin / "HEAD",
              admin / "config.worktree", common / "config", common / "packed-refs",
              common / "info" / "exclude"}
+    from .static_instructions import NAMESPACE
+
+    output = root / NAMESPACE
+    paths.update(parent / ".gitignore" for parent in (output, *output.parents)
+                 if parent == root or parent.is_relative_to(root))
     for directory in {admin, common}:
         paths.update(directory.glob("sharedindex.*"))
     head = admin / "HEAD"
@@ -119,7 +165,17 @@ def git_state(root: Path) -> dict:
         paths.add(head)
     else:
         raise ValueError("cyclic Git symbolic reference")
-    return {str(path): stamp(path, content_digest=True) for path in sorted(paths)}
+    result = {}
+    for path in sorted(paths):
+        value = stamp(path, content_digest=True, allow_links=True)
+        # Creating local metadata/lock files is not a Git index or HEAD change.
+        result[str(path)] = value[:4] if value is not None and stat.S_ISDIR(value[1]) else value
+    return result
+
+
+def require_git_state(root: Path, validated: dict) -> None:
+    if git_state(root) != validated:
+        raise ValueError("Git protection evidence changed after preflight; retry preparation")
 
 
 def output_state(root: Path, namespace: str) -> dict:
@@ -165,14 +221,21 @@ def read(root: Path, home: Path, selection: list) -> Publication | None:
             or data["generation"] != generation(selection, data["inputs"])
         ):
             return None
-        return Publication(unchanged=data["count"], generation=data["generation"], reused=True)
+        return Publication(
+            unchanged=data["count"], generation=data["generation"], reused=True,
+            publication_revision=data.get("publication_revision", ""),
+        )
     except (OSError, ValueError, TypeError, AttributeError):
         return None
 
 
-def save(root: Path, home: Path, selection: list, reads: dict, desired: dict, namespace: str) -> str:
+def save(
+    root: Path, home: Path, selection: list, reads: dict, desired: dict, namespace: str,
+    *, validated_git: dict, revision: str,
+) -> str:
     from .local_cache_worker import _write
 
+    require_git_state(root, validated_git)
     identity = generation(selection, reads)
     directory = _directory(root)
     directory.mkdir(exist_ok=True)
@@ -191,7 +254,9 @@ def save(root: Path, home: Path, selection: list, reads: dict, desired: dict, na
         "schema": _SCHEMA, "version": 1, "root": str(root), "home": str(home),
         "selection": selection, "inputs": reads, "count": len(desired),
         "generation": identity, "outputs": outputs,
-        "git": git_state(root), "model_admission": "unknown",
+        "git": validated_git, "model_admission": "unknown",
+        "publication_revision": revision,
     }
+    require_git_state(root, validated_git)
     _write(directory / "prepared.json", json.dumps(data) + "\n")
     return identity

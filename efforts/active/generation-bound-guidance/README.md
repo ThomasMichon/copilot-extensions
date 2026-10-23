@@ -160,6 +160,17 @@ coordinate the smallest additive owner API before changing another slice.
 
 ## Journal
 
+### 2026-10-22 — Review corrections
+
+- Corrected the implementation-only Bridge contract fingerprint after its
+  required source guard reported stale registry evidence; required CI then
+  passed without bypass.
+- Addressed all five automated-review findings with failing controls first:
+  probe-timeout backup admission, concurrent publication notices, linked source
+  inputs, ignore-file invalidation and preflight-bound Git evidence.
+  Focused post-fix validation passed 19 cases without broad suite reruns or
+  deadline increases. Source review and native acceptance remain distinct.
+
 ### 2026-10-22 — Matched baseline and source-only continuation
 
 - Collected all outstanding validation processes; they completed and no owned

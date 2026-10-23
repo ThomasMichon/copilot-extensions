@@ -181,6 +181,12 @@ files/directories and Git index/HEAD evidence. A subsequent unchanged boundary
 revalidates that evidence (including current file bytes) without rebuilding the desired set, running Git or
 copying files. Changed settings, payloads, template links, pairing output,
 generated files, index/HEAD or malformed receipts require preparation again.
+Ignore-file evidence includes absent repository ignore files, so creating an
+override invalidates reuse. A receipt retains the Git evidence actually checked
+by preflight; changes to that evidence before mutation or receipt creation
+refuse publication rather than certifying an unchecked newer index. Regular
+symlinked source inputs retain both link identity and target content hashes;
+output-link redirection remains refused.
 Pending paired composition always refuses reuse. Partial/failed publications
 never create reusable readiness. The receipt is disposable local evidence, not
 a source of instruction authority or a model-admission receipt.
@@ -202,6 +208,8 @@ compatibility renderer remains available; refused identity or a failed owner
 does not authorize switching to another installation.
 
 SessionStart verifies current readiness before queueing its bounded backup.
+An exhausted reuse-probe budget means unverified readiness, not disabled
+backup: the remaining hook budget is checked again before queueing.
 For a late backup, the exact session retains a watch on the checkout-local
 completion status. The existing post-tool hook surfaces completion once:
 changed/removed files explicitly require restart/new context before discovery;
@@ -209,6 +217,12 @@ partial and failed outcomes retain reviewed-fallback guidance. An idle session
 is not awakened and no restart is automatic. Written files, a successful hook
 result and an acknowledgment never assert that the running model admitted the
 new instructions.
+The watch captures an initial generated-file publication revision before its
+readiness probe. Actual generated-file writes advance that revision under the
+publication lock, including partial publications. Completion compares revisions,
+not only the backup's own copy counts: a foreground publisher that finishes
+before the backup is still a late change requiring a restart notice. An
+unchanged backup does not invent a new publication revision.
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
 purely checked-in: a gitignored, locally re-rendered cache of auto-discovered

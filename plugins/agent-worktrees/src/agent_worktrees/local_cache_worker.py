@@ -208,6 +208,7 @@ def run(root: Path, directory: Path, request_id: str | None = None) -> int:
                 "status": result.status, "installed": result.changed,
                 "unchanged": result.unchanged, "removed": result.removed,
                 "generation": result.generation, "model_admission": "unknown",
+                "publication_revision": result.publication_revision,
                 "restart_required": bool(result.changed or result.removed),
             },
         )
@@ -237,7 +238,9 @@ def metadata_directory(root: str | Path) -> Path | None:
     return git_dir.resolve() / "agent-worktrees-local-guidance"
 
 
-def watch_completion(root: Path, session_id: str | None, *, prepared: bool = False) -> None:
+def watch_completion(
+    root: Path, session_id: str | None, *, prepared: bool = False, initial_revision: str = "",
+) -> None:
     """A hook-owned watch lets the next post-tool hook surface late completion."""
     import re
 
@@ -255,6 +258,7 @@ def watch_completion(root: Path, session_id: str | None, *, prepared: bool = Fal
         _write(path, json.dumps({
             "version": 1, "root": str(root), "metadata": str(metadata),
             "started_at": time.time(),
+            "publication_revision": initial_revision,
         }) + "\n")
 
 
