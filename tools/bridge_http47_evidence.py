@@ -28,6 +28,7 @@ AFFECTED = tuple(
         "protocol.py",
         "drain_contract.py",
         "client.py",
+        "client_drain.py",
         "routes/admin.py",
         "routes/health.py",
         "cold_outages.py",
@@ -39,6 +40,7 @@ AFFECTED = tuple(
         "session_resume.py",
         "session_prompts.py",
         "app.py",
+        "app_supersession.py",
         "session_host/launcher.py",
     )
 ) + ("libs/zdd/src/zdd/cutover_drain.py",)

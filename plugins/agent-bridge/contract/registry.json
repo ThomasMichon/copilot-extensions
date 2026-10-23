@@ -306,6 +306,12 @@
           "non_semantic_reason": null
         },
         {
+          "path": "plugins/agent-bridge/src/agent_bridge/client_drain.py",
+          "sha256": "cf61733b357ff87fdf4aa87bc58d06a607eac99214f0342e2f802837949db117",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
           "path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
           "sha256": "1f0ee4f1599af18cdf3f1184af115eb660a2f8d1ff23db812cfac342667132f5",
           "semantic": true,
@@ -422,6 +428,12 @@
         {
           "path": "plugins/agent-bridge/src/agent_bridge/app.py",
           "sha256": "4b5bbc4b7c0e567a9ce4fcf72508a46dbae3c3a9e2af6e7e22136a34b89f3d95",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/app_supersession.py",
+          "sha256": "26a59f0fb25254a1c5ea1952b74580819c964691f6d67094d13e9a93d96750d0",
           "semantic": true,
           "non_semantic_reason": null
         },
