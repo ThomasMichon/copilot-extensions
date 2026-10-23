@@ -16,7 +16,7 @@ from update_driver.foundation_inputs import GENERATED, PACKAGES
 from test_first_use import primitive
 
 
-def native_command(root, payload, installation, project, *, source=None):
+def native_command(root, payload, installation, project, *, source=None, client_only=False):
     source = source or Path(__file__).resolve().parents[1]
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -24,12 +24,14 @@ def native_command(root, payload, installation, project, *, source=None):
             str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
             str(source / "scripts" / "first-use.ps1"), "-Root", str(root),
             "-Payload", str(payload), "-RuntimeRoot", str(installation), "-Project", str(project),
+            *(("-ServiceMode", "client-only") if client_only else ()),
         ]
     if sys.platform != "linux":
         pytest.skip("native first-use bootstrap is not qualified here")
     return [
         shutil.which("bash"), str(source / "scripts" / "first-use.sh"),
         str(root), str(payload), str(installation), str(project),
+        *(("--client-only",) if client_only else ()),
     ]
 
 

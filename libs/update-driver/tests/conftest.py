@@ -106,12 +106,14 @@ def owning_payload(owning_context):
         ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"),
     )
     (scripts / "install.ps1").write_text(
-        "param([string]$Action,[string]$InstallDir)\n"
+        "param([string]$Action,[string]$InstallDir,[switch]$NoService)\n"
         "if ($Action -cne 'provision') { exit 90 }\n"
         "if ($env:UPDATE_DRIVER_WITNESS -or $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) { exit 91 }\n"
         "[IO.Directory]::CreateDirectory($InstallDir) | Out-Null\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'executed'), 'provision')\n"
         "[IO.File]::WriteAllText((Join-Path $InstallDir 'source-path'), $PSScriptRoot)\n"
+        "[IO.File]::AppendAllText((Join-Path $InstallDir 'client-only'), "
+        "([string][int][bool]$NoService + [Environment]::NewLine))\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'downgrade-history'), "
         "('[' + [string]$env:AGENT_VAULT_ALLOW_DOWNGRADE + ']' + [Environment]::NewLine))\n"
         "exit 7\n", encoding="utf-8",
@@ -121,6 +123,7 @@ def owning_payload(owning_context):
         '[[ -z "${UPDATE_DRIVER_WITNESS:-}" && -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]\n'
         'mkdir -p -- "$3"\nprintf provision >>"$3/executed"\n'
         'dirname -- "${BASH_SOURCE[0]}" >"$3/source-path"\n'
+        'if [[ "${4:-}" == --no-service ]]; then echo 1; else echo 0; fi >>"$3/client-only"\n'
         'printf "[%s]\\n" "${AGENT_VAULT_ALLOW_DOWNGRADE:-}" >>"$3/downgrade-history"\n'
         'exit 7\n',
         encoding="utf-8",

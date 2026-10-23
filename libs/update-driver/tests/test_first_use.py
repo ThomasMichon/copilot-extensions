@@ -45,6 +45,25 @@ def test_fixed_request_is_durable_coalesced_and_not_a_recipe(owning_payload, are
     assert not installation.exists()
 
 
+def test_explicit_client_only_recipe_is_distinct_and_reaches_native_installer(owning_payload, area):
+    payload, installation, project = owning_payload
+    root = area / "queue"
+    ordinary = provision.enqueue(payload, installation, project, root=root)
+    client = provision.enqueue(payload, installation, project, root=root, client_only=True)
+    assert client.id != ordinary.id and client.spec.argv == ("--client-only",)
+    drain(root=root)
+    assert all(status(item.id, root=root).exit_code == 7 for item in (ordinary, client))
+    assert (installation / "client-only").read_text().splitlines() == ["0", "1"]
+
+
+@pytest.mark.parametrize("value", ["yes", 1, None])
+def test_nonboolean_client_only_refuses_before_writes(owning_payload, area, value):
+    payload, installation, project = owning_payload
+    with pytest.raises(provision.ProvisionError, match="must be a boolean"):
+        provision.enqueue(payload, installation, project, root=area / "queue", client_only=value)
+    assert not (area / "queue").exists() and not installation.exists()
+
+
 def test_source_inspection_never_writes_payload_or_installation(owning_payload):
     payload, installation, project = owning_payload
     before = {str(path.relative_to(payload)): path.read_bytes()

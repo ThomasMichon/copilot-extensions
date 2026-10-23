@@ -150,11 +150,13 @@ def inspect(payload: Path, runtime_root: Path, project: Path) -> dict:
 
 def enqueue(
     payload: Path, runtime_root: Path, project: Path, *, root: Path | None = None,
-    expected_source: str | None = None,
+    expected_source: str | None = None, client_only: bool = False,
 ) -> core.Request:
     """Accept exactly the fixed provision action into the existing durable queue."""
     if ENVIRONMENT_KEY in os.environ or participant_environment():
         raise ProvisionError("nested first-use submission is unsupported; retain the current installation owner")
+    if type(client_only) is not bool:
+        raise ProvisionError("client-only selection must be a boolean")
     if os.name != "nt" and not sys.platform.startswith("linux"):
         raise ProvisionError("native plugin provision execution is not qualified on this platform")
     execution_root = core._root(root)
@@ -168,13 +170,15 @@ def enqueue(
     argv, imports = core.runtime_command(
         "update_driver.first_use", [
             "_execute", "--root", str(execution_root), "--admission", encoded,
+            *(("--client-only",) if client_only else ()),
         ],
     )
     context = {key: os.environ[key] for key in CONTEXT_KEYS if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
     return core.enqueue(
         core.RequestSpec(
-            "owning-plugin-provision", source=encoded, cwd=str(project),
+            "owning-plugin-provision", argv=("--client-only",) if client_only else (),
+            source=encoded, cwd=str(project),
             context=tuple(context.items()),
         ),
         runner=core.TrustedRunner(
@@ -184,7 +188,7 @@ def enqueue(
     )
 
 
-def _execute(admission: dict, *, root: Path) -> int:
+def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
     custody = borrowed_custody(root=root)
     if custody is None:
         raise ProvisionError("plugin provisioning requires live installation custody")
@@ -225,6 +229,7 @@ def _execute(admission: dict, *, root: Path) -> int:
                 str(shell), "-NoLogo", "-NoProfile", "-NonInteractive",
                 "-ExecutionPolicy", "Bypass", "-File", str(frozen.plugin / "scripts" / "install.ps1"),
                 "provision", "-InstallDir", str(runtime_root),
+                *(("-NoService",) if client_only else ()),
             ]
         elif sys.platform.startswith("linux"):
             shell = shutil.which("bash")
@@ -233,6 +238,7 @@ def _execute(admission: dict, *, root: Path) -> int:
             argv = [
                 shell, str(frozen.plugin / "scripts" / "install.sh"),
                 "provision", "--install-dir", str(runtime_root),
+                *(("--no-service",) if client_only else ()),
             ]
         else:
             raise ProvisionError("native plugin provision execution is not qualified on this platform")
@@ -255,10 +261,12 @@ def main() -> int:
         if action == "submit":
             command.add_argument("--root", type=Path)
             command.add_argument("--expected-source")
+            command.add_argument("--client-only", action="store_true")
             command.add_argument("--wait", action="store_true")
     execute = commands.add_parser("_execute")
     execute.add_argument("--root", type=Path, required=True)
     execute.add_argument("--admission", required=True)
+    execute.add_argument("--client-only", action="store_true")
     arguments = parser.parse_args()
     try:
         if arguments.action == "_inspect":
@@ -267,10 +275,14 @@ def main() -> int:
             ), sort_keys=True))
             return 0
         if arguments.action == "_execute":
-            return _execute(json.loads(arguments.admission), root=arguments.root)
+            return _execute(
+                json.loads(arguments.admission), root=arguments.root,
+                client_only=arguments.client_only,
+            )
         request = enqueue(
             arguments.payload, arguments.runtime_root, arguments.project, root=arguments.root,
             expected_source=arguments.expected_source,
+            client_only=arguments.client_only,
         )
         print(json.dumps({"request_id": request.id, "state": request.state}), flush=True)
         worker_argv, worker_env = core.runtime_command(

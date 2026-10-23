@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory)][string]$Project,
     [ValidateSet('launch', 'owner')][string]$Mode = 'launch',
     [string]$ExpectedSource,
-    [string]$ReceiptLog
+    [string]$ReceiptLog,
+    [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default'
 )
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
@@ -101,7 +102,7 @@ if ($Mode -ceq 'launch') {
     New-NativeExecutionDirectory -Root $Root
     $log = Join-Path $Root ('first-use-' + [Guid]::NewGuid().ToString('N') + '.log')
     $worker = Start-NativeDaemon -Script $PSCommandPath -Arguments @(
-        $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log
+        $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode
     ) -WorkingDirectory $Project -LogPath $log
     try {
         # This is launch acknowledgement, never a durable ordinary-request receipt.
@@ -147,9 +148,13 @@ $null = [CopilotExtensions.NativeFoundationState]::CheckPath($ReceiptLog, $false
 $previousEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
-    & $python -I -S -B -X utf8 $launcher -m update_driver.first_use submit `
-        --payload $Payload --runtime-root $RuntimeRoot --project $Project `
-        --root $Root --expected-source $source --wait 2>&1 |
+    $submit = @(
+        '-I', '-S', '-B', '-X', 'utf8', $launcher, '-m', 'update_driver.first_use', 'submit',
+        '--payload', $Payload, '--runtime-root', $RuntimeRoot, '--project', $Project,
+        '--root', $Root, '--expected-source', $source, '--wait'
+    )
+    if ($ServiceMode -ceq 'client-only') { $submit += '--client-only' }
+    & $python @submit 2>&1 |
         ForEach-Object {
             try {
                 [IO.File]::AppendAllText($ReceiptLog, ([string]$_ + "`n"), (New-Object Text.UTF8Encoding($false)))

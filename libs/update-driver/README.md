@@ -617,6 +617,11 @@ An existing installation participant cannot submit another first-use request,
 even to another root. Both native and Python admission refuse nested evidence
 before state creation rather than queuing behind the caller's own custody.
 This is an explicit unsupported outcome, not a second owner or inline retry.
+The optional Windows `-ServiceMode client-only`, Linux `--client-only` and
+Python `client_only=True` select only the canonical installer's existing
+`-NoService`/`--no-service` option. This boolean participates in durable request
+and runner identity; ordinary service-enabled behavior is still the default.
+No arbitrary installer options are accepted.
 
 The canonical native daemon helper launches one finite, caller-independent
 supervisor. **Its launch acknowledgement and diagnostic log are not request
@@ -677,8 +682,8 @@ ordinary request receipt and nonzero final status. That controlled native
 product fixture qualifies the handoff, **not** a real Vault deployment,
 production publisher adoption, maintenance enrollment, macOS or host rollout.
 The same opt-in portfolio exercises the actual canonically materialized Vault
-payload, native installer, installed CLI and completion marker with service
-managers absent and all user/configuration/cache roots private. It checks
+payload, native installer, installed CLI and completion marker in explicit
+canonical client-only mode with all user/configuration/cache roots private. It checks
 source-independent healthy dispatch without another queue request; it is not a
 service deployment or production publisher adoption test. Vault carries the
 canonical Python installer helpers for admitted-input inspection/freezing,

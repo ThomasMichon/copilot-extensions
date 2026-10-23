@@ -84,7 +84,7 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
     root = area / "cold"
     profile = installation.parent
     env = dict(os.environ)
-    # Do not expose any host service manager, credentials, runtime or user config.
+    # Isolate user state and explicitly request the canonical client-only recipe.
     for key, relative in {
         "APPDATA": "AppData/Roaming", "LOCALAPPDATA": "AppData/Local",
         "PROGRAMDATA": "ProgramData", "PSModulePath": "powershell-modules",
@@ -108,11 +108,10 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
         isolation = subprocess.run(
             [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
              "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-             "if (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue) { exit 91 }; "
              "if (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) { exit 92 }; exit 0"],
             env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
         )
-        assert isolation.returncode == 0, "native qualification must not expose host services or Python"
+        assert isolation.returncode == 0, "native qualification must not expose host Python"
     else:
         tools = area / "native-tools"
         tools.mkdir()
@@ -138,7 +137,7 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
         worker = None
         descriptor = None
         launched = subprocess.run(
-            native_command(root, payload, installation, project, source=source),
+            native_command(root, payload, installation, project, source=source, client_only=True),
             env=env, cwd=project, stdin=subprocess.DEVNULL, capture_output=True,
             text=True, encoding="utf-8", timeout=90, **no_window_kwargs(),
         )
@@ -172,6 +171,8 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
     assert len(requests) == 1, diagnostic()
     request = requests[0]
     assert request.state == "completed" and request.exit_code == 0, diagnostic()
+    assert request.spec.argv == ("--client-only",)
+    assert "service skipped" in request.log_path.read_text(errors="replace")
     assert foundation_status(root=root).state == "completed"
     selector = installation / "current-version"
     version = selector.read_text().strip()
