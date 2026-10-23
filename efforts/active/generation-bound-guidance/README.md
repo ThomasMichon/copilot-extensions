@@ -170,6 +170,12 @@ coordinate the smallest additive owner API before changing another slice.
   inputs, ignore-file invalidation and preflight-bound Git evidence.
   Focused post-fix validation passed 19 cases without broad suite reruns or
   deadline increases. Source review and native acceptance remain distinct.
+- A later review identified deadline propagation, abnormal-exit notification
+  and nested Git custody gaps. The source corrections add real receipt-hash
+  expiry and post-tool reaper controls, capture the watch timestamp before the
+  probe, and retain the Git subtree under Bridge's existing owned-group cleanup.
+  Focused results: Worktrees 11 passed/2 native Linux skips; Bridge 13 passed.
+  Those skipped native controls remain an explicit #7943 acceptance obligation.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

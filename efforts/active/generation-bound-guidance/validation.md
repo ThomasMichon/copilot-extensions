@@ -146,3 +146,12 @@ The resulting focused validation completed **19 passed, 127 deselected**:
 The publication measurements above identify the original preserved candidate,
 not these later correctness refinements. They remain phase-only historical
 evidence until a matched post-review measurement is recorded.
+
+The subsequent review refinement propagates deadlines through real input,
+output and Git-index hashing; timestamps watches before the probe; persists
+abnormal-worker failure data; and aligns Bridge's outer process-group custody
+with nested Worktrees Git processes. Focused controls completed **11 passed,
+2 skipped** in Worktrees and **13 passed** in Bridge. The two skips are the
+new native Linux cancellation/owner-failure scenarios on this Windows worker;
+their actual native execution remains part of #7943's open qualification, not
+a claimed pass. No test or lifecycle deadline was increased.

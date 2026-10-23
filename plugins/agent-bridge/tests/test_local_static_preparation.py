@@ -1,5 +1,7 @@
 import asyncio
 import json
+import os
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -36,6 +38,9 @@ async def test_uses_owner_generation_without_compatibility_render(tmp_path, monk
         str(tmp_path.resolve()), "--prepare-projections", "--json",
     ]
     assert kwargs["timeout"] is None
+    assert kwargs["retire_group"] is True
+    if os.name != "nt":
+        assert kwargs["env"]["WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP"] == "1"
     assert "AGENT_RT_ROOT" not in kwargs["env"]
 
 
@@ -66,3 +71,25 @@ async def test_owner_cancellation_propagates(tmp_path, monkeypatch):
     monkeypatch.setattr(preparation, "_run_bounded_result", AsyncMock(side_effect=asyncio.CancelledError()))
     with pytest.raises(asyncio.CancelledError):
         await preparation.prepare_for_launch(tmp_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retire", [False, True])
+async def test_owned_group_retires_after_owner_failure(monkeypatch, retire):
+    import agent_procutil
+    import zdd.diagnostics
+
+    process = SimpleNamespace(
+        pid=987654, returncode=23,
+        communicate=AsyncMock(return_value=(b"", b"owner failed")),
+    )
+    monkeypatch.setattr(legacy, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(agent_procutil, "spawn_in_kill_on_close_job", AsyncMock(return_value=(process, None)))
+    monkeypatch.setattr(zdd.diagnostics, "process_start_time", lambda pid: "observed-owner")
+    cleanup = AsyncMock()
+    monkeypatch.setattr(legacy, "_kill_tree", cleanup)
+    result = await legacy._run_bounded_result(["owner"], timeout=None, retire_group=retire)
+    assert result.returncode == 23
+    assert cleanup.await_count == int(retire)
+    if retire:
+        cleanup.assert_awaited_once_with(process, None, "observed-owner")

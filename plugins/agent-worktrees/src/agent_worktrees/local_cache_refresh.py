@@ -189,6 +189,7 @@ def _run_refresh_worker(cwd: str) -> int:
 def sessionstart_diagnostic(cwd: str, *, deadline: float | None, session_id: str | None = None) -> str:
     """Queue the bounded backup without waiting inside SessionStart."""
     try:
+        watch_started_at = time.time()
         if deadline is not None and deadline - time.time() < 1.5:
             return RefreshResult("skipped", detail="backup refresh deadline too short").diagnostic + "\n"
         from .static_instructions import current
@@ -213,7 +214,9 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None, session_id: str
             ).diagnostic + "\n"
         if deadline is not None and deadline - time.time() < 1.5:
             return RefreshResult("skipped", detail="backup refresh deadline too short after probe").diagnostic + "\n"
-        watch_completion(root, session_id, initial_revision=initial_revision)
+        watch_completion(
+            root, session_id, initial_revision=initial_revision, started_at=watch_started_at,
+        )
         return _queue_refresh(cwd).diagnostic + "\n"
     except Exception as exc:
         return _report(RefreshResult("failed", detail=f"backup refresh failed: {exc}")).diagnostic + "\n"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .local_cache_refresh import RefreshResult, _checkout_root, _report, _run_bounded_result
@@ -21,10 +22,13 @@ async def prepare_for_launch(repo_root: str | Path) -> RefreshResult:
 
         return await refresh_local_cache(repo_root)
     root = _checkout_root(repo_root).resolve()
+    environment = _agent_worktrees_environment()
+    if os.name != "nt":
+        environment["WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP"] = "1"
     run = await _run_bounded_result(
         [*prefix, "knowledge", "compose-plugins", "--cwd", str(root),
          "--prepare-projections", "--json"],
-        timeout=None, env=_agent_worktrees_environment(),
+        timeout=None, env=environment, retire_group=True,
     )
     if run.status != "completed":
         return _report(RefreshResult(run.status, blocking=1, detail=run.detail))

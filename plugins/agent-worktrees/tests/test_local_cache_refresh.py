@@ -181,7 +181,7 @@ def test_missing_payload_does_not_withhold_independent_guidance(copy_workspace, 
     assert not result.reused
 
 
-@pytest.mark.parametrize("publisher", ["backup", "foreground", "foreground-partial"])
+@pytest.mark.parametrize("publisher", ["backup", "foreground", "foreground-partial", "during-probe"])
 def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, monkeypatch, publisher):
     from agent_worktrees import local_cache_worker
 
@@ -190,10 +190,25 @@ def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, mo
     session = home / ".copilot" / "session-state" / "example-session"
     session.mkdir(parents=True)
     monkeypatch.setattr(lcr, "_queue_refresh", lambda *a: lcr.RefreshResult("queued"))
+    if publisher == "during-probe":
+        original = static.current
+        began = time.time()
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(
+            time=lambda: began, monotonic=time.monotonic, monotonic_ns=time.monotonic_ns,
+        ))
+
+        def finish_during_probe(*args, **kwargs):
+            monkeypatch.setattr(static, "current", original)
+            assert lcr.prepare_for_launch(root).changed == 1
+            assert local_cache_worker.run(root, lcr._worker_directory(root)) == 0
+            return None
+
+        monkeypatch.setattr(static, "current", finish_during_probe)
     assert "queued" in lcr.sessionstart_diagnostic(
         str(root), deadline=time.time() + 5, session_id="example-session",
     )
-    assert not output.exists(), "backup has not delivered at discovery"
+    if publisher != "during-probe":
+        assert not output.exists(), "backup has not delivered at discovery"
     if publisher == "foreground-partial":
         write_json(root / ".github/copilot/settings.json", {
             "enabledPlugins": {"demo@market": True, "missing@market": True},
@@ -202,7 +217,8 @@ def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, mo
         assert lcr.prepare_for_launch(root).changed == 1
     directory = lcr._worker_directory(root)
     directory.mkdir(exist_ok=True)
-    assert local_cache_worker.run(root, directory) == (1 if publisher == "foreground-partial" else 0)
+    if publisher != "during-probe":
+        assert local_cache_worker.run(root, directory) == (1 if publisher == "foreground-partial" else 0)
     script = Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py"
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_WORKTREES_NUDGE="off")
 
@@ -252,6 +268,38 @@ def test_probe_timeout_rechecks_remaining_hook_budget(copy_workspace, monkeypatc
     monkeypatch.setattr(static, "current", timeout)
     monkeypatch.setattr(lcr, "_queue_refresh", lambda *a: pytest.fail("remaining budget too short"))
     assert "skipped" in lcr.sessionstart_diagnostic(str(root), deadline=102.0)
+
+
+@pytest.mark.parametrize("kind", ["input", "output", "index"])
+def test_deadline_expires_during_real_receipt_validation(copy_workspace, monkeypatch, kind):
+    from agent_worktrees import static_preparation
+
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    if kind == "index":
+        (root / "tracked.txt").write_text("fixture")
+        subprocess.run(
+            ["git", "-C", str(root), "add", "tracked.txt"], check=True, capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    assert lcr.prepare_for_launch(root).status == "ready"
+    target = {"input": template, "output": output, "index": root / ".git/index"}[kind]
+    clock = [100.0]
+    monkeypatch.setattr(static, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    original = static_preparation._hash_file
+    expired = []
+
+    def expire_after_hash(path, deadline):
+        value = original(path, deadline)
+        if path == target and deadline is not None:
+            clock[0] = deadline + 1
+            expired.append(path)
+        return value
+
+    monkeypatch.setattr(static_preparation, "_hash_file", expire_after_hash)
+    with pytest.raises(TimeoutError):
+        static.current(root, home, deadline=101.0)
+    assert expired == [target]
 
 
 @pytest.mark.parametrize("kind", ["settings", "declaration"])

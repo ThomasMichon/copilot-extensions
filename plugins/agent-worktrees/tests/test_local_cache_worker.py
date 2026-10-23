@@ -137,6 +137,46 @@ def test_completion_status_preserves_failure_and_admission(
     assert state["result"]["model_admission"] == "unknown"
 
 
+def test_abnormal_exit_reaches_post_tool_failure_notice(tmp_path, monkeypatch):
+    from pathlib import Path
+    from test_nudge_status import nudge
+
+    home, root = tmp_path / "home", tmp_path / "checkout"
+    (root / ".git").mkdir(parents=True)
+    session = home / ".copilot/session-state/reaper-session"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(worker.activity, "log_event", lambda *a, **kw: None)
+    directory = worker.metadata_directory(root)
+    directory.mkdir()
+    worker.watch_completion(root, "reaper-session")
+    worker._save(directory, {
+        "version": 1, "root": str(root), "request_id": "admitted",
+        "phase": "running", "owner": worker._owner(os.getpid()),
+    })
+    worker._reap(SimpleNamespace(wait=lambda: 17), root, directory, "admitted")
+    payload = {"sessionId": "reaper-session", "cwd": str(root)}
+    assert "Backup refresh failed" in nudge.decide(
+        payload, home=home, env={"AGENT_WORKTREES_NUDGE": "off"},
+    )
+    assert nudge.decide(payload, home=home, env={"AGENT_WORKTREES_NUDGE": "off"}) is None
+    assert not (session / "local-guidance-watch.json").exists()
+
+
+def test_reaper_preserves_completed_partial_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(worker.activity, "log_event", lambda *a, **kw: None)
+    state = {
+        "version": 1, "root": str(tmp_path), "request_id": "finished",
+        "phase": "done", "owner": worker._owner(os.getpid()),
+        "completed_at": 1.0, "result": {"status": "partial", "installed": 2},
+    }
+    worker._save(tmp_path, state)
+    worker._log(tmp_path, "original partial result")
+    worker._reap(SimpleNamespace(wait=lambda: 1), tmp_path, tmp_path, "finished")
+    assert worker._read(tmp_path / "request.json") == state
+    assert (tmp_path / "refresh.log").read_text() == "original partial result\n"
+
+
 def test_latest_result_is_a_bounded_utf8_snapshot(tmp_path):
     worker._log(tmp_path, chr(233) * 20_000)
     path = tmp_path / "refresh.log"

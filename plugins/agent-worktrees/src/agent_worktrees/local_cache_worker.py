@@ -83,6 +83,13 @@ def _gate(directory: Path) -> SingleInstance:
     return SingleInstance(directory, service="local-guidance")
 
 
+def _failed(state: dict) -> None:
+    state.update(
+        phase="failed", completed_at=time.time(),
+        result={"status": "failed", "model_admission": "unknown"},
+    )
+
+
 def _reap(process: subprocess.Popen, root: Path, directory: Path, request_id: str) -> None:
     code = process.wait()
     if code:
@@ -93,8 +100,14 @@ def _reap(process: subprocess.Popen, root: Path, directory: Path, request_id: st
                 return
             gate.acquire()
             state = _read(directory / "request.json")
-            if state and state["request_id"] == request_id and state["phase"] != "done":
-                state["phase"] = "failed"
+            terminal = state and (
+                state["phase"] == "done" or (
+                    state["phase"] == "failed" and isinstance(state.get("result"), dict)
+                    and isinstance(state.get("completed_at"), (int, float))
+                )
+            )
+            if state and state["request_id"] == request_id and not terminal:
+                _failed(state)
                 _log(directory, f"[local-guidance] failed: worker exited {code} before publication")
                 _save(directory, state)
         except (OSError, ValueError, AlreadyRunningError) as exc:
@@ -137,7 +150,7 @@ def queue(root: Path, directory: Path):
             state.update(phase="queued", owner=_owner(process.pid))
             _save(directory, state)
         except (OSError, ValueError) as exc:
-            state["phase"] = "failed"
+            _failed(state)
             _log(directory, f"[local-guidance] failed: dispatch failed: {exc}")
             _save(directory, state)
             if process is not None:
@@ -240,6 +253,7 @@ def metadata_directory(root: str | Path) -> Path | None:
 
 def watch_completion(
     root: Path, session_id: str | None, *, prepared: bool = False, initial_revision: str = "",
+    started_at: float | None = None,
 ) -> None:
     """A hook-owned watch lets the next post-tool hook surface late completion."""
     import re
@@ -257,7 +271,7 @@ def watch_completion(
     if metadata is not None:
         _write(path, json.dumps({
             "version": 1, "root": str(root), "metadata": str(metadata),
-            "started_at": time.time(),
+            "started_at": time.time() if started_at is None else started_at,
             "publication_revision": initial_revision,
         }) + "\n")
 

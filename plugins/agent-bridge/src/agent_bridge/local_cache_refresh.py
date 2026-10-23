@@ -308,7 +308,8 @@ async def _kill_tree(
 
 
 async def _run_bounded_result(
-    argv: list[str], *, timeout: float | None, env: dict[str, str] | None = None
+    argv: list[str], *, timeout: float | None, env: dict[str, str] | None = None,
+    retire_group: bool = False,
 ) -> _RunResult:
     """Run ``argv``, bounded by ``timeout``; kill the whole process tree
     (see ``_kill_tree``) rather than just the direct child if it runs over.
@@ -348,6 +349,7 @@ async def _run_bounded_result(
     """
     from agent_procutil import no_window_flags, spawn_in_kill_on_close_job
 
+    cleanup_attempted = False
     try:
         proc, job_handle = await spawn_in_kill_on_close_job(
             *argv,
@@ -384,6 +386,7 @@ async def _run_bounded_result(
                 proc.communicate(), timeout=timeout
             )
         except BaseException as exc:
+            cleanup_attempted = True
             with contextlib.suppress(Exception):
                 await asyncio.shield(
                     _kill_tree(proc, job_handle, expected_group_identity)
@@ -402,6 +405,9 @@ async def _run_bounded_result(
         if job_handle is not None:
             with contextlib.suppress(Exception):
                 job_handle.close()
+        elif retire_group and not cleanup_attempted:
+            with contextlib.suppress(Exception):
+                await asyncio.shield(_kill_tree(proc, None, expected_group_identity))
 
 
 async def _run_bounded(

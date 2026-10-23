@@ -26,7 +26,30 @@ class Publication:
     publication_revision: str = ""
 
 
-def stamp(path: Path, *, content_digest: bool = False, allow_links: bool = False) -> list | None:
+def _check(deadline: float | None) -> None:
+    if deadline is not None:
+        from .static_instructions import _remaining
+
+        _remaining(deadline)
+
+
+def _hash_file(path: Path, deadline: float | None) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            _check(deadline)
+            block = handle.read(1024 * 1024)
+            _check(deadline)
+            if not block:
+                return digest.hexdigest()
+            digest.update(block)
+
+
+def stamp(
+    path: Path, *, content_digest: bool = False, allow_links: bool = False,
+    deadline: float | None = None,
+) -> list | None:
+    _check(deadline)
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -39,7 +62,8 @@ def stamp(path: Path, *, content_digest: bool = False, allow_links: bool = False
     if allow_links and stat.S_ISLNK(info.st_mode):
         regular = stat.S_ISREG(path.stat().st_mode)
     if content_digest and regular:
-        value.append(hashlib.sha256(path.read_bytes()).hexdigest())
+        value.append(_hash_file(path, deadline))
+    _check(deadline)
     return value
 
 
@@ -75,11 +99,12 @@ def capture():
         _READS.reset(token)
 
 
-def matches(evidence: dict) -> bool:
+def matches(evidence: dict, *, deadline: float | None = None) -> bool:
     return all(
         stamp(
             Path(path), content_digest=isinstance(value, list) and len(value) > 7,
             allow_links=isinstance(value, list) and len(value) > 1 and stat.S_ISLNK(value[1]),
+            deadline=deadline,
         ) == value
         for path, value in evidence.items()
     )
@@ -133,8 +158,9 @@ def record_publication(root: Path, *, changed: bool) -> str:
     return revision
 
 
-def git_state(root: Path) -> dict:
+def git_state(root: Path, *, deadline: float | None = None) -> dict:
     """Detect index/HEAD changes without starting Git on an unchanged launch."""
+    _check(deadline)
     admin = _directory(root).parent
     common_pointer = admin / "commondir"
     common = admin
@@ -153,6 +179,7 @@ def git_state(root: Path) -> dict:
     head = admin / "HEAD"
     # Symbolic refs can themselves name symbolic refs. Bound malformed cycles.
     for _ in range(8):
+        _check(deadline)
         if not head.is_file():
             break
         value = head.read_text(encoding="utf-8").strip()
@@ -167,18 +194,18 @@ def git_state(root: Path) -> dict:
         raise ValueError("cyclic Git symbolic reference")
     result = {}
     for path in sorted(paths):
-        value = stamp(path, content_digest=True, allow_links=True)
+        value = stamp(path, content_digest=True, allow_links=True, deadline=deadline)
         # Creating local metadata/lock files is not a Git index or HEAD change.
         result[str(path)] = value[:4] if value is not None and stat.S_ISDIR(value[1]) else value
     return result
 
 
-def require_git_state(root: Path, validated: dict) -> None:
-    if git_state(root) != validated:
+def require_git_state(root: Path, validated: dict, *, deadline: float | None = None) -> None:
+    if git_state(root, deadline=deadline) != validated:
         raise ValueError("Git protection evidence changed after preflight; retry preparation")
 
 
-def output_state(root: Path, namespace: str) -> dict:
+def output_state(root: Path, namespace: str, *, deadline: float | None = None) -> dict:
     output = root / namespace
     paths = {output, *output.parents}
     paths = {path for path in paths if path != root and path.is_relative_to(root)}
@@ -186,7 +213,7 @@ def output_state(root: Path, namespace: str) -> dict:
         paths.update(output.rglob("*"))
     result = {}
     for path in sorted(paths):
-        value = stamp(path, content_digest=True)
+        value = stamp(path, content_digest=True, deadline=deadline)
         if value is not None and (
             stat.S_ISLNK(value[1]) or not (stat.S_ISREG(value[1]) or stat.S_ISDIR(value[1]))
         ):
@@ -195,16 +222,20 @@ def output_state(root: Path, namespace: str) -> dict:
     return result
 
 
-def read(root: Path, home: Path, selection: list) -> Publication | None:
+def read(
+    root: Path, home: Path, selection: list, *, deadline: float | None = None,
+) -> Publication | None:
     from .static_instructions import pair_pending_path
 
     try:
+        _check(deadline)
         if pair_pending_path(root).exists():
             return None
         path = _directory(root) / "prepared.json"
         if not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
+        _check(deadline)
         if (
             data.get("schema") != _SCHEMA or data.get("version") != 1
             or data.get("root") != str(root) or data.get("home") != str(home)
@@ -216,30 +247,33 @@ def read(root: Path, home: Path, selection: list) -> Publication | None:
         ):
             return None
         if (
-            not matches(data["inputs"]) or not matches(data["outputs"])
-            or data.get("git") != git_state(root)
+            not matches(data["inputs"], deadline=deadline) or not matches(data["outputs"], deadline=deadline)
+            or data.get("git") != git_state(root, deadline=deadline)
             or data["generation"] != generation(selection, data["inputs"])
         ):
             return None
+        _check(deadline)
         return Publication(
             unchanged=data["count"], generation=data["generation"], reused=True,
             publication_revision=data.get("publication_revision", ""),
         )
+    except TimeoutError:
+        raise
     except (OSError, ValueError, TypeError, AttributeError):
         return None
 
 
 def save(
     root: Path, home: Path, selection: list, reads: dict, desired: dict, namespace: str,
-    *, validated_git: dict, revision: str,
+    *, validated_git: dict, revision: str, deadline: float | None = None,
 ) -> str:
     from .local_cache_worker import _write
 
-    require_git_state(root, validated_git)
+    require_git_state(root, validated_git, deadline=deadline)
     identity = generation(selection, reads)
     directory = _directory(root)
     directory.mkdir(exist_ok=True)
-    outputs = output_state(root, namespace)
+    outputs = output_state(root, namespace, deadline=deadline)
     expected = {
         str(root / namespace / relative): hashlib.sha256(content).hexdigest()
         for relative, content in desired.items()
@@ -257,6 +291,6 @@ def save(
         "git": validated_git, "model_admission": "unknown",
         "publication_revision": revision,
     }
-    require_git_state(root, validated_git)
+    require_git_state(root, validated_git, deadline=deadline)
     _write(directory / "prepared.json", json.dumps(data) + "\n")
     return identity

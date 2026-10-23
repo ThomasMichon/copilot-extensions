@@ -206,10 +206,16 @@ cancellation/tree custody and operation-specific owner limits, without a broad
 five-second render cutoff. Without a Worktrees owner, the independent bounded
 compatibility renderer remains available; refused identity or a failed owner
 does not authorize switching to another installation.
+On POSIX the Bridge-owned command uses the existing enclosing-process-group
+contract, so foreground Git stays in the group Bridge retires on cancellation
+or owner exit. Windows retains kill-on-close Job custody. Native Linux
+qualification explicitly removes test-only detachment suppression.
 
 SessionStart verifies current readiness before queueing its bounded backup.
 An exhausted reuse-probe budget means unverified readiness, not disabled
 backup: the remaining hook budget is checked again before queueing.
+That probe budget reaches receipt, file-hash and Git-evidence validation;
+expiry cannot be converted to reused readiness or swallowed as a cache miss.
 For a late backup, the exact session retains a watch on the checkout-local
 completion status. The existing post-tool hook surfaces completion once:
 changed/removed files explicitly require restart/new context before discovery;
@@ -223,6 +229,10 @@ publication lock, including partial publications. Completion compares revisions,
 not only the backup's own copy counts: a foreground publisher that finishes
 before the backup is still a late change requiring a restart notice. An
 unchanged backup does not invent a new publication revision.
+The watch timestamp precedes the probe as well, so a worker finishing during
+the probe is not discarded as an older completion. Abnormal worker exits
+persist a terminal timestamp and failure result for the same post-tool
+consumer; existing completed results are preserved.
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
 purely checked-in: a gitignored, locally re-rendered cache of auto-discovered
