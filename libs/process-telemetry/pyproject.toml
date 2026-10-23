@@ -14,8 +14,8 @@ dependencies = []
 [project.optional-dependencies]
 otlp = [
     "opentelemetry-sdk>=1.45.1,<2",
-    "opentelemetry-exporter-otlp-proto-http>=1.45.1,<2",
-    "requests>=2.32.4,<3",
+    "opentelemetry-exporter-otlp-proto-common>=1.45.1,<2",
+    "opentelemetry-proto>=1.45.1,<2",
 ]
 
 [tool.uv]

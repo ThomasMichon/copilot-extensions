@@ -80,7 +80,11 @@ approved dependency/deployment flow. Nothing installs it on a hook or import.
 ### Optional real OpenTelemetry export
 
 `process_telemetry.otlp.LocalOtlpSink(endpoint, timeout=2)` constructs a real
-OpenTelemetry Python SDK/OTLP-HTTP exporter only when explicitly called.
+OpenTelemetry Python SDK `SpanExporter` only when explicitly called. It uses
+the official OTLP protobuf encoder and a bounded stdlib HTTP transport. The
+stock SDK HTTP exporter constructor parses/logs ambient headers even with
+explicit arguments; this adapter uses the public exporter extension point
+instead, without mutating process environment or SDK globals.
 The endpoint must include a literal loopback IP, explicit port and `/v1/traces`.
 No DNS name, implicit environment destination, proxy, netrc credentials,
 redirect, query or user-info is accepted. A remote consumer requires a separately
@@ -108,8 +112,10 @@ Batch mode calls the existing callable with up to 32 records; there is no
 second SDK processor queue/thread. The exporter validates the typed performance
 schema before constructing SDK `ReadableSpan` objects; arbitrary lifecycle
 events or raw logs are refused. Export errors propagate to the buffer's
-per-record `sink_failed` counter. The SDK owns bounded in-call retries within the
-configured timeout (positive, at most five seconds), not a durable retry queue.
+per-record `sink_failed` counter. Each batch gets one HTTP attempt with the
+configured timeout (positive, at most five seconds); no retry queue is added.
+Non-2xx, malformed/oversize acknowledgements and reported rejected spans fail
+export rather than counting as successful delivery.
 Timeout is a transport/export budget, not a hard OS cancellation promise;
 a blocked call still cannot block producers/close or multiply writers.
 

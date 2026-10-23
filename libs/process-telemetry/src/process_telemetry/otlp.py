@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import http.client
 import math
 import re
 from urllib.parse import urlsplit
@@ -67,41 +68,50 @@ class LocalOtlpSink:
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 5:
             raise ValueError("export timeout must be positive and at most five seconds")
         try:
-            import requests
-            from opentelemetry.exporter.otlp.proto.http import Compression
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-            from opentelemetry.metrics import NoOpMeterProvider
+            from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+            from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceResponse
+            from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
         except ImportError as exc:
             raise RuntimeError("optional OTLP dependencies are not installed") from exc
 
-        class LoopbackSession(requests.Session):
-            def send(self, request, **kwargs):
-                if request.url != endpoint:
-                    raise ValueError("unexpected telemetry destination")
-                # Ignore ambient proxy/netrc/certificate/header configuration.
-                # The local receiver's transport owner handles authentication.
-                if type(request.body) is not bytes:
-                    raise ValueError("OTLP requires an encoded protobuf body")
-                request.headers.clear()
-                request.headers["Content-Type"] = "application/x-protobuf"
-                request.headers["Content-Length"] = str(len(request.body))
-                kwargs.update(
-                    allow_redirects=False, proxies={}, cert=None, verify=True,
-                    timeout=min(float(kwargs.get("timeout") or timeout), timeout),
-                )
-                response = super().send(request, **kwargs)
-                if 300 <= response.status_code < 400:
-                    response.close()
-                    raise RuntimeError("OTLP 3xx responses are not successful acknowledgements")
-                return response
+        destination = urlsplit(endpoint)
 
-        self._session = LoopbackSession()
-        self._session.trust_env = False
+        class LoopbackSpanExporter(SpanExporter):
+            # The SDK HTTP exporter's constructor parses/logs ambient headers
+            # even with explicit arguments. Use the public exporter extension
+            # point and canonical protobuf encoder, never patch SDK globals.
+            def export(self, spans):
+                connection = http.client.HTTPConnection(
+                    destination.hostname, destination.port, timeout=timeout,
+                )
+                try:
+                    body = encode_spans(spans).SerializeToString()
+                    if len(body) > 262144:
+                        return SpanExportResult.FAILURE
+                    connection.request("POST", "/v1/traces", body, {
+                        "Content-Type": "application/x-protobuf",
+                        "Content-Length": str(len(body)),
+                    })
+                    response = connection.getresponse()
+                    if not 200 <= response.status < 300:
+                        return SpanExportResult.FAILURE
+                    result = response.read(65537)
+                    if len(result) > 65536:
+                        return SpanExportResult.FAILURE
+                    acknowledgement = ExportTraceServiceResponse.FromString(result)
+                    if acknowledgement.partial_success.rejected_spans:
+                        return SpanExportResult.FAILURE
+                    return SpanExportResult.SUCCESS
+                except Exception:
+                    return SpanExportResult.FAILURE
+                finally:
+                    connection.close()
+
+            def shutdown(self):
+                pass  # Every export closes its own finite connection.
+
         self._closed = False
-        self._exporter = OTLPSpanExporter(
-            endpoint=endpoint, timeout=timeout, headers={}, session=self._session,
-            compression=Compression.NoCompression, meter_provider=NoOpMeterProvider(),
-        )
+        self._exporter = LoopbackSpanExporter()
 
     def __call__(self, event: dict) -> None:
         """Synchronous off-path single-record compatibility adapter."""
@@ -160,4 +170,3 @@ class LocalOtlpSink:
         if not self._closed:
             self._closed = True
             self._exporter.shutdown()
-            self._session.close()

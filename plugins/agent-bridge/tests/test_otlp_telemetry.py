@@ -9,8 +9,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-pytest.importorskip("opentelemetry.exporter.otlp.proto.http.trace_exporter")
-from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+pytest.importorskip("opentelemetry.exporter.otlp.proto.common.trace_encoder")
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+    ExportTraceServiceRequest, ExportTraceServiceResponse,
+)
 
 from process_telemetry import SinkSlot
 from process_telemetry.buffer import BufferedSink
@@ -30,7 +32,7 @@ def record():
 @pytest.fixture
 def receiver(tmp_path):
     captured = []
-    config = {"status": 200, "location": ""}
+    config = {"status": 200, "location": "", "response": b""}
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
@@ -45,8 +47,9 @@ def receiver(tmp_path):
             self.send_response(config["status"])
             if config["location"]:
                 self.send_header("Location", config["location"])
-            self.send_header("Content-Length", "0")
+            self.send_header("Content-Length", str(len(config["response"])))
             self.end_headers()
+            self.wfile.write(config["response"])
 
         def log_message(self, *args):
             pass
@@ -112,6 +115,21 @@ def test_real_sdk_exports_protobuf_and_receiver_persists_without_private_environ
     assert b"must-not-export" not in file.read_bytes()
 
 
+@pytest.mark.parametrize("variable", ["OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS"])
+def test_malformed_ambient_header_never_reaches_logs(receiver, monkeypatch, caplog, variable):
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_HEADERS", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_TRACES_HEADERS", raising=False)
+    monkeypatch.setenv(variable, "x-private=must-not-log;metadata")
+    with caplog.at_level("WARNING"):
+        sink = LocalOtlpSink(receiver[0])
+        try:
+            sink(record())
+        finally:
+            sink.close()
+    assert "must-not-log" not in caplog.text
+    assert "must-not-log" not in str(receiver[1][0][1])
+
+
 @pytest.mark.parametrize("endpoint", [
     "http://example.com:4318/v1/traces", "http://192.0.2.1:4318/v1/traces",
     "http://localhost:4318/v1/traces", "https://127.0.0.1:4318/v1/traces",
@@ -138,6 +156,24 @@ def test_redirect_cannot_export_elsewhere(receiver, status, location):
     finally:
         sink.close()
     assert len(captured) == 1
+
+
+@pytest.mark.parametrize("kind", ["partial", "malformed", "oversize"])
+def test_unsuccessful_acknowledgement_is_not_export_success(receiver, kind):
+    endpoint, _, config = receiver
+    acknowledgement = ExportTraceServiceResponse()
+    acknowledgement.partial_success.rejected_spans = 1
+    config["response"] = {
+        "partial": acknowledgement.SerializeToString(),
+        "malformed": b"not-protobuf",
+        "oversize": b"a" * 65537,
+    }[kind]
+    sink = LocalOtlpSink(endpoint, timeout=.2)
+    try:
+        with pytest.raises(RuntimeError, match="OTLP export failed"):
+            sink(record())
+    finally:
+        sink.close()
 
 
 def test_receiver_outage_isolated_from_bounded_producers(receiver):
