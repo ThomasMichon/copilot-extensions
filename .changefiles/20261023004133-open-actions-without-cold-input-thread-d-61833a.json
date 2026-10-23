@@ -1,0 +1,9 @@
+{
+  "comment": "Open Actions without cold input-thread discovery and bind liveness refinement to its originating dialog and source.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -1121,6 +1121,22 @@ to direct launch. An AHP-owned row exposes **Dispose hosted session** as an
 explicit action. It disposes and terminally marks the hosted binding so a later
 normal Finalize can proceed; terminal exit never performs that destruction.
 
+### Actions dialog refinement
+
+Actions opens from a private snapshot of the published row. Tracking-path and
+locality discovery run on its existing background worker, never before modal
+push. Unknown locality does not enable local-only AHP operations.
+
+Each refinement is bound to the original modal, open epoch, source-qualified
+row, setup epoch and project binding. Closing/reopening, replacing a source or
+rebinding the project discards late results. Accepted results update the header,
+verbs, modifiers and dialog-owned dispatch maps together without rewriting the
+authoritative row feed. Missing records or failed probes retain cached content
+with a `liveness not verified` footer instead of presenting a successful refresh.
+
+These are functional guarantees; headless modal tests do not establish the
+native Actions-under-one-second or input-under-100ms budgets.
+
 ### Developing a pivot: render early, render often
 
 Any change touching a pivot's columns, derived fields, row grouping, or

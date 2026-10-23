@@ -10469,7 +10469,8 @@ def test_run_bg_drops_quietly_when_the_picker_already_cancelled_it(caplog):
     )
 
 
-def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
+@pytest.mark.parametrize("cancel", [False, True])
+def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch, cancel):
     """Phase 3c UI-thread boundary: the worktree Actions menu opens
     IMMEDIATELY from cached liveness (never frozen).
 
@@ -10491,14 +10492,20 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     tdir = tmp_path / "worktrees"
     tdir.mkdir()
     (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
-    monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
     monkeypatch.setattr(_context, "project", lambda: "example")
     gate = threading.Event()
     calls = {"n": 0}
+    input_thread = threading.get_ident()
+
+    def _cold_tracking_dir(project=None):
+        assert threading.get_ident() != input_thread
+        gate.wait(5)
+        return tdir
+
+    monkeypatch.setattr(_cfg, "tracking_dir", _cold_tracking_dir)
 
     def _gated_verify(project, *, worktree_ids=None, timeout=None):
         calls["n"] += 1
-        gate.wait(5)                    # block as the real mux/session probe would
         return types.SimpleNamespace(
             rows=[{
                 "id": wt_id,
@@ -10519,11 +10526,7 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
             scr.machine_idx = scr.local_index()
             scr.refresh()
             await pilot.pause()
-            body = scr.query_one("#nf-body-data")
-            body.focus()
-            body.highlighted = body._stops.index(("L", 0))
-            await pilot.pause()
-            assert body.has_focus and scr.sel == ("L", 0)
+            scr.sel = ("L", 0)
             scr._open_submenu()
             await pilot.pause()
             # Open-first: the menu is ALREADY open (from cached verbs) and marked
@@ -10533,9 +10536,21 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
             assert menu is not None, "menu did not open immediately (should be open-first)"
             assert menu._loading is True
             assert ("Open" in menu._actions) or ("Resume" in menu._actions)
+            assert calls["n"] == 0
+            if cancel:
+                await pilot.press("escape")
+                await pilot.pause()
+                assert _sub_menu(scr) is None
             # Release the gate; the probe completes and the verbs refine in place
             # (loading drops) -- no re-open.
             gate.set()
+            if cancel:
+                for worker in tuple(scr._bg_threads):
+                    await asyncio.to_thread(worker.join, 2)
+                await pilot.pause()
+                assert _sub_menu(scr) is None
+                assert menu._loading
+                return
             for _ in range(200):
                 await pilot.pause()
                 await asyncio.sleep(0.02)
@@ -10561,7 +10576,7 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
     tdir = tmp_path / "worktrees"
     tdir.mkdir()
     (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
-    monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
+    monkeypatch.setattr(_cfg, "tracking_dir", lambda project=None: tdir)
     monkeypatch.setattr(_context, "project", lambda: "example")
     gate = threading.Event()
     started = threading.Event()

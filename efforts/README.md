@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Actions Dialog Isolation](active/actions-dialog-isolation/README.md) | Blocked; source plan awaits managed publication authority and review | #7939; #7940 shared cache and #7935 native qualification remain separate |
+| [Actions Dialog Isolation](active/actions-dialog-isolation/README.md) | Active; reviewed plan merged, isolated consumer implementation validated | #7939; #7940 shared cache and #7935 native qualification remain separate |
 | [Producer Work Reuse](active/producer-work-reuse/README.md) | Draft; code-grounded producer caching/batching/indexing plan only; execution admission pending | #7948/#7949/#7950 and retained #2110 declaration/health acceptance; no rollout |
 | [Reconstructible Runtime State](active/reconstructible-runtime-state/README.md) | Active; G1 disconnected facts/readers and isolated fixtures admitted; later slices gated | #7947; preserves #1460 compatibility (including consolidated #1915) and #3761 ground-state ownership; no live rebuild or rollout |
 | [Prompt Receipt Observation](active/prompt-receipt-observation/README.md) | Draft; bounded async non-provisioning first-prompt receipt plan before implementation | #7942; unchanged consumption authority; no installed rollout |

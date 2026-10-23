@@ -321,25 +321,26 @@ class SubMenuScreen(ModalScreen[tuple]):
     _AHP_DESC = ("Launch (Open/Resume) through the configured same-machine "
                  "Agent Host Protocol endpoint. Enter/Space toggles this row.")
 
+    @staticmethod
+    def record_is_local(rec, engine=None) -> bool:
+        """Use published locality only; the source's LOCAL may be a cold resolver."""
+        if rec.get("source_kind", "machine-ssh") != "machine-ssh":
+            return False
+        explicit = rec.get("is_local")
+        if explicit is not None:
+            return bool(explicit)
+        if engine is None:
+            return True
+        local = getattr(engine, "_source_local", None)
+        return local is not None and (rec.get("machine"), rec.get("env")) == local
+
     def __init__(self, rec, actions, *, loading=False, engine=None) -> None:
         super().__init__()
         self._rec = rec
         self._actions = actions
         self._no_mux = False
         self._ahp = False
-        explicit_local = rec.get("is_local")
-        self._is_local = (
-            bool(explicit_local)
-            if explicit_local is not None
-            else (
-                True
-                if engine is None
-                else (
-                    rec.get("source_kind", "machine-ssh") == "machine-ssh"
-                    and (rec.get("machine"), rec.get("env")) == engine.src.LOCAL
-                )
-            )
-        )
+        self._is_local = self.record_is_local(rec, engine)
         # Always-async: the menu opens IMMEDIATELY from cached liveness; when an
         # authoritative re-verify is in flight, ``loading`` shows the shared
         # animated spinner in the footer and the caller calls ``refresh_actions``
@@ -475,7 +476,7 @@ class SubMenuScreen(ModalScreen[tuple]):
         t.append("refreshing worktree liveness…", style=C_DIM)
         self.query_one("#sub-foot", Static).update(t)
 
-    def refresh_actions(self, new_actions) -> None:
+    def refresh_actions(self, new_actions, *, status="") -> None:
         """Refine the verb list IN PLACE after the async liveness verify lands and
         drop the footer spinner (always-async: the menu opened immediately from
         cached state; this corrects the verbs without a re-open). Preserves the
@@ -488,13 +489,19 @@ class SubMenuScreen(ModalScreen[tuple]):
                 pass
             self._spin_timer = None
         try:
-            self.query_one("#sub-foot", Static).update("")
+            self.query_one("#sub-foot", Static).update(Text(status))
+            self.query_one("#sub-head", Static).update(self._header())
         except Exception:
             pass
         self._actions = list(new_actions)
+        self._is_local = self.record_is_local(self._rec, self._engine)
         self._has_nomux = ("Open" in self._actions) or ("Resume" in self._actions)
         self._nomux_index = len(self._actions) if self._has_nomux else None
         self._has_ahp = self._has_nomux and self._is_local
+        if not self._has_ahp:
+            self._ahp = False
+        if not self._has_nomux:
+            self._no_mux = False
         self._ahp_index = len(self._actions) + 1 if self._has_ahp else None
         try:
             ol = self.query_one("#sub-list", OptionList)

@@ -212,49 +212,69 @@ class PickerScreenWorktreeActionsMixin:
         rec = self._submenu_target()
         if not rec:
             return
-        # Always-async UX: OPEN the Actions menu IMMEDIATELY from the record's
-        # current (bulk-derived) liveness -- transition to the next component at
-        # once, show cached content, never freeze while probing. #4057: opening the
-        # menu is one of the two moments we want the TRUTH for THIS worktree's mux +
-        # bound-Copilot liveness, but that re-verify touches the mux + session locks
-        # (cross-process). So when it's warranted (a real worktree with a record) we
-        # run it OFF the render flow and REFINE the verb set in place when it lands;
-        # the modal carries a footer spinner meanwhile. A cheap record-existence
-        # stat decides whether to probe -- a mock/fixture row (no record) just opens
-        # with its hand-set liveness, no spinner, no refine.
+        source_rec = rec
+        # The modal owns a snapshot, not the authoritative feed's mutable row.
+        rec = {**rec, "raw": dict(rec.get("raw") or {})}
         _wt_id = (rec.get("raw") or {}).get("id")
-        _need_verify = False
-        if (
+        _need_verify = bool(
             self.real_ops
             and _wt_id
             and rec.get("source_kind", "machine-ssh") == "machine-ssh"
-        ):
-            try:
-                from .. import project_config as _config
-                from .. import context as _context
-                from .. import engine_group_c as _engine_group_c
-
-                _need_verify = (_config.tracking_dir() / f"{_wt_id}.yaml").exists()
-            except Exception:
-                _need_verify = False
-        self._push_wt_submenu(rec, loading=_need_verify)
+        )
+        menu = self._push_wt_submenu(rec, loading=_need_verify)
         if not _need_verify:
+            return
+
+        from .. import context as _context
+
+        source = self.src
+        epoch = self._wt_submenu_epoch
+        setup_epoch = getattr(self, "_setup_epoch", None)
+        identity = self._wt_submenu_identity(rec)
+        bootstrap = _context.project_bootstrap()
+        try:
+            project = _context.project()
+        except RuntimeError:
+            self._refresh_wt_submenu(rec, screen=menu, status="cached · liveness not verified")
             return
 
         def _verify():
             try:
+                from .. import project_config as _config
+                from .. import engine_group_c as _engine_group_c
+
+                local = getattr(source, "LOCAL", None)
+                is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
+                if not is_local or not (_config.tracking_dir(project) / f"{_wt_id}.yaml").exists():
+                    return None, is_local
                 batch = _engine_group_c.picker_reconcile_local(
-                    _context.project(),
+                    project,
                     worktree_ids=[_wt_id],
                 )
                 for row in batch.rows:
                     if isinstance(row, dict) and row.get("id") == _wt_id:
-                        return row
-                return None
+                        return row, is_local
+                return None, is_local
             except Exception:
-                return None
+                return None, None
 
-        def _done(reconcile_row):
+        def _done(result):
+            if (
+                getattr(self.app, "screen", None) is not menu
+                or self._wt_submenu_epoch != epoch
+                or self.src is not source
+                or getattr(self, "_setup_epoch", None) != setup_epoch
+                or self._wt_submenu_identity(rec) != identity
+                or self._wt_submenu_identity(source_rec) != identity
+                or _context.project_bootstrap() is not bootstrap
+            ):
+                return
+            try:
+                if _context.project() != project:
+                    return
+            except RuntimeError:
+                return
+            reconcile_row, is_local = result
             if isinstance(reconcile_row, dict):
                 from . import data_local as _data_local
 
@@ -271,11 +291,20 @@ class PickerScreenWorktreeActionsMixin:
                 )
                 rec.clear()
                 rec.update(refreshed)
-            # Refine the OPEN menu's verbs in place + drop its footer spinner. The
-            # main footer stays quiet -- the modal owns the load indicator.
-            self._refresh_wt_submenu(rec)
+            if is_local is not None:
+                rec["is_local"] = is_local
+            self._refresh_wt_submenu(
+                rec, screen=menu,
+                status="" if isinstance(reconcile_row, dict) else "cached · liveness not verified",
+            )
 
         self._run_bg("Actions", _verify, _done, quiet=True)
+    @staticmethod
+    def _wt_submenu_identity(rec):
+        return (
+            rec.get("source_kind", "machine-ssh"), rec.get("source_id"),
+            rec.get("machine"), rec.get("env"), (rec.get("raw") or {}).get("id"),
+        )
     def _wt_submenu_verbs(self, rec):
         """Compute the worktree Actions verb list + the cross-plugin ``ext`` map
         from the record's CURRENT liveness. Pure -- engine state only, no IO -- so
@@ -285,6 +314,7 @@ class PickerScreenWorktreeActionsMixin:
         # ``_session_action_verbs`` (unit-tested #4058); the bridge/system nav +
         # cross-plugin verbs below need engine state, so they are appended here.
         acts = self._session_action_verbs(rec)
+        self._wt_submenu_workers = {}
         execution_leg = rec.get("execution_leg")
         if not isinstance(execution_leg, dict):
             execution_leg = (rec.get("raw") or {}).get("execution_leg")
@@ -293,7 +323,7 @@ class PickerScreenWorktreeActionsMixin:
             and execution_leg.get("provider") == "ahp"
             and execution_leg.get("state", "unknown") in {"active", "unknown"}
             and rec.get("source_kind", "machine-ssh") == "machine-ssh"
-            and (rec.get("machine"), rec.get("env")) == self.src.LOCAL
+            and SubMenuScreen.record_is_local(rec, self)
         ):
             acts.append("Dispose hosted session")
         if rec.get("source_kind", "machine-ssh") != "machine-ssh":
@@ -356,26 +386,50 @@ class PickerScreenWorktreeActionsMixin:
         :meth:`_refresh_wt_submenu` when the probe lands."""
         acts, ext = self._wt_submenu_verbs(rec)
         self._wt_submenu_ext = ext
+        self._wt_submenu_epoch = getattr(self, "_wt_submenu_epoch", 0) + 1
+        epoch = self._wt_submenu_epoch
+        source = self.src
+        setup_epoch = getattr(self, "_setup_epoch", None)
+        menu = SubMenuScreen(rec, acts, loading=loading, engine=self)
+        menu._action_extensions = ext
+        menu._action_workers = dict(getattr(self, "_wt_submenu_workers", {}) or {})
+
+        def dismissed(result):
+            if (
+                self._wt_submenu_epoch != epoch
+                or self.src is not source
+                or getattr(self, "_setup_epoch", None) != setup_epoch
+            ):
+                return
+            self._wt_submenu_epoch += 1
+            self._wt_submenu_dispatch(
+                rec, result, ext=menu._action_extensions, workers=menu._action_workers,
+            )
         # Migrated to a native Textual ``ModalScreen`` (#88 F4): the modal returns
         # the chosen ``(action_label, no_mux, ahp)`` via ``dismiss`` (or ``None`` on
         # cancel); ``_wt_submenu_dispatch`` runs the selected verb.
         self.app.push_screen(
-            SubMenuScreen(rec, acts, loading=loading, engine=self),
-            lambda result: self._wt_submenu_dispatch(rec, result),
+            menu, dismissed,
         )
-    def _refresh_wt_submenu(self, rec):
+        return menu
+    def _refresh_wt_submenu(self, rec, *, screen=None, status=""):
         """Refine the OPEN Actions menu's verbs in place after the async liveness
         verify lands (and drop its footer spinner). A no-op if the operator already
         closed the menu."""
+        scr = getattr(self.app, "screen", None)
+        if not isinstance(scr, SubMenuScreen) or scr._rec is not rec:
+            return
+        if screen is not None and scr is not screen:
+            return
         acts, ext = self._wt_submenu_verbs(rec)
         self._wt_submenu_ext = ext
-        scr = getattr(self.app, "screen", None)
-        if isinstance(scr, SubMenuScreen):
-            scr.refresh_actions(acts)
-    def _wt_submenu_dispatch(self, rec, result):
+        scr._action_extensions = ext
+        scr._action_workers = dict(getattr(self, "_wt_submenu_workers", {}) or {})
+        scr.refresh_actions(acts, status=status)
+    def _wt_submenu_dispatch(self, rec, result, *, ext=None, workers=None):
         """Run the chosen worktree Actions verb (the ``SubMenuScreen`` dismiss
-        callback). Reads the CURRENT cross-plugin map (``_wt_submenu_ext``) so a
-        live in-place verb refine stays consistent."""
+        callback). Native dialogs supply their own accepted-revision maps;
+        direct legacy callers retain the engine-map fallback."""
         if result is None:
             return
         cur, no_mux, ahp = result
@@ -386,12 +440,14 @@ class PickerScreenWorktreeActionsMixin:
         ):
             self.debug = "This workspace has no session here; navigate to its controller or Refresh."
             return
-        ext = getattr(self, "_wt_submenu_ext", {}) or {}
+        if ext is None:
+            ext = getattr(self, "_wt_submenu_ext", {}) or {}
         if cur in ext:
             from .engine_action_confirm import confirm_then
             confirm_then(self.app, ext[cur], lambda a=ext[cur]: self._run_wt_action(a, rec))
             return
-        workers = getattr(self, "_wt_submenu_workers", {}) or {}
+        if workers is None:
+            workers = getattr(self, "_wt_submenu_workers", {}) or {}
         if cur in workers:
             self._open_worker_row(workers[cur])
             return

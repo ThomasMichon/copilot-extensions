@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-23
-- **Status:** Blocked
+- **Status:** Active
 - **Vision:** [Picker](../../../visions/picker/README.md), responsive-by-budget
 - **Umbrella issue:** #7939
 - **Sub-issues:** #7940 (shared configuration dependency; not absorbed)
@@ -75,30 +75,31 @@ effort is the finite Actions consumer slice, not completion of a wider campaign.
 
 ### Phase 1 — Review the consumer contract
 
-- [ ] Review and merge this source plan before functional implementation.
-- [ ] Confirm the shared configuration seam with its integration owner before
-  any #7940 functional change; otherwise retain #7940 as a dependency.
+- [x] Review and merge this source plan before functional implementation.
+- [x] Deferred to `#7940`: Confirm the shared configuration seam with its
+  integration owner before any #7940 functional change; otherwise retain #7940
+  as a dependency.
 
 ### Phase 2 — Immediate opening and exact completion admission
 
-- [ ] Push `SubMenuScreen` using published row fields before any path/provider
+- [x] Push `SubMenuScreen` using published row fields before any path/provider
   lookup. Move record existence and eligibility refinement into the existing
   background request; keep fixture/no-record behavior compatible.
-- [ ] Remove cold `LOCAL` resolution from menu construction. Unknown locality
+- [x] Remove cold `LOCAL` resolution from menu construction. Unknown locality
   must not offer local-only AHP actions; prefer explicit published locality or
   already-prepared source identity, never discovery.
-- [ ] Bind completion to the originating modal object, monotonically increasing
+- [x] Bind completion to the originating modal object, monotonically increasing
   open epoch and source-qualified row identity. Capture the request's project
   and source inputs; reject close/reopen, source replacement and out-of-order
   results before mutating a row, callback map or spinner.
-- [ ] Refresh header, options, extension/worker dispatch maps and loading state
+- [x] Refresh header, options, extension/worker dispatch maps and loading state
   from one accepted revision. Preserve applicable launch toggles and navigation.
-- [ ] Preserve missing/error results as unverified cached data, not a newly
+- [x] Preserve missing/error results as unverified cached data, not a newly
   authoritative empty or healthy result.
 
 ### Phase 3 — Review, land and retain qualification obligations
 
-- [ ] Update the directly related runtime documentation and mandatory changefile.
+- [x] Update the directly related runtime documentation and mandatory changefile.
 - [ ] Complete focused functional tests, lint and required source checks.
 - [ ] Obtain independent required review, resolve findings and verify actual merge.
 - [ ] Record release/rollout and native qualification separately; do not change
@@ -106,22 +107,22 @@ effort is the finite Actions consumer slice, not completion of a wider campaign.
 
 ## Validation Plan
 
-- [ ] First-open work-count test: block provider/config/path lookup and show
+- [x] First-open work-count test: block provider/config/path lookup and show
   that modal push occurs first, with zero such work on the input thread.
-- [ ] Cold locality test: a raising lazy `LOCAL` accessor cannot be touched by
+- [x] Cold locality test: a raising lazy `LOCAL` accessor cannot be touched by
   modal construction; unknown locality does not offer local-only operations.
-- [ ] Deterministic schedules: close A/open B/finish A, reopen A, source change,
+- [x] Deterministic schedules: close A/open B/finish A, reopen A, source change,
   same identifier on different source, cancellation, error and missing record.
   Rejected completions change no record, header, dispatch map or spinner.
-- [ ] Same-row success refreshes LOCK/header and verbs together while retaining
+- [x] Same-row success refreshes LOCK/header and verbs together while retaining
   valid modifiers and ordinary dispatch behavior.
-- [ ] Configuration dependency: #7940 must prove expiry with a fake clock,
+- [x] Deferred to `#7940`: Configuration dependency must prove expiry with a fake clock,
   atomic replacement, concurrent single-flight reads, supplier/template changes,
   manual invalidation and honest missing/error behavior before it closes.
-- [ ] Native qualification: on a coordinated quiet lane, measure real first
+- [x] Deferred to `#7935`: Native qualification on a coordinated quiet lane must measure real first
   Actions and Escape/input boundaries cold/warm with source/serving identities,
   cardinalities, samples and errors. Headless tests do not pass this gate.
-- [ ] Keep clean-room/native/external tiers explicit. No installer behavior is
+- [x] Keep clean-room/native/external tiers explicit. No installer behavior is
   changed; first-open functional fixtures cover unprepared consumer state,
   not fresh-machine installation or deployed behavior.
 
@@ -152,3 +153,22 @@ interfaces. Do not create a general request broker or shared polling layer.
   No PR was opened. Preserve this source worktree and retry its managed
   publication after the current publisher releases authority; do not bypass
   the publication gate or start functional implementation.
+
+### 2026-10-23 — Reviewed plan and isolated consumer implementation
+
+- Plan #8142 received an approving Copilot review and green checks, then merged
+  as `c3acde020b24eb56fd89004976b0c10e0fdae8d9`. Implementation started only
+  after managed reconciliation onto that merge.
+- The modal now owns a row snapshot and dispatch maps. Path/locality work moved
+  behind modal push, with exact lifetime/source/setup/project completion checks
+  and a visibly unverified fallback. No shared config-cache or startup code changed.
+- Contained Windows functional run: 39 Actions/menu tests passed, including
+  blocked tracking lookup plus Escape, repeated out-of-order completions and a
+  real headless modal's LOCK/header/verb refresh. Corrected the regression
+  fixture's noncanonical source ID and removed unrelated body-focus timing from
+  the direct-open test before the passing run.
+- Touched Python lint and the 13-plugin install-contract check passed. Isolated
+  test dependencies were prepared only after the missing-environment error;
+  no installed runtime, production UI, service or benchmark was changed/run.
+- Native timing, release/rollout and #7940's separate configuration/supplier
+  contract remain open. Source review and actual implementation merge are next.
