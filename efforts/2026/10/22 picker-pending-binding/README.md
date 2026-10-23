@@ -4,7 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-22
-- **Status:** Active
+- **Status:** Done
+- **Completion boundary:** reviewed source increments only; #7938 retains full performance, release and installed acceptance
 - **Vision:** `visions/picker/README.md` — responsive front door and decision support before cost
 - **Umbrella issue:** #7938
 
@@ -15,11 +16,16 @@ bootstrap finish. First interactive chrome and first authoritative rows are
 different milestones; neither is evidence of the other. Keep operational
 authority in the engine and retain explicit bootstrap failure.
 
+Completion here does not close #7938 or claim a sub-two-second native interactive
+frame. It closes the admitted consumer and config-dir-only source increments;
+larger-cardinality, real compositor/remote, release and installed qualification
+remain explicitly tracked on that issue.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| patient-piston | Consumer startup implementation, tests, source review and merge | #7938 |
+| patient-piston | Consumer startup and config-dir-only producer, tests, source review and merge | #7938 |
 | crooked-sprocket | Completed, separately owned engine bootstrap optimization; no live-session contact | #7974 |
 
 ## Coordination
@@ -130,7 +136,7 @@ Implementation details below are agent-recommended means of meeting the request.
 - [x] Resolve the authority/scope blocker: bootstrap currently has no resolved
   machine configuration, and open #7449 owns the inspected Manager-launch seam.
   Only `config_dir` is admitted; effective repo-dir and machine remain fallbacks.
-- [ ] After that decision and a fresh collision check, implement only the admitted
+- [x] After that decision and a fresh collision check, implement only the admitted
   optional producer fields with Worktrees tests/changefile, remeasure the actual
   consumer, and steward its separate source PR through review and merge.
   This is the config-dir-only incremental slice, not the superseded one-query
@@ -143,7 +149,9 @@ Implementation details below are agent-recommended means of meeting the request.
   success without exposing actions or starting post-binding maintenance.
 - [x] Regression-first: a blocked advisory hook must not be called or delay a ready
   authoritative local loader; exactly one initial loader start, current rows
-  retained, and slow remote sources do not delay the local source.
+  retained in the source fixtures.
+- [x] Deferred to `#7938`: Verify slow real remote sources do not delay current
+  local rows, separately from synthetic preferred-source controls.
 - [x] Scalar controls: complete optional payload uses zero legacy scalar calls;
   older payload uses at most one call per scalar per bound project; project switch
   invalidates binding and caches; malformed optional values do not select paths.
@@ -158,6 +166,9 @@ Implementation details below are agent-recommended means of meeting the request.
 - [x] Prove each producer field equals its existing authoritative scalar contract
   without adding discovery; do not report three eliminated calls unless all three
   fields are actually supplied and accepted.
+- [x] Deferred to `#7938`: Qualify the actual cold interactive-frame budget,
+  larger-cardinality native row deadlines, native compositor visibility,
+  released payloads and installed-host behavior. Preserve the measured failures.
 
 ## Proposal
 
@@ -366,3 +377,21 @@ reported as passing source-fixture qualification.
 bootstrap. It is not a controlled before/after latency comparison. The measured
 increment is the eliminated config-dir command with effective repo authority
 preserved; cold startup and larger-cardinality acceptance remain open.
+
+### 2026-10-23 — Scoped source increment complete
+
+- #8126 received an approving review with no findings, passed required CI and
+merged at `0327e0e6d30b831b9bd54eeccff62dad4a61d075`. Together with #8017
+(`68ef28f3c3968c057d2f524567b0293c6b99daac`), this completes the admitted
+source increments. The two effective scalar queries remain intentional.
+- Post-publication producer regression rerun: 18 passed. The consumer/pending
+packet remained 20 passed. Native results remain one passing cardinality case
+and two row-deadline failures, as recorded above; no threshold was relaxed.
+- At completion inspection, Main was
+`8d905243c80f6e867ca6deff875dc3eb52a3c2dd`, Manager `0.6.85-dev1`.
+The config-dir handoff was absent and none of the six changed consumer files
+matched the source increment. Release remains pending/unqualified; no shared
+runtime deployment or installed-host verification was performed.
+- #7938 stays open with full cold/native, remote, release and installed acceptance.
+This archive records a measured incremental delivery, not final performance
+acceptance or an ownership transfer over #7449/#7788.
