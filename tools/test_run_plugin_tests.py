@@ -592,6 +592,17 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
     assert runner._dep_fingerprint("agent-dispatch") != before
 
 
+def test_ssh_optional_sdk_is_not_misattributed_as_a_canonical_library():
+    import tomllib
+
+    metadata = tomllib.loads(
+        (runner.REPO / "plugins" / "agent-ssh" / "pyproject.toml").read_text(encoding="utf-8"),
+    )
+    assert "fleet-manager" not in metadata["tool"]["uv"]["sources"]
+    assert any(item.startswith("fleet-manager>=") for item in metadata["project"]["optional-dependencies"]["fleet"])
+    assert any(item.startswith("fleet-manager>=") for item in metadata["project"]["optional-dependencies"]["dev"])
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows editable staging contract")
 def test_windows_editable_metadata_is_retained_near_all_sources(tmp_path, monkeypatch):
     import tomllib
