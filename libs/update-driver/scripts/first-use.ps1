@@ -10,6 +10,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
+$Mode = $Mode.ToLowerInvariant()
+$ServiceMode = $ServiceMode.ToLowerInvariant()
 if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
     throw 'Nested first-use submission is unsupported; retain the current installation owner.'
 }

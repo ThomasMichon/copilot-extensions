@@ -190,8 +190,11 @@ def test_invalid_native_execution_root_never_creates_directories(
     assert sorted(str(path.relative_to(installation)) for path in installation.rglob("*")) == before_runtime
 
 
+@pytest.mark.parametrize("mixed_case", [False, pytest.param(
+    True, marks=pytest.mark.skipif(os.name != "nt", reason="PowerShell case-insensitive binding"),
+)])
 def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_diagnostics(
-    owning_payload, area,
+    owning_payload, area, mixed_case,
 ):
     payload, installation, project = owning_payload
     library = Path(__file__).resolve().parents[2]
@@ -216,8 +219,11 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
         encoding="utf-8",
     )
     root = area / "cold"
+    command = native_command(root, payload, installation, project, source=source)
+    if mixed_case:
+        command += ["-Mode", "LaUnCh", "-ServiceMode", "Client-Only"]
     result = subprocess.run(
-        native_command(root, payload, installation, project, source=source),
+        command,
         env=dict(os.environ), capture_output=True, text=True, timeout=60,
         **no_window_kwargs(),
     )

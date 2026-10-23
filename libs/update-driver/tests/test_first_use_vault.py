@@ -136,8 +136,12 @@ def test_actual_vault_installs_and_dispatches_after_owning_source_removal(
     def run_request():
         worker = None
         descriptor = None
+        command = native_command(root, payload, installation, project, source=source, client_only=True)
+        if os.name == "nt":
+            command[-1] = "Client-Only"
+            command += ["-Mode", "LaUnCh"]
         launched = subprocess.run(
-            native_command(root, payload, installation, project, source=source, client_only=True),
+            command,
             env=env, cwd=project, stdin=subprocess.DEVNULL, capture_output=True,
             text=True, encoding="utf-8", timeout=90, **no_window_kwargs(),
         )
