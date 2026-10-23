@@ -77,8 +77,8 @@ def forward(payload: dict) -> dict:
         raise ChatProxyError(400, "chat_invalid_operation")
     long_poll = operation in {"wait", "scan"}
     wait = payload.get("timeout", 30) if long_poll else 0
-    if (type(wait) not in (int, float) or not math.isfinite(wait)
-            or not 0 <= wait <= 300):
+    if (type(wait) not in (int, float) or not 0 <= wait <= 300
+            or not math.isfinite(wait)):
         raise ChatProxyError(400, "chat_invalid_timeout")
     slot = _waiters if long_poll else _ordinary
     if not slot.acquire(blocking=False):

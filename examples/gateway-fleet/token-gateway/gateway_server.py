@@ -14,6 +14,7 @@ from pathlib import Path
 
 import jwt
 from jwt import PyJWKClient
+from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError
 
 from index_search import IndexSearchError, search_index
 from credential_record import load_credential, store_credential, valid_credential
@@ -37,7 +38,7 @@ ISSUER = f"https://login.microsoftonline.com/{TENANT_ID}/v2.0"
 JWKS_URL = f"https://login.microsoftonline.com/{TENANT_ID}/discovery/v2.0/keys"
 REQUIRED_ROLE = "GatewayClient"
 
-LISTEN_HOST = "0.0.0.0"
+LISTEN_HOST = "127.0.0.1"
 
 
 LISTEN_PORT = 8787
@@ -139,6 +140,10 @@ def validate_bearer(auth_header: str | None) -> dict:
             issuer=ISSUER,
             options={"require": ["exp", "aud", "iss"]},
         )
+    except PyJWKClientConnectionError as exc:
+        raise AuthError(503, "signing keys unavailable") from exc
+    except PyJWKClientError as exc:
+        raise AuthError(401, "signing key not found") from exc
     except jwt.ExpiredSignatureError as exc:
         raise AuthError(401, "token expired") from exc
     except jwt.InvalidTokenError as exc:
