@@ -191,6 +191,7 @@ def test_cancel_commit_lost_receipt_is_reconciled_after_restart(tmp_path):
     queue.supersede_run_waiter_with_wake(
         task_id, reason="cancelled", message="recheck", sender="test",
     )
+    assert cycle(owner)["checked"] == 0
     service.fault = "after-cancel"
     assert cycle(owner)["blocked"]
     assert not cycle(consumer(TaskQueue(tmp_path / "tasks.db"), service))["blocked"]
@@ -244,6 +245,7 @@ def test_receipt_without_local_effect_cannot_fabricate_completion(tmp_path):
     cycle(owner)
     service.records["request:one"].status = "acknowledged"
     service.records["request:one"].event_id = "foreign"
+    assert cycle(owner)["checked"] == 0
     assert cycle(owner)["blocked"]
     assert not queue.list_run_waiter_wakes(task_id)
     assert queue.list_replay_waiters(BINDING)
@@ -257,8 +259,8 @@ def test_bounded_scan_rotates_past_unknown_originals(tmp_path):
     owner = consumer(queue, service)
     assert cycle(owner)["checked"] == 32
     assert cycle(owner)["checked"] == 3
+    assert cycle(owner)["checked"] == 0
     assert cycle(owner)["checked"] == 32
-    assert cycle(owner)["checked"] == 3
     assert [c[0] for c in service.calls].count("pending") == 4
     assert len(service.records) == 35
 
@@ -466,3 +468,65 @@ def test_worst_case_cycle_has_exact_82_call_bound(tmp_path):
     result = cycle(consumer(queue, service))
     assert result == {"checked": 32, "events": 16, "settled": 48, "blocked": False}
     assert len(service.calls) == 82
+
+
+def test_unresolved_final_row_yields_a_separately_admitted_pending_turn(tmp_path):
+    queue, task_id, spec, service, owner = setup(tmp_path)
+    final_task = task(queue)
+    final_spec = intent(queue, "final")
+    prepare(queue, final_task, final_spec)
+    cycle(owner)
+    service.fire(spec)
+    queue.supersede_run_waiter_with_wake(
+        final_task, reason="cancelled", message="recheck", sender="test",
+    )
+    service.records["request:final"].status = "uncertain"
+    owner = consumer(queue, service)
+    assert cycle(owner)["blocked"]
+    assert not queue.list_run_waiter_wakes(task_id)
+    result = cycle(owner)
+    assert result == {"checked": 0, "events": 1, "settled": 1, "blocked": False}
+    assert len(queue.list_run_waiter_wakes(task_id)) == 1
+    assert queue.list_replay_waiters(BINDING)[0]["task_id"] == final_task
+    assert len(service.records) == 2
+
+
+@pytest.mark.parametrize("operation", ["acknowledge", "cancel"])
+def test_unresolved_terminal_settlement_stops_before_later_registration(tmp_path, operation):
+    queue, task_id, spec, service, owner = setup(tmp_path)
+    cycle(owner)
+    if operation == "acknowledge":
+        service.fire(spec)
+        service.fault = "before-ack"
+        assert cycle(owner)["blocked"]
+    else:
+        queue.supersede_run_waiter_with_wake(
+            task_id, reason="cancelled", message="recheck", sender="test",
+        )
+    prepare(queue, task(queue), intent(queue, "later"))
+    async def unresolved(*args, **kwargs):
+        return SimpleNamespace(status="uncertain")
+    setattr(service, operation, unresolved)
+    result = cycle(consumer(queue, service))
+    assert result["checked"] == 1 and result["blocked"]
+    assert "request:later" not in service.records
+    assert queue.list_replay_waiters(BINDING)[0]["task_id"] == task_id
+
+
+def test_duplicate_replay_transitions_refused_before_suspension(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task_id = task(queue)
+    spec = intent(queue)
+    spec["until"] = ["merged", "merged"]
+    service = Service(queue)
+    with pytest.raises(ValueError, match="duplicate replay transitions"):
+        asyncio.run(consumer(queue, service).prepare(
+            task_id, delegation=spec, worker_id="worker", resume_worktree="host/wt",
+            host="host", reason="waiting",
+        ))
+    assert queue.get(task_id).status == "started"
+    assert not queue.list_pending_run_waiters()
+    assert service.calls == []
+    local = identity(queue)
+    local["until"] = ["merged", "merged"]
+    assert validate_delegation(local) == local

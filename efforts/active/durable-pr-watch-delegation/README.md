@@ -534,7 +534,7 @@ callback an implicit credential store.
   stop the failed cycle, retain potentially committed work and reconcile the
   original identity under renewed authorization. No second registration,
   process fallback, rollback or distributed publication barrier is introduced.
-- Validation: 194 disjoint focused Dispatch cases passed across the replay,
+- Validation: 198 disjoint focused Dispatch cases passed across the replay,
   migration/recovery, local CLI/context and real owner callback modules. Seven
   final controls use the actual TLS/PoP SDK, Gateway/connector, SQLite and PR
   replay disk owners, including lost register/ACK/cancel responses and policy,
@@ -547,9 +547,11 @@ callback an implicit credential store.
   timeout guards passed. The module-size check initially caught 1006 lines in
   the existing waiter module; new replay persistence helpers moved into the
   dedicated replay mixin without changing the enclosing transaction.
-- The first focused run caught a cursor gap; the fix wraps an exhausted indexed
-  scan in the same cycle and advances only over visited rows, including a failed
-  one, to avoid starvation. Tests also cover capability-before-prepare,
+- The first focused run exposed cursor-turn latency. The final cursor advances
+  only over visited rows, including a failed one; an exhausted scan yields a
+  separately admitted pending-only turn, then wraps on the following cycle.
+  This prevents an unresolved final row from starving healthy pending events.
+  Tests also cover capability-before-prepare,
   immutable intent across awaits, duplicate bindings, stale generations,
   original deadlines, batch bounds and dependency-free default imports.
 - Initial publication as #8085 exposed a source-attribution regression in test
@@ -564,6 +566,17 @@ callback an implicit credential store.
   on initial head `5344136a7da575fbae82eedb7530b5f21d74f2a3`. Retain the result
   as source integration evidence and rerun the branch lane after the real
   test-preparation fix; initial-head evidence is not current-head acceptance.
+- Test-preparation fix head `1f90e7dd7f6bc08acdd29898ec0d555e412cf1cd`
+  passed the actual required source CI, including the unchanged full dependency
+  audit, and both hosted acceptance jobs in run `39901930511`. Reviewer fixes
+  below change the head again and retain their own review/CI/acceptance gate.
+- Initial review `5623963359` identified three valid issues: final-row
+  uncertainty starving pending reads, uncertain terminal ACK/cancel results
+  failing to stop that cycle, and duplicate transitions accepted before an
+  unrecoverable suspension. Fix all three with four regression cases; keep
+  local callback validation unchanged. The 110-case replay/wire/recovery
+  selection passes after these fixes. Current-head review, required CI and
+  hosted acceptance must still pass before merge.
 - Documentation/architecture: this closes the finite-consumer part of the
   reviewed PR service contract without claiming its lifecycle. The optional
   embedding still owns stable authenticated scope, dedicated remote pending

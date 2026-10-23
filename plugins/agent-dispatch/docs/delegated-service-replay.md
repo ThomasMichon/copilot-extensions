@@ -66,7 +66,8 @@ Retry that same preparation after a lost local result; do not generate a new ID.
 Each `await consumer.cycle()` visits at most 32 indexed unsettled rows and reads
 one pending batch of at most 16 events. It returns checked/event/settled counts
 and a `blocked` flag. The cursor advances over visited rows, including a failed
-row, so persistent uncertainty cannot permanently starve the rest of a page.
+row. An exhausted scan yields a pending-only turn and wraps on the following
+cycle, so a persistently unresolved final row cannot starve pending delivery.
 The owner chooses when another finite cycle is admitted; no internal retry runs.
 
 Before registration, a short queue transaction records that the original

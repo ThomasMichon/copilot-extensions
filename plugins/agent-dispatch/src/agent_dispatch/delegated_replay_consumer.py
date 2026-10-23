@@ -118,7 +118,7 @@ class ReplayConsumer:
             else:
                 result = await self.client.cancel(request, registration_id=receipt.registration_id)
             if result.status not in ("acknowledged", "cancelled"):
-                return False
+                raise ValueError("replay receipt unresolved")
             return await self._settle(waiter, result)
         self._current(waiter, settled=True)
         return True
@@ -202,8 +202,6 @@ class ReplayConsumer:
             self._check_binding()
             await self.client.capabilities()
             rows = self.queue.list_replay_waiters(self.binding, after=self._after, limit=32)
-            if not rows and self._after:
-                rows = self.queue.list_replay_waiters(self.binding, limit=32)
             if not rows:
                 self._after = 0
             for waiter in rows:

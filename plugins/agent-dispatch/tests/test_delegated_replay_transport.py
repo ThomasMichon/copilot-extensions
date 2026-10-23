@@ -104,6 +104,7 @@ def test_actual_consumer_restarts_after_lost_committed_result(tmp_path, monkeypa
                 queue.supersede_run_waiter_with_wake(
                     task_id, reason="cancelled", message="recheck", sender="test",
                 )
+                assert (await consumer.cycle())["checked"] == 0
             original = caller.request
             lost = []
 

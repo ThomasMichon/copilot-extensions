@@ -55,6 +55,8 @@ def validate_delegation(value: object, *, armed: bool = False) -> dict:
         or type(value["shared"]) is not bool
     ):
         raise ValueError("invalid delegated waiter options")
+    if "replay" in value and len(set(value["until"])) != len(value["until"]):
+        raise ValueError("duplicate replay transitions")
     if armed and (
         not isinstance(value["registration_id"], str)
         or not value["registration_id"] or len(value["registration_id"]) > 200
