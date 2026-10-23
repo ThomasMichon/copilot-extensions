@@ -1,0 +1,9 @@
+{
+  "comment": "Share qualified owner-wave account inventory, batch mux probes and fence session renewal by generation",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

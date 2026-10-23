@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent implementation PRs after this proposal
 - **Created:** 2026-10-22
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** Bridge `unknown-observation-is-not-a-verdict`; Dispatch `discover-and-live-reconcile` and `overrides-take-precedence`; CodeSpaces `single-transport-reach` and `telemetry-grade-session-capture`
 - **Sub-issues:** #7948 · #7949 · #7950 · retained declaration/health slice of #2110
 
@@ -27,6 +27,7 @@ cache/push implementation admission or a change to credential safety.
 | Plan author | Bounded source investigation and proposal publication | This effort and issue threads |
 | Independent plan reviewer | Check source fit, invariants and measurable acceptance | Plan PR |
 | Future slice implementers | Separately admitted work, not allocated by this proposal | The corresponding issue's claim protocol |
+| placid-battery | Admitted S3a/b implementation only | #7949 and [episode](s3ab.md) |
 
 ## Coordination
 
@@ -35,8 +36,10 @@ cache/push implementation admission or a change to credential safety.
 - **Delegates:** no implementation worker is launched by this proposal.
 - **Handoff:** the issue receiving each slice retains implementation and
   qualification. A merged plan does not complete those issues.
-- **Exclusive edit scope now:** this folder and its index entry. No runtime,
-  plugin manifest, installer, service, telemetry adapter or deployed state edits.
+- **Exclusive edit scope:** the plan episode owned this folder and its index.
+  The admitted S3a/b episode owns the CodeSpaces inventory/mux/probe files and
+  narrow atomic heartbeat generation seam, tests and related documentation.
+  No installer, telemetry adapter or deployed state edits.
 - **Implementation boundaries:** [measurement and ownership](validation.md).
   Recheck issue/PR claims immediately before each implementation, not just here.
 
@@ -121,9 +124,10 @@ authorized runtime behavior.
 ### Phase 2 — Review and admission
 
 - [x] Independently review the plan and resolve material design findings.
-- [ ] Land the plan-only PR through normal review and required CI.
-- [ ] Transfer execution to the existing issue claims after explicit admission;
-  no functional work starts under this plan-author episode.
+- [x] Land the plan-only PR through normal review and required CI (#8055).
+- [x] Transfer execution to the existing issue claims after explicit admission;
+  S3a/b is admitted in [its implementation episode](s3ab.md). Other slices
+  remain independently owned/unadmitted; the plan-author episode is closed.
 
 ### Staged execution contract — not authorized by plan publication
 
@@ -148,7 +152,7 @@ neither may create a competing connection owner.
 - [x] Name real consumer-boundary tests and deterministic work-count regressions.
 - [x] Record source/release/installed evidence cells and unavailable semantics.
 - [x] Validate documentation links and repository documentation consistency.
-- [ ] Obtain a clean independent plan review and passing publication gates.
+- [x] Obtain a clean independent plan review and passing publication gates (#8055).
 - [x] Deferred to `#7948`: Bridge native cost and membership-latency qualification.
 - [x] Deferred to `#2110`: aggregate normal-cadence CPU and actual event-path p95.
 - [x] Deferred to `#7949`: owner-wave connection cleanup and no-wake qualification.

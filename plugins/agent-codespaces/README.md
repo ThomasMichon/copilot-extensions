@@ -442,6 +442,24 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   account when a CodeSpace uses ambient ownership. Each must be logged in with
   the `codespace` scope; the remedy is the account's recorded `accounts.yaml`
   login flow.
+- **Connection Owner observation waves:** due session holds share one immutable,
+  per-account inventory; a poll with no due holds does not list accounts. The
+  flattened `list_codespaces()` API remains unchanged. Owner-only qualified
+  listings retain errors and treat the 50-row limit as incomplete. Missing,
+  ambiguous, incomplete or expired observations never authorize a connection.
+  Admission revalidates installation, effective configuration, candidate accounts
+  and selected credential digests without relisting. This still performs metadata
+  work; listing-call savings are not a measured whole-system CPU improvement.
+  Up to four venues are probed concurrently by default, with one complete,
+  versioned mux batch per venue and a 30-second inventory admission window.
+  Expired queued venues defer to the next due wave instead of refreshing secretly.
+  The owner pins the observed account directly, bounds config acquisition to one
+  admitted attempt, drains its child on cancellation, and checks admission before
+  connection/exec retries. Stopped venues are never connected; an unknown state
+  is not a negative mux verdict. Missing tmux, malformed output and missing batch
+  completion remain unknown. Session renewal and release compare launch
+  generations under the existing owner lock. Legacy two-argument probe providers
+  remain supported. Bridge and transcript transports are not shared by this change.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 
