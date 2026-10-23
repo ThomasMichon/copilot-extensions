@@ -29,7 +29,7 @@ introspection reports exactly what a declaration would resolve.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
@@ -44,6 +44,30 @@ _LEGACY_REPO_LOCAL_SUBDIR = repo_config.LEGACY_REPO_CONFIG_DIR / "identities"
 # src/) so it is actually included in the built wheel and resolves identically
 # from an editable checkout and an installed venv.
 _BUILTIN_DIR = Path(__file__).resolve().parent / "identities"
+
+
+def resolve_identity_context(
+    cwd: str | None, *, resolve_resources: bool = False, snapshot=None,
+) -> str | None:
+    """Validate an inherited source root; defer named-resource reads until use."""
+    from .repository_resources import (
+        RepositoryResourceSnapshot, is_repository_resource, validate_resource_arguments,
+    )
+
+    if cwd is None:
+        return None
+    if not isinstance(cwd, str) or not cwd:
+        raise RegistrarError("worker_identity_cwd: expected a non-empty source root")
+    validate_resource_arguments([cwd])
+    if not is_repository_resource(cwd) and not any(
+        cls(cwd).is_absolute() for cls in (Path, PurePosixPath, PureWindowsPath)
+    ):
+        raise RegistrarError("worker_identity_cwd: expected an absolute or named source root")
+    if resolve_resources:
+        return (snapshot or RepositoryResourceSnapshot(execution=False)).resolve(
+            cwd, directory=True, execution=False,
+        )
+    return cwd
 
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-10-23
-- **Status:** Active
+- **Status:** Done (source scope; native and installed qualification retained separately)
 - **Vision:** [Picker](../../../visions/picker/README.md), responsive-by-budget
 - **Umbrella issue:** #7939
 - **Sub-issues:** #7940 (new configuration-freshness episode)
@@ -125,7 +125,7 @@ episode requiring its own reviewed source amendment before implementation.
 - [x] Review the supplier/locality amendment before those functional edits.
 - [x] Obtain the three remaining immediate-caller guard admissions, implement
   their narrow no-effect refusal checks and pass the six captured controls.
-- [ ] Pass review and required checks, merge source PRs and explicitly retain
+- [x] Pass review and required checks, merge source PRs and explicitly retain
   native/release/installed obligations. Do not close #7940 with a production
   supplier or derived-view gap.
 
@@ -143,9 +143,11 @@ Phase 4's additional matrix is in the
   Rejected completions change no record, header, dispatch map or spinner.
 - [x] Same-row success refreshes LOCK/header and verbs together while retaining
   valid modifiers and ordinary dispatch behavior.
-- [x] Deferred to `#7940`: Configuration dependency must prove expiry with a fake clock,
-  atomic replacement, concurrent single-flight reads, supplier/template changes,
-  manual invalidation and honest missing/error behavior before it closes.
+- [x] Configuration dependency #7940 proved expiry with a fake clock, atomic
+  replacement, concurrent single-flight reads, supplier changes, manual
+  invalidation and honest missing/error behavior. External template expansion
+  is not implemented by the actual readers; see the amendment's grounded
+  non-applicability, not a synthetic template pass.
 - [x] Deferred to `#7935`: Native qualification on a coordinated quiet lane must measure real first
   Actions and Escape/input boundaries cold/warm with source/serving identities,
   cardinalities, samples and errors. Headless tests do not pass this gate.
@@ -363,3 +365,27 @@ interfaces. Do not create a general request broker or shared polling layer.
   preparation controls. Lint, module cap, install contract and the
   11-helper AST proof passed. Original failures and correction logs are retained.
   Current-head review/CI/merge and native/installed qualification remain separate.
+
+### 2026-10-23 — Configuration source closure
+
+- Functional source PR #8286 merged to `dev` as
+  `087befb0b8ef9ba3cb2538c0ea67bc461f0cae5f`, from reviewed head
+  `aa0030df9394e390a9aac41efee0cb686c1d73db`. Complete current-head Copilot
+  review `5634666981` approved with no open issues; all three earlier Medium
+  threads were resolved. Required CI passed before the repository-authorized
+  managed merge.
+- The 202-case contained configuration/locality/refusal/startup packet, all
+  11 frozen scalar/helper ASTs, original `clear_caches` statements, touched
+  Python lint, module cap and install contract passed. Failed and corrected
+  raw runs remain retained; this documentation-only reconciliation does not
+  repeat unchanged tests or imply another validation tier passed.
+- Every source Plan and Validation Plan item is resolved or transferred to its
+  named acceptance owner. This finite source effort is Done. #7939 retains
+  release and installed acceptance; #7935 retains quiet-lane native first
+  Actions/input qualification. Broader campaign/root acceptance remains open.
+  No installed payload, service, production UI or rollout was changed.
+- Managed post-merge pullforward encountered a deleted-PR-ref reconciliation
+  limitation. The verified merged published boundary was advanced onto fetched
+  `dev` with a preserved backup and no unpublished commits discarded. Historical
+  refs and raw evidence remain retained pending normal obligation disposition;
+  worktree cleanup is not source or campaign qualification.

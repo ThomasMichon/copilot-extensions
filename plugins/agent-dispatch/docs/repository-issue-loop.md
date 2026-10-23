@@ -245,22 +245,34 @@ itself keeps routing the task normally. `forge.backlog` defaults to `repo`
 when unset, so an existing declaration with no real project to route to --
 and no need for one -- is unaffected.
 
-**Known limitation with `extends:`:** that repo root is always the *leaf*
-declaration's own root, never the directory of whichever hop in an
-`extends:` chain actually supplied the `script` override. A declaration
+**Retained script admission rule with `extends:`:** that execution root is
+the *leaf* declaration's own root. A declaration
 that inherits a *relative* `forge.command`/`forge.cwd` is refused outright
 at registration (a clear `RegistrarError`) whenever the *nearest hop that
 actually defines that field* (not merely some hop elsewhere in the chain)
 lives outside this repo -- rather than silently resolving it against the
-wrong root. Generalizing per-hop origin tracking to cover these fields,
-the way `kind: emitter`'s own `spec.cwd` already does, remains a known,
-tracked gap. Use an absolute `command`/`cwd` for a cross-repo inherited
-override (or declare `forge.command`/`forge.cwd` directly in the
-extending file instead of inheriting them) until that gap is closed. A
+wrong root. Resolution retains each field's defining origin without
+rewriting the raw script values before admission. Use an absolute or named
+resource `command`/`cwd` for a cross-repo inherited override (or declare
+`forge.command`/`forge.cwd` directly in the extending file). A
 field whose defining hop lives in this same repo -- even if some other,
 unrelated hop further up the same chain lives elsewhere -- or a leaf file
 that declares `forge.command`/`forge.cwd` itself rather than inheriting
 them, is never affected by this.
+
+An inherited `worker_identity` has a separate source context: identity lookup
+uses the repository/plugin that defined the selector, even across deferred
+placeholder fills, without changing the script's execution cwd. A leaf's
+explicit selector override restores the leaf's normal identity tiers.
+Built-in `global:` identity defaults still bind in the declaration that
+instantiates them, honoring its explicit `execution_repo`. Inherited authored
+selectors also retain their defining declaration's effective context, including
+a deferred execution-repository parameter. A later execution-root override does
+not silently rebind an inherited identity. Generated emitter
+`worker_identity_cwd` preserves this
+context through serialization; shape validation does not read identity files.
+Named source roots remain named until the existing repository resource owner
+resolves them at use time.
 
 The resolved `command[0]` is then prefixed with whatever interpreter/shell
 its suffix requires, mirroring the plugin companion script-path resolver

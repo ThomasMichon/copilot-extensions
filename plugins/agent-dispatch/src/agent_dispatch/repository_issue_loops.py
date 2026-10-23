@@ -50,7 +50,7 @@ from .script_provider import (
     SCRIPT_FORGE_KEYS, _backlog_identifier, build_provider, script_resource_namespace,
     validate_repo_field, validate_script_forge_config,
 )
-from .worker_identities import load_worker_identity
+from .worker_identities import load_worker_identity, resolve_identity_context
 
 _TERMINAL = frozenset({"submitted", "completed", "abandoned", "dead_letter"})
 _KNOWN_KEYS = frozenset(
@@ -171,17 +171,21 @@ def validate_config(
     cwd: str | Path | None = None,
     inherited_script_fields: frozenset[str] = frozenset(),
     resolve_resources: bool = True,
+    worker_identity_cwd: str | None = None,
 ) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override.
     ``inherited_script_fields`` (``"command"``/``"cwd"``, or both) names
     which `script`-provider forge fields were inherited from an `extends:`
     base rather than declared by this file itself -- see
-    ``validate_script_forge_config``'s own handling."""
+    ``validate_script_forge_config``'s own handling. Generated emitters may
+    retain a separate ``worker_identity_cwd`` from an inherited declaration;
+    it selects identity tiers only, never script execution context."""
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
     from .repository_resources import RepositoryResourceSnapshot, execution_root
 
+    resolve_identity_context(worker_identity_cwd)
     extra = sorted(set(data) - _KNOWN_KEYS)
     if extra:
         raise RegistrarError(
@@ -369,7 +373,12 @@ def validate_config(
         )
     identity_name = ""
     if worker_identity and resolve_resources:
-        identity = load_worker_identity(worker_identity, cwd=Path(cwd) if cwd else None)
+        identity_cwd = resolve_identity_context(
+            worker_identity_cwd, snapshot=snapshot, resolve_resources=True,
+        ) if worker_identity_cwd is not None else cwd
+        identity = load_worker_identity(
+            worker_identity, cwd=Path(identity_cwd) if identity_cwd else None,
+        )
         guidance = identity.rules
         identity_name = identity.name
     if not isinstance(allow_self_config, bool):
@@ -1307,11 +1316,12 @@ def run_tick(
     clock: Callable[[], float] = time.time,
     dry_run: bool = False,
     cwd: str | Path | None = None,
+    worker_identity_cwd: str | None = None,
 ) -> dict[str, Any]:
     """Run one issue-source occurrence with visible reserve/create/reconcile.
     ``cwd`` (declaring repo root, if known) re-threads ``worker_identity``
     to its repo-local override rather than the daemon process's own cwd."""
-    config = validate_config(config, cwd=cwd)
+    config = validate_config(config, cwd=cwd, worker_identity_cwd=worker_identity_cwd)
     provider = provider or _forge_provider_for(config, cwd=cwd)
     now = clock()
     discovered = plan(client, config, provider=provider, now=now)

@@ -168,10 +168,11 @@ cutover is activated by the reviewed documentation.
 | Boundary | Current evidence |
 |----------|------------------|
 | Checked-in policy | #7655 merged the construction/first-launch exception and canonical effort; implementation is permitted within that reviewed scope. |
-| Inventory implementation | The source-owner diagnostic derives canonical plugin/product rosters and tracked Python projects, identifies library inputs and refuses to hide unclassified nested owners. It does not yet classify complete construction environments or qualify runtimes. |
+| Inventory implementation | #8304 merged the source-owner diagnostic and engine declaration. Every tracked Python project is classified against canonical rosters; complete construction environments and the native/profile matrix are still unqualified. |
 | Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate is active for this effort. |
 | Released gate | None: the existing release pipeline does not yet enforce this effort's configured-feed construction and first-launch contract. |
 | Installed evidence | Earlier consumer-specific Manager capture/origin results remain bounded observations, not full environment/profile coverage. The launch-maintenance effort separately records current selected-slot observations. |
+| Disposable construction evidence | One cold `agent-mcp` base environment passed canonical construction, installed-origin health and isolated CLI `--help` with Windows AMD64 Python 3.13.15 and the existing configured feed. It was never selected or deployed as a host runtime. |
 | Hosted/native qualification | Configured-feed execution, complete declared native matrix and negative publication controls remain unproved. Missing feed or capacity must fail qualification, not be called an unsupported row or successful skip. |
 | Deployment | No feed configuration, trusted-controller activation or host rollout is performed or implied by these status records. |
 
@@ -348,3 +349,37 @@ cutover is activated by the reviewed documentation.
   CLI. No guest provisioning, package installation, launcher transfer or
   runtime deployment was performed. This qualifies the diagnostic's filesystem
   boundary, not hosted feed access or the release's native runtime matrix.
+
+### 2026-10-23 - Source inventory merged; first cold constructor diagnostic passes
+
+- #8304 merged into `dev` as
+  `d9bc8ad547417b7b1864515071e65bead743b794` after current-head automated
+  approval and successful required checks. This lands executable source-owner
+  discovery, not a construction qualifier or an active CI/promotion gate.
+  The complete environment/profile, bootstrap and native matrix remain open.
+- At that exact source, a fresh private `agent-mcp` base candidate was built
+  through the existing shared `installer_engine.numbered_candidate` path.
+  It used an empty task-local cache with caching disabled, the existing
+  configured default-index override and the project's seven-day age policy.
+  Configuration observation found one network source, no configured public
+  registry and no ambient index overrides. Feed coordinates and credentials
+  are not recorded here; no fallback, age or TLS exception was introduced.
+- Canonical installed-origin health passed before completion, followed by
+  a fresh isolated `python -I -B -m agent_mcp --help` under the existing owned
+  child-process helper while candidate retention remained held. A separate
+  metadata probe verified distribution `0.2.0.dev138`, Python `3.13.15`,
+  `win-amd64`, and interpreter/package/distribution origins inside that
+  disposable candidate. This is one base environment and a bounded CLI launch,
+  not native ARM64 Python, all optional capabilities, bootstrap-from-zero,
+  hosted-worker access or complete release qualification.
+- The first diagnostic adapter requested process-retention bootstrap assets
+  that this owner does not ship and failed before installed health. It is not
+  counted as a pass or a feed failure. The corrected diagnostic used the
+  owner's normal attached constructor/child lifetime; no installer code,
+  policy or deadline was weakened to obtain the subsequent result.
+- No host activation path was called. The diagnostic root had no active
+  selector, and existing host runtime selectors were unchanged across the
+  successful run. No updater, service, registration or launcher transfer was
+  started. Continue by declaring actual environment/profile/constructor and
+  installed-launch bindings, then implement complete source/candidate-bound
+  results and the accepted trusted-control integration.

@@ -4,11 +4,52 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from .registrar import RegistrarError
 
 _PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)\}(?!\})")
+
+
+def identity_context_origin(directory: Path | str, execution_repo: object) -> Path | str:
+    if isinstance(execution_repo, str) and execution_repo:
+        return f"repo:{execution_repo}:."
+    return directory
+
+
+def declaration_path_origins(
+    data: Mapping[str, Any], directory: Path | str,
+    inherited: Mapping[str, Path | str] | None = None, *,
+    execution_repo: object = None, params: Mapping[str, Any] | None = None,
+) -> dict[str, Path | str]:
+    origins = dict(inherited or {})
+    identity_origin = origins.get("worker_identity")
+    if isinstance(identity_origin, str) and identity_origin.startswith("repo:"):
+        prefix, name, relative = identity_origin.split(":", 2)
+        # Only a deferred execution-repository name is a parameter. The source
+        # directory itself may contain literal braces and must not be rewritten.
+        origins["worker_identity"] = (
+            f"{prefix}:{substitute_placeholders(name, params or {})}:{relative}"
+        )
+    for field in ("spec.cwd", "emitter.cwd", "worker_identity", "forge.command", "forge.cwd"):
+        parts = field.split(".")
+        current = data
+        for part in parts:
+            if part not in current:
+                break
+            value = current[part]
+            if part == parts[-1]:
+                origins[field] = (
+                    identity_context_origin(directory, execution_repo)
+                    if field == "worker_identity" else directory
+                )
+            elif not isinstance(value, Mapping):
+                origins.pop(field, None)
+                break
+            else:
+                current = value
+    return origins
 
 
 def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:

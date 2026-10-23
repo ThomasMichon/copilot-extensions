@@ -269,8 +269,9 @@ def test_run_tick_dispatches_builtin_effort_driver_loop(monkeypatch):
 
 
 @pytest.mark.parametrize("resolve_resources", [False, True])
+@pytest.mark.parametrize("identity_cwd", [None, "repo:supplier:."])
 def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(
-    monkeypatch, resolve_resources,
+    monkeypatch, resolve_resources, identity_cwd,
 ):
     """Regression guard: a repository-issue-loop emitter's own ``cwd`` (the
     declaring repo's root, stamped at expansion time) must reach
@@ -279,9 +280,12 @@ def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(
     declaring repo) resolve that repo's repo-local worker-identity override."""
     observed = {}
 
-    def fake_validate_config(_config, *, cwd=None, resolve_resources=True):
+    def fake_validate_config(
+        _config, *, cwd=None, resolve_resources=True, worker_identity_cwd=None,
+    ):
         observed["cwd"] = cwd
         observed["resolve_resources"] = resolve_resources
+        observed["worker_identity_cwd"] = worker_identity_cwd
         return {}
 
     monkeypatch.setattr(
@@ -292,8 +296,10 @@ def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(
         command=None,
         repository_issue_loop={"kind": "repository-issue-loop"},
         cwd="/repo/root",
+        worker_identity_cwd=identity_cwd,
     )
     emitter.validate_spec(spec, resolve_resources=resolve_resources)
+    assert observed["worker_identity_cwd"] == identity_cwd
     assert observed["cwd"] == "/repo/root"
     assert observed["resolve_resources"] is resolve_resources
 
