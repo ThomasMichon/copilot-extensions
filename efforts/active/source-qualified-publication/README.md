@@ -145,6 +145,11 @@ observation/receipt contract, not an optimistic row cache or second writer.
 Separate fact revisions, observation freshness and transport heartbeat.
 Detailed design: [implementation.md](implementation.md).
 
+The bounded [current-feed entry amendment](startup-entry-proposal.md) addresses
+the pre-control CLI startup gate while preserving existing command semantics
+and exact shared-file owners. It requires source review before implementation;
+it does not expand F1 into launch, installer or owner-side effects.
+
 ## Journal
 
 ### 2026-10-22 — Bounded planning
