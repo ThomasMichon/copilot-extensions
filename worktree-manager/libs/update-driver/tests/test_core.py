@@ -29,10 +29,13 @@ from update_driver import (
 )
 
 
-def sample(area, **kwargs):
+def sample(area, *, coalesce_running=False, **kwargs):
     root = area / "state"
     runner = TrustedRunner((sys.executable, "-c", "pass"), str(area))
-    return enqueue(RequestSpec("synthetic", **kwargs), runner=runner, root=root)
+    return enqueue(
+        RequestSpec("synthetic", **kwargs), runner=runner, root=root,
+        coalesce_running=coalesce_running,
+    )
 
 
 def test_readonly_absent(area):
@@ -86,6 +89,13 @@ def test_identity_includes_runner_and_source(area):
     assert sample(area, source="public:dev").id != first.id
 
 
+@pytest.mark.parametrize("value", ["yes", 1, None])
+def test_nonboolean_active_coalescing_refuses_before_writes(area, value):
+    with pytest.raises(InvalidRequestError, match="explicit boolean"):
+        sample(area, coalesce_running=value)
+    assert not (area / "state").exists()
+
+
 @pytest.mark.parametrize("keys", [
     ("FIXTURE_SCOPE", "FIXTURE_SCOPE"),
     ("invalid-key",),
@@ -109,7 +119,24 @@ def test_runner_context_projection_participates_in_pending_identity(area):
     assert status(second.id, root=area / "state").runner.context_keys == ("FIXTURE_SCOPE",)
 
 
-def test_running_cannot_swallow_later_request(area):
+def test_running_cannot_swallow_later_unresolved_target(area):
+    root = area / "state"
+    first = sample(area)
+    seen = []
+
+    def execute(tx):
+        seen.append(tx.request.id)
+        if tx.request.id == first.id:
+            assert sample(area).id != first.id
+            assert sample(area).id == status(root=root)[1].id
+            assert sample(area, coalesce_running=True).id == first.id
+        return 0
+
+    assert drain(root=root, executor=execute) == 0
+    assert len(seen) == 2
+
+
+def test_running_shares_pinned_requests_but_queues_distinct_targets(area):
     root = area / "state"
     first = sample(area)
     seen = []
@@ -118,13 +145,25 @@ def test_running_cannot_swallow_later_request(area):
         seen.append(tx.request.id)
         assert tx.request.state == "running" and tx.request.started_at is not None
         if tx.request.id == first.id:
-            assert sample(area).id != first.id
-            assert sample(area).id == status(root=root)[1].id
+            assert sample(area, coalesce_running=True).id == first.id
+            assert sample(area, source="next-target").id != first.id
+            assert sample(area, source="next-target").id == status(root=root)[1].id
         return 0
 
     assert drain(root=root, executor=execute) == 0
     assert len(seen) == 2
     assert all(item.state == "completed" for item in status(root=root))
+
+
+@pytest.mark.parametrize("code", [0, 37])
+def test_completed_request_does_not_debounce_a_new_attempt(area, code):
+    root = area / "state"
+    first = sample(area)
+    assert drain(root=root, executor=lambda tx: code) == 0
+    assert status(first.id, root=root).exit_code == code
+    second = sample(area, coalesce_running=True)
+    assert second.id != first.id
+    assert second.state == "pending"
 
 
 def test_result_and_output(area):

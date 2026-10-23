@@ -238,6 +238,7 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] Review the execution-owner clarification and bounded implementation plan.
 - [ ] Review and implement [normal and operator-approved repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-version debounce, one active installer, clean normal rollback and bounded repair takeover without stale-marker vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record repair and unrelated services/data; no host/kernel restart prerequisite.
 - [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
+- [ ] Land pinned-target active-request sharing through the existing queue and fixed first-use adapter; preserve later execution for unresolved moving targets. This does not close central desired-target selection, worker fan-out, same-boot recovery or repair takeover.
 - [ ] Route ordinary supported suite-update entry points through one caller-independent execution owner over the complete canonical transaction.
 - [x] Migrate the public Manager/engine update commands, staged acquisition and hook `reconcile-plugins --apply` without replacing their canonical executors.
 - [ ] Migrate native launchers' direct validated plan-action execution and remaining suite-adopted first-use publishers while preserving standalone defaults.

@@ -24,9 +24,11 @@ policy changed or recurring worker enrolled by this plan.
    Record the actual migration boundary before changing behavior.
 2. Add the smallest shared, versioned request/execution mechanism those callers
    need. Persist normalized request identity, state and final outcome before
-   reporting acceptance or completion. Coalesce only equivalent pending
-   requests; explicit source/ref/options and installation identity are part of
-   equivalence. Never persist credentials or arbitrary caller-supplied commands.
+   reporting acceptance or completion. Coalesce equivalent pending requests;
+   active sharing additionally requires a trusted adapter's fully pinned target,
+   not just equal arguments or a moving ref. Explicit source/ref/options and
+   installation identity are part of equivalence. Never persist credentials or
+   arbitrary caller-supplied commands.
 3. Admit one execution owner using the existing cross-platform kernel-backed
    custody primitive. Hold it across the entire canonical update, including
    Manager acquisition and self-update, plugin acquisition, runtime installation
