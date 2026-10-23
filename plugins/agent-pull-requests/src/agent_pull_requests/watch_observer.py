@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from .watch_contract import PRSnapshot
 from .watch_provider import command_path, fetch_snapshot
-from .watch_replay import ConsumerScope, ReplayEventTooLarge
+from .watch_replay import ConsumerScope, ObservationTarget, ReplayEventTooLarge
 from .watch_replay_store import ReplayStore
+
+_MAX_READS = 4
+_CHECK_INTERVAL = 0.1
 
 
 @dataclass(frozen=True)
@@ -78,42 +83,81 @@ class ReplayObserver:
         result = self.store.sweep_timeouts(**authority)
         if result["status"] == "uncertain":
             return result
-        targets = self.store.observation_targets(**authority)
+        targets = iter(self.store.observation_targets(**authority))
         observed = unavailable = unbound = 0
-        for target in targets:
-            self.store.check_current(expires_at, checkpoint)
-            binding = self.bindings.get((target.account, target.repo))
-            if binding is None:
-                unbound += 1
-                continue
-            target = self.store.waiting_target(target, **authority)
-            if target is None:
-                continue
-            try:
-                snapshot = fetch_snapshot(
-                    target.repo, target.number, binding.command,
-                    prefix=list(binding.prefix) if binding.prefix is not None else None,
-                    credential_command=(
-                        list(binding.credential_command)
-                        if binding.credential_command is not None else None
-                    ),
-                )
-            except ValueError:
-                unavailable += 1
-            else:
-                try:
-                    result = self.store.observe(target, snapshot, **authority)
-                except ReplayEventTooLarge:
-                    unavailable += 1
-                else:
+        pending = {}
+        exhausted = False
+        stopped = threading.Event()
+        # Joining the executor retains cycle/writer custody even after authority
+        # loss; cancelling a Future is not proof that its native read settled.
+        readers = ThreadPoolExecutor(max_workers=_MAX_READS)
+        try:
+            while pending or not exhausted:
+                self.store.check_current(expires_at, checkpoint)
+                result = self.store.sweep_timeouts(**authority)
+                if result["status"] == "uncertain":
+                    return result
+                while not exhausted and len(pending) < _MAX_READS:
+                    self.store.check_current(expires_at, checkpoint)
+                    target = next(targets, None)
+                    if target is None:
+                        exhausted = True
+                        break
+                    binding = self.bindings.get((target.account, target.repo))
+                    if binding is None:
+                        unbound += 1
+                        continue
+                    target = self.store.waiting_target(target, **authority)
+                    if target is not None:
+                        future = readers.submit(
+                            self._read, target, binding, stopped=stopped, **authority,
+                        )
+                        pending[future] = target
+                if not pending:
+                    continue
+                done, _ = wait(pending, timeout=_CHECK_INTERVAL, return_when=FIRST_COMPLETED)
+                for future in done:
+                    target = pending.pop(future)
+                    self.store.check_current(expires_at, checkpoint)
+                    snapshot = future.result()
+                    if snapshot is None:
+                        unavailable += 1
+                    else:
+                        try:
+                            result = self.store.observe(target, snapshot, **authority)
+                        except ReplayEventTooLarge:
+                            unavailable += 1
+                        else:
+                            if result["status"] == "uncertain":
+                                return result
+                            observed += 1
+                    result = self.store.sweep_timeouts(**authority)
                     if result["status"] == "uncertain":
                         return result
-                    observed += 1
-            result = self.store.sweep_timeouts(**authority)
-            if result["status"] == "uncertain":
-                return result
+        finally:
+            stopped.set()
+            readers.shutdown(wait=True, cancel_futures=True)
         self.store.check_current(expires_at, checkpoint)
         return {
             "status": "observed", "observed": observed,
             "unavailable": unavailable, "unbound": unbound,
         }
+
+    def _read(
+        self, target: ObservationTarget, binding: NativeObservationBinding, *,
+        stopped: threading.Event, expires_at: int, checkpoint: Callable[[], None] | None,
+    ) -> PRSnapshot | None:
+        if stopped.is_set():
+            return None
+        self.store.check_current(expires_at, checkpoint)
+        try:
+            return fetch_snapshot(
+                target.repo, target.number, binding.command,
+                prefix=list(binding.prefix) if binding.prefix is not None else None,
+                credential_command=(
+                    list(binding.credential_command)
+                    if binding.credential_command is not None else None
+                ),
+            )
+        except ValueError:
+            return None
