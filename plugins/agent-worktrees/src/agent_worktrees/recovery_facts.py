@@ -6,6 +6,7 @@ import copy
 import json
 import math
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 SCHEMA = "agent-worktrees.recovery-fact"
@@ -49,6 +50,12 @@ def _number(text: str) -> float:
     value = float(text)
     if not math.isfinite(value):
         raise RecoveryError("malformed_json")
+    try:
+        exact = Decimal(text)
+    except InvalidOperation:
+        raise RecoveryError("number_precision_unsupported") from None
+    if exact != Decimal(str(value)):
+        raise RecoveryError("number_precision_unsupported")
     return value
 
 

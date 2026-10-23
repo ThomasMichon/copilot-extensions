@@ -39,6 +39,11 @@ and CAS must be checked separately at any future effect.
 `decode_fact` rejects duplicate keys, invalid JSON/nonfinite numbers, unsupported
 envelope versions and malformed required fields, within 64 KiB / depth 32.
 Unknown optional JSON fields survive encoding and candidate edits recursively.
+Decimal tokens whose value would change on float serialization (including
+underflow or excess precision) return `number_precision_unsupported` before a
+candidate is exposed. This is a scoped representation limit, not ownership
+revocation; original bytes remain untouched. Supported decimal tokens are
+checked against exact decimal value before acceptance.
 `patch_payload` creates a separate in-memory candidate for explicitly named
 scalar leaves; it neither increments revision nor persists or acknowledges it.
 It refuses subtree/array replacement that could erase unknown metadata.

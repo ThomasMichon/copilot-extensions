@@ -124,6 +124,26 @@ def test_unknown_numeric_fields_must_round_trip(number):
     assert_reason("malformed_json", lambda: decode_fact(raw, supported=READ))
 
 
+@pytest.mark.parametrize("number", [
+    b"1e-999", b"-1e-999", b"9007199254740993.0", b"0.1234567890123456789",
+    b"1e-" + b"9" * 40,
+])
+def test_decimal_precision_loss_refuses_before_candidate_edit(number):
+    raw = wire(fact())[:-1] + b',"future_numeric":' + number + b"}"
+    assert_reason("number_precision_unsupported", lambda: decode_fact(raw, supported=READ))
+
+
+@pytest.mark.parametrize("number", [b"0.1", b"1.2300", b"-0.0", b"1.25e-12"])
+def test_supported_decimal_values_survive_unrelated_edits(number):
+    from decimal import Decimal
+    raw = wire(fact())[:-1] + b',"future_numeric":' + number + b"}"
+    value = decode_fact(raw, supported=READ)
+    edited = patch_payload(value, {"observation": {"label": "after"}},
+                           supported=WRITE, known_paths=KNOWN)
+    encoded = encode_fact(edited, supported=READ)
+    assert json.loads(encoded, parse_float=Decimal)["future_numeric"] == Decimal(number.decode())
+
+
 @pytest.mark.parametrize("changes", [
     {"writer_incarnation": "replacement"},
     {"opaque": None},
@@ -216,15 +236,19 @@ def test_future_required_marker_semantics_remain_unsupported(tmp_path, required)
     assert_reason("required_capability_unsupported", lambda: inspect(worktree, common))
 
 
-@pytest.mark.parametrize("number", [b"1e999", b"-1e999"])
-def test_marker_rejects_nonfinite_optional_numbers(tmp_path, number):
+@pytest.mark.parametrize(("number", "reason"), [
+    (b"1e999", "malformed_json"), (b"-1e999", "malformed_json"),
+    (b"1e-999", "number_precision_unsupported"),
+    (b"9007199254740993.0", "number_precision_unsupported"),
+])
+def test_marker_rejects_lossy_optional_numbers(tmp_path, number, reason):
     worktree, common = roots(tmp_path)
     layout = inspect(worktree, common)
     seed_marker(layout.marker_directory, marker_value(REPOSITORY, RESOURCE))
     marker = layout.marker_directory / "identity.json"
     raw = marker.read_bytes()[:-1] + b',"future_numeric":' + number + b"}"
     marker.write_bytes(raw)
-    assert_reason("malformed_json", lambda: inspect(worktree, common))
+    assert_reason(reason, lambda: inspect(worktree, common))
     assert marker.read_bytes() == raw
 
 

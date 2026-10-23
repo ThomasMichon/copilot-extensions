@@ -218,3 +218,7 @@ supported rollback-reader floor are explicit decisions, not implied approval.
   then fail re-encoding. Fixed the parser class for facts and markers; positive/
   negative exponent and large-integer regressions bring the final contained
   Windows focused run to **55 passed**, with Ruff F/E9 green.
+- Follow-up review identified finite decimal underflow/rounding. Values that
+  cannot serialize unchanged now return `number_precision_unsupported` before
+  candidate exposure; supported values pass an independent Decimal oracle.
+  Final contained Windows run: **66 passed**, with Ruff F/E9 green.
