@@ -102,3 +102,27 @@ def test_bootstrap_preserves_foreign_manager_package(admission):
     (slot / "pyproject.toml").write_text('[project]\nname = "unrelated-package"\n')
     with pytest.raises(RuntimeError, match="Manager slot belongs to another package"):
         api["validate_manager_ownership"](root, payload)
+
+
+@pytest.mark.parametrize("name", [
+    "worktree-manager", "worktree-manager.cmd", "worktree-manager.ps1",
+])
+def test_registered_manager_can_repair_changed_launcher_bytes(admission, name):
+    api, home, commands, payload = admission
+    root = home / ".worktree-manager"
+    registry = home / ".agent-worktrees/control-plane-providers.d"
+    registry.mkdir(parents=True)
+    primary = "worktree-manager.cmd" if os.name == "nt" else "worktree-manager"
+    (registry / "worktree-manager.json").write_text(json.dumps({
+        "schema_version": 1, "provider": "worktree-manager",
+        "provider_root": str(root), "command": [str(commands / primary)],
+    }))
+    path = commands / name
+    original = b"older, newer or damaged registered Manager launcher\n"
+    path.write_bytes(original)
+    before = api["validate_manager_ownership"](root, payload)
+    assert path.read_bytes() == original
+    path.write_bytes(b"changed concurrently\n")
+    with pytest.raises(RuntimeError, match="changed during construction"):
+        api["validate_manager_ownership"](root, payload, expected=before)
+    assert path.read_bytes() == b"changed concurrently\n"

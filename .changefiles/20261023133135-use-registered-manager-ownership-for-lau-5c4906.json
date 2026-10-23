@@ -1,0 +1,13 @@
+{
+  "comment": "Use registered Manager ownership for launcher repair",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

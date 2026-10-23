@@ -101,8 +101,10 @@ concurrent update already selected the new runtime, run the same normal update
 again: that invocation uses the new caller's recovery check. Copying a payload
 alone does not replace code already loaded by an old process.
 
-Recovery requires the existing provider registration and an unedited,
-Manager-owned local-bin launcher. It reuses a healthy registered Manager without
+Recovery requires the existing provider registration naming the canonical
+Manager root and local-bin launcher. Registered launchers may be older or
+damaged; their bytes are not historical-version authority. Captured command and
+registration bytes must remain unchanged during recovery. It reuses a healthy registered Manager without
 source acquisition, never adopts an unregistered installation, and preserves the
 Manager's own root, source repository, ref/pin and credential context. The
 selected source must contain the canonical recovery adapter; a pinned older
@@ -117,6 +119,10 @@ bytes with the current payload: payload refresh can legitimately leave older or
 damaged helpers awaiting repair. Worktrees source, installation-cell and
 environment admission remain with the subsequent engine repair and its own
 transactional publisher; Manager construction does not modify those helpers.
+An existing valid Manager registration owns its fixed local-bin launcher family;
+bootstrap snapshots those files and refuses concurrent changes before publishing.
+Without that registration, unrelated commands remain protected rather than
+adopted by filename. Package, ordinary-path and selected-provider checks remain.
 Repair-child launches explicitly forward standard input, output and error to
 the existing caller handles while retaining hidden native children and their
 completion custody. Redirected diagnostics must reach the durable request log,

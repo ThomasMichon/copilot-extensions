@@ -264,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.repair_update:
         from update_entry import validate_manager_ownership
 
-        validate_manager_ownership(args.root, args.payload)
+        prior_commands = validate_manager_ownership(args.root, args.payload)
     # Only bootstrap installer modules are read from source. Application execution
     # happens below under the constructed interpreter and retention bootstrap.
     sys.path.insert(0, str(args.payload / "src"))
@@ -312,7 +312,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.repair_update:
             result = self_install(
                 args.payload, root=args.root, dry_run=False,
-                _before_publish=lambda: validate_manager_ownership(args.root, args.payload),
+                _before_publish=lambda: validate_manager_ownership(
+                    args.root, args.payload, expected=prior_commands,
+                ),
                 _after_activate=lambda slot: _activate_after_bootstrap_update(args.root, slot),
                 _transactional_activation=True,
             )

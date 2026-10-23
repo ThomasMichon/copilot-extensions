@@ -113,10 +113,11 @@ def test_ambiguous_registration_refuses_before_acquisition(adopted):
         recovery.recover()
 
 
-def test_foreign_command_refuses(adopted):
-    adopted.stub.write_text("echo foreign")
-    with pytest.raises(recovery.RecoveryRefused, match="foreign"):
-        recovery.recover()
+def test_registered_changed_launcher_is_admitted_without_historical_hash(adopted):
+    adopted.stub.write_text("older or damaged registered launcher")
+    selected = recovery.adopted_manager()
+    assert selected.command == (str(adopted.stub),)
+    selected.verify()
 
 
 def test_manager_owns_source_selection_not_updater_marketplace(adopted):
@@ -137,10 +138,11 @@ def test_healthy_constructed_manager_never_acquires_source(adopted, monkeypatch)
     assert not (adopted.root / ".installer-inputs").exists()
 
 
-def test_foreign_stub_retaining_known_tokens_is_refused(adopted):
-    adopted.stub.write_bytes(adopted.stub.read_bytes() + b"\necho foreign\n")
-    with pytest.raises(recovery.RecoveryRefused, match="foreign"):
-        recovery.adopted_manager()
+def test_registered_launcher_change_after_admission_is_refused(adopted):
+    selected = recovery.adopted_manager()
+    adopted.stub.write_bytes(adopted.stub.read_bytes() + b"\necho changed\n")
+    with pytest.raises(recovery.RecoveryRefused, match="changed"):
+        selected.verify()
 
 
 def test_duplicate_provider_registration_is_not_silently_ignored(adopted):
@@ -328,7 +330,10 @@ def test_admission_failure_never_rewrites_selection(broken, monkeypatch):
     assert not broken.held
 
 
-def test_staged_source_is_exactly_selected_ref_not_main(broken, monkeypatch):
+@pytest.mark.parametrize("changed_launcher", [False, True])
+def test_staged_source_is_exactly_selected_ref_not_main(broken, monkeypatch, changed_launcher):
+    if changed_launcher:
+        broken.stub.write_bytes(b"damaged registered Manager command\n")
     calls = []
     environments = []
 

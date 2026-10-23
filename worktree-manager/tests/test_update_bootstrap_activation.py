@@ -60,7 +60,8 @@ def constructed_update(tmp_path, monkeypatch):
     monkeypatch.setattr(self_install, "_deploy_binstubs", lambda: ())
     monkeypatch.setattr(self_install, "_write_control_plane_provider_manifest", lambda *args, **kwargs: None)
     monkeypatch.setitem(
-        sys.modules, "update_entry", SimpleNamespace(validate_manager_ownership=lambda *args: None),
+        sys.modules, "update_entry",
+        SimpleNamespace(validate_manager_ownership=lambda *args, **kwargs: None),
     )
 
     def dispatch(arguments):
