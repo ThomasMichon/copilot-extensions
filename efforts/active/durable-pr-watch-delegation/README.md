@@ -503,6 +503,13 @@ callback an implicit credential store.
 
 ### 2026-10-22 - Connect replay groups to finite native observation
 
+- The first #8028 pass identified valid native snapshots larger than replay's
+  delivery budget as a per-target failure, not an owner failure. A reproduced
+  two-target regression initially failed at the size refusal. A distinct
+  event-size exception now leaves that watch intact, continues deadline sweeps
+  and later targets across repeated cycles, while authority, corrupt state and
+  commit failures remain fatal. The corrected focused selection passes 273
+  cases with ten existing platform skips; current-head review and CI remain required.
 - Added trusted immutable account/repository/native-command bindings and one
   owner-invoked observation cycle, not another poller, service, forge client or
   fleet controller. The embedding lifecycle retains scheduling, ownership,

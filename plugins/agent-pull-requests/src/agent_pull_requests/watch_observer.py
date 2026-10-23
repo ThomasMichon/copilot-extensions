@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from .watch_provider import command_path, fetch_snapshot
-from .watch_replay import ConsumerScope
+from .watch_replay import ConsumerScope, ReplayEventTooLarge
 from .watch_replay_store import ReplayStore
 
 
@@ -98,10 +98,14 @@ class ReplayObserver:
             except ValueError:
                 unavailable += 1
             else:
-                result = self.store.observe(target, snapshot, **authority)
-                if result["status"] == "uncertain":
-                    return result
-                observed += 1
+                try:
+                    result = self.store.observe(target, snapshot, **authority)
+                except ReplayEventTooLarge:
+                    unavailable += 1
+                else:
+                    if result["status"] == "uncertain":
+                        return result
+                    observed += 1
             result = self.store.sweep_timeouts(**authority)
             if result["status"] == "uncertain":
                 return result

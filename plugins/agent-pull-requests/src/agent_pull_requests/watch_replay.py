@@ -26,6 +26,10 @@ MAX_RECORDS = 1024
 RETENTION_SECONDS = 86400
 
 
+class ReplayEventTooLarge(ValueError):
+    """A valid observation cannot fit one replay event's delivery budget."""
+
+
 @dataclass(frozen=True)
 class ConsumerScope:
     """Trusted adapter input; constructing this value does not authenticate it."""
@@ -67,7 +71,7 @@ def _check_event_size(payload: dict) -> None:
     if len(json.dumps({
         "events": [payload], "more": False,
     }, allow_nan=False).encode("utf-8")) > MAX_BATCH_BYTES:
-        raise ValueError("pending replay event exceeds batch byte limit")
+        raise ReplayEventTooLarge("pending replay event exceeds batch byte limit")
 
 
 class WatchReplay:
@@ -386,7 +390,7 @@ class WatchReplay:
                 if len(json.dumps(result, allow_nan=False).encode("utf-8")) > MAX_BATCH_BYTES:
                     result["events"].pop()
                     if not result["events"]:
-                        raise ValueError("pending replay event exceeds batch byte limit")
+                        raise ReplayEventTooLarge("pending replay event exceeds batch byte limit")
                     break
                 if len(result["events"]) == limit:
                     break

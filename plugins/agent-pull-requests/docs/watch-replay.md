@@ -78,6 +78,10 @@ the read waits for the next cycle rather than adopting an older result.
 Pending event IDs, original deadlines and completion receipts are unchanged.
 Provider unavailability does not cancel, reset or replace any subscription,
 and each attempted read is followed by an independent deadline sweep.
+An otherwise valid native snapshot may exceed the smaller replay event budget.
+That target's application is refused without changing its state and counted as
+unavailable; timeout sweeps and later targets still run, including on repeated
+cycles. Other invalid-state, authority and commit failures still stop the pass.
 
 The caller supplies the cycle's finite authority expiry and optional current
 lifetime checkpoint. Checks occur between reads and at lookup, commit and

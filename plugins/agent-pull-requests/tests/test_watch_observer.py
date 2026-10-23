@@ -15,6 +15,7 @@ from agent_procutil import no_window_kwargs
 from agent_pull_requests import watch_observer as observer, watch_replay_store as storage
 from agent_pull_requests.watch_contract import PRSnapshot
 from agent_pull_requests.watch_observer import NativeObservationBinding, ReplayObserver
+from agent_pull_requests.watch_provider import decode_snapshot
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import ReplayCallerExpired, ReplayStore
 from agent_pull_requests.watch_storage import StateCommitUncertain
@@ -148,6 +149,63 @@ def test_preexisting_timeout_needs_no_provider_and_unlimited_wait_survives_loss(
     assert calls == [2]
     assert execute(store, "register", original) == receipt
     assert len(execute(store, "pending")["events"]) == 1
+
+
+def test_oversized_event_is_target_local_across_repeated_cycles(store, monkeypatch):
+    now = [time.time()]
+    store.clock = lambda: now[0]
+    original, receipt = register(store, deadline_at=now[0] + 10)
+    register(store, request="other", number=2)
+    large = decode_snapshot({
+        "schema": "agent-worktrees.pr-snapshot", "version": 1, "repo": SCOPE.repo, "pr": 1,
+        "provider": "github", "pr_state": "closed", "merged": True, "head_sha": "head",
+        "base_ref": "main", "mergeable": True, "checks_state": "success",
+        "title": "Fixture", "draft": False, "reviews": [{"body": "x" * 30000}],
+    }, SCOPE.repo, 1)
+    calls = []
+
+    def fetch(repo, number, *args, **kwargs):
+        calls.append(number)
+        return large if number == 1 else PRSnapshot(merged=True)
+
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    owner = ReplayObserver(store, bindings=(binding(),))
+    assert cycle(owner) == {"status": "observed", "observed": 1, "unavailable": 1, "unbound": 0}
+    other_event = execute(store, "pending")["events"][0]
+    assert other_event["number"] == 2
+    assert execute(store, "register", original) == receipt
+    assert cycle(owner) == {"status": "observed", "observed": 0, "unavailable": 1, "unbound": 0}
+    assert calls == [1, 2, 1]
+    assert execute(store, "pending")["events"] == [other_event]
+    now[0] += 11
+    assert cycle(owner)["observed"] == 0
+    assert calls == [1, 2, 1]
+    events = execute(store, "pending")["events"]
+    timeout = next(event for event in events if event["number"] == 1)
+    assert timeout["timed_out"] and timeout["registration_id"] == receipt["registration_id"]
+    assert other_event in events
+
+
+@pytest.mark.parametrize("error", [
+    ValueError("invalid observation"), storage.ReplayStoreInvalid("corrupt store"),
+])
+def test_other_observation_refusals_stop_cycle(store, monkeypatch, error):
+    register(store)
+    register(store, request="other", number=2)
+    calls = []
+
+    def fetch(*args, **kwargs):
+        calls.append(args)
+        return PRSnapshot(merged=True)
+
+    def refuse(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    monkeypatch.setattr(store, "observe", refuse)
+    with pytest.raises(type(error), match=str(error)):
+        cycle(ReplayObserver(store, bindings=(binding(),)))
+    assert len(calls) == 1
 
 
 @pytest.mark.parametrize("fail_read", [False, True])
