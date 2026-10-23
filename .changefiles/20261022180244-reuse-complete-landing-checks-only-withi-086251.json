@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse complete landing checks only within one read-only explanation while keeping later pruning checks fresh.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -77,14 +77,29 @@ def pr_content_landed(
 
 def _pr_content_landed(
     record, repo, content_ref: str | None, *, cwd: str,
+    checked: dict[str, Landing] | None = None,
 ) -> tuple[bool | None, str | None, list[Landing]]:
     from . import finalize_open_pr_gate as fopg
     evidence: list[Landing] = []
 
     def fast(upstream: str) -> bool:
-        if content_ref is None or not upstream or not git_ops.ref_exists(upstream, cwd=cwd):
+        if content_ref is None or not upstream:
             return False
-        result = landing(content_ref, upstream, cwd)
+        if checked is not None:
+            complete = checked.get(upstream)
+            if complete is None:
+                return False
+            result = Landing(
+                complete.ref, complete.upstream, ancestor=complete.ancestor,
+                cherry=None if complete.ancestor else complete.cherry,
+                squash=None if complete.ancestor or complete.cherry else complete.squash,
+                blobs=None if complete.ancestor or complete.cherry or complete.squash
+                else complete.blobs,
+            )
+        else:
+            if not git_ops.ref_exists(upstream, cwd=cwd):
+                return False
+            result = landing(content_ref, upstream, cwd)
         evidence.append(result)
         return result.landed and fopg.upstream_match_is_trustworthy(
             record, content_ref, upstream, cwd=cwd, repo=repo)
@@ -125,9 +140,10 @@ def _explain(record, repo, worktree_path: str, anchor: str) -> dict:
     content_ref = fopg.resolve_precondition_ref(
         getattr(pr, "branch", "") or "", record.worktree_id, worktree_path, cwd=cwd)
     bases = [b for b in (remote_ref(repo, repo.default_branch), pr_base(record, repo)) if b]
-    checks = [landing(content_ref, b, cwd, explain=True).to_dict()
-              for b in bases if content_ref and git_ops.ref_exists(b, cwd=cwd)]
-    ok, message, _ = (pr_content_landed(record, repo, content_ref, cwd=cwd)
+    checks = {b: landing(content_ref, b, cwd, explain=True)
+              for b in bases if content_ref and git_ops.ref_exists(b, cwd=cwd)}
+    # A read-only report already has complete checks; pruning still uses fresh reads.
+    ok, message, _ = (_pr_content_landed(record, repo, content_ref, cwd=cwd, checked=checks)
                       if tracks_pr(record, repo) else (None, None, []))
     return {
         "worktree_id": record.worktree_id,
@@ -136,7 +152,7 @@ def _explain(record, repo, worktree_path: str, anchor: str) -> dict:
         "bases": [b.removeprefix("refs/remotes/") for b in bases],
         "missing_bases": [b.removeprefix("refs/remotes/") for b in bases
                           if not git_ops.ref_exists(b, cwd=cwd)],
-        "checks": checks,
+        "checks": [check.to_dict() for check in checks.values()],
         "pr": {"number": getattr(pr, "number", None), "state": getattr(pr, "state", ""),
                "head_sha": getattr(pr, "head_sha", "")} if pr else None,
         "landed": ok,

@@ -419,6 +419,86 @@ def test_explain_reports_every_base_and_check(merged_env, provider):
     assert report["landed"] is True and report["content_ref"] == f"worktree/{env.worktree_id}"
 
 
+@pytest.mark.parametrize("next_action", ["prune", "explain"])
+def test_explanation_checks_are_reused_only_inside_the_same_report(
+    merged_env, provider, monkeypatch, next_action,
+):
+    env = merged_env
+    provider.head_sha, provider.base_ref = env.head, "dev"
+    record = _record(env, head_sha=env.head, state="merged", number=7)
+    original = finalize_landing.landing
+    calls = []
+
+    def checked(branch, upstream, cwd, *, explain=False):
+        calls.append((branch, upstream, explain))
+        return original(branch, upstream, cwd, explain=explain)
+
+    monkeypatch.setattr(finalize_landing, "landing", checked)
+    expected = [
+        (f"worktree/{env.worktree_id}", f"refs/remotes/origin/{base}", True)
+        for base in ("main", "dev")
+    ]
+    report = finalize_landing.explain(record, _repo(), str(env.clone), str(env.clone))
+    assert report["landed"] is True
+    assert calls == expected
+
+    _git("commit", "-q", "--allow-empty", "-m", "unpublished after explanation", cwd=env.clone)
+    calls.clear()
+    if next_action == "prune":
+        ok, error = finalize._pr_finalize_precondition(
+            record, _repo(), str(env.clone), str(env.clone),
+        )
+        assert ok is False and "further commits" in error
+        assert calls == [(branch, upstream, False) for branch, upstream, _ in expected]
+    else:
+        report = finalize_landing.explain(record, _repo(), str(env.clone), str(env.clone))
+        assert report["landed"] is False
+        assert "further commits" in report["message"]
+        assert calls == expected
+
+
+@pytest.mark.parametrize("first_proof", ["ancestor", "cherry", "squash", "blobs"])
+def test_reused_explanation_checks_preserve_the_fast_path_message(
+    tmp_path, monkeypatch, first_proof,
+):
+    from agent_worktrees import finalize_open_pr_gate as gate
+
+    fields = ["ancestor", "cherry", "squash", "blobs"]
+    index = fields.index(first_proof)
+    complete = finalize_ref.Landing(
+        "task", "refs/remotes/origin/main",
+        **{name: position >= index for position, name in enumerate(fields)},
+    )
+    short = finalize_ref.Landing(
+        complete.ref, complete.upstream,
+        **{name: position == index for position, name in enumerate(fields[:index + 1])},
+    )
+    record = SimpleNamespace(
+        worktree_id="task", pr=SimpleNamespace(branch="feature/task", number=7),
+    )
+    monkeypatch.setattr(gate, "resolve_precondition_ref", lambda *a, **kw: "task")
+    monkeypatch.setattr(gate, "upstream_match_is_trustworthy", lambda *a, **kw: False)
+    monkeypatch.setattr(gate, "pr_merge_status", lambda *a, **kw: True)
+    monkeypatch.setattr(gate, "merged_content_exceeds", lambda *a, **kw: True)
+    monkeypatch.setattr(gate, "merged_pr_block_message", lambda *a, **kw: "unpublished")
+    monkeypatch.setattr(finalize_landing, "pr_base", lambda *a: "")
+    monkeypatch.setattr(finalize_landing, "creation_point", lambda *a, **kw: "base")
+    monkeypatch.setattr(finalize_landing.git_ops, "ref_exists", lambda *a, **kw: True)
+    monkeypatch.setattr(
+        finalize_landing, "landing",
+        lambda *a, explain=False: complete if explain else short,
+    )
+
+    _, expected, _ = finalize_landing.pr_content_landed(
+        record, _repo(), "task", cwd=str(tmp_path),
+    )
+    report = finalize_landing.explain(record, _repo(), str(tmp_path), str(tmp_path))
+
+    assert report["message"] == expected
+    assert report["checks"] == [complete.to_dict()]
+    assert all(getattr(complete, name) is True for name in fields[index:])
+
+
 # -- the creation point ----------------------------------------------------------------
 
 

@@ -1002,6 +1002,12 @@ enables line-ending normalization. Its regression creates the matching squash
 commit, pushes it and runs the real pull-forward operation; production Git
 configuration and rebase conflict handling remain unchanged.
 
+Landing explanations evaluate each base's complete evidence once and reuse
+those checks only while forming that read-only report. Native Git regressions
+add an empty commit after a report and require both a later report and the
+actual finalization precondition to refuse it. Report fields, provider
+validation and fresh reads at the pruning boundary remain unchanged.
+
 The optional profile-assignment-state failure guard follows both real command
 layers returned by worktree creation: exact record-bound execution admission,
 then the installed setup launcher. It checks the underlying model arguments,
