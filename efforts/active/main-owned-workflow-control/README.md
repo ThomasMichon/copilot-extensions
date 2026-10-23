@@ -13,6 +13,9 @@
 roadmap](workflow-portfolio-audit.md). It connects the pinned inventory,
 operating baseline, prioritized work, ownership seams and acceptance gates to
 the [standing vision](../../../visions/main-owned-workflow-control/README.md).
+The October 23 rolling follow-up separates fast runner pickup from promotion
+admission, actual review execution and late synthetic check refreshes. Its next
+investigation is semantic event/helper closure, not another capacity setup.
 
 ## Guiding Intent
 
@@ -358,9 +361,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
   delivery, natural omission and whole-flow measured savings distinct (#8111).
   Fresh source CI retains all three scans and executes the combined 917-case
   packet in 14.845 seconds after preserving the independently merged cohort.
-- [ ] Observe a natural packet-only PR omitting that AST group while retaining
+- [x] Observe a natural packet-only PR omitting that AST group while retaining
   actual unit execution, and report measured work separately from total
-  workflow counts and controlled whole-flow latency.
+  workflow counts and controlled whole-flow latency. #8155's source CI
+  `39921653075` skips the AST group and executes all 917 admitted units.
+  The workflow takes 50 seconds; its three job pickup intervals are
+  2, 3 and 3 seconds. This proves omitted work, not a controlled speedup.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
@@ -500,11 +506,12 @@ authorizes critical main-path acceptance or a bounded administrative change.
   original constant-only vocabulary assertion as an explicit unmapped policy
   residual (#8088). Actual hosted source CI executes all 890 admitted cases in
   9.417 seconds; bounded source qualification is not full-census or Main acceptance.
-- [ ] Map the six original peer-environment units through exact function
+- [x] Map the six original peer-environment units through exact function
   objects, retaining closed canonical source imports, actual call coverage,
   prior packet identities and the 300-second budget. Keep eleven packaging
   cases explicitly unqualified and natural AST omission separate from source
-  qualification, full-census and every-Main-release acceptance.
+  qualification, full-census and every-Main-release acceptance (#8155).
+  Actual hosted source CI executes all 917 current cases in 16.821 seconds.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this

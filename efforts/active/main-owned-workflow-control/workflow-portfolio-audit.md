@@ -383,6 +383,109 @@ reduces duplicate publications, not scheduled invocations or coverage.
 Dev source delivery does not activate the independently owned Main recipe;
 natural prevention and operating-cost comparison remain open after adoption.
 
+### October 23 rolling whole-flow follow-up
+
+Fully enumerate the fixed creation window
+`2026-10-22T20:00:00Z..2026-10-23T07:59:59Z` in four disjoint three-hour
+partitions. Their reported populations are 406/566/388/565; all 21 pages
+return **1,925 distinct run IDs**, exactly matching those totals. This rolling
+window overlaps the earlier October 22 window by one hour fifty minutes.
+It is not an independent causal before/after experiment.
+
+| Workflow population | Runs |
+|---|---:|
+| CI | 451: 322 PR and 129 push |
+| Promote trigger | 460 |
+| Ordinary workflow lockdown | 373 |
+| Departed-source refresh | 194 |
+| Dynamic Copilot review | 277 |
+| Validate and promote | 75 |
+| Base reminder | 29 |
+| Native acceptance / full installation / Windows rotation | 17 / 18 / 3 |
+| Separately titled promotion lockdown / Dependabot | 26 / 1 |
+
+Conclusions are 1,720 success, 84 skipped, 78 failure, 34 cancelled and nine
+action-required. The population includes 29 failed promotion runs. These are
+run conclusions, not 29 independent defects, confirmed flaky tests or evidence
+that a failed run published a release. Increased activity and unequal event
+populations mean that the larger total is not a consolidation speedup or
+regression measurement.
+
+Select the first twenty chronological successful PR CI runs, the first ten
+chronological completed dynamic review runs, and the last three successful
+`repository_dispatch` promotion runs. Read all jobs from each recorded attempt;
+these are bounded, nonrandom samples rather than population queue percentiles.
+All twenty CI samples execute selected units; all ten review samples succeed.
+The first/last CI runs are `39845479261`/`39854813950`, and review runs are
+`39845027410`/`39850480820`.
+
+| Boundary | CI sample | Review sample |
+|---|---:|---:|
+| Allocated jobs | 60: three per run | 10: one per run |
+| Run to first allocated-job creation | Median 1s, range 0-32s | Median 2s, range 1-4s |
+| Job creation to runner start | Median 3s, range 2-7s | Median 5s, range 4-5s |
+| Job execution | Guards median 73.5s; units 38.5s; aggregate 3s | Median 361s, range 115-579s |
+| Run to last allocated-job completion | Median 85.5s, range 68-110s | Median 366.5s, range 124-586s |
+
+Successful CI AST groups take a median 26 seconds; install-contract checks
+five seconds; documentation consistency 6.5 seconds. Eleven selected dependency
+checks have a ten-second median. Inputs and tool/source versions vary; these
+observations do not attribute a controlled saving to any one change.
+The later natural packet-only #8155 observation separately proves that
+#8111 omits the AST group without omitting units: CI `39921653075` runs all
+917 cases in 16.821 seconds and completes in 50 seconds.
+
+**Do not use every record returned by the jobs endpoint as the CI runner
+tail.** It also returns non-allocated `identifier leak guard` and
+`source-attribution` check records, sometimes refreshed much later. For example,
+CI `39854301989` is created at `21:04:54Z`, while an attached source-attribution
+record completes at `21:38:04Z`. That is not 33 minutes of runner queue or CI
+execution. The table uses only actually allocated jobs; downstream check
+freshness remains a separate real consumer contract, not permission to delete
+those records.
+
+The three natural promotion attempts each contain ten allocated jobs and a
+skipped failure-report job:
+
+| Attempt-one run | First-job admission | To last allocated-job completion | After admission |
+|---|---:|---:|---:|
+| `39918930957` | 244s | 842s | 598s |
+| `39920111180` | 222s | 810s | 588s |
+| `39921197334` | 230s | 857s | 627s |
+
+Their thirty actual pickup intervals have median three seconds and range
+2-10 seconds. The 222-244-second pre-job intervals are admission/concurrency/
+platform observations, not proof of a runner-capacity fault or of its cause.
+Unit jobs take 41/39/42 seconds, parallel with the longer 77/61/81-second build
+branch. The source-publication command takes 143/122/138 seconds; the merge
+command takes 70/68/71 seconds. Buffered multi-operation publication output
+does not isolate individual helper costs, prove rollout of a specific helper
+or authorize changing its trusted pin.
+
+For failure attribution, additionally inspect only the latest three failed
+promotion attempts in this captured population. Jobs `120270810434`
+(run `39909441499`) and `120273868185` (run `39910277300`) fail source
+publication with `manifest source closure differs from candidate`.
+Job `120274907975` (run `39911319173`) refuses artifact construction because
+the frozen source/composition for Dev
+`4e0a1e0e355c8b6c3682d4b7f60e02bae43151eb` differs from the candidate.
+A workflow's control head is not necessarily that Dev input. These signatures
+are identity-bound refusals, not demonstrated flakes, and do not classify the
+other 26 failures. The exact observations are escalated to the existing #3336
+release owner without starting another publisher, rerun or repair worker.
+Successful later samples do not alone close those failure families.
+
+**Current investigation priority:** trace semantic duplication across CI
+completion, trusted metadata reporting and deferred-promotion entrypoints
+before proposing another trigger removal. The source bodies show distinct PR
+identifier reporting, Dev baseline maintenance, genuine-ancestry admission and
+active-promotion recovery consumers. Preserve each exact-head/metadata epoch
+and required context; repeated names or one shared head do not prove
+redundancy. Keep the original candidate ledger below as a historical
+investigation map, not a claim that its already-delivered reductions remain
+unimplemented. Capacity expansion, another unit cohort and individual native
+installer repairs are not substitutes for this whole-flow investigation.
+
 ### Enforcement snapshot
 
 At the October 18 capture, the Dev ruleset checks were `workflow-lockdown-guard` and
