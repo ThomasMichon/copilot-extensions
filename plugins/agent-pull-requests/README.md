@@ -239,6 +239,15 @@ extra does not affect ordinary CLI/native installs. This source adapter
 starts no daemon or listener; production lifecycle, forge observation,
 Dispatch consumption and installed/fleet acceptance remain separate work.
 
+The same optional extra exposes the
+[`watch_replay_client.ReplayClient` API](docs/watch-gateway.md#finite-typed-replay-client)
+over Fleet's finite authenticated caller. It validates typed receipts and bounded
+native event batches, retains original request identities and makes no automatic
+retry, poller or process fallback. Revocation, cancellation and lost mutation
+responses remain uncertain; even HTTP 403 cannot prove an in-flight commit
+did not happen. The embedding consumer still owns intent persistence,
+effect idempotency, exact ACK and lifecycle.
+
 ## Native configured observation (source capability)
 
 The existing watch owner also accepts an explicitly attributed Worktrees

@@ -1,0 +1,9 @@
+{
+  "comment": "Add a finite typed Gateway replay client with original-request reconciliation and uncertain mutation failures.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

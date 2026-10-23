@@ -3,7 +3,7 @@
 `agent_pull_requests.watch_gateway.WatchGateway` embeds the
 [replay core](watch-replay.md) in Fleet's real
 [`caller-context-v1` service connector](../../../fleet-manager/docs/gateway-service-profile.md).
-Install the PR package's optional `fleet` extra only for this adapter. The
+Install the PR package's optional `fleet` extra for this adapter or its client. The
 ordinary CLI, process waiter and native callback daemon stay independent of
 Fleet. Importing this module requires that explicit optional dependency.
 
@@ -91,6 +91,50 @@ returns the replay core's `uncertain/state_commit_uncertain` outcome.
 Neither this nor a transport failure licenses a second request identity or a
 process fallback. Reconcile the original request/event identities.
 
+## Finite typed replay client
+
+`agent_pull_requests.watch_replay_client.ReplayClient` uses Fleet's finite
+[`ServiceCaller`](../../../fleet-manager/docs/gateway-service-profile.md)
+for the operations above. The embedding supplies the caller's current async
+token callback, externally provisioned proof key and TLS trust. This client
+does not discover a Gateway, mint credentials, start a waiter, schedule polls
+or persist consumer intent. It is an optional source API, not a new CLI verb
+or a deployed Dispatch consumer.
+
+Construct `ReplayClient(caller, route_prefix="/api", target="project",
+repo="example/project")` with the trusted route prefix, opaque alias and
+expected repository. The prefix is Gateway-facing; the expected repository
+checks returned events and is never sent as an authority label.
+`await client.capabilities()` validates the exact versioned protocol,
+operations, batch bounds and receipt retention. Missing/incompatible
+capabilities refuse rather than silently selecting a legacy waiter.
+
+The consumer durably saves `ReplayRequest(request_id, issued_at)` and its
+criteria before the first `register(request, number=..., until=(...),
+deadline_at=...)`. The client never generates an identity or resamples a
+deadline. Registration, inspection and exact completion return immutable
+`ReplayReceipt` or `ReplayOutcome` values; an uncertain/conflict/unavailable
+outcome is not acceptance. `pending(limit=...)` returns `ReplayBatch` or an
+uncertain outcome. Each immutable `ReplayEvent` exposes generation/event
+identity and a detached `payload()` preserving the complete native
+notification. Consumers still must match their persisted original intent
+and current generation before applying effects. A response is not
+authorization for that effect.
+
+Every method makes exactly one SDK call, which uses fresh current credentials
+and its own finite deadline. Responses require bounded JSON and valid
+receipt/event identity, including expected repository and native notification
+validation. There is no retry, background task, capability cache or process
+fallback. `ReplayClientError` retains only a static code, optional HTTP status
+and uncertainty flag, never server body or credential values.
+Any unsuccessful HTTP mutation response remains uncertain, **including 403**:
+policy withdrawal can occur after dispatch while a remote commit is already
+in flight. Cancellation propagates without claiming rollback. Reconcile
+`inspect(original_request)` under current authorization; if registration
+must be retried, use the same original intent. Commit the consumer effect
+idempotently before acknowledging its exact request/registration/event.
+Neither an error nor an unknown inspection licenses a second wait identity.
+
 ## Transaction custody and drain
 
 Each disk transaction uses the existing `OperationLock` across load, namespace
@@ -117,7 +161,7 @@ protocol. This module starts no resident process or new lifecycle supervisor.
 ## Focused validation
 
 ```text
-python tools/run-plugin-tests.py agent-pull-requests --test-file tests/test_watch_replay_store.py --test-file tests/test_watch_gateway.py --test-file tests/test_watch_gateway_transport.py --test-file tests/test_watch_replay.py
+python tools/run-plugin-tests.py agent-pull-requests --test-file tests/test_watch_replay_store.py --test-file tests/test_watch_gateway.py --test-file tests/test_watch_gateway_transport.py --test-file tests/test_watch_replay.py --test-file tests/test_watch_replay_client.py --test-file tests/test_watch_replay_client_transport.py
 ```
 
 The tests reuse Fleet's actual synthetic-issuer/TLS/PoP/WebSocket fixture:
@@ -130,6 +174,14 @@ The real TLS tests pause before replay lookup and inside an already-started
 atomic write, then exercise both policy withdrawal and channel loss. Publication
 does not wait for the held write. The same original request reconciles after
 reauthorization/reconnection, without replacement or loss of transaction custody.
+The typed client tests traverse that same real path for original-intent retry,
+disk restart, scoped isolation, exact ACK/cancel and policy/channel/client
+cancellation both before lookup and during an in-flight commit. Unit checks
+assert one SDK call per operation, finite byte/batch limits, strict protocol
+responses and detached event payloads. These are deterministic work-count
+checks and synthetic native TLS integration, not production latency/CPU
+qualification or installed fleet acceptance. A deployed observer/consumer
+still owns its polling frequency and representative performance measurements.
 
 ## Explicit native observation credential command
 

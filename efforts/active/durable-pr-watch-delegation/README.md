@@ -256,6 +256,14 @@ _Operator-required scope; agent-recommended implementation and validation._
   events/deadlines through provider loss, cancellation and restart. Source
   validation does not close service scheduling, activation or production proof
   (source confirmed by #8028).
+- [x] Land the finite existing-profile Gateway caller SDK with current credentials,
+  bounded HTTP bodies/concurrency/deadline, no automatic retry or ambient
+  fallback, and explicit uncertain mutation results (source confirmed by #8059).
+  PR-specific replay consumption and installed/fleet acceptance remain below.
+- [ ] Land the finite PR-owned typed replay client over that SDK, preserving
+  original request criteria and exact completion identities without retries,
+  local persistence or a second wait owner. Source client validation does not
+  close the shared Dispatch consumer or installed/fleet acceptance.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -501,6 +509,71 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Prepare the finite typed PR replay client
+
+- Added the optional PR-owned `ReplayClient` over Fleet's finite `ServiceCaller`.
+  Each operation retains the explicit trusted route/alias and expected repository,
+  makes one SDK call and validates bounded JSON, capabilities, receipts or native
+  pending events. Immutable original request identity is supplied by the consumer,
+  not generated or persisted by this client. No retry/poller, callback process,
+  legacy fallback, provider implementation or default-install dependency was added.
+- Typed receipts and outcomes retain exact registration/event IDs; pending payload
+  copies preserve the native notification. Completion verifies the returned
+  generation/event. Consumers still own durable intent, current task-generation
+  matching and idempotent effects before ACK.
+- The first real TLS run passed 63 cases and failed both policy-withdrawal
+  cases: the Gateway correctly returned 403 after dispatch, but the client had
+  incorrectly treated only 5xx as uncertain. Fixed that class for all unsuccessful
+  HTTP mutation responses. Revocation, channel loss and caller cancellation now
+  preserve original-ID reconciliation both before lookup and after commit starts;
+  no negative acknowledgement, rollback claim or replacement registration.
+- Validation: 205 selected replay/client/store/Gateway cases passed in 38.03s,
+  including seven new actual TLS/client cases. Fatal Python lint, whitespace and
+  the 13-plugin install-contract check passed. Source integration uses isolated
+  first-provisioned disk state and a synthetic issuer, not production credentials.
+  No installer/bootstrap/lifecycle change requires a new clean-room installation
+  lane; installed-service and live fleet proof remain explicitly open and no
+  production rollout or capacity is authorized by this source change.
+- Documentation-impact review: updated the existing replay Gateway reference and
+  plugin README for the optional API, typed outcomes, limits, original-intent
+  recovery and 403 uncertainty. No CLI/help/config/installer/activation contract
+  changes. This closes part of the existing PR/fleet vision and respects optional
+  composition, shared native validation and existing transport/lifecycle ownership.
+- Performance impact: one SDK invocation per explicit consumer operation, with its
+  existing two HTTPS exchanges and current-token/signature work; zero added
+  subprocesses, retry loops or persistent sessions. Responses are at most 24 KiB
+  and pending returns at most 16 events. Unit assertions check those exact work
+  counts/bounds. The real TLS suite measures source integration, not qualified
+  native fleet p95/CPU; the eventual scheduled consumer owns representative
+  frequency/cardinality measurements before deployed acceptance.
+- Next: reviewed source publication, then the shared Dispatch consumer through its
+  existing durable prepare/arm/finish fences and independently installable service
+  lifecycle. Parent credential/provider, release, authorized installed proof,
+  presentation/migration and fleet acceptance remain open.
+
+### 2026-10-22 - Merge the finite Gateway caller and continue replay consumption
+
+- #8059 merged as `6e327f495f283406529782c2df064316f2e47965` at
+  `2026-10-23T02:48:00Z`, from published head
+  `688976106d8dc81fd0b5740bce8b9a850f15cc6e`. Current-head Copilot review
+  `5623315206` approved with no open issues. Its full body and complete empty
+  thread page were read; every required check passed. Managed completion used
+  only the documented additional-CODEOWNER review exception, not a CI or
+  feedback bypass. #7188 remains open.
+- Re-read the full current parent Plan/Validation after merge and close only
+  this bounded shared source prerequisite. The 167-case combined selection,
+  final one-case fresh challenge/token count and two-case HEAD/304 checks are
+  source/synthetic TLS proof, not production-provider or fleet qualification.
+- Next: add the PR-owned typed replay client over this caller and connect the
+  shared Dispatch consumer through its existing durable prepare/arm/finish
+  fences. Preserve original request timestamp/deadline, exact registration/event
+  identity, replay after response loss, and ACK only after generation-fenced
+  durable completion. No per-task waiter process or duplicate task registry.
+- Managed post-merge reconciliation retained a backup and removed only the
+  already-merged source commit. The worktree remains bound to this Active
+  parent; no finalization, runtime update, production credential acquisition,
+  remote activation or new capacity follows from source publication.
 
 ### 2026-10-22 - Prepare the finite service-caller transport
 
