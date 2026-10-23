@@ -20,7 +20,7 @@ import sys
 import sysconfig
 import types
 import zipimport
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
@@ -48,12 +48,16 @@ _VALUE_OPTIONS = _INDEX_OPTIONS | _FILE_OPTIONS | {
     "--exclude-newer-package", "--no-sources-package", "--reinstall-package", "--link-mode",
     "-C", "--config-setting", "--config-settings-package", "--no-build-isolation-package",
     "--cache-dir", "--refresh-package", "-p", "--python", "--color", "--allow-insecure-host",
-    "--directory", "--project", "--config-file",
+    "--directory", "--project", "--config-file", "-o", "--output-file", "--format",
 }
 
 
 class DependencyPolicyError(RuntimeError):
     """An installation could not establish the seasoning policy."""
+
+
+class _CompileMetadata(set):
+    """Compile project roots are metadata inputs, never directory dependencies."""
 
 
 def _captured_environment(env):
@@ -184,6 +188,8 @@ def _check_requirement(
     candidate = _contained(candidate, roots)
     if not candidate.is_dir():
         raise DependencyPolicyError("local artifacts cannot prove release age; only owned source directories are exempt")
+    if isinstance(seen, _CompileMetadata):
+        raise DependencyPolicyError("lock export cannot retain directory dependencies or local artifacts")
     _check_project(candidate, roots, seen, expected)
     return candidate
 
@@ -241,6 +247,8 @@ def _inspect_project(
                         or not isinstance(entry["path"], str)):
                     raise DependencyPolicyError("local UV path source is unsupported")
                 child = _contained(source / entry["path"], roots)
+                if isinstance(seen, _CompileMetadata):
+                    raise DependencyPolicyError("lock export cannot retain directory dependencies or local artifacts")
                 if _bundled_dbus_next(identity, name, child):
                     continue
                 if not child.is_dir():
@@ -376,69 +384,17 @@ def _balanced(text: str, start: int, opening: str, closing: str) -> tuple[str, i
     raise DependencyPolicyError("UV settings projection is incomplete")
 
 
-def cutoff_arguments(settings: str, *, now: datetime | None = None) -> list[str]:
+def cutoff_arguments(
+    settings: str, *, now: datetime | None = None, _operation: str = "install",
+) -> list[str]:
     """Honor a stronger global cutoff; reject package/index escape hatches."""
-    now = datetime.now(timezone.utc) if now is None else now
-    if now.tzinfo is None:
-        raise DependencyPolicyError("seasoning requires a timezone-aware clock")
-    floor = now.astimezone(timezone.utc) - timedelta(seconds=MIN_AGE_SECONDS)
-    projections = list(re.finditer(r"(?m)^PipInstallSettings \{", settings))
-    if len(projections) != 1:
-        raise DependencyPolicyError("UV installation settings projection is unsupported")
-    _, projection_end = _balanced(settings, settings.index("{", projections[0].start()), "{", "}")
-    if settings[projection_end:].strip():
-        raise DependencyPolicyError("UV settings projection has unexpected trailing content")
-    settings = settings[projections[0].start():projection_end]
-    if (re.search(r"(?m)^\s*dependency_mode:\s*(?!Transitive\b)\S+", settings)
-            or re.search(r"(?m)^\s*build_isolation:\s*(?!Isolate\b)\S+", settings)):
-        raise DependencyPolicyError("dependency or isolated-build resolution cannot bypass seasoning")
-    indexes = list(re.finditer(r"(?m)^\s*index_locations: IndexLocations \{", settings))
-    if len(indexes) != 1:
-        raise DependencyPolicyError("UV registry source configuration is unsupported")
-    index_body, indexes_end = _balanced(settings, settings.index("{", indexes[0].start()), "{", "}")
-    flat = re.search(r"\bflat_index:\s*\[", index_body)
-    if flat is None:
-        raise DependencyPolicyError("UV flat-index configuration is unsupported")
-    flat_body, _ = _balanced(index_body, index_body.index("[", flat.start()), "[", "]")
-    if flat_body.strip():
-        raise DependencyPolicyError("flat-index dependencies cannot prove artifact upload age")
-    non_registry = settings[:indexes[0].start()] + settings[indexes_end:]
-    if _REMOTE_REFERENCE.search(non_registry):
-        raise DependencyPolicyError("direct remote dependencies lack release-age evidence")
-    matches = list(re.finditer(r"(?m)^\s*exclude_newer: ExcludeNewer \{", settings))
-    if len(matches) != 1:
-        raise DependencyPolicyError("UV does not expose an unambiguous seasoning configuration")
-    match = matches[0]
-    body, end = _balanced(settings, settings.index("{", match.start()), "{", "}")
-    # Index overrides allow unknown upload timestamps to acquire a synthetic
-    # date. Even a strict index cutoff therefore cannot prove artifact age.
-    remaining = settings[:match.start()] + settings[end:]
-    index_values = re.findall(r"(?m)^\s*exclude_newer:\s*([^\n]+)", remaining)
-    if any(value.strip().rstrip(",") != "None" for value in index_values):
-        raise DependencyPolicyError("index-specific exclude-newer cannot prove artifact upload age")
-    global_match = re.match(r"\s*global:\s*(None|Some\()", body)
-    if global_match is None:
-        raise DependencyPolicyError("UV global cutoff settings are unsupported")
-    position = global_match.end()
-    if global_match[1] == "Some(":
-        global_body, position = _balanced(body, position - 1, "(", ")")
-        floor = min(floor, _cutoff_value(global_body, now))
-    package_match = re.fullmatch(
-        r",?\s*package:\s*ExcludeNewerPackage\(\s*\{(.*)\},?\s*\),?\s*",
-        body[position:], re.DOTALL,
+    return _configuration.cutoff_arguments(
+        settings, now=now, operation=_operation, min_age=MIN_AGE_SECONDS,
+        balanced=_balanced, remote_reference=_REMOTE_REFERENCE, error_type=DependencyPolicyError,
     )
-    if package_match is None:
-        raise DependencyPolicyError("UV package cutoff settings are unsupported")
-    package_arguments = []
-    for name, value in _package_cutoffs(package_match[1]):
-        if _cutoff_value(value, now) > floor:
-            raise DependencyPolicyError(f"package-specific cutoff weakens seasoning: {name}")
-        frozen = _cutoff_value(value, now).isoformat().replace("+00:00", "Z")
-        package_arguments.extend(["--exclude-newer-package", f"{name}={frozen}"])
-    return ["--exclude-newer", floor.isoformat().replace("+00:00", "Z"), *package_arguments, "--reinstall"]
 
 
-def _source_inputs(arguments, environment, cwd, trusted_source_roots):
+def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operation="install"):
     if "--" in arguments:
         raise DependencyPolicyError("UV end-of-options markers cannot precede mandatory resolver policy")
     if any(arg.split("=", 1)[0] in ("--show-settings", "--dry-run") for arg in arguments):
@@ -464,7 +420,7 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots):
             project_directory = value
     if directory:
         base = (base / directory).resolve()
-    seen: set[Path] = set()
+    seen: set[Path] = _CompileMetadata() if operation == "compile" else set()
     files: set[Path] = set()
     editables: set[Path] = set()
     for option, value in pairs:
@@ -484,6 +440,8 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots):
                 _check_project(path.parent, roots, seen)
             else:
                 _check_requirements_sources(path, set(), roots, base, seen, files, editables)
+        elif not option and operation == "compile":
+            _check_requirements_sources(base / value, set(), roots, base, seen, files, editables)
         elif option in ("", "-e", "--editable"):
             source = _check_requirement(value, base, roots, seen)
             if source is not None and option in ("-e", "--editable"):
@@ -557,16 +515,24 @@ def prepare_uv_install(
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
     _projection: list[str] | None = None,
+    _operation: str = "install",
 ) -> list[str]:
     """Preflight only. Installations must execute a retained UV transaction."""
     env = _captured_environment(env)
-    _source_inputs(arguments, env, cwd, trusted_source_roots)
+    if _operation == "compile":
+        arguments = _configuration.compile_arguments(
+            arguments, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
+        )
+    _source_inputs(
+        arguments, env, cwd, trusted_source_roots,
+        **({"operation": _operation} if _operation != "install" else {}),
+    )
     uv = _select_uv_executable(uv)
     probe_arguments = [
         argument for argument in arguments
         if argument != "--quiet" and not re.fullmatch(r"-q+", argument)
     ]
-    command = [uv, "pip", "install", "--show-settings", *probe_arguments]
+    command = [uv, "pip", _operation, "--show-settings", *probe_arguments]
     try:
         result = subprocess.run(
             command, capture_output=True, text=True, env=env, cwd=cwd,
@@ -577,7 +543,12 @@ def prepare_uv_install(
     if result.returncode != 0:
         # Do not include UV's debug projection or credential-bearing arguments.
         raise DependencyPolicyError("UV seasoning configuration probe failed")
-    admitted = cutoff_arguments(result.stdout, now=now)
+    admitted = cutoff_arguments(result.stdout, now=now, _operation=_operation)
+    if _operation == "compile":
+        _configuration.check_compile_projection(
+            result.stdout, arguments, argument_pairs=_argument_pairs,
+            balanced=_balanced, error_type=DependencyPolicyError,
+        )
     if _projection is not None:
         _projection.append(result.stdout)
     cleaned = []
@@ -681,11 +652,19 @@ def retain_uv_install(
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
+    _operation: str = "install",
 ):
     """Own the admitted graph until the caller's execution and health settle."""
     now = datetime.now(timezone.utc) if now is None else now
     environment = _captured_environment(env)
-    base, projects, files, editables = _source_inputs(arguments, environment, cwd, trusted_source_roots)
+    if _operation == "compile":
+        arguments = _configuration.compile_arguments(
+            arguments, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
+        )
+    base, projects, files, editables = _source_inputs(
+        arguments, environment, cwd, trusted_source_roots,
+        **({"operation": _operation} if _operation != "install" else {}),
+    )
     uv = _select_uv_executable(uv)
     resources = []
     for resource in retained_resource_roots:
@@ -717,7 +696,7 @@ def retain_uv_install(
             environment["UV_PYTHON"] = os.path.abspath(base / value)
     normalized = []
     for option, value in _argument_pairs(arguments):
-        if option in ("--target", "-t", "--prefix", "--cache-dir", "--cert"):
+        if option in ("--target", "-t", "--prefix", "--cache-dir", "--cert", "-o", "--output-file"):
             value = os.path.abspath(base / value)
         elif option in ("-p", "--python"):
             if Path(value).is_absolute() or (base / value).exists() or re.search(r"[/\\]", value):
@@ -731,6 +710,7 @@ def retain_uv_install(
     original = prepare_uv_install(
         uv, arguments, env=environment, cwd=cwd, now=now,
         trusted_source_roots=trusted_source_roots, _projection=original_projection,
+        **({"_operation": _operation} if _operation != "install" else {}),
     )
     if editables and re.search(r'"editable_mode"\s*:', _resolver_configuration(original_projection[0], now=now)):
         raise DependencyPolicyError("retained editable metadata owns the setuptools editable mode")
@@ -859,8 +839,13 @@ def retain_uv_install(
         for path in files:
             destination = mirror(path)
             Path(_native_retained_path(destination.parent)).mkdir(parents=True, exist_ok=True)
+            text = Path(_native_retained_path(path)).read_text(encoding="utf-8")
+            if _operation == "compile":
+                text = _configuration.compile_requirement_includes(text, path, mirror, remap)
+            else:
+                text = remap(text)
             Path(_native_retained_path(destination)).write_text(
-                remap(Path(_native_retained_path(path)).read_text(encoding="utf-8")), encoding="utf-8")
+                text, encoding="utf-8")
         retained_config = {}
         for path, is_project in reversed(_config_inputs(arguments, environment, base)):
             data = _toml(path)
@@ -901,12 +886,12 @@ def retain_uv_install(
         for option, value in _argument_pairs(original):
             if option in ("--directory", "--config-file"):
                 continue
-            if option in _FILE_OPTIONS or option == "--project":
+            if (_operation == "compile" and not option) or option in _FILE_OPTIONS or option == "--project":
                 value = str(mirror(base / value))
             elif option in ("-p", "--python", "--target", "-t", "--prefix", "--cache-dir", "--cert"):
                 if (base / value).exists() or Path(value).is_absolute():
                     value = os.path.abspath(base / value)
-            else:
+            elif option not in ("-o", "--output-file"):
                 value = remap(value)
             if option and value:
                 retained.extend([option, value] if option in _VALUE_OPTIONS else [option + "=" + value])
@@ -923,6 +908,7 @@ def retain_uv_install(
         admitted = prepare_uv_install(
             uv, retained, env=retained_environment, cwd=retained_base, now=now,
             trusted_source_roots=retained_roots, _projection=retained_projection,
+            **({"_operation": _operation} if _operation != "install" else {}),
         )
         original_configuration = _resolver_configuration(
             original_projection[0], remap, now=now, freeze_package_cutoffs=True,
@@ -933,7 +919,7 @@ def retain_uv_install(
         if editables:
             admitted.extend(["--config-setting", "editable_mode=compat"])
         yield RetainedUVInstall(
-            (uv, "pip", "install", *admitted), retained_environment, retained_base,
+            (uv, "pip", _operation, *admitted), retained_environment, retained_base,
             {path: mirror(path) for path in projects}, source_hashes,
         )
 
@@ -942,7 +928,7 @@ def run_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
-    retained_resource_roots: tuple[Path, ...] = (), **run_options,
+    retained_resource_roots: tuple[Path, ...] = (), _operation: str = "install", **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
     result = None
@@ -951,6 +937,7 @@ def run_uv_install(
             uv, arguments, env=env, cwd=cwd, now=now,
             trusted_source_roots=trusted_source_roots,
             retained_resource_roots=retained_resource_roots,
+            **({"_operation": _operation} if _operation != "install" else {}),
         ) as transaction:
             run_options.setdefault("creationflags", _HEADLESS)
             result = subprocess.run(
@@ -963,6 +950,21 @@ def run_uv_install(
             raise
         _report_cleanup_error(exc)
         return result
+
+
+def prepare_uv_compile(uv: str, arguments: list[str], **options) -> list[str]:
+    """Preflight a hashed requirements export; execute only through retention."""
+    return prepare_uv_install(uv, arguments, _operation="compile", **options)
+
+
+def retain_uv_compile(uv: str, arguments: list[str], **options):
+    """Retain the admitted compile graph for the lifetime of its execution."""
+    return retain_uv_install(uv, arguments, _operation="compile", **options)
+
+
+def run_uv_compile(uv: str, arguments: list[str], **options) -> subprocess.CompletedProcess:
+    """Execute a retained, seasoned, hashed requirements export."""
+    return run_uv_install(uv, arguments, _operation="compile", **options)
 
 
 def main(argv: list[str] | None = None) -> int:

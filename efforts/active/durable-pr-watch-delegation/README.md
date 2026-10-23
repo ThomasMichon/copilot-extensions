@@ -327,6 +327,10 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [ ] Supply an independently installable PR service and container role for
   fleet-manager's declared placement and lifecycle, without requiring a Copilot
   session, host-side plugin supervisor or parallel fleet controller.
+- [x] Land standalone first-party PR/Fleet construction and verification through
+  the existing shared artifact path, preserving plugin compatibility and
+  canonical source/resource identity (confirmed by #8293). This source leaf
+  does not admit a runtime dependency closure or establish image acceptance.
 - [ ] Deliver the [shared artifact construction](artifact-construction.md)
   proposal through review, standalone first-party artifact support, admitted
   runtime closure and actual offline image acceptance. Preserve public
@@ -685,6 +689,90 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-23 - Retain canonical dependency compile inputs before runtime admission
+
+- Added the bounded lock-export seam to the existing installer owner, not a
+  PR-service resolver. Compile admits its own native settings projection,
+  applies the unchanged seven-day/stronger-package policy, retains complete
+  project/recursive requirements/configuration, and rechecks effective resolver
+  equivalence before execution. Existing install defaults and test seams remain
+  compatible; canonical helpers are synchronized to every shipped consumer.
+- Candidate exports force hashed requirements, ignore existing output pins and
+  keep explicit output paths in the original working directory. Effective
+  configuration cannot redirect implicit output, omit packages or emit index
+  URLs. Unsupported compile shapes and live editable graphs refuse. This does
+  not approve a profile, acquire its exact closure, qualify a governed feed or
+  construct an offline context/image.
+- The contained targeted Windows selection passes 234 tests. Real compile
+  cases establish a positive recent-version control, seasoned transitive hashes,
+  refusal of missing upload timestamps, existing-output independence and
+  original-input mutation isolation, including absolute-dot aliases. Review
+  exposed directory dependency exports that could reference cleaned-up snapshots
+  and positional file aliases that could reopen mutable originals. Four new
+  cases failed before correction; compile now refuses directory requirement
+  edges/local artifact mappings while preserving metadata-only project inputs,
+  and maps every positional input through the canonical retained graph.
+  A further real mutation case reproduced the same alias escape inside recursive
+  includes; their requirement/constraint targets are now rewritten by canonical
+  identity, with six option/continuation controls. Positive exports are checked
+  after snapshot cleanup. The separate native selection also passes
+  all eight existing transitive/isolated-build age cases. All 59 workflow-scope
+  tests pass after correcting stale artifact-lane and replay-store expectations.
+  Fatal lint, all thirteen installer contracts and both canonical sync checks
+  pass. Current-head review, required CI and the new explicitly selected native
+  Linux/Windows compile lane remain publication gates.
+- A subsequent review identified double lexical remapping when a POSIX root
+  anchor leaves an original file path as a suffix inside its retained target.
+  Offline composition reproduced the corruption; canonical includes now bypass
+  later lexical remapping, while non-include lines retain their existing
+  transformation. Cross-platform unit and native root-working-directory
+  controls cover this boundary; exact-head Linux acceptance remains required.
+- The parent remains Active. Approved platform-specific runtime closure,
+  separately selected native Worktrees artifact, image/container acceptance,
+  provider/storage/update qualification, release/authorized rollout, actual
+  fleet and retained client/Dispatch closure remain open.
+
+### 2026-10-23 - Merge first-party artifact construction and continue runtime admission
+
+- #8293 merged as `f2fe13adcd9d8a191184dd2669b5cc9fd66ae1fe` at
+  `2026-10-23T21:29:20Z`, from final head
+  `6d9589baef8326450128c295da37f8188dcfcbd0`. Copilot approved that
+  exact head with no open findings. Both review threads are resolved; complete
+  review bodies, issue comments and thread pagination were read. Required CI
+  `40026088499`, workflow lockdown, attribution and identifier checks passed.
+  Managed merge used only the authorized additional CODEOWNER-vote exception,
+  not a CI or blocking-feedback bypass. Closing references were empty.
+- Review exposed two real production export defects missed by ordinary direct
+  builds: nested scratch ancestry made Fleet's helper selection ambiguous,
+  then admission metadata shadowed the disposable source handle after a reuse
+  miss. Isolate attribute-bound source data outside the original ancestry and
+  retain its distinct handle through validation. Keep Fleet's helper safety
+  check unchanged. Pure controls cover build, reuse, reuse miss, failed build
+  and failed admission, including source lifetime and complete cleanup.
+- Final exact-head native acceptance `40026242589` passed Linux and Windows:
+  real MCP/SSH and PR/Fleet builds, source verification, fresh offline
+  first-party standalone installation outside a checkout, and actual nested
+  export through the reuse-miss admission branch. Only catalog absence is
+  simulated; Git, construction, source checks, admission identity and cleanup
+  execute normally. This is packaging/source proof, not governed runtime
+  dependency acquisition, approved Worktrees selection or image/fleet proof.
+  Local follow-up packets passed 23 export/reuse and 19 canonical-attribute
+  cases; the final pure selection passes 20. Its source roster, effect observer
+  and budgets remain unchanged. A local focused observer attempt lacked
+  coverage tooling and is not a pass; the hosted complete unit packet passed.
+- Re-read the entire current parent after merge. Close only the standalone
+  first-party source delivery item; runtime closure, offline context/image,
+  provider, lifecycle, authorized installed rollout, fleet and every directly
+  retained client/reviewer/migration/idle-record/nonevent gate remain open.
+  The parent and #7188 remain Active; no rollout or finalization is authorized.
+- Preserve the reviewed head. Managed continuation safely aborted a squash
+  replay conflict; the complete published range and merged patch have the
+  identical stable patch ID. Exclude only that already-merged range, then
+  complete the managed pull-forward onto current `dev` without discarding
+  unpublished work. Next compose target-specific runtime closure and offline
+  context through canonical retained-input/profile authority, not a PR-only
+  resolver or public runtime fallback.
 
 ### 2026-10-23 - Implement standalone first-party artifact construction
 
