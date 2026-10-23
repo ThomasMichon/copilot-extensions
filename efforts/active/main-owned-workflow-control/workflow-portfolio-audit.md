@@ -402,7 +402,7 @@ It is not an independent causal before/after experiment.
 | Validate and promote | 75 |
 | Base reminder | 29 |
 | Native acceptance / full installation / Windows rotation | 17 / 18 / 3 |
-| Separately titled promotion lockdown / Dependabot | 26 / 1 |
+| Separately titled promotion lockdown / Dependabot | 27 / 1 |
 
 Conclusions are 1,720 success, 84 skipped, 78 failure, 34 cancelled and nine
 action-required. The population includes 29 failed promotion runs. These are
