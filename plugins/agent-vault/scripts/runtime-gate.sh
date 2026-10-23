@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Installation driver contract: vault-first-use-v1
 set -euo pipefail
 
 export PYTHONUTF8=1
@@ -11,6 +12,7 @@ PAYLOAD_ROOT="${AGENT_VAULT_PAYLOAD_ROOT:-}"
 }
 
 SCRIPT_DIR="$PAYLOAD_ROOT/scripts"
+PROJECT_ROOT="$(pwd -P)"
 MODE_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
 JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
 RUNTIME_RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
@@ -123,6 +125,7 @@ STATUS_ARGS=(
     --payload-root "$PAYLOAD_ROOT"
     --plugin-id agent-vault
     --legacy-root "$LEGACY_ROOT"
+    --project-root "$PROJECT_ROOT"
 )
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     STATUS_ARGS+=(--context "$COPILOT_EXTENSIONS_CONTEXT")
@@ -236,7 +239,7 @@ fi
 
 PUBLICATION_ARGS=(
     probe-plugin-publication --payload-root "$PAYLOAD_ROOT"
-    --plugin-id agent-vault --legacy-root "$RUNTIME_ROOT"
+    --plugin-id agent-vault --legacy-root "$RUNTIME_ROOT" --project-root "$PROJECT_ROOT"
 )
 if [[ -n "$CONTEXT" ]]; then
     PUBLICATION_ARGS+=(--context "$CONTEXT" --durable-home "$VALIDATION_DURABLE_HOME")
@@ -254,80 +257,26 @@ if [[ "$PUBLICATION_RC" != 0 ||
         "$PUBLICATION" >&2
     exit 3
 fi
-resolve_runtime normal
-if [[ -n "$AGENT_RT_PY" ]]; then
-    run_runtime "$@"
-fi
-mkdir -p "$RUNTIME_ROOT"
-STATUS_PATH="$RUNTIME_ROOT/.provision-status"
-_lock_link=""
-_unlock_provision() {
-    if [[ -n "$_lock_link" ]]; then
-        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
-        [[ "$_owner" == "$$" ]] && rm -f "$_lock_link"
-        _lock_link=""
-    else
-        flock -u 9 2>/dev/null || true
-        exec 9>&-
-    fi
-}
-if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
-    exec 9>"$RUNTIME_ROOT/.provision.lock"
-    flock 9
-else
-    _lock_link="$RUNTIME_ROOT/.provision.lock.pid"
-    until ln -s "$$" "$_lock_link" 2>/dev/null; do
-        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
-        case "$_owner" in
-            *[!0-9]*|"") _live=0 ;;
-            *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
-        esac
-        if [[ -z "$_owner" ]]; then
-            # The link vanished after the failed `ln -s` (or is not a
-            # symlink): never unlink then -- a live lock could be created
-            # between the read and the unlink. Just retry.
-            sleep 0.1
-        elif [[ "$_live" == 0 && "$(readlink "$_lock_link" 2>/dev/null || true)" == "$_owner" ]]; then
-            rm -f "$_lock_link"
-        else
-            sleep 1
-        fi
-    done
-fi
-trap '_unlock_provision' EXIT INT TERM
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
-    _unlock_provision
-    trap - EXIT INT TERM
     run_runtime "$@"
 fi
-printf '%s\n' '[agent-vault] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.' >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' \
-    'agent-vault' "$STATUS_PATH" >&2
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-
+if [[ -n "$CONTEXT" ]]; then
+    printf '[agent-vault] cold namespaced provisioning requires a qualified installation driver; use explicit installation management.\n' >&2
+    exit 126
+fi
+FIRST_USE="$PAYLOAD_ROOT/libs/update-driver/scripts/first-use.sh"
+if [[ ! -f "$FIRST_USE" ]]; then
+    printf '[agent-vault] packaged installation driver is unavailable; update or repair the owning payload.\n' >&2
+    exit 126
+fi
+EXECUTION_ROOT="$HOME/.copilot-extensions/update-driver"
+printf '[agent-vault] submitting first-use provisioning to the installation driver: %s\n' "$EXECUTION_ROOT" >&2
 apply_runtime_env
-set +e
-bash "$INSTALLER" provision --install-dir "$RUNTIME_ROOT" >&2
-PROVISION_EXIT=$?
-set -e
-if [[ "$PROVISION_EXIT" -ne 0 ]]; then
-    printf 'failed rc=%s %s\n' "$PROVISION_EXIT" "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-    printf '[agent-vault] provisioning FAILED. See the log above; retry, or run: bash "%s" provision --install-dir "%s"\n' \
-        "$INSTALLER" "$RUNTIME_ROOT" >&2
-    exit "$PROVISION_EXIT"
-fi
-
+bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT_ROOT" --wait || exit "$?"
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-    _unlock_provision
-    trap - EXIT INT TERM
     run_runtime "$@"
 fi
-
-_unlock_provision
-trap - EXIT INT TERM
-printf 'failed rc=1 %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-printf '[agent-vault] provisioning reported success but no runtime slot resolved.\n' >&2
+printf '[agent-vault] driver completed without a resolvable runtime.\n' >&2
 exit 1

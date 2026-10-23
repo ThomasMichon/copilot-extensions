@@ -688,6 +688,21 @@ function Write-SimpleBinstub {
     $snapshotInstallerLiteral = $SnapshotInstallerPath.Replace("'", "''")
     $moduleLiteral = $ModuleName.Replace("'", "''")
     $commandLiteral = $CommandName.Replace("'", "''")
+    $coldDispatcher = ''
+    if ($CommandName -ceq 'agent-vault') {
+        $coldDispatcher = @'
+$_gate = Join-Path $_snap 'scripts\runtime-gate.ps1'
+if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or
+    -not (Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: vault-first-use-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-vault] owning snapshot dispatcher is unavailable; repair the owning payload.')
+    exit 126
+}
+$env:AGENT_VAULT_HOME = $_root
+$env:AGENT_VAULT_PAYLOAD_ROOT = $_snap
+& $_gate @args
+exit $LASTEXITCODE
+'@
+    }
 
     $ps1Path = Join-Path $LocalBin "$CommandName.ps1"
     $ps1Content = @"
@@ -722,6 +737,7 @@ if (-not (Test-Path -LiteralPath `$_probe -PathType Leaf)) {
 `$global:LASTEXITCODE = 0
 & `$_probe -PayloadRoot `$_snap -PluginId '$commandLiteral' -LegacyRoot `$_root
 if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+$coldDispatcher
 `$_py = _Resolve-Py normal
 if (`$_py) { & `$_py -m $moduleLiteral @args; exit `$LASTEXITCODE }
 if (-not (Test-Path -LiteralPath `$_root)) { New-Item -ItemType Directory -Path `$_root -Force | Out-Null }

@@ -140,6 +140,17 @@ def test_shared_actual_stamp_first_use_admission(
         '#!/usr/bin/env bash\nprintf yes > "$(dirname "$0")/../installer-ran"\nexit 37\n',
         encoding="utf-8",
     )
+    if plugin == "agent-vault" and state == "standalone":
+        producer = snapshot / "libs" / "update-driver" / "scripts" / (
+            "foundation-produce.ps1" if os.name == "nt" else "foundation-produce.sh"
+        )
+        producer.write_text(
+            "param([string]$Root,[string]$SourceHash)\n"
+            "[IO.File]::WriteAllText((Join-Path $Root 'foundation-entered'), $SourceHash)\nexit 37\n"
+            if os.name == "nt" else
+            '#!/usr/bin/env bash\nprintf "%s" "$2" >"$1/foundation-entered"\n'
+            "printf 'fixture foundation refusal\\n' >&2\nexit 37\n", encoding="utf-8",
+        )
     if state == "old-resolver":
         resolver = root / "bin" / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")
         resolver.write_text(resolver.read_text(encoding="utf-8").replace(
@@ -189,6 +200,13 @@ def test_shared_actual_stamp_first_use_admission(
     )
     marker = snapshot / "installer-ran"
     if state == "standalone":
+        if plugin == "agent-vault":
+            driver = binding_fixture["home"] / ".copilot-extensions" / "update-driver"
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert (driver / "foundation-entered").is_file(), result.stdout + result.stderr
+            assert not marker.exists()
+            assert not (root / ".provision.lock").exists()
+            return
         assert result.returncode == 37, result.stdout + result.stderr
         assert marker.read_text(encoding="utf-8") == "yes"
         assert (root / "logs/boot-trace.jsonl").is_file()
@@ -452,6 +470,12 @@ def test_payload_uses_selected_publication_policy(
         assert result.returncode == 3, result.stdout + result.stderr
         assert "deployment-managed" in result.stdout + result.stderr
         assert _snapshot(root) == before
+    elif plugin == "agent-vault":
+        assert result.returncode == 126, result.stdout + result.stderr
+        expected = "cold namespaced provisioning" if namespaced else "packaged installation driver is unavailable"
+        assert expected in result.stderr, result.stdout + result.stderr
+        assert _snapshot(root) == before
+        assert not (root / "installer-ran").exists()
     else:
         assert result.returncode == 37, result.stdout + result.stderr
         assert (root / "installer-ran").read_text(encoding="utf-8") == "yes"

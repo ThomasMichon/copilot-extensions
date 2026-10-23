@@ -257,7 +257,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
         coverage_map = {}
         for measured_file in cov_data.measured_files():
             try:
-                rel = str(Path(measured_file).resolve().relative_to(cwd_path))
+                rel = Path(measured_file).resolve().relative_to(cwd_path).as_posix()
             except ValueError:
                 rel = measured_file
             per_line = {}

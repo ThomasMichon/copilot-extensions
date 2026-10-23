@@ -501,6 +501,21 @@ write_simple_binstub() {
     local resolver_ps1_source="${8:-}" resolver_sh_source="${9:-}"
     local snapshot_source_path="${10:-}" snapshot_id="${11:-}" payload_version="${12:-}"
     local runtime_root_literal snapshot_installer_literal
+    local cold_dispatch=""
+    if [[ "$command_name" == agent-vault ]]; then
+        cold_dispatch="$(cat <<'DISPATCH'
+_gate="$_snapshot/scripts/runtime-gate.sh"
+if [[ ! -f "$_gate" ]] ||
+   ! grep -Fq '# Installation driver contract: vault-first-use-v1' "$_gate"; then
+    printf '[agent-vault] owning snapshot dispatcher is unavailable; repair the owning payload.\n' >&2
+    exit 126
+fi
+export AGENT_VAULT_HOME="$_root"
+export AGENT_VAULT_PAYLOAD_ROOT="$_snapshot"
+exec bash "$_gate" "$@"
+DISPATCH
+)" || return 1
+    fi
     printf -v runtime_root_literal '%q' "$runtime_root" || return 1
     printf -v snapshot_installer_literal '%q' "$snapshot_installer_rel" || return 1
     local resolver source destination temporary
@@ -594,6 +609,7 @@ if [ ! -f "\$_probe" ]; then
     exit 126
 fi
 bash "\$_probe" "\$_snapshot" "\$_name" "\$_root" || exit \$?
+$cold_dispatch
 _resolve normal
 [ -n "\$AGENT_RT_PY" ] && exec "\$AGENT_RT_PY" -m "$module_name" "\$@"
 mkdir -p "\$_root"

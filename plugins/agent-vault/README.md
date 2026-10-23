@@ -9,12 +9,22 @@ Out-of-session automation, Git credential-helper registration, supervision,
 and `vault-askpass` remain explicit compatibility/management boundaries until
 they receive attributable installation context.
 
-The payload also carries the canonical Python installer-engine helpers for
-the shared execution driver's fixed provision recipe to inspect and freeze
-its complete materialized inputs. Ordinary Vault hooks and first-use wrappers
-have not adopted that driver; this packaging does not enable another installer,
-service or maintenance owner. The explicit native qualification portfolio is
-documented in `libs/update-driver/README.md`.
+The released payload carries the shared installation driver's standalone
+foundation and canonical installer helpers through the existing dependency
+materializer. Cold legacy payload commands and generated primary binstubs submit
+their fixed owning-source provision action to its durable queue, without holding
+an outer provisioning lock or installing in the caller. They wait for the
+recorded outcome, then dispatch the selected runtime. Healthy runtime invocation
+does not start the foundation or submit work.
+The default execution root is `~/.copilot-extensions/update-driver`; launch
+diagnostics do not imply request acceptance. Missing/incompatible packaged
+support and cold namespaced or unsupported-platform calls require explicit
+repair/management rather than a foreground fallback. Managed-publication,
+pinned-read and no-self-provision refusals remain in force.
+Bootstrap reconciliation hooks and explicit installer entry points have not
+adopted this driver. Service-enabled provisioning remains the command default;
+the change does not enroll maintenance or replace service supervision.
+The native qualification portfolio is documented in `libs/update-driver/README.md`.
 
 ## Setup in one pass
 
