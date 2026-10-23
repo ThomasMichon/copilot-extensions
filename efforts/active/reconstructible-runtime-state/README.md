@@ -25,12 +25,16 @@ only against isolated fixtures.
 No live backfill, deletion, force mode, G2 claim writers, G4 projection loss,
 G5 Bridge/installer changes, runtime reset or deployment is admitted.
 Force rebuild remains a design option requiring a separate operator decision.
+The current admission is a **compatibility consumer proposal only**:
+immutable candidate/source inspection and a future characterization matrix.
+It authorizes no historical-runtime execution/install, support-floor selection
+or shared implementation.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Recovery driver | #7947 G3 report-only consumer and isolated fixtures | Isolated source PR, public handle `tidy-cog`; prior G1 `threaded-compass` finalized |
+| Recovery driver | #7947 bounded compatibility consumer proposal | Isolated source PR, public handle `jittery-magnet`; prior G1/G3 worktrees finalized |
 | Worktree ground-state owner | Record transactions, claims, lineage and adoption | #3761 and its existing source claims |
 | Compatibility foundation owner | Bridge durable contracts and mixed-version evidence | #1460; prerequisite evidence #1915 |
 | Component owners | Installer custody, Dispatch task semantics and provider leases | Their existing issue/PR ownership; no takeover |
@@ -40,7 +44,7 @@ Force rebuild remains a design option requiring a separate operator decision.
 
 - **Topology:** one planning PR; later independent PRs with actual dependency
   edges in [design.md](design.md), never a repository-wide merge lock.
-- **Host (owns PRs):** recovery driver owns the proposal and admitted G1/G3. Each
+- **Host (owns PRs):** recovery driver owns the consumer proposal and admitted G1/G3. Each
   implementation PR requires a fresh issue/task collision check and named owner.
 - **Delegates:** none for this plan. Any required independent review may use
   the repository's forge review or a newly owned native sub-agent.
@@ -149,7 +153,7 @@ execution assignments or implemented APIs.
 ### Phase 2 — Scoped observation and reconstruction
 - [x] G3 admitted source/fixture slice: bounded exact-input diagnostics through the existing
       doctor report-first consumer, without changing legacy guards.
-- [ ] Merge the G3 source slice through final-head review and required CI.
+- [x] Merge the G3 source slice through final-head review and required CI (#8163).
 - [ ] G3: add report-first candidate discovery and typed completeness without
       claiming ownership; broader adoption/guard integration needs fresh admission.
 - [ ] G4: rebuild an inactive compatible projection from surviving anchors,
@@ -158,6 +162,13 @@ execution assignments or implemented APIs.
       existing owners; consume explicit interfaces rather than edit their lanes.
 
 ### Phase 3 — Compatibility and optional recovery publication
+- [x] Pin real immutable candidate artifacts and source; propose operation-scoped
+      legacy continuity, preservation, custody and retention requirements in
+      [compatibility-admission.md](compatibility-admission.md).
+- [ ] Review/merge the compatibility consumer proposal, without declaring
+      foundation-owner acceptance or authorizing candidate execution.
+- [ ] Obtain actual owner policy and explicit matrix/containment admission
+      before historical-runtime characterization or shared implementation.
 - [ ] G5: obtain #1460/#1915 reader/writer evidence; integrate component-owned
       unknown-field preservation and actual incarnation fences.
 - [ ] G6: implement scoped doctor only after admission; force-rebuild remains
@@ -273,3 +284,25 @@ supported rollback-reader floor are explicit decisions, not implied approval.
   pre-resolution seam, with separated and `=` arguments. Final contained packet:
   **175 recovery tests passed** (79 G1 + 96 G3); the same **9 legacy routing
   regressions passed**, with Ruff F/E9 green.
+
+### 2026-10-23 — Compatibility admission proposal
+- #8163 merged as `80b1b0415c765dd440c2c05f5e7fa3e8e6fccaad`, approved with
+  required CI green and fixed threads resolved. Its report-only source tier is
+  accepted, not installed/rollback or whole-recovery completion.
+- Fresh #1460/#3761 issue/task/PR reads preserve canonical foundation and
+  mutation ownership. This proposal is a consumer requirement, not a takeover
+  or a new supported-floor authority; no existing agents were contacted.
+- Resolved R191/R206 source commits, release assets and four archive hashes;
+  verified all 15 wheel-member hashes per archive and six actual module byte
+  matches against Git pins. No archive extraction, import, installation or
+  candidate execution occurred. See [candidate provenance](candidate-provenance.json).
+- Two distinct archives/wheels exist per version; the observed R191 installed
+  artifact binding is still unproven. R206's release target differs from the
+  selected promoted-Main commit, with an identical plugin tree. Selected
+  read/write modules are identical across candidates, not proof of whole-runtime
+  equivalence or any capability floor.
+- Proposed keeping compatible legacy operations on their authoritative stores
+  with recoverability unknown, while retaining actual owner/target/revision
+  fences. Unknown preservation or required semantics gate only the affected new
+  operation/representation. Owner policy and exact future containment remain
+  decisions; no G2/G4/G5/G6 implementation or activation is admitted.

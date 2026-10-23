@@ -158,3 +158,18 @@ as a substitute for an isolated loss test.
   Full-process/native Git, Linux, installed/runtime and live-resource tests are
   not claimed: execution is explicitly limited to isolated synthetic resources,
   and no later mutation/rollback/installer capability is admitted.
+
+## Compatibility proposal evidence boundary
+
+The [compatibility proposal](compatibility-admission.md) and
+[candidate provenance](candidate-provenance.json) record static source/archive
+inspection only: four archive SHA-256 checks, 15 wheel-member digest checks per
+archive and six pinned module-byte comparisons. JSON/local-reference/effort
+structure and public-safe scope are checked for publication.
+
+No historical candidate import, installation, execution, native custody,
+old-writer behavior or mixed-version test is claimed. The exact proposed matrix
+and containment must be admitted before running it. Source-artifact identity is
+not installed-runtime provenance; the observed R191 artifact remains unbound.
+No runtime tests are needed for this documentation-only delta, and no plan
+review silently selects a support floor, retires a store or enables G2/G4/G5/G6.

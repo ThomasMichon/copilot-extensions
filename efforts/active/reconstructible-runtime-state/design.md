@@ -179,6 +179,11 @@ go through the campaign admission owner, not existing agent conversations.
 
 ## Decisions before implementation
 
+The bounded [compatibility admission proposal](compatibility-admission.md)
+records real candidate artifacts, operation-scoped continuity requirements and
+an unexecuted historical-runtime matrix. It is a request to the existing
+#1460/#3761 owners, not their accepted policy or a supported package-version floor.
+
 1. Resource-local marker and Git-common journal placement is approved for G1
    isolated fixtures. Backups preserve both roots; path relocation preserves
    stable identities but never elects a writer. Non-Git adapters remain unadmitted.
