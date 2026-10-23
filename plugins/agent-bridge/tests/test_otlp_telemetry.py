@@ -73,7 +73,14 @@ def receiver(tmp_path):
 def test_real_sdk_exports_protobuf_and_receiver_persists_without_private_environment(receiver, monkeypatch):
     endpoint, captured, _ = receiver
     monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "private.source=must-not-export")
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "x-private=must-not-export")
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_HEADERS",
+        "x-private=must-not-export,content-type=application/json,content-encoding=gzip",
+    )
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+        "content-type=application/json,content-encoding=gzip,content-length=99999",
+    )
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://192.0.2.1:1/v1/traces")
     monkeypatch.setenv("HTTP_PROXY", "http://192.0.2.1:1")
     first, second = record(), record()
@@ -87,6 +94,8 @@ def test_real_sdk_exports_protobuf_and_receiver_persists_without_private_environ
     assert path == "/v1/traces"
     assert {key.lower(): value for key, value in headers.items()}["content-type"] == "application/x-protobuf"
     assert not any(key.lower() == "x-private" for key in headers)
+    assert not any(key.lower() == "content-encoding" for key in headers)
+    assert int(headers["Content-Length"]) == len(file.read_bytes())
     decoded = ExportTraceServiceRequest.FromString(file.read_bytes())
     spans = [s for r in decoded.resource_spans for scope in r.scope_spans for s in scope.spans]
     assert len(spans) == 2
@@ -115,9 +124,13 @@ def test_nonlocal_implicit_or_ambiguous_endpoints_refused(endpoint):
         validate_endpoint(endpoint)
 
 
-def test_redirect_cannot_export_elsewhere(receiver):
+@pytest.mark.parametrize(("status", "location"), [
+    (302, "http://192.0.2.1:1/v1/traces"), (302, ""), (304, ""),
+    (307, "http://192.0.2.1:1/v1/traces"),
+])
+def test_redirect_cannot_export_elsewhere(receiver, status, location):
     endpoint, captured, config = receiver
-    config.update(status=302, location="http://192.0.2.1:1/v1/traces")
+    config.update(status=status, location=location)
     sink = LocalOtlpSink(endpoint, timeout=.2)
     try:
         with pytest.raises(RuntimeError, match="OTLP export failed"):

@@ -80,17 +80,19 @@ class LocalOtlpSink:
                     raise ValueError("unexpected telemetry destination")
                 # Ignore ambient proxy/netrc/certificate/header configuration.
                 # The local receiver's transport owner handles authentication.
-                for name in list(request.headers):
-                    if name.lower() not in {"content-type", "content-length", "content-encoding"}:
-                        del request.headers[name]
+                if type(request.body) is not bytes:
+                    raise ValueError("OTLP requires an encoded protobuf body")
+                request.headers.clear()
+                request.headers["Content-Type"] = "application/x-protobuf"
+                request.headers["Content-Length"] = str(len(request.body))
                 kwargs.update(
                     allow_redirects=False, proxies={}, cert=None, verify=True,
                     timeout=min(float(kwargs.get("timeout") or timeout), timeout),
                 )
                 response = super().send(request, **kwargs)
-                if response.is_redirect:
+                if 300 <= response.status_code < 400:
                     response.close()
-                    raise RuntimeError("OTLP redirects are not permitted")
+                    raise RuntimeError("OTLP 3xx responses are not successful acknowledgements")
                 return response
 
         self._session = LoopbackSession()
