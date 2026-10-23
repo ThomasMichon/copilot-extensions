@@ -16,6 +16,7 @@ import jwt
 from jwt import PyJWKClient
 
 from index_search import IndexSearchError, search_index
+from credential_record import load_credential, store_credential, valid_credential
 
 
 _VENDOR_DIR = Path(__file__).parent / "vendor"
@@ -83,10 +84,7 @@ def _cache_entry(resource: str, tenant: str) -> str:
 
 def _push_credential(resource: str, tenant: str, token: str, expires_epoch: float) -> bool:
     entry = _cache_entry(resource, tenant)
-    generation = int(time.time())
-    ok_token = _relay_cache.put(entry, "value", token, generation=generation)
-    ok_exp = _relay_cache.put(entry, "expires_epoch", str(expires_epoch), generation=generation)
-    return bool(ok_token and ok_exp)
+    return store_credential(_relay_cache, entry, token, expires_epoch)
 
 
 def _relay_get_azure_token(fields: dict) -> tuple[int, dict]:
@@ -94,22 +92,18 @@ def _relay_get_azure_token(fields: dict) -> tuple[int, dict]:
 
 
     target = fields.get("scope") or fields.get("resource") or ""
-    if not target:
+    if not target or not _normalize_resource(target):
         return 400, {"error": "missing 'resource' or 'scope' field"}
     tenant = fields.get("tenant", "")
     entry = _cache_entry(target, tenant)
-    token = _relay_cache.get(entry, "value")
-    expires_raw = _relay_cache.get(entry, "expires_epoch")
-    if not token or not expires_raw:
+    record = load_credential(_relay_cache, entry)
+    if record is None:
         return 404, {"error": "no_cached_token", "resource": _normalize_resource(target)}
-    try:
-        expires_epoch = float(expires_raw)
-    except (TypeError, ValueError):
-        return 404, {"error": "no_cached_token", "resource": _normalize_resource(target)}
+    expires_epoch = record["expires_epoch"]
     if expires_epoch - _EXPIRY_SAFETY_MARGIN <= time.time():
         return 404, {"error": "cached_token_expired", "resource": _normalize_resource(target)}
     return 200, {
-        "token": token,
+        "token": record["token"],
         "resource": _normalize_resource(target),
         "expires_on": expires_epoch,
     }
@@ -120,6 +114,14 @@ class AuthError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+def _valid_field(value, required=False):
+    return (
+        isinstance(value, str) and len(value) <= 4096
+        and (not required or bool(value))
+        and all(32 < ord(char) < 127 for char in value)
+    )
 
 
 def validate_bearer(auth_header: str | None) -> dict:
@@ -225,12 +227,13 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = 0
-        if length <= 0:
+        if not 0 < length <= 65536:
             return None
         raw = self.rfile.read(length)
         try:
-            return json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+            value = json.loads(raw.decode("utf-8"))
+            return value if isinstance(value, dict) else None
+        except (UnicodeDecodeError, ValueError, RecursionError):
             return None
 
     def do_POST(self) -> None:
@@ -259,12 +262,17 @@ class Handler(BaseHTTPRequestHandler):
             resource = body.get("resource", "")
             token = body.get("token", "")
             expires_epoch = body.get("expires_epoch")
-            if not resource or not token or expires_epoch is None:
+            tenant = body.get("tenant", "")
+            if (
+                not _valid_field(resource, required=True)
+                or not _normalize_resource(resource)
+                or not _valid_field(tenant)
+                or not valid_credential(token, expires_epoch)
+            ):
                 self._json(
-                    400, {"error": "'resource', 'token', and 'expires_epoch' are required"}
+                    400, {"error": "invalid credential fields"}
                 )
                 return
-            tenant = body.get("tenant", "")
             ok = _push_credential(resource, tenant, token, float(expires_epoch))
             if not ok:
                 self._json(503, {"error": "cache_unavailable"})
@@ -280,12 +288,19 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/v1/relay":
             action = body.get("action", "")
-            fields = body.get("fields") or {}
+            fields = body.get("fields", {})
+            if (
+                not isinstance(action, str) or not isinstance(fields, dict)
+                or any(not _valid_field(fields.get(name, ""))
+                       for name in ("resource", "scope", "tenant"))
+            ):
+                self._json(400, {"error": "invalid relay fields"})
+                return
             if action == "capabilities":
                 self._json(200, {"capabilities": list(RELAY_CAPABILITIES)})
                 return
             if action not in _RELAY_ACTIONS:
-                self._json(400, {"error": f"unsupported action {action!r}"})
+                self._json(400, {"error": "unsupported action"})
                 return
             if action == "get-azure-token":
                 status, payload = _relay_get_azure_token(fields)

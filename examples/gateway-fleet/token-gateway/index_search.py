@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
+from socket_deadline import socket_deadline
 log = logging.getLogger("hgf.gateway.index")
 
 MAX_QUERY_LENGTH = 2048
@@ -175,7 +176,9 @@ def _fetch(backend: Backend, parameters: dict[str, str]) -> dict:
                 "X-Agent-Index-Installation-Id": backend.installation_id,
             },
         )
-        with connection.getresponse() as response:
+        with socket_deadline(sock, deadline), connection.getresponse() as response:
+            if time.monotonic() >= deadline:
+                raise TimeoutError
             if response.status != 200:
 
                 raise IndexSearchError(502, "index_backend_rejected")

@@ -5,26 +5,34 @@ from __future__ import annotations
 
 import json
 import sys
-import time
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor"))
 
 from agent_vault.cache import PersistentCache
+from credential_record import generation_for_expiry, store_credential, valid_credential
 
 
 def main() -> int:
-    payload = json.loads(sys.stdin.read())
-    token = payload["token"]
-    generation = int(payload.get("generation", time.time()))
+    try:
+        payload = json.loads(sys.stdin.read())
+    except (ValueError, RecursionError):
+        payload = None
+    if (
+        not isinstance(payload, dict)
+        or not valid_credential(payload.get("token"), payload.get("expires_epoch"))
+    ):
+        print(json.dumps({"ok": False, "error": "invalid credential payload"}))
+        return 1
+    token, expires_epoch = payload["token"], payload["expires_epoch"]
+    generation = generation_for_expiry(expires_epoch)
     cache = PersistentCache()
     if not cache.enabled:
         print(json.dumps({"ok": False, "error": "cache disabled (AGENT_VAULT_CACHE not set?)"}))
         return 1
-    ok = cache.put("mesh/gateway-token", "value", token, generation=generation)
-    ok_exp = cache.put(
-        "mesh/gateway-token", "expires_epoch", str(payload["expires_epoch"]), generation=generation
-    )
-    print(json.dumps({"ok": bool(ok and ok_exp), "generation": generation}))
-    return 0 if ok and ok_exp else 1
+    ok = store_credential(cache, "mesh/gateway-token", token, expires_epoch)
+    print(json.dumps({"ok": bool(ok), "generation": generation}))
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

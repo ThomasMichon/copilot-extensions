@@ -50,6 +50,16 @@ The token service requires PyJWT and cryptography as listed in
 `token-gateway/requirements-gateway.txt`. Its retained Vault-cache subset is
 MIT-licensed reference code, not a new maintained fork.
 
+The example stores token and expiry together in a single encrypted `credential`
+field. It deliberately does not combine legacy `value`/`expires_epoch` fields
+or claim cache compatibility with a deployed prototype. Newer expiry determines
+the ordering value across coordinator restarts. The coordinator's existing
+process owns one bounded delivery worker, retrying pending consumer deliveries
+without minting a new token; it joins that worker on shutdown. Gateway request
+validation refuses malformed fields before cache access. Both proxies interrupt
+their exact owned socket at the absolute response deadline, including slow
+status/header reads; these request-owned timers are cancelled and joined.
+
 The Windows connector requires an explicit JSON-subset YAML configuration,
 existing authenticated Azure CLI, approved Azure Bastion/VM resources and a
 separately enrolled SSH identity. The checked-in `windows.yaml` and
