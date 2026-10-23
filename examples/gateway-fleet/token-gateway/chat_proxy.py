@@ -11,8 +11,11 @@ import threading
 import time
 from urllib.parse import urlsplit
 
+from socket_deadline import socket_deadline
+
 MAX_BODY = 65536
 MAX_RESPONSE = 1024 * 1024
+REQUEST_OVERHEAD = 10.0
 _ordinary = threading.BoundedSemaphore(8)
 _waiters = threading.BoundedSemaphore(16)
 _operations = {"join", "leave", "post", "read", "cursor", "wait", "scan", "members", "resolve"}
@@ -108,48 +111,57 @@ def _forward(payload: dict, wait: float) -> dict:
         http.client.HTTPSConnection if backend.scheme == "https"
         else http.client.HTTPConnection
     )
-    deadline = time.monotonic() + wait + 10
+    deadline = time.monotonic() + wait + REQUEST_OVERHEAD
 
     def request(method: str, path: str, body=None, *, timeout: float = 5):
-        connection = connection_type(backend.hostname, port, timeout=min(timeout, 3))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ChatProxyError(504, "chat_backend_timeout")
+        connection = connection_type(backend.hostname, port, timeout=min(timeout, 3, remaining))
         try:
 
             headers = {"Content-Type": "application/json"}
             connection.request(method, path, body=body, headers=headers)
             if connection.sock is not None:
                 connection.sock.settimeout(timeout)
-            response = connection.getresponse()
-            if (response.getheader("Content-Type", "").split(";", 1)[0].strip()
-                    != "application/json" or response.getheader("Content-Encoding")):
-                raise ChatProxyError(502, "chat_backend_invalid_response")
-            raw = bytearray()
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise ChatProxyError(504, "chat_backend_timeout")
-                if connection.sock is not None:
-                    connection.sock.settimeout(min(timeout, remaining))
-                block = response.read1(min(65536, MAX_RESPONSE + 1 - len(raw)))
-                raw.extend(block)
-                if len(raw) > MAX_RESPONSE:
-                    raise ChatProxyError(502, "chat_backend_response_too_large")
-                if not block:
-                    break
-            if response.length not in (None, 0):
-                raise ChatProxyError(502, "chat_backend_invalid_response")
-            try:
-                result = _decode(bytes(raw))
-            except ChatProxyError as exc:
-                raise ChatProxyError(502, "chat_backend_invalid_response") from exc
-            if response.status != 200:
-                code = result.get("error")
-                if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
-                    raise ChatProxyError(502, "chat_backend_failed")
-                if not code.startswith("chat_"):
-                    code = "chat_" + code
-                status = response.status if response.status in {400, 404, 409, 413, 429, 503} else 502
-                raise ChatProxyError(status, code)
-            return result
+            if connection.sock is None:
+                raise OSError("Backend has no socket")
+            with socket_deadline(connection.sock, deadline), connection.getresponse() as response:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError
+                if (response.getheader("Content-Type", "").split(";", 1)[0].strip()
+                        != "application/json" or response.getheader("Content-Encoding")):
+                    raise ChatProxyError(502, "chat_backend_invalid_response")
+                raw = bytearray()
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ChatProxyError(504, "chat_backend_timeout")
+                    if connection.sock is not None:
+                        connection.sock.settimeout(min(timeout, remaining))
+                    block = response.read1(min(65536, MAX_RESPONSE + 1 - len(raw)))
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError
+                    raw.extend(block)
+                    if len(raw) > MAX_RESPONSE:
+                        raise ChatProxyError(502, "chat_backend_response_too_large")
+                    if not block:
+                        break
+                if response.length not in (None, 0):
+                    raise ChatProxyError(502, "chat_backend_invalid_response")
+                try:
+                    result = _decode(bytes(raw))
+                except ChatProxyError as exc:
+                    raise ChatProxyError(502, "chat_backend_invalid_response") from exc
+                if response.status != 200:
+                    code = result.get("error")
+                    if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
+                        raise ChatProxyError(502, "chat_backend_failed")
+                    if not code.startswith("chat_"):
+                        code = "chat_" + code
+                    status = response.status if response.status in {400, 404, 409, 413, 429, 503} else 502
+                    raise ChatProxyError(status, code)
+                return result
         except TimeoutError as exc:
             raise ChatProxyError(504, "chat_backend_timeout") from exc
         except (OSError, http.client.HTTPException) as exc:

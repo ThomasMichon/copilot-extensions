@@ -135,27 +135,27 @@ def authenticated(header: str | None) -> dict:
 
 
 class IndexSearchHandlerTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.backend = ThreadingHTTPServer(("127.0.0.1", 0), FakeBackend)
-        cls.gateway = ThreadingHTTPServer(("127.0.0.1", 0), gateway.Handler)
-        cls.threads = []
-        for server in (cls.backend, cls.gateway):
+    def _start_servers(self) -> None:
+        self.backend = ThreadingHTTPServer(("127.0.0.1", 0), FakeBackend)
+        self.gateway = ThreadingHTTPServer(("127.0.0.1", 0), gateway.Handler)
+        self.threads = []
+        for server in (self.backend, self.gateway):
+            server.daemon_threads = False
             thread = threading.Thread(
                 target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True,
             )
             thread.start()
-            cls.threads.append(thread)
+            self.threads.append(thread)
 
-    @classmethod
-    def tearDownClass(cls) -> None:
-        for server in (cls.gateway, cls.backend):
+    def tearDown(self) -> None:
+        for server in (self.gateway, self.backend):
             server.shutdown()
             server.server_close()
-        for thread in cls.threads:
+        for thread in self.threads:
             thread.join(timeout=2)
 
     def setUp(self) -> None:
+        self._start_servers()
         self.backend.calls = []
         self.backend.scenario = "success"
         self.env = patch.dict(os.environ, {
