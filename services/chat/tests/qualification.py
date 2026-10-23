@@ -24,6 +24,7 @@ test_client_refuses_invalid_views_without_mutating_semantic_progress
 test_empty_inbox_work_does_not_grow_with_unrelated_questions
 test_inbox_work_ignores_other_channel_correspondence
 test_sparse_thread_work_and_pagination_ignore_unrelated_history
+test_inbox_lookahead_work_is_bounded_before_merging_pending_branches
 """,
     "test_workspace.py": """
 test_worktree_identity_survives_sessions_and_label_changes_without_adoption
@@ -171,6 +172,7 @@ PARAMETER_COUNTS.update({
     "test_collaboration.py::test_metadata_refuses_invalid_fields_and_bounds": 22,
     "test_collaboration.py::test_annotated_pending_requires_complete_receipt_before_recovery": 6,
     "test_collaboration.py::test_client_refuses_invalid_views_without_mutating_semantic_progress": 11,
+    "test_collaboration.py::test_inbox_lookahead_work_is_bounded_before_merging_pending_branches": 2,
     "test_workspace.py::test_existing_owner_head_and_execution_tuple_are_not_reassigned": 4,
     "test_workspace.py::test_invalid_initialization_refuses_before_executing_owner": 6,
     "test_workspace.py::test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback": 22,

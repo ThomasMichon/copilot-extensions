@@ -1060,7 +1060,7 @@
     "services/chat/src/agent_chat_service/__init__.py": "15e8aa0cd115514aa8cddb61d9ddb1b76720dbb27c55629bc7a12218b6fa5534",
     "services/chat/src/agent_chat_service/store.py": "cbe433df910c3dceb7ea620d5f053795780e5e9efaed86f94b0f9de7b3e3dd1d",
     "services/chat/src/agent_chat_service/client.py": "cd0334a63b71a887733ef735634caf07e626b26bb919fb254c14b415bef37087",
-    "services/chat/src/agent_chat_service/collaboration.py": "42999207d7a42f51c7ee92790f6fffd7d08aebec636bbfd9e755a9598b852c48",
+    "services/chat/src/agent_chat_service/collaboration.py": "67f8c1183ec044b0ed868217d0312fbce45a8124481243124cbeb87725dff2b8",
     "tools/promotion_unit_tests/test_chat_collaboration.py": "c0cb983e6dfd36ee892f825797c7be9de124626544f958f09d0179a81c8b9fbe",
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
     "libs/config-migrate/src/config_migrate/core.py": "77d2469a245ee27ff80a1f24a236f38b896c23d011e2c8e4720a77df19a748c6",

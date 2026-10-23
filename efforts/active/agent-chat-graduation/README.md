@@ -380,6 +380,23 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-23 - Bound each pending branch before lookahead merge
+
+- The second review on `8d2d8fab9a` confirmed the first two findings resolved,
+  but its body retained a real Medium issue despite the overview's
+  "No open issues" label: small inbox pages still sorted an entire genuinely
+  pending backlog. No merge followed that ambiguous summary.
+- Regression-first measurement reproduced4634 versus205357 SQLite instructions
+  for100 versus5000 unanswered directed questions. Each indexed branch now
+  applies its snapshot/retirement filters and ordered lookahead limit before
+  merging their bounded IDs and loading canonical bodies.
+- Two additive cases cover unanswered requests and mixed answer/question
+  backlogs without changing pending semantics, captured paging, reader progress
+  or the120/600-second qualification allowances. The387-node acceptance packet
+  passes with352 passes, two allowed POSIX skips and33 full-only deselections
+  in78.78 seconds. Final full qualification and the next real-head review/CI
+  remain open.
+
 ### 2026-10-23 - Review-driven projection work bounds
 
 - The first current-head review of #8159 found two real lock-held query costs:

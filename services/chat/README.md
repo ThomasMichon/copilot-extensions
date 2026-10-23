@@ -375,6 +375,9 @@ candidates before checking
 relationships; thread IDs and their root are selected through the relationship
 index before loading bounded event bodies. Unrelated channel traffic does not
 require a projection scan.
+Each inbox branch applies snapshot retirement filters and its ordered lookahead
+limit before the bounded merge, so a small page does not sort an entire
+genuinely pending backlog.
 
 ### Offline installed invocation catalog
 

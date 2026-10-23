@@ -129,11 +129,21 @@ SELECT e.*, c.metadata AS collaboration_metadata, c.thread_root
 FROM events e LEFT JOIN collaborations c ON c.event_id=e.id
 """
 
-# The high-water predicate applies to every relation, not just the visible event.
-# CROSS JOIN keeps each indexed recipient branch ahead of relationship checks.
-PENDING = """
-WITH candidates AS (
-    SELECT q.event_id, 'reply' AS attention, q.event_id AS question_id
+LIVE_QUESTION = """
+NOT EXISTS (
+    SELECT 1 FROM collaborations amendment
+    WHERE amendment.supersedes=q.event_id AND amendment.event_id<=:head
+) AND NOT EXISTS (
+    SELECT 1 FROM collaborations resolution
+    WHERE resolution.reply_to=q.event_id AND resolution.kind='resolve'
+    AND resolution.event_id<=:head
+)
+"""
+
+# Keep snapshot filters and ordered lookahead inside each indexed branch.
+PENDING = f"""
+WITH directed AS (
+    SELECT q.event_id, 'reply' AS attention
     FROM collaboration_recipients recipient INDEXED BY collaboration_recipient_events
     CROSS JOIN collaborations q ON q.event_id=recipient.event_id
     WHERE recipient.channel=:channel AND recipient.codename=:viewer
@@ -143,8 +153,10 @@ WITH candidates AS (
         WHERE answer.kind='answer' AND answer.reply_to=q.event_id
         AND answer.event_id<=:head AND ae.codename=:viewer
     )
-    UNION ALL
-    SELECT answer.event_id, 'review' AS attention, q.event_id AS question_id
+    AND {LIVE_QUESTION}
+    ORDER BY recipient.event_id LIMIT :limit
+), reviewed AS (
+    SELECT answer.event_id, 'review' AS attention
     FROM collaborations answer INDEXED BY collaborations_review
     CROSS JOIN collaborations q ON q.event_id=answer.reply_to
     WHERE answer.channel=:channel AND answer.reply_author=:viewer AND answer.kind='answer'
@@ -153,16 +165,11 @@ WITH candidates AS (
         SELECT 1 FROM collaborations amendment
         WHERE amendment.supersedes=answer.event_id AND amendment.event_id<=:head
     )
+    AND {LIVE_QUESTION}
+    ORDER BY answer.event_id LIMIT :limit
 ), pending AS (
-    SELECT event_id, attention FROM candidates candidate
-    WHERE NOT EXISTS (
-        SELECT 1 FROM collaborations amendment
-        WHERE amendment.supersedes=candidate.question_id AND amendment.event_id<=:head
-    ) AND NOT EXISTS (
-        SELECT 1 FROM collaborations resolution
-        WHERE resolution.reply_to=candidate.question_id AND resolution.kind='resolve'
-        AND resolution.event_id<=:head
-    )
+    SELECT event_id, attention FROM directed
+    UNION ALL SELECT event_id, attention FROM reviewed
     ORDER BY event_id LIMIT :limit
 )
 SELECT e.*, c.metadata AS collaboration_metadata, c.thread_root, p.attention

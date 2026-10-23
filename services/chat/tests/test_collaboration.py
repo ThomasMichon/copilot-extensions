@@ -422,3 +422,36 @@ def test_sparse_thread_work_and_pagination_ignore_unrelated_history(store):
                     event_id=child["id"], **paged["next"])
     assert [entry["event"] for entry in next_page["entries"]] == [child]
     assert not next_page["more"] and read(store, "agent-b")["cursor"] == 0
+
+
+@pytest.mark.parametrize("attention", ["reply", "review"])
+def test_inbox_lookahead_work_is_bounded_before_merging_pending_branches(store, attention):
+    join(store)
+    join(store, "agent-b")
+    if attention == "reply":
+        def seed(start, count):
+            seed_unrelated(store, start, count, structured=True, recipients=["agent-b"])
+    else:
+        question = collaborate(store, "own", codename="agent-b", to=["agent-a"])["event"]["id"]
+
+        def seed(start, count):
+            with store._transaction():
+                for number in range(start, start + count):
+                    store._post({
+                        "channel": "room", "codename": "agent-a", "text": "related answer",
+                        "request_id": f"answer-{number}",
+                        "collaboration": annotation("answer", reply_to=question),
+                    })
+            seed_unrelated(store, start, count, structured=True, recipients=["agent-b"])
+
+    seed(0, 100)
+    small, first = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
+    seed(100, 4900)
+    large, last = sqlite_work(store, lambda: inbox(store, recent_limit=0, limit=1))
+    assert len(first["entries"]) == len(last["entries"]) == 1
+    assert first["entries"] == last["entries"] and last["entries"][0]["attention"] == attention
+    assert first["more"] and last["more"]
+    assert large <= small + 1000, (small, large)
+    following = inbox(store, limit=1, **last["next"])
+    assert following["entries"][0]["event"]["id"] > last["entries"][0]["event"]["id"]
+    assert read(store, "agent-b")["cursor"] == 0

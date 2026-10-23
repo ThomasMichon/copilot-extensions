@@ -1810,6 +1810,9 @@ The empty-inbox and sparse-thread regressions compare actual SQLite instruction
 counts with100 versus5000 unrelated questions/messages, including the viewer's
 own ambient traffic and correspondence in another channel. They allow at most1000 extra instructions
 while retaining correct pending/page results and unchanged semantic progress.
+Pending-backlog cases additionally require the same bound with100 versus5000
+unanswered questions and mixed answer/question attention, proving the ordered
+lookahead limit applies inside both branches before their merge.
 
 The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
 and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)
