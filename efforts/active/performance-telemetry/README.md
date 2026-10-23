@@ -158,11 +158,12 @@ sample/drop/missing evidence and the later structured-signal/hook work.
   installed-native, structured-log/metric and hook acceptance.
 
 ### Phase 6 — Structured-signal design only
-- [ ] Review and merge the concrete [logs/metrics proposal](structured-signals.md),
+- [x] Review and merge the concrete [logs/metrics proposal](structured-signals.md),
   including closed schemas, same-writer first consumer, public SDK/protobuf
   boundaries, bounded transport/accounting and consumer-owned retention handshake.
-- [ ] Return exact shared API/file scope and claim to the campaign coordinator
-  before implementation. Plan merge is not implementation or deployment approval.
+- [x] Publish exact shared API/file scope and claim for the campaign coordinator's
+  acceptance before implementation. Plan merge is not implementation or deployment
+  approval; that decision remains open under #7935/#5900.
 - Preserve all native reports/environments and historical attribution corrections
   until their durable copy is verified; no cleanup is authorized by this phase.
 
@@ -232,7 +233,7 @@ afterward it is provenance, not a closed live implementation claim.
 
 ## Validation Plan
 
-- [ ] Review the [structured-signal contract and validation gates](structured-signals.md#validation-and-completion-gates).
+- [x] Review the [structured-signal contract and validation gates](structured-signals.md#validation-and-completion-gates).
   No real logs/metrics acceptance from span attributes, arbitrary JSON or design
   prose; implementation and collector authorization remain separate checkpoints.
 
@@ -270,7 +271,27 @@ Plan/interface approved and merged in #7991. Source implementation proceeds
 independently of shared collector deployment. Missing deployment authorization
 blocks that acceptance item, not pure implementation.
 
+For the later structured-signal slice specifically, the design merged in #8187.
+Its exact functional shared API/file scope still awaits coordinator acceptance;
+no implementation or collector change is admitted by that design merge.
+
 ## Journal
+
+### 2026-10-23 — Structured-signal plan reviewed and merged
+
+- #8187 merged after current-head approval with no open findings and all
+  required checks successful. A nonblocking review clarification was fixed:
+  generated records partition into accepted, rejected, unknown and not-attempted;
+  attempted is the overlapping accepted/rejected/unknown subtotal.
+- The exact API, Manager source consumer, closed schemas, optional SDK/public
+  protobuf boundary, transport/loss behavior and future collector-owner
+  handshake are published in the linked plan. This is design completion only.
+- No SDK/wire execution, functional/dependency edit, service/enrollment change
+  or raw native evidence cleanup occurred. All retained hook clauses remain
+  byte-identical; existing raw reports and environments remain available.
+- Responsibility for admitting the functional scope and later qualification
+  stays with the campaign coordinator under #7935/#5900. Logs/metrics
+  interoperability, persistence and native overhead are not yet proven.
 
 ### 2026-10-23 — Structured-signal design episode
 

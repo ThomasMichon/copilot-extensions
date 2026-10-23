@@ -2,8 +2,8 @@
 
 Back to [Performance Telemetry](README.md). Part of #7935 / #5900.
 
-**Status: design only.** Review and merge this plan before implementation.
-The campaign coordinator must also accept the exact shared API and file scope
+**Status: design reviewed and merged in #8187; implementation not admitted.**
+The campaign coordinator must accept the exact shared API and file scope
 below before functional changes. Neither approval enrolls an installed producer
 or authorizes collector configuration, ports, installation or restart.
 
