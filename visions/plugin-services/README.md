@@ -183,6 +183,27 @@ resource fencing, or existing standalone-service defaults.
 
 ## Features
 
+### progress-aware-service-and-tool-operations
+
+Services, CLIs and tools share two independent time budgets: a **short
+communication timeout** detects silence, while a **very long process timeout**
+allows slow work and substantial grace for disruptions. Every update received
+from the target renews the communication budget, including progress a caller
+does not otherwise interpret. Progress does not renew the total process budget.
+Healthy, observable work is not cut off by a short fixed wall-clock deadline.
+
+Progress is incremental and end-to-end across nested preparation and execution,
+including state negotiation, lock waits, transport setup, session hosting,
+repository synchronization, terminal preparation and capability synchronization.
+Each owner exposes its activity while it happens; intermediate tools relay that
+activity even when they handle only selected event meanings. A final elapsed-time
+summary does not replace live signs of life.
+
+Loss of communication and exhaustion of process lifetime are distinct,
+explicit outcomes. Silence does not prove that execution failed or stopped, and
+does not by itself authorize cancellation, replacement or replay. Recovery
+preserves the existing operation and its acknowledgement uncertainty.
+
 ### capability-sized-runtime-dependencies
 
 Each runtime carries the dependency closure needed for its selected capability,

@@ -103,6 +103,16 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **Communication silence and process lifetime are separate clocks.** Services,
+  CLIs and tools use a short communication deadline renewed by every received
+  target update, including events a consumer does not semantically handle, and
+  an independent, very long process deadline with substantial disruption grace.
+  Nested preparation streams progress end-to-end rather than buffering it into
+  a completion summary. Silence alone is not execution failure or cancellation,
+  replacement or replay authority. See
+  [progress and timeout contract](progress-and-timeouts.md). (Serves
+  *Vision plugin-services §Features/progress-aware-service-and-tool-operations*.)
+
 - **Allocation and embodiment retain one execution workspace.** The ground
   layer allocates space without a session; bridge composes that allocation
   with embodiment or accepts an existing sessionless workspace. Queue lanes
