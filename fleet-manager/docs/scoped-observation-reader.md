@@ -8,6 +8,8 @@ Default commands do not construct or invoke it. Importing it requires no
 optional cryptography dependency.
 Its explicit `read` method selects one point; `snapshot` selects a bounded
 point set from one committed local read view.
+The explicit `refresh` method conditionally replaces that current view; it is
+resnapshot recovery, not historical event replay.
 
 ## Trusted owner boundary
 
@@ -111,6 +113,51 @@ replay, persistent view session, All-view assembly, origin push or later
 wire-emission permission. In particular, the raw store's retention floor and
 cursors are not a scope-safe recovery contract.
 
+## Conditional current-view recovery
+
+`refresh(identity, request, role=..., installation=..., validator=None)` accepts
+the same explicit one-to-64-point selection as `snapshot`. It returns a frozen
+`ScopedObservationRefresh` with `validator`, `status` and `observations`.
+Without a validator, or with a well-shaped nonmatching validator, `status` is
+`snapshot` and observations contains the complete immutable selected tuple.
+Replace the caller's baseline with that tuple. A matching validator yields
+`unchanged` and an empty tuple: retain the caller's **associated** prior
+baseline, not an empty fleet. If the baseline was lost, omit the validator.
+
+Validators are exactly 64 lowercase hexadecimal characters. Unsupported
+requests and malformed validators refuse `unsupported-read` before fence or
+storage access. Well-shaped random, foreign and old-instance validators get
+the same ordinary snapshot outcome, not a validity/restart/history error.
+They neither grant access nor bypass any lookup or authorization.
+
+Every call, including `unchanged`, obtains fresh admission for the complete
+correlated request, reads one consistent SQLite point set, projects only the
+selected fields and prepares the result under the same owner fence. The fresh
+terminal completion checkpoint runs **after** serialization and comparison.
+Failures withhold either result shape and free the finite permit. A validator
+does not preserve an expired proof or extend a human/provider session.
+
+The validator is standard HMAC-SHA-256 under a private random per-reader key.
+Its length-framed canonical inputs are the admitted authority/fleet, logical
+identity domain, exact enrollment binding, exact request digest and the visible
+point DTOs. Selected scalar types, missing/null state and all returned
+entity-local metadata participate. Each point is encoded separately, so a valid
+64-point batch is not incorrectly constrained to the single-record byte limit.
+Only the digest leaves the computation; the key and internal binding do not.
+There is no per-client cache, queue, cursor map or retained transaction.
+
+Global policy revision, unrelated enrollment/state, unselected fields, export
+sequence, store position/retention and proof/read timestamps do not participate.
+New equivalent signed proof evidence does not change an unchanged view.
+Unrelated writes can exhaust the raw replay window without changing this
+result. Reconstructing the reader creates a different private namespace and
+therefore a full snapshot, without exposing a restart identifier.
+
+This is recovery of **current** point observations. Intermediate changes may
+coalesce; `unchanged` does not promise there were no intermediate events.
+The API adds no event replay, snapshot/stream attachment, periodic source scan,
+push client, complete roster, resident integration or wire-emission authority.
+
 ## Completion, expiry and failure
 
 After lookup and result projection, `AdmissionAuthority.complete(permit, request)`
@@ -125,13 +172,13 @@ policy withhold a prepared result. There is no cached allow or implicit retry.
 The existing permit/request bounds do not extend and do not impose a human
 session countdown. Successful and failed terminal reads free permit capacity.
 
-The returned point or tuple describes a **local read at completion**. It is not
-a bearer grant or permission to emit later. Wire emission, queued/asynchronous work,
+The returned point, tuple or refresh describes a **local read at completion**.
+It is not a bearer grant or permission to emit later. Wire emission, queued/asynchronous work,
 durable shared policy epochs and installed consumer adoption are outside this
 API. A future transport must prove its own
 real execution/emission fence; it cannot queue this value as current authority.
 
-The reader/store/admission tests cover both APIs. A native separate-process
+The reader/store/admission tests cover all three APIs. A native separate-process
 writer proves a point-set snapshot cannot mix a concurrent committed update;
 an independent-point-read control demonstrates that mixed-state failure.
 A production-only child consumer verifies actual signed identity evidence and

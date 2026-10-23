@@ -464,6 +464,29 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 
 ## Journal
 
+### 2026-10-23 - Reviewed conditional recovery implemented locally
+
+- Plan #8316 actually merged as
+  `97a329ed9a64d554d778b0f7b7db7d76c18c6bc5` after current-head approval and
+  required CI. Synchronized the source to the reviewed plan before code.
+- Added isolated `ScopedObservationReader.refresh`: fresh whole-request
+  admission and one consistent point-set read precede opaque exact-view
+  comparison; the terminal checkpoint withholds either prepared response on
+  revocation, expiry or failure. No raw replay, global policy revision or
+  unselected payload enters the validator; no baseline cache is retained.
+- The owned reader/snapshot/refresh/store/admission selection passes 227 tests
+  in 75.83 seconds under the unchanged 120-second contained bound. Native
+  process controls cover atomic generation changes, independent-read and
+  inverted-lock negative controls, and actual signed fresh consumer requests.
+  The 64-point case exceeds 1 MiB without an aggregate-record limit; unrelated
+  writes exhaust raw retention without changing the scoped validator.
+- Unit and simple native Windows process E2E are exercised. Installer/first-touch
+  paths are unchanged; the available periodic hosted portfolio does not supply
+  standalone Fleet Manager Linux or enrolled Windows execution. No live
+  provider, resident, deployment or full platform acceptance is claimed.
+  Implementation publication/review remains a separate gate; the full parent
+  serving/recovery, retained-owner agreement and adoption items remain open.
+
 ### 2026-10-23 - Conditional current-view recovery proposed
 
 - Selected the authoritative-snapshot option already retained by #5862 for

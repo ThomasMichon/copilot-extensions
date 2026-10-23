@@ -36,8 +36,10 @@ scopes' activity or counts.
 The explicit [scoped point-reader](scoped-observation-reader.md) composes local
 admission and this store under a mandatory participating owner fence. It returns
 only selected state and defined entity-local metadata, never these internal
-cursors. Its separate bounded snapshot method composes the trusted point-set
-read below. Neither changes this raw API's trust boundary or wires a resident
+cursors. Its bounded snapshot and conditional refresh methods compose the
+trusted point-set read below. Refresh compares only an opaque exact-view
+validator; it never forwards this store's global replay/retention outcomes.
+These methods do not change this raw API's trust boundary or wire a resident
 consumer.
 
 ## Origin and sequence boundaries

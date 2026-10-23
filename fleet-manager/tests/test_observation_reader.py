@@ -384,7 +384,8 @@ def read(connection, origin, project, entity, head):
 store._point = read
 adapter = ScopedObservationReader(authority=owner, store=store, fence=fence)
 for index, (method, subject) in enumerate(
-    (method, subject) for method in ("read", "snapshot") for subject in ("first", "second")
+    (method, subject) for method in ("read", "snapshot", "refresh", "refresh")
+    for subject in ("first", "second")
 ):
     token = jwt.encode(
         {"alg": "ES256", "typ": "at+jwt", "kid": "issuer-1"},
@@ -402,20 +403,30 @@ for index, (method, subject) in enumerate(
         result = getattr(adapter, method)(
             identity, ObservationRead("fleet-a", (scope,) if method == "read" else (scope, other)),
             role="client", installation="client-a",
+            **({"validator": baseline} if method == "refresh" and index >= 6 else {}),
         )
     except AdmissionError as error:
         assert subject == "second" and error.code == "forbidden-scope"
     else:
         assert subject == "first"
-        points = (result,) if method == "read" else result
+        if method == "refresh":
+            assert len(result.validator) == 64
+            if index >= 6:
+                assert result.status == "unchanged" and result.observations == ()
+                continue
+            assert result.status == "snapshot"
+            baseline = result.validator
+            points = result.observations
+        else:
+            points = (result,) if method == "read" else result
         assert points[0].state == (("status", "active"),)
-        if method == "snapshot":
+        if method != "read":
             assert points[1].state == (("title", "selected-title"),)
         encoded = json.dumps([asdict(point) for point in points])
         assert "never-returned" not in encoded and "cursor" not in encoded
-assert len(lookups) == 3 and not owner._issued
+assert len(lookups) == 7 and not owner._issued
 assert not any(name.startswith("test_") for name in sys.modules)
-print(json.dumps({"authorized_reads": 2, "foreign_reads": 0, "point_lookups": 3}))
+print(json.dumps({"authorized_reads": 4, "foreign_reads": 0, "point_lookups": 7}))
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path / "consumer.db")],
@@ -424,12 +435,12 @@ print(json.dumps({"authorized_reads": 2, "foreign_reads": 0, "point_lookups": 3}
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
-        "authorized_reads": 2, "foreign_reads": 0, "point_lookups": 3,
+        "authorized_reads": 4, "foreign_reads": 0, "point_lookups": 7,
     }
 
 
 @pytest.mark.parametrize("inverted", [False, True])
-@pytest.mark.parametrize("method", ["read", "snapshot"])
+@pytest.mark.parametrize("method", ["read", "snapshot", "refresh"])
 def test_mixed_direct_and_reader_calls_have_one_lock_order(reader, tmp_path, inverted, method):
     identities = tmp_path / "verified-identities.json"
     identities.write_text(json.dumps([
@@ -500,7 +511,8 @@ def read():
         result = getattr(adapter, sys.argv[4])(
             identities[0], selection, role="client", installation="client-a",
         )
-        point = result if sys.argv[4] == "read" else result[0]
+        point = (result if sys.argv[4] == "read" else
+                 result.observations[0] if sys.argv[4] == "refresh" else result[0])
         assert point.state == (("status", "active"),)
         outcomes.append("reader")
     except Exception as error:

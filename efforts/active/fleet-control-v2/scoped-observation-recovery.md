@@ -1,6 +1,7 @@
 # Isolated conditional point-set resnapshot
 
-**Status:** Proposed; actual plan review and merge precede runtime edits.
+**Status:** Plan reviewed and merged (#8316); isolated implementation prepared.
+Resident integration, event replay and adoption remain separate.
 
 Back to [Fleet Control V2](README.md). This **agent-recommended bounded
 implementation contract** advances #5862's authoritative-snapshot recovery
@@ -34,9 +35,11 @@ retention failure would still reveal unrelated activity. Filtering events only
 after retrieval also does not establish the reader's correlated field contract.
 
 This slice instead recomputes the explicitly selected current point set. It
-never reads the global head, replay log, retention floor, page API or source
-hosts. It does not disguise resnapshot as lossless replay: intermediate changes
-between calls may be coalesced, and there is no snapshot/stream attachment or
+never queries the replay/page APIs or source hosts, or uses the global
+head/retention floor to decide the conditional outcome. Trusted point storage
+still reads its existing internal metadata for row validation; none enters the
+validator or response. It does not disguise resnapshot as lossless replay:
+intermediate changes between calls may be coalesced, and there is no snapshot/stream attachment or
 no-missed-event guarantee. Those full serving gates remain open.
 
 ## Explicit API and result
@@ -119,41 +122,69 @@ metadata field without reading excluded values.
 
 ## Validation plan
 
-All gates are **agent-recommended**; none are claimed complete by this proposal.
+All gates are **agent-recommended** and apply only to this bounded prerequisite.
 
-- [ ] Plan passes actual current-head review and required CI, merges, and the
+- [x] Plan passes actual current-head review and required CI, merges, and the
   source worktree synchronizes to that reviewed plan before runtime edits.
-- [ ] Initial, matching and stale validators produce exactly the frozen
+- [x] Initial, matching and stale validators produce exactly the frozen
   `snapshot`/`unchanged` shapes. A caller can replace or retain its baseline
   correctly; missing/null/removal/resync metadata stays truthful.
-- [ ] Invalid/implicit/duplicate/oversized requests and malformed validators
+- [x] Invalid/implicit/duplicate/oversized requests and malformed validators
   touch neither fence nor storage. A forbidden branch causes zero point
   lookups, even with a real validator from another permitted request.
-- [ ] Equal visible selections with fresh real proofs preserve the validator.
+- [x] Equal visible selections with fresh real proofs preserve the validator.
   Changes to selected fields and every visible metadata field invalidate it.
   Unselected payload changes alone do not, when visible metadata is unchanged.
-- [ ] Principal/account/role/installation/enrollment-generation, fleet,
+- [x] Principal/account/role/installation/enrollment-generation, fleet,
   issuer/audience/subject, request and reader-instance boundaries cannot reuse
   another baseline as `unchanged`; independent authorization always precedes
   access. Well-shaped nonmatching inputs disclose no validity classification.
-- [ ] More than the entire raw retention window of unrelated committed writes
+- [x] More than the entire raw retention window of unrelated committed writes
   leaves the exact selected response/validator unchanged. Unrelated enrollment
   or policy-revision changes do not become a recovery side channel.
-- [ ] Terminal revocation, changed enrollment/scope, expiry, rollback, callback,
+- [x] Terminal revocation, changed enrollment/scope, expiry, rollback, callback,
   storage and serialization failures withhold both prepared result shapes,
   consume the permit and recover capacity; direct callers retain lock order.
-- [ ] Verify one query-only consistent read transaction, at most 64 indexed
-  point lookups, no raw replay/page/head access and no retained client state.
+- [x] Verify one query-only consistent read transaction, at most 64 indexed
+  point lookups, no replay/page access or conditional global-head dependency,
+  and no retained client state.
   Exercise concurrent real-process writes with an independent-read control.
-- [ ] A fresh production-only process consumer uses actual signed evidence,
+- [x] A fresh production-only process consumer uses actual signed evidence,
   SQLite and both result statuses; importing remains optional-crypto-free.
   Run focused unit/process selections, touched-code lint and relevant guards
   within unchanged contained deadlines; do not expand required CI matrices.
-- [ ] Record unit, simple process E2E, clean-room and available live/platform
+- [x] Record unit, simple process E2E, clean-room and available live/platform
   tiers honestly. This local API changes no installer or first-provision path;
   it supplies no resident/provider/live acceptance.
 - [ ] Complete documentation-impact review, standalone consumer changefile,
   current-head implementation review and required CI before code merge.
+
+## Local proof and remaining tiers
+
+Plan #8316 actually merged as `97a329ed9a64d554d778b0f7b7db7d76c18c6bc5`
+after current-head approval and required CI. The source synchronized to that
+reviewed plan before runtime edits.
+
+The owned reader/snapshot/refresh/store/admission selection passes 227 tests in
+75.83 seconds on native Windows under the unchanged 120-second contained
+deadline. The maximum refresh contains 64 indexed points and more than 1 MiB
+of selected text while using one query-only transaction. An unrelated committed
+event batch exceeds the actual 1,024-event raw retention window: raw recovery
+expires, but the authorized unchanged result and validator remain identical.
+
+The production-only fresh consumer uses real signed identity/proof verification
+and SQLite for all three APIs and both refresh statuses, with seven authorized
+point lookups and no unauthorized lookups. Real-process origin-generation
+replacement cannot split the refresh; independent point reads demonstrate the
+impossible mixed view. Direct admission and refresh retain the shared lock-order
+proof and inverted-order deadlock control.
+
+Unit and simple process E2E tiers were exercised. No installer or first-provision
+path changes, so no installer clean-room acceptance is claimed. The available
+hosted periodic Linux portfolio does not include standalone Fleet Manager and
+the Windows execution is unenrolled. Required unit/guard CI is not a substitute
+for native full-Fleet integration. There is no Linux, live provider, resident
+transport or deployment proof, and no shared CI lane or deadline was changed.
 
 ## Remaining full recovery contract
 
