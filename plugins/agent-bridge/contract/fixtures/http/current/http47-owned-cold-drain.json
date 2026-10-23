@@ -91,7 +91,7 @@
       "status": 401
     }
   },
-  "execution_closure_sha256": "f8c399606e114bb5a21a08e3360d15782e970b9fcf00521912874bd016af2a11",
+  "execution_closure_sha256": "2d15e8e00224603b36217c4c245c62127e3f6f3a8aee8764b4ba9d287620e294",
   "execution_closure": {
     "libs/agent-procutil/src/agent_procutil/__init__.py": {
       "blob": "055e20131efdc966b58de8ad46699d9ba31305b2",
@@ -1226,8 +1226,8 @@
       "sha256": "70058bd55121a268307177aaa9b1e4ef1447b7b69334832e29da5eff4f37690d"
     },
     "plugins/agent-bridge/src/agent_bridge/client_drain.py": {
-      "blob": "f21ca4d729e46157d0eb5c6766913e2c892cd929",
-      "sha256": "cf61733b357ff87fdf4aa87bc58d06a607eac99214f0342e2f802837949db117"
+      "blob": "efac3236b34a490129d5a4c46f078b056ec54397",
+      "sha256": "b22176295f7819f79ebffc7119d06ad9b3e23e183090d44a96bc42eaaf82644d"
     },
     "plugins/agent-bridge/src/agent_bridge/client_live_results.py": {
       "blob": "606b0eaad54380ead30086ce2eac85454d188f99",
@@ -1258,8 +1258,8 @@
       "sha256": "15b4598ea31081173f418fc0e03a1bbecf0dac5d451cf27a726cf43a45671335"
     },
     "plugins/agent-bridge/src/agent_bridge/cold_outages.py": {
-      "blob": "1bd4adc9f0b0ed21471ae6e02425f35a1da5cafe",
-      "sha256": "aa5288d4e3a2f62b3a035a40a003ae56acdcc21f894c2a65bd85e3e68185c3b1"
+      "blob": "b3e52a500e15691cd164474abc11775268565b97",
+      "sha256": "5d814b24805960e635052ac36a5ece63c2bf0281a721a590a3a54baf9518424d"
     },
     "plugins/agent-bridge/src/agent_bridge/cold_store.py": {
       "blob": "c62ea502e608e68c5096b7c787532538a41d46ee",
@@ -1738,8 +1738,8 @@
       "sha256": "916d4687bab944aa33ab395e70d506535e4d3e180ab59b6f3d3cd3d195ee83c3"
     },
     "plugins/agent-bridge/src/agent_bridge/routes/sessions.py": {
-      "blob": "5991aba8bc9074cc10065d615c045e91f6330153",
-      "sha256": "bbefb32975022523860d5d1d172e5e5ad40b511275443f63e8fce494eb144362"
+      "blob": "37c6661b81a1bc1633a90c73a6c102b236ef2630",
+      "sha256": "e17e43ba101acd12812bc3ca6093e82d9f08ce28944d40e9f73b05752bc8f88a"
     },
     "plugins/agent-bridge/src/agent_bridge/routes/ui.py": {
       "blob": "68e06bb934b6b58d656cf7bc06d7f5c7e112c02a",
@@ -1994,8 +1994,8 @@
       "sha256": "41c72c68da1f45f2403da4bfb72d9370d6965eb002c9f4ec9c3ea5845242e94f"
     },
     "plugins/agent-bridge/src/agent_bridge/session_resume.py": {
-      "blob": "2ff413e74102d5c766d02b098135db8eaccf2ade",
-      "sha256": "3fc64af9618d3b8e0f32c78814002ab7a37c799812fd35cbb4454fb73ed6869f"
+      "blob": "f4ed4583caa88a333f7798cc5949c3f8766e750e",
+      "sha256": "28876252a90548910508d3a643ab87fab830aeea2b9a0ca2e4a14ad4f0c25d52"
     },
     "plugins/agent-bridge/src/agent_bridge/session_runtime.py": {
       "blob": "42cf9bb03b2b3d0244b638457306118197a6c524",
@@ -2174,12 +2174,12 @@
       "sha256": "26e074557053fbd691b1975ae585f7b276f0d2a5c2760706d13e4a73ca3f41da"
     },
     "plugins/agent-bridge/tests/test_cold_drain.py": {
-      "blob": "c876d4a58808f7afa3e9ab3590b5ced10579eed6",
-      "sha256": "16a8b13c6857f1b6187816b95f7a8332784642d30bac70df2c57a1622b0ad64c"
+      "blob": "664b2e488b2ca7c65a9700b5e571a25079f5a5d8",
+      "sha256": "794216a18113bbecdc7fdc93bd79794c713b8e3d7078f701e8d4996f39028dd8"
     },
     "plugins/agent-bridge/tests/test_cold_recovery_drain.py": {
-      "blob": "054de128c7ab8419d8c140fbfde0d9a244225ce7",
-      "sha256": "b22553ae01371968373d128ca0c5d50ea84ca36b8cac4a001c5064ecaaf50890"
+      "blob": "3ea615a533e7ff1ae4a25a059a90ca423edf8ae6",
+      "sha256": "7a7e07b28860c0a0d7d3fb5d76e8db15b08bd2daf02c0ca1face7213c3ec8c39"
     },
     "plugins/agent-bridge/tests/test_cold_recovery_handoff_fence.py": {
       "blob": "28c77cf7ece9937e501bdea28fe4a3ac975c750a",
@@ -2242,8 +2242,8 @@
       "sha256": "a4fc42f91705658ab43fb9a538cefec6701b5cd595a106b7d9236d76e0ad8e55"
     },
     "tools/bridge_http47_evidence.py": {
-      "blob": "644931465727e09e226f049a8193945a30f3100a",
-      "sha256": "8b46d3d91079f76301e4a563a69f31c6f50ca7909f05895c3998822ba6f16225"
+      "blob": "1750148602a77a96d1a4b124f825620af1b441fb",
+      "sha256": "a6a8447d68f65302138d416e2a79edb1c152b03bc045c2ded672558f79b10b2d"
     },
     "tools/bridge_http47_runtime.py": {
       "blob": "7e27a8dfed6876fee91ed9c696025737dabfa328",
@@ -3192,11 +3192,16 @@
     "test_cold_handoff_turn_settle_cannot_escape_unknown_reconnect": 1,
     "test_cold_handoff_allows_ordinary_and_confirmed_outage": 2,
     "test_cold_handoff_rechecks_outage_after_awaited_brief": 1,
-    "test_cold_handoff_rechecks_outage_after_awaited_resume": 1
+    "test_cold_handoff_rechecks_outage_after_awaited_resume": 1,
+    "test_cold_drain_client_rejects_nonobject_outcome": 10,
+    "test_cold_drain_client_requires_boolean_completion_flags": 21,
+    "test_ordinary_recovery_closed_cold_gate_is_503_without_effects": 2,
+    "test_ordinary_recovery_entered_before_drain_is_counted": 4,
+    "test_ordinary_recovery_cancellation_releases_drain_accounting": 2
   },
   "scope": "model-free ASGI and owned stdio fixtures; not real Copilot, deployment or host qualification",
   "captured_from": {
-    "commit": "505dfb852ffe5b357d87fda491decc8f1d026170",
+    "commit": "4f7d10dd7267462c5949ffb20484f5c6e005a6bd",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
