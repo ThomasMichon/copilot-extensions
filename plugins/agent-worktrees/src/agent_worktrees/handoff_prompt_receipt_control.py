@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 import importlib
+import importlib.util
 import json
 import math
 from pathlib import Path
@@ -83,7 +84,7 @@ def _subject(value: object) -> dict:
 def _backend():
     try:
         module = importlib.import_module(".handoff_prompt_receipt", __package__)
-    except ImportError:
+    except (ImportError, OSError, ValueError, SyntaxError, RuntimeError):
         return None
     if (
         type(getattr(module, "RESIDENT_RECEIPT_CONTRACT", None)) is int
@@ -300,7 +301,36 @@ class ReceiptControl:
                 self._condition.notify_all()
 
 
-def for_runtime(runtime_home: Path, hook_client, runtime_generation: str, published, *, port=None):
+def _selected_payload_binding(runtime_home: Path):
+    from . import _command_binding, _installation_context, peer_launch_adapter
+
+    context = peer_launch_adapter.validate_context()
+    if context is not None:
+        if Path(context["pluginRoot"]) != runtime_home:
+            raise AdmissionUnavailable("installation-unavailable")
+        raw_payload = context.get("payloadRoot")
+    else:
+        manifest = _json_file(runtime_home / "deploy-manifest.json")
+        if manifest.get("schema_version") != 3 or manifest.get("service") != "agent-worktrees":
+            raise AdmissionUnavailable("installation-unavailable")
+        declared = manifest.get("commandBinding")
+        raw_payload = declared.get("payloadRoot") if isinstance(declared, dict) else None
+    if not isinstance(raw_payload, str) or not raw_payload:
+        raise AdmissionUnavailable("payload-unavailable")
+    payload = Path(raw_payload)
+    if not payload.is_absolute() or ".." in payload.parts:
+        raise AdmissionUnavailable("payload-unavailable")
+    _regular(payload)
+    binding = _command_binding.resolve_command_binding(
+        _installation_context, payload_root=payload, plugin_id="agent-worktrees",
+        legacy_root=runtime_home,
+    )
+    if binding.get("status") != "selected":
+        raise AdmissionUnavailable("installation-unavailable")
+    return payload, binding
+
+
+def for_runtime(runtime_home: Path, runtime_generation: str, published, *, port=None):
     """Select only this resident's existing payload and active route, never recover."""
     from . import status_monitor_cutover as control
     import os
@@ -309,25 +339,30 @@ def for_runtime(runtime_home: Path, hook_client, runtime_generation: str, publis
     if backend is None:
         return ReceiptControl(lambda: None)
     try:
-        binding_helper = hook_client._load_sibling("command_binding.py")
-        projection = hook_client._load_sibling("resident_control_projection.py")
-        payload_root = Path(hook_client.__file__).resolve().parent.parent
-        initial_candidate = projection.project_candidate(binding_helper.binding_for_payload(
-            payload_root, "agent-worktrees", runtime_home,
-        ))
+        payload_root, binding = _selected_payload_binding(runtime_home)
+        projection_path = payload_root / "scripts" / "resident_control_projection.py"
+        _regular(projection_path)
+        spec = importlib.util.spec_from_file_location("_resident_control_projection", projection_path)
+        if spec is None or spec.loader is None:
+            return ReceiptControl(lambda: None)
+        projection = importlib.util.module_from_spec(spec)
+        with projection_path.open("rb") as source:
+            code = source.read(65537)
+        if len(code) > 65536:
+            return ReceiptControl(lambda: None)
+        exec(compile(code, str(projection_path), "exec"), projection.__dict__)
+        initial_candidate = projection.project_candidate(binding)
         if initial_candidate is None or Path(initial_candidate["runtimeRoot"]) != runtime_home:
             return ReceiptControl(lambda: None)
-    except (AttributeError, OSError, TypeError, ValueError, RuntimeError):
+    except (AttributeError, OSError, TypeError, ValueError, RuntimeError, ImportError, SyntaxError):
         return ReceiptControl(lambda: None)
 
     def owner():
-        if not published() or binding_helper is None or projection is None:
+        if not published():
             raise AdmissionUnavailable("owner-unavailable")
-        binding = binding_helper.binding_for_payload(
-            payload_root, "agent-worktrees", runtime_home,
-        )
+        current_payload, binding = _selected_payload_binding(runtime_home)
         candidate = projection.project_candidate(binding)
-        if candidate != initial_candidate:
+        if current_payload != payload_root or candidate != initial_candidate:
             raise AdmissionUnavailable("installation-unavailable")
         route = _json_file(control.routing_dir(runtime_home) / "active.json").get("active")
         if (

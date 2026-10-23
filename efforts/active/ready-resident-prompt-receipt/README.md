@@ -204,3 +204,17 @@ All functional phases remain gated even if this proposal merges.
   replayed onto the fetched reviewed default branch.
 - This source update adds this effort's own index row, resolving the prior
   non-blocking navigation suggestion without modifying another owner's row.
+
+### 2026-10-23 — Source review corrections
+
+- Review identified the deployed hook-client layout as an invalid payload
+  anchor. The adapter now uses validated installation context or the existing
+  legacy command-binding receipt, then the runtime-packaged validator; an
+  isolated deployed-`bin` regression exercises that path. The resulting
+  catalog/control plus resident-lifecycle selection passed 229 tests.
+- Review also identified a final-delivery gap: a registration snapshot already
+  prefixed by the older catalog can hide the enriched catalog. Repair requires
+  one narrow final-guidance composition hunk and its regression beyond the
+  specifically assigned catalog-builder function. Source merge remains
+  blocked until that ownership amendment and correction clear; no readiness
+  or complete receipt delivery is claimed meanwhile.

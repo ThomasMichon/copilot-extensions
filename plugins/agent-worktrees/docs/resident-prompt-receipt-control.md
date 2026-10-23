@@ -34,6 +34,10 @@ The adapter loads the receipt backend only if it exports integer
 owner qualifies that backend, health advertises no receipt capability and the
 action returns unavailable. The marker is an API contract, not a new runtime
 attestation or a claim that any live deployment was tested.
+The resident obtains payload ownership from its validated installation context,
+or its existing legacy command-binding receipt, and revalidates that selection
+using the runtime's packaged validator. It does not infer a payload from the
+deployed `bin/hook_client.py` path or require sibling helpers beside that copy.
 
 ## Request and result
 

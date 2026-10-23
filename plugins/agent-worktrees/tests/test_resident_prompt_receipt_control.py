@@ -121,7 +121,7 @@ def test_loader_requires_qualified_backend_marker(monkeypatch, marker):
 
 def test_missing_backend_does_not_touch_binding_hook_or_route(monkeypatch, tmp_path):
     monkeypatch.setattr(receipts, "_backend", lambda: None)
-    runtime = receipts.for_runtime(tmp_path, None, "runtime", lambda: True)
+    runtime = receipts.for_runtime(tmp_path, "runtime", lambda: True)
     assert runtime.health()["capabilities"] == []
     assert list(tmp_path.iterdir()) == []
 
@@ -380,8 +380,13 @@ def test_real_binding_and_active_route_roundtrip_without_helper(tmp_path, monkey
     payload = home / ".copilot" / "installed-plugins" / "example" / "agent-worktrees"
     payload_scripts = payload / "scripts"
     shutil.copytree(scripts / "installation-context", payload_scripts / "installation-context")
+    shutil.copyfile(
+        scripts / "resident_control_projection.py", payload_scripts / "resident_control_projection.py",
+    )
     root = home / ".agent-worktrees"
     root.mkdir()
+    (root / "bin").mkdir()
+    (root / "bin" / "hook_client.py").write_text("# Deployed hook has no payload siblings.\n")
     (home / ".copilot" / "settings.json").write_text(json.dumps({
         "extraKnownMarketplaces": {
             "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
@@ -402,7 +407,6 @@ def test_real_binding_and_active_route_roundtrip_without_helper(tmp_path, monkey
         return module
 
     binding = load("command_binding")
-    projection = load("resident_control_projection")
     primitive = binding._load_primitive(payload)
     receipt = binding.publish_legacy_binding(
         primitive, payload_root=payload, plugin_id="agent-worktrees", legacy_root=root,
@@ -414,16 +418,13 @@ def test_real_binding_and_active_route_roundtrip_without_helper(tmp_path, monkey
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("helper started"))
     monkeypatch.setattr(receipts, "_backend", lambda: backend)
     calls = []
-    original_binding = binding.binding_for_payload
-    def observed_binding(*args):
+    from agent_worktrees import _command_binding
+    original_binding = _command_binding.resolve_command_binding
+    def observed_binding(*args, **kwargs):
         calls.append(args)
-        return original_binding(*args)
-    monkeypatch.setattr(binding, "binding_for_payload", observed_binding)
-    hook = SimpleNamespace(
-        __file__=str(payload_scripts / "hook_client.py"),
-        _load_sibling=lambda name: binding if name == "command_binding.py" else projection,
-    )
-    runtime = receipts.for_runtime(root, hook, "runtime", lambda: True, port=lambda: server.port)
+        return original_binding(*args, **kwargs)
+    monkeypatch.setattr(_command_binding, "resolve_command_binding", observed_binding)
+    runtime = receipts.for_runtime(root, "runtime", lambda: True, port=lambda: server.port)
     runtime._admission = admission
     route_path = root / "status-monitor-routing" / "active.json"
     route_path.parent.mkdir()
@@ -445,9 +446,11 @@ def test_real_binding_and_active_route_roundtrip_without_helper(tmp_path, monkey
         route_path.write_text(json.dumps({"active": {**active, "port": server.port + 1}}))
         assert runtime.health()["promptReceipt"]["status"] == "unavailable"
         route_path.write_text(json.dumps({"active": active}))
-        original_candidate = projection.project_candidate
-        monkeypatch.setattr(projection, "project_candidate", lambda value: {
-            **original_candidate(value), "sourceFingerprint": "replacement-source",
-        })
+        def changed_binding(*args, **kwargs):
+            value = observed_binding(*args, **kwargs)
+            value["source"]["fingerprint"] = "replacement-source"
+            value["installation"]["sourceFingerprint"] = "replacement-source"
+            return value
+        monkeypatch.setattr(_command_binding, "resolve_command_binding", changed_binding)
         assert runtime.health()["promptReceipt"]["status"] == "unavailable"
         assert not (root / "status-monitor-control.token").exists()

@@ -363,7 +363,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         hook_policy.plugin_related_anchors()
     installation_context = registry_paths.installation_context()
     receipts = receipt_control.for_runtime(
-        status_monitor_runtime._aw_runtime_home(), hook_client, PROCESS_GENERATION,
+        status_monitor_runtime._aw_runtime_home(), PROCESS_GENERATION,
         lambda: published_lock and not admission_closed and not shutdown_requested.is_set(),
         port=lambda: control_server.port,
     )
