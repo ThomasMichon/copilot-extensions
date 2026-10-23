@@ -194,8 +194,9 @@ def test_invalid_native_execution_root_never_creates_directories(
     True, marks=pytest.mark.skipif(os.name != "nt", reason="PowerShell case-insensitive binding"),
 )])
 @pytest.mark.parametrize("wait", [False, True])
+@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
 def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_diagnostics(
-    owning_payload, area, mixed_case, wait,
+    owning_payload, area, mixed_case, wait, installer_action,
 ):
     payload, installation, project = owning_payload
     library = Path(__file__).resolve().parents[2]
@@ -226,8 +227,15 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
     )
     root = area / "cold"
     command = native_command(root, payload, installation, project, source=source)
+    if installer_action == "stamp":
+        command += (
+            ["-InstallerAction", "StAmP" if mixed_case else installer_action]
+            if os.name == "nt" else ["--installer-action", installer_action]
+        )
     if mixed_case:
-        command += ["-Mode", "LaUnCh", "-ServiceMode", "Client-Only"]
+        command += ["-Mode", "LaUnCh"]
+        if installer_action == "provision":
+            command += ["-ServiceMode", "Client-Only"]
     if wait:
         command += ["-Wait" if os.name == "nt" else "--wait"]
     result = subprocess.run(
@@ -254,3 +262,26 @@ def test_actual_native_supervisor_forwards_fixed_fields_and_keeps_root_owned_dia
     assert len(logs) == 1 and logs[0].parent == root
     assert not list(project.glob(".native-daemon-*"))
     assert not (root / "queue.sqlite3").exists() and not installation.exists()
+
+
+@pytest.mark.parametrize("installer_action,client_only", [
+    ("install", False), ("update", False), ("stamp", True),
+])
+def test_unsupported_native_lifecycle_action_refuses_before_driver_state(
+    owning_payload, area, installer_action, client_only,
+):
+    payload, installation, project = owning_payload
+    root = area / "cold"
+    command = native_command(
+        root, payload, installation, project, client_only=client_only,
+    )
+    command += (
+        ["-InstallerAction", installer_action] if os.name == "nt"
+        else ["--installer-action", installer_action]
+    )
+    result = subprocess.run(
+        command, env=dict(os.environ), capture_output=True, text=True,
+        timeout=60, **no_window_kwargs(),
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert not root.exists() and not installation.exists()

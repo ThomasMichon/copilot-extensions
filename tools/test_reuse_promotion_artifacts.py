@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -70,7 +72,12 @@ def test_real_export_reuses_before_running_a_builder_or_resolving_a_toolchain(
 ) -> None:
     directory, _, index, server, _, kwargs = frozen
 
-    def forbid_build(*args: object, **kwargs: object) -> str:
+    def forbid_build(argv, *, cwd) -> str:
+        if argv[:4] == ["git", f"--attr-source={TREE}", "checkout-index", "--all"]:
+            assert cwd == kwargs["repo"] and argv[4].endswith(os.sep)
+            candidate = Path(argv[4].removeprefix("--prefix="))
+            shutil.copytree(cwd / "plugins", candidate / "plugins")
+            return ""
         pytest.fail("an admitted source must not resolve/build another toolchain")
 
     monkeypatch.setattr(artifacts, "_run", forbid_build)

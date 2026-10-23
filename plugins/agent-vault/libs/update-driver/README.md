@@ -596,15 +596,15 @@ canonical queued request receipts.
 ### Fixed first-use handoff and Vault command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
-qualify one fixed recipe: the owning Agent Vault payload's existing legacy
-**direct `provision`** action. Namespaced installation recipes refuse before
+support the owning Agent Vault payload's existing legacy **direct `provision`**
+and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
 selected owning source's runtime gate before taking a provisioning lock
 (the existing snapshot pointer for installed payloads).
 Other publishers, including Vault's bootstrap reconciliation hook and explicit
-installer entry points, have not adopted it. Snapshot-based `stamp`/`provision` recipes
-and other plugin identities remain unsupported rather than being inferred
+installer entry points, have not adopted it. Other plugin identities and their
+snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
 
 Both native clients take the execution root, owning payload, addressed runtime
@@ -625,6 +625,15 @@ Python `client_only=True` select only the canonical installer's existing
 `-NoService`/`--no-service` option. This boolean participates in durable request
 and runner identity; ordinary service-enabled behavior is still the default.
 No arbitrary installer options are accepted.
+Windows `-InstallerAction stamp`, Linux `--installer-action stamp` and Python
+`installer_action="stamp"` select only Vault's existing canonical stamping
+action. This selection is distinct durable request identity; equivalent pending
+stamps coalesce without absorbing a provision request. The default provision
+identity is unchanged. A stamp retains source/publication and no-self-provision/
+pinned-read admission, but does not build or select a Vault venv or register its
+service; constructing the independent driver foundation is separate. Combining
+stamp with client-only selection refuses before state creation. This qualified
+recipe is not adoption of the session bootstrap or explicit installer callers.
 The optional Windows `-Wait` and Linux `--wait` keep the launching client as an
 observer of its independently launched finite supervisor and relay its diagnostics
 and exit status. They do not move installation into the caller. Launch-only
@@ -670,7 +679,7 @@ The queue-owned execution consumes a fresh same-root participant and execution
 scope, rechecks the complete accepted source and selected installation, and uses
 the canonical engine's complete-input copier under that custody. It verifies
 the frozen hash and original admission again before invoking only the frozen
-owning native installer's fixed provision action and addressed root.
+owning native installer's accepted fixed provision or stamp action and addressed root.
 The trusted adapter sets the existing staging-origin fields only after this
 authenticated copy; unrelated ambient staging hints are discarded. Frozen inputs
 remain under `<execution-root>/provision-inputs/<request-id>` because published
@@ -704,6 +713,11 @@ source-independent healthy dispatch without another queue request; it is not a
 service deployment or production publisher adoption test. Vault carries the
 canonical Python installer helpers for admitted-input inspection/freezing,
 through the existing installer-engine sync owner, not a bespoke copier.
+Before building Vault, that same actual-installer case submits a cold stamp
+through the native supervisor, requires a successful ordinary queue result and
+the canonical primary/payload pointer, and proves no Vault venv, current-runtime
+selection or service artifact was created. Subsequent provisioning stays a
+separate request under the same authority.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;

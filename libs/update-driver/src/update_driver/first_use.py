@@ -17,10 +17,10 @@ from . import core
 from .participant import ENVIRONMENT_KEY, borrowed_custody, participant_environment
 
 
-# This first adopter uses its existing direct, self-staging provision action.
-# Snapshot-based publishers need their own qualified stamp/provision contract.
+# Fixed Vault lifecycle actions only; no caller-supplied installer argv.
 PLUGIN = "agent-vault"
 PROTOCOL = 1
+INSTALLER_ACTIONS = ("provision", "stamp")
 CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "AGENT_VAULT_HOME", "AGENT_VAULT_INSTALLATION_ID",
@@ -55,9 +55,13 @@ def _environment(payload: Path) -> dict[str, str]:
     return result
 
 
-def _inspect(payload: Path, runtime_root: Path, project: Path) -> dict:
+def _inspect(
+    payload: Path, runtime_root: Path, project: Path, *, installer_action: str = "provision",
+) -> dict:
     """Run only in the isolated inspection/owned execution process."""
     sys.dont_write_bytecode = True
+    if installer_action not in INSTALLER_ACTIONS:
+        raise ProvisionError("unsupported owning installer action")
     payload = _path(payload, exists=True)
     runtime_root = _path(runtime_root)
     project = _path(project, exists=True)
@@ -124,18 +128,23 @@ def _inspect(payload: Path, runtime_root: Path, project: Path) -> dict:
         "mode": resolution["actualMode"], "environment": resolution["environment"],
         "context": resolution["context"],
         "install_generation": resolution["installGeneration"],
+        **({"installer_action": installer_action} if installer_action != "provision" else {}),
     }
 
 
-def inspect(payload: Path, runtime_root: Path, project: Path) -> dict:
+def inspect(
+    payload: Path, runtime_root: Path, project: Path, *, installer_action: str = "provision",
+) -> dict:
     """Read canonical owning-source admission without mutating either installation."""
+    if installer_action not in INSTALLER_ACTIONS:
+        raise ProvisionError("unsupported owning installer action")
     payload, runtime_root, project = (
         _path(payload, exists=True), _path(runtime_root), _path(project, exists=True),
     )
     argv, imports = core.runtime_command(
         "update_driver.first_use", [
             "_inspect", "--payload", str(payload), "--runtime-root", str(runtime_root),
-            "--project", str(project),
+            "--project", str(project), "--installer-action", installer_action,
         ],
     )
     result = subprocess.run(
@@ -151,19 +160,24 @@ def inspect(payload: Path, runtime_root: Path, project: Path) -> dict:
 def enqueue(
     payload: Path, runtime_root: Path, project: Path, *, root: Path | None = None,
     expected_source: str | None = None, client_only: bool = False,
+    installer_action: str = "provision",
 ) -> core.Request:
-    """Accept exactly the fixed provision action into the existing durable queue."""
+    """Accept only the fixed owning lifecycle actions into the existing queue."""
     if ENVIRONMENT_KEY in os.environ or participant_environment():
         raise ProvisionError("nested first-use submission is unsupported; retain the current installation owner")
     if type(client_only) is not bool:
         raise ProvisionError("client-only selection must be a boolean")
+    if installer_action not in INSTALLER_ACTIONS:
+        raise ProvisionError("unsupported owning installer action")
+    if client_only and installer_action != "provision":
+        raise ProvisionError("client-only selection requires the provision action")
     if os.name != "nt" and not sys.platform.startswith("linux"):
         raise ProvisionError("native plugin provision execution is not qualified on this platform")
     execution_root = core._root(root)
     for installation in (Path(payload), Path(runtime_root)):
         if execution_root.is_relative_to(installation) or installation.is_relative_to(execution_root):
             raise ProvisionError("execution root must be separate from owning payload and installation")
-    admission = inspect(payload, runtime_root, project)
+    admission = inspect(payload, runtime_root, project, installer_action=installer_action)
     if expected_source is not None and admission["source_fingerprint"] != expected_source:
         raise ProvisionError("owning source differs from native first-use admission")
     encoded = json.dumps(admission, sort_keys=True, separators=(",", ":"))
@@ -177,7 +191,11 @@ def enqueue(
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
     return core.enqueue(
         core.RequestSpec(
-            "owning-plugin-provision", argv=("--client-only",) if client_only else (),
+            "owning-plugin-provision",
+            argv=(
+                ("--installer-action", installer_action) if installer_action != "provision" else
+                ("--client-only",) if client_only else ()
+            ),
             source=encoded, cwd=str(project),
             context=tuple(context.items()),
         ),
@@ -195,7 +213,12 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
     with custody, custody.execution_scope():
         payload = Path(admission["payload"])
         runtime_root = Path(admission["runtime_root"])
-        current = _inspect(payload, runtime_root, Path(admission["project"]))
+        installer_action = admission.get("installer_action", "provision")
+        if client_only and installer_action != "provision":
+            raise ProvisionError("client-only selection requires the provision action")
+        current = _inspect(
+            payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
+        )
         if current != admission:
             raise ProvisionError("owning provision source or installation changed after acceptance")
         custody.assert_owned()
@@ -207,7 +230,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         inputs.mkdir(mode=0o700, exist_ok=True)
         frozen = engine.freeze_inputs(payload, inputs / custody.request_id)
         if frozen.payload_hash != admission["input_hash"] or _inspect(
-            payload, runtime_root, Path(admission["project"]),
+            payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
         ) != admission:
             raise ProvisionError("owning source or installation changed while freezing provision inputs")
         custody.assert_owned()
@@ -228,7 +251,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
             argv = [
                 str(shell), "-NoLogo", "-NoProfile", "-NonInteractive",
                 "-ExecutionPolicy", "Bypass", "-File", str(frozen.plugin / "scripts" / "install.ps1"),
-                "provision", "-InstallDir", str(runtime_root),
+                installer_action, "-InstallDir", str(runtime_root),
                 *(("-NoService",) if client_only else ()),
             ]
         elif sys.platform.startswith("linux"):
@@ -237,7 +260,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
                 raise ProvisionError("native provision shell is unavailable")
             argv = [
                 shell, str(frozen.plugin / "scripts" / "install.sh"),
-                "provision", "--install-dir", str(runtime_root),
+                installer_action, "--install-dir", str(runtime_root),
                 *(("--no-service",) if client_only else ()),
             ]
         else:
@@ -258,6 +281,7 @@ def main() -> int:
         command.add_argument("--payload", type=Path, required=True)
         command.add_argument("--runtime-root", type=Path, required=True)
         command.add_argument("--project", type=Path, required=True)
+        command.add_argument("--installer-action", choices=INSTALLER_ACTIONS, default="provision")
         if action == "submit":
             command.add_argument("--root", type=Path)
             command.add_argument("--expected-source")
@@ -272,6 +296,7 @@ def main() -> int:
         if arguments.action == "_inspect":
             print(json.dumps(_inspect(
                 arguments.payload, arguments.runtime_root, arguments.project,
+                installer_action=arguments.installer_action,
             ), sort_keys=True))
             return 0
         if arguments.action == "_execute":
@@ -283,6 +308,7 @@ def main() -> int:
             arguments.payload, arguments.runtime_root, arguments.project, root=arguments.root,
             expected_source=arguments.expected_source,
             client_only=arguments.client_only,
+            installer_action=arguments.installer_action,
         )
         print(json.dumps({"request_id": request.id, "state": request.state}), flush=True)
         worker_argv, worker_env = core.runtime_command(

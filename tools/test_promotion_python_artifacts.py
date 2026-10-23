@@ -732,6 +732,8 @@ def resolve_toolchain_lock(*args, **kwargs):
     shutil.copy(Path(artifacts.__file__), repo / "tools" / "promotion_python_artifacts.py")
     driver = repo.parent / "trusted" / "tools"
     shutil.copytree(repo / "tools", driver)
+    for name in ("artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py"):
+        shutil.copy(Path(artifacts.__file__).with_name(name), driver / name)
     shutil.copy(Path(promotion.__file__), driver / "promote_release.py")
     shutil.copy(Path(promotion.__file__).with_name("promotion_candidate.py"), driver / "promotion_candidate.py")
     for name in (

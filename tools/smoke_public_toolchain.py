@@ -2,15 +2,69 @@
 from __future__ import annotations
 
 import json
+import argparse
+import os
+import shutil
+import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from build_python_artifacts import build_plugin_artifacts
 from build_toolchain_lock import resolve_toolchain_lock
-from promotion_python_artifacts import INDEX_NAME, SCHEMA, bundle_wheels, validate_artifacts
+from promotion_python_artifacts import (
+    INDEX_NAME, SCHEMA, _run, bundle_wheels, candidate_projects, export_artifacts, validate_artifacts,
+)
+from standalone_python_artifacts import COMPONENTS, artifact_label, build_standalone_artifacts, project_key
 
 
-def main() -> None:
+def nested_standalone_export(directory: Path) -> dict:
+    """Exercise the actual nested promotion layout, not only direct builds."""
+    source = Path(__file__).resolve().parent.parent
+    fixture = directory / "nested-export-repository"
+    fixture.mkdir()
+    paths = _run([
+        "git", "ls-files", "--", ".gitattributes", "fleet-manager", "services/pr",
+        "libs/versioned-runtime", "libs/installer-engine", "libs/agent-procutil",
+    ], cwd=source).splitlines()
+    for relative in paths:
+        destination = fixture / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / relative, destination)
+    _run(["git", "init", "-q"], cwd=fixture)
+    _run(["git", "-c", "core.autocrlf=false", "add", "--all"], cwd=fixture)
+    _run([
+        "git", "-c", "user.name=Artifact Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-qm", "Canonical standalone export fixture",
+    ], cwd=fixture)
+    commit = _run(["git", "rev-parse", "HEAD"], cwd=fixture).strip()
+    tree = _run(["git", "rev-parse", "HEAD^{tree}"], cwd=fixture).strip()
+    export = directory / "nested-export"
+    with (
+        patch("reuse_promotion_artifacts.reuse_artifacts", return_value=None),
+        patch.dict(os.environ, {
+            "GITHUB_WORKFLOW_SHA": commit, "GITHUB_SHA": commit, "GITHUB_REF": "refs/heads/main",
+        }),
+    ):
+        index = export_artifacts(
+            repo=fixture, commit=commit, content_tree=tree, dev_head=commit, main_before=commit,
+            out_dir=export, source_policy="seasoned-public", reuse_repository="example/fixture",
+        )
+    validate_artifacts(
+        export, content_tree=tree, dev_head=commit, main_before=commit,
+        projects=candidate_projects(fixture), candidate_root=fixture,
+        source_policy="seasoned-public",
+    )
+    assert {entry["component"] for entry in index["artifacts"]} == set(COMPONENTS)
+    assert index["admission"] == {
+        "signer_digest": commit, "source_digest": commit, "source_ref": "refs/heads/main",
+    }
+    assert len(_run(["git", "worktree", "list", "--porcelain"], cwd=fixture).split("worktree ")) == 2
+    assert not _run(["git", "status", "--porcelain"], cwd=fixture).strip()
+    return index
+
+
+def main(*, standalone: bool = False) -> None:
     with tempfile.TemporaryDirectory(prefix="public-toolchain-smoke-") as root:
         directory = Path(root)
         toolchain = resolve_toolchain_lock(
@@ -22,20 +76,27 @@ def main() -> None:
             )
             for plugin in ("agent-mcp", "agent-ssh")
         ]
+        if standalone:
+            manifests.extend(
+                build_standalone_artifacts(
+                    component, out_dir=directory / f"standalone-{component}", toolchain=toolchain,
+                ) for component in COMPONENTS
+            )
         reused = resolve_toolchain_lock(
             directory / "toolchain", source_policy="seasoned-public"
         )
         assert reused.venv_python == toolchain.venv_python
         assert reused.lock_id == toolchain.lock_id
         for manifest in manifests:
-            assert manifest["schema_version"] == 3
+            assert manifest["schema_version"] == (4 if "component" in manifest else 3)
             assert manifest["build_toolchain"] == toolchain.record
             assert manifest["build_toolchain"]["provenance"]["source_policy"] == "seasoned-public"
-            assert all(wheel["role"] in ("plugin", "vendored-lib") for wheel in manifest["wheels"])
+            primary = "standalone" if "component" in manifest else "plugin"
+            assert all(wheel["role"] in (primary, "vendored-lib") for wheel in manifest["wheels"])
         export = directory / "export"
         export.mkdir()
         entries = [
-            bundle_wheels(manifest, directory / manifest["plugin"], export)
+            bundle_wheels(manifest, directory / artifact_label(manifest), export)
             for manifest in manifests
         ]
         identity = "a" * 40
@@ -46,15 +107,67 @@ def main() -> None:
         }), encoding="utf-8")
         validate_artifacts(
             export, dev_head=identity, main_before=identity, content_tree=identity,
-            projects={manifest["plugin"]: manifest["version"] for manifest in manifests},
+            projects={project_key(manifest): manifest["version"] for manifest in manifests},
             candidate_root=Path(__file__).resolve().parent.parent,
         )
+        if standalone:
+            environment = directory / "consumer"
+            _run(["uv", "venv", "--python", sys.executable, str(environment)], cwd=directory)
+            python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            wheels = [
+                str(directory / artifact_label(manifest) / wheel["filename"])
+                for manifest in manifests if "component" in manifest for wheel in manifest["wheels"]
+            ]
+            # Only our built wheels, offline and dependency-free: not runtime closure admission.
+            _run(
+                ["uv", "pip", "install", "--python", str(python), "--no-deps", "--no-index", *wheels],
+                cwd=directory,
+            )
+            _run([
+                str(python), "-I", "-c",
+                "import fleet_manager, agent_pull_requests_service; "
+                "from importlib.resources import files; "
+                "from importlib.metadata import version; "
+                "assert version('fleet-manager'); assert version('agent-pull-requests-service'); "
+                "root=files('fleet_manager'); "
+                "names=['_versioned_runtime.py','versioned_runtime_leases.py',"
+                "'versioned_runtime_construction.py','versioned_runtime_publication.py',"
+                "'versioned_runtime_source.py','_runtime_launcher.py','_installer_process.py',"
+                "'_construction_procutil.py']; "
+                "assert all(root.joinpath(name).is_file() for name in names)",
+            ], cwd=directory)
+        nested = nested_standalone_export(directory) if standalone else None
         print(json.dumps({
-            "plugins": [manifest["plugin"] for manifest in manifests],
+            "plugins": [manifest["plugin"] for manifest in manifests if "plugin" in manifest],
+            "projects": [project_key(manifest) for manifest in manifests],
+            "standalone_installed_offline": standalone,
+            "nested_export_artifacts": nested["artifacts"] if nested else [],
+            "artifacts": [
+                {"project": project_key(manifest), "version": manifest["version"],
+                 "artifact_id": manifest["artifact_id"], "payload_hash": manifest["payload_hash"]}
+                for manifest in manifests
+            ],
             "toolchain": toolchain.record,
             "wheel_counts": [len(manifest["wheels"]) for manifest in manifests],
         }, sort_keys=True))
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--standalone", action="store_true")
+    parser.add_argument("--contained-worker", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    if args.contained_worker:
+        main(standalone=args.standalone)
+    else:
+        from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+        with TestSandbox(prefix="artifact-smoke-") as temporary:
+            root = Path(temporary)
+            command = [sys.executable, str(Path(__file__).resolve()), "--contained-worker"]
+            if args.standalone:
+                command.append("--standalone")
+            raise SystemExit(run_contained(
+                command, cwd=Path(__file__).resolve().parent.parent,
+                env=isolated_environment(os.environ, root), sandbox=root,
+                limits=Limits(wall_seconds=180),
+            ))

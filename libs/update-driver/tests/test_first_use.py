@@ -56,6 +56,42 @@ def test_explicit_client_only_recipe_is_distinct_and_reaches_native_installer(ow
     assert (installation / "client-only").read_text().splitlines() == ["0", "1"]
 
 
+def test_stamp_recipe_is_distinct_coalesced_and_reaches_canonical_action(owning_payload, area):
+    payload, installation, project = owning_payload
+    root = area / "queue"
+    ordinary = provision.enqueue(payload, installation, project, root=root)
+    stamp = provision.enqueue(
+        payload, installation, project, root=root, installer_action="stamp",
+    )
+    repeated = provision.enqueue(
+        payload, installation, project, root=root, installer_action="stamp",
+    )
+    assert stamp.id == repeated.id and stamp.id != ordinary.id
+    assert stamp.spec.argv == ("--installer-action", "stamp")
+    assert json.loads(stamp.spec.source)["installer_action"] == "stamp"
+    assert "installer_action" not in json.loads(ordinary.spec.source)
+    assert not installation.exists()
+    drain(root=root)
+    assert all(status(item.id, root=root).exit_code == 7 for item in (ordinary, stamp))
+    assert (installation / "executed").read_text() == "provisionstamp"
+
+
+@pytest.mark.parametrize("action,client_only", [
+    ("install", False), ("update", False), ("other", False), (None, False),
+    ("stamp", True),
+])
+def test_unsupported_lifecycle_recipe_refuses_before_writes(
+    owning_payload, area, action, client_only,
+):
+    payload, installation, project = owning_payload
+    with pytest.raises(provision.ProvisionError):
+        provision.enqueue(
+            payload, installation, project, root=area / "queue",
+            installer_action=action, client_only=client_only,
+        )
+    assert not (area / "queue").exists() and not installation.exists()
+
+
 @pytest.mark.parametrize("value", ["yes", 1, None])
 def test_nonboolean_client_only_refuses_before_writes(owning_payload, area, value):
     payload, installation, project = owning_payload
@@ -74,8 +110,11 @@ def test_source_inspection_never_writes_payload_or_installation(owning_payload):
     assert not installation.exists()
 
 
+@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
 @pytest.mark.parametrize("change", ["managed", "malformed", "no-self", "pinned", "manifest"])
-def test_refusal_precedes_queue_and_installation_writes(owning_payload, area, monkeypatch, change):
+def test_refusal_precedes_queue_and_installation_writes(
+    owning_payload, area, monkeypatch, change, installer_action,
+):
     payload, installation, project = owning_payload
     if change in {"managed", "malformed"}:
         module = primitive(payload)
@@ -103,7 +142,10 @@ def test_refusal_precedes_queue_and_installation_writes(owning_payload, area, mo
     before = {str(p.relative_to(installation)): p.read_bytes()
               for p in installation.rglob("*") if p.is_file()}
     with pytest.raises(provision.ProvisionError):
-        provision.enqueue(payload, installation, project, root=area / "queue")
+        provision.enqueue(
+            payload, installation, project, root=area / "queue",
+            installer_action=installer_action,
+        )
     assert not (area / "queue").exists()
     assert {str(p.relative_to(installation)): p.read_bytes()
             for p in installation.rglob("*") if p.is_file()} == before
@@ -128,10 +170,15 @@ def test_actual_owned_native_provision_keeps_exit_status_and_does_not_leak_ticke
     assert (frozen / "plugin.json").read_bytes() == (payload / "plugin.json").read_bytes()
 
 
-def test_source_substitution_after_acceptance_never_runs_installer(owning_payload, area):
+@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+def test_source_substitution_after_acceptance_never_runs_installer(
+    owning_payload, area, installer_action,
+):
     payload, installation, project = owning_payload
     root = area / "queue"
-    request = provision.enqueue(payload, installation, project, root=root)
+    request = provision.enqueue(
+        payload, installation, project, root=root, installer_action=installer_action,
+    )
     with (payload / "scripts" / "install.ps1").open("a") as stream:
         stream.write("# changed after acceptance\n")
     with pytest.raises(ParticipantError):
@@ -174,12 +221,16 @@ def test_publication_policy_changed_after_acceptance_never_runs_installer(owning
     assert sorted(path.name for path in installation.iterdir()) == ["runtime-deployment.json"]
 
 
-def test_actual_submit_wait_worker_uses_the_addressed_execution_root(owning_payload, area):
+@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+def test_actual_submit_wait_worker_uses_the_addressed_execution_root(
+    owning_payload, area, installer_action,
+):
     payload, installation, project = owning_payload
     root = area / "queue"
     argv, imports = provision.core.runtime_command("update_driver.first_use", [
         "submit", "--payload", str(payload), "--runtime-root", str(installation),
         "--project", str(project), "--root", str(root), "--wait",
+        "--installer-action", installer_action,
     ])
     result = subprocess.run(
         argv, env={**os.environ, **imports}, cwd=project, stdin=subprocess.DEVNULL,
@@ -189,7 +240,8 @@ def test_actual_submit_wait_worker_uses_the_addressed_execution_root(owning_payl
     receipt = json.loads(result.stdout)
     request = status(receipt["request_id"], root=root)
     assert request.state == "completed" and request.exit_code == 7
-    assert (installation / "executed").read_text() == "provision"
+    assert (installation / "executed").read_text() == installer_action
+    assert json.loads(request.spec.source).get("installer_action", "provision") == installer_action
     assert not (installation.parent / ".copilot-extensions" / "update-driver").exists()
 
 

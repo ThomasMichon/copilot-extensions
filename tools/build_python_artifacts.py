@@ -807,12 +807,26 @@ def build_plugin_artifacts(
 
     vendored_libs = resolve_vendored_libs(plugin_dir)
 
+    return build_source_artifacts(
+        identity={"plugin": plugin}, source_dir=plugin_dir, dependencies=vendored_libs,
+        out_dir=out_dir, python=python, toolchain=toolchain,
+    )
+
+
+def build_source_artifacts(
+    *, identity: dict, source_dir: Path, dependencies: list[tuple[str, Path]],
+    out_dir: Path, python: str | None, toolchain: ToolchainLock | None,
+    resources: tuple[Path, ...] = (),
+) -> dict:
+    """Shared locked wheel construction; callers own source discovery and admission."""
+    standalone = "component" in identity
+    label = f"standalone-{identity['component']}" if standalone else identity["plugin"]
     # Computed BEFORE any build runs: a build backend can leave residue
     # inside the source tree itself (e.g. setuptools' build_meta creating a
     # *.egg-info directory alongside the sources even for an isolated
     # wheel build), and hashing after the fact would fold build output into
     # the identity of the very input that produced it.
-    all_dirs = [plugin_dir] + [d for _name, d in vendored_libs]
+    all_dirs = [source_dir, *(d for _name, d in dependencies), *resources]
 
     out_dir_r = out_dir.resolve()
     for d in all_dirs:
@@ -864,17 +878,17 @@ def build_plugin_artifacts(
                 )
             return wheel, info, generator
 
-        plugin_wheel, plugin_info, plugin_generator = _build_and_verify(plugin_dir)
-        raw_version = read_project_version(plugin_dir)
+        plugin_wheel, plugin_info, plugin_generator = _build_and_verify(source_dir)
+        raw_version = read_project_version(source_dir)
         _assert_version_corresponds(
-            raw_version=raw_version, wheel_version=plugin_info["version"], label=plugin_dir
+            raw_version=raw_version, wheel_version=plugin_info["version"], label=source_dir
         )
         wheel_infos.append(plugin_info)
         entries.append(
             {
-                "role": "plugin",
+                "role": "standalone" if standalone else "plugin",
                 "name": plugin_info["name"],
-                "source": f"plugins/{plugin}",
+                "source": source_dir.resolve().relative_to(REPO.resolve()).as_posix(),
                 "filename": plugin_wheel.name,
                 "sha256": sha256_file(plugin_wheel),
                 "generator": plugin_generator,
@@ -884,7 +898,7 @@ def build_plugin_artifacts(
             }
         )
 
-        for lib_name, lib_dir in vendored_libs:
+        for lib_name, lib_dir in dependencies:
             lib_wheel, lib_info, lib_generator = _build_and_verify(lib_dir)
             wheel_infos.append(lib_info)
             rel_source = lib_dir.resolve().relative_to(REPO).as_posix()
@@ -919,8 +933,8 @@ def build_plugin_artifacts(
 
         manifest = {
             "schema": MANIFEST_SCHEMA,
-            "schema_version": MANIFEST_SCHEMA_VERSION,
-            "plugin": plugin,
+            "schema_version": 4 if standalone else MANIFEST_SCHEMA_VERSION,
+            **identity,
             "version": raw_version,
             "python_tag": identity_tags["python_tag"],
             "abi_tag": identity_tags["abi_tag"],
@@ -930,7 +944,11 @@ def build_plugin_artifacts(
             "artifact_id": artifact_id,
             "wheels": entries,
         }
-        manifest_path = out_dir / f"{plugin}-{raw_version}-manifest.json"
+        if standalone:
+            manifest["build_resources"] = [
+                path.resolve().relative_to(REPO.resolve()).as_posix() for path in resources
+            ]
+        manifest_path = out_dir / f"{label}-{raw_version}-manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -939,7 +957,8 @@ def build_plugin_artifacts(
 
 def main() -> int:
     from artifact_builder_cli import main as run
-    return run(build_plugin_artifacts, __doc__ or "")
+    from standalone_python_artifacts import build_standalone_artifacts
+    return run(build_plugin_artifacts, __doc__ or "", standalone_builder=build_standalone_artifacts)
 
 
 if __name__ == "__main__":
