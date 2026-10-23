@@ -1,0 +1,17 @@
+{
+  "comment": "Allow trusted pinned-target adapters to share active installation requests without swallowing unresolved moving-target updates",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
