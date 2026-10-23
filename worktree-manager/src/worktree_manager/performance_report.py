@@ -239,6 +239,17 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
 
     resources = {"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"}
 
+    def correlation(value, width):
+        try:
+            raw = bytes.fromhex(value)
+        except ValueError:
+            raw = b""
+        if len(raw) != width:
+            raw = base64.b64decode(value, validate=True)
+        if len(raw) != width:
+            raise ValueError("invalid correlation ID")
+        return raw.hex()
+
     def attrs(entries):
         values = {}
         for entry in entries:
@@ -267,6 +278,7 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
 
     if signal == "logs":
         expected = expected_logs or {}
+        owned_traces = {trace for trace, _ in expected}
         selectors = {trace for trace, _ in expected}
         selectors.update(base64.b64encode(bytes.fromhex(trace)).decode("ascii") for trace, _ in expected)
     elif signal == "metrics":
@@ -274,6 +286,7 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
         if len(expected) != len(expected_metrics):
             return {"complete": False, "reason": "duplicate_sender_metric_interval"}
         selectors = {str(key[-1]) for key in expected}
+        owned_intervals = {key[-2:] for key in expected}
     else:
         raise ValueError("unsupported readback signal")
     seen, matched, mismatched, extra = Counter(), set(), set(), 0
@@ -284,35 +297,30 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
         try:
             value = json.loads(line)
             for resource in value.get("resourceLogs" if signal == "logs" else "resourceMetrics", []):
-                resource_valid = attrs(resource.get("resource", {}).get("attributes", [])) == resources
                 for scope in resource.get("scopeLogs" if signal == "logs" else "scopeMetrics", []):
-                    scope_data = scope.get("scope", {})
-                    common = (
-                        resource_valid and scope_data.get("name") == "copilot-extensions.process-telemetry"
-                        and scope_data.get("version") == "1" and not scope_data.get("attributes")
-                    )
+                    def common():
+                        scope_data = scope.get("scope", {})
+                        return (
+                            attrs(resource.get("resource", {}).get("attributes", [])) == resources
+                            and scope_data.get("name") == "copilot-extensions.process-telemetry"
+                            and scope_data.get("version") == "1" and not scope_data.get("attributes")
+                        )
                     if signal == "logs":
                         for log in scope.get("logRecords", []):
-                            ids = []
-                            for field, width in (("traceId", 16), ("spanId", 8)):
-                                value = log.get(field, "")
-                                try:
-                                    raw = bytes.fromhex(value)
-                                except ValueError:
-                                    raw = b""
-                                if len(raw) != width:
-                                    raw = base64.b64decode(value, validate=True)
-                                if len(raw) != width:
-                                    raise ValueError("invalid correlation ID")
-                                ids.append(raw.hex())
-                            key = tuple(ids)
+                            try:
+                                trace = correlation(log.get("traceId", ""), 16)
+                            except (ValueError, TypeError):
+                                continue
+                            if trace not in owned_traces:
+                                continue
+                            key = (trace, correlation(log.get("spanId", ""), 8))
                             if key not in expected:
                                 extra += key[0] in selectors
                                 continue
                             seen[key] += 1
                             wanted = expected[key]
                             good = (
-                                common and attrs(log.get("attributes", [])) == wanted["attributes"]
+                                common() and attrs(log.get("attributes", [])) == wanted["attributes"]
                                 and log.get("body") == {"stringValue": "agent.source.observation"}
                                 and log.get("eventName") == "agent.source.observation"
                                 and log.get("severityNumber") == wanted["severity_number"]
@@ -322,14 +330,22 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
                             (matched if good else mismatched).add(key)
                     else:
                         for metric in scope.get("metrics", []):
-                            kind = "sum" if metric.get("unit") == "{observation}" else "histogram"
-                            data = metric.get(kind, {})
-                            for point in data.get("dataPoints", []):
+                            kinds = [kind for kind in ("sum", "histogram", "gauge", "exponentialHistogram", "summary")
+                                     if kind in metric]
+                            entries = [(kind, metric[kind], point) for kind in kinds
+                                       for point in metric[kind].get("dataPoints", [])]
+                            for kind, data, point in entries:
+                                try:
+                                    interval = (int(point.get("startTimeUnixNano", -1)),
+                                                int(point.get("timeUnixNano", -1)))
+                                except (ValueError, TypeError):
+                                    continue
+                                if interval not in owned_intervals:
+                                    continue
                                 labels = attrs(point.get("attributes", []))
                                 key = (
                                     metric.get("name"), metric.get("unit"), labels.get("ce.stage"),
-                                    labels.get("ce.outcome"), int(point.get("startTimeUnixNano", -1)),
-                                    int(point.get("timeUnixNano", -1)),
+                                    labels.get("ce.outcome"), *interval,
                                 )
                                 if key not in expected:
                                     extra += str(key[-1]) in selectors
@@ -337,13 +353,15 @@ def signal_readback(lines, *, signal, expected_logs=None, expected_metrics=()) -
                                 seen[key] += 1
                                 wanted = expected[key]
                                 good = (
-                                    common and set(labels) == {"ce.stage", "ce.outcome"}
+                                    common() and len(kinds) == 1
+                                    and kind == ("sum" if "value" in wanted else "histogram")
+                                    and set(labels) == {"ce.stage", "ce.outcome"}
                                     and data.get("aggregationTemporality") in (1, "AGGREGATION_TEMPORALITY_DELTA")
                                     and not point.get("exemplars")
                                 )
                                 if kind == "sum":
                                     good = good and data.get("isMonotonic") is True and int(point.get("asInt", -1)) == wanted["value"]
-                                else:
+                                elif kind == "histogram":
                                     good = good and all(
                                         float(point.get(field, -1)) == wanted[field] for field in ("count", "sum", "min", "max")
                                     ) and [int(v) for v in point.get("bucketCounts", [])] == wanted["bucket_counts"]

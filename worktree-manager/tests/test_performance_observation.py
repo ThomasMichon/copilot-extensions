@@ -104,6 +104,78 @@ def test_bad_signal_accounting_remains_a_failed_child_sample(mutation):
     assert result["outcome"] == "error" and result["error_code"] == "invalid_child_report"
 
 
+def test_readback_scopes_logs_before_validating_foreign_batch_content():
+    from copy import deepcopy
+    from worktree_manager.performance_report import signal_readback
+
+    def attributes(values):
+        return [{"key": key, "value": {"stringValue": value}} for key, value in values.items()]
+
+    attrs = {"ce.schema": "agent.source-observation.log.v1", "ce.component": "worktree-manager-source",
+             "ce.stage": "input_ack", "ce.outcome": "ok"}
+    log = {
+        "traceId": "a" * 32, "spanId": "b" * 16, "timeUnixNano": "10",
+        "body": {"stringValue": "agent.source.observation"}, "eventName": "agent.source.observation",
+        "severityNumber": 9, "severityText": "INFO", "attributes": attributes(attrs),
+    }
+    expected = {("a" * 32, "b" * 16): {
+        "attributes": attrs, "severity_number": 9, "severity_text": "INFO", "time_ns": 10,
+    }}
+    request = {"resourceLogs": [{
+        "resource": {"attributes": attributes({"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"})},
+        "scopeLogs": [{"scope": {"name": "copilot-extensions.process-telemetry", "version": "1"},
+                       "logRecords": [{}, {"traceId": "c" * 32}, log]}],
+    }, {
+        "resource": {"attributes": [{"key": "foreign", "value": {"arrayValue": {"values": []}}}]},
+        "scopeLogs": [{"logRecords": [{"traceId": "d" * 32}]}],
+    }]}
+    assert signal_readback([json.dumps(request)], signal="logs", expected_logs=expected)["complete"]
+    bad = deepcopy(log)
+    del bad["spanId"]
+    request["resourceLogs"][0]["scopeLogs"][0]["logRecords"].append(bad)
+    result = signal_readback([json.dumps(request)], signal="logs", expected_logs=expected)
+    assert not result["complete"] and result["invalid_matching_lines"] == 1
+
+
+@pytest.mark.parametrize("corruption", ["wrong_unit", "wrong_type", "multiple_types"])
+def test_readback_uses_received_metric_type_and_rejects_conflicting_points(corruption):
+    from copy import deepcopy
+    from worktree_manager.performance_report import signal_readback
+
+    def attributes(values):
+        return [{"key": key, "value": {"stringValue": value}} for key, value in values.items()]
+
+    point = {"attributes": attributes({"ce.stage": "input_ack", "ce.outcome": "ok"}),
+             "startTimeUnixNano": "100", "timeUnixNano": "200", "asInt": "1"}
+    metric = {"name": "ce.source.observations", "unit": "{observation}",
+              "sum": {"aggregationTemporality": 1, "isMonotonic": True, "dataPoints": [point]}}
+    expected = [{"name": "ce.source.observations", "unit": "{observation}", "stage": "input_ack",
+                 "outcome": "ok", "start_time_ns": 100, "time_ns": 200, "value": 1}]
+    request = {"resourceMetrics": [{
+        "resource": {"attributes": attributes({"service.name": "worktree-manager-source", "service.namespace": "copilot-extensions"})},
+        "scopeMetrics": [{"scope": {"name": "copilot-extensions.process-telemetry", "version": "1"},
+                          "metrics": [metric]}],
+    }]}
+    request["resourceMetrics"].append({
+        "scopeMetrics": [{"metrics": [{"name": "foreign", "sum": {"dataPoints": [{
+            "startTimeUnixNano": "300", "timeUnixNano": "400",
+            "attributes": [{"key": "foreign", "value": {"arrayValue": {"values": []}}}],
+        }]}}]}],
+    })
+    assert signal_readback([json.dumps(request)], signal="metrics", expected_metrics=expected)["complete"]
+    bad = deepcopy(metric)
+    if corruption == "wrong_unit":
+        bad["unit"] = "s"
+    elif corruption == "wrong_type":
+        bad["gauge"] = bad.pop("sum")
+    else:
+        bad["gauge"] = deepcopy(bad["sum"])
+    request["resourceMetrics"][0]["scopeMetrics"][0]["metrics"].append(bad)
+    result = signal_readback([json.dumps(request)], signal="metrics", expected_metrics=expected)
+    assert not result["complete"]
+    assert result["extra"] + result["mismatched"] + result["invalid_matching_lines"] > 0
+
+
 def test_real_source_writer_sdk_logs_metrics_and_exact_readback(tmp_path):
     pytest.importorskip("opentelemetry.sdk._logs.export")
     from http.server import BaseHTTPRequestHandler, HTTPServer
