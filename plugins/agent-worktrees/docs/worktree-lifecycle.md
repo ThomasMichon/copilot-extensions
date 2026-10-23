@@ -71,6 +71,8 @@ resume planning, and successful `register-session` / `bind-session` entry ensure
 the native checkout is in Copilot's `config.json` `trustedFolders`. Resume
 planning does this before local guidance rendering even with
 `--defer-projections`; bare resume trusts the recorded checkout, not HOME.
+Restore establishes required trust before reclaiming an existing owner;
+projection preparation remains separate from that destructive boundary.
 Legacy labels must also resolve to a local record on the actual native
 platform; a coincidentally existing path is not authority. Declared aliases
 and record-scoped legacy WSL mappings remain supported.

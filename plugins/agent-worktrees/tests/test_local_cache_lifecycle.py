@@ -364,6 +364,21 @@ class TestResumeWiring:
         )
         return record, config, args, worktree_path
 
+    def _json_state(self, tmp_path, monkeypatch, record, config, args):
+        from agent_worktrees import resolve_cli
+
+        tracking_dir = tmp_path / "tracking"
+        tracking_dir.mkdir()
+        (tracking_dir / f"{record.worktree_id}.yaml").touch()
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
+        monkeypatch.setattr(resolve_cli.worktree_identity, "_resolve_worktree_id", lambda value: value)
+        monkeypatch.setattr(resolve_cli, "_relocate_active_project_for_worktree", lambda value: False)
+        monkeypatch.setattr(resolve_cli, "_resolve_profile", lambda *a: None)
+        return SimpleNamespace(
+            use_base=False, use_new=False, worktree_id=record.worktree_id,
+            requested_machine=None, args=args, load_config=lambda: config,
+        )
+
     @pytest.mark.parametrize("deferred", [False, True])
     def test_resume_refreshes_the_local_cache(
         self, tmp_path: Path, monkeypatch, sample_record, deferred,
@@ -420,13 +435,7 @@ class TestResumeWiring:
             tmp_path, monkeypatch, sample_record, dry_run=dry_run,
         )
         args.defer_projections = deferred
-        tracking_dir = tmp_path / "tracking"
-        tracking_dir.mkdir()
-        (tracking_dir / f"{record.worktree_id}.yaml").touch()
-        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
-        monkeypatch.setattr(resolve_cli.worktree_identity, "_resolve_worktree_id", lambda value: value)
-        monkeypatch.setattr(resolve_cli, "_relocate_active_project_for_worktree", lambda value: False)
-        monkeypatch.setattr(resolve_cli, "_resolve_profile", lambda *a: None)
+        state = self._json_state(tmp_path, monkeypatch, record, config, args)
         calls = []
 
         def refresh(root, **kwargs):
@@ -435,10 +444,6 @@ class TestResumeWiring:
             calls.append(root)
 
         monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
-        state = SimpleNamespace(
-            use_base=False, use_new=False, worktree_id=record.worktree_id,
-            requested_machine=None, args=args, load_config=lambda: config,
-        )
         assert resolve_cli._resolve_json_mode(state) == 0
         assert calls == ([] if deferred or dry_run else [str(worktree_path)])
         assert permissions._config_path().exists() is not dry_run
@@ -459,3 +464,43 @@ class TestResumeWiring:
         assert plans[-1]["action"] == "error"
         assert "folder trust" in plans[-1]["error"]
         assert path.read_text() == "malformed"
+
+    @pytest.mark.parametrize("surface", ["json", "interactive"])
+    @pytest.mark.parametrize("failure", [None, "malformed", "lock", "write"])
+    def test_restore_requires_trust_before_reclaiming_the_existing_owner(
+        self, tmp_path, monkeypatch, sample_record, surface, failure,
+    ):
+        from agent_worktrees import config_authority, handoff_cli, resolve_cli
+
+        record, config, args, worktree_path = self._patched_resume(
+            tmp_path, monkeypatch, sample_record, dry_run=False,
+        )
+        args.restore = True
+        path = permissions._config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if failure == "malformed":
+            path.write_text("malformed")
+        elif failure == "lock":
+            path.with_suffix(".lock").mkdir()
+        elif failure == "write":
+            def refuse_write(*args, **kwargs):
+                raise OSError("fixture trust write refused")
+
+            monkeypatch.setattr(permissions, "_atomic_json_write", refuse_write)
+        calls = []
+
+        def restore(**kwargs):
+            assert failure is None, "trust failure reached destructive restore"
+            _, settings = permissions._read_config_jsonc(path)
+            assert str(worktree_path.resolve()) in settings["trustedFolders"]
+            calls.append(kwargs)
+            return {"ok": True, "requires_resume": True}
+
+        monkeypatch.setattr(m, "_perform_remux", restore)
+        if surface == "json":
+            state = self._json_state(tmp_path, monkeypatch, record, config, args)
+            assert (resolve_cli._resolve_json_mode(state) == 0) is (failure is None)
+        else:
+            monkeypatch.setattr(config_authority, "registration_record_config", lambda record: config)
+            assert handoff_cli._restore_before_resume(record) is (failure is None)
+        assert len(calls) == (1 if failure is None else 0)

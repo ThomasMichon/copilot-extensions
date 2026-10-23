@@ -170,11 +170,14 @@ def test_terminal_managed_record_does_not_trust(
     assert not home.exists()
 
 
-@pytest.mark.parametrize("source", ["hook:new", "bind"])
-@pytest.mark.parametrize("broken_config", [False, True])
+@pytest.mark.parametrize("source,broken_config,other_active_project", [
+    ("hook:new", False, False), ("bind", False, False),
+    ("hook:new", True, False), ("bind", True, False),
+    ("hook:new", False, True), ("bind", False, True),
+])
 def test_registered_entry_repairs_trust_after_admission(
     native_checkout, sample_record, tmp_tracking_dir, monkeypatch_config, monkeypatch, source,
-    broken_config, capfd,
+    broken_config, other_active_project, capfd,
 ):
     import argparse
     from agent_worktrees import config as cfg
@@ -189,6 +192,14 @@ def test_registered_entry_repairs_trust_after_admission(
     if broken_config:
         home.mkdir()
         (home / "config.json").write_text("malformed")
+    if other_active_project:
+        ambient = tmp_tracking_dir.parent / "ambient" / "worktrees"
+        ambient.mkdir(parents=True)
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: ambient)
+        monkeypatch.setattr(tracking, "_owning_tracking_dir", lambda worktree_id: tmp_tracking_dir)
+        monkeypatch.setattr(
+            session_binding_cli.worktree_identity, "_resolve_worktree_id", lambda value: value,
+        )
     monkeypatch.setattr(session_binding_cli, "_spawn_status_updater", lambda *args: None)
     monkeypatch.setattr(session_binding_cli, "_register_manager_owned_monitor_session", lambda *a, **k: True)
     monkeypatch.setattr(session_binding_cli, "_note_disposition_snapshot", lambda *a, **k: None)
