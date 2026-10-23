@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 import agent_worktrees.__main__ as m
-from agent_worktrees import local_cache_refresh as lcr
+from agent_worktrees import local_cache_refresh as lcr, permissions
 
 class TestSessionstartDiagnostic:
     """``sessionstart_diagnostic`` is the backup refresh ``__main__.py``'s
@@ -246,7 +246,7 @@ class TestCreateWiring:
     ) -> None:
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda name=None: tmp_path / "tracking")
         monkeypatch.setattr(m.permissions, "clone_permissions", lambda *a: False)
-        monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *a: False)
+        monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *a: False)
         monkeypatch.setattr(
             m.permissions, "ensure_extension_permission_approvals", lambda *a: False
         )
@@ -318,6 +318,7 @@ class TestResumeWiring:
     def _patched_resume(self, tmp_path: Path, monkeypatch, sample_record, *, dry_run: bool):
 
         config = self._config(tmp_path)
+        monkeypatch.setattr(m.cfg, "detect_platform", lambda: config.platform)
         worktree_path = tmp_path / "worktrees" / "wt-1"
         worktree_path.mkdir(parents=True)
         record = replace(
@@ -334,14 +335,6 @@ class TestResumeWiring:
             codename="test-record",
         )
 
-        class _NullLock:
-            def __enter__(self):
-                return None
-
-            def __exit__(self, *exc):
-                return False
-
-        monkeypatch.setattr(m.tracking, "_RecordLock", lambda *_a, **_k: _NullLock())
         monkeypatch.setattr(m.tracking, "load_record", lambda *_a, **_k: record)
         monkeypatch.setattr(m.tracking, "mark_resumed", lambda *_a, **_k: None)
         monkeypatch.setattr(m.tracking, "save_record", lambda *_a, **_k: None)
@@ -371,6 +364,21 @@ class TestResumeWiring:
         )
         return record, config, args, worktree_path
 
+    def _json_state(self, tmp_path, monkeypatch, record, config, args):
+        from agent_worktrees import resolve_cli
+
+        tracking_dir = tmp_path / "tracking"
+        tracking_dir.mkdir()
+        (tracking_dir / f"{record.worktree_id}.yaml").touch()
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
+        monkeypatch.setattr(resolve_cli.worktree_identity, "_resolve_worktree_id", lambda value: value)
+        monkeypatch.setattr(resolve_cli, "_relocate_active_project_for_worktree", lambda value: False)
+        monkeypatch.setattr(resolve_cli, "_resolve_profile", lambda *a: None)
+        return SimpleNamespace(
+            use_base=False, use_new=False, worktree_id=record.worktree_id,
+            requested_machine=None, args=args, load_config=lambda: config,
+        )
+
     @pytest.mark.parametrize("deferred", [False, True])
     def test_resume_refreshes_the_local_cache(
         self, tmp_path: Path, monkeypatch, sample_record, deferred,
@@ -384,6 +392,8 @@ class TestResumeWiring:
 
         def compose(*, cwd, config):
             assert cwd == str(worktree_path)
+            _, settings = permissions._read_config_jsonc(permissions._config_path())
+            assert str(worktree_path.resolve()) in settings["trustedFolders"]
             calls.append("compose")
             return {"action": "no-op"}
 
@@ -395,6 +405,8 @@ class TestResumeWiring:
         m._resolve_resume(record, config, args)
 
         assert calls == ([] if deferred else ["compose", str(worktree_path)])
+        _, settings = permissions._read_config_jsonc(permissions._config_path())
+        assert str(worktree_path.resolve()) in settings["trustedFolders"]
 
     def test_dry_run_resume_never_refreshes(
         self, tmp_path: Path, monkeypatch, sample_record
@@ -410,3 +422,85 @@ class TestResumeWiring:
         m._resolve_resume(record, config, args)
 
         assert calls == []
+        assert not m.permissions._config_path().exists()
+
+    @pytest.mark.parametrize("deferred", [False, True])
+    @pytest.mark.parametrize("dry_run", [False, True])
+    def test_json_resume_trust_is_independent_of_cache_deferral(
+        self, tmp_path, monkeypatch, sample_record, deferred, dry_run,
+    ):
+        from agent_worktrees import resolve_cli
+
+        record, config, args, worktree_path = self._patched_resume(
+            tmp_path, monkeypatch, sample_record, dry_run=dry_run,
+        )
+        args.defer_projections = deferred
+        state = self._json_state(tmp_path, monkeypatch, record, config, args)
+        calls = []
+
+        def refresh(root, **kwargs):
+            _, settings = permissions._read_config_jsonc(permissions._config_path())
+            assert str(worktree_path.resolve()) in settings["trustedFolders"]
+            calls.append(root)
+
+        monkeypatch.setattr(lcr, "refresh_local_cache", refresh)
+        assert resolve_cli._resolve_json_mode(state) == 0
+        assert calls == ([] if deferred or dry_run else [str(worktree_path)])
+        assert permissions._config_path().exists() is not dry_run
+
+    def test_resume_trust_failure_is_explicit_and_precedes_cache(
+        self, tmp_path, monkeypatch, sample_record, capfd,
+    ):
+        record, config, args, _ = self._patched_resume(
+            tmp_path, monkeypatch, sample_record, dry_run=False,
+        )
+        path = permissions._config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("malformed")
+        monkeypatch.setattr(lcr, "prepare_for_launch", lambda *a, **k: pytest.fail("trust failed"))
+        plans = []
+        monkeypatch.setattr(m, "_emit_plan", plans.append)
+        assert m._resolve_resume(record, config, args) == 3
+        assert plans[-1]["action"] == "error"
+        assert "folder trust" in plans[-1]["error"]
+        assert path.read_text() == "malformed"
+
+    @pytest.mark.parametrize("surface", ["json", "interactive"])
+    @pytest.mark.parametrize("failure", [None, "malformed", "lock", "write"])
+    def test_restore_requires_trust_before_reclaiming_the_existing_owner(
+        self, tmp_path, monkeypatch, sample_record, surface, failure,
+    ):
+        from agent_worktrees import config_authority, handoff_cli, resolve_cli
+
+        record, config, args, worktree_path = self._patched_resume(
+            tmp_path, monkeypatch, sample_record, dry_run=False,
+        )
+        args.restore = True
+        path = permissions._config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if failure == "malformed":
+            path.write_text("malformed")
+        elif failure == "lock":
+            path.with_suffix(".lock").mkdir()
+        elif failure == "write":
+            def refuse_write(*args, **kwargs):
+                raise OSError("fixture trust write refused")
+
+            monkeypatch.setattr(permissions, "_atomic_json_write", refuse_write)
+        calls = []
+
+        def restore(**kwargs):
+            assert failure is None, "trust failure reached destructive restore"
+            _, settings = permissions._read_config_jsonc(path)
+            assert str(worktree_path.resolve()) in settings["trustedFolders"]
+            calls.append(kwargs)
+            return {"ok": True, "requires_resume": True}
+
+        monkeypatch.setattr(m, "_perform_remux", restore)
+        if surface == "json":
+            state = self._json_state(tmp_path, monkeypatch, record, config, args)
+            assert (resolve_cli._resolve_json_mode(state) == 0) is (failure is None)
+        else:
+            monkeypatch.setattr(config_authority, "registration_record_config", lambda record: config)
+            assert handoff_cli._restore_before_resume(record) is (failure is None)
+        assert len(calls) == (1 if failure is None else 0)

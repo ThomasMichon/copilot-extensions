@@ -102,7 +102,7 @@ def _reap_locked(
             warnings.append(f"Could not delete branch {rec.branch}")
             failures += 1
 
-    if rec.worktree_path:
+    if rec.worktree_path and not Path(rec.worktree_path).exists():
         permissions.merge_permissions(repo.anchor, rec.worktree_path)
         permissions.remove_trusted_folder(rec.worktree_path)
 

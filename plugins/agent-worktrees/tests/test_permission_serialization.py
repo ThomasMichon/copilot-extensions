@@ -300,3 +300,94 @@ def test_permission_serialization_failed_replace_preserves_original(
         permissions._atomic_json_write(path, {"trustedFolders": ["/new"]})
     assert path.read_text(encoding="utf-8") == original
     assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+def test_strict_trust_serializes_first_and_existing_config(tmp_path: Path, fresh: bool) -> None:
+    home = tmp_path / ".copilot"
+    home.mkdir()
+    config = home / "config.json"
+    header = "// Preserve native settings.\n\n"
+    if not fresh:
+        config.write_text(
+            header + json.dumps({"trustedFolders": ["/existing"], "other": True}),
+            encoding="utf-8",
+        )
+    roots = [tmp_path / "checkout-a", tmp_path / "checkout-b"]
+    for root in roots:
+        root.mkdir()
+    a, b = tmp_path / "writer-a", tmp_path / "writer-b"
+    processes = []
+    try:
+        processes.append(_start(home, a, "ensure_trusted_folder", [str(roots[0])], pause=True, timeout=6))
+        _wait_for(a.with_suffix(".loaded"), processes[0])
+        processes.append(_start(home, b, "ensure_trusted_folder", [str(roots[1])], timeout=6))
+        _wait_for(b.with_suffix(".contending"), processes[1])
+        assert not b.with_suffix(".loaded").exists()
+        a.with_suffix(".release").touch()
+        for process in processes:
+            assert _finish(process) == ""
+    finally:
+        a.with_suffix(".release").touch()
+        for process in processes:
+            _stop(process)
+    text = config.read_text()
+    prefix = "" if fresh else header
+    assert text.startswith(prefix)
+    data = json.loads(text[len(prefix):])
+    assert data["trustedFolders"] == ([] if fresh else ["/existing"]) + [
+        str(root.resolve()) for root in roots
+    ]
+    if not fresh:
+        assert data["other"] is True
+
+
+def test_strict_trust_timeout_raises_and_never_writes(tmp_path: Path) -> None:
+    home = tmp_path / ".copilot"
+    home.mkdir()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    config = home / "config.json"
+    config.write_text('{"other": true}')
+    prefix = tmp_path / "strict-waiter"
+    with tracking._RecordLock(config, require_sidecar=True):
+        process = _start(home, prefix, "ensure_trusted_folder", [str(checkout)], timeout=0.1)
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+            assert process.returncode != 0, stdout
+            assert "FolderTrustError" in stderr
+            assert "Could not lock" in stderr
+            assert "TimeoutError" in stderr
+        finally:
+            _stop(process)
+    assert config.read_text() == '{"other": true}'
+    assert not prefix.with_suffix(".loaded").exists()
+
+
+def test_confirmed_removal_while_ensure_waits_cannot_restore_trust(tmp_path, monkeypatch):
+    home = tmp_path / ".copilot"
+    home.mkdir()
+    monkeypatch.setattr(permissions, "_copilot_dir", lambda: home)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    config = home / "config.json"
+    permissions.ensure_trusted_folder(str(checkout))
+    prefix = tmp_path / "late-ensure"
+    with tracking._RecordLock(config, require_sidecar=True):
+        process = _start(home, prefix, "ensure_trusted_folder", [str(checkout)], timeout=6)
+        try:
+            _wait_for(prefix.with_suffix(".contending"), process)
+            checkout.rmdir()
+            assert permissions.remove_trusted_folder(str(checkout))
+        except BaseException:
+            _stop(process)
+            raise
+    try:
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode != 0, stdout
+        assert "FolderTrustError" in stderr
+        assert "checkout disappeared" in stderr
+    finally:
+        _stop(process)
+    assert json.loads(config.read_text())["trustedFolders"] == []
+    assert not prefix.with_suffix(".loaded").exists()

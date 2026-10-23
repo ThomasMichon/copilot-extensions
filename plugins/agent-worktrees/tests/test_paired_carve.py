@@ -41,7 +41,7 @@ def _common_patches(monkeypatch, tmp_path):
         tk.cfg, "project_dir", lambda name=None: tmp_path / f".{name}"
     )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda a, b: False)
-    monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda p: False)
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda p: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(lcr, "refresh_local_cache", lambda *a, **k: None)
     # codename-attribution-by-default (PR #3037 review finding): the
@@ -476,7 +476,7 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         monkeypatch.setattr(m.git_ops, "create_worktree", _create_worktree)
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
         monkeypatch.setattr(m.permissions, "clone_permissions", lambda *a: False)
-        monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *a: False)
+        monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *a: False)
         monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
         monkeypatch.setattr(lcr, "refresh_local_cache", lambda *a, **k: None)
 

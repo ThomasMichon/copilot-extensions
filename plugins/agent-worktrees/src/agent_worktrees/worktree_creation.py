@@ -353,10 +353,10 @@ def _carve_paired_knowledge(
             codename=knowledge_codename,
             codename_source=fresh_policy_kwargs["codename_source"],
         )
-    # Best-effort permissions + trust for the knowledge worktree.
+    permissions.ensure_trusted_folder(knowledge_wt_path)
+    # Permission cloning remains independent from folder trust.
     try:
         permissions.clone_permissions(knowledge_anchor, knowledge_wt_path)
-        permissions.add_trusted_folder(knowledge_wt_path)
         permissions.ensure_extension_permission_approvals(knowledge_wt_path)
     except Exception:
         pass
@@ -910,7 +910,7 @@ def _create_worktree_core(
         if permissions.clone_permissions(repo.anchor, worktree_path):
             print("Copied Copilot permissions to worktree path.", file=sys.stderr)
         activity.log_event("worktree_created", worktree_id=worktree_id, branch=branch)
-        if permissions.add_trusted_folder(worktree_path):
+        if permissions.ensure_trusted_folder(worktree_path):
             print("Added worktree path to trustedFolders.", file=sys.stderr)
         if permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
@@ -923,7 +923,7 @@ def _create_worktree_core(
                         suffix=suffix, plat=plat, plat_short=plat_short,
                         **({"machine_identity": machine_identity} if machine_identity is not None else {}),
                     )
-            except codename_tracking.CodenameAttributionPolicyError:
+            except (codename_tracking.CodenameAttributionPolicyError, permissions.FolderTrustError):
                 raise
             except Exception as exc:  # pragma: no cover - existing fail-safe pairing policy
                 print(f"paired-knowledge carve failed (non-fatal): {exc}", file=sys.stderr)

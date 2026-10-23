@@ -118,7 +118,7 @@ def _stub_create_worktree_core_internals(
         ),
     )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
-    monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *_a: False)
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
     from agent_worktrees import local_cache_refresh as _lcr
     monkeypatch.setattr(_lcr, "refresh_local_cache", lambda *_a, **_k: None)
@@ -187,6 +187,7 @@ def test_resolve_resume_plan_project_matches_repo_name_not_ambient_global(
     config = _config(tmp_path)
     import dataclasses
     config = dataclasses.replace(config, auto_fast_forward=False)
+    monkeypatch.setattr(m.cfg, "detect_platform", lambda: config.platform)
     monkeypatch.setattr(m.cfg, "active_project", lambda: "some-other-stale-project")
 
     worktree_path = tmp_path / "worktrees" / "wt-1"
@@ -213,6 +214,7 @@ def test_resolve_resume_plan_project_matches_repo_name_not_ambient_global(
             return False
 
     monkeypatch.setattr(m.tracking, "_RecordLock", lambda *_a, **_k: _NullLock())
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.tracking, "load_record", lambda *_a, **_k: record)
     monkeypatch.setattr(m.tracking, "mark_resumed", lambda *_a, **_k: None)
     from agent_worktrees import local_cache_refresh as _lcr

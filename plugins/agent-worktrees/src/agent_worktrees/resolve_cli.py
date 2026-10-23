@@ -11,7 +11,7 @@ import threading
 
 from machine_transport import split_machine_environment, resolve_machine_selection
 
-from . import activity, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
+from . import activity, local_cache_refresh, output, profile_assignment, restore_launch, sessions, tracking, tracking_write, worktree_identity
 from . import codename_tracking, config as cfg, machine_identity
 from .launch_trace import append_launch_event
 from .execution_spaces import ExecutionSpaceError, registry_for_config
@@ -814,21 +814,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
         return output._json_error(launch_preflight.error, exit_code=3)
-    if not getattr(state.args, "defer_projections", False):
-        local_cache_refresh.prepare_for_launch(
-            record.worktree_path, dry_run=getattr(state.args, "dry_run", False),
-            compose_pair=True, config=config,
-        )
     if getattr(state.args, "restore", False):
         if getattr(state.args, "dry_run", False):
             return output._json_error("--restore preview is unsupported; no session was restored", exit_code=3)
-        session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
-        restored = _perform_remux(
-            worktree_id=record.worktree_id,
-            session_id=session_id,
-            worktree_path=record.worktree_path,
-            force_sudo=None,
-            apply_windows=True,
+        restored = restore_launch.restore_for_launch(
+            record, config=config, perform_remux=_perform_remux,
         )
         if not restored.get("ok"):
             return output._json_error(restored.get("reason", "could not restore the session"))
@@ -917,6 +907,15 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
     if native_resume and (seed_pending or not no_resume):
         return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
+    if not getattr(state.args, "dry_run", False):
+        from . import permissions, worktree_trust
+
+        try:
+            worktree_trust.prepare_for_launch(
+                record, config, defer_projections=getattr(state.args, "defer_projections", False),
+            )
+        except (permissions.FolderTrustError, ExecutionSpaceError) as exc:
+            return output._json_error(str(exc), exit_code=3)
     if seed_pending:
         launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
     else:

@@ -108,7 +108,7 @@ def _forbid_create_mutations(monkeypatch) -> None:
     monkeypatch.setattr(m.git_ops, "create_worktree", forbidden)
     monkeypatch.setattr(m.tracking, "create_new_record", forbidden)
     monkeypatch.setattr(m.permissions, "clone_permissions", forbidden)
-    monkeypatch.setattr(m.permissions, "add_trusted_folder", forbidden)
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", forbidden)
 
 
 def _stub_successful_create(monkeypatch, tmp_path) -> None:
@@ -140,7 +140,7 @@ def _stub_successful_create(monkeypatch, tmp_path) -> None:
         lambda **kwargs: SimpleNamespace(**kwargs),
     )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
-    monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *_a: False)
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
     monkeypatch.setattr(
         m,

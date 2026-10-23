@@ -57,6 +57,20 @@ resident still in any Job. A rejected worker must remain a visible durable
 failure, never a successful acceptance or foreground-installer fallback; the
 launcher can still hand off on its healthy retained runtime.
 
+### Source, release and installed evidence
+
+These are separate states; a selected version or installed file is not an
+end-to-end behavior result.
+
+| Boundary | Recorded state |
+|----------|----------------|
+| Checked-in source | #7788 merged into `dev`; its reviewed completion journal merged in #8207. |
+| Released source | Main `931e3d1734bb41496c8f4d526051b18e63914db4`, promoted by #8268, contains the scheduling change. The release's Worktrees automatic executor, shared participant and both shell launchers matched the merged source in read-only blob checks. |
+| Observed installed consumer | One existing Windows consumer selected Manager `0.6.104-dev1` and Worktrees `1.24.191-dev1`. Isolated package/distribution origins were inside the selected slots with `win-amd64` interpreters. Both installed Manager launchers matched #7788 after normalizing line endings. |
+| Installed execution-driver parity | The selected Worktrees executor and shared participant were not byte-identical to #7788; the difference has not been qualified as equivalent behavior. Do not infer parity from their version numbers. |
+| Running acceptance | No new installed healthy-handoff, automatic completion, failure or fresh-first-use proof is claimed. Existing source-fixture evidence remains separate. |
+| Rollout authority | These were read-only observations of existing installations, not an update performed by this driver or authorization to change other consumers. Existing deployment holds remain in force. |
+
 The same driver retains independent ownership of #6859 and draft #7833.
 #6918 is merged, and neither its historical author nor another PR's delivery
 is a dependency of #7788. The immediate-Job inference and new Scheduled Task
@@ -804,3 +818,21 @@ repository history.
   remain unchecked until proved through the separately authorized normal
   rollout. No host registration, installation, restart or deployment was
   performed to complete the merge.
+
+### 2026-10-23 - Release and installed state reconciled
+
+- Legitimate promotion #8268 published Main
+  `931e3d1734bb41496c8f4d526051b18e63914db4`. Exact source-blob checks
+  confirmed the scheduling executor, shared participant and both launchers
+  were released; this is no longer merely a pending-release change.
+- Read-only selected-slot observations found Manager `0.6.104-dev1` and
+  Worktrees `1.24.191-dev1` with completed construction receipts. Fresh
+  isolated metadata probes verified the selected package/distribution
+  origins and actual AMD64 Python platform. The Manager launcher scripts
+  contain the released scheduling change; the Worktrees executor and
+  participant differ from the merged source and remain behaviorally
+  unqualified. No host maintenance was started or attributed to this driver.
+- Keep installed acceptance and first-use checks open. Finish source parity
+  and isolated acceptance before considering an authorized rollout; do not
+  convert a receipt, version, metadata probe or successful source test into
+  running-state evidence. The independent broker repair remains held.
