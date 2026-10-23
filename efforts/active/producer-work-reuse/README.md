@@ -138,6 +138,16 @@ admission; S2 health requires schema/lifecycle coordination.
 
 ## Journal
 
+### 2026-10-23 — Explicit S3 authority amendment
+
+- The user selected [selected admission followed by full publication
+  validation](selected-authority-contract.md), accepting that an unrelated
+  candidate change may allow an observation/connection wake before rejection.
+- This amends S3a/b's authority scope, not selected authentication, ownership,
+  no-wake/age, cancellation or performance gates. Existing #5761 ownership is
+  retained. Draft #8143 remains unqualified; no runtime or rollout completion
+  follows from this contract review.
+
 ### 2026-10-22 — Plan-only investigation
 
 - Verified issue bodies and comments; no conflicting issue claims or matching
