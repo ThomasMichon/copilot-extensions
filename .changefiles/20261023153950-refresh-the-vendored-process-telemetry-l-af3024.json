@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the vendored process-telemetry library with its shared synchronous append primitive; Manager behavior is unchanged.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
