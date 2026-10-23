@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve user-owned project configuration and knowledge bindings during forced registration.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

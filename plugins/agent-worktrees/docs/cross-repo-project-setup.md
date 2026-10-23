@@ -39,6 +39,15 @@ class alone.
 
 ## Decision table
 
+`register --force` refreshes the machine-local project marker and anchor without
+removing unrelated settings such as `knowledge_repo`, custom worktree roots,
+remote overrides, or other repository entries. `--headless` and no-agent
+adoption still apply their explicit settings. Re-registration without those
+options preserves existing headless and terminal-profile preferences. Existing
+YAML must contain mappings at the top level, `repos`, and the selected repo;
+invalid configuration is refused without replacing the file. A refresh may
+normalize YAML formatting and does not preserve comments.
+
 Start from the operator's stated need, not from "what flag looks closest":
 
 | Stated need | Command | Notes |

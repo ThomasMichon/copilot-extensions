@@ -717,7 +717,8 @@ def cmd_register(args: argparse.Namespace) -> int:
     # classification, else default ON (adopting a repo means working in it).
     # A no-agent adoption is worked programmatically (create --json) rather than
     # launched from the terminal dropdown, so it also gets NO terminal profile.
-    if getattr(args, "no_agent", False):
+    explicit_no_agent = getattr(args, "no_agent", False)
+    if explicit_no_agent:
         expose_agent = False
     elif getattr(args, "agent", False):
         expose_agent = True
@@ -727,7 +728,8 @@ def cmd_register(args: argparse.Namespace) -> int:
         _entry = _repos.find_repo(project)
         expose_agent = _entry.agent if _entry else True
 
-    if not config_path.exists() or args.force:
+    config_exists = config_path.exists()
+    if not config_exists or args.force:
         _core_helper("_write_config", _write_config)(
             config_path,
             repo_dir,
@@ -736,7 +738,9 @@ def cmd_register(args: argparse.Namespace) -> int:
             project,
             default_branch,
             headless=getattr(args, "headless", False),
-            no_terminal_profile=not expose_agent,
+            no_terminal_profile=explicit_no_agent or (
+                not config_exists and not expose_agent
+            ),
         )
     else:
         output.skipped(f"Config exists at {config_path} (use --force to overwrite)")

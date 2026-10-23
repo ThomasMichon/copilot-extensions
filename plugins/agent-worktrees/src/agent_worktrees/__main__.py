@@ -116,6 +116,7 @@ from . import session_context as session_context_mod  # noqa: F401 -- compatibil
 from . import state_root as state_root_mod
 from .copilot_launch_prefs import resolve_launch_pref_flags
 from .process_launcher import apply_process_launcher
+from .project_config_writer import write_project_config as _write_config  # noqa: F401
 from .update_stage import cmd_stage_update as cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
 # front_door_cli's own names are re-exported eagerly (not deferred to
 # _load_full_command_surface() below) because main() calls several of them
@@ -5042,71 +5043,6 @@ platform: {plat}
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     output.changed(f"Written global config: {path}")
-
-
-def _write_config(
-    path: Path,
-    repo_dir: Path,
-    machine: str,
-    plat: str,
-    project: str,
-    default_branch: str = "master",
-    *,
-    headless: bool = False,
-    no_terminal_profile: bool = False,
-) -> None:
-    """Write the machine-local per-project config YAML.
-
-    Machine-wide fields (srcroot/machine/platform/copilot_profiles) live in the
-    global ~/.agent-worktrees/config.yaml; repo settings may live in-repo at
-    <anchor>/.agent-worktrees/config.yaml. This file keeps only the project
-    marker and machine paths (anchor / worktree_root). It does **not** stamp
-    repo-invariant settings such as ``default_branch``: that is owned by the
-    repo's in-repo ``.agent-worktrees/config.yaml`` and backfilled from
-    ``repos.yaml`` by ``load_config``. Stamping ``default_branch`` here (from the
-    ambient system git default, e.g. ``master``, when detection fell back)
-    shadowed the correct in-repo value and broke ``create-pr`` against a
-    non-existent ``origin/master`` (dotfiles #1090). The ``default_branch``
-    parameter is retained for call-site compatibility but is no longer persisted.
-
-    ``no_terminal_profile`` seeds an explicit empty ``terminal_profiles: []`` so
-    the Windows-Terminal generator emits **no** profile for this project (used
-    for a ``--no-agent`` adoption: worktree-managed + binstub, but nothing to
-    launch from the terminal dropdown). An *absent* key applies the **default
-    column** (minimal per-agent + bare cross-machine), so the empty list must be
-    written explicitly to suppress.
-    """
-    wt_root = f"{repo_dir}.worktrees"
-
-    headless_line = "headless: true\n" if headless else ""
-    # Explicit empty selection = "no terminal profile for this project".
-    # Absent would apply the default column (self launcher + remote shells), so
-    # it must be written out to suppress.
-    terminal_block = (
-        "\n# No Windows Terminal profile for this project (--no-agent adoption):\n"
-        "# an empty selection suppresses generation (absent applies the default).\n"
-        "terminal_profiles: []\n"
-        if no_terminal_profile
-        else ""
-    )
-    content = f"""# ~/.{project}/config.yaml
-# Machine-local config for {project} (overrides + machine paths only).
-# Machine-wide defaults -> ~/.agent-worktrees/config.yaml.
-# Repo settings may live in-repo -> <anchor>/.agent-worktrees/config.yaml.
-
-repo_name: {project}
-{headless_line}{terminal_block}
-repos:
-  {project}:
-    anchor: {repo_dir}
-    # worktree_root defaults to {wt_root} -- a sibling
-    # <anchor>.worktrees dir, matching Copilot CLI's /worktree layout.
-    # Uncomment and set an absolute path to override.
-    remote: origin
-"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
-    output.changed(f"Written config: {path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
