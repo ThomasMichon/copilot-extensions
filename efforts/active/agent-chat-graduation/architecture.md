@@ -118,6 +118,14 @@ write, display cursor or legacy mark-read is not native admission or semantic
 completion. Compatibility adapters require explicit source/identity and
 progress mapping; they cannot silently migrate membership or reset cursors.
 
+The proposed first service/client realization is specified in the linked
+[collaboration and recipient-view contract](collaboration.md). It adds optional
+explicit metadata and non-consuming projections while retaining ordinary
+text-event shapes, stable request identity and the existing semantic-read
+contract. Its recipient view is not the still-required authoritative host
+inbox/source assignment or shared notification-feed binding. The contract's
+review and validation obligations precede dependent implementation.
+
 ## Peer authority, collective decisions and external ingress
 
 The policy owner is `agent-conduct-guidance`; Bridge, Chat, Logger, workspace

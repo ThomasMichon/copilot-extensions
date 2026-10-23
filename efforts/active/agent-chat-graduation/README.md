@@ -43,6 +43,7 @@ Use #7238 to accept a slice and record its source boundary before editing it.
 |-------------|----------------|-------------|
 | Proposal editor | Sole shared vision/effort/service-lifecycle writer; `services/chat` core, client and hosting integration | #7238 and the proposal PR |
 | Plugin contributor | Disjoint `plugins/agent-chat` connection/native contribution; exact paths claimed before edits | #7238; input integrated by the proposal editor |
+| Collaboration contributor | Claimed continuation of the linked collaboration/thread/attention specification and its coordinated service/client slice; no transport or lifecycle takeover | [Bounded continuation claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6358796470) |
 | Qualification contributor | Installed-consumer, native lifecycle and platform-boundary cases | #7238; input integrated by the proposal editor |
 | Conduct contributor | Generic scoped-peer ambient policy and discoverable rules-of-engagement skill, after the intent amendment clears review; no Chat/Bridge/Logger source | [Accepted disjoint scope](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6303930285) |
 | Process utility contributor | Canonical `libs/agent-procutil` caller-bounded cross-OS source, tests and library docs | [Public source claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6274245326) |
@@ -56,6 +57,10 @@ Use #7238 to accept a slice and record its source boundary before editing it.
   input. Contributors do not edit the same proposal files concurrently.
 - **Handoff:** use the existing issue/task/worktree contracts for accepted
   ownership transfer. A chat message or a published plan does not transfer it.
+- **Collaboration continuation:** the contributor's claimed specification is
+  the one shared-plan writer for this bounded slice. Review its
+  [contract](collaboration.md) before dependent code; exact implementation
+  paths are claimed separately. Existing component/source owners remain.
 - Preserve existing fleet-manager and machine-fleet work under #6030, managed
   lifecycle work under #6424/#6240, and service-specific authorities. Consume
   their supported seams; do not replace them through this effort.
@@ -114,6 +119,13 @@ drivers, private configuration and secret references remain adopter-owned.
 Standard installation and Worktree Manager remain the baseline, with optional
 fleet-manager enhancement. These are public-safe intent summaries; adapter
 shapes and validation details below are agent-recommended realization.
+
+The renewed direction prioritizes practical, prior-art-informed conversations:
+typed threads and evidence, scoped recipient views, and durable reply attention
+outside bounded ambient history. This public-safe summary does not identify
+private research sources or add another transport/controller. The
+[collaboration contract](collaboration.md) is agent-recommended realization of
+that existing intent, not installation or activation authority.
 
 ## Plan
 
@@ -224,9 +236,19 @@ requirements.
   Source merged in #7464 at `e620c95778df579b706f709b07af91df1f4203aa`;
   declarative decision cases and fresh-adopter delivery were qualified,
   not actual model behavior, runtime enforcement or live policy adoption.
-- [ ] The proposal editor defines the future versioned collaboration/thread/
-  attention representation over existing Chat state and installed composition;
-  agree extension points with the original client/service/plugin owners first.
+
+#### Collaboration contract continuation
+
+- [ ] Review and merge the claimed [collaboration/thread/recipient contract](collaboration.md)
+  over existing Chat state before dependent implementation, preserving the
+  coordinated client/service/plugin extension points.
+- [ ] Implement and qualify optional structured posts and non-consuming
+  thread/inbox projections through the existing store and installed client.
+  Pending reply attention must outlive an ambient window without becoming a
+  task queue, native inbox assignment or another delivery authority.
+
+#### Retained conduct and ingress integration
+
 - [ ] Coordinate any required new domain/intake or external-ingress binding
   with its actual host/client owner. State missing APIs precisely without
   holding existing explicitly authorized same-domain work behind them.
@@ -354,6 +376,17 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-23 - Collaboration contract continuation
+
+- Resumed the existing open interaction slice under its public source claim,
+  without opening another effort or taking transport/lifecycle source.
+- The linked specification combines typed references and evidence with scoped
+  recipient projections and durable reply attention. Plain conversation,
+  stable uncertain requests and output/flush/cursor semantics remain intact.
+- This is proposed realization of existing vision items. Review and merge
+  precede code; no implementation, installed capability, native delivery or
+  deployment result is asserted.
 
 ### 2026-10-22 - Preserve canonical worktree-root aliases
 
