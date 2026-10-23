@@ -91,6 +91,10 @@ once the target repository is established, uninspectable or timed-out bodies
 remain fail-closed. This does not change destination policy or address the
 PowerShell/GraphQL parsing gaps tracked in #3677.
 
+The irrelevant-command path also avoids importing Python's subprocess stack;
+relevant calls load it within the remaining decision budget, without caching
+repository authority or changing publication classification.
+
 The budget starts in Python's entry point, not before shell/interpreter startup;
 OS process creation and termination can also add overhead. It is **not** proof
 that all installed hooks together finish within two seconds. The focused

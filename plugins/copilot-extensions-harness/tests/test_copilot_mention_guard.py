@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import io
 import json
@@ -467,11 +468,51 @@ def test_irrelevant_hook_has_no_discovery_or_body_io(monkeypatch, capsys, comman
     def unexpected(*args, **kwargs):
         pytest.fail("irrelevant command performed discovery or body IO")
 
-    monkeypatch.setattr(guard.subprocess, "run", unexpected)
+    monkeypatch.setattr(subprocess, "run", unexpected)
     monkeypatch.setattr(guard, "target_repo_from_manifest", unexpected)
     monkeypatch.setattr(guard, "_extract_body_text", unexpected)
     assert guard.main() == 0
     assert capsys.readouterr().out == ""
+
+
+def test_irrelevant_entry_does_not_import_subprocess(monkeypatch, capsys):
+    real_import = builtins.__import__
+    imports = []
+
+    def track_import(name, *args, **kwargs):
+        imports.append(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", track_import)
+    guard = _load_guard()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+        "toolName": "powershell", "toolArgs": {"command": "git status --short"},
+    })))
+    assert guard.main() == 0
+    assert capsys.readouterr().out == ""
+    assert "subprocess" not in imports
+
+
+def test_deferred_import_is_charged_to_remaining_decision_budget(monkeypatch):
+    guard = _load_guard()
+    real_import = builtins.__import__
+    clock = [10.0]
+    timeouts = []
+
+    def slow_import(name, *args, **kwargs):
+        if name == "subprocess":
+            clock[0] += 0.25
+        return real_import(name, *args, **kwargs)
+
+    def run(argv, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, "")
+
+    monkeypatch.setattr(builtins, "__import__", slow_import)
+    monkeypatch.setattr(guard.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(subprocess, "run", run)
+    assert guard.current_repo_candidates(deadline=11.0) == []
+    assert timeouts == [0.75]
 
 
 @pytest.mark.parametrize("command", [
@@ -512,7 +553,7 @@ def test_remote_discovery_is_one_process_with_remaining_budget(monkeypatch):
         ]
         return subprocess.CompletedProcess(argv, 0, "".join(lines))
 
-    monkeypatch.setattr(guard.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     assert len(guard.current_repo_candidates(deadline=11.0)) == 100
     assert len(calls) == 1
     assert calls[0][0] == ["git", "remote", "--verbose"]
@@ -559,8 +600,8 @@ def test_git_timeout_reaps_the_actual_child(monkeypatch):
     def slow_git(argv, **kwargs):
         return real_run([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
 
-    monkeypatch.setattr(guard.subprocess, "Popen", popen)
-    monkeypatch.setattr(guard.subprocess, "run", slow_git)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(subprocess, "run", slow_git)
     started = time.monotonic()
     assert guard.current_repo_candidates(deadline=started + 0.15) == []
     assert time.monotonic() - started < 2

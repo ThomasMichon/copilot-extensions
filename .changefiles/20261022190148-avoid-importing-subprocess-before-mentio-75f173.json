@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid importing subprocess before mention-guard publication relevance; preserve deadline accounting.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

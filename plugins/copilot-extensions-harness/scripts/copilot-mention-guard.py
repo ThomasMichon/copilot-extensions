@@ -30,7 +30,6 @@ import json
 import os
 import re
 import shlex
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -144,6 +143,10 @@ def current_repo_candidates(
     carries an ``upstream`` remote pointing at the real target repo, so
     checking only ``origin`` would silently no-op the guard for either
     shape."""
+    # Most hook calls never discover a repository. Defer subprocess (and its
+    # threading imports) until the local publication classifier needs Git.
+    import subprocess
+
     if deadline is None:
         deadline = time.monotonic() + DECISION_BUDGET_SECONDS
     remaining = deadline - time.monotonic()
