@@ -43,6 +43,9 @@ proof refuse rather than being adopted or overwritten.
 candidate, runtime fingerprint and target digest to one publication attempt.
 `client-runtime/client-activations/<id>/` retains its intent, original physical
 selector states, backups, canonical context and created-stage producer receipts.
+After installed health and selector settlement, `acknowledged.json` retains
+the exact active receipt in that same history. Missing historical acknowledgement
+is not inferred from old selector bytes.
 The canonical physical proof includes file identity and content, so a peer's
 same-byte replacement is not owned merely because its text matches.
 The installed publication helper and its lease dependency are retained from
@@ -50,7 +53,9 @@ the same owning wheel's admitted RECORD resources.
 
 An already active candidate still requires fresh policy, compatibility, bytes,
 selector ownership and health checks. A successful no-op does not rewrite
-selectors, completion or activation records. The report's current target digest
+selectors, completion or activation records. An otherwise exact older activation
+without historical acknowledgement may record its freshly proven current healthy
+state; this metadata write is reported as a mutation. The report's current target digest
 may differ from the digest at the last actual publication.
 
 ## Interruption and bounded forward retry
@@ -88,8 +93,11 @@ remain `false`; this report is not a retained lease or authorization token.
 
 [Attributable frontdoor registration](client-frontdoor.md) is a separate explicit
 transition; activation does not register or update commands. Exact owned
-candidate deletion is a [separate transition](#completed-candidate-removal). Retained-good rollback policy,
-identity retirement/reinstall fencing and the complete managed installer remain
+candidate deletion is a [separate transition](#completed-candidate-removal).
+[Explicit retained-good recovery](client-retained-recovery.md) is a separate
+decision-bound operation covering selectors and commands without lowering
+admission; ordinary activation remains exact-admitted-only.
+Identity retirement/reinstall fencing and the complete managed installer remain
 separate obligations. In particular, do not delete admission or publication
 evidence while a retained candidate or registration could be replayed.
 Controller/node assembly, release promotion and authorized rollout are not
