@@ -18,6 +18,9 @@ Its state is **`candidate`**, not ready. There is no network probe, token read o
 creation in this projection. Existing command `availability` still describes
 shim/installer presence. An old producer, unresolved binding or invalid
 projection simply has no optional member.
+When a registration snapshot already includes the older generated catalog, final
+guidance replaces that catalog's JSON block with the current enriched block,
+preserving surrounding registration text and emitting only one catalog.
 
 An observer must use only the active route and existing token and negotiate the
 `handoff-prompt-receipt-v1` capability in authenticated health. No previous route,
@@ -104,6 +107,18 @@ and accounting until the backend returns. Completion after deadline or owner
 change is `unknown`. The observer must retain the exact immutable identity and
 reconcile it rather than redirect a mutation to a new head/source/incarnation.
 Unknown is not absent and does not grant duplicate-effect admission.
+
+Compatible service replacement uses the existing status-monitor
+`status_monitor_cutover` activation/drain owner. Receipt admission closes during
+drain; cooperative shutdown retains in-flight accounting through fsync. This is
+not a veto on the lifecycle owner's bounded, identity-checked forced retirement
+when cooperation cannot settle. Forced interruption is a lost/unknown outcome,
+not a successful flush; the qualified backend and consumer must reconcile the
+same durable receipt identity after a verified same-installation takeover.
+No child process or new termination authority is introduced here. Existing
+single-instance election, routed process-start identity and cutover recovery
+remain the exclusion/retirement authority; this source change does not qualify
+their live installation or promise interruption-free upgrades.
 
 ## Qualification boundaries
 

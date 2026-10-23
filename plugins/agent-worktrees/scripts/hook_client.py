@@ -395,12 +395,36 @@ def _is_link_or_reparse(path: Path) -> bool:
 
 def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
     registration = _registration_context(enriched, home)
+    metadata = enriched.get("_agentWorktrees")
+    catalog = metadata.get("commandCatalog") if isinstance(metadata, dict) else None
     contexts = []
     if registration.startswith(_COMMAND_CATALOG_HEADING):
+        def catalog_block(context):
+            if not isinstance(context, str) or not context.startswith(_COMMAND_CATALOG_HEADING):
+                return None
+            match = re.search(r"(?ms)^```json\r?\n(.*?)\r?\n```(?=\r?\n|$)", context)
+            if match is None:
+                return None
+            try:
+                value = json.loads(match.group(1))
+            except (ValueError, TypeError):
+                return None
+            if (
+                not isinstance(value, dict)
+                or value.get("schema") != "copilot-extensions.session-command-catalog"
+                or type(value.get("version")) is not int or value["version"] != 1
+                or value.get("plugin") != "agent-worktrees"
+            ):
+                return None
+            return match
+
+        old, current = catalog_block(registration), catalog_block(catalog)
+        if old is not None and current is not None:
+            registration = (
+                registration[:old.start()] + current.group(0) + registration[old.end():]
+            )
         contexts.append(registration)
     else:
-        metadata = enriched.get("_agentWorktrees")
-        catalog = metadata.get("commandCatalog") if isinstance(metadata, dict) else None
         if not isinstance(catalog, str) or not catalog.startswith(_COMMAND_CATALOG_HEADING):
             catalog = _command_catalog_context()
         for context in (catalog, registration):

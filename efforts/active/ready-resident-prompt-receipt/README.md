@@ -218,3 +218,18 @@ All functional phases remain gated even if this proposal merges.
   specifically assigned catalog-builder function. Source merge remains
   blocked until that ownership amendment and correction clear; no readiness
   or complete receipt delivery is claimed meanwhile.
+
+### 2026-10-23 — Final-guidance correction admitted
+
+- The integration owner admitted exactly the final-guidance catalog replacement
+  and its regression. The enriched catalog now replaces only the older JSON
+  block while registration text and a single catalog are preserved. No broader
+  hydration/lifecycle behavior changed.
+- The previous 229-test source selection plus five final-guidance regressions
+  passes: 234 tests. A separate existing-guidance selection and source re-review
+  remain the completion gates.
+- The trusted subject producer is a separate design-only proposal: inspect the
+  existing worktree-binding writer and its registration caller; do not edit
+  either until the exact additive fields and snapshot checks are admitted.
+- The existing-guidance compatibility selection subsequently passed 31 tests;
+  source re-review and required CI remain open.
