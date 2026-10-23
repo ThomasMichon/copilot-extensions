@@ -330,6 +330,51 @@ These progress helpers are not ordinary plugin entry points. The finite producer
 below owns prerequisite acquisition and construction; first-use adapters remain
 separate work.
 
+On Linux, `update_driver/foundation.sh` supplies the corresponding cold progress
+and fixed-source helpers in Bash 4.4+, using GNU coreutils/findutils, `flock`,
+`iconv` and the existing strict `json-query.awk`. The parser is a declared
+standalone asset of `tools/sync-installation-context.py`, not another JSON
+implementation or Python runtime dependency. Load the canonical
+`single_instance_lease/operation.sh` and acquire the actual root's FD 9 first:
+
+```bash
+source "<single-instance-lease-source>/src/single_instance_lease/operation.sh"
+source "<update-driver-source>/src/update_driver/foundation.sh"
+enter_native_operation_lock "$root/execution.lock"
+start_native_foundation_progress "$root" "$plugin"
+operation="$__foundation_document"
+freeze_native_foundation_source "$root" "$plugin" "$root/frozen" \
+    "${__foundation_value[source_hash]}"
+# Only a trusted producer's positively settled child tree permits an integer.
+complete_native_foundation_progress "$root" "$operation" "$plugin" null cleanup_unproved
+leave_native_operation_lock "$root/execution.lock"
+```
+
+`read_native_foundation_progress "$root"` never acquires custody or creates
+state. It sets `__foundation_present` to `0` or `1`; for a present record,
+`__foundation_document` retains the bounded snapshot and
+`_native_foundation_encode` prints its validated canonical representation.
+Readers reject NUL, invalid UTF-8, malformed/duplicate/unknown fields and
+non-finite or inconsistent values. Timestamp tokens and signed 64-bit integer
+outcomes retain their exact JSON spelling rather than round-tripping through
+awk's floating-point arithmetic.
+
+All mutators reassert the same kernel-proved FD 9. Writes use a private
+temporary, filesystem sync and atomic replacement. `reconcile_native_foundation_progress`
+records a lost owner as interrupted without certifying descendant settlement;
+`recover_native_foundation_after_restart` requires a different actual Linux
+kernel boot and retains the original interrupted identity/outcome. Neither
+operation edits or initializes a queue. The same cold-only queue/sidecar refusal
+applies before native admission.
+
+`native_foundation_source_digest` and `freeze_native_foundation_source` use the
+same UTF-8, byte-sorted three-package inventory as Python and PowerShell,
+including both canonical installer-engine variants. Freezing requires a new
+destination inside the execution root, which cannot be inside a source package.
+It rechecks the original and frozen inventories under custody. These Linux
+helpers do **not** launch a producer, acquire prerequisites, settle child groups,
+or implement Linux genesis/upgrade; those remain separate integration work.
+
 ### Fixed foundation construction participant
 
 On Windows, `update_driver/participant.ps1` supplies the native owner side of
