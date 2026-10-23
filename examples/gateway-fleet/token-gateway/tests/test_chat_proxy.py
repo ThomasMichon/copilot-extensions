@@ -151,7 +151,7 @@ class ChatProxyTests(unittest.TestCase):
         self.assertEqual(self.backend.calls, [])
 
     def test_invalid_wait_types_do_not_contact_backend(self):
-        for value in (True, -1, 301, "30", None):
+        for value in (True, -1, 301, "30", None, 10 ** 400):
             with self.subTest(value=value):
                 status, result = self.request({"op": "wait", "timeout": value})
                 self.assertEqual((status, result["error"]), (400, "chat_invalid_timeout"))
@@ -190,7 +190,7 @@ class ChatProxyTests(unittest.TestCase):
             self.assertEqual(self.request({"op": "members", "channel": "room"})[0], 200)
         self.assertEqual(self.backend.calls[-1][0], "/v1/chat")
         self.backend.calls.clear()
-        for timeout in (True, -1, 301, "30", None):
+        for timeout in (True, -1, 301, "30", None, 10 ** 400):
             self.assertEqual(self.request({**payload, "timeout": timeout}),
                              (400, {"error": "chat_invalid_timeout"}))
         self.assertEqual(self.backend.calls, [])

@@ -64,6 +64,21 @@ class FleetAuthorizationTests(unittest.TestCase):
                 gateway.validate_bearer(self.header(**changes))
             self.assertEqual(error.exception.status, 403)
 
+    def test_key_lookup_and_connection_failures_have_explicit_auth_responses(self):
+        cases = (
+            (gateway.PyJWKClientConnectionError, 503, "signing keys unavailable"),
+            (gateway.PyJWKClientError, 401, "signing key not found"),
+        )
+        for exception, status, message in cases:
+            with self.subTest(exception=exception):
+                self.key_resolver.side_effect = exception("synthetic lookup failure")
+                with self.assertRaises(gateway.AuthError) as error:
+                    gateway.validate_bearer(self.header())
+                self.assertEqual((error.exception.status, error.exception.message), (status, message))
+
+    def test_default_http_listener_does_not_expose_credentials_to_the_network(self):
+        self.assertEqual(gateway.LISTEN_HOST, "127.0.0.1")
+
     def test_signature_issuer_audience_and_expiration_remain_required(self):
         for changes in (
             {"exp": time.time() - 60}, {"aud": "other-audience"},
