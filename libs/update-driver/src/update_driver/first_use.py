@@ -265,7 +265,9 @@ def main() -> int:
             expected_source=arguments.expected_source,
         )
         print(json.dumps({"request_id": request.id, "state": request.state}), flush=True)
-        worker_argv, worker_env = core.runtime_command("update_driver", ["worker"])
+        worker_argv, worker_env = core.runtime_command(
+            "update_driver", ["worker", "--root", str(core._root(arguments.root))],
+        )
         worker = core.ensure_worker(worker_argv, root=arguments.root, env=worker_env)
         if not arguments.wait:
             return 0

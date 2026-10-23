@@ -133,6 +133,7 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
             assert not _pidfd_exited(descriptor), diagnostic()
         observe(
             lambda: (installation / "source-path").exists()
+            or (supervisor.poll() is not None if supervisor is not None else _pidfd_exited(descriptor))
             or foundation_status(root=root).state in {"failed", "interrupted"},
             600, diagnostic,
         )
@@ -159,6 +160,8 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
             if line.startswith('{"request_id"')
         ]
         assert receipts == [{"request_id": request.id, "state": "pending"}], diagnostic()
+        if supervisor is not None:
+            assert supervisor.wait(timeout=60) == 7, diagnostic()
     finally:
         installation.mkdir(exist_ok=True)
         (installation / "release").write_text("release\n")

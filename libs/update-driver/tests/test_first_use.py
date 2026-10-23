@@ -2,13 +2,21 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
 
 from update_driver import ParticipantError, drain, status
 from update_driver import first_use as provision
+from agent_procutil import no_window_kwargs
+
+pytestmark = pytest.mark.skipif(
+    os.name != "nt" and sys.platform != "linux",
+    reason="fixed native first-use execution is qualified only on Windows and Linux",
+)
 
 
 def primitive(payload):
@@ -144,3 +152,22 @@ def test_publication_policy_changed_after_acceptance_never_runs_installer(owning
     assert result.state == "interrupted" and result.exit_code is None
     assert not (root / "provision-inputs").exists()
     assert sorted(path.name for path in installation.iterdir()) == ["runtime-deployment.json"]
+
+
+def test_actual_submit_wait_worker_uses_the_addressed_execution_root(owning_payload, area):
+    payload, installation, project = owning_payload
+    root = area / "queue"
+    argv, imports = provision.core.runtime_command("update_driver.first_use", [
+        "submit", "--payload", str(payload), "--runtime-root", str(installation),
+        "--project", str(project), "--root", str(root), "--wait",
+    ])
+    result = subprocess.run(
+        argv, env={**os.environ, **imports}, cwd=project, stdin=subprocess.DEVNULL,
+        capture_output=True, text=True, encoding="utf-8", timeout=90, **no_window_kwargs(),
+    )
+    assert result.returncode == 7, result.stdout + result.stderr
+    receipt = json.loads(result.stdout)
+    request = status(receipt["request_id"], root=root)
+    assert request.state == "completed" and request.exit_code == 7
+    assert (installation / "executed").read_text() == "provision"
+    assert not (installation.parent / ".copilot-extensions" / "update-driver").exists()
