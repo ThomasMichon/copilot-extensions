@@ -87,6 +87,38 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-REPORT-BASES one availability read per base in a read-only report
+
+`explain` reads each candidate base's commit existence once and supplies that
+same call's set to its checks, authoritative report evaluation and
+`missing_bases` metadata. The private evaluator's optional set is supplied
+only by the read-only report. Ordinary finalization still performs its own
+fresh availability reads; graph counts and later pruning decisions are not
+cached or shared with the report.
+
+Existing real-Git report/prune freshness controls now require exactly one
+availability probe per base in the initial report and fresh probes in a
+later report or pruning decision after new unpublished work. Eight fast
+controls cover every two-base availability combination with both resolved
+and unresolved content, including the all-missing default fallback. Each
+flips availability before a subsequent report and verifies the ordered
+base exclusions, missing-base metadata and unresolved-content behavior.
+
+Native Windows functional validation retains exactly two workers, the
+30-second item timeout and all existing process/memory/native deadlines:
+the complete landing, creation-gating and blob-comparison modules pass
+**145 tests**, **205.03 seconds including preparation and cleanup**.
+The focused ten availability/freshness controls also pass, **22.77 seconds
+inclusive**. This is not complete unchanged-group or repeated same-head
+900-second qualification; the latest earlier normal-group attempt still
+exhausted its 240-second cap, and those parent gates remain open.
+
+Documentation impact: report fields, CLI/configuration, installation and
+architecture remain unchanged. This ledger describes the internal
+read-only reuse boundary. Real Git exercises report-to-prune freshness;
+separate installer clean-room or external-service lanes do not apply.
+There is no rollout.
+
 ### B-RELATIVE-REMOTES self-relocating private finalization stores
 
 The landing and refspec-precondition seeds configure Git-supported
