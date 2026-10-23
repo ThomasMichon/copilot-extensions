@@ -161,6 +161,9 @@ def publication_case(tmp_path, monkeypatch, request, publication_transform):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.syspath_prepend(str(content / "scripts"))
+    # Track both first import and replacement so teardown restores the prior module.
+    monkeypatch.setitem(sys.modules, "runtime_install_governance", None)
+    monkeypatch.delitem(sys.modules, "runtime_install_governance")
     driver = load(content / "scripts" / "runtime_install.py", "source_publication_driver")
     source = driver.runtime_source
     digest = source.assembly_hash(content)
@@ -210,6 +213,13 @@ def publication_case(tmp_path, monkeypatch, request, publication_transform):
         })},
     })
     return driver, root, slot, owner, content, identity
+
+
+def test_publication_governance_uses_current_fixture(publication_case):
+    driver, _root, _slot, _owner, content, _identity = publication_case
+    governance = sys.modules[driver.Governance.__module__]
+    assert Path(governance.__file__).resolve().parent == content / "scripts"
+    assert governance.SCRIPTS == content / "scripts"
 
 
 @contextmanager

@@ -21,6 +21,9 @@ from agent_procutil import no_window_kwargs
 def driver(monkeypatch):
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     monkeypatch.syspath_prepend(str(scripts))
+    # Track both first import and replacement so teardown restores the prior module.
+    monkeypatch.setitem(sys.modules, "runtime_install_governance", None)
+    monkeypatch.delitem(sys.modules, "runtime_install_governance")
     spec = importlib.util.spec_from_file_location("worktrees_python_runtime_install", scripts / "runtime_install.py")
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
@@ -31,6 +34,13 @@ def driver(monkeypatch):
                        "runtime_generation": "test-generation"},
     })
     return module
+
+
+def test_driver_governance_uses_current_scripts(driver):
+    governance = sys.modules[driver.Governance.__module__]
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    assert Path(governance.__file__).resolve().parent == scripts
+    assert governance.SCRIPTS == scripts
 
 
 @pytest.mark.parametrize(("section", "field"), [

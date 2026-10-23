@@ -1,5 +1,5 @@
 {
-  "comment": "Preserve launch-project source provenance across native installer staging, retained helper callbacks, and lifecycle publication; retain installation governance in a dedicated bootstrap module.",
+  "comment": "Preserve launch-project source provenance across native installer staging, retained helper callbacks, and lifecycle publication; retain installation governance in a dedicated bootstrap module and isolate it across copied installer fixtures.",
   "changes": [
     {
       "plugin": "agent-worktrees",
