@@ -25,7 +25,6 @@ import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { readFile, access } from "node:fs/promises";
 import {
   CONTINUATION_DIRECTIVE,
   HANDOFF_MECHANISM_AWARENESS,
@@ -33,7 +32,8 @@ import {
   buildCutoverSeed,
 } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
-import { AGENT_WORKTREES_QUERY_TIMEOUT_MS, PROMPT_RECEIPT_TIMEOUT_MS } from "./cli-timeouts.mjs";
+import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
+import { observeResidentReceipt } from "./resident-receipt-client.mjs";
 import { DEFAULT_HANDOFF_MODE, automaticHandoffEnabled } from "./mode.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
@@ -3047,135 +3047,12 @@ export function logHandoffPromptReceived(
   }
 }
 
-// Optional observation uses the existing payload's read-only resolver, never its
-// self-provisioning command shim. One deadline covers resolution and all CLI calls.
-export async function observeHandoffPromptReceived({
-  cwd, sid, locator, launchIdentity = null, env = process.env, signal,
-  timeout = PROMPT_RECEIPT_TIMEOUT_MS,
-}, {
-  execute = runReceiptChild,
-  payloadRoot = join(INSTALLATION_ROOT, "agent-worktrees"),
-} = {}) {
-  if (!sid || !locator) return { status: "unavailable", reason: "session-or-locator-unavailable" };
-  const deadline = performance.now() + timeout;
-  const remaining = () => {
-    signal?.throwIfAborted();
-    const ms = Math.floor(deadline - performance.now());
-    if (ms <= 0) throw new Error("observation-deadline");
-    return ms;
-  };
-  const childEnv = runtimeEnvironment(env, payloadRoot);
-  childEnv.AGENT_WORKTREES_PAYLOAD_ROOT = payloadRoot;
-  childEnv.AGENT_RT_RESOLVE_TRACE_MODE = "read-only";
-  let stage = "runtime";
-  let commandCwd = cwd;
-  async function run(bin, args) {
-    return (await execute(bin, args, {
-      cwd: commandCwd, env: childEnv, encoding: "utf-8", timeout: remaining(),
-      signal, killSignal: "SIGKILL", windowsHide: true, maxBuffer: 64 * 1024,
-    })).stdout.trim();
-  }
-  try {
-    const manifest = JSON.parse(await readFile(join(payloadRoot, "plugin.json"), "utf-8"));
-    if (manifest.name !== "agent-worktrees" || manifest.repository !== CANONICAL_REPOSITORY) {
-      throw new Error("payload-unavailable");
-    }
-    let python;
-    if (process.platform === "win32") {
-      python = await run(windowsPowerShell(), [
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-        [
-          "$ErrorActionPreference='Stop'",
-          "$env:AGENT_RT_ROOT=Join-Path $env:USERPROFILE '.agent-worktrees'",
-          ". (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts\\resolve-runtime.ps1') -TraceMode read-only",
-          "if ($AgentRtPy) {[Console]::Out.Write($AgentRtPy)}",
-        ].join("; "),
-      ]);
-    } else {
-      python = await run("sh", ["-c", [
-        'AGENT_RT_ROOT="$HOME/.agent-worktrees"',
-        "export AGENT_RT_ROOT",
-        '. "$COPILOT_PLUGIN_ROOT/scripts/resolve-runtime.sh"',
-        'printf %s "${AGENT_RT_PY:-}"',
-      ].join("; ")]);
-    }
-    if (!python) return { status: "unavailable", reason: "runtime-unavailable" };
-    await access(python);
-    const prefix = launchIdentity?.project ? ["-p", launchIdentity.project] : [];
-    const cli = (args) => run(python, isolatedPythonArgs("agent_worktrees", [...prefix, ...args]));
-    let worktreeId = launchIdentity?.worktreeId;
-    if (!worktreeId) {
-      stage = "identity";
-      const args = ["get", "worktree-dir"];
-      if (sid) args.push("--session-id", sid);
-      const dir = await cli(args);
-      if (!dir) return { status: "unavailable", reason: "identity-unavailable" };
-      worktreeId = basename(dir);
-      commandCwd = dir;
-    }
-    stage = "receipt-write";
-    const receipt = JSON.parse(await cli([
-      "activity-log", "context_handoff_prompt_received", "--receipt-json",
-      "--worktree-id", worktreeId, "--session-id", sid,
-      "--source", "context-handoff", "--field", `locator=${locator}`,
-    ]));
-    if (receipt.received !== true) throw new Error("receipt-not-confirmed");
-    return { status: "logged", replayed: receipt.replayed === true };
-  } catch (error) {
-    return {
-      status: "unavailable",
-      reason: signal?.aborted ? "cancelled"
-        : `${stage}-${error.code === "ETIMEDOUT" ? "timeout" : "unavailable"}`,
-    };
-  }
-}
-
-// Abort emits an error before child close. Do not release the single-flight slot
-// (or report disposal complete) until the owned child's stdio is closed too.
-export function runReceiptChild(bin, args, options) {
-  return new Promise((resolve, reject) => {
-    const { signal, timeout, ...childOptions } = options;
-    signal?.throwIfAborted();
-    let outcome;
-    let stopping = false;
-    let cleanup = Promise.resolve();
-    const child = execFile(bin, args, {
-      ...childOptions, timeout: 0, detached: process.platform !== "win32",
-    }, (error, stdout, stderr) => {
-      outcome = { error, stdout, stderr };
-    });
-    function stop() {
-      if (stopping || !child.pid) return;
-      stopping = true;
-      if (process.platform === "win32") {
-        cleanup = new Promise((done) => {
-          execFile(join(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), [
-            "/PID", String(child.pid), "/T", "/F",
-          ], { windowsHide: true, timeout: 500, killSignal: "SIGKILL" }, () => {
-            child.kill("SIGKILL");
-            done();
-          });
-        });
-      } else {
-        try { process.kill(-child.pid, "SIGKILL"); }
-        catch { child.kill("SIGKILL"); }
-      }
-    }
-    const timer = setTimeout(stop, timeout);
-    signal?.addEventListener("abort", stop, { once: true });
-    child.once("close", async () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", stop);
-      await cleanup;
-      if (stopping) {
-        const error = new Error("observation-child-stopped");
-        error.code = signal?.aborted ? "ABORT_ERR" : "ETIMEDOUT";
-        reject(error);
-      }
-      else if (outcome?.error) reject(outcome.error);
-      else if (outcome) resolve({ stdout: outcome.stdout, stderr: outcome.stderr });
-      else reject(new Error("observation-child-closed"));
-    });
+// Prompt observation has no command/runtime fallback. Missing resident readiness
+// retains the exact pending identity for the next authorized lifecycle event.
+export async function observeHandoffPromptReceived(input) {
+  if (!input.sid) return { status: "unavailable", reason: "session-unavailable" };
+  return observeResidentReceipt({
+    ...input, sessionDir: input.sessionDir || sessionStateDirFor(input.sid),
   });
 }
 

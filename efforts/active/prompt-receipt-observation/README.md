@@ -251,3 +251,40 @@ new authority or ownership behavior requires a separate proposal.
   recorded as an owner gate, not inferred.
 - Mechanical index-only rebase completed; all other owners' current rows remain
   unchanged. The retained implementation and original negative evidence remain.
+
+### Controlled continuation checkpoint
+
+- The exact optional `handoff_trace._append_lock(..., deadline=None)` extension
+  was subsequently admitted and implemented. Default native blocking calls
+  remain unchanged; finite deadlines use nonblocking acquisition on the caller
+  thread. Sixty-one targeted trace/deadline/resident-backend tests pass.
+- Implemented the nonce-qualified in-process resident backend with the agreed
+  100 ms lock, total 1 MiB/4,096 rows/200 ms scan and 1,000 ms pre-effect bounds.
+  The owner admission guard precedes the trace lock and is revalidated before
+  append. Post-append failure/deadline remains unknown.
+- Existing blocking consumers: 168 tests passed across claim history/mirror,
+  ADO remediation and session binding. No consumer was migrated implicitly.
+- Added the async Node resident client and pending-identity scheduler changes.
+  A focused 131-test Node run passed (core, timeouts, scheduler and resident
+  socket protocol). Its guarded consumer path spawned zero helpers. The stalled
+  observation measured 1,917.73 ms; the 2,000 ms ceiling was not increased.
+  These socket protocol fixtures are not the final actual-ControlServer proof.
+- Removed the rejected child-helper transport from production observation.
+  Its original strict failing assertions and helper implementation remain under
+  `evidence/legacy-prompt-receipt-custody.repro.mjs` and
+  `evidence/legacy-receipt-child.mjs`; they remain historical counterexamples,
+  not a qualified transport or a plugin fallback.
+- Began the actual ControlServer + real backend + guarded Node integration fixture
+  against immutable provider candidate `ded1f7bd5e7121200d7e52a4926632a7cbe8f5a4`
+  from #8224. The first seven cases failed during fixture import, before server
+  startup: the staged server imported the adapter by its canonical package name.
+  The loader now registers that adapter name first and restores it through
+  the test monkeypatch. **That last fixture correction has not been rerun.**
+- `RESIDENT_RECEIPT_CONTRACT` remains absent: no ready capability is advertised
+  from this unqualified candidate. Actual server integration, windowless cycles,
+  final review/CI and source merge remain open. Real project/creation-nonce
+  producer delivery remains separately owned; missing nonce stays unavailable.
+- Work is paused for a controlled owner continuation. No new publication,
+  deployment, restart or broad test batch was started after that checkpoint.
+  The staged immutable provider/client fixture is retained for the exact next
+  targeted integration run; no fixture server or helper remains running.

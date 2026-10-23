@@ -1,8 +1,10 @@
 # Narrow canonical lock admission gate
 
 Parent: [Prompt Receipt Observation](README.md).
-**Proposal only: no helper implementation is admitted by this document.**
-The resident design is the merged #8193 contract.
+**Retained exact proposal, subsequently admitted by the coordinating owner.**
+The resident design is the merged #8193 contract. Implementation/checkpoint
+status is in the parent README; this admission does not expand other owners'
+producer or control scope.
 
 ## Exact proposed helper change
 

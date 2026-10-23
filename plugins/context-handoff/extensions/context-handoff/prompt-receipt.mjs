@@ -1,4 +1,3 @@
-import { basename } from "node:path";
 import { extractRecoveryLocatorFromPrompt, recoveryLocatorFor } from "./cutover-seed.mjs";
 import { observeHandoffPromptReceived } from "./handoff-core.mjs";
 import { PROMPT_RECEIPT_RETRY_MS } from "./cli-timeouts.mjs";
@@ -7,12 +6,12 @@ import { PROMPT_RECEIPT_RETRY_MS } from "./cli-timeouts.mjs";
 // later lifecycle events may reconcile it without launching a polling loop.
 export function registerPromptReceiptObservation(session, state, {
   observe = observeHandoffPromptReceived,
-  env = process.env,
+  sessionDir = null,
   now = Date.now,
   retryMs = PROMPT_RECEIPT_RETRY_MS,
 } = {}) {
   if (state.promptReceiptObservation) return state.promptReceiptObservation;
-  let pending = null;
+  let pending = state.receiptPending || null;
   let running = null;
   let scheduled = null;
   let controller = null;
@@ -39,11 +38,14 @@ export function registerPromptReceiptObservation(session, state, {
       if (!pending.sid) pending.sid = state.sessionId || session.sessionId || null;
       controller = new AbortController();
       running = Promise.resolve().then(() => observe({
-        ...pending, env, signal: controller.signal,
+        ...pending, pending: pending.observationState, signal: controller.signal,
       })).then((result) => {
         if (disposed) return;
         status = result;
-        if (result.status === "logged") pending = null;
+        if (result.status === "logged") {
+          pending = null;
+          delete state.receiptPending;
+        }
         else {
           retryAt = now() + retryMs;
           reportUnavailable();
@@ -69,19 +71,11 @@ export function registerPromptReceiptObservation(session, state, {
       const locator = extractRecoveryLocatorFromPrompt(event.data?.content);
       if (locator) {
         const cwd = state.cwd || process.cwd();
-        // Never trust legacy ambient WORKTREE_ID. A qualified launch reference
-        // is usable only for this cwd or this exact session's bare resume.
-        const match = /^([^/#]+)\/([^/#]+)\/([^/#]+)(?:#([^/#]+))?$/.exec(
-          env.AGENT_WORKTREES_OWNER_REF || "",
-        );
-        const launchIdentity = match && (
-          basename(cwd) === match[3]
-          || (state.sessionId && state.sessionId === match[4])
-        ) ? { worktreeId: match[3], project: match[2] } : null;
         pending = {
-          cwd, sid: state.sessionId, launchIdentity,
+          cwd, sid: state.sessionId, sessionDir, observationState: {},
           locator: recoveryLocatorFor(locator.kind, locator.id),
         };
+        state.receiptPending = pending;
       }
     }
     reconcile();
@@ -105,7 +99,6 @@ export function registerPromptReceiptObservation(session, state, {
       controller?.abort();
       for (const unsubscribe of unsubscribers) unsubscribe();
       await running;
-      pending = null;
       status = { status: "disposed" };
       delete state.promptReceiptObservation;
     },

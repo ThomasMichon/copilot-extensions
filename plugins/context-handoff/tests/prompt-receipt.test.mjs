@@ -1,10 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, copyFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { registerPromptReceiptObservation } from "../extensions/context-handoff/prompt-receipt.mjs";
-import { observeHandoffPromptReceived, runReceiptChild } from "../extensions/context-handoff/handoff-core.mjs";
 
 const prompt = "Continue work | Recovery: context-handoff task:receipt-1";
 function harness(options = {}) {
@@ -19,8 +17,8 @@ function harness(options = {}) {
     },
     log: (message) => warnings.push(message),
   };
-  const state = { turnCount: 0, cwd: process.cwd(), sessionId: "successor" };
-  const observation = registerPromptReceiptObservation(session, state, { env: {}, ...options });
+  const state = { turnCount: 0, cwd: process.cwd(), sessionId: "subject" };
+  const observation = registerPromptReceiptObservation(session, state, options);
   return {
     state, session, observation, warnings,
     emit: (name, event = {}) => {
@@ -28,43 +26,15 @@ function harness(options = {}) {
     },
   };
 }
-async function settle(h) {
+async function settle(observation) {
   for (let i = 0; i < 400; i++) {
-    if (h.observation.status.status !== "pending") return;
+    if (observation.status.status !== "pending") return;
     await delay(10);
   }
   assert.fail("observation did not settle");
 }
-function payload() {
-  const root = mkdtempSync(join(process.cwd(), ".receipt-test-"));
-  mkdirSync(join(root, "scripts"));
-  writeFileSync(join(root, "plugin.json"), JSON.stringify({
-    name: "agent-worktrees", repository: "https://github.com/ThomasMichon/copilot-extensions",
-  }));
-  return root;
-}
-function assertStopped(pid) {
-  if (process.platform === "linux") {
-    try {
-      // A group-killed descendant can briefly await its new parent's reap.
-      if (/^\s*Z\s/.test(readFileSync(join("/proc", String(pid), "stat"), "utf-8").split(")").at(-1))) return;
-    } catch { /* a reaped process has no proc entry */ }
-  }
-  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
-}
-function fixtureExecutor(calls, { replay = false, unavailable = false } = {}) {
-  return async (bin, args, opts) => {
-    calls.push({ bin, args, opts });
-    if (calls.length === 1) return { stdout: unavailable ? "" : process.execPath };
-    if (args.includes("get")) return { stdout: join(process.cwd(), "owned") };
-    if (args.includes("activity-log")) return {
-      stdout: JSON.stringify({ received: true, replayed: replay }),
-    };
-    return { stdout: "" };
-  };
-}
 
-test("registered first-prompt callback returns before observation; duplicates coalesce", async () => {
+test("registered callback returns before work; concurrent duplicate events coalesce", async () => {
   let calls = 0;
   let release;
   const h = harness({ observe: () => { calls++; return new Promise((r) => { release = r; }); } });
@@ -81,14 +51,14 @@ test("registered first-prompt callback returns before observation; duplicates co
     await delay(10);
     assert.equal(calls, 1);
     release({ status: "logged" });
-    await settle(h);
-    h.emit("user.message", { data: { content: prompt } });
+    await settle(h.observation);
+    h.emit("session.idle");
     await delay(10);
     assert.equal(calls, 1);
   } finally { await h.observation.dispose(); }
 });
 
-test("unavailable observation retains first locator and retries only at a later boundary", async () => {
+test("unavailable retains the first locator until a later authorized event", async () => {
   let clock = 0;
   const calls = [];
   const h = harness({
@@ -100,14 +70,14 @@ test("unavailable observation retains first locator and retries only at a later 
   });
   try {
     h.emit("user.message", { data: { content: prompt } });
-    await settle(h);
+    await settle(h.observation);
     h.emit("session.idle");
     await delay(10);
     assert.equal(calls.length, 1);
     assert.equal(h.warnings.length, 1);
     clock = 101;
     h.emit("user.message", { data: { content: "Recovery: context-handoff task:other" } });
-    await settle(h);
+    await settle(h.observation);
     assert.equal(calls.length, 2);
     assert.equal(calls[1].locator, "task:receipt-1");
   } finally { await h.observation.dispose(); }
@@ -126,208 +96,62 @@ test("later reconciliation fills only a missing captured session ID", async () =
   try {
     h.state.sessionId = null;
     h.emit("user.message", { data: { content: prompt } });
-    await settle(h);
+    await settle(h.observation);
     assert.equal(seen[0].sid, null);
     h.state.sessionId = "resolved-later";
     clock = 11;
     h.emit("tool.execution_complete");
-    await settle(h);
+    await settle(h.observation);
     assert.equal(seen[1].sid, "resolved-later");
     assert.equal(seen[1].locator, "task:receipt-1");
-    assert.equal(h.observation.status.status, "logged");
   } finally { await h.observation.dispose(); }
 });
 
-test("qualified launch identity avoids identity query; legacy ambient identity is ignored", async () => {
-  const calls = [];
-  const root = payload();
+test("dispose preserves uncertain exact identity for a later registration", async () => {
   const h = harness({
-    env: { AGENT_WORKTREES_OWNER_REF: "host/project/owned#successor", WORKTREE_ID: "wrong" },
-    observe: (input) => observeHandoffPromptReceived(input, {
-      payloadRoot: root, execute: fixtureExecutor(calls),
-    }),
+    retryMs: 0,
+    observe: async ({ pending }) => {
+      pending.uncertain = true;
+      pending.subject = { creationNonce: "original", sessionId: "subject", locator: "task:receipt-1" };
+      return { status: "unknown" };
+    },
+  });
+  h.emit("user.message", { data: { content: prompt } });
+  await settle(h.observation);
+  await h.observation.dispose();
+  assert.equal(h.state.receiptPending.observationState.uncertain, true);
+  h.state.sessionId = "replacement";
+  const next = registerPromptReceiptObservation(h.session, h.state, {
+    observe: async ({ sid, pending }) => {
+      assert.equal(sid, "subject");
+      assert.equal(pending.subject.creationNonce, "original");
+      assert.equal(pending.uncertain, true);
+      return { status: "logged" };
+    },
   });
   try {
-    h.emit("user.message", { data: { content: prompt } });
-    await settle(h);
-    assert.equal(h.observation.status.status, "logged");
-    assert.equal(calls.some(({ args }) => args.includes("get")), false);
-    assert.ok(calls.at(-1).args.includes("owned"));
-    assert.ok(calls.at(-1).args.includes("project"));
-    assert.equal(calls.at(-1).opts.windowsHide, true);
-  } finally {
-    await h.observation.dispose();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("receipt replay uses one atomic backend operation with bounded response", async () => {
-  const root = payload();
-  const calls = [];
-  try {
-    const result = await observeHandoffPromptReceived({
-      cwd: process.cwd(), sid: "successor", locator: "task:receipt-1",
-    }, { payloadRoot: root, execute: fixtureExecutor(calls, { replay: true }) });
-    assert.deepEqual(result, { status: "logged", replayed: true });
-    assert.equal(calls.filter(({ args }) => args.includes("--receipt-json")).length, 1);
-    assert.equal(calls.some(({ args }) => args.includes("activity")), false);
-    assert.ok(calls.find(({ args }) => args.includes("get")).args.includes("--session-id"));
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("absent service fails visibly and missing session never starts a child", async () => {
-  const root = payload();
-  const calls = [];
-  try {
-    const execute = async (bin, args, options) => {
-      calls.push(args);
-      if (calls.length === 1) return { stdout: process.execPath };
-      throw new Error("service unavailable");
-    };
-    assert.equal((await observeHandoffPromptReceived({
-      cwd: process.cwd(), sid: null, locator: "task:receipt-1",
-    }, { payloadRoot: root, execute })).status, "unavailable");
-    assert.equal(calls.length, 0);
-    assert.equal((await observeHandoffPromptReceived({
-      cwd: process.cwd(), sid: "successor", locator: "task:receipt-1",
-      launchIdentity: { project: "project", worktreeId: "owned" },
-    }, { payloadRoot: root, execute })).status, "unavailable");
-    assert.equal(calls.length, 2);
-    assert.equal(calls.filter((args) => args.includes("--receipt-json")).length, 1);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test("native consumer succeeds after deferred runtime availability", async (t) => {
-  const root = payload();
-  let available = false;
-  let clock = 0;
-  const commands = [];
-  const h = harness({
-    now: () => clock, retryMs: 10,
-    env: { AGENT_WORKTREES_OWNER_REF: "host/project/owned#successor" },
-    observe: (input) => observeHandoffPromptReceived(input, {
-      payloadRoot: root,
-      execute: (bin, args, options) => {
-        commands.push(args);
-        if (!args.includes("-m")) return Promise.resolve({ stdout: available ? process.execPath : "" });
-        return runReceiptChild(process.execPath, [
-          "-e", "process.stdout.write(JSON.stringify({received:true,replayed:false}))",
-        ], options);
-      },
-    }),
-  });
-  try {
-    h.emit("user.message", { data: { content: prompt } });
-    await settle(h);
-    assert.equal(h.observation.status.status, "unavailable");
-    available = true;
-    clock = 11;
-    const start = performance.now();
     h.emit("session.idle");
-    await settle(h);
-    assert.equal(h.observation.status.status, "logged");
-    assert.equal(commands.filter((args) => args.includes("activity-log")).length, 1);
-    t.diagnostic(`deferred native receipt lifecycle=${(performance.now() - start).toFixed(2)}ms`);
-  } finally {
-    await h.observation.dispose();
-    rmSync(root, { recursive: true, force: true });
-  }
+    await settle(next);
+    assert.equal(next.status.status, "logged");
+    assert.equal(h.state.receiptPending, undefined);
+  } finally { await next.dispose(); }
 });
 
-test("extension uses the tested registration boundary rather than the synchronous logger", () => {
+test("subagent events and later locators do not fabricate a first-prompt receipt", async () => {
+  let calls = 0;
+  const h = harness({ observe: async () => { calls++; return { status: "logged" }; } });
+  try {
+    h.emit("user.message", { agentId: "child", data: { content: prompt } });
+    h.emit("user.message", { data: { content: "ordinary first message" } });
+    h.emit("user.message", { data: { content: prompt } });
+    await delay(10);
+    assert.equal(calls, 0);
+  } finally { await h.observation.dispose(); }
+});
+
+test("extension registers the tested boundary without a synchronous receipt logger", () => {
   const source = readFileSync(new URL("../extensions/context-handoff/extension.mjs", import.meta.url), "utf-8");
   assert.match(source, /registerPromptReceiptObservation\(session, state\)/);
   assert.doesNotMatch(source, /logHandoffPromptReceived/);
   assert.doesNotMatch(source, /session\.on\("user\.message"/);
 });
-
-test("isolated first touch runs the native resolver without invoking a provisioner", async (t) => {
-  const root = payload();
-  for (const name of ["resolve-runtime.ps1", "resolve-runtime.sh"]) {
-    copyFileSync(new URL(`../../agent-worktrees/scripts/${name}`, import.meta.url), join(root, "scripts", name));
-  }
-  const calls = [];
-  const h = harness({
-    env: { ...process.env, HOME: root, USERPROFILE: root },
-    observe: (input) => observeHandoffPromptReceived(input, {
-      payloadRoot: root,
-      execute: (bin, args, options) => {
-        calls.push(args);
-        return runReceiptChild(bin, args, options);
-      },
-    }),
-  });
-  try {
-    const start = performance.now();
-    h.emit("user.message", { data: { content: prompt } });
-    const callbackMs = performance.now() - start;
-    await settle(h);
-    const lifecycleMs = performance.now() - start;
-    assert.ok(callbackMs < 100);
-    assert.ok(lifecycleMs < 2000);
-    assert.equal(h.observation.status.status, "unavailable");
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].includes("--help"), false);
-    assert.equal(existsSync(join(root, ".agent-worktrees")), false);
-    t.diagnostic(`missing runtime callback=${callbackMs.toFixed(2)}ms lifecycle=${lifecycleMs.toFixed(2)}ms`);
-  } finally {
-    await h.observation.dispose();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-for (const cancel of [false, true]) {
-  test(`native blocked identity child is joined after ${cancel ? "dispose" : "deadline"}`, async (t) => {
-    const root = payload();
-    const pidFile = join(root, "child.pid");
-    const descendantFile = join(root, "descendant.pid");
-    let calls = 0;
-    const h = harness({
-      observe: (input) => observeHandoffPromptReceived(input, {
-        payloadRoot: root,
-        execute: (bin, args, options) => {
-          calls++;
-          if (calls === 1) return Promise.resolve({ stdout: process.execPath });
-          return runReceiptChild(process.execPath, [
-            "-e", [
-              "const fs=require('node:fs');",
-              "const c=require('node:child_process').spawn(process.execPath,",
-              "['-e','setInterval(()=>{},1000)'],{windowsHide:true});",
-              "fs.writeFileSync(process.argv[2],String(c.pid));",
-              "fs.writeFileSync(process.argv[1],String(process.pid));",
-              "setInterval(()=>{},1000);",
-            ].join(""),
-            pidFile, descendantFile,
-          ], options);
-        },
-      }),
-    });
-    try {
-      let heartbeats = 0;
-      const timer = setInterval(() => { heartbeats++; }, 10);
-      const start = performance.now();
-      h.emit("user.message", { data: { content: prompt } });
-      const callbackMs = performance.now() - start;
-      if (cancel) {
-        for (let i = 0; i < 100 && !existsSync(pidFile); i++) await delay(10);
-        assert.ok(existsSync(pidFile), "blocked child reached startup before cancellation");
-        await h.observation.dispose();
-      }
-      else await settle(h);
-      clearInterval(timer);
-      const lifecycleMs = performance.now() - start;
-      assert.ok(callbackMs < 100);
-      assert.ok(lifecycleMs < 2000);
-      assert.ok(heartbeats > 3);
-      assert.equal(calls, 2);
-      const pid = Number(readFileSync(pidFile, "utf-8"));
-      assertStopped(pid);
-      const descendant = Number(readFileSync(descendantFile, "utf-8"));
-      assertStopped(descendant);
-      t.diagnostic(`blocked identity callback=${callbackMs.toFixed(2)}ms lifecycle=${lifecycleMs.toFixed(2)}ms; child tree gone`);
-    } finally {
-      await h.observation.dispose();
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-}

@@ -2,6 +2,8 @@
 
 Parent: [Prompt Receipt Observation](README.md). This is a blocking qualification
 packet, not completion or permission to change another owner's implementation.
+The later merged #8193 zero-helper resident contract supersedes the proposed
+helper integration below; retain this packet as the rejected-path evidence.
 
 ## Source and ownership
 
@@ -63,11 +65,12 @@ assertion against the current taskkill adapter (whole test-case duration
 Those failures remain open. Earlier 1.827-second happy-path results are not a
 bound on these failure paths.
 
-The durable negative regression is
-`plugins/context-handoff/tests/exhaustive/prompt-receipt-custody.test.mjs`.
-Run it explicitly with `node --test`; `RECEIPT_TEST_PYTHON` may name an existing
-test interpreter. The tests clean their owned children before asserting; they
-are not disabled or satisfied by the earlier Node-child fixtures.
+The unchanged strict negative assertions are retained in
+`evidence/legacy-prompt-receipt-custody.repro.mjs`, beside the rejected helper
+implementation. Run that historical counterexample explicitly with `node --test`;
+`RECEIPT_TEST_PYTHON` may name an existing test interpreter. It is expected to
+fail and cleans its owned children before asserting. The supported resident
+transport has separate zero-helper tests; this evidence does not qualify it.
 
 ## Minimal integration contract requested from the owning lane
 

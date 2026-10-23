@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { runReceiptChild } from "../../extensions/context-handoff/handoff-core.mjs";
+import { runReceiptChild } from "./legacy-receipt-child.mjs";
 
 for (const mode of ["missing-taskkill", "output-overflow"]) {
   test(`receipt custody: ${mode} must not leave a Python descendant`, {
