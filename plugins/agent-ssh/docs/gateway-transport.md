@@ -94,6 +94,12 @@ copies of the private identity file. No automatic source cleanup is performed.
 
 ## Setup boundary
 
+The optional [Fleet provider](../../../fleet-manager/docs/gateway-ssh-provider.md)
+now supplies this adapter from the existing directional policy and an explicitly
+selected admitted public directory. Its read-only default and explicit
+`--apply` entry point preserve local identity, directory revision and the
+existing emitter; raw public data still cannot grant enrollment or execution.
+
 This implements the outbound transport/profile part of
 [Gateway/SSH onboarding](../../../efforts/active/gateway-ssh-fleet-onboarding/README.md),
 not its remaining setup executor. Gateway selection, Vault key preparation,

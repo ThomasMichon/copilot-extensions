@@ -413,6 +413,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     add_gateway_parser(sub)
 
+    from .gateway_provider import add_parser as add_gateway_provider_parser
+
+    add_gateway_provider_parser(sub)
+
     from .copilot_plugins import target_repo
     target_repo_parser = sub.add_parser(
         "namespace-target-repo", help="Print the configured SSH workspace repository for plugin selection.",
