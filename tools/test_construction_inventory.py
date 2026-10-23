@@ -132,6 +132,29 @@ class ConstructionInventoryTests(unittest.TestCase):
                 with self.assertRaises(inventory.InventoryError):
                     self.report()
 
+    def test_base_and_additional_project_ownership_cannot_depend_on_marketplace_order(self):
+        child = {"name": "child", "source": "plugins/runtime/child"}
+        self.add_project("plugins/runtime/child/pyproject.toml", "child")
+        self.write_json("plugins/runtime/child/plugin.json", {"name": "child", "runtimeScope": "universal"})
+        self.write_json(
+            "plugins/runtime/plugin.json",
+            {"name": "runtime", "runtimeScope": "universal", "additionalPythonProjects": ["child/pyproject.toml"]},
+        )
+        parent, guidance = self.plugins
+        for plugins in ([parent, child, guidance], [child, parent, guidance]):
+            with self.subTest(plugins=plugins):
+                self.plugins = plugins
+                self.write_marketplace()
+                with self.assertRaisesRegex(inventory.InventoryError, "multiply owned Python project"):
+                    self.report()
+
+    def test_plugin_and_standalone_cannot_own_the_same_project(self):
+        self.plugins.append({"name": "service", "source": "apps/service"})
+        self.write_marketplace()
+        self.write_json("apps/service/plugin.json", {"name": "service", "runtimeScope": "universal"})
+        with self.assertRaisesRegex(inventory.InventoryError, "multiply owned Python project"):
+            self.report()
+
     def test_vendored_library_inputs_are_not_counted_as_environments(self):
         self.add_project("plugins/runtime/libs/shared/pyproject.toml", "shared")
         self.add_project("plugins/guidance/libs/shared/pyproject.toml", "shared")

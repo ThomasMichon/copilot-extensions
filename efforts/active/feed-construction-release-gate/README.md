@@ -281,9 +281,12 @@ cutover is activated by the reviewed documentation.
   and future nested projects receive the same visible classification boundary.
 - Optional dependency group names and console scripts are inventory data, not
   an inferred environment matrix or installed first-launch evidence. Reuse the
-  existing plugin-owned `runtime_install`/`runtime_install_modes` and versioned
-  runtime constructor when execution is implemented; no new installer was
-  added. Complete environment identities, production profile selections,
+  existing shared installer-engine and versioned-runtime primitives through
+  each owner's canonical constructor when execution is
+  implemented. Worktrees' `runtime_install` and `runtime_install_modes` own its
+  specific lifecycle; they are not a generic installer for other components.
+  No new installer was added. Complete environment identities, production
+  profile selections,
   constructor/launch bindings and native matrix remain open Phase 1 work.
 - Local refusal/data contracts and a real fresh Git-fixture CLI control passed.
   The real source invocation independently reported the expected unclassified
@@ -320,3 +323,9 @@ cutover is activated by the reviewed documentation.
   All twenty-four local contracts and the explicit-root source invocation passed
   after this correction; install-contract validation also passed. Root binding
   is source classification, not source/candidate-bound runtime evidence.
+
+- A second review found order-dependent duplicate ownership between a parent's
+  additional project and a later marketplace plugin. All three owner kinds now
+  use the same duplicate-project claim check; regressions cover both marketplace
+  orders and plugin/standalone overlap. This tightens classification only and
+  does not add execution ownership or another installer.

@@ -137,6 +137,13 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
     identities: set[str] = set()
     sources: set[str] = set()
     standalone_consumers = _standalone_consumers(root)
+
+    def claim_project(path: str, kind: str, owner: str) -> None:
+        if path in classified:
+            raise InventoryError(f"multiply owned Python project: {path}")
+        owners.append(_project(root, path, kind, owner))
+        classified.add(path)
+
     for plugin in plugins:
         if not isinstance(plugin, dict):
             raise InventoryError(f"{marketplace}: invalid plugin entry")
@@ -162,8 +169,7 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
         else:
             if manifest.get("runtimeScope") == "none":
                 raise InventoryError(f"{manifest_path}: runtimeScope none has a Python project")
-            owners.append(_project(root, path, "runtime-plugin", name))
-            classified.add(path)
+            claim_project(path, "runtime-plugin", name)
         additional = _strings(
             manifest.get("additionalPythonProjects", []),
             f"{manifest_path}: additionalPythonProjects",
@@ -173,16 +179,12 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
             path = f"{source}/{relative}"
             if PurePosixPath(relative).name != "pyproject.toml" or path not in tracked:
                 raise InventoryError(f"missing additional Python project: {path}")
-            if path in classified:
-                raise InventoryError(f"multiply owned Python project: {path}")
-            owners.append(_project(root, path, "plugin-python-project", f"{name}:{relative}"))
-            classified.add(path)
+            claim_project(path, "plugin-python-project", f"{name}:{relative}")
     for component in standalone_consumers:
         path = f"{_relative(component)}/pyproject.toml"
-        if path not in tracked or path in classified:
-            raise InventoryError(f"missing or multiply owned standalone project: {path}")
-        owners.append(_project(root, path, "standalone-product", component))
-        classified.add(path)
+        if path not in tracked:
+            raise InventoryError(f"missing standalone project: {path}")
+        claim_project(path, "standalone-product", component)
     library_inputs = sorted(
         path
         for path in tracked - classified
