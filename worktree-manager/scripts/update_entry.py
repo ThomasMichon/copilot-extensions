@@ -23,7 +23,9 @@ def _publication_api(engine: Path) -> tuple[dict[str, Any], ModuleType]:
     return api, primitive
 
 
-def validate_manager_ownership(root: Path, payload: Path) -> None:
+def validate_manager_ownership(
+    root: Path, payload: Path, *, expected: dict[Path, bytes | None] | None = None,
+) -> dict[Path, bytes | None]:
     """Admit only the Manager files this bootstrap is about to publish."""
     _ordinary(root)
     marker = root / "current-version"
@@ -47,16 +49,6 @@ def validate_manager_ownership(root: Path, payload: Path) -> None:
     home = Path(os.environ.get("USERPROFILE") or Path.home())
     local_bin = home / ".local" / "bin"
     _ordinary(local_bin)
-    ownership = (
-        payload.parent / "plugins/agent-worktrees/src/agent_worktrees"
-        / "manager_launcher_ownership.py"
-    )
-    owns = runpy.run_path(str(ownership))["owns_launcher"]
-    for name in ("worktree-manager", "worktree-manager.cmd", "worktree-manager.ps1"):
-        path = local_bin / name
-        _ordinary(path)
-        if path.exists() and (not path.is_file() or not owns(name, path.read_bytes())):
-            raise RuntimeError(f"Foreign Manager command preserved: {path}")
     registry = Path(os.environ.get(
         "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR",
         str(home / ".agent-worktrees/control-plane-providers.d"),
@@ -89,3 +81,21 @@ def validate_manager_ownership(root: Path, payload: Path) -> None:
             raise RuntimeError("Manager registration does not own the selected installation")
     if selected and not manager_seen:
         raise RuntimeError("Selected Manager provider is not registered")
+    ownership = (
+        payload.parent / "plugins/agent-worktrees/src/agent_worktrees"
+        / "manager_launcher_ownership.py"
+    )
+    owns = runpy.run_path(str(ownership))["owns_launcher"] if not manager_seen else None
+    commands = {}
+    for name in ("worktree-manager", "worktree-manager.cmd", "worktree-manager.ps1"):
+        path = local_bin / name
+        _ordinary(path)
+        if path.exists() and not path.is_file():
+            raise RuntimeError(f"Foreign Manager command preserved: {path}")
+        body = path.read_bytes() if path.is_file() else None
+        if body is not None and owns is not None and not owns(name, body):
+            raise RuntimeError(f"Foreign Manager command preserved: {path}")
+        commands[path] = body
+    if expected is not None and commands != expected:
+        raise RuntimeError("Manager commands changed during construction")
+    return commands

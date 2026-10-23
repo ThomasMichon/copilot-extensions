@@ -31,8 +31,13 @@ The subsequent publication-scope repair #8283 qualified in natural
 bytes. Actual native recovery clears that refusal and activates Manager
 `0.6.105-dev1`, but its real update request completes with exit 1 and an empty
 diagnostic log; the selected Worktrees runtime remains unchanged. A reproduced
-native repair-child standard-stream defect is being corrected before another
-installed attempt. Complete native suite and normal-entry acceptance remain
+native repair-child standard-stream fix #8289 qualified in natural
+`40017462768`. The next supported bootstrap stops before construction at another
+stale hash gate: its installed Manager launcher exactly matches the current
+producer but is absent from the historical hash list. Registered Manager
+admission is being aligned with its existing provider/package/path authority
+and construction-time change detection, rather than expanding that list.
+Complete native suite and normal-entry acceptance remain
 open; guest interrupted-request recovery still needs the separately confirmed
 disruptive restart. #7743's supported installed recovery remains ahead of
 local-first identity implementation. The

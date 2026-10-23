@@ -21,7 +21,7 @@ from pathlib import Path
 from agent_procutil import SyncProcessLaunchError, no_window_kwargs
 
 from . import control_plane_providers as providers, manager_launch_cli, output, update_events
-from .manager_launcher_ownership import _OWNED_STUBS as _OWNED_STUBS, owns_launcher
+from .manager_launcher_ownership import _OWNED_STUBS as _OWNED_STUBS
 
 
 class RecoveryRefused(RuntimeError):
@@ -203,8 +203,6 @@ def adopted_manager() -> Adoption | None:
     if stub.parent.resolve() != local_bin.resolve() or stub.name != primary:
         raise RecoveryRefused("Manager command is outside its registered local-bin ownership")
     _ordinary(stub)
-    if not owns_launcher(stub.name, _read(stub)):
-        raise RecoveryRefused("Manager binstub is foreign or edited")
     paths = [*entries, stub, root / "current-version", root / "last-known-good", root / "config.toml"]
     snapshots = {path: _read(path) for path in paths}
     slot = _slot(root, snapshots[root / "current-version"])

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
-import ast
 import json
+import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -72,18 +73,12 @@ def test_bare_bootstrap_does_not_resolve_a_project_before_construction(extension
     assert "runtime_install.py" in text
 
 
-def test_recovery_fingerprints_match_manager_owned_templates():
-    source = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "manager_launcher_ownership.py"
-    expected = next(
-        ast.literal_eval(node.value) for node in ast.parse(source.read_text(encoding="utf-8")).body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "_OWNED_STUBS" for target in node.targets)
-    )
+def test_registered_bootstrap_admits_current_manager_owned_templates(tmp_path, monkeypatch):
     script = (
-        "import sys,json,hashlib;"
+        "import sys,json;"
         "sys.path.insert(0,sys.argv[1]);"
         "from worktree_manager import runtime_launchers as r;"
-        "print(json.dumps({name:hashlib.sha256(getattr(r,fn)().encode()).hexdigest() "
+        "print(json.dumps({name:getattr(r,fn)() "
         "for name,fn in [('worktree-manager.cmd','_cmd_binstub'),"
         "('worktree-manager.ps1','_ps1_binstub'),('worktree-manager','_sh_binstub')]}))"
     )
@@ -92,4 +87,26 @@ def test_recovery_fingerprints_match_manager_owned_templates():
         capture_output=True, text=True, check=True, timeout=10,
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
     )
-    assert all(digest in expected[name] for name, digest in json.loads(result.stdout).items())
+    home = tmp_path / "home"
+    commands = home / ".local/bin"
+    commands.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.delenv("AGENT_WORKTREES_CONTROL_PLANE_PROVIDER", raising=False)
+    registry = home / "providers"
+    registry.mkdir()
+    monkeypatch.setenv("AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR", str(registry))
+    root = home / ".worktree-manager"
+    primary = "worktree-manager.cmd" if os.name == "nt" else "worktree-manager"
+    (registry / "worktree-manager.json").write_text(json.dumps({
+        "schema_version": 1, "provider": "worktree-manager",
+        "provider_root": str(root), "command": [str(commands / primary)],
+    }))
+    templates = json.loads(result.stdout)
+    for name, body in templates.items():
+        (commands / name).write_bytes(body.encode("utf-8"))
+    validate = runpy.run_path(str(REPO / "worktree-manager/scripts/update_entry.py"))[
+        "validate_manager_ownership"
+    ]
+    observed = validate(root, REPO / "worktree-manager")
+    assert observed == {commands / name: body.encode("utf-8") for name, body in templates.items()}
