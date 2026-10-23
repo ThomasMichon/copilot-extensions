@@ -81,7 +81,7 @@ adding operator-requested runtime scope to this documentation task.
 ### Phase 0 - Reconcile intent and retire the superseded plan
 - [x] Revise the existing service/runtime-assembly visions and development pattern; capture the operator's words without relaxing immutable deployment.
 - [x] Abandon/archive the mutable effort with explicit transfers, preserving delivered work and journal history.
-- [ ] Land this reconciliation through review, then publish the final disposition to existing coordination owners.
+- [x] Land this reconciliation through review, then publish the final disposition to existing coordination owners (#8065 and the closing coordination comments below).
 
 ### Phase 1 - Complete shared admission and immutable development
 - [ ] Reconcile existing shared/first-adopter deliveries against the archived Phase 3 evidence before choosing the next implementation slice; do not redo delivered work.
@@ -118,7 +118,7 @@ adding operator-requested runtime scope to this documentation task.
 - [ ] **Claims:** competing owners refuse; iterative builds preserve the original restore target; deployed release works without the source checkout and failed restore retains attributable ownership.
 - [ ] **Portfolio:** record every canonical adopter's actual two-entrypoint, native process and installed acceptance evidence. Shared primitives or one pilot never close #5472.
 - [ ] **Platforms:** qualify Windows, Linux and macOS separately, with named tracked gaps where a lane is unavailable; use isolated roots and owned processes, never live user state as a fixture.
-- [ ] **Guidance:** audit new intent, archive transfers, links and literal request capture; retain explicit implementation/rollout gaps instead of claiming documentation deploys behavior.
+- [x] **Guidance:** audit new intent, archive transfers, links and literal request capture; retain explicit implementation/rollout gaps instead of claiming documentation deploys behavior.
 
 ## Proposal
 
@@ -128,6 +128,23 @@ This reconciliation changes intent and effort ownership only. Implementation,
 native installation and rollout remain separately assigned and gated.
 
 ## Journal
+
+### 2026-10-22 - Reviewed intent landed; finite reconciliation complete
+
+#8065 merged as `738b370a14cda49aefdf82ac785535fc11e87718` after approval and
+required CI. Effort/vision structure, documentation consistency, changed local
+links, all 18 explicit archival transfers and literal Request capture passed.
+No executable behavior changed, so runtime unit/E2E, clean-room provisioning
+and live rollout were not exercised by this documentation slice.
+
+Published the final disposition to
+[#5472](https://github.com/ThomasMichon/copilot-extensions/issues/5472#issuecomment-6356383975)
+and [#7028](https://github.com/ThomasMichon/copilot-extensions/issues/7028#issuecomment-6356384651).
+The intent reconciliation coordinator's finite slice is complete. This effort
+stays Active: the Slot-admission coordinator and separately assigned adopter
+owners retain Phases 1-3 and their unchecked validation; Source-Managed Runtime
+Installs retains #7028/#7029's deployment acceptance. Select the next existing
+implementation slice against delivered evidence, not another mutable framework.
 
 ### 2026-10-22 - Immutable development direction
 
