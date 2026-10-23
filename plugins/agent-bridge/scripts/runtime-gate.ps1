@@ -35,6 +35,11 @@ if (
     exit 126
 }
 
+if (-not (Select-String -LiteralPath $runtimeResolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-bridge] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
+    exit 126
+}
+
 $hostExe = (Get-Process -Id $PID).Path
 if (-not $hostExe) {
     [Console]::Error.WriteLine('[agent-bridge] PowerShell host executable is unavailable.')
@@ -44,20 +49,20 @@ if (-not $hostExe) {
 $runtimeRoot = $legacyRoot
 $context = ''
 $installationId = ''
-$statusArgs = @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
-    'status',
-    '-PayloadRoot', $payloadRoot,
-    '-PluginId', 'agent-bridge',
-    '-LegacyRoot', $legacyRoot
-)
+$statusArgs = @{
+    Action = 'status'
+    PayloadRoot = $payloadRoot
+    PluginId = 'agent-bridge'
+    LegacyRoot = $legacyRoot
+}
 if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-    $statusArgs += @('-Context', $env:COPILOT_EXTENSIONS_CONTEXT)
+    $statusArgs.Context = $env:COPILOT_EXTENSIONS_CONTEXT
     $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
     1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
-    $statusArgs += @('-DurableHome', $durableHome)
+    $statusArgs.DurableHome = $durableHome
 }
-$resolutionJson = @(& $hostExe @statusArgs)
+$global:LASTEXITCODE = 1
+$resolutionJson = @(& $modeRunner @statusArgs)
 if ($LASTEXITCODE -ne 0) {
     [Console]::Error.WriteLine(
         '[agent-bridge] installation context could not be resolved.'
@@ -128,15 +133,15 @@ elseif (
     1..5 | ForEach-Object {
         $validationDurableHome = Split-Path -Parent $validationDurableHome
     }
-    $validationArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
-        'validate',
-        '-Context', $context,
-        '-DurableHome', $validationDurableHome,
-        '-ExpectedPluginId', 'agent-bridge',
-        '-ExpectedPayloadRoot', $payloadRoot
-    )
-    $validationJson = @(& $hostExe @validationArgs)
+    $validationArgs = @{
+        Action = 'validate'
+        Context = $context
+        DurableHome = $validationDurableHome
+        ExpectedPluginId = 'agent-bridge'
+        ExpectedPayloadRoot = $payloadRoot
+    }
+    $global:LASTEXITCODE = 1
+    $validationJson = @(& $modeRunner @validationArgs)
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine(
             '[agent-bridge] installation context validation failed.'
@@ -151,7 +156,8 @@ elseif (
         )
         exit 126
     }
-    if ([string]$validatedContext.generation -cne $installGeneration) {
+    if ([string]$validatedContext.generation -cne $installGeneration -or
+        [string]$validatedContext.pluginRoot -cne $runtimeRoot) {
         [Console]::Error.WriteLine(
             '[agent-bridge] installation context generation does not match governance.'
         )
@@ -166,10 +172,19 @@ else {
     exit 126
 }
 
+if (-not $context) {
+    $runtimeRoot = [string]$resolution.legacy.root
+    if (-not $runtimeRoot -or -not [IO.Path]::IsPathRooted($runtimeRoot)) {
+        [Console]::Error.WriteLine('[agent-bridge] installation context is missing the canonical legacy root.')
+        exit 126
+    }
+}
+
 function Resolve-RuntimePython {
+    param([string]$TraceMode = 'ready')
     $script:AgentRtPy = $null
     $env:AGENT_RT_ROOT = $runtimeRoot
-    . $runtimeResolver
+    . $runtimeResolver -TraceMode $TraceMode
     return $AgentRtPy
 }
 
@@ -192,6 +207,14 @@ function Set-RuntimeEnvironment {
 function Invoke-Runtime {
     param([Parameter(Mandatory)][string]$Python)
     Set-RuntimeEnvironment
+    $nativeArgs = $forwardArgs
+    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+    if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+        # Legacy PowerShell reparses native arguments, including literal quotes.
+        $nativeArgs = @($forwardArgs | ForEach-Object {
+            '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+        })
+    }
     # Relax EAP for just this forwarding call: the wrapped module's own
     # exit code is the only contract this dispatcher relays, so a
     # legitimate stderr diagnostic from a non-zero exit must never become
@@ -200,9 +223,9 @@ function Invoke-Runtime {
     $ErrorActionPreference = 'Continue'
     try {
         if ($hasPipelineInput) {
-            $pipelineInput | & $Python -m agent_bridge @forwardArgs
+            $pipelineInput | & $Python -m agent_bridge @nativeArgs
         } else {
-            & $Python -m agent_bridge @forwardArgs
+            & $Python -m agent_bridge @nativeArgs
         }
     } finally {
         $ErrorActionPreference = $previousEap
@@ -222,6 +245,67 @@ if ($env:AGENT_BRIDGE_NO_SELFPROVISION) {
     exit 1
 }
 
+function Assert-RuntimePublication {
+    $publicationArgs = @{
+        Action = 'probe-plugin-publication'
+        PayloadRoot = $payloadRoot
+        PluginId = 'agent-bridge'
+        LegacyRoot = $runtimeRoot
+    }
+    if ($context) {
+        $publicationArgs.Context = $context
+        $publicationArgs.DurableHome = $validationDurableHome
+    }
+    try {
+        $global:LASTEXITCODE = 3
+        $publicationJson = @(& $modeRunner @publicationArgs)
+        $publicationCode = $LASTEXITCODE
+        $publication = ($publicationJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        $publicationRoot = if ($context) {
+            [string]$publication.runtimeRoot
+        } else { [string]$publication.legacy.root }
+        if ($publicationCode -ne 0 -or
+            $publication.deployment.allowPluginPublication -isnot [bool] -or
+            -not $publication.deployment.allowPluginPublication -or
+            $publicationRoot -cne $runtimeRoot -or
+            [string]$publication.deployment.path -cne
+                (Join-Path $runtimeRoot 'runtime-deployment.json')) {
+            throw ($publicationJson -join ' ')
+        }
+        if ($context) {
+            if ([string]$publication.status -cnotin @('ready', 'deactivation-required') -or
+                [string]$publication.actualMode -cne 'namespaced' -or
+                [string]$publication.context -cne $context -or
+                [string]$publication.installGeneration -cne $installGeneration) {
+                throw ($publicationJson -join ' ')
+            }
+        } else {
+            $legacyArgs = $publicationArgs.Clone()
+            $legacyArgs.Action = 'probe-legacy'
+            $global:LASTEXITCODE = 3
+            $legacyJson = @(& $modeRunner @legacyArgs)
+            $legacyCode = $LASTEXITCODE
+            $legacy = ($legacyJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            if ($legacyCode -ne 0 -or $legacy.allowMutation -isnot [bool] -or
+                -not $legacy.allowMutation -or
+                [string]$legacy.legacy.root -cne $runtimeRoot) {
+                throw ($legacyJson -join ' ')
+            }
+        }
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-bridge] Runtime publication refused: $($_.Exception.Message) " +
+            'Use explicit installation management to install or repair this runtime.'
+        )
+        exit 3
+    }
+}
+
+Assert-RuntimePublication
+$runtimePython = Resolve-RuntimePython -TraceMode normal
+if ($runtimePython) {
+    Invoke-Runtime -Python $runtimePython
+}
 New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
 $statusPath = Join-Path $runtimeRoot '.provision-status'
 $_lockPath = Join-Path $runtimeRoot '.provision.lock'
@@ -244,6 +328,7 @@ $_provisionRc = 0
 try {
     $_provisionedPy = Resolve-RuntimePython
     if (-not $_provisionedPy) {
+        Assert-RuntimePublication
         [Console]::Error.WriteLine(
             '[agent-bridge] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.'
         )

@@ -144,6 +144,7 @@ sys.exit(17)
         "\n".join(
             (
                 "$ErrorActionPreference = 'Stop'",
+                f"$PluginDir = '{str(plugin).replace(chr(39), chr(39) * 2)}'",
                 f"$InstallDir = '{str(runtime).replace(chr(39), chr(39) * 2)}'",
                 f"$LocalBin = '{str(legacy_bin).replace(chr(39), chr(39) * 2)}'",
                 "$BinstubPs1 = Join-Path $LocalBin 'agent-bridge.ps1'",
@@ -528,6 +529,44 @@ def test_session_catalog_producer_is_not_registered_as_a_hook() -> None:
     ).read_text(encoding="utf-8")
     assert r"bin\agent-bridge.ps1" in powershell_catalog
     assert "shell = 'direct'" in powershell_catalog
+
+
+@pytest.mark.portfolio_tier("T3")
+def test_payload_gate_refuses_old_resolver_before_first_use_writes(tmp_path: Path) -> None:
+    suffix = "ps1" if os.name == "nt" else "sh"
+    engine = shutil.which("pwsh" if os.name == "nt" else "bash")
+    if engine is None:
+        pytest.skip("Native shell unavailable")
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("runtime-gate", "install", "resolve-runtime"):
+        shutil.copy2(PLUGIN / "scripts" / f"{name}.{suffix}", scripts)
+    shutil.copytree(PLUGIN / "scripts/installation-context", scripts / "installation-context")
+    resolver = scripts / f"resolve-runtime.{suffix}"
+    content = resolver.read_text(encoding="utf-8-sig")
+    capability = "# Trace contract: normal/read-only/ready-v1"
+    assert capability in content
+    resolver.write_text(content.replace(capability, "# Older resolver"), encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+    runtime = home / ".agent-bridge"
+    env = {
+        **os.environ, "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "AGENT_BRIDGE_PAYLOAD_ROOT": str(payload),
+        "AGENT_BRIDGE_INSTALL_DIR": str(runtime), "AGENT_BRIDGE_CONFIG_DIR": str(runtime),
+    }
+    command = [engine]
+    if os.name == "nt":
+        command += ["-NoLogo", "-NoProfile", "-File"]
+    command += [str(scripts / f"runtime-gate.{suffix}"), "--help"]
+    result = subprocess.run(
+        command, env=env, capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert "read-only runtime resolver is unavailable" in result.stderr
+    assert not runtime.exists()
 
 
 def test_out_of_session_boundaries_remain_explicit() -> None:

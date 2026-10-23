@@ -1471,58 +1471,43 @@ deploy_binstub() {
         return 0
     fi
 
-    cat > "$BINSTUB" << 'STUB'
-#!/usr/bin/env bash
-# agent-bridge binstub -- self-provisioning (install-on-first-use).
-# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
-# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
-# version -> last-known-good -> newest complete slot. NEVER the `venv` link, NEVER
-# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
-# provision on first use rather than silently binding the system interpreter.
+    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n' \
+        "$INSTALL_DIR" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$BINSTUB"
+    cat >> "$BINSTUB" << 'STUB'
+set -euo pipefail
 export PYTHONUTF8=1
-_name="agent-bridge"
-_root="$HOME/.$_name"
-_resolver="$_root/bin/resolve-runtime.sh"
-_resolve() {
-    AGENT_RT_PY=""
-    if [ -f "$_resolver" ]; then
-        AGENT_RT_ROOT="$_root"
-        . "$_resolver"
+_snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
+_payload="$_snap"
+# Prefer the exact publisher for old snapshots lacking canonical source proof.
+if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
+    _payload=""
+    if [[ -f "$_source/scripts/runtime-gate.sh" ]]; then _payload="$_source"; fi
+fi
+if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
+    if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+        _resolver="$_root/bin/resolve-runtime.sh"
+        if [[ -f "$_resolver" ]] &&
+           grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+            AGENT_RT_ROOT="$_root"
+            AGENT_RT_RESOLVE_TRACE_MODE=ready
+            AGENT_RT_PY=""
+            . "$_resolver"
+            if [[ -n "$AGENT_RT_PY" ]]; then
+                export AGENT_BRIDGE_INSTALL_DIR="$_root"
+                export AGENT_BRIDGE_CONFIG_DIR="$_root"
+                export AGENT_BRIDGE_CONNECT_LOG="$_root/logs/connect.log"
+                unset AGENT_BRIDGE_INSTALLATION_ID
+                exec "$AGENT_RT_PY" -m agent_bridge "$@"
+            fi
+        fi
     fi
-}
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_bridge "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
-    exit 127
+    printf '[agent-bridge] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.\n' >&2
+    exit 126
 fi
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_bridge "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_bridge "$@"
-fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
-fi
-exit "$_rc"
+export AGENT_BRIDGE_INSTALL_DIR="$_root"
+export AGENT_BRIDGE_CONFIG_DIR="$_root"
+export AGENT_BRIDGE_PAYLOAD_ROOT="$_payload"
+exec bash "$_payload/scripts/runtime-gate.sh" "$@"
 STUB
     chmod +x "$BINSTUB"
     _ok "Binstub: $BINSTUB (self-provisioning)"

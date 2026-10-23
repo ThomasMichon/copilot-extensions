@@ -2147,38 +2147,67 @@ function Write-Binstubs {
         return
     }
     $rootLit = $InstallDir -replace "'", "''"
+    $sourceRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $sourceLit = $sourceRoot -replace "'", "''"
     $ps1 = @'
+$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $env:PYTHONUTF8 = '1'
 $_root = '__ROOT__'
-$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-# Windows PowerShell marks -File's redirected stdin as pipeline input, but
-# that invocation has no caller line. Defer reading object input so the raw
-# native pipe is never eagerly decoded by a reference to the automatic variable.
+# -File's redirected native stdin is not an object pipeline.
 $_pipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
-function _Resolve-Py {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
-    return $AgentRtPy
-}
-$_py = _Resolve-Py
-if ($_py) { if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_py -m agent_bridge @args } else { & $_py -m agent_bridge @args }; exit $LASTEXITCODE }
-if ($env:AGENT_BRIDGE_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-bridge] runtime not provisioned (AGENT_BRIDGE_NO_SELFPROVISION set).'); exit 1 }
+$_source = '__SOURCE__'
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-bridge] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
-[Console]::Error.WriteLine('[agent-bridge] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-bridge eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-$_py = _Resolve-Py
-if ($_py) { if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_py -m agent_bridge @args } else { & $_py -m agent_bridge @args }; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-bridge] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
-exit 1
-'@ -replace '__ROOT__', $rootLit
-    [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($false)))
+$_payload = $_snap
+# Older ordinary snapshots have no source receipt. Prefer their exact publisher
+# while it exists; never discover a different marketplace through PATH or a glob.
+if (-not $_snap -or -not [IO.File]::Exists((Join-Path $_snap 'snapshot-provenance.json'))) {
+    $_payload = if ([IO.File]::Exists((Join-Path $_source 'scripts\runtime-gate.ps1'))) { $_source } else { '' }
+}
+$_gate = if ($_payload) { Join-Path $_payload 'scripts\runtime-gate.ps1' } else { '' }
+if (-not $_gate -or -not [IO.File]::Exists($_gate)) {
+    if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
+        $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+        if ([IO.File]::Exists($_resolver) -and
+            (Select-String -LiteralPath $_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+            $env:AGENT_RT_ROOT = $_root
+            $AgentRtPy = $null
+            . $_resolver -TraceMode ready
+            if ($AgentRtPy) {
+                $env:AGENT_BRIDGE_INSTALL_DIR = $_root
+                $env:AGENT_BRIDGE_CONFIG_DIR = $_root
+                $env:AGENT_BRIDGE_CONNECT_LOG = Join-Path $_root 'logs\connect.log'
+                Remove-Item Env:AGENT_BRIDGE_INSTALLATION_ID -ErrorAction SilentlyContinue
+                $_nativeArgs = $args
+                $_argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+                if (-not $_argumentMode -or $_argumentMode -eq 'Legacy') {
+                    $_nativeArgs = @($args | ForEach-Object {
+                        '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+                    })
+                }
+                $_previousEap = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try {
+                    if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $AgentRtPy -m agent_bridge @_nativeArgs } else { & $AgentRtPy -m agent_bridge @_nativeArgs }
+                } finally {
+                    $ErrorActionPreference = $_previousEap
+                }
+                exit $LASTEXITCODE
+            }
+        }
+    }
+    [Console]::Error.WriteLine('[agent-bridge] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.')
+    exit 126
+}
+$env:AGENT_BRIDGE_INSTALL_DIR = $_root
+$env:AGENT_BRIDGE_CONFIG_DIR = $_root
+$env:AGENT_BRIDGE_PAYLOAD_ROOT = $_payload
+if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_gate @args } else { & $_gate @args }
+exit $LASTEXITCODE
+'@
+    $ps1 = $ps1.Replace('__ROOT__', $rootLit).Replace('__SOURCE__', $sourceLit)
+    [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($true)))
 
     # cmd fallback: delegate entirely to the .ps1 binstub so resolution stays
     # uniform with the canonical resolve-runtime.ps1 chain and self-provisioning

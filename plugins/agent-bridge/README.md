@@ -581,6 +581,15 @@ inherited as bytes, including framed carrier traffic and quoted, multiline
 `--prompt-file -` bodies; an actual PowerShell object pipeline remains text
 input rather than a binary transport.
 
+Cold first use checks the selected installation's runtime-deployment policy
+before provision traces, status, roots or locks, then revalidates after acquiring
+the provision lock. Healthy managed runtimes remain callable without publication
+permission. Missing or older admission/resolver support reports readiness instead
+of provisioning. Generated global wrappers retain the exact publisher or an
+owned snapshot; if neither is available, only a healthy legacy runtime may run
+through its deployed resolver. A requested installation context never falls
+back to that legacy runtime.
+
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: daemon and service
 launchers, picker pivots, remote commands, provider manifests and provider

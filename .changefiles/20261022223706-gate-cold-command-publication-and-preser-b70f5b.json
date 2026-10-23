@@ -1,0 +1,9 @@
+{
+  "comment": "Gate cold command publication and preserve healthy retained-runtime invocation",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

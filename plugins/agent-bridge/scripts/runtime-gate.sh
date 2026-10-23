@@ -31,10 +31,15 @@ json_get() {
     LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v "query_path=$2" <<<"$1"
 }
 
+json_type() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" <<<"$1"
+}
+
 resolve_runtime() {
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
     # shellcheck source=/dev/null
     . "$RUNTIME_RESOLVER"
 }
@@ -63,6 +68,10 @@ run_runtime() {
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&
    -f "$INSTALLER" ]] || {
     printf '[agent-bridge] installation-context runtime support is unavailable.\n' >&2
+    exit 126
+}
+grep -Fq '# Trace contract: normal/read-only/ready-v1' "$RUNTIME_RESOLVER" || {
+    printf '[agent-bridge] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.\n' >&2
     exit 126
 }
 
@@ -144,7 +153,9 @@ elif [[ ( "$RESOLUTION_STATUS" == ready &&
     VALIDATED_INSTALL_GENERATION="$(
         json_get "$VALIDATION" "$(json_path generation)" 2>/dev/null || true
     )"
-    [[ "$VALIDATED_INSTALL_GENERATION" == "$INSTALL_GENERATION" ]] || {
+    VALIDATED_RUNTIME_ROOT="$(json_get "$VALIDATION" "$(json_path pluginRoot)" 2>/dev/null || true)"
+    [[ "$VALIDATED_INSTALL_GENERATION" == "$INSTALL_GENERATION" &&
+       "$VALIDATED_RUNTIME_ROOT" == "$RUNTIME_ROOT" ]] || {
         printf '[agent-bridge] installation context generation does not match governance.\n' >&2
         exit 126
     }
@@ -152,6 +163,14 @@ else
     printf '[agent-bridge] installation context blocks invocation: status=%s reason=%s.\n' \
         "${RESOLUTION_STATUS:-invalid}" "${RESOLUTION_REASON:-invalid}" >&2
     exit 126
+fi
+
+if [[ -z "$CONTEXT" ]]; then
+    RUNTIME_ROOT="$(json_get "$RESOLUTION" "$(json_path legacy root)" 2>/dev/null || true)"
+    [[ "$RUNTIME_ROOT" == /* ]] || {
+        printf '[agent-bridge] installation context is missing the canonical legacy root.\n' >&2
+        exit 126
+    }
 fi
 
 resolve_runtime
@@ -164,6 +183,57 @@ if [[ -n "${AGENT_BRIDGE_NO_SELFPROVISION:-}" ]]; then
     exit 1
 fi
 
+assert_runtime_publication() {
+    local -a PUBLICATION_ARGS=(
+        probe-plugin-publication --payload-root "$PAYLOAD_ROOT"
+        --plugin-id agent-bridge --legacy-root "$RUNTIME_ROOT"
+    )
+    if [[ -n "$CONTEXT" ]]; then
+        PUBLICATION_ARGS+=(--context "$CONTEXT" --durable-home "$VALIDATION_DURABLE_HOME")
+    fi
+    local PUBLICATION="" PUBLICATION_RC=0 PUBLICATION_ROOT_PATH PUBLICATION_STATUS
+    PUBLICATION="$(bash "$MODE_RUNNER" "${PUBLICATION_ARGS[@]}")" || PUBLICATION_RC=$?
+    PUBLICATION_ROOT_PATH="$(json_path legacy root)"
+    [[ -z "$CONTEXT" ]] || PUBLICATION_ROOT_PATH="$(json_path runtimeRoot)"
+    if [[ "$PUBLICATION_RC" != 0 ||
+          "$(json_type "$PUBLICATION" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)" != boolean ||
+          "$(json_get "$PUBLICATION" "$(json_path deployment allowPluginPublication)" 2>/dev/null || true)" != true ||
+          "$(json_get "$PUBLICATION" "$PUBLICATION_ROOT_PATH" 2>/dev/null || true)" != "$RUNTIME_ROOT" ||
+          "$(json_get "$PUBLICATION" "$(json_path deployment path)" 2>/dev/null || true)" != "$RUNTIME_ROOT/runtime-deployment.json" ]]; then
+        printf '[agent-bridge] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' \
+            "$PUBLICATION" >&2
+        exit 3
+    fi
+    if [[ -n "$CONTEXT" ]]; then
+        PUBLICATION_STATUS="$(json_get "$PUBLICATION" "$(json_path status)" 2>/dev/null || true)"
+        if [[ ( "$PUBLICATION_STATUS" != ready && "$PUBLICATION_STATUS" != deactivation-required ) ||
+              "$(json_get "$PUBLICATION" "$(json_path actualMode)" 2>/dev/null || true)" != namespaced ||
+              "$(json_get "$PUBLICATION" "$(json_path context)" 2>/dev/null || true)" != "$CONTEXT" ||
+              "$(json_get "$PUBLICATION" "$(json_path installGeneration)" 2>/dev/null || true)" != "$INSTALL_GENERATION" ]]; then
+            printf '[agent-bridge] Runtime publication refused: %s Decision no longer admits the validated installation context.\n' \
+                "$PUBLICATION" >&2
+            exit 3
+        fi
+    else
+        local LEGACY_PUBLICATION="" LEGACY_PUBLICATION_RC=0
+        LEGACY_PUBLICATION="$(bash "$MODE_RUNNER" probe-legacy --payload-root "$PAYLOAD_ROOT" \
+            --plugin-id agent-bridge --legacy-root "$RUNTIME_ROOT")" || LEGACY_PUBLICATION_RC=$?
+        if [[ "$LEGACY_PUBLICATION_RC" != 0 ||
+              "$(json_type "$LEGACY_PUBLICATION" "$(json_path allowMutation)" 2>/dev/null || true)" != boolean ||
+              "$(json_get "$LEGACY_PUBLICATION" "$(json_path allowMutation)" 2>/dev/null || true)" != true ||
+              "$(json_get "$LEGACY_PUBLICATION" "$(json_path legacy root)" 2>/dev/null || true)" != "$RUNTIME_ROOT" ]]; then
+            printf '[agent-bridge] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' \
+                "$LEGACY_PUBLICATION" >&2
+            exit 3
+        fi
+    fi
+}
+
+assert_runtime_publication
+resolve_runtime normal
+if [[ -n "$AGENT_RT_PY" ]]; then
+    run_runtime "$@"
+fi
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
 _lock_link=""
@@ -207,6 +277,7 @@ if [[ -n "$AGENT_RT_PY" ]]; then
     trap - EXIT INT TERM
     run_runtime "$@"
 fi
+assert_runtime_publication
 printf '%s\n' '[agent-bridge] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.' >&2
 printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' \
     'agent-bridge' "$STATUS_PATH" >&2
