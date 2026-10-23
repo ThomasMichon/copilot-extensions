@@ -1074,6 +1074,30 @@ plugin installer to write into Manager-owned state. See
 The contract also lets one available contribution designate the initial home
 pivot and lets providers declare view-scoped actions alongside row actions, so
 the Manager does not need a provider-specific home or "New" path.
+Forms may declare read-only request preparation and exact receipt commands.
+Manager retains the complete original request before sending it, including
+file and directory publication barriers; a failed barrier prevents Submit.
+Identical retries re-establish those barriers before invoking Submit; receipt
+reads remain available when storage is unavailable.
+Recovered submissions refresh the original provider's original scope even
+when command output leaves acceptance uncertain; receipt-only reads do not
+mutate the display cache.
+New parent directories are published write-through on Windows; POSIX writes
+sync the containing directory and each newly published parent's entry, not
+unrelated existing ancestors. Both platforms stage a local pending marker
+before publishing a new directory; a leftover marker requires a successful
+parent-directory flush before the directory can be reused.
+Directory publication is exclusive, so concurrent writers cannot replace
+another writer's new empty directory; unavailable exclusive-rename or flush
+primitives fail closed.
+Inspection loads observations
+off the UI thread and reports unreadable observations without hiding the
+original request. **Retained
+responses** (`Ctrl+Shift+R` from any top-level view) remains reachable after
+restart, card/row removal or provider removal. It supports read-only inspection,
+explicit owner receipt checks and a separately confirmed identical retry;
+changed/unavailable providers leave recovery read-only. Local records and
+command observations are not proof of acceptance or answer consumption.
 Available pivot contributions appear beside Worktrees in the Picker. Their list
 commands run in background workers, so the UI opens before cross-process reads
 finish; each pivot keeps its own cached rows and loading/error/empty state, and

@@ -246,6 +246,7 @@ class RegisteredPivot:
     create_action: CreateAction | None = None
     view_actions: tuple[PivotAction, ...] = ()
     placement: str = "left"
+    source_owner: str | None = None
 
     @property
     def account_scoped(self) -> bool:
@@ -410,8 +411,10 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
     if not isinstance(data, Mapping):
         raise ManifestError("manifest root must be a JSON object")
     from worktree_manager.configuration_preview import validate_preview_actions
+    from worktree_manager.form_requests import validate_request_placement
     try:
         validate_preview_actions(data)
+        validate_request_placement(data)
     except ValueError as exc:
         raise ManifestError(str(exc)) from exc
 
@@ -479,6 +482,8 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         kind = a.get("kind")
         if "draft" in a and kind != "form":
             raise ManifestError(f"`actions[{i}].draft` requires a form action")
+        if "request" in a and kind != "form":
+            raise ManifestError(f"`actions[{i}].request` requires a form action")
         form: Mapping[str, object] | None = None
         card: Mapping[str, object] | None = None
         if kind == "internal":
@@ -516,6 +521,9 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
             try:
                 if a.get("draft") is not None:
                     form["draft"] = parse_draft(a["draft"])
+                if a.get("request") is not None:
+                    from worktree_manager.form_requests import parse_request
+                    form["request"] = parse_request(a["request"])
             except ValueError as exc:
                 raise ManifestError(str(exc)) from exc
         elif kind == "card":

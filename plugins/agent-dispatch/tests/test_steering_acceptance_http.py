@@ -266,8 +266,11 @@ def test_both_native_contributions_forward_the_owner_revision(name):
     root = Path(__file__).resolve().parents[1]
     document = json.loads((root / "pivots" / name).read_text("utf-8"))
     action = next(action for action in document["actions"] if action["key"] == "steer")
-    index = action["run"].index("--expected-revision")
-    assert action["run"][index + 1] == "{steering_revision}"
+    prepare = action["request"]["prepare"]
+    index = prepare.index("--expected-revision")
+    assert prepare[index + 1] == "{steering_revision}"
+    assert action["run"][-2:] == ["--prepared-json", "{json.prepared_request}"]
+    assert action["request"]["receipt"][-2:] == ["--prepared-json", "{json.prepared_request}"]
 
 
 @pytest.mark.parametrize("scoped", [False, True])

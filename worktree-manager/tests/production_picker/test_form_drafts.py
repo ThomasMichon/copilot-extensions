@@ -345,7 +345,13 @@ def test_local_persistence_failure_never_dismisses_or_invokes_provider(tmp_path,
     from worktree_manager.production_picker.picker_tui.steering import SubmitErrorScreen
 
     monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path))
-    monkeypatch.setattr(form_draft_storage.os, "replace", lambda *args: (_ for _ in ()).throw(OSError("write denied")))
+    def denied(*_args, **_kwargs):
+        raise OSError("write denied")
+
+    if form_draft_storage.os.name == "nt":
+        monkeypatch.setattr(form_draft_storage, "_windows_move", denied)
+    else:
+        monkeypatch.setattr(form_draft_storage.os, "replace", denied)
     calls = []
     form = PivotFormScreen(CARD, FIELDS, "Answer", task_id="same-id", draft_binding=binding(),
                            on_clear_draft=lambda: calls.append("must not run"))

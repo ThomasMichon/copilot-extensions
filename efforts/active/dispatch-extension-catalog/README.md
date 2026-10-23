@@ -1222,3 +1222,25 @@ authorized installed proof remain distinct obligations.
   row-independent recovery surface remain next. Current-head review and
   required CI are still required before merge. No live task, activation,
   installed rollout or independent graphical parity is claimed.
+
+### 2026-10-23 - Prepared original requests merged; generic recovery adoption next
+
+- #8107 merged at 05:48Z as `9d5854ee82c81e4baa991d6d056e28108add8f3e`.
+  Exact head `72a44a61cfc86d4b51c04a5d5ef63a7945ca1003` was approved,
+  with no review threads and complete green required CI. #7141 and #7091
+  remain open; this effort remains Active.
+- Re-read both canonical Plans and Validation Plans. The owner-side dependency
+  is delivered at source: read-only preparation, complete original request
+  data and existing-scope-bound submit/receipt inspection. Final focused
+  prepared-request validation passed 53 tests, including native fresh-process
+  replay; the broader selections passed 150 and 90. Lint, install contracts
+  and unchanged module ceilings passed.
+- Next: declare generic prepare/receipt operations in attributed form
+  contributions; preserve the prepared request before command execution in
+  existing client recovery storage; offer explicit receipt reads and identical
+  retries independently of current cards or bounded board rows. Re-resolve
+  current provider/action authority before use; legacy, corrupt or changed-scope
+  records remain visible read-only, never automatically applied or erased.
+- No installed adoption, source activation, live task effect or release proof
+  follows from this merge. All broader parity, template and mapped-production
+  obligations remain open.

@@ -2530,8 +2530,13 @@ agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "
   or authorization; clients must still resolve their current trusted provider.
   Failed/missing/unverifiable reads leave acceptance uncertain. Retain the
   original data; do not regenerate an ID, assume failure, or retarget a new card.
-  This API adds no task or receipt store. It does not by itself provide the
-  Manager's planned row-independent recovery UI.
+  This API adds no task or receipt store. Both native Manager task categories
+  declare Prepare, prepared Submit and exact receipt commands. Manager retains
+  the original request before submission and exposes **Retained responses**
+  without a current board row; `Ctrl+Shift+R` also reaches it after the provider
+  pane disappears. Receipt checks are read-only and identical retries ask for
+  confirmation. Local observations are not acceptance authority; current
+  contribution attribution and the original owner scope are checked again.
 - **Safe to retry on an ambiguous timeout.** `submit_steer`'s own write is a
   single fast local transaction, but the full HTTP round trip can still
   exceed a client's request timeout under load even though the write already

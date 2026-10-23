@@ -484,7 +484,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         self.app.push_screen(screen, _after)
     def _run_pivot_form_submit(
         self, reg, action, ctx, title, values, *, draft_binding=None,
-        draft_path=None, draft_cleanup=None,
+        draft_path=None, draft_cleanup=None, retained_request=None,
     ):
         """Run a submitted form off the render flow with single-pass values.
 
@@ -495,11 +495,19 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         """
         from . import pivots as _pivots
 
+        if (action.form or {}).get("request") and retained_request is None:
+            self._prepare_pivot_form_submit(
+                reg, action, ctx, title, values, draft_binding=draft_binding,
+                draft_path=draft_path, draft_cleanup=draft_cleanup,
+            )
+            return
         rt = self._pivot_runtime(reg)
         argv = _pivots.format_form_template(action.run, ctx, values)
         task_id = ctx.get("task_id")
-        scope = self._pivot_scope_key()
-        text_result = getattr(action, "result_view", None) == "text"
+        scope = (
+            "" if reg.account_scoped else str(ctx.get("machine") or "")
+        ) if retained_request is not None else self._pivot_scope_key()
+        text_result = retained_request is not None or getattr(action, "result_view", None) == "text"
         result_screen = None
 
         prog = {
@@ -526,10 +534,14 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
 
         def _work():
             try:
-                ok, msg = (
-                    rt.run_resolved(argv, preserve_output=True) if text_result
-                    else rt.run_resolved(argv)
-                )
+                if retained_request is not None:
+                    from .engine_form_requests import run_retained_request
+                    ok, msg = run_retained_request(*retained_request)
+                else:
+                    ok, msg = (
+                        rt.run_resolved(argv, preserve_output=True) if text_result
+                        else rt.run_resolved(argv)
+                    )
             except Exception as exc:  # never let a delivery attempt vanish silently
                 ok, msg = False, f"{type(exc).__name__}: {exc}"
             else:
@@ -537,6 +549,8 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
                     rt.invalidate()
                 except Exception:
                     pass
+            if retained_request is not None:
+                msg = (msg or "") + f"\n\nOriginal request retained at: {retained_request[0]}"
             return ok, msg
 
         def _done(result):
