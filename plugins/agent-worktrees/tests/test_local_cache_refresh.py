@@ -181,7 +181,9 @@ def test_missing_payload_does_not_withhold_independent_guidance(copy_workspace, 
     assert not result.reused
 
 
-@pytest.mark.parametrize("publisher", ["backup", "foreground", "foreground-partial", "during-probe"])
+@pytest.mark.parametrize("publisher", [
+    "backup", "foreground", "foreground-partial", "during-probe", "post-copy-failure",
+])
 def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, monkeypatch, publisher):
     from agent_worktrees import local_cache_worker
 
@@ -217,8 +219,20 @@ def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, mo
         assert lcr.prepare_for_launch(root).changed == 1
     directory = lcr._worker_directory(root)
     directory.mkdir(exist_ok=True)
+    if publisher == "post-copy-failure":
+        from agent_worktrees import static_preparation
+        original_check = static_preparation.require_git_state
+
+        def fail_after_copy(*args, **kwargs):
+            if output.exists():
+                raise ValueError("fixture post-copy verification failed")
+            return original_check(*args, **kwargs)
+
+        monkeypatch.setattr(static_preparation, "require_git_state", fail_after_copy)
     if publisher != "during-probe":
-        assert local_cache_worker.run(root, directory) == (1 if publisher == "foreground-partial" else 0)
+        assert local_cache_worker.run(root, directory) == (
+            1 if publisher in ("foreground-partial", "post-copy-failure") else 0
+        )
     script = Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py"
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_WORKTREES_NUDGE="off")
 
@@ -235,8 +249,16 @@ def test_late_worker_completion_reaches_actual_post_tool_hook(copy_workspace, mo
     notice = post()["additionalContext"]
     assert "Restart/new context is required" in notice
     assert "not proof of model admission" in notice
+    if publisher == "foreground-partial":
+        assert "incomplete" in notice and "Retain reviewed fallback" in notice
     assert not post()
     assert output.read_bytes() == b"fresh guidance"
+    if publisher == "post-copy-failure":
+        assert "failed" in notice and "repair" in notice
+        monkeypatch.setattr(static_preparation, "require_git_state", original_check)
+        repaired = lcr.prepare_for_launch(root)
+        assert repaired.status == "ready"
+        assert lcr.prepare_for_launch(root).reused
 
 
 def test_probe_timeout_still_admits_bounded_backup(copy_workspace, monkeypatch):

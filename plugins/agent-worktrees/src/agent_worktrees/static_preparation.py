@@ -144,7 +144,7 @@ def publication_revision(root: Path) -> str:
 
 
 def record_publication(root: Path, *, changed: bool) -> str:
-    """Record actual generated-file writes, independently of readiness reuse."""
+    """Record a possible output mutation before writes, never complete readiness."""
     if not changed:
         return publication_revision(root)
     from .local_cache_worker import _write
@@ -250,6 +250,7 @@ def read(
             not matches(data["inputs"], deadline=deadline) or not matches(data["outputs"], deadline=deadline)
             or data.get("git") != git_state(root, deadline=deadline)
             or data["generation"] != generation(selection, data["inputs"])
+            or data.get("publication_revision", "") != publication_revision(root)
         ):
             return None
         _check(deadline)

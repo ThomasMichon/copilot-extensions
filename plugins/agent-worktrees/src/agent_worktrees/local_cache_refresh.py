@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import subprocess
 import sys
@@ -34,6 +34,7 @@ class RefreshResult:
     reused: bool = False
     elapsed_ns: int | None = None
     publication_revision: str = ""
+    counts_known: bool = True
 
     @property
     def diagnostic(self) -> str:
@@ -41,6 +42,8 @@ class RefreshResult:
             f"{self.changed} installed, {self.unchanged} unchanged, "
             f"{self.removed} removed, {self.warnings} warnings, {self.blocking} failures"
         )
+        if not self.counts_known:
+            counts = f"publication counts unavailable, {self.blocking} failures"
         return f"[local-guidance] {self.status}: {counts}" + (f"; {self.detail}" if self.detail else "")
 
 
@@ -140,11 +143,13 @@ def refresh_local_cache(
     from .static_instructions import publish
 
     started = time.monotonic_ns()
+    root = None
     deadline = time.monotonic() + timeout if timeout is not None else None
     try:
         with step("Copying declared instructions", enabled=timeout is None):
+            root = _checkout_root(repo_root).resolve()
             published = publish(
-                _checkout_root(repo_root).resolve(), home or Path.home(), deadline=deadline,
+                root, home or Path.home(), deadline=deadline,
             )
         result = RefreshResult(
             "partial" if published.failures else "ready",
@@ -155,9 +160,16 @@ def refresh_local_cache(
             elapsed_ns=time.monotonic_ns() - started,
         )
     except (TimeoutError, subprocess.TimeoutExpired) as exc:
-        result = RefreshResult("timeout", blocking=1, detail=f"instruction copy timed out: {exc}")
+        result = RefreshResult("timeout", blocking=1, counts_known=False, detail=f"instruction copy timed out: {exc}")
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
-        result = RefreshResult("failed", blocking=1, detail=f"instruction copy failed: {exc}")
+        result = RefreshResult("failed", blocking=1, counts_known=False, detail=f"instruction copy failed: {exc}")
+    if not result.counts_known:
+        from .static_preparation import publication_revision
+
+        result = replace(
+            result, publication_revision=publication_revision(root) if root is not None else "",
+            elapsed_ns=time.monotonic_ns() - started,
+        )
     if timeout is None:
         print(result.diagnostic, file=sys.stderr, flush=True)
     return _report(result)

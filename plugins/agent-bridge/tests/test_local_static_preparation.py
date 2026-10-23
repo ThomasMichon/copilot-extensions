@@ -54,6 +54,22 @@ async def test_standalone_compatibility_is_only_used_without_owner(tmp_path, mon
 
 
 @pytest.mark.asyncio
+async def test_failed_owner_preserves_unknown_publication_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr(owner, "_agent_worktrees_launch_prefix", lambda **kw: ["owner"])
+    value = {
+        "status": "failed", "changed": 0, "unchanged": 0, "removed": 0,
+        "warnings": 0, "blocking": 1, "detail": "publication failed", "counts_known": False,
+    }
+    monkeypatch.setattr(preparation, "_run_bounded_result", AsyncMock(return_value=legacy._RunResult(
+        "completed", json.dumps({"projections": value}), 3,
+    )))
+    result = await preparation.prepare_for_launch(tmp_path)
+    assert result.counts_known is False
+    assert "counts unavailable" in result.diagnostic
+    assert "0 installed" not in result.diagnostic
+
+
+@pytest.mark.asyncio
 async def test_refused_owner_never_falls_back_to_another_identity(tmp_path, monkeypatch):
     from agent_bridge import _peer_launch
 

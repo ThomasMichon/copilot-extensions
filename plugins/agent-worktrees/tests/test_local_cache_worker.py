@@ -137,7 +137,8 @@ def test_completion_status_preserves_failure_and_admission(
     assert state["result"]["model_admission"] == "unknown"
 
 
-def test_abnormal_exit_reaches_post_tool_failure_notice(tmp_path, monkeypatch):
+@pytest.mark.parametrize("mutation_started", [False, True])
+def test_abnormal_exit_reaches_post_tool_failure_notice(tmp_path, monkeypatch, mutation_started):
     from pathlib import Path
     from test_nudge_status import nudge
 
@@ -150,15 +151,23 @@ def test_abnormal_exit_reaches_post_tool_failure_notice(tmp_path, monkeypatch):
     directory = worker.metadata_directory(root)
     directory.mkdir()
     worker.watch_completion(root, "reaper-session")
+    if mutation_started:
+        from agent_worktrees import static_preparation
+        static_preparation.record_publication(root, changed=True)
     worker._save(directory, {
         "version": 1, "root": str(root), "request_id": "admitted",
         "phase": "running", "owner": worker._owner(os.getpid()),
     })
     worker._reap(SimpleNamespace(wait=lambda: 17), root, directory, "admitted")
     payload = {"sessionId": "reaper-session", "cwd": str(root)}
-    assert "Backup refresh failed" in nudge.decide(
+    notice = nudge.decide(
         payload, home=home, env={"AGENT_WORKTREES_NUDGE": "off"},
     )
+    assert "Backup refresh failed" in notice
+    if mutation_started:
+        assert "Restart/new context is required" in notice and "repair" in notice
+    else:
+        assert "Restart/new context" not in notice
     assert nudge.decide(payload, home=home, env={"AGENT_WORKTREES_NUDGE": "off"}) is None
     assert not (session / "local-guidance-watch.json").exists()
 

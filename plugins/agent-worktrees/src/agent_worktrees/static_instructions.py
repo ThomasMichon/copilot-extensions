@@ -435,7 +435,18 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
             if paths - set(ignored.split(b"\0")):
                 raise ValueError("instruction output namespace is not completely ignored by Git")
         preparation.require_git_state(root, validated_git, deadline=deadline)
+        revision = preparation.publication_revision(root)
+        mutation_started = False
+
+        def note_mutation() -> None:
+            nonlocal revision, mutation_started
+            if not mutation_started:
+                revision = preparation.record_publication(root, changed=True)
+                mutation_started = True
+
         for relative in sorted(stale):
+            _remaining(deadline)
+            note_mutation()
             _remaining(deadline)
             (output / relative).unlink()
         retained_parents = {
@@ -464,6 +475,8 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
                     temporary = Path(handle.name)
                     handle.write(content)
                 _remaining(deadline)
+                note_mutation()
+                _remaining(deadline)
                 os.replace(temporary, path)
             finally:
                 if temporary is not None:
@@ -473,7 +486,6 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
         if not preparation.matches(inputs, deadline=deadline):
             raise ValueError("instruction sources changed during publication; retry preparation")
         preparation.require_git_state(root, validated_git, deadline=deadline)
-        revision = preparation.record_publication(root, changed=bool(changed or stale))
         identity = ""
         if not desired.failures:
             identity = preparation.save(

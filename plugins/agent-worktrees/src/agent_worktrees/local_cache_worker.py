@@ -83,10 +83,15 @@ def _gate(directory: Path) -> SingleInstance:
     return SingleInstance(directory, service="local-guidance")
 
 
-def _failed(state: dict) -> None:
+def _failed(state: dict, root: Path) -> None:
+    from .static_preparation import publication_revision
+
     state.update(
         phase="failed", completed_at=time.time(),
-        result={"status": "failed", "model_admission": "unknown"},
+        result={
+            "status": "failed", "model_admission": "unknown", "counts_known": False,
+            "publication_revision": publication_revision(root),
+        },
     )
 
 
@@ -107,7 +112,7 @@ def _reap(process: subprocess.Popen, root: Path, directory: Path, request_id: st
                 )
             )
             if state and state["request_id"] == request_id and not terminal:
-                _failed(state)
+                _failed(state, root)
                 _log(directory, f"[local-guidance] failed: worker exited {code} before publication")
                 _save(directory, state)
         except (OSError, ValueError, AlreadyRunningError) as exc:
@@ -150,7 +155,7 @@ def queue(root: Path, directory: Path):
             state.update(phase="queued", owner=_owner(process.pid))
             _save(directory, state)
         except (OSError, ValueError) as exc:
-            _failed(state)
+            _failed(state, root)
             _log(directory, f"[local-guidance] failed: dispatch failed: {exc}")
             _save(directory, state)
             if process is not None:
@@ -218,11 +223,13 @@ def run(root: Path, directory: Path, request_id: str | None = None) -> int:
             phase="done" if result.status in ("ready", "partial", "skipped") else "failed",
             completed_at=time.time(),
             result={
-                "status": result.status, "installed": result.changed,
-                "unchanged": result.unchanged, "removed": result.removed,
+                "status": result.status, "installed": result.changed if result.counts_known else None,
+                "unchanged": result.unchanged if result.counts_known else None,
+                "removed": result.removed if result.counts_known else None,
+                "counts_known": result.counts_known,
                 "generation": result.generation, "model_admission": "unknown",
                 "publication_revision": result.publication_revision,
-                "restart_required": bool(result.changed or result.removed),
+                "restart_required": bool(result.changed or result.removed) if result.counts_known else None,
             },
         )
         _save(directory, current)

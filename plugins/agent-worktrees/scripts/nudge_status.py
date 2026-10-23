@@ -168,17 +168,33 @@ def _late_guidance_notice(payload: dict, home: Path) -> str | None:
         if status not in ("ready", "partial", "skipped", "failed", "timeout"):
             return None
         watch_path.unlink()
-        if status in ("failed", "timeout"):
-            return "[local-guidance] Backup refresh failed; retain reviewed fallback. Model admission is unknown."
         revision = result.get("publication_revision")
-        if result.get("restart_required") is True or (
+        changed = result.get("restart_required") is True or (
             isinstance(revision, str) and revision and revision != watch.get("publication_revision", "")
-        ):
+        )
+        if status in ("failed", "timeout"):
+            if changed:
+                return (
+                    "[local-guidance] Backup refresh failed after possible file changes. "
+                    "Retain reviewed fallback and repair preparation. Restart/new context is required "
+                    "before discovering refreshed guidance; file changes are not proof of model admission."
+                )
+            return "[local-guidance] Backup refresh failed; retain reviewed fallback. Model admission is unknown."
+        if changed:
             coverage = "partially refreshed" if status == "partial" else "refreshed"
+            description = (
+                f"Static guidance files {coverage} after session discovery."
+                if result.get("restart_required") is True
+                else "Static guidance preparation is incomplete after a possible late file change."
+                if status == "partial"
+                else "Static guidance was revalidated after a possible late file change."
+            )
+            fallback = "Retain reviewed fallback for unresolved sources. " if status == "partial" else ""
             return (
-                f"[local-guidance] Static guidance files {coverage} after session discovery. "
+                f"[local-guidance] {description} "
                 "Restart/new context is required to discover the refreshed guidance; "
                 "this is file publication, not proof of model admission. "
+                f"{fallback}"
                 "Do not restart automatically; preserve current work first."
             )
         if status == "partial":

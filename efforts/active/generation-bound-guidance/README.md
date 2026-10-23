@@ -181,6 +181,11 @@ coordinate the smallest additive owner API before changing another slice.
   identity, with a pre-spawn capability check and mismatch/access refusal.
   Five focused controls passed; native Darwin descendant scenarios remain
   explicitly unexecuted on this Windows worker and retained under #7943.
+- Preserved mutation evidence before output effects so post-copy verification
+  failure or abnormal exit cannot suppress the repair/restart notice. Failure
+  counts are marked unavailable rather than displayed as zero delivered files.
+  The failing real-output control now passes; focused results were Worktrees
+  13 passed and Bridge 4 passed.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

@@ -165,3 +165,12 @@ skips before correcting its Windows-only fake-signal setup; no production
 change was needed for that test harness correction. Two native Darwin
 descendant controls are source-preserved but unexecuted here and remain in
 #7943's open native acceptance.
+
+Post-copy failure evidence is covered separately: the actual output is written,
+verification then fails, and the post-tool notice still names repair plus
+restart/new-context requirements. A mutation revision is retained before output
+effects and failure counts are explicitly unavailable; a later successful
+reprepare restores reusable readiness. Focused results: **13 passed** in
+Worktrees and **4 passed** in Bridge. Abnormal exit after a mutation attempt
+uses the same conservative notice, without claiming that a failed refresh
+delivered a complete set.

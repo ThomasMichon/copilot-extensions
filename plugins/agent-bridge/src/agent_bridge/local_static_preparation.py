@@ -40,7 +40,7 @@ async def prepare_for_launch(repo_root: str | Path) -> RefreshResult:
         timeout=None, env=environment, retire_group=True,
     )
     if run.status != "completed":
-        return _report(RefreshResult(run.status, blocking=1, detail=run.detail))
+        return _report(RefreshResult(run.status, blocking=1, counts_known=False, detail=run.detail))
     try:
         value = json.loads(run.stdout)["projections"]
         if not isinstance(value, dict) or value.get("status") not in ("ready", "partial", "failed", "timeout"):
@@ -50,14 +50,17 @@ async def prepare_for_launch(repo_root: str | Path) -> RefreshResult:
             raise ValueError("invalid static preparation counts")
         if not isinstance(value.get("detail"), str):
             raise ValueError("invalid static preparation diagnostic")
+        if type(value.get("counts_known", True)) is not bool:
+            raise ValueError("invalid static preparation count availability")
         status = value["status"]
         if status == "ready" and run.returncode != 0:
             status = "failed"
         return _report(RefreshResult(
             status, **{key: value[key] for key in fields}, detail=value["detail"],
             generation=value.get("generation", ""), reused=value.get("reused", False),
+            counts_known=value.get("counts_known", True),
         ))
     except (ValueError, TypeError, KeyError) as exc:
         return _report(RefreshResult(
-            "failed", blocking=1, detail=f"static preparation owner: {exc}; {run.detail}",
+            "failed", blocking=1, counts_known=False, detail=f"static preparation owner: {exc}; {run.detail}",
         ))

@@ -78,6 +78,7 @@ class RefreshResult:
     removed: int = 0
     generation: str = ""
     reused: bool = False
+    counts_known: bool = True
 
     @property
     def diagnostic(self) -> str:
@@ -85,6 +86,8 @@ class RefreshResult:
             f"{self.changed} installed, {self.unchanged} unchanged, "
             f"{self.removed} removed, {self.warnings} warnings, {self.blocking} failures"
         )
+        if not self.counts_known:
+            counts = f"publication counts unavailable, {self.blocking} failures"
         suffix = f"; {self.detail}" if self.detail else ""
         return f"[local-guidance] {self.status}: {counts}{suffix}"
 

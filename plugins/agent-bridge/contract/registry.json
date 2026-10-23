@@ -392,9 +392,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py",
-          "sha256": "d04976287fe360108158cf878c8ee02e7195dd7b8fc6d56c6dfde224f28b8ec8",
+          "sha256": "b4c1b1fe5d047c41e8d1ee505dc7f1d6de0920b063edc8085c4628541778fa1b",
           "semantic": false,
-          "non_semantic_reason": "Implementation-only local static preparation reuse and process custody: internal results add generation/reuse fields; foreground waits retain nested Git in an owned group retired on cancellation or owner exit. Darwin birth identity uses the already-required psutil native backend; mismatched or unreadable identity still refuses group signals. HTTP fields, capability floors, wire fixtures and historical provenance are unchanged."
+          "non_semantic_reason": "Implementation-only static preparation and process custody: internal results carry generation/reuse and count-availability metadata; foreground waits retain nested Git in an owned group retired on cancellation or owner exit. Darwin uses the already-required psutil native birth reader, retaining mismatch/access refusal. HTTP fields, capability floors, wire fixtures and historical provenance are unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",

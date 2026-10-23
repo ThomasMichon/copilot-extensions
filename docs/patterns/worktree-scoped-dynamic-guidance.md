@@ -230,11 +230,17 @@ is not awakened and no restart is automatic. Written files, a successful hook
 result and an acknowledgment never assert that the running model admitted the
 new instructions.
 The watch captures an initial generated-file publication revision before its
-readiness probe. Actual generated-file writes advance that revision under the
-publication lock, including partial publications. Completion compares revisions,
+readiness probe. A prospective output mutation advances that revision under the
+publication lock before the first write or removal, including partial
+publications. It survives post-copy verification failure or abnormal exit;
+failed-publication counts remain explicitly unavailable. Complete readiness
+receipts also bind this revision, so failed mutation cannot reuse an older
+receipt. Completion compares revisions,
 not only the backup's own copy counts: a foreground publisher that finishes
 before the backup is still a late change requiring a restart notice. An
-unchanged backup does not invent a new publication revision.
+unchanged backup does not invent a new publication revision. Failure after
+possible changes reports repair and restart/new-context requirements while
+retaining reviewed fallback, never a successful refresh or model-admission claim.
 The watch timestamp precedes the probe as well, so a worker finishing during
 the probe is not discarded as an older completion. Abnormal worker exits
 persist a terminal timestamp and failure result for the same post-tool
