@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import re
 from urllib.parse import urlparse
 
 from . import output, tracking
@@ -128,6 +129,26 @@ def dirty_worktree_error(worktree_path: str, *, wt_exists: bool) -> str | None:
     )
 
 
+def _current_commit_ref(cwd: str) -> str | None:
+    """Resolve an existing HEAD and its checkout ref in one read."""
+    from . import git_ops
+
+    result = git_ops.git(
+        "rev-parse", "HEAD", "--abbrev-ref", "HEAD", cwd=cwd, check=False,
+    )
+    lines = result.stdout.splitlines()
+    if (
+        result.returncode != 0
+        or len(lines) != 2
+        or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", lines[0]) is None
+    ):
+        return None
+    ref = lines[1]
+    if ref and not ref.startswith("-") and not any(c.isspace() for c in ref):
+        return ref
+    return None
+
+
 def resolve_precondition_ref(
     feature: str,
     worktree_id: str,
@@ -171,8 +192,8 @@ def resolve_precondition_ref(
     from . import git_ops
     worktree_ref = f"worktree/{worktree_id}"
     if Path(worktree_path).exists() and cwd == worktree_path:
-        current = git_ops._get_current_branch_safe(cwd) or "HEAD"
-        if git_ops.ref_exists(current, cwd=cwd) and not _tracked_branch_ahead(
+        current = _current_commit_ref(cwd)
+        if current and not _tracked_branch_ahead(
             feature, worktree_id, current, cwd=cwd,
         ):
             return current

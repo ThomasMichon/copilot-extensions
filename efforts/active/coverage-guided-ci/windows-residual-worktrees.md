@@ -87,6 +87,41 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-CHECKOUT-REF one fresh checkout identity and existence query
+
+Below-altitude subprocess reduction: `resolve_precondition_ref` reads HEAD's
+complete object ID and the existing `--abbrev-ref HEAD` spelling in one Git
+invocation, instead of separately resolving the branch and probing its
+existence. Detached HEAD, ambiguous short names, tracked-branch-ahead checks
+and tracked-ref/feature/HEAD fallback order remain intact. Nonzero status,
+incomplete IDs or malformed output do not establish checkout evidence.
+Nothing is cached across calls.
+
+Real-Git controls cover attached and detached checkouts, a same-named tag,
+an unborn HEAD, a non-repository, exact one-query behavior, and subsequent
+checkout changes. Existing report strings and short-ref identities remain
+unchanged: an initial qualified-ref candidate changed four landing-report
+assertions and was corrected rather than relaxing those assertions.
+
+Native Windows validation uses exactly two workers and the unchanged
+30-second item deadline. The complete precondition and creation-gating
+modules plus all four affected landing-report cases pass: **118 passed**,
+**105.30 seconds including preparation and cleanup**. This is functional
+evidence, not unchanged-group or aggregate qualification. The additional
+fresh-checkout/unborn-fallback regression passes separately (**1 passed**,
+**12.02 seconds including preparation and cleanup**). The unchanged
+25-file normal group still exhausted its 240-second limit (251.25 seconds
+including cleanup); no timing waiver, selection change or completion claim
+follows from the complementary pass. Full same-head repeated qualification
+and the previously interrupted worker failure remain parent-owned.
+
+Documentation impact: no command, configuration, install, bootstrap or
+runtime contract changed. This ledger records the internal optimization and
+validation boundary; no additional user-facing documentation is needed.
+The real-Git tests exercise the consumer contract directly. A separate
+clean-room installer or external venue is not applicable to this local Git
+read-only optimization; no runtime rollout is performed.
+
 ### B-LANDING-VALIDATION graph queries validate their own revisions
 
 The PR-content landing fast path no longer starts a separate upstream

@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve checkout identity and existence in one fresh Git query",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
