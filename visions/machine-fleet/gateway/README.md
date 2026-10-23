@@ -17,6 +17,11 @@ The same Gateway core serves an ordinary container, a managed service host or a
 thin platform wrapper. Optional edge and identity adapters protect reach without
 making a provider, private inventory or hosting platform part of the core.
 
+The Gateway federates machine-owned facts through push and routes separately
+authorized requests back to their target owners. Observation, control and
+interactive terminal attachment are distinct capabilities, not one blanket
+grant implied by a connected machine.
+
 ## Concepts & Components
 
 - **Desired manifest:** owner-controlled service slots, API and UX namespaces,
@@ -49,6 +54,28 @@ outbound authenticated channels without publishing their own LAN-facing ports.
 Routes preserve declared HTTP, streaming and UX capabilities and their
 authorization semantics. Unsupported capabilities fail explicitly rather than
 turning the Gateway into an arbitrary URL, socket or command proxy.
+
+### push-federation-and-local-authority
+
+Origins promptly push committed observations so connected clients' remote and
+All views update without per-client polling of other machines. A machine still
+reads its own information from its local authority. The Gateway serves scoped
+remote observations with explicit provenance, freshness and coverage, not a
+claim that disconnected or delayed sources are current.
+
+### named-target-control-and-terminal-reach
+
+An admitted outbound channel can carry named requests to a target's existing
+worktree and session-host services, including workspace creation and agent
+launch. Those services perform current authorization, admission and execution
+and retain their original receipts and ownership. Gateway delivery alone is
+neither target acceptance nor operation completion.
+
+Console attachment is selected separately from the control route. SSH and an
+authorized terminal-only channel can present the same target-owned session;
+a lightweight browser renderer need not implement a full remote shell or
+become another session host. Input, observation and lifecycle control remain
+separate permissions. No terminal capability is inferred from service routing.
 
 ### nearly-all-configuration-is-live
 

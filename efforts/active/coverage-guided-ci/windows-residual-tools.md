@@ -94,6 +94,36 @@ the specific already-merged findings below.
 
 ## Named retained batches and explicit blocked owners
 
+### Subsequent admission: G-RETENTION only
+
+Admit S028/S033/S034 and only G-RETENTION's explicit S027/S029 subspans:
+remove the old `tempfile` import and local retention function, import the
+shared helper under the existing alias, and move its unchanged body plus
+required imports into `install_contract_guard.py`. The production
+`_check_runtime_retention(runtime)` call remains unchanged. This does not
+admit any G-PS-SCAN import, helper, consumer or test; mixed S027/S029 remain
+partitioned rather than becoming a combined scan/retention extraction.
+
+An AST comparison proves the entire moved body identical to current Dev.
+The existing real-runtime execution, construction-cleanup refusal and retained
+incomplete-slot refusal cases remain; alias identity is asserted explicitly.
+A new observing wrapper calls the real shared helper from the actual complete
+guard and proves exactly one canonical runtime invocation. It does not mock
+past any retention assertion.
+
+All five retention cases and the real install guard passed on native Windows,
+exactly two workers, no skips, 25.45 seconds including preparation/cleanup.
+The 30-second item deadline, 240-second diagnostic bound and default caps
+remain. Ruff and diff checks passed. These are focused consumer results,
+not full-module or full-plugin qualification.
+
+This is a below-altitude source relocation with no plugin payload,
+installer/runtime behavior, workflow policy or required-unit admission change;
+no changefile or external provisioning lane applies. The helper's module
+description now reflects its shared scope. Synthetic temporary slots exercise
+the clean consumer contract without touching an installed runtime. Existing
+runtime/usage docs remain accurate; review and required CI still gate merge.
+
 ### Subsequent admission: G-FEED
 
 This candidate admits only S025/S026/S062/S063 (`b6682f6cbc29`,

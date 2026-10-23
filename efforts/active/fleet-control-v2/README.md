@@ -230,6 +230,14 @@ constraint remains in force. The
 [observation contribution boundary](central-state-backing-store.md#owned-contract-lane)
 is an **agent-recommended follow-on**, not a new runtime assignment.
 
+The operator then clarified local-direct versus remote-Gateway observation,
+and proposed considering Gateway-routed creation with independently selected
+SSH or lightweight terminal attachment. The full verbatim capture and
+**agent-recommended design decomposition** are in
+[federation and console choice](federation-and-console.md). Observation routing
+is stated intent; the alternative control/console scheme does not itself
+assign runtime implementation, select a protocol or authorize SSH retirement.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -354,8 +362,10 @@ All detailed slices are **agent-recommended** and remain subject to review.
   publication positions coherently, without a rival task/worktree/claim writer.
   Isolated point-observation storage and bounded replay landed in #6685; actual
   authorized origin push and complete roster publication remain unimplemented.
-- [ ] Serve UX, CLI and API requests through one scoped current-state contract,
-  with snapshot/subscribe consistency, bounded recovery and isolated backpressure.
+- [ ] Serve remote UX, CLI and API observations through one scoped current-state
+  contract, retaining direct local-owner reads and an All view without duplicate
+  local origins; prove snapshot/subscribe consistency, bounded recovery and
+  isolated backpressure.
 - [ ] Prove authorized one-Gateway adoption with owned storage, preserved source
   responsibilities, explicit offline/gap states and no per-client fleet polling.
 
@@ -426,6 +436,20 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-22 - Federation read paths and independent console direction
+
+- Captured the operator's local-direct/remote-federated read rule and the
+  separately considered Gateway control/TTY scheme in the linked
+  [clarification](federation-and-console.md), without paraphrasing away either
+  the near-instant push objective or the caller's presentation choice.
+- Reconciled fleet, Gateway, SSH, target agency, session-hosting and venue
+  vision boundaries. A target-owned operation can be routed independently of
+  its console attachment; this does not select a replacement protocol or
+  transfer another source owner's implementation.
+- Retained explicit latency, authorization, retry and same-execution
+  attachment validation obligations. No runtime, provider, enrollment,
+  deployment or default mode changed, and no other agent was contacted.
 
 ### 2026-10-22 - Fleet, mesh and Gateway alignment review
 

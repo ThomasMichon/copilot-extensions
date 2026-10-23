@@ -1,8 +1,10 @@
-"""Lexical PowerShell checks used by the repository install-contract guard."""
+"""Shared checks used by the repository install-contract guard."""
 
 from __future__ import annotations
 
 import re
+import tempfile
+from pathlib import Path
 
 
 def declares_stamp_provision(text: str, ext: str) -> bool:
@@ -207,6 +209,45 @@ def is_ignored_scan_path(path) -> bool:
     persistent-environment sweep must not descend into (see
     ``check-install-contract.py``'s repo-wide backstop)."""
     return any(part in IGNORED_SCAN_DIR_NAMES for part in path.parts)
+
+
+def check_runtime_retention(runtime) -> None:
+    """Exercise the canonical lifetime contract without an installed runtime."""
+    with tempfile.TemporaryDirectory(prefix="runtime-retention-contract-") as temporary:
+        root = Path(temporary)
+        candidate = runtime.slot(root, "candidate")
+        payload = candidate / "payload"
+        payload.write_text("unchanged", encoding="utf-8")
+        with runtime.construction_lease(root, "candidate", timeout=0):
+            assert runtime.gc(root) == [], "GC removed a construction owner"
+            assert runtime.toss_incomplete(root) == [], "toss removed a construction owner"
+        with runtime.retention_lease(root, "candidate", timeout=0):
+            assert runtime.gc(root) == [], "GC removed a retained candidate"
+            assert runtime.toss_incomplete(root) == [], "toss removed a retained candidate"
+            try:
+                runtime.slot(root, "candidate", clean_incomplete=True)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("incomplete cleanup admitted a retained candidate")
+            assert payload.read_text(encoding="utf-8") == "unchanged"
+        assert runtime.toss_incomplete(root) == ["candidate"], "released candidate was not reclaimed"
+        marker = runtime.mark_complete(root, "candidate", payload_hash="same", pid=11)
+        before = marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns
+        runtime.mark_complete(root, "candidate", payload_hash="same", pid=22)
+        assert (marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns) == before, (
+            "matching completion rewrote immutable evidence"
+        )
+        try:
+            runtime.mark_complete(root, "candidate", payload_hash="different")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("numbered completion accepted conflicting content")
+        assert marker.read_bytes() == before[0], "conflict changed immutable evidence"
+        with runtime.retention_lease(root, "candidate", payload_hash="same", timeout=0):
+            runtime.activate(root, "candidate")
+        assert runtime.gc(root) == [], "GC removed the published candidate"
 
 
 def persistent_environment_violations(text: str) -> list[str]:

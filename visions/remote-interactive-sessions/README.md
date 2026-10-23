@@ -9,7 +9,7 @@
   venue provider.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -55,6 +55,12 @@ interactive-session capability merely by exposing daemon/task control. A provide
 offering interactive Gateway reach must explicitly satisfy this same reservation,
 launch, interaction, reattach, credentials, observation, and retirement contract;
 unsupported interaction remains visible rather than silently falling back to SSH.
+
+Creation/control and terminal attachment need not use the same transport.
+After a Gateway-routed request creates a target-owned session, the caller can
+choose SSH attachment or a supported terminal-only host channel and lightweight
+renderer. Both attach to the same execution and reservation identity; neither
+creates a parallel agent lifecycle or makes the Gateway the session host.
 
 This is deliberately an **explicit, per-request mode**, not a default execution
 shape most agents should reach for. Ordinary delegated/headless work continues
