@@ -1,4 +1,4 @@
-# Isolated scoped point reads
+# Isolated scoped observation reads
 
 `fleet_manager.observation_reader.ScopedObservationReader` composes the existing
 [admission library](runtime-admission.md) and trusted
@@ -6,6 +6,8 @@
 not a resident Gateway route, provider adapter, wire protocol or subscription.
 Default commands do not construct or invoke it. Importing it requires no
 optional cryptography dependency.
+Its explicit `read` method selects one point; `snapshot` selects a bounded
+point set from one committed local read view.
 
 ## Trusted owner boundary
 
@@ -48,7 +50,7 @@ a snapshot callback may also acquire it without changing lock order.
 
 ## One explicit correlated point
 
-The reader accepts exactly one explicit `ObservationRead` scope. Omitted,
+`read` accepts exactly one explicit `ObservationRead` scope. Omitted,
 empty, multi-branch and other request types refuse `unsupported-read`, rather
 than becoming broad or guard-only reads. Existing lower-level admission
 semantics for other callers do not change.
@@ -75,6 +77,40 @@ Explicit removals retain `projection-removed`. Older origin-generation rows
 remain `origin-resync-required`; their original generation is not relabeled.
 Storage errors propagate rather than becoming successful empty results.
 
+## Explicit point-set snapshots
+
+`snapshot(identity, request, role=..., installation=...)` accepts one to 64
+explicit correlated branches and returns a tuple of existing frozen
+`ScopedObservation` values in the request's canonical scope order. Omitted,
+empty, oversized and repeated origin/project/entity selections refuse
+`unsupported-read` before fence acquisition or storage access. Different field
+sets for the same entity are not implicitly merged.
+
+The same exact owner fence and authority binding apply. The entire request is
+authorized before any entity lookup; a forbidden branch with otherwise permitted
+points yields no partial retrieval. One permit and verifier result cover the
+whole finite batch. The store's trusted `read_points` seam uses one query-only
+SQLite transaction and one indexed current lookup per requested key, retaining
+complete row/binding validation rather than field-only SQL hydration.
+
+All returned points come from one central committed snapshot. Their individual
+source revisions and observation times need not be simultaneous, and the tuple
+does not imply complete machine/project/fleet coverage. Missing fields, explicit
+nulls, unobserved rows, projection removals and resync-required generations keep
+the same meanings as a point read. Unbound origins and corrupt/foreign/unavailable
+storage are errors, never partial successful tuples.
+
+The same fresh terminal completion checkpoint runs after all retrieval and
+projection, including on failure. Revocation, enrollment/scope changes, expiry,
+clock rollback or owner failure withhold the entire tuple and release permit
+capacity. No cursor, global position, export sequence, store/producer/installation
+identity or reusable grant is returned.
+
+The snapshot is only a bounded local read at completion. It adds no pagination,
+replay, persistent view session, All-view assembly, origin push or later
+wire-emission permission. In particular, the raw store's retention floor and
+cursors are not a scope-safe recovery contract.
+
 ## Completion, expiry and failure
 
 After lookup and result projection, `AdmissionAuthority.complete(permit, request)`
@@ -89,8 +125,15 @@ policy withhold a prepared result. There is no cached allow or implicit retry.
 The existing permit/request bounds do not extend and do not impose a human
 session countdown. Successful and failed terminal reads free permit capacity.
 
-The result describes one **local point read at completion**. It is not a bearer
-grant or permission to emit later. Wire emission, queued/asynchronous work,
-multi-point snapshot consistency, durable shared policy epochs and installed
-consumer adoption are outside this API. A future transport must prove its own
+The returned point or tuple describes a **local read at completion**. It is not
+a bearer grant or permission to emit later. Wire emission, queued/asynchronous work,
+durable shared policy epochs and installed consumer adoption are outside this
+API. A future transport must prove its own
 real execution/emission fence; it cannot queue this value as current authority.
+
+The reader/store/admission tests cover both APIs. A native separate-process
+writer proves a point-set snapshot cannot mix a concurrent committed update;
+an independent-point-read control demonstrates that mixed-state failure.
+A production-only child consumer verifies actual signed identity evidence and
+selected fields for two principals without importing test helpers. These are
+local library proofs, not Linux, resident-federation or live-provider adoption.

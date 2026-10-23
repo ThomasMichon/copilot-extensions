@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded authorized point-set observation snapshots with one committed SQLite read view and fresh terminal admission checks.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

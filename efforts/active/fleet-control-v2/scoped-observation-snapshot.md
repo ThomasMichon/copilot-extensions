@@ -1,5 +1,8 @@
 # Isolated scoped point-set snapshot
 
+**Status:** Plan reviewed (#8290); implementation source and local validation
+prepared, with current-head review, required CI and merged publication pending.
+
 Back to [Fleet Control V2](README.md). This is an **agent-recommended bounded
 implementation contract** for the next observation prerequisite under #5862,
 not a resident federation, complete-roster or subscription implementation.
@@ -84,29 +87,30 @@ existing owners.
 
 ## Validation plan
 
-The following are **agent-recommended gates**, not completed evidence:
+The following are **agent-recommended gates**; completed local proofs are
+distinguished from the remaining publication gates:
 
-- [ ] Invalid/implicit/empty/over-limit/duplicate selections perform zero
+- [x] Invalid/implicit/empty/over-limit/duplicate selections perform zero
   storage access; one forbidden branch in a mixed request performs zero entity
   lookups. Correlated origin/project/entity/field grants never cross-product.
-- [ ] Real verified identities produce exact immutable selected-field tuples,
+- [x] Real verified identities produce exact immutable selected-field tuples,
   with canonical order, no prohibited metadata and honest point coverage.
   Missing fields remain distinct from explicit nulls.
-- [ ] Real SQLite separate-process contention proves a concurrent committed
+- [x] Real SQLite separate-process contention proves a concurrent committed
   update cannot split the batch. Include a controlled sequence of independent
   point reads that demonstrates the mixed-state failure this API prevents.
   Retain bounded cleanup and process deadlines; do not weaken existing limits.
-- [ ] Enforce one query-only read transaction and at most one indexed current
+- [x] Enforce one query-only read transaction and at most one indexed current
   lookup per requested key, including the 64-point bound. No page, replay,
   history scan or per-client source query is a substitute.
-- [ ] Preserve missing/removal/resync and unbound/foreign/corrupt-store behavior.
+- [x] Preserve missing/removal/resync and unbound/foreign/corrupt-store behavior.
   A failure on a later point or at final authorization returns no partial tuple
   and leaks no retained permit capacity.
-- [ ] Fresh final checkpoints withhold the entire prepared result for
+- [x] Fresh final checkpoints withhold the entire prepared result for
   revocation, changed enrollment/scope, expiry, rollback or owner failure;
   native fence contention and mixed direct callers preserve the established
   ordering and one-second acquisition bound.
-- [ ] An independent fresh-process consumer uses production modules, actual
+- [x] An independent fresh-process consumer uses production modules, actual
   cryptographic verification and SQLite; importing the reader remains
   dependency-free without optional cryptography.
 - [ ] Run the smallest affected reader/store/admission selection under the
@@ -118,3 +122,23 @@ The following are **agent-recommended gates**, not completed evidence:
 
 The parent effort remains Active. This contract closes neither the central
 serving/recovery gates nor another participant's source responsibility.
+
+## Local proof and remaining tiers
+
+The owned snapshot/reader/admission/store selection passes 162 tests in
+50.23 seconds under the unchanged 120-second contained budget on native Windows.
+The 64-point case checks one query-only transaction, exact indexed lookups and
+no history/replay scans. One real origin-generation transition atomically
+changes coverage for two selected points: the coherent snapshot sees both old
+bindings, while independent point reads demonstrate an impossible mixed view.
+Both point and snapshot mixed-caller lock tests retain their inverted-order
+deadlock negative controls. A production-only child consumer verifies actual
+signed credentials and field isolation for both APIs.
+
+Unit and simple real-process E2E tiers were exercised. No installer or
+first-provision path changed, so no installer clean-room claim is made. Provider,
+resident transport and live deployment are excluded from this isolated slice.
+The available periodic hosted Linux portfolio does not include standalone
+Fleet Manager, and its Windows execution is unenrolled; required unit/guard CI
+is not a replacement for native full-Fleet integration. No Linux or live
+provider acceptance is asserted and no shared CI lane or deadline was changed.
