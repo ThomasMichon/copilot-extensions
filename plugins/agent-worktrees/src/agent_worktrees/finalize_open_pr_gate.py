@@ -596,23 +596,18 @@ def merged_pr_block_message(
     count resolves on some checked ref; every other case -- including one
     that failed closed elsewhere -- reports the unverifiable message.
     """
-    from . import git_ops
-    if git_ops.ref_exists(upstream, cwd=cwd):
-        active_head_sha = (getattr(record.pr, "head_sha", "") or "").strip()
-        pairs = (
-            [(content_ref, active_head_sha)] if content_ref else []
-        ) + _cleanup_branch_refs(record)
-        checked: set[str] = set()
-        for ref, head_sha in pairs:
-            if (
-                not ref or ref in checked or not head_sha
-                or not git_ops.ref_exists(ref, cwd=cwd)
-                or not git_ops.ref_exists(head_sha, cwd=cwd)
-            ):
-                continue
+    active_head_sha = (getattr(record.pr, "head_sha", "") or "").strip()
+    pairs = (
+        [(content_ref, active_head_sha)] if content_ref else []
+    ) + _cleanup_branch_refs(record)
+    checked: set[str] = set()
+    for ref, head_sha in pairs:
+        if not ref or ref in checked or not head_sha:
+            continue
+        count = _extra_commit_count(ref, head_sha, upstream, cwd=cwd)
+        if count is not None:
             checked.add(ref)
-            count = _extra_commit_count(ref, head_sha, upstream, cwd=cwd)
-            if count is not None and count > 0:
+            if count > 0:
                 return f"Worktree/{record.worktree_id}: PR merged but carries further commits."
     return (
         f"Worktree/{record.worktree_id}: PR merged, but its merge boundary "
@@ -713,15 +708,16 @@ def _extra_commit_count(
     ``upstream``). Callers must treat ``None`` as inconclusive, never zero.
     ``upstream`` may be several published bases: a commit on any of them is
     upstream (a branch pulled forward onto one base, another onto a second).
+    The graph query verifies every revision itself; option/path delimiters
+    prevent an invalid revision from becoming an option or a path filter.
     """
     from . import git_ops
     from .finalize_ref import creation_point
-    if not git_ops.ref_exists(content_ref, cwd=cwd):
-        return None
     bases = (upstream,) if isinstance(upstream, str) else upstream
     excluded = (f"^{head_sha}", *(f"^{u}" for u in bases))
     extra = git_ops.git(
-        "rev-list", "--count", content_ref, *excluded, cwd=cwd, check=False,
+        "rev-list", "--count", "--end-of-options", content_ref, *excluded, "--",
+        cwd=cwd, check=False,
     )
     stripped = extra.stdout.strip()
     if extra.returncode != 0 or not stripped.isascii() or not stripped.isdigit():
@@ -733,7 +729,8 @@ def _extra_commit_count(
     if not created:
         return count
     extra = git_ops.git(
-        "rev-list", "--count", content_ref, *excluded, f"^{created}", cwd=cwd, check=False,
+        "rev-list", "--count", "--end-of-options", content_ref, *excluded, f"^{created}", "--",
+        cwd=cwd, check=False,
     )
     if extra.returncode != 0:
         return None

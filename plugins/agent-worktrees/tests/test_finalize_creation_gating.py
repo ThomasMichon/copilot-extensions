@@ -124,6 +124,49 @@ def test_unreadable_extra_commit_counts_never_authorize_finalization(
     )
 
 
+def test_graph_count_itself_verifies_all_refs_without_existence_probes(env, monkeypatch):
+    branch = f"worktree/{env.worktree_id}"
+    head = _git("rev-parse", "HEAD", cwd=env.clone)
+    base = "refs/remotes/origin/main"
+    (env.clone / "missing").write_text("a path is not a revision\n")
+    monkeypatch.setattr(
+        git_ops, "ref_exists",
+        lambda *args, **kwargs: pytest.fail("the graph query must validate its own inputs"),
+    )
+    assert finalize_open_pr_gate._extra_commit_count(
+        branch, head, base, cwd=str(env.clone),
+    ) == 0
+    for ref, published, upstream in [
+        ("missing", head, base), (branch, "missing", base),
+        (branch, head, "missing"), ("--all", head, base), ("", head, base),
+    ]:
+        assert finalize_open_pr_gate._extra_commit_count(
+            ref, published, upstream, cwd=str(env.clone),
+        ) is None
+
+
+@pytest.mark.parametrize("count", [None, 0, 1])
+def test_merged_block_message_uses_only_verified_graph_counts(monkeypatch, count):
+    record = SimpleNamespace(worktree_id="task", pr=SimpleNamespace(head_sha="head"), prs=[])
+    monkeypatch.setattr(
+        git_ops, "ref_exists",
+        lambda *args, **kwargs: pytest.fail("the graph query already verifies the refs"),
+    )
+    calls = []
+
+    def counted(ref, head, upstream, *, cwd):
+        calls.append((ref, head, upstream, cwd))
+        return count
+
+    monkeypatch.setattr(finalize_open_pr_gate, "_extra_commit_count", counted)
+    message = finalize_open_pr_gate.merged_pr_block_message(
+        record, "worktree/task", "upstream", cwd="unused",
+    )
+    assert ("carries further commits" in message) is (count == 1)
+    assert ("can't be verified" in message) is (count != 1)
+    assert calls and all(call == ("worktree/task", "head", "upstream", "unused") for call in calls)
+
+
 @pytest.mark.parametrize("later", [[], ["later\tcommit: new work"]])
 def test_creation_point_without_a_later_reset_needs_no_source_tip_reread(monkeypatch, later):
     monkeypatch.setattr(
@@ -211,8 +254,14 @@ def test_bad_counts_after_creation_exclusion_remain_unknown(monkeypatch, stdout)
         "tracked", "head", ("refs/remotes/origin/main", "refs/remotes/origin/dev"), cwd="unused",
     ) is None
     assert calls == [
-        ("rev-list", "--count", "tracked", "^head", "^refs/remotes/origin/main", "^refs/remotes/origin/dev"),
-        ("rev-list", "--count", "tracked", "^head", "^refs/remotes/origin/main", "^refs/remotes/origin/dev", "^created"),
+        (
+            "rev-list", "--count", "--end-of-options", "tracked", "^head",
+            "^refs/remotes/origin/main", "^refs/remotes/origin/dev", "--",
+        ),
+        (
+            "rev-list", "--count", "--end-of-options", "tracked", "^head",
+            "^refs/remotes/origin/main", "^refs/remotes/origin/dev", "^created", "--",
+        ),
     ]
 
 
