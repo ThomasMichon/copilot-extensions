@@ -19,6 +19,13 @@ belong to the on-demand integration portfolio, not required unit-only CI.
 The [reviewed effort](efforts/active/performance-telemetry/README.md) retains
 native boundary, actual SDK/local receiver and overhead qualification.
 
+For the optional export lane, explicitly prepare the isolated test environment
+with `agent-process-telemetry[otlp]` using the source library and the same
+seven-day dependency policy, then select `tests/test_otlp_telemetry.py` in the
+Bridge runner. It uses an owned port-zero loopback receiver and synthetic
+protobuf file readback, never a shared collector. A missing extra skips the
+module and is not passing wire proof. Normal producer installs remain SDK-free.
+
 ## Static SSH plugin preparation
 
 Bridge's `tests/test_ssh_plugin_preparation.py` executes the streamed stdlib

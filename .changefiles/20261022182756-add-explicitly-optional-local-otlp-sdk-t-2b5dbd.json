@@ -1,0 +1,13 @@
+{
+  "comment": "Add explicitly optional local OTLP SDK trace export and synthetic wire canary to shared telemetry",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

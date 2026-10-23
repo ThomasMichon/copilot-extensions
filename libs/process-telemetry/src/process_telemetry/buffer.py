@@ -72,12 +72,14 @@ class BufferedSink:
 
     def __init__(
         self, sink: TelemetrySink, *, capacity: int = 128, max_bytes: int = 4096,
-        batch_size: int = 32,
+        batch_size: int = 32, batch_sink: bool = False,
     ) -> None:
         if not callable(sink):
             raise ValueError("sink must be callable")
         if any(type(value) is not int for value in (capacity, max_bytes, batch_size)):
             raise ValueError("queue bounds must be integers")
+        if type(batch_sink) is not bool:
+            raise ValueError("batch_sink must be boolean")
         if not 1 <= capacity <= 4096 or not 128 <= max_bytes <= 65536:
             raise ValueError("invalid queue bounds")
         if not 1 <= batch_size <= capacity:
@@ -86,6 +88,7 @@ class BufferedSink:
         self._capacity = capacity
         self._max_bytes = max_bytes
         self._batch_size = batch_size
+        self._batch_sink = batch_sink
         self._queue: deque[dict] = deque()
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -160,6 +163,16 @@ class BufferedSink:
                     self._queue.popleft()
                     for _ in range(min(self._batch_size, len(self._queue)))
                 ]
+            if self._batch_sink and batch and not self._closed:
+                try:
+                    self._sink(batch)
+                except Exception:
+                    for _ in batch:
+                        next(self._counts["sink_failed"])
+                else:
+                    for _ in batch:
+                        next(self._counts["delivered"])
+                batch = []
             for event in batch:
                 if self._closed:
                     next(self._counts["abandoned"])

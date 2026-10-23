@@ -71,11 +71,68 @@ helper alone does not qualify native performance.
 
 ## Delivery status and boundaries
 
-This is the bounded JSONL/in-process **intermediate** from the reviewed
+This is the bounded diagnostic producer from the reviewed
 [performance telemetry effort](../../efforts/active/performance-telemetry/README.md).
-It is not OpenTelemetry implementation or collector qualification. Optional
-real SDK/OTLP export and local-receiver proof remain that effort's Phase 3.
-There is no SDK import/dependency or telemetry auto-install/start.
+Base installation has no SDK dependency or telemetry auto-install/start.
+Explicit consumers may install the optional `[otlp]` extra through their own
+approved dependency/deployment flow. Nothing installs it on a hook or import.
+
+### Optional real OpenTelemetry export
+
+`process_telemetry.otlp.LocalOtlpSink(endpoint, timeout=2)` constructs a real
+OpenTelemetry Python SDK/OTLP-HTTP exporter only when explicitly called.
+The endpoint must include a literal loopback IP, explicit port and `/v1/traces`.
+No DNS name, implicit environment destination, proxy, netrc credentials,
+redirect, query or user-info is accepted. A remote consumer requires a separately
+authorized local transport owned elsewhere; this package never creates one.
+Resources are explicitly constructed, not discovered from environment/host data.
+
+```python
+from process_telemetry import SinkSlot
+from process_telemetry.otlp import LocalOtlpSink
+from process_telemetry.measurement import begin
+
+sink = LocalOtlpSink(configured_loopback_endpoint)
+slot = SinkSlot()
+writer = slot.set_buffered(sink.export_batch, batch_sink=True)
+measurement = begin(slot, "example-component", "preparation")
+if measurement is not None:
+    measurement.finish()
+# Owner shutdown: stop new work, never wait on UI/hook callbacks.
+slot.set(None)
+if writer.join(2):  # explicit off-path wait; lost diagnostics are permitted
+    sink.close()
+```
+
+Batch mode calls the existing callable with up to 32 records; there is no
+second SDK processor queue/thread. The exporter validates the typed performance
+schema before constructing SDK `ReadableSpan` objects; arbitrary lifecycle
+events or raw logs are refused. Export errors propagate to the buffer's
+per-record `sink_failed` counter. The SDK owns bounded in-call retries within the
+configured timeout (positive, at most five seconds), not a durable retry queue.
+Timeout is a transport/export budget, not a hard OS cancellation promise;
+a blocked call still cannot block producers/close or multiply writers.
+
+Wire contract: OTLP/HTTP protobuf traces, resource keys `service.name` (component)
+and `service.namespace` (`copilot-extensions`); span name
+`agent.<component>.<stage>`. Span attributes are `ce.component`, `ce.stage`,
+`ce.outcome`, `ce.schema`, plus `ce.`-prefixed known counter/version fields from
+`measurement.py`. Trace/span/parent identifiers are protocol fields, not metric
+dimensions. No descriptions, payload strings or free-form events are exported.
+
+An explicit synthetic canary is available in an environment with `[otlp]`:
+
+```text
+python -m process_telemetry.canary --endpoint http://127.0.0.1:<selected-port>/v1/traces --timeout 2
+```
+
+It prints generated trace/span IDs only after actual SDK export and explicitly
+reports `persistence: not-verified`. The receive owner must independently read
+that ID from durable local storage; an HTTP success is not persistence proof.
+The canary never starts a listener, discovers an endpoint or installs anything.
+Traces are the first interoperability slice. Structured logging/metric mapping,
+native product spans, overhead qualification and actual adopter receive/persist
+proof remain explicit effort acceptance; this is not all-telemetry completion.
 
 Manager first-frame/new-resume and composed hook instrumentation remain with
 their existing owners. Short-lived hooks must not create writers: use their
@@ -90,5 +147,11 @@ exercise compatibility. Run the targeted suites through the repository test
 runner; thread/process/native work remains outside required unit-only CI.
 Tests cover disabled effects, bounded copying, full/contended/blocked/throwing
 sinks, no-wait close, trace/privacy/clock semantics and incomplete summaries.
+With `[otlp]` explicitly installed in the isolated test environment,
+`tests/test_otlp_telemetry.py` exercises genuine SDK protobuf encoding into an
+owned port-zero loopback receiver, file readback/decoding, hostile ambient
+export configuration, redirect refusal and receiver outage. Without the extra
+that optional module is explicitly skipped, not counted as export proof.
+An isolated `-I -S` native control proves base imports work without the SDK.
 Native source/installed/serving measurements and overhead qualification are
 separate acceptance, not asserted by these unit/integration tests.

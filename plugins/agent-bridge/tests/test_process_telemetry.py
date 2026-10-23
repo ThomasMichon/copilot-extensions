@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +31,27 @@ def test_disabled_and_sampled_out_measurements_do_no_work(monkeypatch):
     assert begin(slot, "invalid/content", "unknown") is None
     slot.set(forbidden)
     assert begin(slot, "invalid/content", "unknown", sampled=False) is None
+
+
+def test_optional_sdk_absence_never_breaks_base_imports():
+    import process_telemetry
+
+    source = Path(process_telemetry.__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c",
+         "import sys;sys.path.insert(0,sys.argv[1]);"
+         "from process_telemetry import SinkSlot;"
+         "from process_telemetry.measurement import begin;"
+         "from process_telemetry.otlp import LocalOtlpSink;"
+         "assert begin(SinkSlot(),'invalid','invalid') is None;\n"
+         "try: LocalOtlpSink('http://127.0.0.1:1/v1/traces')\n"
+         "except RuntimeError as e: assert str(e)=='optional OTLP dependencies are not installed'\n"
+         "else: raise AssertionError('SDK unexpectedly available')",
+         str(source)],
+        capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_measurement_context_and_private_fields(monkeypatch):
