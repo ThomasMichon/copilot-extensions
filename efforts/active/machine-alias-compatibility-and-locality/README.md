@@ -25,7 +25,11 @@ example, a source commit, or a merged individual pull request.
 are qualified and released. The runtime ownership alignment #8010 is merged
 with current-head approval, but its containing qualification `39901978547`
 failed immutable publication with `manifest source closure differs from
-candidate`. Native complete-suite and normal-entry acceptance remain open;
+candidate`. The tag-aware allocation repair merged in #8110 after current-head
+approval and required CI. Reviewed helper-pin adoption landed in #8121; its
+first natural run correctly refused the old helper's already-frozen composition
+for the same Dev source. The Source control mirror and a fresh naturally
+qualified source remain required. Native complete-suite and normal-entry acceptance remain open;
 guest interrupted-request recovery still needs the separately confirmed
 disruptive restart. The next driver first repairs the promotion blocker under
 #3336, preserving immutable publication checks and the existing control writer,
@@ -252,6 +256,19 @@ landing. It does not authorize tag replacement or weaker publication checks;
 reviewed helper adoption and natural qualification remain with the existing
 control path.
 
+**Installed Manager observation (operator clarification, verbatim):**
+
+> The name should not matter, though: the machine metadata does.
+
+The operator reports that an existing guest worktree with a duplicated
+environment qualifier in its historical name is missing from the expected
+Manager machine tab. Stored machine/platform/environment metadata and canonical
+identity resolution govern discovery and grouping, not its ID or suffix.
+Preserve that worktree's identity, path, relationships and live session. Actual
+installed tab visibility remains an explicit acceptance case; bridge, mux or
+canonical-head presence is not equivalent proof. Prospective naming quality is
+separate and does not establish the cause of the missing row.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite
@@ -446,6 +463,11 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
   separation, update/launch gate agreement, new single-environment naming,
   unchanged legacy lookup and native/guest refusal boundaries using the
   [validation matrix](physical-machine-environment-boundary.md#validation-plan).
+- [ ] Verify the operator-reported retained guest worktree appears in the actual
+  installed Manager's expected machine tab using authoritative machine/platform/
+  environment metadata, preserving its historical ID, path, relationships and
+  live session. Do not use its duplicated naming qualifier as locality authority
+  or rename it as a visibility remedy.
 
 ## Proposal
 
