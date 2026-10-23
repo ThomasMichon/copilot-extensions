@@ -50,6 +50,10 @@ case "$mode" in
         ;;
     reconcile) reconcile_native_foundation_progress "$root" ;;
     recover) recover_native_foundation_after_restart "$root" ;;
+    near-limit-complete)
+        read_native_foundation_progress "$root"
+        complete_native_foundation_progress "$root" "$__foundation_document" "$plugin" 7 builder_failed
+        ;;
     protocol)
         for path in "$root/corpus/"*.json; do
             cp -- "$path" "$root/foundation-operation.json"

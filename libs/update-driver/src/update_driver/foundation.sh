@@ -162,6 +162,8 @@ _native_foundation_write() {
     local root="$1" temporary code=0
     assert_native_operation_lock "$root/execution.lock" || return 1
     __foundation_document="$(_native_foundation_encode)" || return 1
+    [[ $((${#__foundation_document} + 1)) -le 32768 ]] ||
+        { _native_foundation_error 'encoded progress exceeds size bound'; return 1; }
     _native_foundation_validate || { _native_foundation_error 'invalid progress mutation'; return 1; }
     temporary="$(umask 077; mktemp -- "$root/.foundation-operation-XXXXXXXX.tmp")" || return 1
     if ! printf '%s\n' "$__foundation_document" >"$temporary" ||

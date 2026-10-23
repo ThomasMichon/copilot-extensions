@@ -195,6 +195,28 @@ def test_reader_status_is_read_only_and_absence_does_not_create(native_source, a
     assert file_parent.read_text() == "not a directory"
 
 
+@pytest.mark.parametrize("mode", ["reconcile", "recover", "near-limit-complete"])
+def test_oversized_mutation_preserves_readable_near_limit_progress(native_source, area, tools, mode):
+    root = area / "state"
+    root.mkdir(mode=0o700)
+    value = document(
+        started_at="STAMP",
+        boot_id="linux:11111111-1111-4111-8111-111111111111",
+    )
+    raw = json.dumps(value, separators=(",", ":")).encode()
+    padding = 32760 - len(raw.replace(b'"STAMP"', b"0.1"))
+    raw = raw.replace(b'"STAMP"', b"0." + b"0" * padding + b"1")
+    assert len(raw) == 32760
+    path = root / fs.FILENAME
+    path.write_bytes(raw)
+    original = fs.read(root)
+    run_native(root, native_source, "read", tools)
+    result = run_native(root, native_source, mode, tools, success=False)
+    assert "encoded progress exceeds size bound" in result.stderr
+    assert path.read_bytes() == raw and fs.read(root) == original
+    assert not list(root.glob(".foundation-operation-*.tmp"))
+
+
 def test_native_reader_differential_protocol_corpus(native_source, area, tools):
     root = area / "state"
     root.mkdir(mode=0o700)
@@ -216,6 +238,7 @@ def test_native_reader_differential_protocol_corpus(native_source, area, tools):
         candidates.append(json.dumps(dict(base, **{key: value})).encode())
     raw = json.dumps(base).encode()
     candidates += [
+        raw + b" " * (fs.MAX_BYTES - len(raw)),
         raw[:-1] + b', "version": 1}', raw[:-1] + b', "ver\\u0073ion": 1}',
         json.dumps(dict(base, extra="unknown")).encode(),
         json.dumps({k: v for k, v in base.items() if k != "error"}).encode(),

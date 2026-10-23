@@ -359,7 +359,9 @@ non-finite or inconsistent values. Timestamp tokens and signed 64-bit integer
 outcomes retain their exact JSON spelling rather than round-tripping through
 awk's floating-point arithmetic.
 
-All mutators reassert the same kernel-proved FD 9. Writes use a private
+All mutators reassert the same kernel-proved FD 9. Encoded writes, including
+their trailing newline, must fit the reader's 32 KiB limit before any temporary
+is created; refusal preserves the prior readable recovery evidence. Writes use a private
 temporary, filesystem sync and atomic replacement. `reconcile_native_foundation_progress`
 records a lost owner as interrupted without certifying descendant settlement;
 `recover_native_foundation_after_restart` requires a different actual Linux
