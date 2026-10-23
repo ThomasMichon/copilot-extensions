@@ -42,7 +42,8 @@ The already-extracted #7304 is outside this scope and receives no credit here.
 ## Single-disposition legend and narrowly bounded candidate batches
 
 An entry's final token is its **only** disposition. The original 48
-candidate assignments and whitespace-retirement proposal remain unchanged.
+candidate assignments remain unchanged. The narrow T disposition below
+accounts for the original whitespace-retirement proposal.
 The later refinement below gives the other 281 hunks named behavioral
 ownership. `MX-*` identifies a lossless symbol/subspan ownership partition,
 **not** a combined implementation batch: split it into the named constituent
@@ -61,7 +62,7 @@ Retained means candidate ownership, not reviewed, passing or already landed.
 | R | 3 / replay tree evidence | `pr_rebase.py`, `test_pr_rebase_trees.py`: pinned complete commits, exact ordered raw trees, notes/signature/color/replacement/foreign Git context cannot substitute evidence; malformed/truncated/duplicate rows and timeout preserve refusal; parent reconstruction and raw author/message comparisons remain independent checks. |
 | A | 3 / atomic recovery retention | `pr_recovery.py`, `test_pr_recovery_batch.py`: fresh NUL-input commit resolution on each call; full SHA-1/SHA-256 IDs, missing/noncommit rejection; create-only transaction retains all refs or none on collision. Excludes remote publication authority and replay authorization. |
 | I | 2 / immutable PR seed semantics | `test_pr_repo_fixture.py`, `test_pr_seed_cache.py`: copied object stores/config/hooks/refs/records and repaired worktree links remain private; changed sibling cannot mutate seed; failed/incomplete/redirected readiness fails closed; process lock interruption never publishes readiness; two processes build once. Implementation `conftest.py` is separately partitioned below rather than silently expanding I. |
-| T | proposal / retirement, not enacted | `finalize_ref.py:6`: remove whitespace-only residual from a future extraction after review; no behavioral or merged claim. |
+| T | redundant EOF whitespace | `finalize_ref.py:6`: two removed blank lines are already absent from the accepted EOF; no further patch, code/test retirement or whole-file equivalence claim. |
 
 Production imports in `finalize_ref.py:1` combine dependencies of multiple
 contracts; MX-FINAL names their split. `conftest.py` combines no-mux isolation,
@@ -86,6 +87,33 @@ No hunk is assigned to a catch-all wave-6 implementation batch. Wave 6 is
 the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
+
+### T redundant end-of-file whitespace needs no further extraction
+
+This settles only `src/agent_worktrees/finalize_ref.py:6`, header
+`@@ -287,5 +315,3 @@ def warn_if_tracked_branch_diverged(`, with complete
+hunk SHA256
+`417c416b88a79b512b02918a8cc4837551adedaf8de16ada47ca709b29827314`.
+Its only changed lines are two empty deleted lines following the final
+`return True`; there are no added lines or changed code tokens.
+
+The immutable base
+`6e2e59ceed9a5cb822bd02906f5d4e1173aeae71` has blob
+`51ba39d289de3793e3c08245ae28da09a22b3290`. The preserved source
+`8b7b8778b69e6bd1b6a6f2b0018fa6e1f59d961f` has blob
+`b4364f0fa7e2a5115e68893f4635c504cc43a0d0`, also present verbatim in
+the public original publication
+`339dc00123964d84a117afd55197a192895ebac8`. Accepted comparison
+`b4d72ab8cf46d10942828d25db791149579736fd` has blob
+`13424f33743eea9b919bad90ed178e9684d8309d`. Both source and accepted
+EOFs retain the same final warning text, closing parenthesis and
+`return True`, followed by one LF and no additional blank lines.
+
+No runtime or test change is needed for this hunk. This is not a retirement
+of any test, assertion, native operation or safety check, and it does not
+settle the file's separately partitioned imports or functional hunks.
+The wider residual census and every normal-group/repeated complete
+same-head timing gate remain independent obligations.
 
 ### I immutable-seed assertions are preserved by stronger accepted controls
 
