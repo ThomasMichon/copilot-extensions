@@ -284,9 +284,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/worktree_native_resume.py",
-          "sha256": "5188f9cbc9063cc4b0289402ca8ad626a452d6f1c0b91381710e0c68528f3a60",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "5423c1cf905ce651f9009c7d80c4e3647370468ca678f4fd75c9afafdd7c7659",
+          "semantic": false,
+          "non_semantic_reason": "Retained completion labels no longer preempt existing exact-native owner admission. HTTP routes, request/response schemas, capability floors, native identity, holder fences and no-recreation behavior are unchanged; focused ACP/CLI tests cover the implementation flow and owner refusals."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
