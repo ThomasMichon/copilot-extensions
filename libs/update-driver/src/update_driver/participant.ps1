@@ -17,6 +17,7 @@ using Microsoft.Win32.SafeHandles;
 namespace CopilotExtensions {
     public sealed class NativeParticipantWitness : IDisposable {
         private const int MaxFrame = 16384;
+        private const int MaxParticipants = 16;
         private readonly object guard = new object();
         private readonly Action assertOwned;
         private readonly Thread acceptThread;
@@ -50,7 +51,7 @@ namespace CopilotExtensions {
             security.SetAccessRuleProtection(true, false);
             security.AddAccessRule(new PipeAccessRule(WindowsIdentity.GetCurrent().User,
                 PipeAccessRights.FullControl, AccessControlType.Allow));
-            return new NamedPipeServerStream(name, PipeDirection.InOut, 16,
+            return new NamedPipeServerStream(name, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
                 PipeTransmissionMode.Message, PipeOptions.Asynchronous, MaxFrame, MaxFrame, security);
         }
 
@@ -85,20 +86,17 @@ namespace CopilotExtensions {
         private static void Send(NamedPipeServerStream pipe, Dictionary<string, object> frame) {
             byte[] data = Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(frame));
             var write = pipe.WriteAsync(data, 0, data.Length);
-            using (var ready = ((IAsyncResult)write).AsyncWaitHandle) {
-                if (!ready.WaitOne(2000))
-                    throw new TimeoutException("native participant write deadline expired");
-            }
+            // Task-owned handles must survive a deadline until I/O completes or is cancelled.
+            if (!((IAsyncResult)write).AsyncWaitHandle.WaitOne(2000))
+                throw new TimeoutException("native participant write deadline expired");
             write.GetAwaiter().GetResult();
         }
 
         private static Dictionary<string, object> Receive(NamedPipeServerStream pipe) {
             var data = new byte[MaxFrame + 1];
             var read = pipe.ReadAsync(data, 0, data.Length);
-            using (var ready = ((IAsyncResult)read).AsyncWaitHandle) {
-                if (!ready.WaitOne(2000))
-                    throw new TimeoutException("native participant read deadline expired");
-            }
+            if (!((IAsyncResult)read).AsyncWaitHandle.WaitOne(2000))
+                throw new TimeoutException("native participant read deadline expired");
             int count = read.GetAwaiter().GetResult();
             if (count == 0 || count > MaxFrame || !pipe.IsMessageComplete)
                 throw new InvalidDataException("invalid native participant message");
@@ -121,6 +119,10 @@ namespace CopilotExtensions {
                         if (!active) return;
                         // Keep a listening instance present while an authenticated client is joined.
                         listener = CreatePipe();
+                        if (connections.Count >= MaxParticipants) {
+                            pipe.Dispose();
+                            continue;
+                        }
                         connections.Add(pipe);
                         var handler = new Thread(delegate() { Serve(pipe); });
                         handler.IsBackground = true;

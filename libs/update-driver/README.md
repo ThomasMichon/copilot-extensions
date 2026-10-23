@@ -324,6 +324,11 @@ cooperative same-user custody, not a sandbox against process-memory access.
 The bridge does not launch construction, publish progress, acquire prerequisites
 or enable a cold producer.
 
+At most 16 clients may be joined concurrently. Excess connections are refused
+without revoking already joined participants; capacity returns after disconnect
+observation. Stalled handshakes expire independently. Async I/O retains its
+task-owned wait handle through completion/cancellation even after a deadline.
+
 `scripts/foundation-build.py` constructs only this library plus the canonical
 `agent-procutil` and `single-instance-lease` sibling packages. The fixed
 manifests, local references and complete non-generated source inventory must

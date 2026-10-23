@@ -7,7 +7,8 @@ import os
 import queue
 import subprocess
 import threading
-from contextlib import contextmanager
+import time
+from contextlib import ExitStack, contextmanager
 from multiprocessing.connection import Client
 from pathlib import Path
 
@@ -156,5 +157,52 @@ def test_malformed_native_handshake_is_bounded_without_retiring_real_witness(are
                 connection.recv_bytes(16384)
         finally:
             connection.close()
+        with participant(root=root, witness=transport) as custody:
+            custody.assert_owned()
+
+
+def test_saturated_witness_refuses_excess_without_revoking_existing_participants(area):
+    with owner(area) as (root, child):
+        transport = line(child)
+        with ExitStack() as participants:
+            joined = [
+                participants.enter_context(participant(root=root, witness=transport))
+                for _ in range(16)
+            ]
+            with pytest.raises(ParticipantError):
+                participant(root=root, witness=transport)
+            assert child.poll() is None
+            for custody in joined:
+                custody.assert_owned()
+        # Python close is asynchronous from the server's disconnect observation.
+        deadline = time.monotonic() + 3
+        while True:
+            try:
+                replacement = participant(root=root, witness=transport)
+                break
+            except ParticipantError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(.01)
+        with replacement as custody:
+            custody.assert_owned()
+
+
+def test_stalled_handshake_timeout_preserves_owner_and_genuine_participant(area):
+    with owner(area) as (root, child):
+        transport = line(child)
+        with participant(root=root, witness=transport) as custody:
+            connection = Client(json.loads(transport)["address"], family="AF_PIPE", authkey=None)
+            try:
+                assert connection.poll(3)
+                connection.recv_bytes(16384)
+                # Send no proof: the real pending native ReadAsync must time out safely.
+                assert connection.poll(4)
+                with pytest.raises((EOFError, OSError)):
+                    connection.recv_bytes(16384)
+            finally:
+                connection.close()
+            assert child.poll() is None
+            custody.assert_owned()
         with participant(root=root, witness=transport) as custody:
             custody.assert_owned()
