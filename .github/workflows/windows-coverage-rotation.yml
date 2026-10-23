@@ -34,6 +34,11 @@ on:
         required: false
         type: string
         default: dev
+      launch_maintenance:
+        description: "Run only contained launch-maintenance acceptance for Worktrees, Manager and their shared driver (Linux only)."
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   # A scheduled run and a manually dispatched run could otherwise overlap;
@@ -150,7 +155,7 @@ jobs:
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
 
   linux-full:
-    name: full (Linux isolated) - ${{ matrix.plugin }}
+    name: ${{ inputs.launch_maintenance && 'launch maintenance' || 'full' }} (Linux isolated) - ${{ matrix.plugin }}
     needs: select
     if: needs.select.outputs.sha != ''
     runs-on: ubuntu-latest
@@ -158,16 +163,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        plugin:
-          - agent-bridge
-          - agent-codespaces
-          - agent-containers
-          - agent-dispatch
-          - agent-logger
-          - agent-mcp
-          - agent-ssh
-          - agent-vault
-          - agent-worktrees
+        plugin: ${{ fromJSON(inputs.launch_maintenance && '["agent-worktrees","worktree-manager","update-driver"]' || '["agent-bridge","agent-codespaces","agent-containers","agent-dispatch","agent-logger","agent-mcp","agent-ssh","agent-vault","agent-worktrees"]') }}
+    env:
+      TEST_SELECTOR: ${{ inputs.launch_maintenance && (matrix.plugin == 'update-driver' && 'test_core or test_participant_transport or test_real_product_exit_cannot_hide_abandoned_execution_custody' || 'test_update_launch_cli or test_update_driver_json or test_update_stage or test_reconcile_status or test_launch_update_requests or test_launch_preparation_progress or test_launch_session_unwrap') || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -231,7 +229,7 @@ jobs:
               output.write(str(binary.parent) + "\n")
           print(f"Admitted {admitted} seasoned locked dependency; Dev Containers CLI {version} is ready.")
           PY
-      - name: Run default full suite in the canonical hardened container
+      - name: Run requested scope in the canonical hardened container
         id: full
         shell: bash
         env:
@@ -239,13 +237,17 @@ jobs:
         run: |
           directory="$RUNNER_TEMP/periodic-integration/$PLUGIN"
           mkdir -p "$directory"
+          arguments=("$PLUGIN")
+          if [ -n "$TEST_SELECTOR" ]; then
+            arguments+=(-k "$TEST_SELECTOR")
+          fi
           set +e
           {
             command -v docker &&
             command -v devcontainer &&
             docker info --format '{{.ServerVersion}}' &&
             touch "$directory/wrapper-invoked" &&
-            python tools/run_tests_in_devcontainer.py "$PLUGIN"
+            python tools/run_tests_in_devcontainer.py "${arguments[@]}"
           } 2>&1 | tee "$directory/execution.log"
           statuses=("${PIPESTATUS[@]}")
           status=${statuses[0]}
@@ -274,13 +276,20 @@ jobs:
           profile = Path(".devcontainer/test-isolation/devcontainer.json")
           inventory = Path("tools/periodic-integration-inventory.json")
           exit_code = directory / "exit-code"
+          selector = os.environ.get("TEST_SELECTOR", "")
+          command = ["python", "tools/run_tests_in_devcontainer.py", os.environ["PLUGIN"]]
+          if selector:
+              command += ["-k", selector]
           record = {
               "version": 1,
               "plugin": os.environ["PLUGIN"],
               "tested_sha": os.environ["TESTED_SHA"],
               "platform": "linux",
-              "qualification_scope": "Linux default-full only; Windows execution unavailable and not validated",
-              "command": ["python", "tools/run_tests_in_devcontainer.py", os.environ["PLUGIN"]],
+              "qualification_scope": (
+                  "Linux launch-maintenance selection only; no Windows or broker qualification"
+                  if selector else "Linux default-full only; Windows execution unavailable and not validated"
+              ),
+              "command": command,
               "outcome": os.environ["EXECUTION_OUTCOME"],
               "exit_code": int(exit_code.read_text()) if exit_code.is_file() else None,
               "wrapper_invoked": (directory / "wrapper-invoked").is_file(),
@@ -288,8 +297,14 @@ jobs:
               "profile_sha256": hashlib.sha256(profile.read_bytes()).hexdigest() if profile.is_file() else None,
               "inventory": str(inventory),
               "inventory_sha256": hashlib.sha256(inventory.read_bytes()).hexdigest() if inventory.is_file() else None,
-              "scope": "default full plugin invocation; explicit-tier/environment-gated skips are not passes",
-              "failure_owner": "Test Portfolio Rationalization #1303",
+              "scope": (
+                  "selected launch-maintenance tests; explicit-tier/environment-gated skips are not passes"
+                  if selector else "default full plugin invocation; explicit-tier/environment-gated skips are not passes"
+              ),
+              "failure_owner": (
+                  "Coordinated Launch Maintenance #7694" if selector
+                  else "Test Portfolio Rationalization #1303"
+              ),
               "release_dependency": False,
           }
           if profile.is_file():
@@ -318,7 +333,7 @@ jobs:
     # about `dev`'s own health, and must not pollute that issue.
     if: >-
       always() && (needs.select.result == 'failure' || needs.test.result == 'failure' || needs.linux-full.result == 'failure') &&
-      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.ref == '' || inputs.ref == 'dev')))
+      (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && !inputs.launch_maintenance && (inputs.ref == '' || inputs.ref == 'dev')))
     runs-on: ubuntu-latest
     permissions:
       contents: read

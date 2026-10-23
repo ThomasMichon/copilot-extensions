@@ -1,4 +1,9 @@
-"""Background update *staging* for the launch path (issue #1430).
+"""Update acquisition shared by automatic and explicitly blocking maintenance.
+
+Healthy launches submit ``launch-update automatic --detach``. Its existing
+execution-driver worker calls this stage under custody, then re-plans and
+applies eligible work without joining the launching session. The historical
+stage-then-join shell flow below remains only for explicit blocking recovery.
 
 The launcher used to run the whole update/reconcile chain **serially before**
 showing the Picker: ``copilot plugin update agent-worktrees`` (a ~1.3-1.9s
@@ -9,7 +14,7 @@ Picker can paint.
 This module implements the **stage** half of the Copilot-style
 *stage-then-join* model: run the slow marketplace download **in the background
 while the Picker is open**, so the operator's think-time hides it. The launcher
-then **joins** (waits for) this stage and **applies** any pending update *after*
+then **joined** (waited for) this stage and **applied** any pending update *after*
 the Picker closes and *before* the psmux/Copilot handoff.
 
 Critical safety constraint (why stage != apply): the Picker (``resolve``) runs
@@ -19,8 +24,8 @@ only touches the **marketplace payload dir**
 (``~/.copilot/installed-plugins/copilot-extensions/agent-worktrees``) via
 ``copilot plugin update`` -- it never rewrites the running venv -- so it is safe
 to run concurrently with the Picker. The *apply* (installer: payload->runtime +
-pip) must run from the shell after the Picker exits; it lives in the launch
-wrappers, not here.
+pip) runs through the canonical execution owner, never inside this acquisition
+function. Blocking launch wrappers may still wait on that owner.
 
 Single-flight: a lockfile (PID + start epoch, with stale reclaim) ensures two
 near-simultaneous launches never both hit the marketplace / race the payload
@@ -252,23 +257,26 @@ def fingerprint(plugin_dir: Path) -> str:
 
 
 def _run_copilot_update() -> tuple[bool, str]:
-    """Run the marketplace download. Returns (ran, combined_output)."""
+    """Run bounded, caller-owned acquisition. Returns (succeeded, output)."""
+    from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
     from shutil import which
 
     if which("copilot") is None:
         return False, "copilot not on PATH"
     try:
-        proc = subprocess.run(
+        proc = run_caller_owned(
             ["copilot", "plugin", "update", _PLUGIN_ID],
-            capture_output=True,
-            text=True,
             timeout=_COPILOT_UPDATE_TIMEOUT,
+            max_stdout_bytes=1024 * 1024,
+            max_stderr_bytes=1024 * 1024,
         )
         out = (proc.stdout or "") + (proc.stderr or "")
-        return True, out.strip()
+        return proc.returncode == 0, out.strip()
+    except OwnedCleanupError:
+        raise
     except subprocess.TimeoutExpired:
         return False, f"copilot plugin update timed out ({_COPILOT_UPDATE_TIMEOUT}s)"
-    except Exception as e:  # never break the launch
+    except (OSError, subprocess.SubprocessError) as e:
         return False, f"copilot plugin update error: {e}"
 
 
@@ -350,6 +358,7 @@ def stage(
         if layout == "marketplace":
             before, before_source = _resolve_before_fingerprint(prior, plugin_dir)
             ran, copilot_output = _run_copilot_update()
+            result["acquisition_ok"] = ran
             after = fingerprint(plugin_dir) if ran else before
             result["fingerprint"] = after
             result["before_fingerprint_source"] = before_source

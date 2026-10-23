@@ -246,6 +246,48 @@ def test_distinct_product_runners_need_no_cross_import(area):
     assert [status(r.id, root=root).exit_code for r in requests] == [0, 0]
 
 
+def test_real_product_exit_cannot_hide_abandoned_execution_custody(area):
+    from update_driver import ParticipantError
+
+    root = area / "state"
+    script = (
+        "import sys\nfrom pathlib import Path\n"
+        "from update_driver import borrowed_custody\n"
+        "with borrowed_custody(root=Path(sys.argv[1])) as custody:\n"
+        " try:\n"
+        "  with custody.execution_scope():\n"
+        "   raise RuntimeError('synthetic unconfirmed cleanup')\n"
+        " except RuntimeError:\n"
+        "  pass\n"
+        "raise SystemExit(7)\n"
+    )
+    first = enqueue(
+        RequestSpec("uncertain"),
+        runner=TrustedRunner(
+            (sys.executable, "-c", script, str(root)), str(area), timeout=15,
+            env=(("PYTHONPATH", environment()["PYTHONPATH"]),),
+        ),
+        root=root,
+    )
+    marker = area / "later-executed"
+    later = enqueue(
+        RequestSpec("later"),
+        runner=TrustedRunner(
+            (sys.executable, "-c", "import sys;from pathlib import Path;Path(sys.argv[1]).touch()",
+             str(marker)), str(area),
+        ),
+        root=root,
+    )
+    with pytest.raises(ParticipantError):
+        drain(root=root)
+    failed = status(first.id, root=root)
+    assert failed.state == "interrupted" and failed.exit_code is None
+    assert status(later.id, root=root).state == "pending"
+    assert not marker.exists()
+    with pytest.raises(InterruptedError):
+        drain(root=root)
+
+
 def test_missing_worker_entrypoint_is_explicit(area):
     root = area / "state"
     request = enqueue(RequestSpec("fixture"), runner=runner(area), root=root)

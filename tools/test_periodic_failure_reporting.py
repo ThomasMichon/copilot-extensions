@@ -20,15 +20,17 @@ def workflow():
     return source_workflow(ROOT, "windows-coverage-rotation.yml")
 
 
-def condition(expression, event, ref, select, windows, linux):
+def condition(expression, event, ref, select, windows, linux, launch=False):
     context = {
         "always": True, "event": event, "ref": ref,
         "select": select, "windows": windows, "linux": linux,
+        "launch": launch,
     }
     for old, new in (
         ("always()", "always"),
         ("github.event_name", "event"),
         ("inputs.ref", "ref"),
+        ("!inputs.launch_maintenance", "not launch"),
         ("needs.select.result", "select"),
         ("needs.test.result", "windows"),
         ("needs.linux-full.result", "linux"),
@@ -86,6 +88,41 @@ def test_existing_reporter_and_execution_boundaries_are_preserved():
     assert source["concurrency"] == {
         "group": "windows-coverage-rotation", "cancel-in-progress": False,
     }
+
+
+@pytest.mark.parametrize("ref", ["", "dev", "feature"])
+def test_targeted_launch_qualification_never_files_the_shared_portfolio_issue(ref):
+    report = workflow()["jobs"]["report"]
+    assert not condition(
+        report["if"], "workflow_dispatch", ref, "success", "skipped", "failure", launch=True,
+    )
+
+
+def test_targeted_launch_selection_preserves_container_and_exact_scope_evidence():
+    source = workflow()
+    triggers = source.get("on", source.get(True))
+    option = triggers["workflow_dispatch"]["inputs"]["launch_maintenance"]
+    assert option["type"] == "boolean" and option["default"] is False
+    linux = source["jobs"]["linux-full"]
+    matrix = linux["strategy"]["matrix"]["plugin"]
+    assert """'["agent-worktrees","worktree-manager","update-driver"]'""" in matrix
+    selector = linux["env"]["TEST_SELECTOR"]
+    for name in (
+        "test_update_launch_cli", "test_update_driver_json", "test_update_stage", "test_reconcile_status",
+        "test_launch_update_requests",
+        "test_launch_preparation_progress", "test_launch_session_unwrap",
+        "test_core", "test_participant_transport",
+        "test_real_product_exit_cannot_hide_abandoned_execution_custody",
+    ):
+        assert name in selector
+    execute = next(step for step in linux["steps"] if step.get("id") == "full")
+    assert 'arguments+=(-k "$TEST_SELECTOR")' in execute["run"]
+    assert 'tools/run_tests_in_devcontainer.py "${arguments[@]}"' in execute["run"]
+    evidence = next(
+        step for step in linux["steps"] if step.get("name") == "Record exact execution scope and outcome"
+    )
+    assert '"Linux launch-maintenance selection only; no Windows or broker qualification"' in evidence["run"]
+    assert 'command += ["-k", selector]' in evidence["run"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="The production report is a Linux Bash consumer")

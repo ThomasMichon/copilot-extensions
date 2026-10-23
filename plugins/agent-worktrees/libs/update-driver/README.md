@@ -143,11 +143,31 @@ from update_driver import borrowed_custody
 custody = borrowed_custody()
 if custody is not None:
     with custody:
-        custody.assert_owned()
-        execute_canonical_update()
+        with custody.execution_scope():
+            execute_canonical_update()
 else:
     enqueue_ordinary_request()
 ```
+
+`execution_scope()` registers a cleanup obligation with the existing owner
+before product execution. Only an ordinary return certifies completion and
+releases it; an exception makes the participant unusable for further mutation.
+If that participant exits or converts the exception into an integer status,
+the owner still records interruption and refuses later queued work until the
+existing positive-settlement policy permits recovery. Nothing creates a second
+queue, lock or journal completer. New scope messages require an explicit owner
+acknowledgement; a downlevel owner refuses before the body can mutate rather
+than silently ignoring the obligation. Legacy ownership assertions, including
+the native foundation builder, keep their existing wire contract.
+
+Short Unix endpoints retain their existing location under the execution root.
+If that pathname exceeds the native byte limit, the same witness instead owns
+a short-lived, user-private temporary directory and removes it when the witness
+closes. Clients verify that directory's owner and private permissions; the
+authenticated execution root and request identity remain unchanged. No queue
+is relocated, second owner created, or capability written to a file. A
+temporary-folder configuration that cannot provide a short endpoint refuses
+explicitly rather than weakening authentication or selecting another queue.
 
 `borrowed_custody(root=None, environ=None)` returns None only for an absent
 witness; missing-required, malformed, forged, wrong-space, or stale evidence
