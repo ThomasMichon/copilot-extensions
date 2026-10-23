@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Draft; local architecture accepted, normal proposal review pending
+- **Status:** Active; bounded DB custody foundation in source review, full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -82,15 +82,19 @@ Unsupported predecessors or participants refuse honestly.
 
 Source implementation is authorized, with architecture acceptance and normal
 proposal review required before executing the widened protocol design. Local
-architecture acceptance is recorded; proposal review and landing remain open.
-Implementation stays paused until the proposal merges and the Integration owner
-assigns the next specific source slice. Source authorization is
+architecture acceptance and proposal review/landing are complete.
+The Integration owner assigned the first bounded Phase 1 DB epoch/producer
+association and strict-inventory foundation. Broader producer, SDK, native and
+installer wiring remain paused pending review and another specific source-slice
+assignment. Source authorization is
 not permission for deployment, process stops, protected-owner operations,
 credential work or production capture. No private permission record or
 operational evidence is incorporated into this public effort.
 
 All decomposition, proposed API/storage names and test cases below and in the
-linked contracts are **agent-recommended design**, pending independent review.
+linked contracts are **agent-recommended design**, accepted through proposal
+review. Implementation and its source/native evidence still require their own
+review and qualification.
 
 ## Plan
 
@@ -99,11 +103,14 @@ linked contracts are **agent-recommended design**, pending independent review.
       reconcile the existing public handoff contract.
 - [x] Record local architecture acceptance of the proposal, ownership boundaries
       and acceptance matrix.
-- [ ] Land the proposal through normal repository review before implementation.
+- [x] Land the proposal through normal repository review before implementation.
 
 ### Phase 1 - Close and inventory through existing Bridge owners
 - [ ] Implement installation-bound admission epochs, producer enrollment and
       strict cross-owner inventory as specified in [custody-contract.md](custody-contract.md).
+      The first [DB/storage foundation](../../../plugins/agent-bridge/docs/runtime-custody-foundation.md)
+      is implemented locally for review; it does not close this item or qualify
+      complete runtime custody.
 - [ ] Fence keyed creation, start/resume, queued/native sends, inbox/control
       handoffs, wake/redrive and host/lifecycle mutations at their effect owners.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
@@ -162,10 +169,68 @@ Read [custody-contract.md](custody-contract.md),
 [installer-contract.md](installer-contract.md) and [validation.md](validation.md).
 They are prospective contracts, not supported APIs or operating instructions.
 The source ownership and integration order are in those documents.
-Local architecture acceptance permits proposal publication through normal
-repository review. It does not establish merged review or implementation.
+The proposal merged through normal repository review in
+[#8179](https://github.com/ThomasMichon/copilot-extensions/pull/8179).
+This establishes the reviewed plan, not implementation or running adoption.
 
 ## Journal
+
+### 2026-10-23 - Require prepared custody storage and finite host metadata
+- Schema 28 explicitly versions the required storage. The canonical writable
+  migration prepares it before publication; read-only and existing-only writable
+  adoption reject older or partial layouts without hidden migration. The frozen
+  pre-custody-v27 SQL fixture preserves independent old histories without needing
+  today's constructor or local Git objects.
+- Host inventory rejects exponent-overflow floats at any JSON nesting while
+  retaining existing duplicate-key, path, size, mutex and cache guards.
+- The focused DB/adoption/host/custody/delete cohort passed 240 cases with two
+  skips. Required-shape refusal and finite decoding remain bounded foundation
+  repairs, not complete producer enrollment, restoration or Phase 1 completion.
+- The full canonical contract checker passed for two contracts and 456 fixtures.
+  Existing HTTP/native-admission/result replays passed 229 cases with two skips.
+  Only four registered source fingerprints/classifications were refreshed;
+  every historical fixture, capture provenance, HTTP generation and floor was
+  preserved.
+
+### 2026-10-23 - Bound the first DB/storage foundation
+- The assigned first source slice adds explicit DB epoch/producer observations,
+  serial session/turn insertion fencing, original-history retention and
+  revision-checked DB inventory, plus strict fresh host-index storage under its
+  existing native mutex.
+- Closure here covers only DB session/turn insertion. Installation/native
+  authentication, complete producer mediation, SDK/host custody, compatibility,
+  continuing retention and actual restoration remain open; no public controller
+  or ordinary runtime path activates the foundation.
+- Focused regressions target the DB portions of C1/C3/C4/C6 and strict-storage
+  portions of C5/C6. Full cross-owner and native cases are not declared complete.
+- The source/test diff awaits independent review before any commit, PR or
+  broader wiring. Validation outcomes are recorded with the source review
+  receipt, not inferred from this implementation entry.
+- The bounded, network-disconnected Linux development cohort passed 209 cases
+  with two skips across the new foundation/host-inventory tests and existing DB,
+  adoption, host-claim and native-keyed-admission regressions. Separate BEFORE
+  triggers initially made the refusal diagnostic order-dependent; one ordered
+  insertion guard now gives closure precedence without relying on SQLite trigger
+  ordering. This is not complete C1-C6 or Windows/native/live qualification.
+- Session deletion now reserves the SQLite writer before its custody check and
+  commits or rolls back all cleanup together. A statement-level ABORT must not
+  leave deleted events pending for a later write to commit. Real two-owner,
+  custody-refusal and cleanup-fault controls passed with the prior cohort:
+  216 passed, two skipped. Complete runtime closure remains unqualified.
+
+### 2026-10-23 - Proposal merged; implementation remains paused
+- #8179 merged to `dev` as `f5d297f7787a8f3d7d70cdc7d29e62c3be328cda`,
+  with sole parent `e4846bbd2838ac595285b9b7b426756f046c2b1c`.
+- Copilot approved head `43e8dc2642d931a0f0078da59a2164be98d26dc2`
+  with no open findings, and required CI passed. Publication changed only the
+  seven proposal/index/parent documents. Both #8063 and #7268 remain open.
+- The adjacent index conflict was reconciled without reverting upstream
+  statuses or archive entries. Managed post-merge completion reconciled the
+  source worktree; the effort was not finalized or declared Done.
+- Next is Phase 1 admission/producer enrollment and strict inventory through
+  existing Bridge owners, after the Integration owner assigns that specific
+  source slice. No implementation, deployment, process stop, production capture
+  or native qualification was performed.
 
 ### 2026-10-23 - Draft the Bridge participant and restore contract
 - Confirmed compatible effort adoption and a target-local effort home.

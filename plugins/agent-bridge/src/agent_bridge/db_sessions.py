@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .runtime_custody import RuntimeAdmission, admission_document
+
 
 class _SessionsMixin:
     """Bridge-owned session lifecycle helpers."""
@@ -23,17 +25,19 @@ class _SessionsMixin:
         caller_session_id: str | None = None,
         acp_session_id: str | None = None,
         background_recovery_enabled: bool = True,
+        runtime_admission: RuntimeAdmission | None = None,
     ) -> None:
         self.execute_write(
             "INSERT INTO sessions (id, name, agent_name, caller_id, "
             "caller_session_id, target_dir, "
             "target_type, status, config_json, target_json, "
-            "background_recovery_enabled, created_at, updated_at, acp_session_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "background_recovery_enabled, created_at, updated_at, acp_session_id, "
+            "runtime_custody_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (session_id, name, agent_name, caller_id, caller_session_id,
              target_dir, target_type,
              status, config_json, target_json, int(background_recovery_enabled),
-             now, now, acp_session_id),
+             now, now, acp_session_id, admission_document(runtime_admission)),
         )
 
     def update_session_status(
@@ -149,19 +153,29 @@ class _SessionsMixin:
         self.flush()
         with self._write_lock:
             conn = self._get_conn()
-            # Clear every child table that has a FK to sessions BEFORE the
-            # session row, or `PRAGMA foreign_keys=ON` rejects the parent delete
-            # (FOREIGN KEY constraint failed). delivery_cursors was easy to miss
-            # here -- omitting it left ENDED sessions undeletable, which crashed
-            # _rehydrate's ENDED-cleanup on the next startup.
-            conn.execute("DELETE FROM events WHERE session_id=?", (session_id,))
-            conn.execute("DELETE FROM turns WHERE session_id=?", (session_id,))
-            conn.execute(
-                "DELETE FROM delivery_cursors WHERE session_id=?", (session_id,)
-            )
-            conn.execute(
-                "DELETE FROM delivery_cursor_invalidations WHERE session_id=?",
-                (session_id,),
-            )
-            conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
-            conn.commit()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if conn.execute(
+                    "SELECT 1 FROM sessions WHERE id=? AND runtime_custody_json IS NOT NULL "
+                    "UNION ALL SELECT 1 FROM turns WHERE session_id=? "
+                    "AND runtime_custody_json IS NOT NULL",
+                    (session_id, session_id),
+                ).fetchone() is not None:
+                    from .runtime_custody import RuntimeCustodyError
+
+                    raise RuntimeCustodyError("Retained runtime custody requires outcome reconciliation")
+                # Child rows must precede the FK-protected parent deletion.
+                conn.execute("DELETE FROM events WHERE session_id=?", (session_id,))
+                conn.execute("DELETE FROM turns WHERE session_id=?", (session_id,))
+                conn.execute(
+                    "DELETE FROM delivery_cursors WHERE session_id=?", (session_id,)
+                )
+                conn.execute(
+                    "DELETE FROM delivery_cursor_invalidations WHERE session_id=?",
+                    (session_id,),
+                )
+                conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise

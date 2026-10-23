@@ -19,6 +19,7 @@ from .db_prompts import _PromptsMixin
 from .db_schema import _SchemaMixin
 from .db_sessions import _SessionsMixin
 from .db_relationships import _RelationshipsMixin
+from .db_runtime_custody import _RuntimeCustodyMixin
 
 __all__ = [
     "Database",
@@ -33,6 +34,7 @@ __all__ = [
 
 class Database(
     _CoreMixin,
+    _RuntimeCustodyMixin,
     _SchemaMixin,
     _SessionsMixin,
     _RelationshipsMixin,
