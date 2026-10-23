@@ -623,12 +623,20 @@ def test_explanation_checks_are_reused_only_inside_the_same_report(
     record = _record(env, head_sha=env.head, state="merged", number=7)
     original = finalize_landing.landing
     calls = []
+    original_exists = finalize_landing.git_ops.ref_exists
+    base_reads = []
 
     def checked(branch, upstream, cwd, *, explain=False):
         calls.append((branch, upstream, explain))
         return original(branch, upstream, cwd, explain=explain)
 
+    def exists(ref, **kwargs):
+        if ref.startswith("refs/remotes/"):
+            base_reads.append(ref)
+        return original_exists(ref, **kwargs)
+
     monkeypatch.setattr(finalize_landing, "landing", checked)
+    monkeypatch.setattr(finalize_landing.git_ops, "ref_exists", exists)
     expected = [
         (f"worktree/{env.worktree_id}", f"refs/remotes/origin/{base}", True)
         for base in ("main", "dev")
@@ -636,9 +644,11 @@ def test_explanation_checks_are_reused_only_inside_the_same_report(
     report = finalize_landing.explain(record, _repo(), str(env.clone), str(env.clone))
     assert report["landed"] is True
     assert calls == expected
+    assert base_reads == [upstream for _, upstream, _ in expected]
 
     _git("commit", "-q", "--allow-empty", "-m", "unpublished after explanation", cwd=env.clone)
     calls.clear()
+    base_reads.clear()
     if next_action == "prune":
         ok, error = finalize._pr_finalize_precondition(
             record, _repo(), str(env.clone), str(env.clone),
@@ -650,6 +660,57 @@ def test_explanation_checks_are_reused_only_inside_the_same_report(
         assert report["landed"] is False
         assert "further commits" in report["message"]
         assert calls == expected
+    assert base_reads == [upstream for _, upstream, _ in expected]
+
+
+@pytest.mark.parametrize("content_ref", ["task", None])
+@pytest.mark.parametrize("available", [(), ("main",), ("dev",), ("main", "dev")])
+def test_report_base_snapshot_preserves_missing_and_unresolved_content(
+    tmp_path, monkeypatch, content_ref, available,
+):
+    from agent_worktrees import finalize_open_pr_gate as gate
+
+    record = SimpleNamespace(
+        worktree_id="task", pr=SimpleNamespace(branch="feature/task", number=7),
+    )
+    bases = [f"refs/remotes/origin/{base}" for base in ("main", "dev")]
+    present = {f"refs/remotes/origin/{base}" for base in available}
+    reads, counted_bases = [], []
+
+    def exists(ref, **kwargs):
+        reads.append(ref)
+        return ref in present
+
+    def exceeds(record, ref, upstream, **kwargs):
+        counted_bases.append(upstream)
+        return ref is None
+
+    monkeypatch.setattr(gate, "resolve_precondition_ref", lambda *a, **kw: content_ref)
+    monkeypatch.setattr(finalize_landing.git_ops, "ref_exists", exists)
+    monkeypatch.setattr(finalize_landing, "pr_base", lambda *a: bases[1])
+    monkeypatch.setattr(
+        finalize_landing, "landing",
+        lambda ref, upstream, cwd, **kw: finalize_ref.Landing(ref, upstream, ancestor=True),
+    )
+    monkeypatch.setattr(finalize_landing, "creation_point", lambda *a, **kw: "")
+    monkeypatch.setattr(gate, "upstream_match_is_trustworthy", lambda *a, **kw: False)
+    monkeypatch.setattr(gate, "pr_merge_status", lambda *a: True)
+    monkeypatch.setattr(gate, "merged_content_exceeds", exceeds)
+    monkeypatch.setattr(gate, "merged_pr_block_message", lambda *a, **kw: "unresolved")
+
+    for _ in range(2):
+        reads.clear()
+        report = finalize_landing.explain(record, _repo(), str(tmp_path), str(tmp_path))
+        assert reads == bases
+        expected_bases = tuple(b for b in bases if b in present) or (bases[0],)
+        assert counted_bases[-1] == expected_bases
+        assert report["missing_bases"] == [
+            b.removeprefix("refs/remotes/") for b in bases if b not in present
+        ]
+        assert report["landed"] is (content_ref is not None)
+        if content_ref is None:
+            assert report["checks"] == []
+        present = set(bases) - present
 
 
 @pytest.mark.parametrize("first_proof", ["ancestor", "cherry", "squash", "blobs"])
