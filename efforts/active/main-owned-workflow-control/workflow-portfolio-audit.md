@@ -5,6 +5,37 @@ Standing intent: [workflow orchestration vision](../../../visions/main-owned-wor
 [test portfolio](../../../visions/test-portfolio/README.md) and
 [release pipeline](../../../visions/release-pipeline/README.md).
 
+## October 23 documentation-count recipe reduction
+
+The documentation and version guards enforce different policies; neither is a
+duplicate to remove. Attribute the documentation count check before changing
+its scope: all 1,009 Markdown files contain 22,248,244 normalized characters.
+The eight existing regular expressions spend most of their time rejecting
+arbitrary initial tokens, including patterns with no matches in this corpus.
+
+Split each unchanged full expression into its original prefix and a necessary
+suffix. Search that suffix with the same case-insensitive regex semantics
+before running the full expression. Derive both from shared fragments rather
+than maintaining a separate keyword roster. Every file remains read and
+normalized; a missing suffix skips only an impossible full-pattern scan.
+No changed-path selector, cached result, count grammar or diagnostic ordering
+changes. Unicode case-insensitivity and whitespace continue to use `re.I`
+and the original regex syntax rather than an ASCII lowercase approximation.
+
+On the same native corpus, three alternating full count-check runs per version
+have median **15.415 seconds before** and **4.735 seconds after**. Every
+original regex string, match span, capture, file and ordered diagnostic agrees.
+The complete documentation guard and 122 focused cases pass; these include
+all count phrase forms, numeric/word/unknown tokens, emphasis, multiline
+whitespace, Unicode case variants, ordered failures, impossible-scan work
+counts and read-error propagation. These are local recipe measurements, not
+controlled Actions/whole-flow latency or review-throughput claims.
+
+Required source CI still invokes the whole documentation guard. Source merge,
+actual required-CI observation and release adoption are separate acceptance
+steps; no Main controller, release packet, workflow trigger or runner is
+changed by this optimization.
+
 ## Authority and evidence boundary
 
 This is the shared #6237 audit and execution map, not a competing effort.
@@ -493,7 +524,7 @@ commit overlaps another. The retained population has one successful Main-push
 CI, `39911280826`, followed by `39911295855`. Its allocated ancestry job
 `120274675022` runs for 13 seconds and explicitly rejects source
 `8d905243c80f6e867ca6deff875dc3eb52a3c2dd` as not a Dev ancestor;
-dispatch skips. The proposed source job condition omits only successful CI
+dispatch skips. The source job condition merged in #8189 omits only successful CI
 push completions on Main, retaining all manual refs, Dev ancestry/freshness,
 promotion failure/cancellation recovery, closed-Main wakes and other jobs.
 This removes a demonstrated no-op allocation, not an invocation, required

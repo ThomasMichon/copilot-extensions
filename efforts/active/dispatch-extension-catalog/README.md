@@ -165,7 +165,7 @@ implementation and validation choices remain proposed means.
 - [x] Provide owner-atomic card/ownership steering acceptance, exact-request
   replay and distinct acceptance/consumption/original-wake receipts through
   the existing HTTP, SDK, CLI and native contributions.
-- [ ] Review and implement the bounded terminal receipt/recovery and
+- [x] Review and implement the bounded terminal receipt/recovery and
   draft-provenance contract below through generic contributions and existing
   owner APIs; retain independent graphical adoption and cross-client proof.
 - [ ] Reuse the existing command-emitter task-output contract for mapped
@@ -209,7 +209,7 @@ All items below are **agent-recommended acceptance checks** for execution.
 - [ ] Feed identical owner-backed source/task/steering fixtures to independent
   graphical and terminal consumers. Assert semantic parity, including structured
   inputs and failure/unknown states, without requiring matching layouts.
-- [ ] Exercise terminal full-result presentation, restart and vanished-card
+- [x] Exercise terminal full-result presentation, restart and vanished-card
   recovery with the original request identity. Race draft Save/Reset against
   card replacement and another client's edit; prove no stale restore, overwrite,
   duplicate answer or wrong-owner receipt, including older-owner refusal.
@@ -1244,3 +1244,47 @@ authorized installed proof remain distinct obligations.
 - No installed adoption, source activation, live task effect or release proof
   follows from this merge. All broader parity, template and mapped-production
   obligations remain open.
+
+### 2026-10-23 - Terminal original-request recovery merged
+
+- #8152 merged at 10:52Z as `7e03ddf7f46447492ec50c6f20e99417c17de509`.
+  Exact head `7f6da03c9f2f8190201ac98ccfe0882c14b81761` received an
+  approving Copilot review with no unresolved findings. Required CI run
+  39941476893 passed, including `PR gate (required check)`; all review threads
+  were resolved before the actor-aware merge.
+- Generic contributed preparation retains the complete original request,
+  values, scope, sender/wake and consent before every Submit, including a
+  separately confirmed identical retry. Global retained-response recovery
+  survives restart, vanished rows/cards and unavailable providers. Exact
+  receipt reads remain explicit and read-only; stored commands are never
+  execution authority. Row and view forms use fresh attributed registrations,
+  not uncertain last-known display-cache entries.
+- Review corrected first-touch publication barriers, unavailable Windows
+  roots, repeated storage failures, corrupt observation encoding, UI-thread
+  inspection and stale original-scope rows without polling. Pending-directory
+  markers preserve storage uncertainty across restart on both platforms;
+  exclusive publication cannot replace another writer's empty directory.
+  No second task, receipt or acceptance authority was introduced.
+- The merged tree's contained native Windows storage/recovery/draft selection
+  passed 137 tests with two native-POSIX skips. Earlier real-owner cases prove
+  both native contributions recover only the original acceptance, consumption
+  and wake after response loss, card replacement and a fresh Manager process,
+  with zero duplicate answers or wakes. Three fresh native Windows processes
+  also prove failed-directory publication and retry barriers.
+- An already-cached, ephemeral, non-root Linux container exercised the actual
+  source with network disabled, read-only source/root and resource limits.
+  Native checks passed first-touch/replacement, an execute-only ancestor with
+  a writable leaf, exclusive rename preserving an existing directory inode,
+  and repeated failed-parent recovery. No image pull or dependency install.
+  Darwin has API-contract coverage, not native execution. Lint, unchanged
+  module ceilings and install contracts passed; no deadline was widened.
+- Re-read the entire Plan and Validation Plan after merge. Marked only the
+  bounded terminal contract and its recovery validation complete. Keep #7141
+  open for independent graphical shared/restart-draft adoption and identical
+  cross-client proof. Source/configuration actions, history, templates,
+  process/evaluator and mapped-record journeys remain open under #7091.
+- Next is the independent graphical client's adoption of guarded shared
+  drafts and durable original-request recovery through existing owner
+  operations, followed by common-fixture comparison. Normal promotion and
+  separately authorized installed proof remain open; no live task, source
+  activation, producer handoff or installed rollout occurred.

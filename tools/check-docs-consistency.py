@@ -21,6 +21,9 @@ Three checks (truth is `.github/plugin/marketplace.json` + `plugins/`):
   D. **Adopter navigation** -- primary reading pages exist, link to their
      next waypoints, and resolve local paths/heading anchors with exact casing.
 
+Count checks read every Markdown input; necessary suffix prefilters avoid
+full token-first scans without changing count grammar or diagnostic order.
+
 Usage:  python tools/check-docs-consistency.py            # check
         python tools/check-docs-consistency.py --counts   # print derived counts
 Exit 0 = consistent, 1 = drift (suitable for a pre-push hook / CI).
@@ -342,15 +345,17 @@ def check_plugin_skill_lists(names: list[str]) -> list[str]:
 
 
 COUNT_PATTERNS = [
-    # (regex, kind)  -- kind resolves to an expected number
-    (re.compile(r"\b([A-Za-z0-9]+)\s+plugins,\s+one\s+marketplace", re.I), "total"),
-    (re.compile(r"How\s+the\s+([A-Za-z0-9]+)\s+copilot-extensions\s+plugins", re.I), "total"),
-    (re.compile(r"\ball\s+([A-Za-z0-9]+)\s+copilot-extensions\s+plugins", re.I), "total"),
-    (re.compile(r"\b([A-Za-z0-9]+)-plugin\s+(?:suite|marketplace)", re.I), "total"),
-    (re.compile(r"\b([A-Za-z0-9]+)\s+ship\s+a\s+runtime", re.I), "runtime"),
-    (re.compile(r"\b([A-Za-z0-9]+)\s+runtime\s+plugins", re.I), "runtime"),
-    (re.compile(r"\b([A-Za-z0-9]+)\s+(?:are|is)\s+payload-only", re.I), "payload"),
-    (re.compile(r"bundles\s+([A-Za-z0-9]+)\s+focused\s+skills", re.I), "cc_skills"),
+    (re.compile(prefix + suffix, re.I), kind, re.compile(suffix, re.I))
+    for prefix, suffix, kind in [
+        (r"\b([A-Za-z0-9]+)\s+", r"plugins,\s+one\s+marketplace", "total"),
+        (r"How\s+the\s+([A-Za-z0-9]+)\s+", r"copilot-extensions\s+plugins", "total"),
+        (r"\ball\s+([A-Za-z0-9]+)\s+", r"copilot-extensions\s+plugins", "total"),
+        (r"\b([A-Za-z0-9]+)", r"-plugin\s+(?:suite|marketplace)", "total"),
+        (r"\b([A-Za-z0-9]+)\s+", r"ship\s+a\s+runtime", "runtime"),
+        (r"\b([A-Za-z0-9]+)\s+", r"runtime\s+plugins", "runtime"),
+        (r"\b([A-Za-z0-9]+)\s+(?:are|is)\s+", r"payload-only", "payload"),
+        (r"bundles\s+([A-Za-z0-9]+)\s+", r"focused\s+skills", "cc_skills"),
+    ]
 ]
 
 
@@ -366,7 +371,10 @@ def check_counts(expected: dict[str, int]) -> list[str]:
         # Strip markdown emphasis so "**five**" / "`five`" still match.
         text = raw.replace("*", "").replace("`", "")
         rel = md.relative_to(REPO)
-        for rx, kind in COUNT_PATTERNS:
+        for rx, kind, suffix in COUNT_PATTERNS:
+            # A match requires this suffix; avoid token-first scans of unrelated prose.
+            if not suffix.search(text):
+                continue
             for m in rx.finditer(text):
                 got = _num(m.group(1))
                 want = expected[kind]
