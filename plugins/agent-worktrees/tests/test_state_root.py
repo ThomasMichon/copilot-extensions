@@ -1478,6 +1478,13 @@ class TestStateRootPairCLI:
 # config_source_anchors -- the E1e knowledge-overlay (config-graft) seam.
 # ---------------------------------------------------------------------------
 
+def test_config_sources_reexports_preserve_the_existing_api():
+    from agent_worktrees import config_sources
+
+    assert sr.ConfigSource is config_sources.ConfigSource
+    assert sr.config_source_anchors is config_sources.config_source_anchors
+
+
 def test_config_sources_non_stateless_is_base_only(monkeypatch):
     monkeypatch.setattr(sr, "_git_toplevel", lambda cwd: "/work/tree")
     srcs = sr.config_source_anchors(_config("dotfiles"))

@@ -1057,7 +1057,9 @@ shadow mutation and original safety assertions.
 Config-overlay regressions require self-hosted lookups to retain base and
 machine-local sources without resolving an unused state root. Stateless and
 external-state configurations still resolve the knowledge overlay on every
-call, including changed or removed bindings. The diverged-checkout Git fixtures
+call, including changed or removed bindings. `config_sources` owns this read
+path; `state_root` re-exports the same types and function for existing callers.
+The diverged-checkout Git fixtures
 hide only the unrelated CodeSpace CLI from discovery, leaving real Git,
 finalization, status polling and checkout-invalidation assertions intact.
 The claim-warning suite separately exercises CodeSpace CLI invocation.
