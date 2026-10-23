@@ -384,10 +384,20 @@ def prepared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
 
 
 def test_real_prepublish_cli_checks_qualification_signatures_and_final_downloads_before_receipt(
-    prepared: tuple,
+    prepared: tuple, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     directory, service, observed, argv, output = prepared
+    validate = publisher.validate_commit_artifacts
+    validations = []
+
+    def record_validation(*args, **kwargs):
+        validations.append((args, kwargs))
+        return validate(*args, **kwargs)
+
+    monkeypatch.setattr(publisher, "validate_commit_artifacts", record_validation)
+    before = len(service.calls)
     assert publisher.main(argv) == 0
+    assert len(validations) == 1
     assert observed
     fields = dict(line.split("=", 1) for line in output.read_text("utf-8").splitlines())
     assert fields["source_release"] == f"python-artifacts-{DEV}"
@@ -395,14 +405,15 @@ def test_real_prepublish_cli_checks_qualification_signatures_and_final_downloads
     source = service.releases[f"python-artifacts-{DEV}"]
     assert service.tags == {f"python-artifacts-{DEV}": DEV}
     assert len(source["assets"]) == 2
-    assert {
+    assert sorted(
         int(call[1].rsplit("/", 1)[-1])
-        for call, options in service.calls
+        for call, options in service.calls[before:]
         if call[0] == "api" and "/releases/assets/" in call[1]
         and options.get("binary") and options.get("verification")
-    } == {asset["id"] for asset in source["assets"]}
+    ) == sorted(asset["id"] for asset in source["assets"])
     writes = list(service.writes)
     assert publisher.main(argv) == 0
+    assert len(validations) == 2
     assert service.writes == writes
     assert output.read_text("utf-8").count(f"source_release=python-artifacts-{DEV}") == 2
     assert (directory / artifacts.INDEX_NAME).is_file()

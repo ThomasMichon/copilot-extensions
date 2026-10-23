@@ -411,7 +411,7 @@ def test_cli_preparation_failure_is_nonzero_and_final_publication_never_repairs_
         "--signer-digest", TREE, "--source-digest", TREE, "--source-ref", "refs/heads/main",
         "--candidate-commit", TREE, "--dev-head", DEV,
     ]
-    monkeypatch.setattr(publisher, "verify_attestations", lambda *a, **kw: None)
+    monkeypatch.setattr(publisher, "verify_attestations", lambda *a, **kw: {"schema_version": 1})
     assert publisher.main(["prepare", *args]) == 1
     assert "artifact-ready:" not in capsys.readouterr().out
     writes = list(server.writes)

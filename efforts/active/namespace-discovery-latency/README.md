@@ -183,6 +183,25 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-23 - Single verified source-set readback
+
+- Review found the new schema-2 CLI still entered independent helper paths
+  repeatedly, causing five candidate validations and three complete source-set
+  transfers despite performing no publication writes.
+- The canonical readback now returns its validated index after candidate
+  validation, source-tag/metadata checks and every exact raw-byte read. The
+  schema-2 candidate CLI reuses that result for its publication receipt after
+  qualification and all signatures pass. Direct helper callers and the
+  historical landing/schema-1 flow retain their independent checks.
+- The actual CLI regression now counts exactly one candidate validation and
+  one download per index/bundle per invocation. Two pure cases cover receipt
+  reuse and readback failure without a success receipt; no network, timing or
+  effect-observer exception is introduced.
+- The focused publication/source-identity selection passed 100 cases and the
+  readiness-core selection passed 32. Its other 23 native/workflow cases were
+  outside this focused selection, not credited as passing. Canonical unit
+  execution and new-head review/CI remain pending for this correction.
+
 ### 2026-10-23 - Source-owned composition selected
 
 - While this repair was under review, #8110 independently merged a

@@ -71,19 +71,19 @@ def _verify_downloads(
 
 def _validated_set(
     directory: Path, *, candidate_commit: str, dev_head: str, repo: Path,
-) -> tuple[str, str, dict[str, str]]:
+) -> tuple[str, str, dict[str, str], dict]:
     index = publisher.validate_commit_artifacts(
         directory, commit=candidate_commit, dev_head=dev_head, repo=repo,
     )
     target = dev_head if index["schema_version"] == 2 else candidate_commit
-    return f"python-artifacts-{target}", target, _expected(directory, index)
+    return f"python-artifacts-{target}", target, _expected(directory, index), index
 
 
 def prepare_artifacts(
     directory: Path, *, repository: str, candidate_commit: str, dev_head: str, repo: Path,
 ) -> str:
     """Only a complete set readable with consumer authority authorizes merge."""
-    tag, source, expected = _validated_set(
+    tag, source, expected, _index = _validated_set(
         directory, candidate_commit=candidate_commit, dev_head=dev_head, repo=repo,
     )
     release = _read_release(repository, tag)
@@ -116,11 +116,22 @@ def verify_ready_artifacts(
     directory: Path, *, repository: str, candidate_commit: str, dev_head: str, repo: Path,
 ) -> str:
     """Read-only verification; never repair a readiness failure after source merge."""
-    tag, source, expected = _validated_set(
+    tag, _index = verify_ready_artifact_set(
+        directory, repository=repository, candidate_commit=candidate_commit,
+        dev_head=dev_head, repo=repo,
+    )
+    return tag
+
+
+def verify_ready_artifact_set(
+    directory: Path, *, repository: str, candidate_commit: str, dev_head: str, repo: Path,
+) -> tuple[str, dict]:
+    """Return the source index only after candidate validation and complete raw readback."""
+    tag, source, expected, index = _validated_set(
         directory, candidate_commit=candidate_commit, dev_head=dev_head, repo=repo,
     )
     release = _read_release(repository, tag)
     if release is None or publisher._tag_commit(repository, tag) != source:
         raise PromotionArtifactError(f"{tag}: candidate release is unavailable or misbound")
     _verify_downloads(repository, tag, _assets(repository, release, expected), expected)
-    return tag
+    return tag, index

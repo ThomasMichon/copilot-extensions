@@ -114,6 +114,12 @@ the pinned hosted signer, source-bound archives and source-owned ready set, and
 reads the index and every bundle back with consumer authority before emitting
 publication success. It does not create a second version-alias publication. A failed
 readback does not emit a success-shaped receipt.
+For schema 2, the candidate-publication CLI performs one artifact-set validation
+against the current candidate and one complete source-set readback after qualification and
+signature checks. The readback returns its validated index for the publication
+receipt; the CLI does not call the legacy publication helpers or repeat those
+transfers. Direct helper callers retain independent validation, and the
+historical `publish` landing checks and schema-1 flow remain unchanged.
 
 The trusted controller must require both bound qualification and publication
 receipts before its atomic exact-head, strict-base, non-administrator Main
