@@ -1036,7 +1036,7 @@
     "tools/artifact_source_build.py": "bd7079c5ac69199305b5aa949976ccf184e3cb6ffcf068521f17cd53cbc0e508",
     "tools/standalone_python_artifacts.py": "f0be60291f3d4987bc8bc8cfab6f8e7edb877d6991da92bdad22d9e6ce04b598",
     "tools/standalone_consumers.py": "168987556a18f4820f1b4869d090306827b2587e93b392eebe25ef497db5e910",
-    "tools/promotion_unit_tests/test_standalone_artifacts.py": "f4b2d4b858b9c38f57a910905b94090341ee3d86b30be999b4a41594021d2efc",
+    "tools/promotion_unit_tests/test_standalone_artifacts.py": "39ee8e4441f9331305e7074ca6a9a3995a8efbb3e20e6c21b6b37714b8a04eef",
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
     "libs/config-migrate/src/config_migrate/core.py": "77d2469a245ee27ff80a1f24a236f38b896c23d011e2c8e4720a77df19a748c6",
     "libs/config-migrate/src/config_migrate/registry.py": "e542436a67d0ca488261e5fd17f921d2947296bc2aa04a46d46611a57c7a1f42",

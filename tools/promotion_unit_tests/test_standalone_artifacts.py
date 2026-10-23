@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-import promote_release as promotion
 import promotion_python_artifacts as artifacts
-import reuse_promotion_artifacts as reuse
 from artifact_source_build import validate_static_build
 from standalone_python_artifacts import artifact_label, project_key
 
@@ -83,10 +83,10 @@ def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypa
     candidate = None
     events = []
     tree, commit = "a" * 40, "b" * 40
-    monkeypatch.setattr(promotion, "add_scratch_worktree", lambda *a, **kw: scratch)
-    monkeypatch.setattr(
-        promotion, "remove_scratch_worktree", lambda path, **kw: events.append(("remove", path)),
-    )
+    monkeypatch.setitem(sys.modules, "promote_release", SimpleNamespace(
+        add_scratch_worktree=lambda *a, **kw: scratch,
+        remove_scratch_worktree=lambda path, **kw: events.append(("remove", path)),
+    ))
 
     def run(argv, *, cwd):
         nonlocal candidate
@@ -129,7 +129,9 @@ def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypa
     monkeypatch.setattr(artifacts, "_run", run)
     monkeypatch.setattr(artifacts, "candidate_projects", inventory)
     monkeypatch.setattr(artifacts, "validate_artifacts", validate)
-    monkeypatch.setattr(reuse, "reuse_artifacts", reuse_source)
+    monkeypatch.setitem(sys.modules, "reuse_promotion_artifacts", SimpleNamespace(
+        reuse_artifacts=reuse_source,
+    ))
     kwargs = dict(
         repo=tmp_path, commit=commit, content_tree=tree, dev_head=commit, main_before=commit,
         out_dir=tmp_path / "export",
