@@ -11,9 +11,10 @@ from pathlib import Path
 from build_toolchain_lock import ArtifactBuildError, resolve_toolchain_lock
 
 
-def main(builder, description: str) -> int:
+def main(builder, description: str, *, standalone_builder=None) -> int:
     ap = argparse.ArgumentParser(description=description)
     ap.add_argument("plugin", help="plugin name under plugins/")
+    ap.add_argument("--standalone", action="store_true", help="build a registered standalone component")
     ap.add_argument("--out-dir", required=True, type=Path)
     ap.add_argument("--python", help="interpreter used to create the locked toolchain venv")
     ap.add_argument("--toolchain-venv", type=Path, help="share one locked toolchain across builds")
@@ -23,6 +24,10 @@ def main(builder, description: str) -> int:
     )
     ap.add_argument("--toolchain-min-age-days", type=int, default=None)
     args = ap.parse_args()
+    if args.standalone:
+        if standalone_builder is None:
+            ap.error("standalone artifact builder is unavailable")
+        builder = standalone_builder
     if args.toolchain_min_age_days is not None and args.toolchain_source != "seasoned-public":
         ap.error("--toolchain-min-age-days requires --toolchain-source seasoned-public")
     try:

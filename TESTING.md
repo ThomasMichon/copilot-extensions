@@ -28,6 +28,18 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+The separate manual selector `pr_artifacts=true` exercises real first-party
+wheel construction and verification on Linux and Windows through
+`tools/smoke_public_toolchain.py --standalone`. It shares one seasoned-public
+build-toolchain lock with the existing plugin builds, validates PR/Fleet
+standalone bundles against their source/resource closure, and installs only
+those built wheels offline into a fresh environment outside the checkout.
+This is packaging evidence, not runtime dependency admission or image proof.
+`tools/test_standalone_python_artifacts.py` retains the fuller synthetic
+builder/bundle refusal matrix; fifteen pure identity, inventory and exact-hook
+controls in `tools/promotion_unit_tests/test_standalone_artifacts.py` join the
+required no-actor unit packet without adding native builds to required CI.
+
 The manual `installation-context-acceptance.yml` selector `pr_service=true`
 runs the focused PR serving/observation lifecycle on Linux and Windows:
 `test_watch_replay_store.py`, `test_watch_service.py`, `test_watch_gateway.py`,
