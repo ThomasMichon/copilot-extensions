@@ -55,6 +55,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                         raise TaskError("delegated preparation identity conflict")
                     conn.execute("COMMIT")
                     return existing
+                self._check_replay_request(conn, delegation)
             task = self._fetch(conn, task_id)
             if task is None:
                 conn.execute("COMMIT")
@@ -131,6 +132,7 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
                 "UPDATE run_waiters SET kind = ?, delegation_json = ? WHERE task_id = ? AND generation = ?",
                 (kind, json.dumps(delegation) if delegation is not None else None, task_id, generation),
             )
+            self._store_replay_intent(conn, delegation, task_id, generation)
             conn.execute("COMMIT")
         self._notify_run_waiter_prepare()
         if release_enqueued:
@@ -283,17 +285,21 @@ class QueueRunWaitersMixin(DelegatedWaiterBindingMixin):
             ).fetchone()
         return self._run_waiter_from_row(row) if row else None
 
-    def list_active_run_waiters(self) -> list[dict[str, Any]]:
+    def list_active_run_waiters(self, *, local_only: bool = False) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM run_waiters WHERE state = 'active' ORDER BY created_at ASC, id ASC"
+                "SELECT * FROM run_waiters WHERE state = 'active' "
+                + ("AND replay_scope IS NULL " if local_only else "")
+                + "ORDER BY created_at ASC, id ASC"
             ).fetchall()
         return [self._run_waiter_from_row(row) for row in rows]
 
-    def list_pending_run_waiters(self) -> list[dict[str, Any]]:
+    def list_pending_run_waiters(self, *, local_only: bool = False) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM run_waiters WHERE state = 'preparing' ORDER BY created_at ASC, id ASC"
+                "SELECT * FROM run_waiters WHERE state = 'preparing' "
+                + ("AND replay_scope IS NULL " if local_only else "")
+                + "ORDER BY created_at ASC, id ASC"
             ).fetchall()
         return [self._run_waiter_from_row(row) for row in rows]
 

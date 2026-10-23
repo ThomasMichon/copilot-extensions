@@ -33,6 +33,9 @@ def run_waiter_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "kind": row["kind"],
         "delegation": json.loads(row["delegation_json"] or "null"),
         "event_id": row["event_id"],
+        "replay_registration_id": row["replay_registration_id"],
+        "replay_attempted": bool(row["replay_attempted"]),
+        "replay_settled": bool(row["replay_settled"]),
         "id": row["id"],
         "task_id": row["task_id"],
         "generation": row["generation"],
@@ -60,4 +63,9 @@ def run_waiter_summary(waiter: dict) -> dict:
         summary.update(kind="delegated", generation=waiter["generation"],
                        repo=identity["repo"], number=identity["number"],
                        observation_deadline=waiter["created_at"] + identity["timeout"])
+        if "replay" in identity:
+            summary.update(
+                observation_deadline=identity["replay"]["deadline_at"],
+                delivery="service-replay", replay_settled=waiter["replay_settled"],
+            )
     return summary

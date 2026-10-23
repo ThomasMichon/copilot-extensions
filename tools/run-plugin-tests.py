@@ -285,8 +285,10 @@ def _dep_fingerprint(name: str) -> str:
     import hashlib
     pdir = _plugin_dir(name)
     parts = [pdir / "pyproject.toml"]
-    if name in {"agent-index", "agent-pull-requests"}:
+    if name in {"agent-index", "agent-pull-requests", "agent-dispatch"}:
         parts.append(REPO / "fleet-manager" / "pyproject.toml")
+    if name == "agent-dispatch":
+        parts.append(REPO / "plugins" / "agent-pull-requests" / "pyproject.toml")
     libs = pdir / "libs"
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
@@ -361,7 +363,9 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
             if name == "agent-index":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
-            if name == "agent-pull-requests":
+            if name == "agent-dispatch":
+                cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
+            if name in {"agent-pull-requests", "agent-dispatch"}:
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if reinstall:
                 # A new venv can still consume uv's stale local-path wheels.
@@ -377,7 +381,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
                 retained_resource_roots=(
                     standalone_build_resources("fleet-manager", source_root=REPO)
-                    if name in {"agent-index", "agent-pull-requests"} else ()
+                    if name in {"agent-index", "agent-pull-requests", "agent-dispatch"} else ()
                 ),
             )
         else:

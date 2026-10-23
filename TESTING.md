@@ -7,6 +7,18 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional Dispatch service replay
+
+`tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py
+--test-file tests/test_delegated_replay_transport.py` exercises the finite replay
+consumer and actual TLS/PoP Gateway/connector with isolated SQLite and replay
+stores. Dispatch's dev preparation selects the same checkout's PR and Fleet
+packages; default Dispatch installs remain independent. The existing manual
+`installation-context-acceptance.yml` `dispatch_delegation=true` selector runs
+these alongside the local callback contracts on Linux and Windows. No new job,
+production credential or fleet placement is added. This does not qualify the
+unimplemented installed consumer lifecycle or production fleet budgets.
+
 ## Optional diagnostic telemetry
 
 The shared `libs/process-telemetry` contract is exercised by its real Bridge

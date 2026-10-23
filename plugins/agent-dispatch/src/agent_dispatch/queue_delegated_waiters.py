@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from .delegated_waiter_contract import validate_delegation, validate_event
 from .queue_records import TaskError
+from .queue_replay_waiters import ReplayWaiterProgressMixin
 
 
-class DelegatedWaiterBindingMixin:
+class DelegatedWaiterBindingMixin(ReplayWaiterProgressMixin):
     def run_waiter_coordinator_id(self) -> str:
         with self._connect() as conn:
             return str(conn.execute("SELECT id FROM run_waiter_identity").fetchone()["id"])

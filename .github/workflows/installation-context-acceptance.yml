@@ -168,13 +168,15 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Receipt-bound callbacks, real owner replay and process fallback
+      - name: Receipt-bound callbacks, service replay and process fallback
         run: >-
           python tools/run-plugin-tests.py agent-dispatch
           --test-file tests/test_delegated_waiter_cli.py
           --test-file tests/test_delegated_waiter_context.py
           --test-file tests/test_delegated_waiter_fences.py
           --test-file tests/test_delegated_waiter_owner_contract.py
+          --test-file tests/test_delegated_replay_consumer.py
+          --test-file tests/test_delegated_replay_transport.py
           --max-files-per-sub-suite 2
 
   dispatch-delegation-windows:

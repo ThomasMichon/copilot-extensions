@@ -1,0 +1,208 @@
+"""Optional Dispatch consumer over real TLS/PoP, connector and both disk owners."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import subprocess
+import sys
+from pathlib import Path
+import threading
+import time
+
+import pytest
+from agent_procutil import no_window_kwargs
+from fleet_manager.gateway_service_caller import ServiceCaller
+from fleet_manager.gateway_service_channel import TransportError
+
+from agent_pull_requests.watch_gateway import WatchGateway, WatchScopeBinding
+from agent_pull_requests.watch_replay import ConsumerScope
+from agent_pull_requests.watch_replay_store import ReplayStore
+from agent_dispatch.delegated_replay_consumer import create_replay_consumer
+from tests._delegation_helpers import identity, task
+from tests._helpers import RepoDefaultingQueue as TaskQueue
+
+pytestmark = pytest.mark.contract("agent_dispatch.delegated_replay.transport")
+
+
+def service_owner(tmp_path):
+    store = ReplayStore((tmp_path / "replay").resolve(), "fleet/service/installation")
+    store.provision()
+    return store, WatchGateway(
+        store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
+        bindings=(WatchScopeBinding(
+            "caller-a", "project", ConsumerScope("caller-a", "dispatch", "example/project"),
+        ),),
+    )
+
+
+def new_consumer(queue, rig):
+    async def access():
+        return rig.access("caller-a", 3)
+    caller = ServiceCaller(
+        gateway_origin=rig.origin, gateway_ca=rig.ca, access_token_callback=access,
+        proof_key=rig.h.keys[3].get_op_key("sign"),
+    )
+    return create_replay_consumer(
+        queue, caller, route_prefix="/api", target="project",
+        repo="example/project", caller_scope="caller-a:dispatch",
+    ), caller
+
+
+def test_default_import_does_not_load_optional_packages():
+    code = """
+import importlib.abc
+import sys
+class RefuseOptional(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, *args):
+        if fullname.split('.')[0] in ('agent_pull_requests', 'fleet_manager'):
+            raise AssertionError('default import loaded an optional distribution')
+sys.meta_path.insert(0, RefuseOptional())
+import agent_dispatch
+import agent_dispatch.delegated_replay_consumer
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", code], capture_output=True, text=True,
+        timeout=15, check=False, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+
+
+async def prepare_intent(queue, owner, task_id, *, timeout=1.0):
+    spec = identity(queue)
+    issued_at = time.time() - 2
+    spec.update(timeout=timeout, replay={
+        "binding": owner.binding, "request_id": "original",
+        "issued_at": issued_at, "deadline_at": issued_at + timeout,
+    })
+    await owner.prepare(
+        task_id, delegation=spec, worker_id="worker", resume_worktree="host/wt",
+        host="host", reason="waiting",
+    )
+    return spec
+
+
+@pytest.mark.parametrize("lost_operation", ["register", "acknowledge", "cancel"])
+def test_actual_consumer_restarts_after_lost_committed_result(tmp_path, monkeypatch, lost_operation):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
+    from gateway_service_transport_fixtures import running
+    from test_gateway_service_handler import connect_handler
+
+    async def scenario():
+        store, owner = service_owner(tmp_path)
+        database = tmp_path / "tasks.db"
+        queue = TaskQueue(database)
+        task_id = task(queue)
+        async with running(tmp_path) as rig:
+            await connect_handler(rig, owner.handle)
+            consumer, caller = new_consumer(queue, rig)
+            spec = await prepare_intent(
+                queue, consumer, task_id, timeout=300.0 if lost_operation == "cancel" else 1.0,
+            )
+            if lost_operation == "cancel":
+                assert not (await consumer.cycle())["blocked"]
+                queue.supersede_run_waiter_with_wake(
+                    task_id, reason="cancelled", message="recheck", sender="test",
+                )
+            original = caller.request
+            lost = []
+
+            async def request(method, target, **kwargs):
+                response = await original(method, target, **kwargs)
+                if target.endswith("/" + lost_operation) and not lost:
+                    lost.append(True)
+                    raise TransportError("outcome-unknown", 502)
+                return response
+
+            monkeypatch.setattr(caller, "request", request)
+            assert (await consumer.cycle())["blocked"]
+            assert len(queue.list_run_waiter_wakes(task_id)) == int(lost_operation != "register")
+            await owner.drain(timeout=3)
+            rig.tasks[-1].cancel()
+            await asyncio.gather(rig.tasks[-1], return_exceptions=True)
+            owner = WatchGateway(
+                store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
+                bindings=(WatchScopeBinding(
+                    "caller-a", "project", ConsumerScope("caller-a", "dispatch", "example/project"),
+                ),),
+            )
+            await connect_handler(rig, owner.handle)
+            restored = TaskQueue(database)
+            consumer, _ = new_consumer(restored, rig)
+            result = await consumer.cycle()
+            assert not result["blocked"]
+            assert len(restored.list_run_waiter_wakes(task_id)) == 1
+            assert not restored.list_replay_waiters(consumer.binding)
+            records = json.loads(store.path.read_bytes())["records"]
+            assert len(records) == 1
+            assert (await consumer.client.pending()).events == ()
+            assert (spec["replay"]["deadline_at"] < time.time()) == (lost_operation != "cancel")
+            assert rig.backends[0].requests == []
+            await owner.drain(timeout=3)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("loss", ["policy", "channel", "cancel"])
+def test_actual_consumer_reconciles_original_after_commit_in_flight(tmp_path, monkeypatch, loss):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
+    from gateway_service_transport_fixtures import eventually, running
+    from test_gateway_service_handler import connect_handler
+    from agent_pull_requests import watch_replay_store
+
+    async def scenario():
+        store, owner = service_owner(tmp_path)
+        queue = TaskQueue(tmp_path / "tasks.db")
+        task_id = task(queue)
+        started, release = threading.Event(), threading.Event()
+        original_write = watch_replay_store._atomic_write_json
+
+        def commit(path, state):
+            if not started.is_set():
+                started.set()
+                assert release.wait(10)
+            original_write(path, state)
+
+        async with running(tmp_path) as rig:
+            await connect_handler(rig, owner.handle)
+            consumer, _ = new_consumer(queue, rig)
+            await prepare_intent(queue, consumer, task_id, timeout=300.0)
+            monkeypatch.setattr(watch_replay_store, "_atomic_write_json", commit)
+            pending = asyncio.create_task(consumer.cycle())
+            try:
+                assert await asyncio.to_thread(started.wait, 3)
+                callers = rig.h.document["callers"]
+                if loss == "policy":
+                    rig.h.document["callers"] = []
+                    await rig.update()
+                elif loss == "channel":
+                    await rig.state.channels["service-a"].close()
+                else:
+                    pending.cancel()
+                if loss == "cancel":
+                    with pytest.raises(asyncio.CancelledError):
+                        await pending
+                else:
+                    assert (await pending)["blocked"]
+                assert owner._tasks
+                assert queue.list_pending_run_waiters()[0]["replay_attempted"]
+                assert not queue.list_run_waiter_wakes(task_id)
+                release.set()
+                await eventually(lambda: not owner._tasks)
+                if loss == "policy":
+                    rig.h.document["callers"] = callers
+                    await rig.update()
+                elif loss == "channel":
+                    await connect_handler(rig, owner.handle)
+                consumer, _ = new_consumer(TaskQueue(tmp_path / "tasks.db"), rig)
+                assert not (await consumer.cycle())["blocked"]
+                assert len(json.loads(store.path.read_bytes())["records"]) == 1
+                assert queue.get_active_run_waiter(task_id)["delegation"]["replay"]["request_id"] == "original"
+                assert not queue.list_run_waiter_wakes(task_id)
+            finally:
+                release.set()
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+                await owner.drain(timeout=3)
+
+    asyncio.run(scenario())

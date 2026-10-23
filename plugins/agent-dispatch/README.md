@@ -2244,6 +2244,12 @@ is installed or auto-started just to enable this optimization. See
 [`Delegated PR waits`](docs/delegated-pr-waits.md) for transition syntax, safe
 fallback decisions, generation-fenced at-least-once completion, and recovery.
 
+An explicitly configured embedding can instead compose the optional
+[`service replay consumer`](docs/delegated-service-replay.md). Its finite cycles
+retain original request/deadline intent in the same waiter rows and settle
+generation-fenced effects before ACK. This does not change CLI defaults or
+install/activate a fleet service.
+
 Everything after `--` is the blocking wait command (its own flags are never parsed
 as `run` options). With `--detach` the wait is re-exec'd as a fully detached,
 cheap OS-level waiter (no agent, no tokens); the expensive worker session is spun

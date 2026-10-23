@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in durable generation-fenced shared PR replay consumption.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

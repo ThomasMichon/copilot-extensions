@@ -260,10 +260,14 @@ _Operator-required scope; agent-recommended implementation and validation._
   bounded HTTP bodies/concurrency/deadline, no automatic retry or ambient
   fallback, and explicit uncertain mutation results (source confirmed by #8059).
   PR-specific replay consumption and installed/fleet acceptance remain below.
-- [ ] Land the finite PR-owned typed replay client over that SDK, preserving
+- [x] Land the finite PR-owned typed replay client over that SDK, preserving
   original request criteria and exact completion identities without retries,
   local persistence or a second wait owner. Source client validation does not
-  close the shared Dispatch consumer or installed/fleet acceptance.
+  close the shared Dispatch consumer or installed/fleet acceptance (#8072).
+- [ ] Land the finite shared Dispatch replay consumer over the existing
+  prepare/arm/finish transactions, retaining original intent and terminal
+  settlement progress through disconnect and restart. This source leaf does
+  not close coordinator scheduling, service lifecycle or fleet acceptance.
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -509,6 +513,89 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-22 - Prepare durable shared Dispatch replay consumption
+
+- Added an explicit optional replay composition over the existing typed PR
+  client, with no change to ordinary CLI/default imports or the local callback
+  optimization. Capability negotiation precedes task suspension. The original
+  nonsecret Gateway/route/target/repository/caller-scope binding, request ID,
+  issue time and deadline are committed to the same waiter row and generation.
+  Caller scope is trusted embedding correlation, never authorization or an
+  attested Gateway namespace.
+- Indexed unsettled rows retain attempted/registration/settlement progress
+  across retirement and restart. Each finite cycle visits at most 32 rows and
+  reads one 16-event batch. No database transaction spans the network. The
+  existing finish transaction commits the event and wake outbox before ACK;
+  lost ACK results reconcile the original receipt even after pending removal.
+  Cancellation/supersession affects only the original registration, and local
+  callback/PID recovery skips remote preparations and active waits.
+- Revocation, channel loss and cancellation retain disconnect semantics:
+  stop the failed cycle, retain potentially committed work and reconcile the
+  original identity under renewed authorization. No second registration,
+  process fallback, rollback or distributed publication barrier is introduced.
+- Validation: 194 disjoint focused Dispatch cases passed across the replay,
+  migration/recovery, local CLI/context and real owner callback modules. Seven
+  final controls use the actual TLS/PoP SDK, Gateway/connector, SQLite and PR
+  replay disk owners, including lost register/ACK/cancel responses and policy,
+  channel and cancellation loss during commit. Native callback families passed
+  separately (16 + 6) without changing item limits. Initial aggregate 240s and
+  two-file 180s groups timed out without assertions; those are not passing
+  evidence and the complete partitioned runs supersede them. Four targeted
+  test-preparation cases and two acceptance-selector cases passed. Install
+  contract passed for all 13 plugins; Ruff, headless, module-size and async
+  timeout guards passed. The module-size check initially caught 1006 lines in
+  the existing waiter module; new replay persistence helpers moved into the
+  dedicated replay mixin without changing the enclosing transaction.
+- The first focused run caught a cursor gap; the fix wraps an exhausted indexed
+  scan in the same cycle and advances only over visited rows, including a failed
+  one, to avoid starvation. Tests also cover capability-before-prepare,
+  immutable intent across awaits, duplicate bindings, stale generations,
+  original deadlines, batch bounds and dependency-free default imports.
+- Documentation/architecture: this closes the finite-consumer part of the
+  reviewed PR service contract without claiming its lifecycle. The optional
+  embedding still owns stable authenticated scope, dedicated remote pending
+  view, admission, cadence/backoff and graceful shutdown. Same-checkout test
+  preparation and the existing manual Linux/Windows selector exercise the new
+  modules; no new CI job or production capacity is added.
+- Performance: no consumer subprocess, sleeper, per-task thread, tree/history
+  scan or installation. Indexed queue work is bounded by the page and each
+  cycle performs at most 82 finite SDK calls, including capability, receipt,
+  pending and settlement work. A worst-case 32-row/16-event test asserts exactly
+  82 calls. An indexed local-only recovery query excludes remote rows before
+  projection; its query plan is also asserted. Deterministic work counts and native isolated
+  wire behavior are exercised, not representative fleet p95/CPU qualification.
+  No installer/lifecycle code changed; isolated fresh disk/dependency
+  preparation covers the callable's first touch, not a full service clean room.
+- The parent remains Active. Shared scheduling, independently installable role,
+  production-provider validation, released/authorized installed proof and the
+  complete fleet/native-client/migration/reviewer matrix remain open. No
+  runtime update, credential provisioning, activation, new placement or
+  worktree finalization occurred.
+
+### 2026-10-22 - Merge typed replay consumption and continue the shared coordinator
+
+- #8072 merged as `0a68c8e3a127be8af4393aa79dfed25f22fa783e` at
+  `2026-10-23T03:20:45Z`, from published head
+  `523ca0f3394093fdefeed95d105f7ae2ebe47685`. Current-head Copilot review
+  `5623493205` approved with no open issues. Read its complete body and the
+  complete empty thread page; every required check passed. Managed completion
+  used only the documented additional-CODEOWNER exception, not a CI or
+  feedback bypass. #7188 remains open.
+- Read the full parent Plan/Validation after merge and close only the finite
+  typed-client source item. The 205-case replay/client/Gateway selection and
+  all source guards are not production-provider or installed fleet proof.
+  Retain every presentation/migration, credential, installation, lifecycle
+  and fleet acceptance item.
+- Next: connect the shared Dispatch consumer through the existing durable
+  prepare/arm/finish transactions. Persist the original request/issued/deadline
+  with its task generation, reconcile setup uncertainty, and ACK an exact event
+  only after durable generation-fenced completion. Remote registrations must
+  not be judged missing by the local callback-owner probe or arm a process
+  fallback on transport loss.
+- Managed post-merge reconciliation preserved the published head in its backup
+  and removed only the already-merged commit. The parent remains Active; no
+  worktree finalization, runtime update, credentials, activation or new capacity.
 
 ### 2026-10-22 - Prepare the finite typed PR replay client
 

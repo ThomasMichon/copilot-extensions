@@ -253,6 +253,11 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         ("kind", "TEXT NOT NULL DEFAULT 'process'"),
         ("delegation_json", "TEXT"),
         ("event_id", "TEXT"),
+        ("replay_scope", "TEXT"),
+        ("replay_request_id", "TEXT"),
+        ("replay_registration_id", "TEXT"),
+        ("replay_attempted", "INTEGER NOT NULL DEFAULT 0"),
+        ("replay_settled", "INTEGER NOT NULL DEFAULT 0"),
     ):
         if name not in run_waiter_columns:
             try:
@@ -260,6 +265,23 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
             except sqlite3.OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_run_waiters_replay_request "
+        "ON run_waiters(replay_scope, replay_request_id) WHERE replay_scope IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_run_waiters_replay_registration "
+        "ON run_waiters(replay_scope, replay_registration_id) "
+        "WHERE replay_registration_id IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_waiters_replay_unsettled "
+        "ON run_waiters(replay_scope, replay_settled, id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_waiters_replay_local "
+        "ON run_waiters(state, replay_scope, created_at, id)"
+    )
     conn.execute("CREATE TABLE IF NOT EXISTS run_waiter_identity ("
                  "singleton INTEGER PRIMARY KEY CHECK(singleton = 1), id TEXT NOT NULL)")
     import uuid

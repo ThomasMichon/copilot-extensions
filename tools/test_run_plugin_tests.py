@@ -533,6 +533,7 @@ def selectable_tests(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("name,extra", [
     ("agent-index", "auth"), ("agent-pull-requests", "service-gateway"),
+    ("agent-dispatch", "service-gateway"),
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -566,6 +567,8 @@ def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatc
     monkeypatch.setattr(runner, "run_uv_install", prepare)
     runner._ensure_venv(name, "fixture-uv", reinstall=False)
     install = calls[-1]
+    if name == "agent-dispatch":
+        assert str(tmp_path / "plugins" / "agent-pull-requests") + "[fleet]" in install
     assert install[-len(runner.RUNNER_DEPENDENCIES) - 2:] == [
         "-e", str(fleet) + f"[{extra}]", *runner.RUNNER_DEPENDENCIES,
     ]
@@ -575,6 +578,17 @@ def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatc
         tmp_path / "libs" / "installer-engine",
         tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",
     )]
+
+
+def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda name: tmp_path / "plugins" / name)
+    metadata = tmp_path / "plugins" / "agent-pull-requests" / "pyproject.toml"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text('[project]\nversion = "1.0"\n', encoding="utf-8")
+    before = runner._dep_fingerprint("agent-dispatch")
+    metadata.write_text('[project]\nversion = "1.1"\n', encoding="utf-8")
+    assert runner._dep_fingerprint("agent-dispatch") != before
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows editable staging contract")

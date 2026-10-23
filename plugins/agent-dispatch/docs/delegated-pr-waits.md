@@ -1,5 +1,10 @@
 # Delegated PR waits
 
+This page covers the existing local callback backend. The explicitly composed
+[optional service replay consumer](delegated-service-replay.md) reuses the same
+generation-fenced queue transactions, but owns remote receipt/restart recovery
+instead of using local callback liveness. It does not change these CLI defaults.
+
 `run` remains an arbitrary-command process waiter by default. With both
 `--detach` and `--task`, explicit PR options can replace that process with a
 subscription on the optional, already-ready `agent-pull-requests` watch owner:
@@ -146,7 +151,7 @@ gh workflow run installation-context-acceptance.yml --ref <branch> \
   -f dispatch_delegation=true
 ```
 
-It runs only the four delegation modules on Linux and Windows, without adding
+It runs the six local-callback and service-replay modules on Linux and Windows, without adding
 them to required unit CI or starting unrelated native-owner scenarios. The cases
 exercise real isolated coordinator listeners, owner subscription CLI and callback
 processes, same-cell peer resolution, restart, outage, timeout and replay.

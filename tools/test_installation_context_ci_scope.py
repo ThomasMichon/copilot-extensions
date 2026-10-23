@@ -469,6 +469,8 @@ def test_dispatch_delegation_acceptance_is_bounded_and_independently_selected() 
             "--test-file", "tests/test_delegated_waiter_context.py",
             "--test-file", "tests/test_delegated_waiter_fences.py",
             "--test-file", "tests/test_delegated_waiter_owner_contract.py",
+            "--test-file", "tests/test_delegated_replay_consumer.py",
+            "--test-file", "tests/test_delegated_replay_transport.py",
             "--max-files-per-sub-suite", "2",
         ]
 

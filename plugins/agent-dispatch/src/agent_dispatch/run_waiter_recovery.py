@@ -19,7 +19,7 @@ async def maintain_delegated_recovery(queue: TaskQueue, recover, *, interval: fl
     sleep = sleep or asyncio.sleep
     while True:
         await sleep(interval)
-        waiters = await asyncio.to_thread(queue.list_active_run_waiters)
+        waiters = await asyncio.to_thread(queue.list_active_run_waiters, local_only=True)
         if any(waiter.get("kind") == "delegated" for waiter in waiters):
             await recover()
 
@@ -40,7 +40,7 @@ def recover_run_waiters(
     counts = {"checked": 0, "live": 0, "unknown": 0, "recovered": 0}
     owner_probed = False
     owner_status = None
-    for waiter in queue.list_pending_run_waiters():
+    for waiter in queue.list_pending_run_waiters(local_only=True):
         counts["checked"] += 1
         if now < float(waiter["created_at"]) + max(0.01, arm_grace_seconds):
             counts["unknown"] += 1
@@ -59,7 +59,7 @@ def recover_run_waiters(
         if retired is None:
             continue
         counts["recovered"] += 1
-    for waiter in queue.list_active_run_waiters():
+    for waiter in queue.list_active_run_waiters(local_only=True):
         counts["checked"] += 1
         if waiter.get("kind") == "delegated":
             from .delegated_waiter_recovery import probe_local_owner, recovery_reason
