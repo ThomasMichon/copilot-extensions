@@ -152,11 +152,14 @@ owners. No provider, enrollment, SSH-profile, resident or live deployment edits
 follow from this assessment; it neither replaces those owners nor requires
 contacting them to finish the alignment review.
 
-Following the operator's continuation direction, the next bounded prerequisite
-is the proposed [scoped point-set snapshot](scoped-observation-snapshot.md).
-It composes the existing owned reader/store under one committed local read
-view; its separate plan review precedes code. It does not deliver All-view
-assembly, scope-safe replay, a resident consumer or wire-emission authority.
+Following the operator's continuation direction, the bounded
+[scoped point-set snapshot](scoped-observation-snapshot.md) prerequisite is
+implemented locally (#8303). The next proposed
+[conditional point-set resnapshot](scoped-observation-recovery.md) uses only
+the authorized visible view for an opaque validator, never the raw store's
+global replay/retention state. Its separate plan review precedes code. Neither
+delivers All-view assembly, event replay, a resident consumer or wire-emission
+authority.
 
 ## Lifecycle and adoption
 
