@@ -180,3 +180,17 @@ def test_fallback_base_is_pinned_when_another_worktree_fetches(tmp_path):
     result = repo.hook((head, "0" * len(head)))
     assert result.returncode != 0, result.stdout + result.stderr
     assert "sized.txt" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("reuse_published_blob", [True, False])
+def test_rewritten_pr_checks_only_new_blob_objects(tmp_path, reuse_published_blob):
+    repo = Repository(tmp_path, unrelated_dev=False)
+    old = repo.tree_commit("previously-published.json", "x" * (1024 * 1024 + 1))
+    content = ("x" if reuse_published_blob else "y") * (1024 * 1024 + 1)
+    head = repo.file_commit("rebased.json", content)
+    result = repo.hook((head, old))
+    assert (result.returncode == 0) is reuse_published_blob, result.stdout + result.stderr
+    if reuse_published_blob:
+        assert "0 newly-introduced blob(s)" in result.stdout
+    else:
+        assert "rebased.json" in result.stdout
