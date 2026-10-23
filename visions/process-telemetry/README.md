@@ -6,7 +6,7 @@
   caused it
 - **Scope:** leaf (concrete cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`plugins/agent-dispatch/src/agent_dispatch/telemetry.py`](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) ·
   [`plugins/agent-bridge/src/agent_bridge/telemetry.py`](../../plugins/agent-bridge/src/agent_bridge/telemetry.py)
   — the existing generic telemetry seam (fail-open sink registration, the
@@ -15,6 +15,12 @@
   for the current runtime-plugin shape
 
 ## Purpose & Intent
+
+[Portable Telemetry](../telemetry/README.md) governs the suite-wide common hooks,
+structured logging, harness binding and optional isolated sinks. This vision
+remains the narrower process-provenance subject: its reuse of existing seams
+and spool integrations does not restrict that broader transport-neutral intent,
+nor require replacing configured legacy consumers.
 
 The agent fabric ([`visions/agent-fabric`](../agent-fabric/README.md)) spawns a
 lot of short-lived processes on a host — worktree setup scripts, shells, CLI
@@ -196,7 +202,8 @@ resource figures are sampled, never in the emitted shape.
 - Related: [`../agent-fabric`](../agent-fabric/README.md) (the coordination
   fabric whose processes this instruments), [`../plugin-services`](../plugin-services/README.md)
   (the shared plugin-service model this rides alongside — a sibling concern to
-  service supervision and endpoint discovery)
+  service supervision and endpoint discovery), [Portable Telemetry](../telemetry/README.md)
+  (the broader instrumentation and harness-owned export intent)
 - Reality docs: [`../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py`](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py),
   [`../../plugins/agent-bridge/src/agent_bridge/telemetry.py`](../../plugins/agent-bridge/src/agent_bridge/telemetry.py),
   `docs/patterns/runtime-agent-plugin.md` (the runtime-plugin shape a launch

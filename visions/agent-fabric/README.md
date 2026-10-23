@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-21
+- **Last revised:** 2026-10-22
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -546,6 +546,9 @@ conversation content, a task prompt/payload, or any secret) and is **fail-open**
 an unconfigured or misconfigured sink leaves the layer untouched. *How* a consumer
 is attached (an environment variable, a dropped config file) and the on-disk
 config shape are spec-level, not fixed by this vision.
+[Portable Telemetry](../telemetry/README.md) governs the common hooks,
+structured logging, harness-owned sink selection and operation-bound context
+across transports; this fabric intent remains backend-agnostic.
 
 ### survivable-work
 An agent's session output is **recoverable and digestible** after the fact —
