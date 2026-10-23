@@ -1157,3 +1157,14 @@ authorized installed proof remain distinct obligations.
   writes from cleanup. Native repeated-Save/Reset and repeated-Save/Confirm/
   reopen regressions plus both shared/local real-process newer writers pass;
   the coupled selection is now 102 tests. No old finding was waived.
+- Added two failing native reproductions for local-only Confirm cleanup before
+  and after dispatch. A bound Confirm now writes an unconfirmed response and
+  retires observed automatic copies before invocation; preparation failure
+  preserves the open form and invokes no command. Post-command cleanup failures
+  cannot automatically reapply an accepted response.
+- The next review had no inline open issues but named a real shared multichoice
+  fidelity concern. Preserve unchanged restored members and their order instead
+  of merging custom values; retain single-freeform Other editing semantics and
+  Configuration's separate line convention. The combined form/result/local
+  cleanup and Configuration selection passed 212 tests with two opt-in skips.
+  These fixes still require updated-head review and required CI.

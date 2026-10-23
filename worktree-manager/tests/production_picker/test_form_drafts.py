@@ -605,3 +605,112 @@ def test_native_confirm_retires_its_exact_record_without_deleting_a_newer_copy(t
             await _wait(pilot, lambda: not app.screen.pending)
             assert not original.exists() and newer.exists()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("phase", ["before-submit", "after-submit"])
+def test_local_confirm_cleanup_failure_never_reapplies_an_accepted_response(tmp_path, monkeypatch, phase):
+    from test_config_actions import _wait
+    from test_picker_tui import _fixture_source, _wait_for_initial_setup
+    from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
+    from worktree_manager.production_picker.picker_tui.steering import SubmitErrorScreen
+
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path / "drafts"))
+    invoked = tmp_path / "invoked"
+    script = tmp_path / "submit.py"
+    script.write_text(
+        f"from pathlib import Path\nPath({str(invoked)!r}).write_text('yes')\nprint('completed')",
+        encoding="utf-8",
+    )
+    raw = manifest()
+    raw["actions"][0].pop("draft")
+    raw["actions"][0].update(run=[sys.executable, str(script), "{fields}"], result_view="text")
+    reg = registered(raw)
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    monkeypatch.setattr(runtime, "ensure", lambda scope: None)
+    rec = {"task_id": "same-id", "id": "same-id", "title": "Example", "card": {**CARD, "fields": FIELDS}}
+    failed_path = []
+    unlink = Path.unlink
+
+    def fail_once(path, *args, **kwargs):
+        if failed_path and path == failed_path[0]:
+            failed_path.clear()
+            raise OSError("cleanup denied")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_once)
+
+    async def open_form(app, pilot):
+        picker = app.query_one(PickerScreen)
+        await _wait_for_initial_setup(pilot, picker)
+        monkeypatch.setattr(picker, "_pivot_runtime", lambda value: runtime)
+        picker._open_pivot_form(reg, reg.actions[0], rec, rec, "Example")
+        await _wait(pilot, lambda: isinstance(app.screen, PivotFormScreen))
+        return app.screen
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            form = await open_form(app, pilot)
+            form.query_one(Input).value = "older automatic response"
+            form.action_save()
+            automatic = form._draft_path()
+            await _wait(pilot, lambda: app.screen is not form)
+            form = await open_form(app, pilot)
+            form.query_one(Input).value = "current submitted response"
+            if phase == "before-submit":
+                failed_path.append(automatic)
+            form._confirm()
+            preserved = form._draft_path()
+            if phase == "after-submit":
+                failed_path.append(preserved)
+            await _wait(pilot, lambda: isinstance(app.screen, SubmitErrorScreen))
+            assert preserved.exists()
+            if phase == "before-submit":
+                assert form.is_mounted and form.query_one(Input).value == "current submitted response"
+                assert not invoked.exists()
+            else:
+                assert invoked.exists() and not automatic.exists()
+        if phase == "after-submit":
+            restarted = PickerApp(_fixture_source(), live=False)
+            async with restarted.run_test() as pilot:
+                form = await open_form(restarted, pilot)
+                assert form.query_one(Input).value == ""
+                form.action_restore_local()
+                assert form.query_one(Input).value == "current submitted response"
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("close", ["save", "confirm", "escape"])
+def test_untouched_shared_multichoice_preserves_custom_boundaries_and_order(tmp_path, monkeypatch, close):
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path))
+    fields = [{"name": "answer", "type": "multichoice", "options": ["one", "two"], "allow_other": True}]
+    original = ["custom,one", "one", "custom\ntwo"]
+    form = PivotFormScreen(CARD, fields, "Answer", task_id="same-id", draft_binding=binding(fields=fields),
+                           draft_values={"answer": original}, on_clear_draft=lambda: None)
+
+    async def run():
+        app = Host(form)
+        async with app.run_test() as pilot:
+            assert form._collect() == {"answer": original}
+            {"save": form.action_save, "confirm": form._confirm, "escape": form.action_escape_close}[close]()
+            await pilot.pause()
+            assert app.result["values"] == {"answer": original}
+            assert json.loads(form._draft_path().read_text())["values"] == {"answer": original}
+    asyncio.run(run())
+
+
+def test_editing_other_keeps_existing_single_freeform_semantics(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path))
+    fields = [{"name": "answer", "type": "multichoice", "options": ["one", "two"], "allow_other": True}]
+    form = PivotFormScreen(CARD, fields, "Answer", task_id="same-id", draft_binding=binding(fields=fields),
+                           draft_values={"answer": ["custom,one", "one", "custom\ntwo"]})
+
+    async def run():
+        async with Host(form).run_test() as pilot:
+            controls = form._q[0]
+            controls["primary"].select("two")
+            await pilot.pause()
+            assert form._collect()["answer"] == ["one", "two", "custom,one", "custom\ntwo"]
+            controls["other"].text = "one new, freeform\ncustom answer"
+            assert form._collect()["answer"] == ["one", "two", "one new, freeform\ncustom answer"]
+    asyncio.run(run())

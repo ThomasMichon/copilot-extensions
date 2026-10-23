@@ -197,6 +197,16 @@ that form/attempt, never a mutable path shared with another writer.
 Local-only forms include every matching automatic record observed at open in
 that cleanup set, so repeated Saves cannot expose an older response after
 Reset or Confirm. Records written after that snapshot remain untouched.
+Before any bound Confirm, the current response is preserved as unconfirmed and
+the observed automatic copies are retired before invoking the provider. A
+failure in that preflight keeps the form open and invokes no command. A failed
+post-command cleanup therefore cannot make an accepted response automatic.
+
+Unchanged restored multichoice input preserves the original member boundaries
+and order, including separate custom values containing commas or newlines.
+Changing a known selection retains unchanged custom members; editing Other
+retains its existing single-freeform-value semantics. Configuration's explicit
+one-custom-value-per-line convention remains separate.
 
 Reset asks first, freezes input during Clear and retains fields/local recovery
 until a valid acknowledgement arrives. It updates only this form's observed

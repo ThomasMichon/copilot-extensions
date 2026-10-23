@@ -92,6 +92,7 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         self._draft_pending = False
         self._draft_file = None
         self._draft_files = []
+        self._automatic_draft_files = set()
         self._local_recoveries = []
         # The caller must finish a pending Reset with draft_reset_complete.
         self._on_clear_draft = on_clear_draft
@@ -112,7 +113,7 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
                 yield from self._compose_questions()
                 yield Static(self._foot(), id="steer-foot")
                 buttons = [("confirm", "Confirm"), ("save", "Save"), ("reset", "Reset")]
-                if self._on_clear_draft is not None:
+                if self._draft_binding is not None:
                     buttons.append(("restore", "Restore local"))
                 yield SteerButtonRow(buttons, self._on_button, id="steer-buttons")
 
@@ -194,16 +195,20 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         except Exception:
             pass
 
-    def _write_draft(self) -> bool:
+    def _write_draft(self, *, pending: bool | None = None) -> bool:
         path = _steer_draft_path(self._task_id, self._draft_binding)
         if not path:
             return True
         try:
+            if pending is None:
+                pending = self._on_clear_draft is not None
             self._draft_file = write_draft(
                 path, self._draft_binding, self._task_id, self._collect(include_hidden=True),
-                pending=self._on_clear_draft is not None,
+                pending=pending,
             )
             self._draft_files.append(self._draft_file)
+            if not pending:
+                self._automatic_draft_files.add(self._draft_file)
             return True
         except OSError as error:
             self.app.push_screen(SubmitErrorScreen(
@@ -218,6 +223,7 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
             self._local_recoveries = [(path, data) for path, data in records if data.get("pending")]
             automatic = [(path, data) for path, data in records if not data.get("pending")]
             self._draft_files.extend(path for path, _ in automatic)
+            self._automatic_draft_files.update(path for path, _ in automatic)
             if automatic:
                 path, data = automatic[0]
                 self._draft_file = path
@@ -228,21 +234,27 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         return self._draft_file or _steer_draft_path(self._task_id, self._draft_binding)
 
     def _delete_draft(self) -> bool:
+        return self._retire_drafts(self._draft_files)
+
+    def _retire_drafts(self, paths, *, before_submit=False) -> bool:
         failures = []
-        for path in set(self._draft_files):
+        removed = set()
+        for path in set(paths):
             try:
                 path.unlink(missing_ok=True)
+                removed.add(path)
             except OSError as error:
                 failures.append((path, error))
-        self._draft_files = [path for path, _ in failures]
+        self._draft_files = [path for path in self._draft_files if path not in removed]
+        self._automatic_draft_files.difference_update(removed)
         if failures:
             detail = "\n".join(f"{path}: {error}" for path, error in failures)
             self.app.push_screen(SubmitErrorScreen(
                 "Local recovery cleanup",
-                ("Shared state was acknowledged, but local cleanup failed. "
-                 "Unconfirmed copies are never automatically restored.\n"
-                 if self._on_clear_draft is not None else "Local cleanup failed; the form is retained.\n") + detail,
-                failures[0][0],
+                ("Cannot prepare submission: old local drafts could not be retired. "
+                 "The form remains open and no command was invoked.\n" if before_submit else
+                 "Local cleanup failed. Unconfirmed copies are not automatically restored.\n") + detail,
+                self._draft_path(),
             ))
         return not failures
 
@@ -278,7 +290,11 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         # collected answer must still be recoverable rather than lost the
         # moment this dialog closes. The caller deletes this draft itself once
         # it confirms the submission actually succeeded.
-        if not self._write_draft():
+        if not self._write_draft(pending=self._draft_binding is not None or self._on_clear_draft is not None):
+            return
+        if self._draft_binding is not None and not self._retire_drafts(
+            self._automatic_draft_files, before_submit=True,
+        ):
             return
         values = self._collect()
         self.dismiss({"action": "confirm", "values": values})
@@ -331,6 +347,7 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
 
     def _clear_fields(self) -> None:
         for rec in self._q:
+            rec.pop("restored_multichoice", None)
             ftype = rec["type"]
             prim, other = rec["primary"], rec["other"]
             if ftype == "text":
