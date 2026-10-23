@@ -117,10 +117,11 @@ def qualified_binding(tmp_path, tmp_tracking_dir, monkeypatch_config):
     cfg.set_active_project("test-repo")
     _save_record(tmp_tracking_dir, "wt-subject", str(tmp_path / "checkout"))
     tracking.register_session("wt-subject", "sid-subject")
+    tracking.register_session("wt-subject", "other-head")
     record_path = tmp_tracking_dir / "wt-subject.yaml"
     record = tracking._load_record_uncached(record_path)
     record.creation_nonce = "subject-incarnation"
-    record.head_session = "other-head"
+    tracking.set_head_session(record, "other-head", save=False)
     save_record(record, record_path)
     session_dir = sessions._session_state_dir() / "sid-subject"
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -129,6 +130,8 @@ def qualified_binding(tmp_path, tmp_tracking_dir, monkeypatch_config):
 
 def test_trusted_binding_qualifies_actual_non_head_record(qualified_binding, monkeypatch):
     record_path, snapshot, session_dir = qualified_binding
+    assert snapshot.resolved_head_session == "other-head"
+    assert snapshot.session_entry("sid-subject") is not None
     original = Path.replace
     held_at_replace = []
 
@@ -149,7 +152,7 @@ def test_trusted_binding_qualifies_actual_non_head_record(qualified_binding, mon
 
 def test_trusted_binding_accepts_exact_pending_candidate(qualified_binding):
     record_path, record, _ = qualified_binding
-    tracking.open_handoff(record, "sid-subject", "task-subject")
+    tracking.open_handoff(record, "other-head", "task-subject")
     record = tracking._load_record_uncached(record_path)
     record.handoffs[-1].candidate = "sid-pending"
     save_record(record, record_path)

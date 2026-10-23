@@ -320,3 +320,8 @@ All functional phases remain gated even if this proposal merges.
 - Functional source review, required CI and verified merge remain open. The
   next handoff is the exact producer contract to the receipt integration owner;
   native, installed, macOS and complete campaign gates remain unchanged.
+- Source review found that assigning the head cache did not move the
+  authoritative ledger. The non-head fixture now registers a second session,
+  uses the existing `set_head_session` transition and asserts the resolved head
+  before publication. This corrects the regression's evidence, not runtime
+  subject authority.
