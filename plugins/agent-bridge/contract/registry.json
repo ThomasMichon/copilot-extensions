@@ -392,9 +392,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py",
-          "sha256": "e40a6816e9d75b5b956d848377b5be58a831f11bc86617c11b924cf2c68f511b",
+          "sha256": "33614b5a065953bd652ae7d7c2ccd5a5aa13be0d3dde9c56be1891a769053fd2",
           "semantic": false,
-          "non_semantic_reason": "Source-only reused native process-group retirement primitive: authority commands use its identity-checked group cleanup; rendering behavior and HTTP wire shapes are unchanged."
+          "non_semantic_reason": "Implementation-only local static preparation reuse: internal refresh results add generation/reuse fields and the existing contained process helper accepts an unbounded foreground wait. Cancellation, native process-group retirement, HTTP fields and capability floors are unchanged; no wire fixtures or historical provenance are regenerated."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
