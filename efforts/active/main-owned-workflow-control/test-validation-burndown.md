@@ -323,6 +323,41 @@ full historical census, shell-process integration or every-Main-release
 acceptance. The constant-only policy residual requires an explicit subsequent
 decision rather than quietly treating the original module as fully admitted.
 
+### Bounded peer-environment cohort and packaging residual
+
+Independent original collection finds seventeen cases under
+`libs/peer-launch/tests/`: six peer-environment units and eleven packaging
+contracts. A fresh hardened, offline process observes all six original units
+without production preloading: eighteen passing phases, zero effects and
+actual canonical `peer_environment` call contexts for every case, in
+0.879 seconds. The imported closure contains only the original test,
+canonical flat implementation and already-admitted observer/contract modules.
+
+The packet adapter re-exports the six exact original function objects without
+copying assertions or rewriting the original module's direct source import.
+The initial candidate preserves all 917 prior identities in order with
+unchanged hashes and budget; that additive packet declares 923 nodes,
+102 sources and 46 production targets.
+The canonical 923-node/2,769-phase packet passes with zero effects in
+51.169 seconds and independently verifies all three output files. Complete
+collection matches the manifest, and all six aliases retain original
+object/code/global identity. Four actual runner controls refuse an unadmitted
+original test, changed production bytes, a duplicate node and an omitted
+function without emitting success proofs. Native Windows executes the six
+aliases in 0.64 seconds.
+
+Publication reconciles the independently merged source-owned artifact
+cohort without restoring its retired reservation units. All 911 current Dev
+identities and source hashes are preserved, adding the same six originals
+for a 917-node, 100-source, 45-target packet under the unchanged budget.
+That reconciled packet passes all 2,751 phases with zero effects in
+45.362 seconds; independent three-file verification, complete collection,
+six original-function identities and all four runner refusal controls pass.
+
+The eleven packaging cases remain explicitly unqualified, not passing unit
+evidence. Natural packet-only AST omission, full-census and every-Main-release
+acceptance remain separate from this bounded source qualification.
+
 ### Scheduled execution is real; repair initiation is not yet established
 
 The current Dev and Main snapshots carry byte-identical periodic workflow and

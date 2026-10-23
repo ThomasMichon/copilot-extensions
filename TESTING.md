@@ -239,6 +239,16 @@ Real front-door, missing-socket, installed-hook, SDK-forwarding and JavaScript
 delivery counterparts retain their existing periodic ownership. No Python
 classifier assertion is treated as proof of a native or shell boundary.
 
+`tools/promotion_unit_tests/test_peer_environment.py` re-exports all six exact
+functions from `libs/peer-launch/tests/test_peer_environment.py`. The original
+module already loads the canonical flat `libs/peer-launch/peer_launch.py`;
+the adapter does not preload production, rewrite imports or copy assertions.
+Replacing only the original file prefix maps each unit to its packet identity.
+All three files are hash-bound, and each unit must contribute actual
+`peer_environment` call coverage under the unchanged observer and budget.
+The eleven separate packaging tests remain unqualified; this cohort does not
+prove native peer launch, vendor synchronization or the complete library census.
+
 The shared lazy-dispatch cohort re-exports the three original classes from
 `libs/lazy-cli-dispatch/tests/test_dispatch.py` through
 `tools/promotion_unit_tests/test_lazy_dispatch.py`. Its fourteen class/method

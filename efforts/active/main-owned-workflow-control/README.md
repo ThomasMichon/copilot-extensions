@@ -352,10 +352,15 @@ authorizes critical main-path acceptance or a bounded administrative change.
   existing portfolio tracker and owner. Genuine Dev provenance must survive
   missing selection outputs; other manual refs remain inspection-only, and
   preparation failure cannot imply executed Linux or Windows coverage.
-- [ ] Omit the unchanged full AST scanner group on positively closed
+- [x] Land omission of the unchanged full AST scanner group on positively closed
   packet-only PR inputs, preserving actual unit execution, every unknown/mixed
   input, all scanner/policy dependencies and full non-PR scans. Keep source
-  delivery, natural omission and whole-flow measured savings distinct.
+  delivery, natural omission and whole-flow measured savings distinct (#8111).
+  Fresh source CI retains all three scans and executes the combined 917-case
+  packet in 14.845 seconds after preserving the independently merged cohort.
+- [ ] Observe a natural packet-only PR omitting that AST group while retaining
+  actual unit execution, and report measured work separately from total
+  workflow counts and controlled whole-flow latency.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
@@ -495,6 +500,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   original constant-only vocabulary assertion as an explicit unmapped policy
   residual (#8088). Actual hosted source CI executes all 890 admitted cases in
   9.417 seconds; bounded source qualification is not full-census or Main acceptance.
+- [ ] Map the six original peer-environment units through exact function
+  objects, retaining closed canonical source imports, actual call coverage,
+  prior packet identities and the 300-second budget. Keep eleven packaging
+  cases explicitly unqualified and natural AST omission separate from source
+  qualification, full-census and every-Main-release acceptance.
 - [x] Verify a covering promotion activates the dev-owned baseline producer on
   default main; record authorized runtime adoption separately.
   #6631 and hosted job `115706505844` prove activation of #6438; this

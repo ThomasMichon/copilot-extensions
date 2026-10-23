@@ -911,7 +911,13 @@
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_omits_only_closed_packet_inputs[workflow-source]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_omits_only_closed_packet_inputs[source-to-packet-rename]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_omits_only_closed_packet_inputs[push-full]",
-    "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_omits_only_closed_packet_inputs[manual-full]"
+    "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_selector_omits_only_closed_packet_inputs[manual-full]",
+    "tools/promotion_unit_tests/test_peer_environment.py::test_agent_dispatch_forwards_control_token_command",
+    "tools/promotion_unit_tests/test_peer_environment.py::test_agent_dispatch_forwards_raw_control_token",
+    "tools/promotion_unit_tests/test_peer_environment.py::test_agent_dispatch_omits_unset_control_token_keys",
+    "tools/promotion_unit_tests/test_peer_environment.py::test_pr_owner_roster_and_state_rebinding",
+    "tools/promotion_unit_tests/test_peer_environment.py::test_other_peers_never_inherit_pr_owner_state",
+    "tools/promotion_unit_tests/test_peer_environment.py::test_agent_dispatch_retains_authority_and_separate_shared_control"
   ],
   "sources": {
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
@@ -1010,7 +1016,10 @@
     "tools/promotion_unit_tests/test_activation_preservation.py": "bb6c7de539254571e2635424ac06b5772714d860ba490aca668d02a0731c8a92",
     "libs/remote-login-shell/src/remote_login_shell/__init__.py": "339e08c120b8310de198a3fa675e1089c2229e985e9389cc2f507eabd0b6ffe6",
     "libs/remote-login-shell/tests/test_remote_login_shell.py": "c58b26541adaef6eed1d64e9a7a16fd827ff52045881021d9c1f9b26ac1d11ca",
-    "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0"
+    "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
+    "libs/peer-launch/peer_launch.py": "fcd646b8a52156b8cfbf1189ac74855249f1ac1fcaeff4e25c920e1df758c8b8",
+    "libs/peer-launch/tests/test_peer_environment.py": "8edc52ef1254c99ead6877cbe9906cb352b93bdb9aa95d22c9ea04d20553413a",
+    "tools/promotion_unit_tests/test_peer_environment.py": "e816bedb5935365405818dabb0a12116c6965d0d40104763b9c8cb9630567cae"
   },
   "coverage_targets": [
     "libs/config-migrate/src/config_migrate/core.py",
@@ -1056,7 +1065,8 @@
     "tools/check-docs-consistency.py",
     "libs/plugin-activation/src/plugin_activation/preservation.py",
     "libs/plugin-activation/src/plugin_activation/state.py",
-    "libs/remote-login-shell/src/remote_login_shell/__init__.py"
+    "libs/remote-login-shell/src/remote_login_shell/__init__.py",
+    "libs/peer-launch/peer_launch.py"
   ],
   "max_seconds": 300
 }
