@@ -78,7 +78,9 @@ def pr_content_landed(
 def _pr_content_landed(
     record, repo, content_ref: str | None, *, cwd: str,
     checked: dict[str, Landing] | None = None,
+    existing_bases: set[str] | None = None,
 ) -> tuple[bool | None, str | None, list[Landing]]:
+    """Use base availability from this read-only report, or probe it fresh."""
     from . import finalize_open_pr_gate as fopg
     evidence: list[Landing] = []
 
@@ -112,7 +114,11 @@ def _pr_content_landed(
         return True, None, evidence
     if fopg.pr_merge_status(record, repo) is not True:
         return None, None, evidence
-    bases = [b for b in (default, other) if b and git_ops.ref_exists(b, cwd=cwd)] or [default]
+    bases = [
+        b for b in (default, other)
+        if b and (b in existing_bases if existing_bases is not None
+                  else git_ops.ref_exists(b, cwd=cwd))
+    ] or [default]
     # Every validated base at once: a commit on any of them is published, so branches
     # pulled forward onto different bases (one PR onto main, another onto dev) all pass.
     if not fopg.merged_content_exceeds(record, content_ref, tuple(bases), cwd=cwd, repo=repo):
@@ -140,18 +146,23 @@ def _explain(record, repo, worktree_path: str, anchor: str) -> dict:
     content_ref = fopg.resolve_precondition_ref(
         getattr(pr, "branch", "") or "", record.worktree_id, worktree_path, cwd=cwd)
     bases = [b for b in (remote_ref(repo, repo.default_branch), pr_base(record, repo)) if b]
+    existing_bases = {b for b in bases if git_ops.ref_exists(b, cwd=cwd)}
     checks = {b: landing(content_ref, b, cwd, explain=True)
-              for b in bases if content_ref and git_ops.ref_exists(b, cwd=cwd)}
+              for b in bases if content_ref and b in existing_bases}
     # A read-only report already has complete checks; pruning still uses fresh reads.
-    ok, message, _ = (_pr_content_landed(record, repo, content_ref, cwd=cwd, checked=checks)
-                      if tracks_pr(record, repo) else (None, None, []))
+    if tracks_pr(record, repo):
+        ok, message, _ = _pr_content_landed(
+            record, repo, content_ref, cwd=cwd, checked=checks, existing_bases=existing_bases,
+        )
+    else:
+        ok, message = None, None
     return {
         "worktree_id": record.worktree_id,
         "content_ref": content_ref,
         "created_from": creation_point(content_ref, cwd, published_bases=tuple(bases)) if content_ref else "",
         "bases": [b.removeprefix("refs/remotes/") for b in bases],
         "missing_bases": [b.removeprefix("refs/remotes/") for b in bases
-                          if not git_ops.ref_exists(b, cwd=cwd)],
+                          if b not in existing_bases],
         "checks": [check.to_dict() for check in checks.values()],
         "pr": {"number": getattr(pr, "number", None), "state": getattr(pr, "state", ""),
                "head_sha": getattr(pr, "head_sha", "")} if pr else None,

@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse base availability only within one read-only landing report",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
