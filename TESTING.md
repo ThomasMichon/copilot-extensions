@@ -3120,6 +3120,19 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   and override store: Cancel writes nothing, Disable sets the logical override,
   Enable removes it, and declaration bytes stay unchanged. Ordinary Manager
   runs skip this cross-distribution lane when no interpreter is supplied.
+  The original-request recovery lane uses the same opt-in pattern:
+  set `COPILOT_TEST_FORM_REQUEST_OWNER_PYTHON` to the existing agent-dispatch
+  test interpreter, then run the Manager standalone runner with
+  `PYTEST_ADDOPTS='-k native_form_requests'`. Its real owner/CLI tests cover
+  both category contributions and rendered Textual forms/global recovery at
+  80x24 and 120x40: retain before a lost response, replace the card, reopen a
+  client without the row, inspect the original receipt, cancel and separately
+  confirm exact retry. Assertions preserve original fields/fingerprint and
+  one answer/wake. The owner, storage and provider attribution are isolated
+  fixtures; list/subscription refresh is disabled on every fixture runtime,
+  including the fresh client, so replay cannot start an ambient board producer.
+  No installed registry, live task or worker is used. Ordinary runs
+  skip this lane without the explicitly selected dependency interpreter.
 - **ai-attribution:** payload-only hook tests covering authoritative
   `sessionStart` payload cwd, malformed/missing payloads, git-repo gating, safe
   defaults, bounded operator/repository config discovery, symlink/reparse
