@@ -600,6 +600,7 @@ def _build_pr_repo_seed(tmp_path):
     git_ops.git("init", "--template=", "-b", "master", str(anchor))
     (anchor / ".git" / "hooks").mkdir()
     _pr_git("config", "maintenance.auto", "false", cwd=anchor)
+    _pr_git("config", "core.autocrlf", "false", cwd=anchor)
     _pr_git("config", "user.email", "t@example.com", cwd=anchor)
     _pr_git("config", "user.name", "Test", cwd=anchor)
     (anchor / "README.md").write_text("base\n")

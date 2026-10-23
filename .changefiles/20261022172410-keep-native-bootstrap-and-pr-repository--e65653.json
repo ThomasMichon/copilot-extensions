@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native bootstrap and PR repository fixtures isolated and bounded without changing runtime policy.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

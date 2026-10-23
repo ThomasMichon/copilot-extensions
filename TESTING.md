@@ -991,6 +991,17 @@ Byte-preservation and cache-exclusion guards cover that fixture separately.
 Native PowerShell and Bash preflight checks assert the framed launch-progress
 events while retaining the existing test and subprocess deadlines.
 
+The Worktrees bootstrap fixture also copies its complete plugin payload with
+at most 16 workers before the real release materializer closes the dependency
+graph. Copy failures propagate, and byte, file-mode and modification-time
+guards cover the staged input. Installer source assertions follow the isolated
+UTF-8 runtime arguments and direct installation-context helper invocation.
+The shared PR repository seed pins `core.autocrlf=false` in its own local Git
+config, so copies retain identical blobs even when system Git configuration
+enables line-ending normalization. Its regression creates the matching squash
+commit, pushes it and runs the real pull-forward operation; production Git
+configuration and rebase conflict handling remain unchanged.
+
 The optional profile-assignment-state failure guard follows both real command
 layers returned by worktree creation: exact record-bound execution admission,
 then the installed setup launcher. It checks the underlying model arguments,

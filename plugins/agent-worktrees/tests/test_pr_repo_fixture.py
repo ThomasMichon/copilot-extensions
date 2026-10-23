@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from agent_procutil import no_window_kwargs
 
-from agent_worktrees import git_ops, pr_publish, tracking
+from agent_worktrees import git_collab, git_ops, pr_publish, tracking
 from conftest import _copy_pr_repo
 
 
@@ -71,6 +71,41 @@ assert not (root / 'hook-ran').exists()
     assert result.returncode == 0, result.stdout + result.stderr
     assert global_config.read_bytes() == before
     assert not marker.exists()
+
+
+def test_copied_seed_keeps_line_endings_under_system_normalization(
+    pr_repo, tmp_path, monkeypatch,
+):
+    config, wid, worktree, _remote = pr_repo
+    anchor = Path(config.default_repo.anchor)
+    system = tmp_path / "system.gitconfig"
+    system.write_text("[core]\n autocrlf = true\n", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(system))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.delenv("GIT_CONFIG_NOSYSTEM", raising=False)
+    assert git_ops.git(
+        "config", "--system", "--get", "core.autocrlf", cwd=anchor,
+    ).stdout.strip() == "true"
+    assert git_ops.git(
+        "config", "--local", "--get", "core.autocrlf", cwd=anchor,
+    ).stdout.strip() == "false"
+
+    for name in ("a.txt", "b.txt"):
+        (anchor / name).write_bytes((worktree / name).read_bytes())
+    git_ops.git("add", "-A", cwd=anchor)
+    git_ops.git("commit", "-m", "squash unchanged worktree content", cwd=anchor)
+    for name in ("a.txt", "b.txt"):
+        assert git_ops.git(
+            "rev-parse", f"HEAD:{name}", cwd=anchor,
+        ).stdout == git_ops.git(
+            "rev-parse", f"worktree/{wid}:{name}", cwd=anchor,
+        ).stdout
+    git_ops.git("push", "origin", "master", cwd=anchor)
+
+    assert git_collab.sync_forward(wid, config) is True
+    assert git_ops.git("rev-parse", "HEAD", cwd=worktree).stdout == git_ops.git(
+        "rev-parse", "origin/master", cwd=worktree,
+    ).stdout
 
 
 def test_failed_session_seed_restores_git_environment(tmp_path_factory, monkeypatch):

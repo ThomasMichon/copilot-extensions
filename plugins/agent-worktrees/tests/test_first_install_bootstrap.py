@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -427,7 +428,7 @@ def test_posix_context_install_bootstraps_uv_before_runtime_build() -> None:
     invoke = ps1_owner.index("Invoke-Hidden -FilePath $base -ArgList $arguments")
     assert ps1_owner.index("Ensure-Uv") < invoke
     assert ps1_owner.index("Ensure-UvIndex") < invoke
-    assert "@('-I', '-B', (Join-Path $ScriptDir 'runtime_install.py')" in ps1_owner
+    assert "@('-I', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'runtime_install.py')" in ps1_owner
 
 
 def test_context_install_revalidates_generations_before_cutover() -> None:
@@ -452,7 +453,7 @@ def test_context_install_revalidates_generations_before_cutover() -> None:
         "runtime.activate(root, version"
     )
     assert ps1.index("Set-Location -LiteralPath $env:USERPROFILE") < ps1.index(
-        "$validatedJson = & $hostExe"
+        "$validatedJson = & $contextHelper"
     )
     assert sh.index('cd "$HOME"') < sh.index("__aw_validated_context=")
 
@@ -585,6 +586,68 @@ def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
     assert "Remove-Item $snapDir" not in stamp
 
 
+def _copy_bootstrap_payload(source: Path, payload: Path) -> None:
+    pending = []
+    with ThreadPoolExecutor(max_workers=16) as copies:
+        def queue_copy(source, destination):
+            pending.append(copies.submit(shutil.copy2, source, destination))
+            return destination
+
+        shutil.copytree(
+            source,
+            payload,
+            copy_function=queue_copy,
+            ignore=shutil.ignore_patterns(
+                "__pycache__",
+                "*.pyc",
+                ".pytest_cache",
+                ".ruff_cache",
+                ".test-venvs",
+                "*.egg-info",
+                "build",
+                "dist",
+            ),
+        )
+        for future in pending:
+            future.result()
+
+
+def test_bootstrap_payload_copy_preserves_all_source_bytes_and_metadata(tmp_path: Path) -> None:
+    source, payload = tmp_path / "source", tmp_path / "payload"
+    (source / "nested").mkdir(parents=True)
+    contents = {"bootstrap.py": b"opaque\xff\r\n", "nested/data.bin": b"\x00\x01\r\n"}
+    for name, content in contents.items():
+        path = source / name
+        path.write_bytes(content)
+        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "ignored.pyc").write_bytes(b"stale")
+
+    _copy_bootstrap_payload(source, payload)
+
+    assert {path.relative_to(payload) for path in payload.rglob("*") if path.is_file()} == {
+        Path(name) for name in contents
+    }
+    for name, content in contents.items():
+        assert (source / name).read_bytes() == (payload / name).read_bytes() == content
+        before, after = (source / name).stat(), (payload / name).stat()
+        assert stat.S_IMODE(before.st_mode) == stat.S_IMODE(after.st_mode)
+        assert before.st_mtime_ns == after.st_mtime_ns
+
+
+def test_bootstrap_payload_copy_propagates_worker_failure(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "bootstrap.py").write_bytes(b"fixture")
+
+    def fail_copy(*args, **kwargs):
+        raise OSError("fixture copy refused")
+
+    monkeypatch.setattr(shutil, "copy2", fail_copy)
+    with pytest.raises(OSError, match="fixture copy refused"):
+        _copy_bootstrap_payload(source, tmp_path / "payload")
+
+
 def _materialized_payload(tmp_path: Path) -> tuple[Path, Path]:
     home = tmp_path / "home"
     payload = (
@@ -594,20 +657,7 @@ def _materialized_payload(tmp_path: Path) -> tuple[Path, Path]:
         / "copilot-extensions"
         / "agent-worktrees"
     )
-    shutil.copytree(
-        PLUGIN,
-        payload,
-        ignore=shutil.ignore_patterns(
-            "__pycache__",
-            "*.pyc",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".test-venvs",
-            "*.egg-info",
-            "build",
-            "dist",
-        ),
-    )
+    _copy_bootstrap_payload(PLUGIN, payload)
     repo = PLUGIN.parents[1]
     spec = importlib.util.spec_from_file_location(
         "_bootstrap_materializer", repo / "tools" / "materialize_main.py",
