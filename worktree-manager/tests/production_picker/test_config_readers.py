@@ -174,12 +174,12 @@ def test_load_machines_yaml_merges_canonical_and_legacy_disjoint_keys(tmp_path):
     )
     legacy = root / "machines.yaml"
     legacy.write_text(
-        "machines:\n  lambda-core:\n    display_name: Lambda-Core\n"
-        "  borealis:\n    display_name: Borealis\n",
+        "machines:\n  machine-a:\n    display_name: Machine A\n"
+        "  machine-b:\n    display_name: Machine B\n",
         encoding="utf-8",
     )
     entries = project_config.load_machines_yaml(root)
-    assert set(entries) == {"container-fleet", "lambda-core", "borealis"}
+    assert set(entries) == {"container-fleet", "machine-a", "machine-b"}
 
 
 def test_load_machines_yaml_canonical_wins_on_key_collision(tmp_path):
