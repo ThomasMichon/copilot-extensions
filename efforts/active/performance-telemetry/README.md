@@ -147,13 +147,13 @@ sample/drop/missing evidence and the later structured-signal/hook work.
 
 ### Phase 5 — Manager source observation
 - [x] Review and merge the [bounded consumer plan](manager-observation.md).
-- [ ] Admit source observations once and reuse the existing reporter queue,
+- [x] Admit source observations once and reuse the existing reporter queue,
   writer and lifecycle without editing reserved Manager/entry files.
-- [ ] Exercise actual source Picker refresh/input observations in owned native
+- [x] Exercise actual source Picker refresh/input observations in owned native
   processes; distinguish fixtures and unavailable headed/authority evidence.
-- [ ] Produce complete expected/completed/failure/drop/identity/overhead reports
+- [x] Produce complete expected/completed/failure/drop/identity/overhead reports
   and verify actual local receiver readback for the owned observations.
-- [ ] Pass source gates and merge the bounded slice, retaining broader
+- [x] Pass source gates and merge the bounded slice, retaining broader
   installed-native, structured-log/metric and hook acceptance.
 
 ### Plan addendum: retained Windows mention-guard whole-dispatch qualification (#8036)
@@ -222,7 +222,7 @@ afterward it is provenance, not a closed live implementation claim.
 
 ## Validation Plan
 
-- [ ] Complete the [Manager source-observation validation](manager-observation.md#validation)
+- [x] Complete the [Manager source-observation validation](manager-observation.md#validation)
   at its stated evidence boundaries; do not turn headless callbacks into headed
   paint or fixture rows into production authority.
 - [ ] Complete every directly retained #8036 Plan/Validation clause above at its original scope and evidence
@@ -279,6 +279,34 @@ blocks that acceptance item, not pure implementation.
   headless fixture evidence, not headed/installed budget qualification.
 - Preserve the complete #8036 intake from #8086, including every native hook
   host-contract gate. It is not absorbed or qualified by this Manager slice.
+
+### 2026-10-23 — Bounded Manager source adoption merged
+
+- #8147 merged after approval at its exact head and successful required CI.
+  The source consumer reuses the existing reporter; reserved Manager/entry
+  files and installed/service state remain unchanged.
+- Final scoped validation passed 43 tests, including real source processes,
+  standalone dependency materialization, Windows windowless-parent cycles,
+  descendant cleanup, actual unmount nonblocking behavior and report failures.
+- A clean merged-source run completed three disabled and three enabled source
+  process samples, with zero failures, drops or incomplete senders. All 15
+  generated observation IDs and typed labels were read from the authorized
+  local receiver, without duplicates or mismatches.
+- Exact boundaries: script entry, real source refresh callback, matching Key
+  receipt, headless fixture viewport and UI-stop point. Headed paint,
+  installed launcher, production authority and descendant resource measures
+  remain unavailable. Payload identity is unknown; selected source and isolated
+  serving distribution identities are retained.
+- This small shared-host run is not a budget pass or causal overhead result.
+  Refresh medians were about 4.03s disabled / 3.34s enabled, with enabled maximum
+  6.16s; Key-receipt medians were about 7.24ms / 0.875ms, with enabled maximum
+  9.73ms. Paired differences have mixed signs; p99 is unavailable at three samples.
+- Earlier input timing included Pilot/handler settling and is superseded by
+  receipt timestamps. Observation versus enqueue and off-UI drain timings are
+  now separate; malformed samples/readback cannot discard run accounting.
+- The performance campaign coordinator retains full native/installed and hook
+  qualification, structured log/metric mapping, rollout and every #8036 gate.
+  Neither the broader effort nor #7935/#5900 is complete.
 
 ### 2026-10-22 - Complete retained acceptance from #8036
 
