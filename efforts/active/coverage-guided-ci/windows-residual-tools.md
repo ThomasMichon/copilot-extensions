@@ -120,6 +120,11 @@ run took 11.88 seconds including preparation and cleanup, retaining the
 caps. Ruff and diff checks passed. These are focused functional results,
 not complete-plugin or repeated same-head qualification.
 
+Required CI initially refused the changed docs source bytes before execution.
+Refresh only their two declared source hashes in the existing unit manifest;
+its admitted node inventory and coverage targets remain unchanged. The new
+filesystem traversal/link tests are not added to required unit-only CI.
+
 This is a below-altitude guard implementation change, with no plugin payload,
 installer or runtime behavior change and no changefile needed. The guard's own
 module documentation records the traversal boundary. Fresh temporary-tree
