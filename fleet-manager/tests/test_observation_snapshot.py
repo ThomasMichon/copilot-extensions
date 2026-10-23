@@ -281,8 +281,9 @@ def test_snapshot_uses_the_real_bounded_policy_fence(snapshot):
 
 
 @pytest.mark.parametrize("coherent", [True, False])
+@pytest.mark.parametrize("method", ["snapshot", "refresh"])
 def test_separate_process_writer_cannot_split_snapshot_but_can_split_point_reads(
-    snapshot, tmp_path, monkeypatch, coherent,
+    snapshot, tmp_path, monkeypatch, coherent, method,
 ):
     other = replace(A, entity="entity-c", fields=("title",))
     snapshot.store.apply(update(snapshot.bindings[A.origin], other, sequence=2))
@@ -351,7 +352,12 @@ print("committed")
         wait_for(initialized)
         if coherent:
             monkeypatch.setattr(snapshot.store, "_point", point)
-            result = read(snapshot, selection)
+            result = getattr(snapshot.reader, method)(
+                snapshot.identity(), selection, role="client", installation="client-a",
+            )
+            if method == "refresh":
+                assert result.status == "snapshot"
+                result = result.observations
             assert tuple(item.coverage for item in result) == ("point-observation",) * 2
             monkeypatch.setattr(snapshot.store, "_point", original)
             finish(child)

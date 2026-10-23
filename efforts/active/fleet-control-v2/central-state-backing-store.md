@@ -154,10 +154,10 @@ contacting them to finish the alignment review.
 
 Following the operator's continuation direction, the bounded
 [scoped point-set snapshot](scoped-observation-snapshot.md) prerequisite is
-implemented locally (#8303). The next proposed
-[conditional point-set resnapshot](scoped-observation-recovery.md) uses only
+implemented locally (#8303). The implemented
+[conditional point-set resnapshot](scoped-observation-recovery.md) (#8326) uses only
 the authorized visible view for an opaque validator, never the raw store's
-global replay/retention state. Its separate plan review precedes code. Neither
+global replay/retention state. Its separate plan review (#8316) preceded code. Neither
 delivers All-view assembly, event replay, a resident consumer or wire-emission
 authority.
 
