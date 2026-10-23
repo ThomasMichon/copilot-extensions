@@ -156,6 +156,15 @@ def _initialize_shell_profiles(fixture: dict, environment: dict) -> set[str]:
     *[("selected-cell", state, "stamped-global")
       for state in ("standalone", "managed", "healthy-managed")],
     ("selected-cell", "healthy-managed", "stamped-no-pointer"),
+    *[(scope, state, "payload")
+      for scope in ("legacy", "selected-cell")
+      for state in ("healthy-stale-current", "healthy-incomplete-current")],
+    *[("legacy", state, entry)
+      for state in ("healthy-stale-current", "healthy-incomplete-current")
+      for entry in ("stamped-global", "stamped-unavailable", "stamped-no-pointer")],
+    *[pytest.param("legacy", "failed-resolver", entry, marks=pytest.mark.skipif(
+        os.name == "nt", reason="Bash resolver error propagation",
+    )) for entry in ("payload", "stamped-no-pointer")],
 ])
 def test_bridge_actual_first_use_publication(
     binding_fixture: dict, bridge_release: Path, shell: str, scope: str, state: str, entry: str,
@@ -224,11 +233,14 @@ def test_bridge_actual_first_use_publication(
     if scope == "selected-cell":
         root, arguments = _selected_cell(fixture, environment)
     healthy = state.startswith("healthy-") or state == "deactivation-healthy"
-    readiness = state in {"missing-helper", "old-helper", "missing-resolver", "old-resolver"}
+    readiness = state in {
+        "missing-helper", "old-helper", "missing-resolver", "old-resolver", "failed-resolver",
+    }
     policy_state = (
         "missing" if state in {"mode-changed-missing", "deployment-changed-under-lock"} else
         "standalone" if state in {"standalone-unicode", "deactivation-standalone"} or readiness else
-        "managed" if state in {"healthy-managed", "healthy-exit", "deactivation-managed", "deactivation-healthy"} else
+        "managed" if ((state.startswith("healthy-") and state != "healthy-invalid") or
+                      state in {"deactivation-managed", "deactivation-healthy"}) else
         "invalid" if state == "healthy-invalid" else state
     )
     standalone = policy_state in {"missing", "standalone"}
@@ -257,11 +269,16 @@ def test_bridge_actual_first_use_publication(
         (site / "agent_bridge.py").write_text(
             "import json, os, sys\n"
             "print(json.dumps({'arguments':sys.argv[1:],"
-            "'root':os.environ['AGENT_BRIDGE_INSTALL_DIR']}))\n"
+            "'root':os.environ['AGENT_BRIDGE_INSTALL_DIR'],'prefix':sys.prefix}))\n"
             + ('print("recorded runtime diagnostic", file=sys.stderr)\nsys.exit(29)\n'
                if state == "healthy-exit" else ""),
             encoding="utf-8",
         )
+        if state in {"healthy-stale-current", "healthy-incomplete-current"}:
+            (root / "last-known-good").write_text("1.0.0", encoding="utf-8")
+            (root / "current-version").write_text("2.0.0", encoding="utf-8")
+            if state == "healthy-incomplete-current":
+                (root / "versions/2.0.0").mkdir()
         if scope == "selected-cell" and entry == "stamped-no-pointer":
             legacy_python = _completed_slot(fixture)
             legacy_site = legacy_python.parent.parent / (
@@ -367,9 +384,21 @@ def test_bridge_actual_first_use_publication(
             encoding="utf-8-sig" if shell == "powershell" else "utf-8",
         )
     if readiness:
-        target = helper if state.endswith("helper") else fixture["payload"] / f"scripts/resolve-runtime.{suffix}"
+        target = (
+            fixture["legacy"] / f"bin/resolve-runtime.{suffix}"
+            if state == "failed-resolver" and entry == "stamped-no-pointer" else
+            helper if state.endswith("helper") else
+            fixture["payload"] / f"scripts/resolve-runtime.{suffix}"
+        )
         if state.startswith("missing-"):
             target.rename(target.with_name(target.name + ".unavailable"))
+        elif state == "failed-resolver":
+            real_resolver = target.with_name("recorded-real-resolver." + suffix)
+            target.rename(real_resolver)
+            target.write_text(
+                "# Trace contract: normal/read-only/ready-v1\n"
+                f". {shlex.quote(str(real_resolver))}\nreturn 19\n", encoding="utf-8",
+            )
         else:
             original = target.read_text(encoding="utf-8-sig")
             old = (
@@ -425,6 +454,12 @@ def test_bridge_actual_first_use_publication(
         f"changed={changed}\ninstallerReached={marker.exists()}\n"
         f"{result.stdout}{result.stderr}"
     )
+    if state == "failed-resolver":
+        assert result.returncode == 126, evidence
+        assert "runtime resolver failed" in result.stderr, evidence
+        assert not changed, evidence
+        assert not marker.exists(), evidence
+        return
     if state == "deployment-changed-under-lock":
         assert result.returncode == 3, evidence
         assert "deployment-managed" in result.stdout + result.stderr, evidence
@@ -479,7 +514,9 @@ def test_bridge_actual_first_use_publication(
         assert "failed rc=37" in (root / ".provision-status").read_text(encoding="utf-8-sig")
     else:
         assert result.returncode == (29 if state == "healthy-exit" else 0), evidence
-        assert json.loads(result.stdout) == {"arguments": forwarded, "root": str(root)}, evidence
+        assert json.loads(result.stdout) == {
+            "arguments": forwarded, "root": str(root), "prefix": str(python.parent.parent),
+        }, evidence
         if state == "healthy-exit":
             assert "recorded runtime diagnostic" in result.stderr, evidence
         assert not marker.exists(), evidence

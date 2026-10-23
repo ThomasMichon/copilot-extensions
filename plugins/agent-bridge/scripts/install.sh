@@ -1491,7 +1491,10 @@ if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
             AGENT_RT_ROOT="$_root"
             AGENT_RT_RESOLVE_TRACE_MODE=ready
             AGENT_RT_PY=""
-            . "$_resolver"
+            if ! . "$_resolver"; then
+                printf '[agent-bridge] runtime resolver failed. Re-enable/update the owning plugin, then retry.\n' >&2
+                exit 126
+            fi
             if [[ -n "$AGENT_RT_PY" ]]; then
                 export AGENT_BRIDGE_INSTALL_DIR="$_root"
                 export AGENT_BRIDGE_CONFIG_DIR="$_root"

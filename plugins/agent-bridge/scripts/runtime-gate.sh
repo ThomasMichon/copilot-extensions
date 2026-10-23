@@ -41,7 +41,10 @@ resolve_runtime() {
     export AGENT_RT_ROOT
     local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
     # shellcheck source=/dev/null
-    . "$RUNTIME_RESOLVER"
+    if ! . "$RUNTIME_RESOLVER"; then
+        printf '[agent-bridge] runtime resolver failed. Re-enable/update the owning plugin, then retry.\n' >&2
+        exit 126
+    fi
 }
 
 apply_runtime_env() {
