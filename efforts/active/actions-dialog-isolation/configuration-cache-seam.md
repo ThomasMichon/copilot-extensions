@@ -2,10 +2,12 @@
 
 Back to [Actions Dialog Isolation](README.md).
 
-**Execution amendment pending source review.** The exact file-store and derived
-consumer surfaces below now have integration admission; shared supplier
-extraction does not. These are agent-recommended mechanics, not implemented
-behavior. The new #7940 episode does not take startup ownership.
+**Supplier/locality amendment pending source review.** The exact file-store,
+derived-consumer and supplier surfaces below have integration admission.
+Locality admission is limited to `data_local.is_local` and immediate
+`_resume_decision`/`_decide` handling. The headed-launch bypass guard remains an
+explicit extra dependency. These are agent-recommended mechanics, not completed
+behavior. The #7940 episode does not take startup ownership.
 
 ## Evidence and invariants
 
@@ -182,8 +184,9 @@ release and installed qualification remain separate. No benchmarks are requested
 The integration owner admits the file-store methods listed above plus only the
 necessary `_machine_key_map` invalidation and existing manual-reload/accepted
 file-revision request/completion hooks in `engine_pivots`, `engine_runtime` and
-`engine_loading`. This supersedes the earlier proposal's consumer-hook hold,
-not its supplier hold.
+`engine_loading`. This supersedes the earlier proposal's consumer-hook hold.
+The later supplier/locality amendment also admits the exact supplier owner API,
+while retaining the separately identified headed-launch guard dependency.
 
 Keep `_ScalarCache`, `bind_bootstrap`, `_input_scalar`, `_scalar`, `_project_dir`,
 `_repo_dir`, `_machine_name`, `_install_dir` and scalar memoizer APIs/statements
@@ -266,10 +269,55 @@ config, both registries and both supplier candidates. A changed supplier name
 or registry mapping replaces that dependency graph in the same background pass.
 Absent higher-precedence candidates remain tracked.
 
-**Not authorized yet:** all `harness_state` edits above. Until admission and
-actual production-path tests, #7940 remains open. Do not hide the present
+**Now admitted, after this amendment's review:** the `harness_state` edits above.
+Until actual production-path tests pass, #7940 remains open. Do not hide the present
 `build_projects` fallback behind a TTL or mock it into a constant and call the
 supplier lane qualified.
+
+The registry-root/path calculation stays owner-owned and is reused rather than
+copied into the cache. Existing `build_repos`/`build_projects` outputs, sorting,
+fallback precedence and existing call behavior remain unchanged. Tests compare
+the selected result with actual builders over real synthetic registry files
+while separately forbidding builder/provider/Git/plugin/roster calls in the
+new selected-entry reader.
+
+### Locality not-ready contract
+
+The source's ordinary public results remain `True` for established local and
+`False` for established remote. A not-ready file snapshot propagates an explicit
+`RuntimeError`-compatible refusal, not `False` or an unmarked empty result.
+There is no new generic three-state action engine or registry authority.
+
+The immediate `_resume_decision` catches that refusal and returns an internal
+decision dictionary with a persistent deferred/refusal marker and reason.
+`_decide` inspects the marker before assigning `app.result` or calling
+`app.exit`, shows the reason and returns. This marker must survive an immediate
+Restore caller replacing `decision["action"]`. Known local/remote decisions,
+modifiers and ordinary successful exit remain unchanged. Positively established
+locality may only be retained while its identity/source generation is valid;
+otherwise the operation waits for an existing worker refresh or manual retry.
+
+`resume_prompt_actions` already forwards the decision through `_decide`.
+`headed_actions.open_worktree_cli_headed` does not: it reads options and builds
+a `LaunchRequest` directly. A one-branch guard there must forward a deferred
+decision to `_decide` and return before `_run_bg` or request construction.
+That guard is proposed, not silently included in the two-method admission.
+Do not publish a locality fix that leaves this bypass able to launch.
+
+Two immediate internal-action paths also require explicit narrow admission.
+`engine_worktree_actions._resume_embodied_worktree_cli` must honor refusal in
+both its loaded-row and synthetic-row paths: no result mutation or successful
+return after `_decide` refuses, with or without an explicit project. Its
+synthetic path must not bypass the common not-ready handling.
+`_embody_task_cli` has a direct source-locality check before dispatch; it must
+return a visible failure without starting the embodiment worker when locality
+is unavailable. These are refusal guards, not a new action framework.
+
+Tests must run the real invalidated configured-alias case and immediate
+`_resume_decision`/`_decide` behavior, asserting no SSH, exit, launch request or
+worker launch for unknown locality. Also exercise Restore's label replacement,
+valid local/remote cases, headed launch, loaded/synthetic internal resume with
+and without project, and pre-embodiment dispatch once their guards are admitted.
 
 ### Template cell: grounded non-applicability
 

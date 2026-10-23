@@ -188,9 +188,11 @@ startup path first; it does not claim every suite entry point already conforms.
 
 - [x] Review the [startup-clock amendment](startup-progress-and-timeouts.md)
   before runtime implementation through #8051.
-- [ ] Implement and qualify the actual composed consumer: incremental nested
+- [x] Implement and qualify the actual composed consumer: incremental nested
   target progress, sliding communication silence and an independent long process
   budget, without replay or replacement authority.
+  Source consumer proof is merged in #8177; actual native-agent performance,
+  containing release and authorized adoption remain separate acceptance.
 - [ ] Resolve source/release and authorized adoption separately; preserve the
   parent Phase 3 and all unrelated owners' open acceptance.
 
@@ -508,6 +510,40 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-23 - Startup observation source merged; release and adoption remain open
+
+- #8177 merged as `c0b0dbba0f639344c5e4b384ccffe7b7ede1cc02` after the
+  exact published head received a clean owner-authored Comment review with no
+  open findings, every substantive thread was resolved and required CI passed.
+  The resolved Maintainer completion path exercised its ordinary review-rule
+  exception; no failing CI or blocking review was bypassed.
+- Review corrections cover actual text/JSON protocol refusals, supervised
+  read-only preflight and late-contact expiry, incomplete/wrong-session resume
+  acknowledgements, canonical ACP-to-Bridge identity, valid lifecycle status
+  acknowledgements and accepted delivery followed by receipt-settlement failure.
+  Unknown outcomes retain the original operation and never authorize replay.
+- Current HTTP-46 operation/registry replay passes 103 cases; the unchanged
+  committed-diff checker passes two contracts and 515 fixtures. The 456 prior
+  fixture records and existing capability floors remain unchanged. Current
+  attestation uses actual source `fc439fc4b4e4c6e160868e94450c4bed57eddac0`.
+  Linked predecessor families remain historical, not new native captures.
+- The affected coordinator cohort passes 50 cases. Twenty targeted admission
+  cases preserve all eight lifecycle values and turn index zero while rejecting
+  invalid statuses. Actual CLI/HTTP controls exercise distinct canonical/native
+  IDs and retain one resume with zero prompts on invalid resume acknowledgement.
+  Earlier corrected-source Linux proof remains pinned to its recorded commit;
+  it is not relabelled as a run of every later integrated source byte.
+- Whole-interpreter timing assertions and cold route imports in the synthetic
+  service produced recorded fixture failures during qualification. The controls
+  now measure the selected observation clock and prepare the service before
+  observation; no production clock was widened.
+- The merged worktree was preserved after ordinary sync auto-aborted a conflict
+  replaying its squash-merged history. A backup retained the exact published
+  tip; an empty post-merge rebase pulled the continuing source workspace forward.
+  Release proof and any authorized adoption continue under #8051. Phase 3,
+  full native-agent performance, other suite entry points and broader owners'
+  acceptance remain open.
 
 ### 2026-10-23 - Corrected startup consumer qualifies on Windows and offline Linux
 
