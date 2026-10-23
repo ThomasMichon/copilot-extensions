@@ -3200,29 +3200,16 @@ def test_ensure_columns_backfills_background_recovery_for_stopped_rows(
     from agent_bridge.db import SCHEMA_VERSION, Database
 
     path = tmp_path / "legacy.db"
+    prepared = Database(path)
+    prepared.close()
     conn = sqlite3.connect(str(path))
+    conn.execute("ALTER TABLE sessions DROP COLUMN background_recovery_enabled")
+    assert conn.execute("SELECT version FROM schema_version").fetchone()[0] == SCHEMA_VERSION
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+    assert "background_recovery_enabled" not in columns
+    assert "runtime_custody_json" in columns
     conn.executescript(
-        f"""
-        CREATE TABLE schema_version (version INTEGER NOT NULL);
-        INSERT INTO schema_version (version) VALUES ({SCHEMA_VERSION});
-        CREATE TABLE sessions (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            agent_name TEXT,
-            caller_id TEXT,
-            target_dir TEXT,
-            target_type TEXT NOT NULL DEFAULT 'local',
-            target_json TEXT,
-            status TEXT NOT NULL DEFAULT 'created',
-            pid INTEGER,
-            acp_session_id TEXT,
-            config_json TEXT,
-            predecessor_id TEXT,
-            successor_id TEXT,
-            handoff_at REAL,
-            created_at REAL NOT NULL DEFAULT 0,
-            updated_at REAL NOT NULL DEFAULT 0
-        );
+        """
         INSERT INTO sessions (id, name, status, created_at, updated_at)
         VALUES ('stopped-1', 'agent', 'stopped', 0, 0);
         INSERT INTO sessions (id, name, status, created_at, updated_at)
@@ -3233,7 +3220,8 @@ def test_ensure_columns_backfills_background_recovery_for_stopped_rows(
     conn.close()
 
     # Opening the Database runs _init_schema -> _ensure_columns.
-    Database(str(path))
+    reopened = Database(path)
+    reopened.close()
 
     check = sqlite3.connect(str(path))
     rows = {
