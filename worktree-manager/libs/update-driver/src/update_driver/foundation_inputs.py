@@ -109,11 +109,14 @@ def check_health() -> None:
     import agent_procutil
     import single_instance_lease
 
-    from . import core, foundation_state
+    from . import core, first_use, foundation_state
     import update_driver
     from .participant import MAX_FRAME
 
-    if core.SCHEMA != 2 or foundation_state.VERSION != 1 or MAX_FRAME != 16384:
+    if (
+        core.SCHEMA != 2 or foundation_state.VERSION != 1
+        or first_use.PROTOCOL != 1 or MAX_FRAME != 16384
+    ):
         raise FoundationInputError("unsupported foundation execution protocol")
     for package, names in (
         (agent_procutil, ("native_daemon.ps1", "native_owned.ps1", "native_owned.sh", "native_daemon.sh")),
