@@ -4461,6 +4461,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: _FakeHookClient())
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
     _elect_monitor_for_one_iteration(monkeypatch)

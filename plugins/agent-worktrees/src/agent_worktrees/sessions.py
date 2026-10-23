@@ -2071,12 +2071,9 @@ def headless_new_session(
 
     from agent_procutil import detached_kwargs
 
-    # Inlined rather than calling embody_resume.with_seed (the same one-line
-    # append): embody_resume imports this module, so a module-level import
-    # here would be circular, and a lazy import inside this function body
-    # would pull in a fresh platform.system() call under whatever
-    # subprocess.Popen a caller's test may have already monkeypatched.
-    argv = [*cmd, "--interactive", seed] if seed else list(cmd)
+    from .native_arguments import append_native_arguments
+
+    argv = append_native_arguments(cmd, ["--interactive", seed]) if seed else list(cmd)
 
     full_env = {**os.environ, **(env or {})}
     kwargs: dict[str, object] = {

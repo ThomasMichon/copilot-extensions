@@ -51,8 +51,8 @@ A conflicting Copilot `-C` override is refused; a custom launcher's prefix
 options (such as PowerShell's `-C` command abbreviation) remain unchanged.
 Required option values remain literal even when they look like `-C` flags;
 an end-of-options tail is not rewritten as directory selection.
-Normalized setup uses the equivalent long-option `--option=value` form for
-flag-shaped native values, preventing PowerShell setup-parameter collisions.
+Normalized PowerShell setup carries native argv in a checked argument envelope,
+separate from setup parameters, preserving flag-shaped values and literal tails.
 Direct PowerShell command-string launches encode the final native arguments
 as quoted PowerShell literals, preserving spaces, apostrophes and literal
 variable syntax through the command-source boundary. Opaque compound commands
@@ -64,6 +64,11 @@ script instead of silently losing the selected-directory argument.
 Normalized setup passes the directory
 through its own named parameter and constructs Copilot's native `-C` argument
 only after shell parameter parsing, preserving Windows drive paths and spaces.
+Both normalized shells place directory selection before the native argument
+tail. Bash stops interpreting setup parameters at the tail delimiter.
+Generated launch flags and later resume/interactive-seed additions stay at the
+native boundary before literal tails, including encoded PowerShell invocations
+and the normalized argument envelope.
 ACP keeps its existing workspace authority.
 
 Rejoining an already-running mux does not relocate its process or rewrite

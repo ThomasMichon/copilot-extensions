@@ -200,6 +200,24 @@ def test_directory_binding_does_not_supply_a_missing_option_value(option):
         m._build_launch_cmd(_config(), _args([option]), "/selected worktree")
 
 
+@pytest.mark.parametrize("template", [["copilot"], ["bash", "-c", "copilot"]])
+def test_late_resume_and_seed_stay_before_literal_tail_without_mutating_prepared_command(template):
+    from agent_worktrees.embody_resume import with_resume, with_seed
+
+    command = m._build_launch_cmd(
+        _config({"linux": template}), _args(["--prompt", "--", "--", "-C", "/literal"]), "/selected",
+    )
+    original = list(command)
+    seed = "literal seed's $value"
+    updated = _inner_command(with_seed(with_resume(command, "history"), seed))
+    native = updated[1:] if template == ["copilot"] else updated[4:]
+    assert native == [
+        "--prompt", "--", "-C=/selected", "--allow-all", "--experimental",
+        "--resume=history", "--interactive", seed, "--", "-C", "/literal",
+    ]
+    assert command == original
+
+
 @pytest.mark.parametrize("recovery", [False, True])
 @pytest.mark.parametrize("prefix", [
     ["pwsh.exe", "-NoProfile", "-C", "copilot"],
@@ -317,6 +335,45 @@ def test_owned_setup_directory_cannot_override_selected_workspace(script, shell,
     )
     assert command.count(flag) == 1
     assert "/foreign" not in command
+
+
+def test_normalized_powershell_envelope_preserves_seed_fields_and_literal_values():
+    from agent_worktrees import installer
+    from agent_worktrees.process_launcher import quote_powershell_command
+
+    setup = str(installer.install_dir() / "scripts" / "default-setup.ps1")
+    command = quote_powershell_command([
+        "pwsh", "-File", setup, "-LaunchSeedRecord", "record", "--prompt", "-LaunchSeedId",
+        "-LaunchSeedId", "seed", "-LaunchSeedRuntimePython", "python", "-Recovery",
+    ], m.LaunchPreflightError)
+    assert command[:3] == ["pwsh", "-File", setup]
+    assert command[command.index("-LaunchSeedId") + 1] == "seed"
+    assert command[command.index("-LaunchSeedRuntimePython") + 1] == "python"
+    assert "-Recovery" in command
+    assert json.loads(command[-1]) == {"args": ["--prompt", "-LaunchSeedId"]}
+    with pytest.raises(m.LaunchPreflightError, match="cannot override"):
+        quote_powershell_command([
+            "pwsh", "-File", setup, "-NativeArgumentsJson", '{"args":[]}',
+        ], m.LaunchPreflightError)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native PowerShell envelope validation")
+@pytest.mark.parametrize("payload,remaining", [
+    ("not-json", []), ("{}", []), ('{"args":"scalar"}', []),
+    ('{"args":[1]}', []), ('{"args":[null]}', []), ('{"args":[]}', ["--unexpected"]),
+])
+def test_normalized_powershell_rejects_invalid_or_mixed_argument_envelopes(payload, remaining):
+    from agent_procutil import owned_process
+
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    completed = owned_process.run_owned([
+        shell, "-NoProfile", "-File", str(Path(_SCRIPTS_DIR) / "default-setup.ps1"),
+        "-NativeArgumentsJson", payload, *remaining,
+    ], timeout=20)
+    assert completed.returncode != 0
+    assert completed.stderr
 
 
 def test_acp_launch_skips_allow_all():
@@ -1349,6 +1406,7 @@ def test_custom_powershell_command_forwards_selected_directory(
 ):
     from agent_procutil import owned_process
     from agent_worktrees import installer
+    from agent_worktrees.embody_resume import with_resume, with_seed
 
     shell = shutil.which("pwsh")
     if not shell:
@@ -1374,9 +1432,11 @@ def test_custom_powershell_command_forwards_selected_directory(
     )
     command = m._build_launch_cmd(
         _config({"linux": [shell, "-NoProfile", command_flag, "copilot"]}),
-        _args(["--resume=synthetic-anchor-origin", "--prompt", prompt]),
+        _args(["--prompt", prompt]),
         str(selected),
     )
+    seed = "seed's literal $value"
+    command = with_seed(with_resume(command, "synthetic-anchor-origin"), seed)
     command[0] = shell
     monkeypatch.chdir(selected)
     monkeypatch.setenv("PATH", str(bin_dir))
@@ -1385,15 +1445,13 @@ def test_custom_powershell_command_forwards_selected_directory(
     assert completed.returncode == 0, completed.stdout + completed.stderr
     received = json.loads(marker.read_text(encoding="utf-8"))
     assert received == [
-        "--resume=synthetic-anchor-origin", "--prompt", prompt,
+        "--prompt", prompt,
         f"-C={selected}", "--allow-all", "--experimental",
+        "--resume=synthetic-anchor-origin", "--interactive", seed,
     ]
 
 
-@pytest.mark.parametrize("command_name", [None, "--", "configured-command-name"])
-def test_bash_command_template_reaches_native_child(tmp_path, command_name):
-    from agent_procutil import no_window_kwargs
-
+def _local_bash():
     shell = shutil.which("bash")
     if os.name == "nt" and (not shell or "system32" in shell.casefold()):
         git = shutil.which("git")
@@ -1401,6 +1459,15 @@ def test_bash_command_template_reaches_native_child(tmp_path, command_name):
         shell = str(candidate) if candidate is not None and candidate.is_file() else None
     if not shell or (os.name == "nt" and "system32" in shell.casefold()):
         pytest.skip("a local Bash executable is unavailable")
+    return shell
+
+
+@pytest.mark.parametrize("command_name", [None, "--", "configured-command-name"])
+def test_bash_command_template_reaches_native_child(tmp_path, command_name):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.embody_resume import with_resume, with_seed
+
+    shell = _local_bash()
     selected = tmp_path / "selected worktree"
     selected.mkdir()
     bin_dir = tmp_path / "bin"
@@ -1414,10 +1481,9 @@ def test_bash_command_template_reaches_native_child(tmp_path, command_name):
     template = [shell, "-c", "copilot"]
     if command_name is not None:
         template.append(command_name)
-    command = _inner_command(m._build_launch_cmd(
-        _config({"linux": template}),
-        _args(["--resume=synthetic-anchor-origin"]), str(selected),
-    ))
+    command = m._build_launch_cmd(_config({"linux": template}), _args([]), str(selected))
+    seed = "seed's literal $value"
+    command = _inner_command(with_seed(with_resume(command, "synthetic-anchor-origin"), seed))
     completed = subprocess.run(
         command, cwd=selected,
         env={**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ["PATH"],
@@ -1428,19 +1494,51 @@ def test_bash_command_template_reaches_native_child(tmp_path, command_name):
     received = marker.read_text(encoding="utf-8").splitlines()
     assert f"-C={selected}" in received
     assert "--resume=synthetic-anchor-origin" in received
+    assert received[received.index("--interactive") + 1] == seed
     assert "--" not in received
     assert "configured-command-name" not in received
 
 
+def test_normalized_bash_keeps_selected_directory_before_literal_tail(tmp_path, monkeypatch):
+    from agent_procutil import owned_process
+
+    shell = _local_bash()
+    selected = tmp_path / "selected worktree"
+    selected.mkdir()
+    copilot = tmp_path / "copilot"
+    marker = tmp_path / "native-argv.txt"
+    copilot.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$@" > "$NATIVE_ARGV_MARKER"\n', encoding="utf-8",
+    )
+    copilot.chmod(0o700)
+    monkeypatch.chdir(selected)
+    monkeypatch.setenv("NATIVE_ARGV_MARKER", str(marker))
+    if os.name == "nt":
+        utilities = Path(shell).parent.parent / "usr" / "bin"
+        monkeypatch.setenv("PATH", str(utilities) + os.pathsep + os.environ["PATH"])
+    literal = ["--", "--execution-directory", "/foreign", "-C", "/literal-data"]
+    completed = owned_process.run_owned([
+        shell, str(Path(_SCRIPTS_DIR) / "default-setup.sh"), "--machine", "test",
+        "--copilot-path", str(copilot), "--execution-directory", str(selected),
+        "--resume=synthetic-anchor-origin", *literal,
+    ], timeout=20)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert marker.read_text(encoding="utf-8").splitlines() == [
+        "-C", str(selected), "--resume=synthetic-anchor-origin", *literal,
+    ]
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native PowerShell-to-command argument forwarding")
-@pytest.mark.parametrize("prompt_option,prompt", [
-    ("--prompt", None), ("--prompt", "-C"), ("-p", "-C"),
+@pytest.mark.parametrize("prompt_option,prompt,literal_tail", [
+    ("--prompt", None, False), ("--prompt", "-C", False), ("-p", "-C", False),
+    ("--prompt", None, True),
 ])
 def test_pinned_resume_directory_survives_normalized_powershell_launch(
-    tmp_path, monkeypatch, prompt_option, prompt,
+    tmp_path, monkeypatch, prompt_option, prompt, literal_tail,
 ):
     from agent_procutil import no_window_kwargs
     from agent_worktrees import installer
+    from agent_worktrees.embody_resume import with_resume, with_seed
 
     shell = shutil.which("pwsh")
     if not shell:
@@ -1486,10 +1584,14 @@ def test_pinned_resume_directory_survives_normalized_powershell_launch(
     config = _config({"linux": [
         "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(setup), "-Machine", "test", "-Recovery",
     ]})
-    arguments = ["--resume=synthetic-anchor-origin"]
+    arguments = []
     if prompt is not None:
         arguments += [prompt_option, prompt]
-    command = _inner_command(m._build_launch_cmd(config, _args(arguments), str(selected)))
+    if literal_tail:
+        arguments += ["--", "-C", "/literal-data"]
+    command = m._build_launch_cmd(config, _args(arguments), str(selected))
+    seed = "seed's literal $value"
+    command = _inner_command(with_seed(with_resume(command, "synthetic-anchor-origin"), seed))
     completed = subprocess.run(
         [shell, "-NoProfile", "-NoLogo", "-File", str(staged), "--", *command],
         cwd=selected, env=env, capture_output=True, text=True, timeout=20,
@@ -1497,12 +1599,11 @@ def test_pinned_resume_directory_survives_normalized_powershell_launch(
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     received = json.loads(argv_marker.read_text(encoding="utf-8"))
-    assert "-ExecutionDirectory" not in received
-    assert received.count("-C") == 1
-    assert received[received.index("-C") + 1] == str(selected)
-    assert "--resume=synthetic-anchor-origin" in received
-    if prompt is not None:
-        assert f"--prompt={prompt}" in received
+    boundary = arguments.index("--") if literal_tail else len(arguments)
+    assert received == [
+        "-C", str(selected), *arguments[:boundary], "--allow-all", "--experimental",
+        "--resume=synthetic-anchor-origin", "--interactive", seed, *arguments[boundary:],
+    ]
     assert Path(cwd_marker.read_text(encoding="utf-8").strip()) == selected
 
 

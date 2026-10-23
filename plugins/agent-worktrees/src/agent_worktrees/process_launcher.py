@@ -7,22 +7,9 @@ import os
 from pathlib import Path, PureWindowsPath
 
 from . import installer
-
-# Required-value options from the native CLI contract consume even flag-shaped data.
-_NATIVE_VALUE_OPTIONS = {
-    "-i", "--interactive", "-p", "--prompt", "--model", "--reasoning-effort",
-    "--context", "--auto-tier", "--agent", "-n", "--name", "--session-id",
-    "--log-dir", "--extension-sdk-path", "--log-level", "--stream", "--output-format",
-    "--add-dir", "--attachment", "--disable-mcp-server", "--add-github-mcp-toolset",
-    "--add-github-mcp-tool", "--plugin-dir", "--additional-mcp-config", "--mcp-github-auth",
-    "--max-autopilot-continues", "--mode", "--environment-host", "--environment-compute-id",
-    "--dynamic-retrieval", "--enable-mcp-server", "--max-ai-credits", "--usage-output-file",
-}
-_SETUP_VALUE_OPTIONS = {
-    "-machine", "-setuphook", "-configroot", "-runtimepython", "-sessionpath",
-    "-envscript", "-copilotpath", "--machine", "--setup-hook", "--config-root",
-    "--runtime-python", "--session-path", "--env-script", "--copilot-path",
-}
+from .native_arguments import SETUP_VALUE_OPTIONS as _SETUP_VALUE_OPTIONS
+from .native_arguments import VALUE_OPTIONS as _NATIVE_VALUE_OPTIONS
+from .native_arguments import bash_command_index, powershell_invocation
 
 
 def _normalized_setup_index(command) -> int | None:
@@ -45,22 +32,9 @@ def _normalized_setup_index(command) -> int | None:
 def _bash_argument_boundary(command, passthrough_start: int, error_type):
     if not command or PureWindowsPath(command[0]).stem.casefold() != "bash":
         return command, None
-    command_flag = None
-    index = 1
-    while index < passthrough_start:
-        arg = command[index]
-        if not arg.startswith("-") or arg == "--":
-            break
-        if arg in {"-o", "-O", "--rcfile", "--init-file"}:
-            index += 2
-            continue
-        if not arg.startswith("--") and "c" in arg[1:]:
-            command_flag = index
-            break
-        index += 1
-    if command_flag is None:
+    script_index = bash_command_index(command, limit=passthrough_start)
+    if script_index is None:
         return command, None
-    script_index = command_flag + 1
     script = command[script_index].strip() if script_index < passthrough_start else ""
     if script in {"copilot", "exec copilot"}:
         command = [*command[:script_index], 'exec copilot "$@"', *command[script_index + 1:]]
@@ -74,7 +48,9 @@ def _bash_argument_boundary(command, passthrough_start: int, error_type):
     return command, script_index + 2
 
 
-def bind_execution_directory(command, work_dir: str, error_type, *, passthrough_start: int = 1):
+def bind_execution_directory(
+    command, work_dir: str, error_type, *, passthrough_start: int = 1, native_suffix=(),
+):
     """Keep native resume in the selected workspace, not its historical cwd."""
     selected = os.path.normcase(os.path.abspath(work_dir))
     command, bash_start = _bash_argument_boundary(command, passthrough_start, error_type)
@@ -100,12 +76,7 @@ def bind_execution_directory(command, work_dir: str, error_type, *, passthrough_
         ):
             if index + 1 >= len(command):
                 raise error_type(f"Copilot launch option {arg} requires a value")
-            value = command[index + 1]
-            if normalized is not None and arg in _NATIVE_VALUE_OPTIONS and value.startswith("-"):
-                native_option = {"-p": "--prompt", "-i": "--interactive", "-n": "--name"}.get(arg, arg)
-                result.append(f"{native_option}={value}")
-            else:
-                result.extend(command[index:index + 2])
+            result.extend(command[index:index + 2])
             index += 2
             continue
         setup_flag = normalized is not None and (
@@ -130,13 +101,44 @@ def bind_execution_directory(command, work_dir: str, error_type, *, passthrough_
     normalized = _normalized_setup_index(result)
     if normalized is not None:
         flag = "-ExecutionDirectory" if result[normalized].endswith(".ps1") else "--execution-directory"
-        return [*result[:normalized + 1], flag, work_dir, *result[normalized + 1:], *literal_tail]
-    return [*result, f"-C={work_dir}", *literal_tail]
+        return [*result[:normalized + 1], flag, work_dir,
+                *result[normalized + 1:], *native_suffix, *literal_tail]
+    return [*result, f"-C={work_dir}", *native_suffix, *literal_tail]
+
+
+def _pack_powershell_setup(command, setup_index: int, error_type):
+    setup = list(command[:setup_index + 1])
+    native = []
+    index = setup_index + 1
+    while index < len(command):
+        arg = command[index]
+        key = arg.casefold()
+        if arg == "--":
+            native.extend(command[index:])
+            break
+        if key == "-nativeargumentsjson":
+            raise error_type("Launch templates cannot override the native argument envelope")
+        if arg in _NATIVE_VALUE_OPTIONS:
+            native.extend(command[index:index + 2])
+            index += 2
+        elif (not arg.startswith("--") and key in _SETUP_VALUE_OPTIONS) or key == "-executiondirectory":
+            setup.extend(command[index:index + 2])
+            index += 2
+        elif key == "-recovery":
+            setup.append(arg)
+            index += 1
+        else:
+            native.append(arg)
+            index += 1
+    return [*setup, "-NativeArgumentsJson", json.dumps({"args": native})]
 
 
 def quote_powershell_command(command, error_type):
     if not command or PureWindowsPath(command[0]).stem.casefold() not in {"pwsh", "powershell"}:
         return command
+    setup = _normalized_setup_index(command)
+    if setup is not None:
+        return _pack_powershell_setup(command, setup, error_type)
     for index, arg in enumerate(command[1:], 1):
         if arg.casefold() == "-file":
             return command
@@ -148,8 +150,7 @@ def quote_powershell_command(command, error_type):
                 "A PowerShell command-string launch must directly invoke Copilot; "
                 "use a launcher script for a compound command"
             )
-        literals = ["'" + value.replace("'", "''") + "'" for value in command[target:]]
-        return [*command[:target], "& " + " ".join(literals)]
+        return [*command[:target], powershell_invocation(command[target:])]
     return command
 
 

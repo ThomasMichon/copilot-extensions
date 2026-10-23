@@ -33,6 +33,7 @@ COPILOT_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --)             COPILOT_ARGS+=("$@"); break ;;
         --machine)      MACHINE="$2"; shift 2 ;;
         --recovery)     RECOVERY=true; shift ;;
         --setup-hook)   SETUP_HOOK="$2"; shift 2 ;;
@@ -49,7 +50,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 if [[ -n "$EXECUTION_DIRECTORY" ]]; then
-    COPILOT_ARGS+=(-C "$EXECUTION_DIRECTORY")
+    COPILOT_ARGS=(-C "$EXECUTION_DIRECTORY" "${COPILOT_ARGS[@]}")
 fi
 
 # In --stdio (ACP) mode, stdout is the JSON-RPC channel; keep all human-facing

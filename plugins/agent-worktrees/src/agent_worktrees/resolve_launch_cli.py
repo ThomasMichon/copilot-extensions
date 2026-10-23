@@ -594,7 +594,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     no_resume = getattr(args, "no_resume", False) or bare_resume
     if not no_resume:
         if resume_target:
-            launch_cmd.append(f"--resume={resume_target}")
+            from .native_arguments import append_native_arguments
+            launch_cmd = append_native_arguments(launch_cmd, [f"--resume={resume_target}"])
             print(f"   Resuming session: {resume_target[:12]}…")
         else:
             _emit_parent_context_hint(record)

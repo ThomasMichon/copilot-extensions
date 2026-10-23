@@ -398,3 +398,41 @@ restarted or updated to force acceptance. No productive rollout is performed.
   leaving its own parameters intact. Both `--prompt` and `-p` retain the
   literal value while Copilot receives the selected directory separately.
   All 140 launch cases pass in 49.05 seconds.
+
+### 2026-10-23 - Normalized native argument ownership
+
+- Follow-up review identified directory flags after a forwarded literal tail
+  in both normalized shells. Both scripts now place selected-directory flags
+  before native arguments. Bash stops setup-parameter parsing at the literal
+  tail, so a later setup-shaped value cannot replace the selected directory.
+- Exact PowerShell execution also demonstrated that raw literal-tail tokens
+  still collide with script parameter binding. The owned launcher now carries
+  native argv in a checked JSON argument envelope, separate from setup fields.
+  This supersedes inline option-value normalization and preserves the original
+  native tokens, including short options and literal values. Invalid or mixed
+  envelopes fail before setup effects; configured launch templates cannot
+  override the internal envelope.
+- Existing seed-record/id/runtime fields and recovery remain setup-owned.
+  The legacy direct setup call remains available when no envelope is supplied;
+  ACP remains on its existing transport. No service or installed state changes.
+- Five exact native PowerShell/Bash directory-and-tail controls pass. The
+  combined launch and launch-seed consumer portfolios pass 276 cases in
+  111.15 seconds under ordinary containment, including malformed/null/mixed
+  envelope refusal. This remains source acceptance, not productive rollout.
+- The integrated eight-module launch/seed/status portfolio passes 704 cases
+  in 168.62 seconds. Its real-wire wake fixture now excludes unrelated project
+  activation I/O from the unchanged one-second best-effort RPC budget;
+  actual transport, decision and wake assertions remain in place.
+- Traced post-build resume and seed consumers before source acceptance.
+  A cycle-free, standard-library-only native-argument helper now composes
+  later arguments inside the normalized envelope or quoted PowerShell
+  invocation rather than after it. Resolve, embody, headless launch and
+  handoff preview paths use the same helper; no runtime/registry import was
+  added to the headless process path.
+- Generated flags and later resume/seed additions precede literal tails while
+  required option values remain data. Exact native PowerShell/Bash controls
+  now exercise the real late-addition helpers with spaces, apostrophes and
+  literal variable syntax, preserving conversation and seed together.
+  The final eight-module launch/resume/resolve/handoff consumer portfolio
+  passes 612 cases in 115.98 seconds. Lint, module ceilings, install closure
+  and headless-launch contracts pass without raising a limit.

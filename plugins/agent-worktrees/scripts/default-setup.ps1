@@ -61,13 +61,29 @@ param(
     [string]$LaunchSeedRecord,
     [string]$LaunchSeedId,
     [string]$LaunchSeedRuntimePython,
+    [string]$NativeArgumentsJson,
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$CopilotArgs
 )
 
 $ErrorActionPreference = 'Stop'
+if ($PSBoundParameters.ContainsKey('NativeArgumentsJson')) {
+    if ($null -ne $CopilotArgs -and $CopilotArgs.Count -gt 0) {
+        throw 'Native argument envelope cannot be combined with remaining arguments.'
+    }
+    $nativeEnvelope = ConvertFrom-Json -InputObject $NativeArgumentsJson
+    if ($null -eq $nativeEnvelope -or $nativeEnvelope.args -isnot [System.Array]) {
+        throw 'Native argument envelope must contain an args array.'
+    }
+    foreach ($nativeArgument in $nativeEnvelope.args) {
+        if ($nativeArgument -isnot [string]) {
+            throw 'Native argument envelope must contain only strings.'
+        }
+    }
+    $CopilotArgs = [string[]]$nativeEnvelope.args
+}
 if ($ExecutionDirectory) {
-    $CopilotArgs += @('-C', $ExecutionDirectory)
+    $CopilotArgs = @('-C', $ExecutionDirectory) + $CopilotArgs
 }
 
 # ── --stdio (ACP) mode: keep human output off the JSON-RPC channel ────────

@@ -2173,10 +2173,7 @@ def _build_launch_cmd(
     # Append profile-specific Copilot args
     profile_args = profile.copilot_args if profile and profile.copilot_args else []
     cmd.extend(profile_args)
-    if "--acp" not in cmd:
-        cmd = bind_execution_directory(
-            cmd, work_dir, LaunchPreflightError, passthrough_start=passthrough_start,
-        )
+    generated = []
 
     # Auto-approve everything so worktree sessions run without any
     # confirmation prompts.  --allow-all is equivalent to
@@ -2196,9 +2193,9 @@ def _build_launch_cmd(
     if not is_acp and not any(
         a == flag for a in passthrough for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
-        cmd.append("--allow-all")
+        generated.append("--allow-all")
     if "--experimental" not in cmd:
-        cmd.append("--experimental")
+        generated.append("--experimental")
 
     # Re-express the persisted model/effort/context-tier preference
     # (agent-machines' copilot.settings is the sole writer of
@@ -2213,7 +2210,11 @@ def _build_launch_cmd(
     # model/effort through its own configuration path there instead (context
     # tier is not yet carried through ACP -- a separate, tracked gap).
     if not is_acp:
-        cmd.extend(resolve_launch_pref_flags(cmd))
+        generated.extend(resolve_launch_pref_flags(cmd))
+        cmd = bind_execution_directory(cmd, work_dir, LaunchPreflightError,
+            passthrough_start=passthrough_start, native_suffix=generated)
+    else:
+        cmd.extend(generated)
 
     # Every resolved session command passes through one installed wrapper.
     # This gives optional sibling integrations a single pre-exec seam even for
