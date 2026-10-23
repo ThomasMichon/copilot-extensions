@@ -1,4 +1,5 @@
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 import http.client
 import io
 import json
@@ -19,6 +20,7 @@ import consumer_ingest
 import coordinator_daemon as coordinator
 from credential_record import generation_for_expiry, load_credential, store_credential
 from agent_vault.cache import PersistentCache
+from cryptography.fernet import Fernet
 
 
 class CredentialConsistencyTests(unittest.TestCase):
@@ -36,6 +38,44 @@ class CredentialConsistencyTests(unittest.TestCase):
         with patch.object(self.cache, "_write_store_unlocked", return_value=False):
             self.assertFalse(store_credential(self.cache, "entry", "token-b", self.expiry + 600))
         self.assertEqual(load_credential(self.cache, "entry"), {
+            "token": "token-a", "expires_epoch": self.expiry,
+        })
+
+    def test_first_reader_and_writer_share_one_persisted_encryption_key(self):
+        generating = threading.Event()
+        release = threading.Event()
+        second_generation = threading.Event()
+        calls = []
+        generate = Fernet.generate_key
+        other = PersistentCache(self.cache._base_dir)
+
+        def delayed_key():
+            calls.append(True)
+            if len(calls) == 1:
+                generating.set()
+                if not release.wait(3):
+                    raise TimeoutError("Test key generation was not released")
+            else:
+                second_generation.set()
+            return generate()
+
+        with patch.object(Fernet, "generate_key", side_effect=delayed_key), ThreadPoolExecutor(2) as pool:
+            reader = pool.submit(self.cache.get, "entry", "credential")
+            try:
+                self.assertTrue(generating.wait(3))
+                writer = pool.submit(store_credential, other, "entry", "token-a", self.expiry)
+                self.assertFalse(second_generation.wait(0.15))
+            finally:
+                release.set()
+            observed = reader.result(timeout=3)
+            if observed is not None:
+                self.assertEqual(json.loads(observed), {
+                    "token": "token-a", "expires_epoch": self.expiry,
+                })
+            self.assertTrue(writer.result(timeout=5))
+        self.assertEqual(len(calls), 1)
+        fresh = PersistentCache(self.cache._base_dir)
+        self.assertEqual(load_credential(fresh, "entry"), {
             "token": "token-a", "expires_epoch": self.expiry,
         })
 
