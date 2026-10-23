@@ -64,6 +64,8 @@ jobs:
           --test-file tests/test_foundation_state.py
           --test-file tests/test_foundation_native_process.py
           --test-file tests/test_foundation_progress_process.py
+          --test-file tests/test_foundation_producer_process.py
+          --test-file tests/test_foundation_genesis_process.py
           --test-file tests/test_native_participant.py
           --test-file tests/test_foundation_build_process.py
           --test-timeout 300 --timeout 600
@@ -74,6 +76,7 @@ jobs:
     timeout-minutes: 15
     env:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
@@ -93,6 +96,8 @@ jobs:
           --test-file tests/test_foundation_state.py
           --test-file tests/test_foundation_native_process.py
           --test-file tests/test_foundation_progress_process.py
+          --test-file tests/test_foundation_producer_process.py
+          --test-file tests/test_foundation_genesis_process.py
           --test-file tests/test_native_participant.py
           --test-file tests/test_foundation_build_process.py
-          --test-timeout 300 --timeout 600
+          --test-timeout 600 --timeout 780

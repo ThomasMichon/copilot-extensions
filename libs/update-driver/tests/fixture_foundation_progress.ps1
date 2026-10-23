@@ -6,6 +6,74 @@ $utf8 = New-Object Text.UTF8Encoding($false)
 function Save([string]$Name, [string]$Value) {
     [IO.File]::WriteAllText((Join-Path $Root $Name), $Value, $utf8)
 }
+if ($Mode -eq 'prerequisite-helpers') {
+    . (Join-Path $Library 'installer-engine\installer-engine.ps1')
+    $script:probed = New-Object 'Collections.Generic.List[string]'
+    $script:legacy = Join-Path $Root 'signed-310-fixture'
+    $script:modern = Join-Path $Root 'signed-311-fixture'
+    Save 'signed-310-fixture' 'fixture, never executed'
+    Save 'signed-311-fixture' 'fixture, never executed'
+    function py {
+        param([string]$Version)
+        $script:probed.Add($Version)
+        $global:LASTEXITCODE = 0
+        if ($Version -eq '-3.10') { return $script:legacy }
+        if ($Version -eq '-3.11' -and $script:allowModern) { return $script:modern }
+    }
+    function Get-AuthenticodeSignature { return @{ Status = 'Valid' } }
+    if ((Get-SignedBasePython) -ne $script:legacy) { throw 'legacy signed-base default changed' }
+    $script:probed.Clear()
+    if ($null -ne (Get-SignedBasePython -MinimumVersion '3.11') -or $script:probed.Contains('-3.10')) {
+        throw 'signed-base floor admitted or probed an older interpreter'
+    }
+    $script:allowModern = $true
+    if ((Get-SignedBasePython -MinimumVersion '3.11') -ne $script:modern) {
+        throw 'compatible signed base was not preferred'
+    }
+    function Get-SignedBasePython {
+        param([version]$MinimumVersion)
+        if ($MinimumVersion -ne [version]'3.11') { throw 'venv lost the signed-base floor' }
+        return $null
+    }
+    $venv = Join-Path $Root 'fixture-venv'
+    $python = Join-Path $venv 'Scripts\python.exe'
+    function Invoke-UvVenvResilient {
+        param([string]$VenvDir, [string[]]$Arguments, [string]$UvCommand)
+        if ($UvCommand -ne 'never-executed' -or ($Arguments -join ',') -ne '--python,3.11,--allow-existing') {
+            throw 'canonical venv selection options changed'
+        }
+        [IO.Directory]::CreateDirectory((Join-Path $VenvDir 'Scripts')) | Out-Null
+        [IO.File]::WriteAllText((Join-Path $VenvDir 'Scripts\python.exe'), 'fixture, never executed')
+        [IO.File]::WriteAllText((Join-Path $VenvDir 'pyvenv.cfg'), 'fixture')
+        return @{ ExitCode = 0; Output = '' }
+    }
+    if (-not (New-SignedVenv -VenvDir $venv -VenvPython $python -PythonVersion '3.11' -MinimumSignedBaseVersion '3.11' -UvCommand 'never-executed')) {
+        throw 'canonical managed fallback did not retain its requested interpreter'
+    }
+    Save 'prerequisite-helpers-ok' 'legacy default, signed preference and managed fallback verified'
+    exit 0
+}
+if ($Mode -eq 'directory') {
+    . (Join-Path $Library 'update-driver\src\update_driver\directory.ps1')
+    $before = [IO.Directory]::GetAccessControl($Root).GetSecurityDescriptorSddlForm('All')
+    New-NativeExecutionDirectory -Root $Root
+    if ([IO.Directory]::GetAccessControl($Root).GetSecurityDescriptorSddlForm('All') -ne $before) {
+        throw 'existing execution ACL was rewritten'
+    }
+    $fresh = Join-Path $Root 'nested\fresh'
+    New-NativeExecutionDirectory -Root $fresh
+    $security = [IO.Directory]::GetAccessControl($fresh)
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    if ($security.GetOwner([Security.Principal.SecurityIdentifier]) -ne $sid -or -not $security.AreAccessRulesProtected) {
+        throw 'new execution directory owner or protection differs from TokenUser policy'
+    }
+    $allowed = @($sid.Value, 'S-1-5-18', 'S-1-5-32-544') | Sort-Object -Unique
+    $actual = @($security.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) |
+        ForEach-Object { $_.IdentityReference.Value }) | Sort-Object -Unique
+    if (($allowed -join ',') -ne ($actual -join ',')) { throw 'new execution access policy differs' }
+    Save 'directory-ok' 'new owner/protected ACL and unchanged existing ACL verified'
+    exit 0
+}
 if ($Mode -eq 'protocol') {
     $results = @()
     foreach ($path in (Get-ChildItem -LiteralPath (Join-Path $Root 'corpus') -File | Sort-Object Name)) {
@@ -24,6 +92,14 @@ if ($Mode -eq 'protocol') {
 }
 $owned = Enter-NativeOperationLock ([IO.Path]::Combine($Root, 'execution.lock'))
 try {
+    if ($Mode -eq 'recovery') {
+        try {
+            Save 'recovered.json' (Repair-NativeFoundationAfterRestart -Custody $owned -Root $Root)
+        } catch {
+            Save 'recovery-refused' $_.Exception.Message
+        }
+        exit 0
+    }
     if ($Mode -eq 'refuse') {
         $refused = $false
         try { $null = Start-NativeFoundationProgress -Custody $owned -Root $Root -Plugin $Plugin }

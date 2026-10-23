@@ -388,9 +388,9 @@ lexicographic fallback. Existing retained workers and queue state remain under
 the same execution root; bootstrap interpreter files must outlive any dependent
 venv and are not removed by this participant.
 
-This is the bounded construction participant, not yet a Python-free native
-producer or first-use integration. It does not acquire a bootstrap interpreter,
-write admission/completion records or modify a plugin publisher.
+The construction participant itself does not acquire a bootstrap interpreter,
+write admission/completion records or modify a plugin publisher. The separate
+Windows producer below owns those earlier construction stages.
 
 `tests/test_native_participant.py` exercises the real stock-PowerShell owner
 against unchanged Python participants: simultaneous joins, consumed environment,
@@ -400,6 +400,62 @@ owner release/death, same-path replacement, closed witnesses and absent custody.
 that an IPC thread may only invoke the issued read-only assertion, not assert
 or release ownership. These are native interoperability controls, not a cold
 foundation installation or non-Windows native bootstrap claim.
+
+### Finite Windows foundation producer
+
+`Start-NativeFoundationProducer -Root <execution-root>
+-Plugin <absolute-update-driver-source> [-ExpectedSourceHash <sha256>]`
+starts only `scripts/foundation-produce.ps1`, through the canonical native
+outside-Job admission helper. It requires stock Windows PowerShell 5.1 and
+returns the actual process handle, **not a completed installation receipt**.
+Waiting callers observe that process plus the matching durable foundation
+record; they never run acquisition or installers themselves. A launch refusal
+does not select a foreground alternative. The direct script is the supervised
+debug path and acquires the same kernel authority.
+
+The finite worker holds the exact installation lock across source admission,
+prerequisite acquisition, construction, activation and outcome persistence.
+Only real kernel lock contention waits; malformed paths, absent capability
+and unsupported state refuse. Execution roots inside the source closure are
+rejected before control-directory creation. New control roots use the same
+TokenUser-owned protected inheritable ACL as the Python queue, and existing
+permissions are never migrated.
+
+After publishing progress, native source freezing copies only the fixed three
+packages into the operation's private bootstrap tree. Both the copy and the
+original must match the admitted inventory before any acquisition helper runs.
+The fixed owned acquisition child loads that frozen canonical
+`installer-engine.ps1`; the existing sync owner supplies that native helper,
+rather than another downloader. `Ensure-Uv` retains its pinned
+archive/hash and existing-tool policy. `New-SignedVenv` prefers a compatible
+signed base and otherwise uses its canonical managed-Python fallback.
+Foundation bootstrap requests Python 3.11 and a 3.11 minimum signed base for
+stdlib TOML support; other adopters retain their 3.10 defaults.
+
+Each operation retains its bootstrap venv, downloaded base interpreter and
+private cache under `<execution-root>/bootstrap/<operation-id>`. These files
+are not removed while completed foundations can depend on them. Prerequisite
+and builder trees run under strict native Jobs with bounded deadlines.
+Prerequisites and package children never inherit the participant capability;
+only the fixed builder receives it, consumes it and checks live custody.
+The builder uses the frozen source and rechecks the separately admitted
+original before staging and activation. Only verified full-tree settlement
+permits an integer outcome. Uncertain cleanup retains an interrupted fence.
+A later native caller that obtains free custody records a lost running owner
+as interrupted without needing Python, but does not replay its construction.
+`Repair-NativeFoundationAfterRestart -Custody <held-object> -Root <root>` is
+explicit positive settlement only: it requires a genuinely different native
+boot on the same platform and preserves the interrupted outcome. It neither
+rebuilds nor executes queued work, and ordinary startup never calls it.
+
+A second caller can reuse only a completed matching operation, its exact
+source-qualified current slot and successful retained installed health.
+It neither starts another bootstrap nor edits pending request history.
+Without that healthy exact selection, an existing queue still requires
+queue-aware upgrade/repair authority; this cold producer never interprets or
+deletes SQLite. It does not enroll maintenance or enable ordinary first-use
+publishers. Queue-aware foundation upgrades, native Linux/macOS genesis and
+the remaining first-use integrations stay explicit, separate boundaries.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;
@@ -470,3 +526,27 @@ test interpreter is not Python-free genesis evidence. The manual `foundation`
 portfolio of `installation-context-full.yml` runs this bounded lane on fresh
 Windows and Ubuntu runners without adding native/network work to required
 unit-only PR CI.
+
+Python-free Windows genesis has its own explicit opt-in:
+
+```powershell
+$env:UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS='1'
+python tools\run-plugin-tests.py update-driver --test-file tests/test_foundation_genesis_process.py --test-timeout 600 --timeout 780
+```
+
+This lane performs real network acquisition and immutable construction in a
+fresh private root, with no Python/py/uv command available to the native
+submitter. It forces a private managed interpreter/cache instead of borrowing
+the orchestrator's registry-installed Python. The originating caller and its
+Job are closed during admitted construction; a second cold caller converges
+on the same operation. Assertions cover one bootstrap, exact selected source,
+installed health, retained source-independent queued execution and no visible
+console/focus transitions. Only this isolated opt-in removes contained-test
+suppression for its native producer; all returned native handles retain bounded
+cleanup. The manual Windows foundation portfolio runs it; ordinary scheduled
+and required unit-only CI do not.
+
+`test_foundation_producer_process.py` instead replaces only the inner helpers
+in a copied fixture source. It qualifies native orchestration, pre-acquisition
+progress, exact status and owned-builder death without downloads; it is not
+evidence of actual cold construction.

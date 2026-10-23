@@ -533,6 +533,42 @@ def test_unregistered_python_engine_is_rejected(fake_repo, monkeypatch):
     assert any("unregistered Python" in problem for problem in sync_installer_engine.verify())
 
 
+def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatch):
+    contract = sync_installer_engine.ier
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
+    consumer = fake_repo / "libs" / "update-driver"
+    consumer.mkdir()
+    assert len(sync_installer_engine.verify()) == len(contract.STANDALONE_NATIVE_FILES)
+    assert len(sync_installer_engine.sync()) == len(contract.STANDALONE_NATIVE_FILES)
+    assert sync_installer_engine.verify() == []
+    for name in contract.STANDALONE_NATIVE_FILES:
+        assert (consumer / "scripts" / name).read_bytes() == (
+            sync_installer_engine.CANONICAL_DIR / name
+        ).read_bytes()
+    (consumer / "scripts" / "installer-engine.ps1").write_text("drift", encoding="utf-8")
+    assert len(sync_installer_engine.verify()) == 1
+    assert len(sync_installer_engine.sync()) == 1
+    assert sync_installer_engine.verify() == []
+
+
+def test_standalone_native_engine_refuses_linked_destination(
+    fake_repo, monkeypatch, native_file_symlink,
+):
+    contract = sync_installer_engine.ier
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
+    scripts = fake_repo / "libs" / "update-driver" / "scripts"
+    scripts.mkdir(parents=True)
+    target = fake_repo / "untouched"
+    target.write_text("not a generated helper", encoding="utf-8")
+    native_file_symlink(scripts / "installer-engine.ps1", target)
+    assert any("symlink" in problem for problem in sync_installer_engine.verify())
+    with pytest.raises(RuntimeError, match="symlink"):
+        sync_installer_engine.sync()
+    assert target.read_text(encoding="utf-8") == "not a generated helper"
+
+
 def _write_canonical_refs(scripts: Path) -> None:
     (scripts / "install.ps1").write_text(
         ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')\n",

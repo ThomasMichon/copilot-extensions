@@ -19,7 +19,10 @@ from update_driver import foundation_state  # noqa: E402
 from update_driver.foundation_inputs import FoundationInputError, inspect  # noqa: E402
 
 
-def construct(*, root: Path, source_hash: str, uv: Path, base_python: Path) -> Path:
+def construct(
+    *, root: Path, source_hash: str, uv: Path, base_python: Path,
+    admitted_source: Path | None = None,
+) -> Path:
     custody = borrowed_custody(root=root)
     if custody is None:
         raise FoundationInputError("foundation construction requires live installation custody")
@@ -29,7 +32,8 @@ def construct(*, root: Path, source_hash: str, uv: Path, base_python: Path) -> P
         if operation is None or operation.state != "running" or operation.source_hash != source_hash:
             raise FoundationInputError("foundation construction does not match admitted native progress")
         selected = inspect(SOURCE)
-        if selected.digest != source_hash:
+        origin = SOURCE if admitted_source is None else admitted_source
+        if selected.digest != source_hash or inspect(origin).digest != source_hash:
             raise FoundationInputError("foundation source changed after native admission")
         # Only this source's checked and packaged canonical helpers are imported.
         import installer_engine as engine
@@ -43,7 +47,10 @@ def construct(*, root: Path, source_hash: str, uv: Path, base_python: Path) -> P
         target.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="inputs-", dir=target) as temporary:
             frozen = engine.freeze_inputs(SOURCE, Path(temporary) / "source")
-            if inspect(frozen.plugin).digest != source_hash or inspect(SOURCE).digest != source_hash:
+            if (
+                inspect(frozen.plugin).digest != source_hash or inspect(SOURCE).digest != source_hash
+                or inspect(origin).digest != source_hash
+            ):
                 raise FoundationInputError("foundation source changed while freezing inputs")
             custody.assert_owned()
             version = "foundation-" + source_hash
@@ -57,6 +64,7 @@ def construct(*, root: Path, source_hash: str, uv: Path, base_python: Path) -> P
                     foundation_state.read(root) != operation
                     or inspect(frozen.plugin).digest != source_hash
                     or inspect(SOURCE).digest != source_hash
+                    or inspect(origin).digest != source_hash
                 ):
                     raise FoundationInputError("foundation admission changed before selection")
                 runtime.activate(target, version, link_free=True)
@@ -69,8 +77,12 @@ def main() -> int:
     parser.add_argument("--source-hash", required=True)
     parser.add_argument("--uv", required=True, type=Path)
     parser.add_argument("--base-python", required=True, type=Path)
+    parser.add_argument("--admitted-source", type=Path)
     args = parser.parse_args()
-    construct(root=args.root, source_hash=args.source_hash, uv=args.uv, base_python=args.base_python)
+    construct(
+        root=args.root, source_hash=args.source_hash, uv=args.uv, base_python=args.base_python,
+        admitted_source=args.admitted_source,
+    )
     return 0
 
 

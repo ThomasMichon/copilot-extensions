@@ -370,10 +370,12 @@ function Ensure-Uv {
 }
 
 function Get-SignedBasePython {
+    param([version]$MinimumVersion = [version]'3.10')
     if ($env:OS -ne 'Windows_NT') { return $null }
     $cands = @()
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($v in '3.13', '3.12', '3.11', '3.10') {
+            if ([version]$v -lt $MinimumVersion) { continue }
             $result = Invoke-NativeCapture { & py "-$v" -c 'import sys;print(sys.executable)' }
             if ($result.ExitCode -eq 0 -and $result.Output) {
                 $cands += $result.Output
@@ -399,7 +401,8 @@ function New-SignedVenv {
         [string]$PythonVersion = '3.10',
         [string]$UvCommand = 'uv',
         [bool]$RequireSignedBase = $false,
-        [bool]$AllowExisting = $true
+        [bool]$AllowExisting = $true,
+        [version]$MinimumSignedBaseVersion = [version]'3.10'
     )
 
     $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
@@ -409,7 +412,7 @@ function New-SignedVenv {
         } else {
             'Valid'
         }
-        if ($sig -ne 'Valid' -and (Get-SignedBasePython)) {
+        if ($sig -ne 'Valid' -and (Get-SignedBasePython -MinimumVersion $MinimumSignedBaseVersion)) {
             Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python'
             try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } catch {}
         } elseif (-not (Test-Path $cfgPath)) {
@@ -421,7 +424,7 @@ function New-SignedVenv {
         return $true
     }
 
-    $signedBase = Get-SignedBasePython
+    $signedBase = Get-SignedBasePython -MinimumVersion $MinimumSignedBaseVersion
     if ($signedBase) {
         & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
         if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {

@@ -3128,6 +3128,14 @@ They do not themselves construct a driver foundation or migrate any first-use
 publisher. Bootstrap source admission, durable interruption fencing and
 immutable publication remain consumer obligations.
 
+The finite Windows standalone consumer is
+`libs/update-driver/scripts/foundation-produce.ps1`: it composes those primitives
+with source-bound progress, frozen canonical acquisition and immutable
+construction under the same authority. The
+[producer contract](../libs/update-driver/README.md#finite-windows-foundation-producer)
+owns its API and qualification boundary. Ordinary first-use publication and
+queue-aware foundation upgrades are not enabled by that consumer.
+
 `libs/installer-engine/installer_engine.py` is the in-progress Python ownership
 seam for the mutable-dev-slot effort, not a completed installer adoption.
 Construction follows the complete transitive local `tool.uv.sources` graph.

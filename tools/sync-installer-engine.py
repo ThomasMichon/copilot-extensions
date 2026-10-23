@@ -18,6 +18,8 @@ This tool's ``--check`` verifies both forms correctly. Its write mode keeps
 vendored adopters byte-identical and removes stale local copies from
 canonical-reference adopters.
 Linked destinations are refused before reading, copying or changing permissions.
+Explicit standalone native adopters receive their declared canonical helpers;
+the Python-free foundation does not own another prerequisite downloader.
 
 Usage::
 
@@ -300,6 +302,19 @@ def verify() -> list[str]:
                 problems.append(f"{indirect} is a symlink -- refusing")
             elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
                 problems.append(f"{destination.relative_to(REPO)} differs from canonical Python engine")
+    for consumer in ier.native_adopter_dirs(REPO):
+        for name in ier.STANDALONE_NATIVE_FILES:
+            source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
+            for path in (source, destination):
+                indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
+                if indirect is not None:
+                    problems.append(f"{indirect} is a symlink -- refusing")
+                    break
+            else:
+                if not source.is_file() or not destination.is_file() or destination.read_bytes() != source.read_bytes():
+                    problems.append(f"{destination.relative_to(REPO)} differs from canonical native engine")
+                elif os.name != "nt" and stat.S_IMODE(destination.stat().st_mode) != stat.S_IMODE(source.stat().st_mode):
+                    problems.append(f"{destination.relative_to(REPO)} has a different canonical native mode")
     plugins = REPO / "plugins"
     for candidate in plugins.iterdir() if plugins.is_dir() else ():
         if candidate.name not in PYTHON_ADOPTERS and any(
@@ -383,6 +398,26 @@ def sync() -> list[str]:
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, destination)
             written.append(destination.relative_to(REPO).as_posix())
+    for consumer in ier.native_adopter_dirs(REPO):
+        for name in ier.STANDALONE_NATIVE_FILES:
+            source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
+            for path in (source, destination):
+                indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
+                if indirect is not None:
+                    raise RuntimeError(f"{indirect} is a symlink -- refusing")
+            same_content = destination.is_file() and destination.read_bytes() == source.read_bytes()
+            same_mode = destination.is_file() and (
+                os.name == "nt"
+                or stat.S_IMODE(destination.stat().st_mode) == stat.S_IMODE(source.stat().st_mode)
+            )
+            if same_content and same_mode:
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not same_content:
+                shutil.copyfile(source, destination)
+            if os.name != "nt":
+                shutil.copymode(source, destination)
+            written.append(destination.relative_to(REPO).as_posix())
     return written
 
 
@@ -404,7 +439,8 @@ def main() -> int:
             return 1
         print(
             f"installer-engine files in sync across {len(ADOPTERS)} shell adopter(s) "
-            f"and {len(ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS))} Python consumer(s)."
+            f"and {len(ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS))} Python consumer(s), "
+            f"plus {len(ier.native_adopter_dirs(REPO))} standalone native consumer(s)."
         )
         return 0
 

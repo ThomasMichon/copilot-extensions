@@ -113,6 +113,9 @@ namespace CopilotExtensions {
             }
             return present;
         }
+        public static bool CheckPath(string path, bool directory, bool missing) {
+            return Ordinary(path, directory, missing);
+        }
         private static FileStream OpenPlain(string path) {
             Ordinary(path, false, false);
             var handle = CreateFile(path, 0x80000000, 0x7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
@@ -283,6 +286,32 @@ namespace CopilotExtensions {
             var value = ReadValue(root);
             return value == null ? null : Utf8.GetString(Encode(value));
         }
+        public static string ReconcileLost(string root, Action owned) {
+            owned();
+            var value = ReadValue(root);
+            if (value != null && Text(value, "state") == "running") {
+                value["state"] = "interrupted";
+                value["finished_at"] = Now();
+                value["error"] = "owner_lost_custody";
+                Write(root, value, owned);
+            }
+            return value == null ? null : Utf8.GetString(Encode(value));
+        }
+        public static string RecoverAfterRestart(string root, Action owned) {
+            owned();
+            var value = ReadValue(root);
+            if (!Fenced(value)) return value == null ? null : Utf8.GetString(Encode(value));
+            string current = KernelBootIdentity(), prior = Text(value, "boot_id");
+            if (current == prior || current.Split(':')[0] != prior.Split(':')[0])
+                throw Invalid("recovery requires a different native kernel boot");
+            value["state"] = "interrupted";
+            if (value["finished_at"] == null) value["finished_at"] = Now();
+            if (value["error"] == null) value["error"] = "owner_lost_custody";
+            value["settled_boot_id"] = current;
+            value["settled_at"] = Now();
+            Write(root, value, owned);
+            return Utf8.GetString(Encode(value));
+        }
         private static double Now() {
             return (DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
         }
@@ -358,7 +387,7 @@ namespace CopilotExtensions {
             using (var sha = SHA256.Create())
                 return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", "").ToLowerInvariant();
         }
-        public static string SourceDigest(string plugin) {
+        private static List<string> SourceFiles(string plugin) {
             Absolute(plugin);
             if (Path.GetFileName(plugin) != "update-driver") throw Invalid("requires exact update-driver source");
             string common = Path.GetDirectoryName(plugin);
@@ -386,6 +415,7 @@ namespace CopilotExtensions {
                 }
             }
             foreach (string support in new[] {
+                "installer-engine.ps1",
                 "installer_engine.py", "installer_engine_process.py", "installer_dependency_policy.py",
                 "installer_dependency_config.py", "runtime_launcher.py", "versioned_runtime.py",
                 "versioned_runtime_leases.py", "versioned_runtime_construction.py",
@@ -398,9 +428,14 @@ namespace CopilotExtensions {
                     if (first[index] != second[index]) return first[index].CompareTo(second[index]);
                 return first.Length.CompareTo(second.Length);
             });
+            return files;
+        }
+        public static string SourceDigest(string plugin) {
+            var files = SourceFiles(plugin);
+            string common = Path.GetDirectoryName(plugin);
             using (var inventory = new MemoryStream()) {
                 foreach (string file in files) {
-                    string relative = file.Substring(common.Length + 1).Replace('\\', '/');
+                    string relative = Relative(file, common).Replace('\\', '/');
                     string hash;
                     using (var stream = OpenPlain(file))
                     using (var sha = SHA256.Create())
@@ -410,6 +445,43 @@ namespace CopilotExtensions {
                 }
                 return Sha(inventory.ToArray());
             }
+        }
+        private static string Relative(string path, string common) {
+            return path.Substring(common.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                ? common.Length : common.Length + 1);
+        }
+        public static void CheckExecutionRoot(string root, string plugin) {
+            Ordinary(root, true, true);
+            string common = Path.GetDirectoryName(plugin);
+            foreach (string name in new[] { "update-driver", "agent-procutil", "single-instance-lease" }) {
+                string package = Path.Combine(common, name);
+                if (String.Equals(root, package, StringComparison.OrdinalIgnoreCase)
+                    || root.StartsWith(package + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    throw Invalid("execution root cannot mutate its source closure");
+            }
+        }
+        public static string FreezeSource(string plugin, string destination, string expected, Action owned) {
+            owned();
+            if (SourceDigest(plugin) != expected) throw Invalid("source changed before native freeze");
+            if (Ordinary(destination, true, true)) throw Invalid("native source freeze must be new");
+            string common = Path.GetDirectoryName(plugin);
+            Directory.CreateDirectory(destination);
+            foreach (string source in SourceFiles(plugin)) {
+                owned();
+                string target = Path.Combine(destination, Relative(source, common));
+                Directory.CreateDirectory(Path.GetDirectoryName(target));
+                Ordinary(Path.GetDirectoryName(target), true, false);
+                using (var input = OpenPlain(source))
+                using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None)) {
+                    input.CopyTo(output);
+                    output.Flush(true);
+                }
+            }
+            owned();
+            string frozen = Path.Combine(destination, "update-driver");
+            if (SourceDigest(frozen) != expected || SourceDigest(plugin) != expected)
+                throw Invalid("source changed during native freeze");
+            return frozen;
         }
     }
 }
@@ -421,11 +493,25 @@ function Get-NativeFoundationProgress {
     return [CopilotExtensions.NativeFoundationState]::Read($Root)
 }
 
+function Repair-NativeFoundationAfterRestart {
+    param(
+        [Parameter(Mandatory)]$Custody,
+        [Parameter(Mandatory)][string]$Root
+    )
+    if ($Custody -isnot [CopilotExtensions.NativeOperationLock]) {
+        throw 'Foundation recovery requires actual native operation custody.'
+    }
+    $Custody.AssertOwned()
+    $assertion = $Custody.CreateWitnessAssertion([IO.Path]::Combine($Root, 'execution.lock'))
+    return [CopilotExtensions.NativeFoundationState]::RecoverAfterRestart($Root, $assertion)
+}
+
 function Start-NativeFoundationProgress {
     param(
         [Parameter(Mandatory)]$Custody,
         [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][string]$Plugin
+        [Parameter(Mandatory)][string]$Plugin,
+        [string]$ExpectedSourceHash
     )
     if ($Custody -isnot [CopilotExtensions.NativeOperationLock]) {
         throw 'Foundation progress requires actual native operation custody.'
@@ -433,7 +519,31 @@ function Start-NativeFoundationProgress {
     $Custody.AssertOwned()
     $assertion = $Custody.CreateWitnessAssertion([IO.Path]::Combine($Root, 'execution.lock'))
     $digest = [CopilotExtensions.NativeFoundationState]::SourceDigest($Plugin)
+    [CopilotExtensions.NativeFoundationState]::CheckExecutionRoot($Root, $Plugin)
+    if ($PSBoundParameters.ContainsKey('ExpectedSourceHash') -and $digest -cne $ExpectedSourceHash) {
+        throw 'Foundation source differs from its requested inventory.'
+    }
     return [CopilotExtensions.NativeFoundationState]::BeginCold($Root, $digest, $assertion)
+}
+
+function Start-NativeFoundationProducer {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Plugin,
+        [string]$ExpectedSourceHash
+    )
+    $digest = [CopilotExtensions.NativeFoundationState]::SourceDigest($Plugin)
+    if ($PSBoundParameters.ContainsKey('ExpectedSourceHash') -and $digest -cne $ExpectedSourceHash) {
+        throw 'Foundation source differs from its requested inventory.'
+    }
+    [CopilotExtensions.NativeFoundationState]::CheckExecutionRoot($Root, $Plugin)
+    . (Join-Path $Plugin 'src\update_driver\directory.ps1')
+    $library = [IO.Path]::GetDirectoryName($Plugin)
+    . (Join-Path $library 'agent-procutil\src\agent_procutil\native_daemon.ps1')
+    New-NativeExecutionDirectory -Root $Root
+    $log = Join-Path $Root ('foundation-launch-' + [Guid]::NewGuid().ToString('N') + '.log')
+    return Start-NativeDaemon -Script (Join-Path $Plugin 'scripts\foundation-produce.ps1') `
+        -Arguments @($Root, $digest) -WorkingDirectory $Plugin -LogPath $log
 }
 
 function Complete-NativeFoundationProgress {

@@ -90,6 +90,52 @@ def test_native_progress_roundtrip_matches_python_and_exact_source(native_source
     assert not list(root.glob(".foundation-operation-*.tmp"))
 
 
+def test_native_directory_creation_matches_queue_policy_without_acl_migration(native_source, area):
+    root = area / "state"
+    create_queue_directory(root)
+    run_native(root, native_source, "directory")
+    assert (root / "nested" / "fresh").is_dir()
+    assert (root / "directory-ok").is_file()
+    assert not (root / fs.FILENAME).exists()
+
+
+def test_canonical_prerequisite_helpers_preserve_signed_preference_and_python_floor(native_source, area):
+    root = area / "state"
+    create_queue_directory(root)
+    run_native(root, native_source, "prerequisite-helpers")
+    assert (root / "prerequisite-helpers-ok").is_file()
+    assert not (root / fs.FILENAME).exists()
+
+
+@pytest.mark.parametrize("boot", ["same", "synthetic-old", "other-platform"])
+def test_native_explicit_recovery_retains_interruption_and_checks_actual_boot(native_source, area, boot):
+    root = area / "state"
+    create_queue_directory(root)
+    actual_boot = fs.boot.kernel_boot_identity()
+    prior_boot = {
+        "same": actual_boot,
+        "synthetic-old": "windows:11111111-1111-4111-8111-111111111111",
+        "other-platform": "linux:11111111-1111-4111-8111-111111111111",
+    }[boot]
+    original = fs.FoundationOperation("a" * 32, "b" * 64, prior_boot, "running", 1)
+    path = root / fs.FILENAME
+    path.write_text(json.dumps({"schema": fs.SCHEMA, "version": fs.VERSION, **asdict(original)}))
+    before = path.read_bytes()
+    run_native(root, native_source, "recovery")
+    if boot != "synthetic-old":
+        assert (root / "recovery-refused").exists()
+        assert path.read_bytes() == before
+    else:
+        recovered = fs.read(root)
+        assert recovered.operation_id == original.operation_id
+        assert recovered.source_hash == original.source_hash
+        assert recovered.boot_id == prior_boot and recovered.settled_boot_id == actual_boot
+        assert recovered.state == "interrupted" and recovered.exit_code is None
+        assert recovered.error == "owner_lost_custody" and not recovered.fenced
+    assert not (root / "queue.sqlite3").exists()
+    assert not (root / "bootstrap").exists()
+
+
 def test_native_reader_differential_protocol_corpus(native_source, area):
     root = area / "state"
     create_queue_directory(root)

@@ -31,6 +31,8 @@ _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = ("installer_engine.py", "installer_engine_process.py", "runtime_launcher.py")
 PYTHON_ADOPTERS = ("agent-worktrees",)
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
+STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver",)
+STANDALONE_NATIVE_FILES = ("installer-engine.ps1",)
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:
@@ -42,6 +44,10 @@ def python_adopter_dirs(repo: Path, *, plugins: tuple[str, ...] | None = None) -
         *(repo / "plugins" / name for name in (PYTHON_ADOPTERS if plugins is None else plugins)),
         *standalone_python_adopter_dirs(repo),
     )
+
+
+def native_adopter_dirs(repo: Path) -> tuple[Path, ...]:
+    return tuple(repo / name for name in STANDALONE_NATIVE_ADOPTERS if os.path.lexists(repo / name))
 
 
 INSTALLER_SCRIPTS = ("install.ps1", "install.sh")

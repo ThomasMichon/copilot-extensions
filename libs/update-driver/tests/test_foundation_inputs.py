@@ -120,7 +120,7 @@ def construction(monkeypatch, source):
     return engine, events
 
 
-def execute(builder, source, area, monkeypatch):
+def execute(builder, source, area, monkeypatch, *, admitted_source=None):
     root = area / "state"
     queued = enqueue(
         RequestSpec("foundation-builder-fixture"), root=root,
@@ -134,6 +134,7 @@ def execute(builder, source, area, monkeypatch):
         monkeypatch.setenv("UPDATE_DRIVER_WITNESS", transaction.participant_env()["UPDATE_DRIVER_WITNESS"])
         result.append(builder.construct(
             root=root, source_hash=digest, uv=area / "uv", base_python=Path(sys.executable),
+            admitted_source=admitted_source,
         ))
         fs.finish(root, operation, transaction._lock, exit_code=0)
         return 0
@@ -185,3 +186,25 @@ def test_source_substitution_never_selects_a_candidate(
         execute(builder, source, area, monkeypatch)
     assert not any(isinstance(event, tuple) and event[0] == "selected" for event in events)
     assert not list((area / "state" / "foundation").glob("inputs-*"))
+
+
+@pytest.mark.parametrize("phase", ["freeze", "construct"])
+def test_native_frozen_builder_still_checks_the_original_admitted_source(
+    builder, construction, source, area, monkeypatch, phase,
+):
+    origin_common = area / "origin"
+    shutil.copytree(source.parent, origin_common)
+    origin = origin_common / "update-driver"
+    engine, events = construction
+    name = "freeze_inputs" if phase == "freeze" else "numbered_candidate"
+    original = getattr(engine, name)
+
+    def changed(*args, **kwargs):
+        value = original(*args, **kwargs)
+        (origin / "source.py").write_text("original selected source changed\n")
+        return value
+
+    monkeypatch.setattr(engine, name, changed)
+    with pytest.raises(FoundationInputError, match="source changed|admission changed"):
+        execute(builder, source, area, monkeypatch, admitted_source=origin)
+    assert not any(isinstance(event, tuple) and event[0] == "selected" for event in events)
