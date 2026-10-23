@@ -344,6 +344,45 @@ legacy admission remains accepted by the actual-controller compatibility test.
 Existing release/control ownership retains adoption and live-result acceptance;
 this slice starts no Main writer or manual validation run.
 
+### Periodic execution and cleanup publication - October 23 UTC
+
+The complete seven-day scheduled population, October 16 00:00 through
+October 23 01:30 UTC, has 46 runs across ten families: 25 failed, one cancelled
+and twenty successful. Every run is bound to its immutable cron recipe.
+Creation minus the latest nominal cron slot ranges from 11,165 to 26,385
+seconds, median 17,316.5 seconds. This is a schedule-admission observation,
+not a provider-reported intended time, internal queue measurement or SLA.
+Five complete first-attempt job sets separate ordinary three-second pickup
+from a cleanup job's 401-second pickup and 385-second execution. That run
+spends 360 seconds waiting for required checks; it is not proof of a failed
+test or permission to enlarge the wait.
+
+The full-suite rotation's seven failing Linux groups remain explicit
+escalations on #7377 to the existing #1303/#6142 repair owners, not accepted
+transfers or parent completion. Its successful status-only Windows selector
+does not constitute native execution. Installation-context's cancelled
+90-minute run and crash-diagnostics' cleanup failures retain separate repair
+obligations; their schedule declarations are not coverage.
+
+Cleanup run serialization ends when a run times out, but its generated PR
+can remain open. Complete file pages for #7603 and #7895 show 91 shared
+changefile-deletion paths, with the older PR's entire path set included in
+the newer one. Both are still existing-owner obligations, not permission to
+merge, close or replace either PR. The bounded source guard reads all open
+Dev PR metadata once, with paginated/slurped output and a 45-second provider
+deadline, after actual consumed deletions and the local path fence but before
+commit or push. Matching owner, repository, generated branch and workflow
+origin refuse another publication visibly, including drafts and holds.
+Provider/metadata errors also fail closed. The decision stays in trusted
+workflow YAML rather than mutable Dev code running with the release token.
+
+This addresses `minimal-redundant-invocations` and accountable maintenance
+without changing run cadence, credential custody, consumed-file selection,
+existing required checks, expected-head merge or the six-minute wait. It
+reduces duplicate publications, not scheduled invocations or coverage.
+Dev source delivery does not activate the independently owned Main recipe;
+natural prevention and operating-cost comparison remain open after adoption.
+
 ### Enforcement snapshot
 
 At the October 18 capture, the Dev ruleset checks were `workflow-lockdown-guard` and

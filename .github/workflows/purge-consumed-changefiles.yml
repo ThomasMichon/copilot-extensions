@@ -101,6 +101,81 @@ jobs:
             echo "$staged_paths" >&2
             exit 1
           fi
+          # Run serialization does not cover PRs left open after a check timeout.
+          # Keep this read-only guard in trusted YAML, not the dev checkout.
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          owner = repository.split("/")[0]
+          try:
+              result = subprocess.run(
+                  ["gh", "api", "--paginate", "--slurp",
+                   f"repos/{repository}/pulls?state=open&base=dev&per_page=100"],
+                  check=True, capture_output=True, text=True, timeout=45,
+              )
+              pages = json.loads(result.stdout)
+              if not isinstance(pages, list) or not pages:
+                  raise ValueError("missing pull-request pages")
+              pending = []
+              for page in pages:
+                  if not isinstance(page, list):
+                      raise ValueError("invalid pull-request page")
+                  for pr in page:
+                      if (
+                          not isinstance(pr, dict)
+                          or type(pr["number"]) is not int
+                          or pr["number"] < 1
+                          or pr["state"] != "open"
+                          or pr["base"]["ref"] != "dev"
+                          or pr["base"]["repo"]["full_name"].casefold() != repository.casefold()
+                          or not isinstance(pr["user"]["login"], str)
+                          or not isinstance(pr["head"]["ref"], str)
+                          or not isinstance(pr["body"], (str, type(None)))
+                          or (pr["head"]["repo"] is not None
+                              and not isinstance(pr["head"]["repo"]["full_name"], str))
+                      ):
+                          raise ValueError("invalid open pull-request metadata")
+                      branch = re.fullmatch(
+                          r"chore/purge-changefiles-([0-9]{1,20})", pr["head"]["ref"],
+                      )
+                      head_repo = pr["head"]["repo"]
+                      if (
+                          branch
+                          and head_repo is not None
+                          and head_repo["full_name"].casefold() == repository.casefold()
+                          and pr["user"]["login"].casefold() == owner.casefold()
+                          and (
+                              "<!-- agent-worktrees:source workflow=purge-consumed-changefiles "
+                              f"run={branch[1]} -->"
+                          ) in (pr["body"] or "").splitlines()
+                      ):
+                          pending.append(pr["number"])
+          except (KeyError, TypeError, AttributeError, ValueError,
+                  subprocess.SubprocessError, OSError) as exc:
+              print(
+                  "::error::Cannot verify outstanding cleanup PRs "
+                  f"({type(exc).__name__}); refusing another publication.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          if pending:
+              links = ", ".join(
+                  f"https://github.com/{repository}/pull/{number}"
+                  for number in sorted(set(pending))
+              )
+              print(
+                  "::error::Outstanding generated cleanup PRs: "
+                  f"{links}. The existing cleanup owner must resolve them; "
+                  "refusing another publication without changing their merge gates.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          PY
           git commit -m "chore: purge changefiles consumed by promotions through ${dev_head:0:8}"
           git push origin "HEAD:$cleanup_branch"
           origin="<!-- agent-worktrees:source workflow=purge-consumed-changefiles run=$GITHUB_RUN_ID -->"

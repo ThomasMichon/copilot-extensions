@@ -1083,7 +1083,15 @@ promotion correctness: `tools/promote_release.py`'s own bump computation
 already excludes a consumed changefile regardless of whether it still
 physically exists on `dev`). Don't expect one to follow within minutes of
 every promotion -- routine cleanup, not something that needs review, but
-it can take up to a day to appear.
+it can take up to a day to appear. Before committing or pushing a new cleanup,
+the trusted workflow completely pages open `dev` PRs. An owner-authored,
+same-repository `chore/purge-changefiles-<run>` PR with its matching workflow
+origin blocks another publication, including when it is draft or held. The
+job fails visibly with links for the existing cleanup owner; it does not
+merge, close or replace those PRs. Unavailable or invalid PR metadata also
+fails closed. Run-level serialization alone cannot prevent duplicate cleanup
+PRs after an earlier run times out waiting for checks. This source behavior
+becomes live only when the workflow's existing Main control owner adopts it.
 
 ### Previewing without waiting for a real promotion
 

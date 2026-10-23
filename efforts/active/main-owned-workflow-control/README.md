@@ -336,6 +336,18 @@ authorizes critical main-path acceptance or a bounded administrative change.
   does not migrate the independently preserved Main controller or establish
   a hosted promotion critical-path saving. Qualified control adoption remains
   separate.
+- [x] Land source job admission that omits the owner reminder's existing no-op
+  before runner allocation (#8029). All reminder JavaScript, independent Main
+  admission/identifier jobs and synchronize behavior remain unchanged.
+  Native/Linux focused and actual consumer contracts pass, including recorded
+  Dev selection with preserved legacy Main bytes. Qualified Main adoption and
+  natural no-runner observation remain separate; no live allocation saving is
+  claimed from the Dev merge.
+- [ ] Land the bounded cleanup-publication guard: completely page open Dev
+  metadata before any new commit/push and fail visibly on an outstanding
+  same-repository, owner-authored generated cleanup PR. Preserve its existing
+  owner, merge gates, cadence and wait budget. Qualified Main adoption and
+  natural duplicate-prevention acceptance remain separate.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
