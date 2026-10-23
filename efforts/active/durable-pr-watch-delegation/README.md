@@ -180,6 +180,17 @@ already in flight remains uncertain and must reconcile its original identity.
 Known disconnected work must not start a subsequent lookup/commit, and existing
 transaction custody must remain held until that work actually settles.
 
+Artifact-construction scope selection, verbatim:
+
+> extend-shared-artifacts
+
+This selects the offered extension of the shared artifact path for PR-service
+image inputs rather than a supplied-wheelhouse-only container test. It does
+not authorize runtime rollout, public runtime-dependency fallback or publication
+of third-party bytes. The
+[construction proposal](artifact-construction.md) separates first-party release
+artifacts from governed, target-specific offline image inputs.
+
 ## Plan
 
 ### Governed watch-owner cutover prerequisite
@@ -300,11 +311,11 @@ _Operator-required scope; agent-recommended implementation and validation._
   exact authorized groups and original registration/event identities; this
   source leaf does not close representative production performance or fleet proof
   (source confirmed by #8209).
-- [ ] Bind the standalone replay volume to its exact fleet/Gateway/slot and
+- [x] Bind the standalone replay volume to its exact fleet/Gateway/slot and
   namespace on every transaction, preserving original identities and refusing
   unbound/foreign formats without implicit migration or downgrade. This source
   safeguard does not close image construction, cross-host fencing or update/
-  rollback acceptance.
+  rollback acceptance (source confirmed by #8221).
 - [ ] Define and deliver the [PR-service consumer contract](pr-service-contract.md)
   through normal reviewed source changes, including missing shared seams and
   real serving/consumer proof. Consult related campaigns without a separate
@@ -316,6 +327,10 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [ ] Supply an independently installable PR service and container role for
   fleet-manager's declared placement and lifecycle, without requiring a Copilot
   session, host-side plugin supervisor or parallel fleet controller.
+- [ ] Deliver the [shared artifact construction](artifact-construction.md)
+  proposal through review, standalone first-party artifact support, admitted
+  runtime closure and actual offline image acceptance. Preserve public
+  first-party-only release bundles and canonical dependency authority.
 - [ ] Implement centralized, authorization-scoped observation and durable
   registration with transport-appropriate replay/ACK delivery; do not execute a
   remote subscriber's local callback argv in the service container.
@@ -649,6 +664,10 @@ All items below are **agent-recommended** acceptance checks.
   [the fleet plan](fleet-pr-service.md#validation-plan-agent-recommended),
   including the single-operator ownership boundary, without substituting mocks
   or a healthy container for the requested deployed path.
+- [ ] Artifact construction: resolve the
+  [construction validation](artifact-construction.md#validation) at each named
+  evidence tier; a built wheel, synthetic lock or public CI run cannot certify
+  governed-feed admission or fleet deployment.
 
 ## Proposal
 
@@ -666,6 +685,54 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-23 - Select the shared PR-service artifact construction path
+
+- Operator selected `extend-shared-artifacts` rather than a supplied-wheelhouse
+  container test. The linked construction proposal retains separate first-party
+  publication and governed target-runtime closure boundaries; it does not extend
+  the public build-toolchain exception to runtime dependencies.
+- Source inspection found the shared locked wheel builder and signed candidate
+  pipeline currently select plugins and vendored libraries, not standalone
+  PR/Fleet distributions. Canonical input retention owns install-time source,
+  configuration and resolver admission. A new PR-only resolver or a renamed
+  standalone-as-plugin record would lose those contracts.
+- Propose reviewable standalone artifact support, exact-profile/feed admission
+  and dedicated offline-context/image proof under the existing #7188 scope.
+  Implementation follows review of this proposal. Existing native wheel and
+  installed-host evidence does not count as image construction or governed-feed
+  acceptance. No runtime, credentials, capacity or deployment was changed.
+
+### 2026-10-23 - Merge durable service storage identity and retain lifecycle work
+
+- #8221 merged as `24b7c667dbc23cbe08924f70a4c2bbc3a2c60361` at
+  `2026-10-23T13:14:07Z`, from final head
+  `282c180342bb46f4edd1af843840f7afd2860e2e`. Copilot `5628695933`
+  approved that exact head with no open issues. The sole earlier Low finding
+  requested a description-only graceful-cutover statement; the updated body
+  names the existing rollout owner, unchanged drain/retained-writer boundary
+  and explicit volume migration/refusal policy. Its thread is resolved.
+- Required CI `39957878327` and `39958755938`, attribution/lockdown and
+  exact-head native acceptance `39957995159` passed. Both Linux and Windows
+  run the core/store lifecycle and independent installed process. Local
+  affected acceptance passed 246 and rebuilt standalone acceptance passed 25;
+  fatal lint, diff, install contract and documentation consistency passed.
+  Full review bodies, thread/comment pagination and issue comments were read.
+  Managed self-merge used only the authorized additional CODEOWNER-vote
+  exception, not a failed-check or feedback bypass.
+- Re-read the full parent goal, Coordination, Plan and Validation after merge.
+  Close only this storage-binding source leaf. The consumer-contract, image,
+  service update/migration/rollback, cross-host fencing, real provider,
+  authorized installed/fleet proof and every directly retained client,
+  presentation, reviewer, idle-record and nonevent clause remain open.
+  #7188 remains open; no source merge authorizes rollout or finalization.
+- Preserve the reviewed head; managed `pr-complete` proved squash equivalence
+  and advanced the continuing worktree past only its two merged commits.
+  Next inspect the existing standalone artifact/container acceptance tooling
+  for real image construction and isolated persistent-volume proof. Reuse
+  existing artifact/role/lifecycle owners; do not add a second installer or
+  controller, infer activation from a role projection, or reopen the accepted
+  reader residual.
 
 ### 2026-10-23 - Bind the retained service volume before broader container lifecycle
 
