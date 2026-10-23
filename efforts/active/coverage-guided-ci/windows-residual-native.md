@@ -223,6 +223,34 @@ reconciliation blocks admission rather than expanding a batch.
 
 ## Continuation hunk ledger
 
+### Subsequent admission: W4-ATTR-ENCODING
+
+This candidate admits only `f4aafb2aa54f`, `978cd04361f6`, `ba6c4547c0e7`
+and `4e163bc20889`, under the original attribution README, policy script
+and policy-test paths. The four keys retain their original semantic contract:
+the normally invoked PowerShell entrypoint temporarily selects UTF-8 for native
+Git output capture and restores the caller's output encoding in `finally`.
+Dot-sourced helper behavior and all attribution-policy decisions are unchanged.
+There is no session-writer, Bash-fixture or command-binding change.
+
+The existing Unicode-payload regression remains independently collected for
+both available PowerShell implementations. Its stronger driver sets an ASCII
+caller encoding before invoking the real script against an accented/emoji
+repository path, then proves the encoding was restored. It also checks the
+malformed-payload early-exit path preserves `{}` and its diagnostic while
+restoring that same caller encoding. Both implementation cases failed against
+the original script's empty policy result and pass with UTF-8 capture.
+
+The complete policy module passed 99 tests with three unchanged POSIX-specific
+skips, native Windows, exactly two workers, 147.81 seconds including preparation
+and cleanup. The run retained the 30-second item limit, 240-second diagnostic
+limit and all default process/memory/temp bounds. Touched-Python lint and
+whitespace checks passed. A new changefile names only `ai-attribution`.
+The real local Git/PowerShell consumer is exercised directly; no install,
+bootstrap or runtime change requires a fresh-machine or separate external
+venue here. This is not full-plugin or parent timing qualification, and review
+plus required CI still gate merge.
+
 ### Subsequent admission: W4-PANE
 
 This candidate carries only the W4-PANE source keys `818365a959b9`,

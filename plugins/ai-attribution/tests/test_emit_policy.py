@@ -91,10 +91,11 @@ def _run(
     payload: str | None = None,
     payload_cwd: Path | None = None,
     process_cwd: Path | None = None,
+    powershell_executable: str | None = None,
     **extra: str,
 ) -> subprocess.CompletedProcess[str]:
     if hook.suffix == ".ps1":
-        powershell = _powershell_command()
+        powershell = powershell_executable or _powershell_command()
         assert powershell
         command = [powershell, "-NoProfile", "-File", str(hook), *args]
     else:
@@ -252,13 +253,47 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(
         assert "process-owner" not in context
 
 
-def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "powershell_executable",
+    list(dict.fromkeys([_powershell_command(), shutil.which("powershell.exe")]))
+    if os.name == "nt" else [None],
+)
+def test_payload_cwd_decodes_json_unicode_escapes(
+    tmp_path: Path, powershell_executable: str | None,
+) -> None:
     repo = _git_repo(tmp_path / "r\u00e9po-\N{GRINNING FACE}")
     hooks = _parity_hooks()
     for hook in hooks:
-        assert _context(_run(hook, repo, tmp_path / "home")).startswith(
+        entrypoint = hook
+        if hook.suffix == ".ps1":
+            entrypoint = tmp_path / "encoding-driver.ps1"
+            quoted_hook = "'" + str(hook).replace("'", "''") + "'"
+            entrypoint.write_text(
+                "[Console]::OutputEncoding = [Text.Encoding]::ASCII\n"
+                "$OriginalCodePage = [Console]::OutputEncoding.CodePage\n"
+                f"& {quoted_hook} @args\n"
+                "if ([Console]::OutputEncoding.CodePage -ne $OriginalCodePage) {\n"
+                "    throw 'Caller output encoding was not restored.'\n"
+                "}\n"
+                "[Console]::Error.WriteLine('encoding-restored')\n",
+                encoding="utf-8",
+            )
+        result = _run(
+            entrypoint, repo, tmp_path / "home",
+            powershell_executable=powershell_executable,
+        )
+        assert _context(result).startswith(
             f"[owner: ai-attribution@{PLUGIN_VERSION}]"
         )
+        if hook.suffix == ".ps1":
+            assert result.stderr.strip() == "encoding-restored"
+            malformed = _run(
+                entrypoint, repo, tmp_path / "home", payload="{",
+                powershell_executable=powershell_executable,
+            )
+            assert malformed.stdout == "{}"
+            assert "missing or malformed sessionStart payload" in malformed.stderr
+            assert malformed.stderr.splitlines().count("encoding-restored") == 1
 
 
 @pytest.mark.parametrize(
