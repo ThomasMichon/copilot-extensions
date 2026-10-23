@@ -3,6 +3,7 @@ import json
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 import pytest
 
@@ -149,3 +150,31 @@ async def test_darwin_custody_unavailable_refuses_before_owner_spawn(tmp_path, m
     result = await preparation.prepare_for_launch(tmp_path)
     assert result.status == "unavailable"
     assert "custody unavailable" in result.detail
+
+
+@pytest.mark.asyncio
+async def test_already_reaped_owner_without_identity_refuses_unbounded_pipe_wait(monkeypatch):
+    import agent_procutil
+
+    async def inherited_pipes():
+        await asyncio.Event().wait()
+
+    close = Mock()
+    process = SimpleNamespace(
+        pid=987654, returncode=0, _transport=SimpleNamespace(close=close),
+        communicate=AsyncMock(side_effect=inherited_pipes), wait=AsyncMock(return_value=0),
+    )
+    monkeypatch.setattr(legacy, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(agent_procutil, "spawn_in_kill_on_close_job", AsyncMock(return_value=(process, None)))
+    monkeypatch.setattr(legacy, "_process_start_time", lambda pid: None)
+    cleanup = AsyncMock()
+    monkeypatch.setattr(legacy, "_kill_tree", cleanup)
+    result = await asyncio.wait_for(
+        legacy._run_bounded_result(["owner"], timeout=None, retire_group=True), timeout=1,
+    )
+    assert result.status == "failed"
+    assert "identity unavailable" in result.detail
+    assert "cleanup is unconfirmed" in result.detail
+    process.communicate.assert_not_awaited()
+    cleanup.assert_not_awaited()
+    close.assert_called_once()

@@ -214,6 +214,10 @@ The finite command scope observes the owner's public process return code
 independently of pipe EOF, then retires descendants; inherited stdout/stderr
 handles cannot postpone cleanup indefinitely. Its observer is joined or
 cancelled before the command returns and is not a resident poller.
+If POSIX birth custody is already unavailable when spawn returns, preparation
+fails explicitly before communication starts. It closes only its owned local
+capture transport and bounds the direct-child wait; it neither signals an
+unverified group nor claims that descendant cleanup was verified.
 macOS group identity uses the public native birth-time reader from psutil,
 already supplied by Bridge's required `agent-procutil[metrics]` dependency.
 Readiness of that identity backend is checked before enabling the owner path;

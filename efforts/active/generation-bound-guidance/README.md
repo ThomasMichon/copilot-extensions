@@ -204,6 +204,11 @@ coordinate the smallest additive owner API before changing another slice.
   pipes. The owned observer now detects process exit independently of EOF and
   is joined/cancelled within the finite command scope. Five focused controls
   passed; native qualification limitations remain in the validation report.
+- Addressed the early-exit/missing-birth-evidence case by explicit preparation
+  refusal before communication, not a weaker group signal or a broad startup
+  timeout. The regression failed before the correction; the focused selection
+  passed five cases with three platform skips. Cleanup uncertainty remains
+  visible rather than being called a successful retirement.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

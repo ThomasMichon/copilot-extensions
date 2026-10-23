@@ -204,3 +204,11 @@ finishes. Five focused cleanup/cancellation controls passed. Two asyncio
 transport-finalizer warnings were reported by the existing cancellation fixture;
 the process-retirement assertions passed, but these warnings are not represented
 as a warning-free native qualification.
+
+The already-reaped POSIX owner case has a separate deterministic regression:
+missing birth evidence previously left communication pending indefinitely.
+Preparation now fails before entering that wait, closes its local capture
+transport, and reports descendant cleanup as unconfirmed rather than weakening
+identity checks or claiming retirement. The focused missing-custody, normal
+owner-retirement and held-pipe selection passed **5 cases**, with **3 explicit
+platform skips**.

@@ -390,6 +390,17 @@ async def _run_bounded_result(
         with contextlib.suppress(Exception):
             await asyncio.wait_for(proc.wait(), timeout=_CLEANUP_GRACE_S)
         return _RunResult("failed", detail="mandatory Windows Job containment unavailable")
+    if retire_group and job_handle is None and expected_group_identity is None:
+        # asyncio exposes no public close for captured subprocess pipes.
+        # Close only this owned transport; never signal an unverified group.
+        with contextlib.suppress(Exception):
+            proc._transport.close()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(proc.wait(), timeout=_CLEANUP_GRACE_S)
+        return _RunResult(
+            "failed",
+            detail="process birth identity unavailable; preparation stopped; descendant cleanup is unconfirmed",
+        )
     exit_watch: asyncio.Task[None] | None = None
 
     async def retire_after_owner_exit() -> None:

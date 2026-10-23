@@ -392,9 +392,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/local_cache_refresh.py",
-          "sha256": "cea182e2b2e64cbed93b93fb0eb595d28e978c9a6d7b90c63da3b6dbeed120bb",
+          "sha256": "856e680d0d88d1a95c86d1d7426b1bf708c6bf3492724d5499fe9584097490d2",
           "semantic": false,
-          "non_semantic_reason": "Implementation-only static preparation and process custody: internal results carry generation/reuse and count availability; owned-group retirement observes direct-owner exit independently of inherited output-pipe EOF. Darwin uses the already-required psutil native birth reader, retaining mismatch/access refusal. HTTP fields, capability floors, wire fixtures and historical provenance are unchanged."
+          "non_semantic_reason": "Implementation-only static preparation and process custody: internal results carry generation/reuse and count availability; owner-exit retirement is independent of pipe EOF. Missing POSIX birth custody explicitly fails before communication without signalling an unverified group. Darwin uses the required psutil native reader. HTTP fields, capability floors, wire fixtures and historical provenance are unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
