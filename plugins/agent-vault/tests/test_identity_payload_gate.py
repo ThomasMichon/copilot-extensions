@@ -209,6 +209,7 @@ def test_actual_payload_cache_only_reader_preserves_two_database_scopes(tmp_path
 @pytest.mark.parametrize("command", [
     ("identity-key", "setup"),
     ("ssh-key", "prepare", "--entry", "SSH/node-a"),
+    ("ssh-key", "install", "--entry", "SSH/node-a", "--directory", "unused"),
 ])
 def test_actual_first_touch_require_running_never_provisions(tmp_path, mode, command):
     home, payload, runtime, _installation_id, context = prepare_payload(tmp_path, mode)
