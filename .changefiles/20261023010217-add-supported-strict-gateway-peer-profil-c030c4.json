@@ -1,5 +1,5 @@
 {
-  "comment": "Add supported strict Gateway peer profiles with durable local registry and host-pin snapshots.",
+  "comment": "Add strict Gateway profiles and optional Fleet policy/public-directory projection with retained monotonic revisions and repeat-safe inputs.",
   "changes": [
     {
       "plugin": "agent-ssh",

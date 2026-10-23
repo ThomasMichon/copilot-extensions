@@ -205,6 +205,12 @@ original correlation. It does not supply a production SSH/policy/discovery
 adapter, choose candidates, change forwarding grants or select a reconnect
 loop. Default commands do not activate it.
 
+The stdlib-only [Gateway SSH provider](docs/gateway-ssh-provider.md) joins the
+existing directional policy with an owner-selected admitted public directory.
+Its optional `agent-ssh[fleet]` CLI consumer uses the existing normalized profile
+writer, with explicit local application and monotonic directory revisions.
+It does not authenticate enrollment data, allocate listeners or claim live SSH.
+
 ## Thin client artifacts and local diagnostics
 
 `fleet-manager` builds as a dependency-free runtime wheel. Its wheel carries the
