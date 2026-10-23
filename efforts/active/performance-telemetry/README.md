@@ -146,7 +146,7 @@ sample/drop/missing evidence and the later structured-signal/hook work.
 - [ ] Verify release and authorized installed-serving rollout separately (#7935).
 
 ### Phase 5 — Manager source observation
-- [ ] Review and merge the [bounded consumer plan](manager-observation.md).
+- [x] Review and merge the [bounded consumer plan](manager-observation.md).
 - [ ] Admit source observations once and reuse the existing reporter queue,
   writer and lifecycle without editing reserved Manager/entry files.
 - [ ] Exercise actual source Picker refresh/input observations in owned native
@@ -267,6 +267,18 @@ blocks that acceptance item, not pure implementation.
 - Preserved the separately retained #8036 whole-dispatch qualification and
   existing source claims. No reserved call-site edit or installed/service change
   has been made. Plan review precedes implementation.
+
+### 2026-10-23 — Manager observation source under validation
+
+- #8096 merged after approving review and successful required checks.
+- Implemented once-admitted source observations through the existing reporter,
+  source-native process driver and honest report/readback helpers. No reserved
+  Manager/entry file or collector/service configuration was changed.
+- An initial actual source Picker disabled/enabled pair completed and all five
+  enabled source observations reached the authorized local receiver. This is
+  headless fixture evidence, not headed/installed budget qualification.
+- Preserve the complete #8036 intake from #8086, including every native hook
+  host-contract gate. It is not absorbed or qualified by this Manager slice.
 
 ### 2026-10-22 - Complete retained acceptance from #8036
 

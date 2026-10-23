@@ -13,6 +13,7 @@ STAGES = frozenset({
     "executable", "runtime_entry", "first_frame", "current_rows", "actions",
     "new", "resume", "preparation", "spawn", "host_ready", "first_prompt",
     "hook_dispatch", "hook", "ipc", "fallback", "cleanup",
+    "source_entry", "first_refresh", "input_ack", "fixture_rows", "ui_stop",
 })
 OUTCOMES = frozenset({"ok", "error", "cancelled", "unavailable"})
 _TAG = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}\Z")

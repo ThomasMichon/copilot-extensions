@@ -1,0 +1,17 @@
+{
+  "comment": "Adopt optional source Manager observations through its existing frame-health writer with native reports",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

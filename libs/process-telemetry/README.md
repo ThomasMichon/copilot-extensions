@@ -6,6 +6,12 @@ durable update, recovery, delivery, approval or process-membership facts.
 
 ## Existing consumers
 
+Manager's explicit [source observation](../../worktree-manager/docs/source-observation.md)
+consumer also uses this schema/exporter, through its **existing frame-health
+writer**, not a second buffer or exporter worker. Its `source_entry`,
+`first_refresh`, `input_ack`, `fixture_rows` and `ui_stop` stages intentionally
+do not claim headed paint, installed startup or production row authority.
+
 Both plugins retain `set_telemetry_sink`, `clear_telemetry_sink`, `has_sink`,
 `emit`, existing factory/config discovery and JSONL spool functions. Their
 lifecycle reducers remain plugin-owned. `SinkSlot` extracts their per-consumer

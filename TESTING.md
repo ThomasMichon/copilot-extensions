@@ -28,6 +28,14 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional diagnostic telemetry
 
+Manager's source-native consumer lane is documented in
+[`worktree-manager/docs/source-observation.md`](worktree-manager/docs/source-observation.md).
+Select its `test_performance_observation.py`, `test_performance_native.py` and
+production Picker `test_launch_trace.py` with the existing bounded runner.
+The native process/window controls are explicit integration work, not additions
+to the required pure-unit packet. Its report distinguishes real source refresh/
+input callbacks from unavailable headed paint and production row authority.
+
 The shared `libs/process-telemetry` contract is exercised by its real Bridge
 consumer. Run the bounded runner for `agent-bridge` with
 `--test-file tests/test_process_telemetry.py --test-file tests/test_telemetry.py`

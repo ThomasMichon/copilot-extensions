@@ -1,0 +1,347 @@
+"""Explicit source-native headless Manager measurement; no installed enrollment."""
+
+from __future__ import annotations
+
+import time
+
+ENTRY_NS = time.perf_counter_ns()
+ENTRY_WALL_NS = time.time_ns()
+ENTRY_CPU_NS = time.process_time_ns()
+
+import argparse
+import asyncio
+import importlib.metadata
+import json
+import os
+import platform
+from pathlib import Path
+import subprocess
+import sys
+import tomllib
+import types
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def captured_child(argv, *, cwd, env, timeout):
+    """Reuse Manager/process-library custody, including timeout descendant cleanup."""
+    if sys.platform != "win32":
+        from worktree_manager.engine_posix_process import run as run_owned
+        result = run_owned(argv, cwd=cwd, env=env, timeout=timeout, text=True,
+                           stderr=subprocess.DEVNULL)
+        return subprocess.CompletedProcess(argv, result.returncode, result.stdout, "")
+    from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+    process, job = spawn_sync_in_kill_on_close_job(
+        argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, require_job=True, allow_breakaway=False,
+        **no_window_kwargs(),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    finally:
+        if job is not None:
+            job.close()
+        process.communicate(timeout=5)
+
+
+def child(config: dict) -> dict:
+    """Exercise real source Picker callbacks, with declared fixture substitutions."""
+    attempted = []
+
+    def block_children(event, args):
+        if event in ("subprocess.Popen", "os.system", "os.posix_spawn"):
+            attempted.append(event)
+            raise RuntimeError("source probe blocks unrelated child execution")
+
+    sys.addaudithook(block_children)
+    import urllib.request
+    def block_network(*args, **kwargs):
+        raise RuntimeError("source probe blocks unrelated network access")
+    urllib.request.urlopen = block_network
+    import websocket
+    websocket.create_connection = block_network
+    from worktree_manager.agent_worktrees_runtime import ensure_engine_runtime
+    ensure_engine_runtime()
+    from worktree_manager.performance_observation import SourceObservation
+    from worktree_manager.production_picker.picker_tui import derive, engine, frame_health
+    substitutions = [
+        "advisory update/orphan polls disabled", "isolated fixture source",
+        "refresh timing wrapper; original callback executes",
+    ]
+    for name in ("_poll_update_state", "_poll_manager_update_state", "_poll_orphan_state"):
+        setattr(engine.PickerScreen, name, lambda self, *a, **kw: None)
+    points = {"source_entry": 0}
+    original_refresh = engine.PickerScreen._after_first_refresh
+
+    def refresh(screen):
+        points.setdefault("first_refresh", time.perf_counter_ns() - ENTRY_NS)
+        return original_refresh(screen)
+
+    engine.PickerScreen._after_first_refresh = refresh
+    local = ("sample", "Win" if sys.platform == "win32" else "Linux")
+    rows = [derive.norm({
+        "id": f"sample-{index}", "title": f"Sample {index}", "status": "active",
+        "started_at": "2026-01-01T00:00:00", "state": "wip", "turn_count": 0,
+    }, *local) for index in range(3)]
+    source = types.SimpleNamespace(
+        LOCAL=local, LOCAL_LABEL="sample",
+        machines=lambda: [("sample", *local, True)],
+        bucket=derive.bucket, for_machine=derive.for_machine, load=lambda: rows,
+    )
+    identity = {
+        **config["identity"],
+        "serving_version": importlib.metadata.version("copilot-extensions-worktree-manager"),
+    }
+    observation = SourceObservation(
+        identity, endpoint=config["endpoint"], origin_ns=ENTRY_NS, wall_ns=ENTRY_WALL_NS,
+        source_clean=config["source_clean"],
+    ) if config["mode"] == "enabled" else None
+    reporter = frame_health.FrameHealthReporter(
+        Path(config["events"]), report_gaps=False, observation=observation,
+    ) if observation is not None else None
+    if reporter is not None:
+        os.environ["AGENT_WORKTREES_LAUNCH_TRACE"] = config["events"]
+    result = {
+        "mode": config["mode"], "identity": identity, "source_clean": config["source_clean"],
+        "identity_method": "source Git/manifest, isolated distribution metadata, selected module-root check",
+        "points_ns": points, "substitutions": substitutions,
+        "entry_boundary": "script entry before source Picker imports",
+        "refresh_boundary": "real source Textual callback, not headed paint",
+        "input_boundary": "actual Key dispatch acknowledgement, not paint",
+        "roster_count": len(rows), "outcome": "ok",
+        "cache_mode": "fresh-isolated-state; os-cache-uncontrolled",
+        "python_version": platform.python_version(), "platform": sys.platform,
+        "serving_source_matches": Path(engine.__file__).resolve().is_relative_to(
+            ROOT / "worktree-manager/src"
+        ),
+    }
+    if not result["serving_source_matches"]:
+        result.update(outcome="error", error_code="source_module_mismatch")
+        return result
+
+    async def exercise():
+        app = engine.PickerApp(source, live=False, mock_mode=True)
+        async with app.run_test(size=(100, 35)) as pilot:
+            screen = app.query_one(engine.PickerScreen)
+            for _ in range(100):
+                if (
+                    "first_refresh" in points and len(screen.data) == len(rows)
+                    and screen._setup_applied_epoch == screen._setup_epoch != 0
+                ):
+                    break
+                await pilot.pause(.02)
+            if "first_refresh" not in points or len(screen.data) != len(rows):
+                raise RuntimeError("fixture roster was not observed")
+            app.screen._compositor.render_full_update()
+            if screen.query_one("#nf-body-data").option_count < len(rows) * 2:
+                raise RuntimeError("fixture viewport was not observed")
+            points["fixture_rows"] = time.perf_counter_ns() - ENTRY_NS
+            if reporter is not None:
+                reporter.observe("fixture_rows", roster_count=len(screen.data))
+            before = app._last_input_activity
+            started = time.perf_counter_ns()
+            await pilot.press("tab")
+            if app._last_input_activity <= before:
+                await pilot.pause(0)
+            if app._last_input_activity <= before:
+                raise RuntimeError("input was not acknowledged")
+            points["input_ack"] = time.perf_counter_ns() - started
+            if reporter is not None:
+                reporter.observe("input_ack", duration_ns=points["input_ack"])
+
+    from contextlib import nullcontext
+    drain_started = None
+    try:
+        with frame_health.source_observation_scope(reporter) if reporter is not None else nullcontext():
+            if reporter is not None:
+                reporter.observe("source_entry", observed_ns=ENTRY_NS, duration_ns=0)
+            asyncio.run(exercise())
+            drain_started = time.perf_counter_ns()
+    except Exception as exc:
+        result.update(outcome="error", error_code=type(exc).__name__)
+    result["blocked_child_attempts"] = len(attempted)
+    result["source_process_cpu_ns"] = max(0, time.process_time_ns() - ENTRY_CPU_NS)
+    result["cpu_boundary"] = "process_time_ns from script entry to report; excludes descendants"
+    result["owner_drain_ns"] = time.perf_counter_ns() - drain_started if drain_started is not None else None
+    result["telemetry"] = reporter.observation_summary() if reporter is not None else None
+    return result
+
+
+def child_environment(home: Path) -> dict:
+    """Selected child-only isolated roots; never alter user-global configuration."""
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_", "COPILOT_", "WORKTREE_", "OTEL_", "GITHUB_", "GH_"))
+    }
+    env.update({
+        "HOME": str(home), "USERPROFILE": str(home), "APPDATA": str(home / "appdata"),
+        "LOCALAPPDATA": str(home / "local"), "XDG_CONFIG_HOME": str(home / "config"),
+        "XDG_DATA_HOME": str(home / "data"), "XDG_CACHE_HOME": str(home / "cache"),
+        "XDG_RUNTIME_DIR": str(home / "run"), "COPILOT_HOME": str(home / "copilot"),
+        "TEMP": str(home), "TMP": str(home), "WORKTREE_NO_UPDATE": "1",
+        "WORKTREE_MANAGER_ROOT": str(home / "manager"),
+        "AGENT_WORKTREES_STATUS_MONITOR": "0",
+        "AGENT_WORKTREES_PLUGINS_DIR": str(home / "empty-plugins"),
+        "AGENT_WORKTREES_PIVOTS_DIR": str(home / "empty-pivots"),
+        "WORKTREE_MANAGER_AGENT_WORKTREES_SRC": str(ROOT / "plugins/agent-worktrees/src"),
+        "PYTHONPATH": os.pathsep.join(map(str, (
+            ROOT / "worktree-manager/src", ROOT / "libs/process-telemetry/src",
+        ))),
+    })
+    return env
+
+
+def run(args) -> dict:
+    from agent_procutil import no_window_kwargs
+    from worktree_manager.performance_report import child_result, source_report, trace_readback
+    from process_telemetry.otlp import validate_endpoint, validate_record
+
+    if args.endpoint is not None:
+        validate_endpoint(args.endpoint)
+    destination = Path(args.run_dir).resolve()
+    destination.mkdir(parents=True, exist_ok=False)
+    revision = subprocess.check_output(
+        ["git", "-c", "core.fsmonitor=false", "-C", str(ROOT), "rev-parse", "HEAD"],
+        text=True, timeout=15, **no_window_kwargs(),
+    ).strip()
+    clean = not subprocess.check_output(
+        ["git", "-c", "core.fsmonitor=false", "-C", str(ROOT),
+         "status", "--porcelain", "--untracked-files=normal"],
+        text=True, timeout=15, **no_window_kwargs(),
+    ).strip()
+    version = tomllib.loads((ROOT / "worktree-manager/pyproject.toml").read_text(encoding="utf-8"))[
+        "project"]["version"]
+    runs = []
+    identities = set()
+    expected_labels = {}
+    for index in range(args.samples):
+        order = ("disabled", "enabled") if index % 2 == 0 else ("enabled", "disabled")
+        for mode in order:
+            directory = destination / f"{index}-{mode}"
+            directory.mkdir()
+            events = directory / "observations.jsonl"
+            config = {
+                "mode": mode, "events": str(events), "endpoint": args.endpoint,
+                "source_clean": clean,
+                "identity": {"source_revision": revision, "payload_version": None, "selected_version": version},
+            }
+            config_path = directory / "input.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            started = time.perf_counter_ns()
+            try:
+                process = captured_child(
+                    [sys.executable, "-s", str(Path(__file__).resolve()), "--child", str(config_path)],
+                    cwd=directory, env=child_environment(directory), timeout=args.timeout,
+                )
+                result = child_result(process.stdout, mode=mode, returncode=process.returncode)
+                (directory / "stderr.txt").write_text(process.stderr, encoding="utf-8")
+            except subprocess.TimeoutExpired:
+                result = {"mode": mode, "outcome": "error", "error_code": "process_timeout", "exit_code": None}
+            except OSError as exc:
+                result = {"mode": mode, "outcome": "error", "error_code": type(exc).__name__, "exit_code": None}
+            result["process_duration_ns"] = time.perf_counter_ns() - started
+            result["process_clock_domain"] = "parent-perf-counter"
+            result["sample_index"] = index
+            result["pair_order"] = list(order)
+            result["owned_root_processes"] = 1
+            result["owned_control_processes"] = 0 if sys.platform == "win32" else 1
+            sender_count = 0
+            sender_ids = set()
+            sender_stages = {}
+            try:
+                lines = events.read_text(encoding="utf-8").splitlines() if events.exists() else []
+            except (OSError, UnicodeError):
+                lines = []
+                result["event_file_invalid"] = True
+            for line in lines:
+                try:
+                    record = validate_record(json.loads(line)["span"])
+                    key = (record["trace_id"], record["span_id"])
+                    if (
+                        record["trace_id"] != (result.get("telemetry") or {}).get("trace_id")
+                        or key in sender_ids
+                    ):
+                        raise ValueError("unexpected sender identity")
+                    sender_ids.add(key)
+                    sender_stages[record["stage"]] = sender_stages.get(record["stage"], 0) + 1
+                    expected_labels[key] = {
+                        f"ce.{name}": record[name]
+                        for name in ("component", "stage", "schema", "outcome")
+                    }
+                    sender_count += 1
+                except (ValueError, KeyError, TypeError):
+                    result["event_file_invalid"] = True
+            identities.update(sender_ids)
+            result["sender_records"] = sender_count
+            result["sender_stage_counts"] = sender_stages
+            if mode == "enabled":
+                result["sender_missing_stages"] = [
+                    stage for stage in ("source_entry", "first_refresh", "input_ack", "fixture_rows", "ui_stop")
+                    if not sender_stages.get(stage)
+                ]
+            if sender_count != ((result.get("telemetry") or {}).get("counts") or {}).get("written", 0):
+                result["event_file_invalid"] = True
+            runs.append(result)
+    report = source_report(runs, expected_per_mode=args.samples)
+    report["sender_spans"] = [{"trace_id": trace, "span_id": span} for trace, span in sorted(identities)]
+    report["readback"] = {"complete": False, "reason": "not-requested"}
+    if args.receiver_jsonl:
+        deadline = time.monotonic() + args.readback_timeout
+        started = time.perf_counter_ns()
+        while True:
+            try:
+                with Path(args.receiver_jsonl).open(encoding="utf-8") as stream:
+                    report["readback"] = trace_readback(stream, identities, expected_labels=expected_labels)
+            except OSError as exc:
+                report["readback"] = {"complete": False, "reason": type(exc).__name__}
+            if report["readback"]["complete"] or time.monotonic() >= deadline:
+                break
+            time.sleep(.1)
+        report["readback"]["wait_ns"] = time.perf_counter_ns() - started
+        report["readback"]["sender_complete"] = report["modes"]["enabled"]["telemetry_incomplete"] == 0
+        report["readback"]["complete"] = report["readback"]["complete"] and report["readback"]["sender_complete"]
+    (destination / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--child")
+    parser.add_argument("--run-dir")
+    parser.add_argument("--samples", type=int, default=3)
+    parser.add_argument("--timeout", type=float, default=30)
+    parser.add_argument("--endpoint")
+    parser.add_argument("--receiver-jsonl")
+    parser.add_argument("--readback-timeout", type=float, default=5)
+    args = parser.parse_args()
+    if args.child:
+        result = child(json.loads(Path(args.child).read_text(encoding="utf-8")))
+        print("MANAGER_OBSERVATION " + json.dumps(result))
+        return 0 if result["outcome"] == "ok" else 1
+    if (
+        not args.run_dir or not 1 <= args.samples <= 20 or not 1 <= args.timeout <= 60
+        or not 0 <= args.readback_timeout <= 30
+    ):
+        parser.error("a fresh --run-dir, 1..20 samples and 1..60 second timeout are required")
+    report = run(args)
+    print(json.dumps({
+        "schema": report["schema"],
+        "modes": {mode: {key: value[key] for key in (
+            "expected", "completed", "failed", "drops", "telemetry_incomplete",
+        )}
+                  for mode, value in report["modes"].items()},
+        "readback": report["readback"], "qualification": report["qualification"],
+    }))
+    valid = all(
+        mode["failed"] == 0 and mode["telemetry_incomplete"] == 0
+        and all(point["complete"] for point in mode["points"].values())
+        for mode in report["modes"].values()
+    )
+    if args.receiver_jsonl:
+        valid = valid and report["readback"]["complete"]
+    return 0 if valid else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

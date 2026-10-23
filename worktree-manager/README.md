@@ -1090,6 +1090,11 @@ work completed.
 
 ## Production Picker transplant
 
+Explicit source-only performance observations reuse the Picker's existing
+frame-health writer. See [source observation](docs/source-observation.md) for
+the native headless fixture, optional local export, complete reports and the
+boundaries that are **not** headed/installed qualification.
+
 The established production Picker source now lives under
 [`src/worktree_manager/production_picker/`](src/worktree_manager/production_picker/)
 as a wholesale copy of the still-shipping agent-worktrees implementation.

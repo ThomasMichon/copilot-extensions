@@ -6,12 +6,40 @@ import os
 import queue
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 _STOP = object()
 _DEFAULT_THRESHOLD_SECONDS = 0.5
 _QUEUE_SIZE = 128
+_source_reporter = None
+_last_source_reporter = None
+_scope_lock = threading.Lock()
+
+
+@contextmanager
+def source_observation_scope(reporter):
+    """Explicit source-process admission, before UI callbacks; never auto-enroll."""
+    global _source_reporter, _last_source_reporter
+    with _scope_lock:
+        previous_thread = getattr(_last_source_reporter, "_thread", None)
+        if _source_reporter is not None or (previous_thread is not None and previous_thread.is_alive()):
+            raise RuntimeError("a source observation reporter still owns delivery")
+        if reporter.observation is None:
+            raise ValueError("source observation configuration is required")
+        if reporter._source_started or reporter._source_closed:
+            raise RuntimeError("source observation reporters are single-use")
+        _source_reporter = _last_source_reporter = reporter
+    try:
+        yield reporter
+    finally:
+        try:
+            reporter.close(wait=True)
+        finally:
+            with _scope_lock:
+                if _source_reporter is reporter:
+                    _source_reporter = None
 
 
 def _timestamp() -> str:
@@ -34,6 +62,10 @@ def _launch_trace_path() -> Path | None:
 
 def append_launch_event(event: str, **fields) -> None:
     """Append one pre-render launch checkpoint. Best-effort and fail-silent."""
+    reporter = _source_reporter or _last_source_reporter
+    if reporter is not None:
+        reporter._enqueue({"event": event, **fields})
+        return
     path = _launch_trace_path()
     if path is None:
         return
@@ -62,20 +94,32 @@ class FrameHealthReporter:
         report_gaps: bool = True,
         launch_id: str = "",
         binstub_started: str = "",
+        observation=None,
     ) -> None:
         self.path = path
         self.threshold_seconds = max(0.1, float(threshold_seconds))
         self.report_gaps = report_gaps
         self.launch_id = launch_id
         self.binstub_started = binstub_started
+        self._observation = observation
         self._queue: queue.Queue[dict | object] = queue.Queue(maxsize=_QUEUE_SIZE)
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._last_tick: float | None = None
         self._dropped = 0
+        self._source_started = False
+        self._source_writer_started = False
+        self._source_closed = False
+        self._lifecycle_lock = threading.RLock()
+
+    observation = property(lambda self: self._observation)
 
     @classmethod
     def from_env(cls) -> FrameHealthReporter | None:
+        if _source_reporter is not None:
+            return _source_reporter
+        if _last_source_reporter is not None:
+            return None  # Late source callbacks must not reactivate legacy file writes.
         health_raw = os.environ.get(
             "AGENT_WORKTREES_PICKER_FRAME_HEALTH", ""
         ).strip()
@@ -119,22 +163,43 @@ class FrameHealthReporter:
         )
 
     def start(self) -> None:
+        with self._lifecycle_lock:
+            self._start()
+
+    def _start(self) -> None:
+        if self.observation is not None:
+            if self._source_started or self._source_closed:
+                return
+            self._source_started = True
+            self._enqueue({"event": "textual_first_refresh"})
+            if not self.observation.sampled:
+                return
         if self._thread is not None:
             return
-        self._stop.clear()
+        if self.observation is None:
+            self._stop.clear()
         self._last_tick = time.monotonic()
-        self._thread = threading.Thread(
-            target=self._write_loop,
-            name="picker-frame-health",
-            daemon=True,
-        )
-        self._thread.start()
-        self._enqueue({
-            "event": "textual_first_refresh",
-            "pid": os.getpid(),
-            "launch_id": self.launch_id,
-            "binstub_started": self.binstub_started,
-        })
+        try:
+            self._thread = threading.Thread(
+                target=self._write_loop,
+                name="picker-frame-health",
+                daemon=True,
+            )
+            self._thread.start()
+        except Exception:
+            if self.observation is None:
+                raise
+            self.observation.increment("writer_failed")
+            self._thread = None
+            return
+        self._source_writer_started = self.observation is not None
+        if self.observation is None:
+            self._enqueue({
+                "event": "textual_first_refresh",
+                "pid": os.getpid(),
+                "launch_id": self.launch_id,
+                "binstub_started": self.binstub_started,
+            })
 
     def tick(self, *, frame: int, debug: str, busy: str | None) -> None:
         if not self.report_gaps:
@@ -157,6 +222,19 @@ class FrameHealthReporter:
         })
 
     def close(self, *, wait: bool = False) -> None:
+        with self._lifecycle_lock:
+            thread = self._thread
+            self._request_close()
+        if wait and thread is not None:
+            thread.join(timeout=3 if self.observation is not None else 2)
+
+    def _request_close(self):
+        if self.observation is not None:
+            if not self._source_closed:
+                self._enqueue({"event": "picker_stop"})
+                self._source_closed = True
+                self._stop.set()
+            return
         if self._thread is None:
             return
         self._enqueue({
@@ -169,18 +247,46 @@ class FrameHealthReporter:
             self._queue.put_nowait(_STOP)
         except queue.Full:
             pass
-        thread = self._thread
-        if wait:
-            thread.join(timeout=2)
-        if not thread.is_alive():
-            self._thread = None
 
     def _enqueue(self, event: dict) -> None:
-        event = {"timestamp": _timestamp(), **event}
+        if self.observation is not None:
+            if self._source_closed:
+                self.observation.increment("after_close")
+                return
+            event = self.observation.capture(event)
+            if event is None:
+                return
+        else:
+            event = {"timestamp": _timestamp(), **event}
         try:
             self._queue.put_nowait(event)
         except queue.Full:
             self._dropped += 1
+            if self.observation is not None:
+                self.observation.increment("queue_full")
+        else:
+            if self.observation is not None:
+                self.observation.increment("queued")
+
+    def observe(self, event: str, **measurements):
+        """Explicit source adapter seam; disabled reporters perform no work."""
+        if self.observation is not None:
+            self._enqueue({"event": event, **measurements})
+
+    def observation_summary(self):
+        """Off-path owner snapshot, not a paint/authority or persistence claim."""
+        if self.observation is None:
+            return None
+        state = self.observation.summary()
+        alive = self._thread is not None and self._thread.is_alive()
+        unwritten = max(0, state["counts"]["queued"] - state["counts"]["written"])
+        return {
+            **state, "writer_started": self._source_writer_started,
+            "first_refresh_observed": self._source_started,
+            "writer_alive": alive, "unwritten": unwritten,
+            "abandoned": unwritten if self._source_closed and not alive else 0,
+            "queued_remaining": self._queue.qsize(),
+        }
 
     def _write_loop(self) -> None:
         try:
@@ -193,8 +299,30 @@ class FrameHealthReporter:
                         continue
                     if event is _STOP:
                         return
-                    stream.write(json.dumps(event, separators=(",", ":")) + "\n")
+                    if self.observation is None:
+                        stream.write(json.dumps(event, separators=(",", ":")) + "\n")
+                    else:
+                        batch = [event]
+                        while len(batch) < 32:
+                            try:
+                                batch.append(self._queue.get_nowait())
+                            except queue.Empty:
+                                break
+                        self.observation.deliver(stream, batch)
         except OSError:
+            if self.observation is not None:
+                self.observation.increment("writer_failed")
             return
+        except Exception:
+            if self.observation is not None:
+                self.observation.increment("writer_failed")
+            else:
+                raise
         finally:
-            self._thread = None
+            try:
+                if self.observation is not None:
+                    self.observation.close()
+            except Exception:
+                self.observation.increment("writer_failed")
+            finally:
+                self._thread = None
