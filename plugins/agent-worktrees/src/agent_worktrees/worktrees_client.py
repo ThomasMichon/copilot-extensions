@@ -30,7 +30,10 @@ def __getattr__(name: str):
 def validate_result(result: dict, request: dict) -> dict:
     if not isinstance(result, dict) or type(result.get("contract_version")) is not int:
         raise ProjectionUnavailable("resident lacks worktrees-current-v1; update the engine")
-    if result["contract_version"] != request["contract_version"]:
+    if result["contract_version"] not in (CONTRACT_VERSION, observations.VERSION) or (
+        result["contract_version"] != request["contract_version"]
+        and not (result.get("ok") is False and result["contract_version"] == CONTRACT_VERSION)
+    ):
         raise ProjectionUnavailable(
             "incompatible resident current-roster contract; update the engine"
         )
@@ -40,7 +43,12 @@ def validate_result(result: dict, request: dict) -> dict:
         raise ProjectionUnavailable("resident observation response changed project")
     if result.get("ok") is not True:
         error = result.get("error")
-        if not isinstance(error, dict) or not isinstance(error.get("message"), str):
+        if (
+            result.get("ok") is not False
+            or not isinstance(error, dict)
+            or not isinstance(error.get("code"), str) or not error["code"]
+            or not isinstance(error.get("message"), str) or not error["message"]
+        ):
             raise ProjectionUnavailable("malformed resident current-roster error")
         if error.get("code") == "invalid-request":
             raise ProjectionError(error["message"])

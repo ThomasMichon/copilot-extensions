@@ -154,6 +154,24 @@ it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
 
+### 2026-10-23 — Size-compliant entry and wire-admission corrections retained
+- The admitted two-helper extraction is committed locally in `5a946fd6f`.
+  The actual root module has 6,760 lines against its 6,761 ceiling, without
+  changing the baseline, shared shutdown policy or public late-bound wrapper.
+- The latest unchanged module/console/guarded native cases all failed their
+  two-second gate under saturated host load. They do not establish a regression
+  or unavoidable floor; earlier passes do not qualify the extracted candidate.
+- Both #8217 Medium findings reproduce: negotiated v2 reads obscure shared v1
+  failures, and receiver-added metadata makes valid near-limit rows fail at
+  snapshot/update barriers. Local corrections preserve typed errors and raw
+  UTF-8 wire limits, excluding only four local metadata fields after admission.
+- Scoped Worktrees contracts pass 134 cases plus one final envelope control;
+  Manager parser/feed contracts pass 92. Required source CI, fresh accepted
+  review, unchanged native qualification and actual merge remain outstanding.
+  Detailed commands, failures and exclusions are in [validation.md](validation.md).
+- No timing retry or publication followed these corrections. A coordinated
+  quiet lane is required before the next unchanged native invocation.
+
 ### 2026-10-23 — Plan merged; F1 admitted
 - #8021 merged after current-head Copilot approval and required green CI.
 - F1 alone is admitted: semantic storage/observation wire contract and Manager

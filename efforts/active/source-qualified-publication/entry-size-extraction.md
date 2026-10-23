@@ -1,7 +1,7 @@
-# Entry/shutdown extraction proposal
+# Entry/shutdown extraction
 
-Back to [the effort](README.md). **Proposal only; no production edit or new
-benchmark has been performed.** The target is the existing owned
+Back to [the effort](README.md). **Implemented locally in `5a946fd6f`;
+native qualification and source review/merge remain open.** The target is the existing owned
 `plugins/agent-worktrees/src/agent_worktrees/current_roster_entry.py`;
 no new module, framework, registry or exit policy is proposed.
 
@@ -79,12 +79,13 @@ The reported required-CI ceiling on that published head is 6,761.
 The target module currently has 89 lines and stays far below the 1,000-line
 cap with these two related helpers.
 
-These are snapshot projections, not a pinned future ceiling. After admission
-and a fresh rebase, run the actual `check-module-size.py` against that tree.
+The admitted extraction's actual `check-module-size.py` passes at 6,760 lines;
+the target entry module has 111 lines. Recheck against the actual tree after
+any integration, rather than treating this snapshot as a pinned future ceiling.
 **No baseline file edit, widening, suppression, unrelated comment trimming or
 statement packing is part of this proposal.**
 
-## Fresh collision check
+## Admission collision check
 
 The complete open-PR file inventory was paginated for these exact source/test
 paths. Besides this effort's own #8217, current main-file claims are:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
 
@@ -55,6 +56,88 @@ def receive(receiver, events):
     for event in events:
         result = receiver.receive(event)
     return result
+
+
+def near_limit_envelope(*, unicode=False, revision=1):
+    value = envelope(revision)
+    row = value["worktrees"][0]
+    row["semantic_revision"] = revision
+    row["closure"] = {}
+    value["observations"][0]["derivations"] = {
+        "closure": {"computed_at": "2026-10-23T00:00:00Z", "observation_revision": revision},
+    }
+    for index in range(15):
+        row[f"padding{index}"] = "é" * 2048 if unicode else "x" * 4096
+    row["tail"] = ""
+    size = len(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    row["tail"] = "x" * (65536 - size)
+    assert len(row["tail"]) <= 4096
+    assert len(json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) == 65536
+    return value
+
+
+@pytest.mark.parametrize("unicode", [False, True])
+@pytest.mark.parametrize("receiver_type", [CurrentSnapshot, CurrentFeed])
+def test_near_limit_snapshot_counts_only_wire_bytes_at_done(unicode, receiver_type):
+    value = near_limit_envelope(unicode=unicode)
+    assert parse_current_rows(value)[0]["title"] == "Title"
+    receiver = receiver_type()
+    events = frames(value)
+    for event in events[:-1]:
+        assert receiver.receive(event) is None
+        if isinstance(receiver, CurrentFeed):
+            assert receiver.rows is None and receiver.head is None
+    row = receiver.receive(events[-1])[0]
+    assert row["tail"] == value["worktrees"][0]["tail"]
+    assert row["_observations"]["session"]["observed_at"] == 10
+    assert row["_observation_derivations"] == value["observations"][0]["derivations"]
+
+
+@pytest.mark.parametrize("unicode", [False, True])
+def test_near_limit_observation_only_update_counts_only_wire_bytes(unicode):
+    value = near_limit_envelope(unicode=unicode)
+    receiver = CurrentFeed()
+    receive(receiver, frames(value))
+    before = copy.deepcopy(receiver.rows)
+    head = copy.deepcopy(receiver.head)
+    update = envelope(2, at=20)
+    update["observations"][0]["derivations"] = {
+        "closure": {"computed_at": "2026-10-23T00:00:01Z", "observation_revision": 2},
+    }
+    events = frames(update, initial=False, semantic=False)
+    assert not any(event["type"] == "worktree" for event in events)
+    for event in events[:-1]:
+        assert receiver.receive(event) is None
+        assert receiver.rows == before and receiver.head == head
+    row = receiver.receive(events[-1])[0]
+    assert row["semantic_revision"] == 1
+    assert row["tail"] == before[0]["tail"]
+    assert row["_projection"]["revision"] == receiver.head["revision"] == 2
+    assert row["_observations"]["session"]["observed_at"] == 20
+    assert row["_observation_derivations"] == update["observations"][0]["derivations"]
+
+
+@pytest.mark.parametrize("field", [
+    "tail", "_projection", "_availability", "_observations", "_observation_derivations",
+])
+@pytest.mark.parametrize("initial", [False, True])
+def test_oversize_raw_wire_metadata_never_bypasses_utf8_byte_bound(field, initial):
+    value = near_limit_envelope(unicode=True, revision=1 if initial else 2)
+    row = value["worktrees"][0]
+    row[field] = row.get(field, "") + "é"
+    encoded = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+    assert len(encoded) < 65536 < len(encoded.encode("utf-8"))
+    with pytest.raises(ValueError, match="byte bound"):
+        parse_current_rows(value)
+    receiver = CurrentFeed()
+    if not initial:
+        receive(receiver, frames(envelope()))
+    before, head = copy.deepcopy(receiver.rows), copy.deepcopy(receiver.head)
+    events = frames(value, initial=initial)
+    receiver.receive(events[0])
+    with pytest.raises(ValueError, match="byte bound"):
+        receiver.receive(events[1])
+    assert receiver.rows == before and receiver.head == head
 
 
 def test_snapshot_and_feed_observations_commit_atomically_without_semantic_frames():

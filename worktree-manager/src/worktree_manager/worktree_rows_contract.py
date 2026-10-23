@@ -22,6 +22,15 @@ _HISTORICAL_FIELDS = frozenset(
         "claims_graph",
     }
 )
+_RECEIVER_FIELDS = frozenset({
+    "_projection", "_availability", "_observations", "_observation_derivations",
+})
+
+
+def publication_wire_rows(rows: list[dict]) -> list[dict]:
+    """Remove local metadata only from previously admitted publication rows."""
+    return [{key: value for key, value in row.items() if key not in _RECEIVER_FIELDS}
+            for row in rows]
 
 
 def _bounded(value, depth: int = 0) -> None:
@@ -197,7 +206,7 @@ class CurrentSnapshot:
             raise ValueError("current-roster stream did not complete its publication")
         if self._begin["contract_version"] == 2:
             self._rows = parse_current_rows({
-                **self._begin, "ok": True, "worktrees": self._rows,
+                **self._begin, "ok": True, "worktrees": publication_wire_rows(self._rows),
                 "observations": list(self._observations.values()),
             })
         self._complete = True

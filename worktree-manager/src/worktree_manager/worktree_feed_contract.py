@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .worktree_rows_contract import CurrentSnapshot, parse_current_rows
+from .worktree_rows_contract import CurrentSnapshot, parse_current_rows, publication_wire_rows
 from .worktree_observation_contract import (
     check_advance,
     check_observation_advance,
@@ -204,7 +204,7 @@ class CurrentFeed:
             rows = self._metadata([self._pending[wid] for wid in self._order], self._begin)
             if self._version == 2:
                 rows = parse_current_rows({
-                    **self._begin, "ok": True, "worktrees": rows,
+                    **self._begin, "ok": True, "worktrees": publication_wire_rows(rows),
                     "observations": list(self._observations.values()),
                 })
         if (

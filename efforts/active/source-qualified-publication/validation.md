@@ -470,3 +470,98 @@ its existing `_shutdown_exit.run_and_exit(main)` composition to the same
 entry module. This can reduce the monolith without changing command,
 shutdown, authorization or timing semantics. No such change was made.
 Source review remains pending and the PR is not merged/finalized.
+
+### Size-compliant extraction and wire-admission corrections
+
+The exact [entry/shutdown extraction](entry-size-extraction.md) is committed
+locally in `5a946fd6f8d4362e3d079c4fc799c0f9fba1eff1`. Root
+`console_entry` still resolves `main` at call time and delegates through the
+unchanged exit policy. The actual module-size check passes at 6,760 lines
+against 6,761; the entry module is 111 lines. No baseline or packaging change
+accompanies that extraction.
+
+The latest native case at that commit retains the same 1,100 rows, timer
+before `Popen`, observer initialization inside the child, two-second initial
+deadline, output/error checks and cleanup:
+
+| Entry | First health | Feed | Begin | Done | Verdict |
+|---|---:|---:|---:|---:|---|
+| Module | 4.922 s | 4.938 s | 5.110 s | 5.141 s | Failed |
+| Console | 4.282 s | 4.297 s | 4.485 s | 4.516 s | Failed |
+| Guarded module | 4.234 s | 4.265 s | 4.421 s | 4.453 s | Failed |
+
+Each ran once. All report `qualified: false`, empty stderr, cleanup return
+code 1 and joined readers. Pre-run CPU samples were approximately 100%.
+These are loaded-host failures, not causal performance attribution or a
+deadline waiver. Earlier native passes are historical, not current
+post-extraction qualification. No new native case or JUnit output was produced
+during the subsequent wire corrections.
+
+Both outstanding Medium findings on #8217 were independently reproduced:
+
+- Actual `WorktreesRuntime.handle()` failures, serialized through JSON, retain
+  contract version 1 for v2 requests. Before correction, invalid selectors
+  lose `ProjectionError` and unready/superseded replies lose their real
+  diagnostics to a version mismatch (3 failed, 11 passed, 22 deselected).
+  The client accepts a shared v1 failure only with explicit `ok: false` and
+  nonempty string code/message. Success still requires the negotiated
+  version; unknown versions, malformed failures and unnegotiated v2 failures
+  are rejected.
+- Valid rows of exactly 65,536 compact UTF-8 bytes fail after locally added
+  provenance is counted at `done` (6 failed, 5 passed before correction).
+  After correcting that snapshot seam alone, the distinct observation-only
+  update still fails at `commit` (2 failed, 3,988 deselected). Both barriers
+  now remove only `_projection`, `_availability`, `_observations` and
+  `_observation_derivations` from previously admitted rows before complete
+  revalidation and reconstruction. Raw ingress still counts every field.
+  ASCII/multibyte near-limit snapshots and observation-only updates pass;
+  oversize raw rows, including each reserved metadata name, fail at both
+  ingress paths without replacing committed rows/head.
+
+The contained Windows source commands (prepared Python 3.12 environment;
+runner scratch rooted inside the owned checkout) were:
+
+```powershell
+python tools\run-plugin-tests.py agent-worktrees `
+  --test-file tests/test_worktrees_client.py `
+  --test-file tests/test_worktrees_feed.py `
+  --test-file tests/test_worktrees_observations.py `
+  --test-file tests/test_shutdown_exit.py `
+  --test-file tests/test_current_roster_entry.py `
+  -k "not (actual_cli or real_transport or cross_real_authenticated_control_socket or real_producer)"
+
+$env:PYTEST_ADDOPTS='-k "(worktree_observations or current_worktrees_feed or current_roster_reads) and not (actual_loader_subprocess or reconnect_resolves_new_generation or terminal_errors_stop_actual_child_respawn)"'
+python tools\run-standalone-tests.py worktree-manager
+Remove-Item Env:PYTEST_ADDOPTS
+
+python tools\run-plugin-tests.py agent-worktrees `
+  --test-file tests/test_worktrees_client.py -k unnegotiated_v2_failure
+```
+
+Results: **134 passed, 11 deselected** in Worktrees; **92 passed,
+3,903 deselected** in Manager; **1 passed, 45 deselected** for the last added
+envelope control. The latter adds a test only; production bytes are unchanged
+from the 134-case pass. Manager initially could not collect an unrelated module
+because its prepared environment lacked declared `process_telemetry`; the
+supported `--prepare` restored that dependency before the reproductions.
+Eight unknown-marker collection warnings remain visible, not suppressed.
+Ruff with each product's configuration and `--select F,E9`, actual scoped
+module-size validation, `git diff --check` and the 13-plugin install-contract
+guard pass.
+
+Documentation impact: these repairs restore the already-specified wire and
+atomic-publication contracts; no public interface or architecture is added.
+The entry status and this evidence are updated. Existing changefiles cover
+both shipped products. The earlier 1,000-row/ten-publication semantic-write
+counter packet is retained, not claimed rerun by this narrower selection.
+No loader/UI, effect, installer, installed runtime, remote venue, shared process
+library, durable schema or writer-incarnation change is included.
+
+The next native selection remains `test_worktrees_feed.py -k actual_cli`
+with explicit native-tier admission through the contained plugin runner.
+Allow approximately one minute for its three serial owned variants, plus
+preparation/cleanup margin (request a two-minute quiet window). This is an
+estimate, not a runtime-budget increase. Run only after quiet-lane admission.
+Until it passes unchanged, source publication, review-thread resolution,
+fresh review, required green CI and actual merge of #8217 remain open.
+The effort and parent trackers are not complete.
