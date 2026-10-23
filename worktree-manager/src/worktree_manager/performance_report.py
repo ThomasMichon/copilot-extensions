@@ -98,7 +98,9 @@ def source_report(runs: list[dict], *, expected_per_mode: int) -> dict:
             continue
         baseline, enabled = [modes[mode]["points"][point] for mode in ("disabled", "enabled")]
         valid = baseline["complete"] and enabled["complete"]
-        delta = enabled["p50_ns"] - baseline["p50_ns"] if valid else None
+        baseline_median = statistics.median(sample["duration_ns"] for sample in baseline["samples"]) if valid else None
+        enabled_median = statistics.median(sample["duration_ns"] for sample in enabled["samples"]) if valid else None
+        delta = enabled_median - baseline_median if valid else None
         pairs = []
         for index in range(expected_per_mode):
             matching = [
@@ -118,8 +120,8 @@ def source_report(runs: list[dict], *, expected_per_mode: int) -> dict:
             "difference_of_medians_ns": delta, "paired_deltas": pairs,
             "paired_median_delta_ns": statistics.median(paired_values)
             if len(paired_values) == expected_per_mode else None,
-            "ratio_of_medians": enabled["p50_ns"] / baseline["p50_ns"]
-            if valid and baseline["p50_ns"] else None,
+            "ratio_of_medians": enabled_median / baseline_median
+            if valid and baseline_median else None,
             "interpretation": "observed differences, not causal confidence or a budget pass",
         }
     return {

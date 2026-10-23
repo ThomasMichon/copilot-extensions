@@ -266,6 +266,22 @@ def test_overhead_distinguishes_paired_deltas_from_difference_of_medians():
     assert [pair["delta_ns"] for pair in overhead["paired_deltas"]] == [4, -4, 10]
 
 
+def test_even_condition_medians_are_arithmetic_not_nearest_rank():
+    runs = []
+    for mode, values in (("disabled", [1, 10]), ("enabled", [3, 4])):
+        for index, value in enumerate(values):
+            runs.append({
+                "mode": mode, "sample_index": index, "outcome": "ok",
+                "points_ns": {"source_entry": 0, "first_refresh": value,
+                              "input_ack": value, "fixture_rows": value},
+            })
+    report = source_report(runs, expected_per_mode=2)
+    overhead = report["overhead"]["first_refresh"]
+    assert overhead["difference_of_medians_ns"] == -2
+    assert overhead["ratio_of_medians"] == pytest.approx(3.5 / 5.5)
+    assert report["modes"]["disabled"]["points"]["first_refresh"]["p50_ns"] == 1
+
+
 def test_readback_returns_only_owned_identity_metadata():
     record = {"resourceSpans": [{"scopeSpans": [{"spans": [
         {"traceId": "owned", "spanId": "one", "private": "do-not-return"},

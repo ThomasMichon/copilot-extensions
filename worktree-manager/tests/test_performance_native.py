@@ -65,6 +65,33 @@ def test_posix_capture_keeps_startup_stderr(tmp_path, monkeypatch):
     assert result.stderr == "synthetic startup traceback\n"
 
 
+def test_job_admission_failure_keeps_prior_samples_and_final_report(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    module = probe_module()
+    monkeypatch.setattr(module, "source_identity", lambda _: ("a" * 40, True))
+    def capture(argv, *, cwd, **kwargs):
+        if cwd.name.endswith("enabled"):
+            raise RuntimeError("synthetic denied Job")
+        value = {
+            "mode": "disabled", "outcome": "ok",
+            "points_ns": {"source_entry": 0, "first_refresh": 1, "input_ack": 1, "fixture_rows": 2},
+        }
+        return subprocess.CompletedProcess(argv, 0, "MANAGER_OBSERVATION " + json.dumps(value), "")
+    monkeypatch.setattr(module, "captured_child", capture)
+    root = tmp_path / "failed-run"
+    report = module.run(SimpleNamespace(
+        run_dir=str(root), endpoint=None, samples=1, timeout=1,
+        receiver_jsonl=None, readback_timeout=0,
+    ))
+    saved = json.loads((root / "report.json").read_text())
+    assert saved == report
+    assert saved["modes"]["disabled"]["completed"] == 1
+    assert saved["modes"]["disabled"]["failed"] == 0
+    assert saved["modes"]["enabled"]["completed"] == saved["modes"]["enabled"]["failed"] == 1
+    assert saved["modes"]["enabled"]["samples"][0]["error_code"] == "RuntimeError"
+
+
 def test_git_overrides_cannot_redirect_source_identity(tmp_path, monkeypatch):
     from agent_procutil import no_window_kwargs
 
