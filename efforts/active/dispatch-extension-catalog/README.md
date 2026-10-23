@@ -1467,3 +1467,29 @@ authorized installed proof remain distinct obligations.
   were exercised. Full machine provisioning, another native OS, live external
   sources and installed/fleet lanes were not exercised: no such behavior changed
   and no live effects or rollout were authorized.
+
+### 2026-10-23 - Supported recipe-origin prerequisite merged
+
+- PR #8300 merged as `39f7924842a03e29e0ac0c4b84c5a2152394a2d1`
+  after exact-head approval with no open findings, resolved threads and required
+  green CI. It closes the existing composability effort's bounded reviewer cwd
+  and worker-identity source-context gap, not template instantiation itself.
+- Resolution retains nearest-field origins through deferred parameters and
+  explicit overrides. Reviewer cwd uses its defining directory; serialized
+  repository-loop identity context survives resource validation, scheduled
+  execution and CLI discovery independently of execution cwd. Global defaults,
+  effective execution repositories and actual shipped aliases retain their
+  supported adoption behavior. Named origins keep existing resource custody.
+- The final contained packet passed 512 tests across eight coupled consumer
+  files, including a real fixture script provider and a fake coordinator.
+  Scoped Python lint, install contract and unchanged module ceilings passed.
+  Windows fresh source roots were exercised; full installer clean-room,
+  another local native OS, installed/fleet and live external-provider lanes
+  were not exercised because no installation behavior changed and no rollout
+  or live effects were authorized. Required source CI passed separately.
+- Script-forge fields remain raw until existing admission. Inherited
+  cross-repository relative command/cwd still refuses; #4959 remains open and
+  refusal alone is not safe relative-script execution. Re-read this Plan and
+  Validation Plan after merge. The parent remains Active; next is provenance-safe
+  template instantiation through the existing instance/save lifecycle, with
+  explicit refusal for unsupported dependencies. No new registry or producer.
