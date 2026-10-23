@@ -242,3 +242,17 @@ All functional phases remain gated even if this proposal merges.
   exhaust the budget. The adapter now checks the deadline after that read;
   received and absent late-result regressions pass. The combined source/guidance
   selection now passes 267 tests; module-size and lint gates remain unchanged.
+
+### 2026-10-23 — Final source qualification clarification
+
+- The final-owner deadline correction was published to #8224; its required CI
+  passed and fresh source review confirmed the deadline defect was resolved.
+  An independent isolated run of the two new deadline regressions passed.
+- Review retained the existing macOS route-publisher identity mismatch as a
+  separately gated platform prerequisite (#7659). The runtime documentation now
+  names that limitation explicitly; shared publication/identity code is unchanged
+  and the receipt check remains fail-closed. Synthetic route fixtures are not
+  actual macOS publisher qualification.
+- Fresh review and CI on this documentation clarification still precede source
+  merge. Backend/Node qualification, trusted subject production, native/live
+  validation, release and installed rollout remain separately owned and open.

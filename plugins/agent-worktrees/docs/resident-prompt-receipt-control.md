@@ -128,6 +128,15 @@ non-head/pending-successor association, existing record-lock exclusion, replay
 fencing, four-slot admission, disconnect/drain accounting and late completion.
 Missing qualified backend is tested explicitly.
 
+macOS additionally requires qualification of the existing route publisher's
+process-start identity contract (#7659). The current zdd publisher reads
+`/proc` on non-Windows platforms, whereas receipt validation uses Worktrees'
+native Darwin identity reader. A synthetic route written with the latter does
+not prove actual publisher compatibility. Until the lifecycle owner aligns and
+tests that shared identity contract, macOS receipt readiness remains unavailable;
+the identity check must stay fail-closed. This slice does not change the shared
+publisher or claim macOS readiness.
+
 The receipt owner separately owns the real backend/Node integration, canonical
 lock qualification, total history bounds and the whole 2,000 ms observation
 budget. A timely pending result is not completed-write or cleanup proof.
