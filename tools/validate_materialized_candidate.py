@@ -150,7 +150,7 @@ def recipes(
             sys.executable, str(runner), STANDALONE[standalone].as_posix(),
             "--prepare", "--admission-wait", "60",
         ]
-        if component == "dispatch":
+        if component in {"dispatch", "pr"}:
             argv += ["--timeout", "180"]
         elif component == "index":
             argv += ["--smoke"]

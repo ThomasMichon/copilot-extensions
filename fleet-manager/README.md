@@ -135,6 +135,15 @@ foreign replacements, all candidate/rollback bytes, historical proofs and the
 admitted floor. It does not delete runtimes, stop running clients or retire an
 installation.
 
+The separate [explicit retained-good recovery](docs/client-retained-recovery.md)
+transition restores selectors **and** the installed command family for an exact
+previously acknowledged healthy client. It requires a fresh attributed local
+decision, unchanged higher admission, current release trust and explicit current
+API/data/config compatibility. It never admits or reconstructs an older release,
+automatically falls back, or treats historical physical proofs as ownership of a
+current replacement. Admitted and recovered-active releases are reported
+separately. This client-only source API is not a live rollback permission.
+
 The explicit `remove-runtime --candidate <exact-candidate>` transition
 [deletes one owned completed candidate](docs/client-runtime-activation.md#completed-candidate-removal)
 only after command and selector withdrawal. Canonical cleanup custody protects

@@ -57,23 +57,28 @@ def main(argv=None):
     for operation in (
         "initialize", "inspect", "admit", "construct", "activate-runtime",
         "register-commands", "unregister-commands", "deactivate-runtime", "remove-runtime",
+        "recover-retained",
     ):
         state = state_commands.add_parser(operation)
         state.add_argument("--root", type=Path, required=True)
         state.add_argument("--identity", type=Path, required=True)
         if operation == "remove-runtime":
             state.add_argument("--candidate", required=True)
-        if operation in ("admit", "construct", "activate-runtime", "register-commands"):
+        if operation in ("admit", "construct", "activate-runtime", "register-commands", "recover-retained"):
             state.add_argument("--selection", type=Path, required=True)
             state.add_argument("--release", type=Path, required=True)
             state.add_argument("--proof", type=Path, required=True)
             state.add_argument("--policy", type=Path, required=True)
             state.add_argument("--sources", type=Path, required=True)
             state.add_argument("--staging-parent", type=Path, required=True)
-        if operation in ("construct", "activate-runtime", "register-commands"):
+        if operation in ("construct", "activate-runtime", "register-commands", "recover-retained"):
             state.add_argument("--target", type=Path, required=True)
-        if operation in ("register-commands", "unregister-commands"):
+        if operation in ("register-commands", "unregister-commands", "recover-retained"):
             state.add_argument("--command-directory", type=Path, required=True)
+        if operation == "recover-retained":
+            state.add_argument("--recovery-decision", type=Path, required=True)
+        elif operation == "register-commands":
+            state.add_argument("--recovery-decision", type=Path)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
@@ -172,18 +177,26 @@ def main(argv=None):
                     installation=identity["installation"], role="client",
                     staging_parent=args.staging_parent,
                 ) as staged:
-                    if args.state_command in ("construct", "activate-runtime", "register-commands"):
+                    if args.state_command in (
+                        "construct", "activate-runtime", "register-commands", "recover-retained",
+                    ):
                         from .client_activation import activate_client_runtime
                         from .client_construction import construct_client_release
                         from .client_frontdoor import register_client_frontdoor
+                        from .client_recovery import recover_client_release
 
                         execute = {
                             "construct": construct_client_release,
                             "activate-runtime": activate_client_runtime,
                             "register-commands": register_client_frontdoor,
+                            "recover-retained": recover_client_release,
                         }[args.state_command]
                         options = ({"command_directory": args.command_directory}
-                                   if args.state_command == "register-commands" else {})
+                                   if args.state_command in ("register-commands", "recover-retained") else {})
+                        if args.state_command in ("register-commands", "recover-retained") and (
+                            args.recovery_decision is not None
+                        ):
+                            options["current_recovery"] = lambda: local(args.recovery_decision)
                         result = execute(
                             args.root, identity, selection, staged,
                             current_policy=lambda: local(args.policy),

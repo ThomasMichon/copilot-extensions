@@ -190,10 +190,11 @@ Implementation sequencing below is **agent-recommended**:
   Attempt-local metadata journals and staged namespace retry are merged in #8038.
   Complete producer headers before client pending ownership are merged in #8093;
   existing missing/malformed legacy proofs still refuse.
-  Retained-good policy,
+  Retained-good implementation,
   identity retirement/reinstall fencing and a managed installer remain open.
   [Explicit retained-good recovery](client-retained-good-recovery.md) is the
-  next operator-selected policy proposal; review must precede implementation.
+  operator-selected contract reviewed in #8106; executable implementation and
+  its complete validation remain open.
   None of these local prerequisites authorizes a live rollout.
   [Installation repair conductor](installation-repair-conductor.md) is the
   agent-recommended #6464 setup prerequisite proposal. Its ordinary-owner

@@ -6,9 +6,10 @@ and Fleet's `ServiceConnector.run(stop)` in one foreground lifecycle. It
 requires the explicit `agent-pull-requests[fleet]` extra. Ordinary native
 CLI/callback installations remain unchanged.
 
-This is an embedding API, not an installed standalone distribution or an
-activated fleet role. No CLI, listener, supervisor, credential issuer,
-placement executor, storage migration or runtime selector is added.
+This is the embedding API used by the separate
+[standalone foreground distribution](../../../services/pr/README.md).
+The core does not install or activate a fleet role, register a supervisor,
+issue credentials, execute placement, migrate storage or select runtimes.
 
 ## Trusted construction and adoption
 
@@ -113,7 +114,14 @@ It proves shared observation, channel reconnect, owner restart and exact ACK
 without another native read. These are isolated source integration tests, not
 production provider or standalone/container deployment evidence.
 
-The independently installable artifact, declared fleet role, authenticated
-artifact construction/activation, installed update/rollback and approved live
-provider/fleet acceptance remain open under
+The standalone package supplies explicit host configuration, external credential
+references, provision/serve/passive-readiness commands and an offline wheel-only
+container recipe using Fleet's existing `container.service` role. Its explicit
+foreground launch bounds local transaction work; Gateway attachment/caller
+admission and typed forge-credential authorization remain independent.
+It never turns a local operation deadline or passive readiness file into a
+placement permit.
+
+Authenticated image construction/activation, fresh-container qualification,
+installed update/rollback and approved live provider/fleet acceptance remain open under
 [the canonical effort](../../../efforts/active/durable-pr-watch-delegation/README.md).

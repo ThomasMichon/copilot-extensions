@@ -112,7 +112,7 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         rows = list(csv.reader(io.StringIO(archive.read(name).decode())))
         for member_source in (
             "fleet_manager/client_command_removal.py", "fleet_manager/client_deactivation.py",
-            "fleet_manager/client_runtime_removal.py",
+            "fleet_manager/client_runtime_removal.py", "fleet_manager/client_recovery.py",
         ):
             removal_source = (Path(__file__).parents[1] / "src" / member_source).read_bytes()
             assert archive.read(member_source) == removal_source
@@ -455,5 +455,7 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
     runtime = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runtime)
     with zipfile.ZipFile(next(output.glob("*.whl"))) as artifact:
+        for module in sorted((PROJECT / "src" / "fleet_manager").glob("*.py")):
+            assert artifact.read("fleet_manager/" + module.name) == module.read_bytes()
         for name, member in runtime.RUNTIME_RESOURCES.items():
             assert artifact.read(f"fleet_manager/{member}") == (LIBRARY / name).read_bytes()

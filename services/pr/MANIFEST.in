@@ -1,0 +1,2 @@
+include container/Dockerfile
+include container/role-bindings.example.json
