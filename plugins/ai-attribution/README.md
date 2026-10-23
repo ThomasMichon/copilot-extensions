@@ -107,7 +107,9 @@ grammar, keys, precedence, authority boundaries, and diagnostics.
   `sessionId` in the launch payload.
 - `git` must be available for repository gating and local remote inspection.
 - On POSIX, `bash` is required. On Windows, PowerShell 5.1 or `pwsh` is
-  required.
+  required. The PowerShell policy entrypoint captures native Git output as
+  UTF-8, including non-ASCII repository paths, and restores the caller's
+  console output encoding when it finishes.
 - The plugin is independently installable and assumes no sibling plugin,
   Python, jq, YAML module, network access, or authenticated account.
 - The hook receives a JSON `sessionStart` payload on stdin and uses its `cwd`;
