@@ -37,6 +37,8 @@ disable host verification to make an example work.
 The Gateway reads `HGF_TENANT_ID` and `HGF_APP_ID`. Their synthetic defaults
 cannot describe a real configured service. It retains RS256 signature, issuer,
 tenant, audience, expiry and dedicated `GatewayClient` role checks.
+Its HTTP listener binds only `127.0.0.1`; remote use requires an explicitly
+protected encrypted transport. A bearer token does not encrypt HTTP traffic.
 `HGF_GATEWAY_RESOURCE` selects the producer's application resource;
 `HGF_SSH_USER` and `HGF_SSH_IDENTITY_FILE` select an existing approved SSH
 identity. No script supplies an application registration, role assignment,
