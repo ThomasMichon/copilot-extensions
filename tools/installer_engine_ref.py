@@ -32,7 +32,7 @@ PYTHON_FILES = ("installer_engine.py", "installer_engine_process.py", "runtime_l
 PYTHON_ADOPTERS = ("agent-worktrees",)
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
 STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver",)
-STANDALONE_NATIVE_FILES = ("installer-engine.ps1",)
+STANDALONE_NATIVE_FILES = ("installer-engine.ps1", "installer-engine.sh")
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:

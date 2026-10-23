@@ -415,7 +415,7 @@ namespace CopilotExtensions {
                 }
             }
             foreach (string support in new[] {
-                "installer-engine.ps1",
+                "installer-engine.ps1", "installer-engine.sh",
                 "installer_engine.py", "installer_engine_process.py", "installer_dependency_policy.py",
                 "installer_dependency_config.py", "runtime_launcher.py", "versioned_runtime.py",
                 "versioned_runtime_leases.py", "versioned_runtime_construction.py",
@@ -462,6 +462,7 @@ namespace CopilotExtensions {
         }
         public static string FreezeSource(string plugin, string destination, string expected, Action owned) {
             owned();
+            CheckExecutionRoot(destination, plugin);
             if (SourceDigest(plugin) != expected) throw Invalid("source changed before native freeze");
             if (Ordinary(destination, true, true)) throw Invalid("native source freeze must be new");
             string common = Path.GetDirectoryName(plugin);

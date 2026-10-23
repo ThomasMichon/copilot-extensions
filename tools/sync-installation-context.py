@@ -88,6 +88,9 @@ LEGACY_ENTRYPOINT_ADOPTERS = ("agent-machines", "agent-index")
 STANDALONE_PYTHON_ADOPTERS: tuple[tuple[str, str], ...] = (
     ("worktree-manager/src/worktree_manager", "worktree_manager"),
 )
+STANDALONE_ASSETS: tuple[tuple[str, str], ...] = (
+    ("json-query.awk", "libs/update-driver/src/update_driver/json-query.awk"),
+)
 
 
 def vendor_pairs() -> list[tuple[Path, Path]]:
@@ -127,6 +130,9 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         for relative_dir, _label in STANDALONE_PYTHON_ADOPTERS
         for name in FILES
         if name.endswith(".py")
+    ] + [
+        (CANONICAL_DIR / name, REPO / destination)
+        for name, destination in STANDALONE_ASSETS
     ]
 
 
