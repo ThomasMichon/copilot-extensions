@@ -26,17 +26,18 @@ released the runtime ownership alignment #8010 and tag-aware allocation repair
 #8110 after reviewed helper adoption #8121 and Source mirror #8127. Independent
 provider and artifact readback verifies the exact candidate, qualified/Main tree,
 source tag and immutable artifact receipts within the unchanged timing bound.
-Native installed acceptance remains blocked before construction: the fresh
-bootstrap rejects an older global update helper after its registered payload
-has advanced. The helper matches the immutable release named by the old
-deployment manifest, but the current admission path has no retained matching
-payload or snapshot from which to establish its ownership. No helper, receipt,
-tag or queue was rewritten to bypass that refusal. Complete native suite and
-normal-entry acceptance remain open; guest interrupted-request recovery still
-needs the separately confirmed disruptive restart. #7743's supported installed
-recovery remains ahead of local-first identity implementation. The
-[current journal](journal/2026/10.22%20progress.md) records the release proof and
-the new installed ownership-evidence boundary.
+The subsequent publication-scope repair #8283 qualified in natural
+`40013348876`: Manager bootstrap no longer compares unrelated Worktrees helper
+bytes. Actual native recovery clears that refusal and activates Manager
+`0.6.105-dev1`, but its real update request completes with exit 1 and an empty
+diagnostic log; the selected Worktrees runtime remains unchanged. A reproduced
+native repair-child standard-stream defect is being corrected before another
+installed attempt. Complete native suite and normal-entry acceptance remain
+open; guest interrupted-request recovery still needs the separately confirmed
+disruptive restart. #7743's supported installed recovery remains ahead of
+local-first identity implementation. The
+[current journal](journal/2026/10.22%20progress.md) preserves the release,
+activation, request-outcome and installed-suite distinctions.
 
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is
