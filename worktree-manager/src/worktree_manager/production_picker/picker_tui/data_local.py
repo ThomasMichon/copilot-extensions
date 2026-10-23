@@ -87,14 +87,28 @@ def is_local(machine: str, env: str) -> bool:
         return False
     try:
         config = cfg.load_config()
+    except (RuntimeError, ValueError) as exc:
+        if matches_raw_local:
+            try:
+                cfg.project_name()
+            except RuntimeError:
+                return True
+        raise RuntimeError("Locality is not ready; refresh configuration before launching") from exc
     except Exception:
         return matches_raw_local
+    revision = cfg.ConfigCacheSession(ttl=60).revision
+    registry_error = None
     try:
         entries = cfg.load_machines_yaml(config.default_repo.anchor)
     except AmbiguousMachineError:
         return False
-    except (FileNotFoundError, ValueError, KeyError):
+    except RuntimeError as exc:
+        raise RuntimeError("Locality is not ready; refresh the machine registry before launching") from exc
+    except (FileNotFoundError, ValueError, KeyError) as exc:
         entries = {}
+        registry_error = exc
+    if revision is not None and cfg.ConfigCacheSession(ttl=60).revision is not revision:
+        raise RuntimeError("Locality is not ready; configuration changed")
     if entries:
         actual = local_execution_platform()
         try:
@@ -122,7 +136,7 @@ def is_local(machine: str, env: str) -> bool:
         return target is not None and target is local
     if matches_raw_local:
         return True
-    return is_local_machine(
+    result = is_local_machine(
         machine,
         config_machine=config.machine,
         load_entries=lambda: entries,
@@ -136,6 +150,9 @@ def is_local(machine: str, env: str) -> bool:
         real_hostname=LOCAL[0],
         guest=local_execution_platform() == "wsl",
     )
+    if registry_error is not None and not result:
+        raise RuntimeError("Locality is not ready; the machine registry is unavailable") from registry_error
+    return result
 
 
 def _project_repo() -> tuple[str, str]:
