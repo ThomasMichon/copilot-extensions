@@ -21,23 +21,22 @@ The completion gate is released, installed behavior that resolves every existing
 worktree on the adopting host's Windows and WSL environments, not a passing
 example, a source commit, or a merged individual pull request.
 
-**Current status (2026-10-22):** the fresh-source updater repairs through #7987
-are qualified and released. The runtime ownership alignment #8010 is merged
-with current-head approval, but its containing qualification `39901978547`
-failed immutable publication with `manifest source closure differs from
-candidate`. The tag-aware allocation repair merged in #8110 after current-head
-approval and required CI. Reviewed helper-pin adoption landed in #8121; its
-first natural run correctly refused the old helper's already-frozen composition
-for the same Dev source. The Source mirror merged in #8127. Fresh natural
-qualification `39912447859` has passed source units, build and attestation;
-candidate publication and actual Main/source/tag receipts remain unverified.
-Native complete-suite and normal-entry acceptance remain open;
-guest interrupted-request recovery still needs the separately confirmed
-disruptive restart. The next driver first repairs the promotion blocker under
-#3336, preserving immutable publication checks and the existing control writer,
-then completes #7743's installed acceptance before resuming local-first identity
-implementation. The [current journal](journal/2026/10.22%20progress.md) records
-the source, qualification and installed-state distinctions.
+**Current status (2026-10-22):** natural qualification `39912447859` successfully
+released the runtime ownership alignment #8010 and tag-aware allocation repair
+#8110 after reviewed helper adoption #8121 and Source mirror #8127. Independent
+provider and artifact readback verifies the exact candidate, qualified/Main tree,
+source tag and immutable artifact receipts within the unchanged timing bound.
+Native installed acceptance remains blocked before construction: the fresh
+bootstrap rejects an older global update helper after its registered payload
+has advanced. The helper matches the immutable release named by the old
+deployment manifest, but the current admission path has no retained matching
+payload or snapshot from which to establish its ownership. No helper, receipt,
+tag or queue was rewritten to bypass that refusal. Complete native suite and
+normal-entry acceptance remain open; guest interrupted-request recovery still
+needs the separately confirmed disruptive restart. #7743's supported installed
+recovery remains ahead of local-first identity implementation. The
+[current journal](journal/2026/10.22%20progress.md) records the release proof and
+the new installed ownership-evidence boundary.
 
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is
@@ -392,11 +391,13 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
 
 ### Phase 3d - Physical machine and environment boundaries
 _(Agent-recommended realization of the operator's explicit model clarification.)_
-- [ ] Unblock the containing promotion's source-closure publication failure
+- [x] Unblock the containing promotion's source-closure publication failure
       under #3336, through a reviewed fix and natural qualified release.
       This is the operator-prioritized prerequisite to #7743's complete native
       and guest installed acceptance, not permission to rewrite immutable tags,
       weaken closure checks or introduce a second Main writer.
+      Natural `39912447859` independently verifies the exact source containing
+      #8010 and #8110, qualification/Main tree, immutable publication and source tag.
 - [x] Review the [structured identity contract](physical-machine-environment-boundary.md)
       before changing implementation.
 - [x] Reuse the shared map's physical-machine/environment selection; identify
