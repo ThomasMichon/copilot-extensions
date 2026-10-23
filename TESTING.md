@@ -28,6 +28,17 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+The independent `dependency_compile=true` selector exercises the canonical
+retained lock-export API on Linux and Windows. `tools/test_installer_dependency_compile.py`
+uses a synthetic loopback package index: ordinary UV selects a recent transitive
+wheel, while the retained export selects the seasoned version with exact hashes,
+ignores stale output pins, survives mutations of original project/requirement/
+configuration files, and refuses missing upload timestamps. The same bounded
+lane retains the existing transitive/isolated-build installer age cases.
+Pure option, effective-output and resolver-drift controls run alongside those
+native cases. This does not resolve a governed feed or approve a target profile;
+the subprocess/network cases remain outside required unit-only CI.
+
 The separate manual selector `pr_artifacts=true` exercises real first-party
 wheel construction and verification on Linux and Windows through
 `tools/smoke_public_toolchain.py --standalone`. It shares one seasoned-public

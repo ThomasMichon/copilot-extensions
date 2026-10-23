@@ -2971,6 +2971,20 @@ constraints and stricter package cutoffs; an unsupported merge or mismatch
 refuses installation. `prepare_uv_install` is only a preflight API, not an
 installation boundary.
 
+`run_uv_compile` and `retain_uv_compile` expose the same retained transaction
+for bounded `uv pip compile` exports. They admit `PipCompileSettings` directly,
+not a renamed install projection. Positional requirements files (including
+recursive includes) and attributable `pyproject.toml` metadata are copied and
+revalidated with the effective resolver. Exports force `requirements.txt`,
+hashes, a fresh resolution (`--upgrade`, ignoring existing output pins), and no
+header or source annotations. An explicit output path remains relative to the
+original effective working directory, never the temporary snapshot. Without
+an explicit output, UV writes to the caller's captured standard output;
+ambient file redirection, package omissions, index-URL emission, live editable
+graphs and unsupported compile options refuse. `prepare_uv_compile` is only
+preflight. This is candidate lock construction, not target-profile approval,
+wheel acquisition, feed qualification or runtime activation.
+
 Retain complete admitted projects before merging their declared build-resource
 directories. A resource may be a package subdirectory of another admitted
 project; its presence must not make that parent look fully copied while its
