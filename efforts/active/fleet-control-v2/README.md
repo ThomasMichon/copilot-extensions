@@ -375,11 +375,12 @@ All detailed slices are **agent-recommended** and remain subject to review.
   preserving one committed read view without adding replay or wire authority.
   The plan is reviewed in #8290 and the isolated implementation merged in
   #8303. Resident integration and scope-safe recovery remain separate gates.
-- [ ] Review and implement [conditional point-set resnapshot
+- [x] Review and implement [conditional point-set resnapshot
   recovery](scoped-observation-recovery.md), with fresh admission for both
   full and unchanged results, opaque exact-view validators and no global
   cursor/retention signal. Historical replay and resident subscription
-  consistency remain separate gates.
+  consistency remain separate gates. The plan merged in #8316 and the isolated
+  implementation in #8326.
 - [ ] Agree authenticated origin/push, current-projection, persistence and
   query/subscription interfaces with the retained owners before runtime edits.
   The subsequent operator approval permits only an isolated transport-neutral
@@ -463,6 +464,24 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-23 - Conditional recovery source merged
+
+- #8326 actually merged as `822a26d53d71d4fac01b46143bacf9edfbc349f9`
+  after exact-head Copilot approval, required CI and feedback resolution.
+  Normal tracking reconciliation and managed source synchronization completed;
+  transient publication-lock contention required only the ordinary retry,
+  not lock deletion, process retirement or a safety-hook bypass.
+- Marked only the bounded conditional-resnapshot item and its publication gate
+  complete. The local implementation and all scoped validation obligations are
+  recorded in [the recovery contract](scoped-observation-recovery.md);
+  runtime documentation retains the current-state-only and no-wire-grant limits.
+- The remaining serving seam still requires authenticated source-policy
+  provenance, retained-owner source/interface agreement and actual transport
+  emission fencing. No agreement or source allocation is inferred under the
+  existing no-other-agent-coordination constraint. Producer, provider, resident,
+  Manager, lifecycle, complete subscription and live adoption gates stay open.
+  The complete Fleet Control V2 effort remains Active.
 
 ### 2026-10-23 - Reviewed conditional recovery implemented locally
 

@@ -1,6 +1,6 @@
 # Isolated conditional point-set resnapshot
 
-**Status:** Plan reviewed and merged (#8316); isolated implementation prepared.
+**Status:** Implemented local prerequisite (#8326), following reviewed plan #8316.
 Resident integration, event replay and adoption remain separate.
 
 Back to [Fleet Control V2](README.md). This **agent-recommended bounded
@@ -156,7 +156,7 @@ All gates are **agent-recommended** and apply only to this bounded prerequisite.
 - [x] Record unit, simple process E2E, clean-room and available live/platform
   tiers honestly. This local API changes no installer or first-provision path;
   it supplies no resident/provider/live acceptance.
-- [ ] Complete documentation-impact review, standalone consumer changefile,
+- [x] Complete documentation-impact review, standalone consumer changefile,
   current-head implementation review and required CI before code merge.
 
 ## Local proof and remaining tiers
@@ -185,6 +185,11 @@ hosted periodic Linux portfolio does not include standalone Fleet Manager and
 the Windows execution is unenrolled. Required unit/guard CI is not a substitute
 for native full-Fleet integration. There is no Linux, live provider, resident
 transport or deployment proof, and no shared CI lane or deadline was changed.
+
+Implementation #8326 actually merged as
+`822a26d53d71d4fac01b46143bacf9edfbc349f9` after current-head approval,
+required CI and feedback resolution. Runtime API documentation describes the
+delivered local behavior; the parent Journal retains the publication history.
 
 ## Remaining full recovery contract
 
