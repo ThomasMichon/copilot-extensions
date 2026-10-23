@@ -7,6 +7,8 @@
 - **Participant:** placid-battery, source implementation and PR owner.
 - **Scope:** qualified owner-wave inventory, batched mux checks, bounded venue
   concurrency, and compatible atomic heartbeat generation fencing.
+- **Current boundary:** [exact authority proposal and counter evidence](s3ab-authority-proposal.md).
+  Proposal/evidence only; shared functional API changes remain unadmitted.
 
 ## Request
 
@@ -127,6 +129,22 @@ defers to the next due wave, with no hidden per-venue refresh.
   cheap current-revision check, with production-path counters covering discovery
   and auth as well as listing and mux work. No shared source signature has been
   changed for this follow-up.
+- The follow-up proposal traces existing owner APIs and identifies the opaque
+  keyring counterexample rather than inventing a revision provider. New
+  production-callgraph accounting proves a complete mux-only cold fixture
+  regresses from **103 to 596** process requests; mux-plus-bridge complete
+  frames regress **123 to 926**. These are intercepted synthetic boundaries,
+  not native process/CPU or hidden GH HTTP measurements. Prior real-child
+  listing/mux counts remain explicitly subwork-only.
+- Preserved all six accounting runs and their original public-safe counter
+  frames, including a failed recorder run and partial observations; full local
+  raw logs remain retained. The original older disposable event files were
+  already removed before the preservation request; retained tool stdout is
+  transcribed separately, never presented as recovered raw files.
+- The evidence recorder passes 27 tests covering actual resolution,
+  account/namespace/config/credential replacement, provider failure,
+  partial/limit inventory, expiry, retries, stale heartbeat and cancellation.
+  This is evidence collection, not a causal runtime fix or authority admission.
 
 ## Reproduction and remaining cells
 
