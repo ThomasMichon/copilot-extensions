@@ -109,8 +109,10 @@ SourceObservation(identity, *, endpoint=None, signal_endpoints=None, ...)
   signal: `attempted_records`, `accepted_records`, `rejected_records`,
   `unknown_records`, `not_attempted_records`, and a closed `status`.
   A record means a span, log record or metric **data point**, respectively.
-  Counts partition that signal's generated records; omitted/not-requested
-  signals are distinct from zero accepted records.
+  `generated = accepted + rejected + unknown + not_attempted` is the outcome
+  partition; `attempted = accepted + rejected + unknown` is its overlapping
+  transport subtotal, not an additional outcome. Omitted/not-requested signals
+  are distinct from zero accepted records.
 - Status vocabulary: `accepted`, `accepted_warning`, `partial`,
   `unsupported`, `transport_unknown`, `invalid_ack`, `sdk_unavailable`,
   `deadline_exhausted`, `inactive`, `not_requested`. No remote text is retained.
