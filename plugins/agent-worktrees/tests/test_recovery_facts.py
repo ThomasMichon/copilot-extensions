@@ -117,6 +117,13 @@ def test_bounded_strict_json(raw, reason):
     assert_reason(reason, lambda: decode_fact(raw, supported=WRITE))
 
 
+@pytest.mark.parametrize("number", [b"1e999", b"-1e999", b"9" * 5000],
+                         ids=["positive-overflow", "negative-overflow", "integer-limit"])
+def test_unknown_numeric_fields_must_round_trip(number):
+    raw = wire(fact())[:-1] + b',"future_numeric":' + number + b"}"
+    assert_reason("malformed_json", lambda: decode_fact(raw, supported=READ))
+
+
 @pytest.mark.parametrize("changes", [
     {"writer_incarnation": "replacement"},
     {"opaque": None},
@@ -207,6 +214,18 @@ def test_future_required_marker_semantics_remain_unsupported(tmp_path, required)
     value["required_capabilities"] = required
     seed_marker(layout.marker_directory, value)
     assert_reason("required_capability_unsupported", lambda: inspect(worktree, common))
+
+
+@pytest.mark.parametrize("number", [b"1e999", b"-1e999"])
+def test_marker_rejects_nonfinite_optional_numbers(tmp_path, number):
+    worktree, common = roots(tmp_path)
+    layout = inspect(worktree, common)
+    seed_marker(layout.marker_directory, marker_value(REPOSITORY, RESOURCE))
+    marker = layout.marker_directory / "identity.json"
+    raw = marker.read_bytes()[:-1] + b',"future_numeric":' + number + b"}"
+    marker.write_bytes(raw)
+    assert_reason("malformed_json", lambda: inspect(worktree, common))
+    assert marker.read_bytes() == raw
 
 
 def test_relocation_and_backup_preserve_one_journal_authority(tmp_path):

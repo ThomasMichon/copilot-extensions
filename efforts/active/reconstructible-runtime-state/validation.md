@@ -103,7 +103,7 @@ as a substitute for an isolated loss test.
 
 - Windows contained runner:
   `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_recovery_facts.py`:
-  **50 passed**, including file-backed close/reopen and relocated/backup fixture
+  **55 passed**, including file-backed close/reopen and relocated/backup fixture
   roots. All actual file creation is in test-owned roots, not live installations.
 - Ordinary placement opens exactly two identity markers and performs no history
   enumeration with 0, 100 and 1,000 real synthetic historical files.
@@ -114,6 +114,9 @@ as a substitute for an isolated loss test.
 - Initial long parametrized test IDs failed on Windows's 32,767-character
   environment-variable limit; explicit short IDs fixed the fixture and the
   complete focused rerun passed.
+- Source review found JSON exponent overflow could become infinity despite
+  literal-nonfinite rejection. Fact and marker readers now reject both signs;
+  five added regression cases also cover typed excessive-integer refusal.
 - Ruff F/E9, install-contract, documentation consistency and effort-structure
   checks passed. Linux/native Git adoption, process-crash/power-loss, actual old
   runtime and external-venue qualification remain unexecuted: G1 has no live

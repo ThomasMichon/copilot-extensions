@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from collections.abc import Mapping
 from uuid import UUID
 
@@ -42,6 +43,20 @@ def _object(pairs: list[tuple[str, object]]) -> dict:
 
 def _constant(_: str) -> None:
     raise RecoveryError("malformed_json")
+
+
+def _number(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise RecoveryError("malformed_json")
+    return value
+
+
+def _integer(text: str) -> int:
+    try:
+        return int(text)
+    except ValueError:
+        raise RecoveryError("malformed_json") from None
 
 
 def _depth(value: object, level: int = 0) -> None:
@@ -105,6 +120,7 @@ def decode_fact(raw: bytes, *, supported: frozenset[str]) -> dict:
     try:
         value = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_object, parse_constant=_constant,
+            parse_float=_number, parse_int=_integer,
         )
         _depth(value)
     except (UnicodeError, json.JSONDecodeError):

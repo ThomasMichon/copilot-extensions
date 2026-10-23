@@ -214,3 +214,7 @@ supported rollback-reader floor are explicit decisions, not implied approval.
   Ruff F/E9, install-contract, effort structure and documentation consistency
   checks pass. No historical binary, power-loss, production transaction or
   Linux qualification is claimed.
+- Source review found an unknown optional exponent could decode to infinity and
+  then fail re-encoding. Fixed the parser class for facts and markers; positive/
+  negative exponent and large-integer regressions bring the final contained
+  Windows focused run to **55 passed**, with Ruff F/E9 green.
