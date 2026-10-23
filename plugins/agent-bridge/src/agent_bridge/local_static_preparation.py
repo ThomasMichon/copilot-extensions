@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
-from .local_cache_refresh import RefreshResult, _checkout_root, _report, _run_bounded_result
+from .local_cache_refresh import RefreshResult, _checkout_root, _process_start_time, _report, _run_bounded_result
 
 
 async def prepare_for_launch(repo_root: str | Path) -> RefreshResult:
@@ -23,6 +24,14 @@ async def prepare_for_launch(repo_root: str | Path) -> RefreshResult:
         return await refresh_local_cache(repo_root)
     root = _checkout_root(repo_root).resolve()
     environment = _agent_worktrees_environment()
+    if sys.platform == "darwin":
+        try:
+            if _process_start_time(os.getpid()) is None:
+                raise ValueError("current process birth identity unavailable")
+        except Exception as exc:
+            return _report(RefreshResult(
+                "unavailable", blocking=1, detail=f"native preparation custody unavailable: {exc}",
+            ))
     if os.name != "nt":
         environment["WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP"] = "1"
     run = await _run_bounded_result(

@@ -210,6 +210,12 @@ On POSIX the Bridge-owned command uses the existing enclosing-process-group
 contract, so foreground Git stays in the group Bridge retires on cancellation
 or owner exit. Windows retains kill-on-close Job custody. Native Linux
 qualification explicitly removes test-only detachment suppression.
+macOS group identity uses the public native birth-time reader from psutil,
+already supplied by Bridge's required `agent-procutil[metrics]` dependency.
+Readiness of that identity backend is checked before enabling the owner path;
+missing custody is an explicit unavailable result, not an unsafe spawn.
+Fresh identity reads retain PID-reuse and unreadable-identity refusal.
+Native Darwin descendant controls remain distinct from adapter unit tests.
 
 SessionStart verifies current readiness before queueing its bounded backup.
 An exhausted reuse-probe budget means unverified readiness, not disabled

@@ -93,3 +93,43 @@ async def test_owned_group_retires_after_owner_failure(monkeypatch, retire):
     assert cleanup.await_count == int(retire)
     if retire:
         cleanup.assert_awaited_once_with(process, None, "observed-owner")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expected,current,signals", [
+    ("darwin:1234.5", 1234.5, True),
+    ("darwin:1234.5", 1235.5, False),
+    (None, 1234.5, False),
+    ("darwin:1234.5", "denied", False),
+])
+async def test_darwin_birth_identity_keeps_group_cleanup_bound(monkeypatch, expected, current, signals):
+    import psutil
+    import signal
+
+    def process(pid):
+        if current == "denied":
+            raise psutil.AccessDenied(pid)
+        return SimpleNamespace(create_time=lambda: current)
+
+    monkeypatch.setattr(psutil, "Process", process)
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(legacy, "sys", SimpleNamespace(platform="darwin"))
+    killed = []
+    monkeypatch.setattr(legacy, "os", SimpleNamespace(
+        getpgid=lambda pid: 456,
+        killpg=lambda pid, sig: killed.append(pid),
+    ))
+    child = SimpleNamespace(pid=123, returncode=0, wait=AsyncMock(return_value=0))
+    await legacy._kill_tree(child, None, expected)
+    assert killed == ([123] if signals else [])
+
+
+@pytest.mark.asyncio
+async def test_darwin_custody_unavailable_refuses_before_owner_spawn(tmp_path, monkeypatch):
+    monkeypatch.setattr(owner, "_agent_worktrees_launch_prefix", lambda **kw: ["owner"])
+    monkeypatch.setattr(preparation, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(preparation, "_process_start_time", lambda pid: None)
+    monkeypatch.setattr(preparation, "_run_bounded_result", AsyncMock(side_effect=AssertionError("unsafe spawn")))
+    result = await preparation.prepare_for_launch(tmp_path)
+    assert result.status == "unavailable"
+    assert "custody unavailable" in result.detail

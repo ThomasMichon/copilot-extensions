@@ -176,6 +176,11 @@ coordinate the smallest additive owner API before changing another slice.
   probe, and retain the Git subtree under Bridge's existing owned-group cleanup.
   Focused results: Worktrees 11 passed/2 native Linux skips; Bridge 13 passed.
   Those skipped native controls remain an explicit #7943 acceptance obligation.
+- Addressed the macOS cleanup finding without widening ownership into shared
+  libraries: Bridge's already-required psutil backend supplies native birth
+  identity, with a pre-spawn capability check and mismatch/access refusal.
+  Five focused controls passed; native Darwin descendant scenarios remain
+  explicitly unexecuted on this Windows worker and retained under #7943.
 
 ### 2026-10-22 — Matched baseline and source-only continuation
 

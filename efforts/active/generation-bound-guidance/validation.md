@@ -155,3 +155,13 @@ with nested Worktrees Git processes. Focused controls completed **11 passed,
 new native Linux cancellation/owner-failure scenarios on this Windows worker;
 their actual native execution remains part of #7943's open qualification, not
 a claimed pass. No test or lifecycle deadline was increased.
+
+The macOS review correction stays within Bridge: it uses the already-required
+psutil native birth-time API rather than adding a shared-library API or copying
+a platform ABI. Matching, mismatched, missing and inaccessible birth evidence
+plus pre-spawn custody refusal have focused controls (5 passed). The broader
+identity selection had 12 other/overlapping passes and 5 explicit platform
+skips before correcting its Windows-only fake-signal setup; no production
+change was needed for that test harness correction. Two native Darwin
+descendant controls are source-preserved but unexecuted here and remain in
+#7943's open native acceptance.

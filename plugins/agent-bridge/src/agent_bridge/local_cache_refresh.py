@@ -54,6 +54,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import os
 import sys
 import time
@@ -108,6 +109,24 @@ def _checkout_root(path: str | Path) -> Path:
         if (root / ".git").exists():
             return root
     return candidate
+
+
+def _process_start_time(pid: int) -> str | None:
+    if sys.platform == "darwin":
+        # Bridge already requires agent-procutil[metrics], which supplies psutil.
+        # Its public native backend supports Darwin without a /proc dependency.
+        import psutil
+
+        try:
+            value = psutil.Process(pid).create_time()
+        except psutil.NoSuchProcess:
+            return None
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError("Darwin process birth identity is invalid")
+        return f"darwin:{value!r}"
+    from zdd.diagnostics import process_start_time
+
+    return process_start_time(pid)
 
 
 def _render_result(stdout: str, returncode: int) -> RefreshResult:
@@ -247,12 +266,11 @@ async def _kill_tree(
     This repository's PID-destruction rule requires identity verification
     before any destructive termination by numeric ID, since an exited and
     reaped PID is eventually reusable by an unrelated process. ``_run_
-    bounded`` captures ``expected_group_identity`` (``zdd.diagnostics.
-    process_start_time(proc.pid)``) immediately after spawn, before any
-    reaping could occur -- a ``None`` *baseline* (no identity backend at
-    all for this platform; ``process_start_time`` has a Linux (``/proc``)
-    and a Windows backend only, so this is the universal non-Linux-POSIX
-    case, not just a transient miss) fails this check closed and the
+    bounded`` captures ``expected_group_identity`` through this module's
+    native birth-identity adapter immediately after spawn, before any
+    reaping could occur. Linux retains the ZDD identity reader; macOS uses
+    the already-required psutil native backend. A missing *baseline*
+    fails this check closed and the
     group is never signaled. With a baseline established, this function
     re-reads the *current* occupant's start-time token for that same
     numeric ID before signaling: a live, **different** identity there
@@ -273,19 +291,10 @@ async def _kill_tree(
         with contextlib.suppress(Exception):
             import signal
 
-            from zdd.diagnostics import process_start_time
-
-            # `expected_group_identity is None` covers two cases that
-            # must both fail closed: (a) the identity backend captured
-            # nothing at spawn time, and (b) a platform with no identity
-            # backend at all (`process_start_time` always returns `None`
-            # on non-Linux POSIX -- it reads `/proc/<pid>/stat`). Treating
-            # a missing *baseline* the same as "no mismatch" would let an
-            # unverified numeric pid be signaled on exactly those hosts,
-            # which this refuses outright rather than widen the "None is
-            # not evidence of a mismatch" allowance from this function's
-            # own docstring to cover the baseline too.
-            current_identity = process_start_time(proc.pid)
+            # Unavailable birth evidence never authorizes a group signal.
+            # A known baseline may outlive its reaped leader, but a confirmed
+            # different current occupant must still refuse numeric-ID cleanup.
+            current_identity = _process_start_time(proc.pid)
             identity_established = expected_group_identity is not None
             identity_mismatch = (
                 identity_established
@@ -364,12 +373,10 @@ async def _run_bounded_result(
     expected_group_identity: str | None = None
     if sys.platform != "win32":
         with contextlib.suppress(Exception):
-            from zdd.diagnostics import process_start_time
-
             # Captured immediately after spawn, before any await that
             # could let the process exit and be reaped -- this is the
             # identity token `_kill_tree` later re-verifies against.
-            expected_group_identity = process_start_time(proc.pid)
+            expected_group_identity = _process_start_time(proc.pid)
     if sys.platform == "win32" and job_handle is None:
         # Job Object setup failed; the process is already running
         # unprotected (spawn_in_kill_on_close_job's own contract still
