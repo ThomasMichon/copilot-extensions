@@ -136,6 +136,7 @@ def subject_admission(subject: dict, revalidate_owner, deadline: float):
                 raise AdmissionUnavailable("subject-unavailable") from None
             if (
                 record.worktree_id != subject["worktreeId"]
+                or record.repo != subject["project"]
                 or record.creation_nonce != subject["creationNonce"]
             ):
                 raise AdmissionUnavailable("subject-incarnation-changed")

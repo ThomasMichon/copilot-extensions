@@ -245,11 +245,14 @@ def subject_record(sample_record, tmp_tracking_dir, monkeypatch):
     sample_record.sessions = [tracking.SessionEntry(SUBJECT["sessionId"], "2026-01-01")]
     path = tmp_tracking_dir / f"{sample_record.worktree_id}.yaml"
     tracking.save_record(sample_record, path)
+    project = sample_record.repo
     monkeypatch.setattr(config, "tracking_dir", lambda project=None: tmp_tracking_dir)
     monkeypatch.setattr(installer, "read_projects_registry", lambda **kw: {
-        "projects": {SUBJECT["project"]: {}},
+        "projects": {project: {}},
     })
-    return {**SUBJECT, "worktreeId": sample_record.worktree_id}, sample_record, path
+    return {
+        **SUBJECT, "project": sample_record.repo, "worktreeId": sample_record.worktree_id,
+    }, sample_record, path
 
 
 def test_real_record_guard_preserves_non_head_subject_and_excludes_other_writer(subject_record):
@@ -287,6 +290,17 @@ def test_exact_pending_successor_is_associated(subject_record):
     with pytest.raises(receipts.AdmissionUnavailable, match="association"):
         with receipts.subject_admission(subject, lambda: None, time.monotonic() + 2):
             pytest.fail("inferred successor admitted")
+
+
+def test_record_from_another_project_is_not_admitted(subject_record):
+    from agent_worktrees import tracking
+
+    subject, record, path = subject_record
+    record.repo = "foreign"
+    tracking.save_record(record, path)
+    with pytest.raises(receipts.AdmissionUnavailable, match="incarnation"):
+        with receipts.subject_admission(subject, lambda: None, time.monotonic() + 2):
+            pytest.fail("foreign project record admitted")
 
 
 def test_nonce_and_association_revalidated_after_backend_wait(subject_record, monkeypatch):

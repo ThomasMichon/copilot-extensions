@@ -191,7 +191,7 @@ All functional phases remain gated even if this proposal merges.
   ceilings recorded in the runtime documentation. The canonical trace-lock
   deadline hunk and existing registration-producer project/nonce projection
   remain explicit additional admission gates, not inferred edit authority.
-- Validation: 79 focused catalog/control/cutover tests passed, including real
+- Validation: 80 focused catalog/control/cutover tests passed, including real
   sockets and real source binding against isolated fixtures; 180 resident
   lifecycle tests passed. Install contract and touched-file lint passed.
   No native/live deployment or full Node/backend qualification was performed.
