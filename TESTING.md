@@ -160,6 +160,8 @@ Plugin-owned Python projects below a plugin root are declared with
 `additionalPythonProjects` in that plugin's manifest, using plugin-relative
 `pyproject.toml` paths. Missing, duplicate or escaping declarations are refused.
 This inert source-owner declaration does not select or install an environment.
+Resolved project locations must stay within their owning plugin/product root
+and cannot acquire multiple owners through path aliases.
 
 Exit `1` reports unclassified Python projects, including nested projects and
 fixtures that have no established source-owner classification. Exit `2` reports

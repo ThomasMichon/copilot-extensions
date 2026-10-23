@@ -155,6 +155,59 @@ class ConstructionInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(inventory.InventoryError, "multiply owned Python project"):
             self.report()
 
+    def test_resolved_additional_project_cannot_escape_its_plugin(self):
+        path = "plugins/runtime/engine/pyproject.toml"
+        self.add_project(path, "engine")
+        self.write_json(
+            "plugins/runtime/plugin.json",
+            {"name": "runtime", "runtimeScope": "universal", "additionalPythonProjects": ["engine/pyproject.toml"]},
+        )
+        source_file = inventory._source_file
+
+        def resolved_source(root, relative):
+            if relative == path:
+                return self.root / "apps/service/pyproject.toml"
+            return source_file(root, relative)
+
+        with patch.object(inventory, "_source_file", side_effect=resolved_source):
+            with self.assertRaisesRegex(inventory.InventoryError, "escapes its owning source root"):
+                self.report()
+
+    def test_resolved_project_alias_cannot_acquire_a_second_owner(self):
+        path = "plugins/runtime/alias/pyproject.toml"
+        self.add_project(path, "alias")
+        self.write_json(
+            "plugins/runtime/plugin.json",
+            {"name": "runtime", "runtimeScope": "universal", "additionalPythonProjects": ["alias/pyproject.toml"]},
+        )
+        source_file = inventory._source_file
+
+        def resolved_source(root, relative):
+            if relative == path:
+                return self.root / "plugins/runtime/pyproject.toml"
+            return source_file(root, relative)
+
+        with patch.object(inventory, "_source_file", side_effect=resolved_source):
+            with self.assertRaisesRegex(inventory.InventoryError, "multiply owned Python project"):
+                self.report()
+
+    def test_native_symlink_cannot_assign_a_foreign_project_to_a_plugin(self):
+        path = self.root / "plugins/runtime/engine/pyproject.toml"
+        path.parent.mkdir()
+        try:
+            path.symlink_to(self.root / "apps/service/pyproject.toml")
+        except OSError as error:
+            if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+                self.skipTest("native file symlink privilege is unavailable")
+            raise
+        self.projects.append(path.relative_to(self.root).as_posix())
+        self.write_json(
+            "plugins/runtime/plugin.json",
+            {"name": "runtime", "runtimeScope": "universal", "additionalPythonProjects": ["engine/pyproject.toml"]},
+        )
+        with self.assertRaisesRegex(inventory.InventoryError, "escapes its owning source root"):
+            self.report()
+
     def test_vendored_library_inputs_are_not_counted_as_environments(self):
         self.add_project("plugins/runtime/libs/shared/pyproject.toml", "shared")
         self.add_project("plugins/guidance/libs/shared/pyproject.toml", "shared")

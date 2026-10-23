@@ -335,3 +335,16 @@ cutover is activated by the reviewed documentation.
   literal-only read. The exact mutation regression refuses that source without
   executing the helper. This is not a general Python evaluator or a new runtime
   policy; nonliteral or mutable roster declarations need explicit reconciliation.
+
+- Resolved source ownership is scoped to the declaring plugin/product, not just
+  the repository. A link to another project's metadata cannot assign that
+  project to a foreign plugin or claim a second owner through an alias.
+  Resolver-boundary controls and a native file-link control cover this case;
+  unavailable native link privileges remain an explicit skip, not native proof.
+
+- The containment slice passed twenty-nine Windows controls with one explicit
+  native file-link privilege skip. An existing Linux guest then passed all
+  thirty controls, including the real file-link refusal and fresh Git-fixture
+  CLI. No guest provisioning, package installation, launcher transfer or
+  runtime deployment was performed. This qualifies the diagnostic's filesystem
+  boundary, not hosted feed access or the release's native runtime matrix.

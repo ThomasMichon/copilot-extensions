@@ -134,15 +134,21 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
         raise InventoryError(f"{marketplace}: plugins must be an array")
     owners: list[dict] = []
     classified: set[str] = set()
+    project_locations: set[Path] = set()
     identities: set[str] = set()
     sources: set[str] = set()
     standalone_consumers = _standalone_consumers(root)
 
-    def claim_project(path: str, kind: str, owner: str) -> None:
-        if path in classified:
+    def claim_project(path: str, kind: str, owner: str, scope: str) -> None:
+        location = _source_file(root, path).resolve()
+        owner_root = root.joinpath(*PurePosixPath(scope).parts).resolve()
+        if not location.is_relative_to(owner_root):
+            raise InventoryError(f"Python project escapes its owning source root: {path}")
+        if path in classified or location in project_locations:
             raise InventoryError(f"multiply owned Python project: {path}")
         owners.append(_project(root, path, kind, owner))
         classified.add(path)
+        project_locations.add(location)
 
     for plugin in plugins:
         if not isinstance(plugin, dict):
@@ -169,7 +175,7 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
         else:
             if manifest.get("runtimeScope") == "none":
                 raise InventoryError(f"{manifest_path}: runtimeScope none has a Python project")
-            claim_project(path, "runtime-plugin", name)
+            claim_project(path, "runtime-plugin", name, source)
         additional = _strings(
             manifest.get("additionalPythonProjects", []),
             f"{manifest_path}: additionalPythonProjects",
@@ -179,12 +185,12 @@ def inventory(root: Path, tracked_projects: list[str]) -> dict:
             path = f"{source}/{relative}"
             if PurePosixPath(relative).name != "pyproject.toml" or path not in tracked:
                 raise InventoryError(f"missing additional Python project: {path}")
-            claim_project(path, "plugin-python-project", f"{name}:{relative}")
+            claim_project(path, "plugin-python-project", f"{name}:{relative}", source)
     for component in standalone_consumers:
         path = f"{_relative(component)}/pyproject.toml"
         if path not in tracked:
             raise InventoryError(f"missing standalone project: {path}")
-        claim_project(path, "standalone-product", component)
+        claim_project(path, "standalone-product", component, component)
     library_inputs = sorted(
         path
         for path in tracked - classified
