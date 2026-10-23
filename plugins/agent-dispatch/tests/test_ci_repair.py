@@ -516,7 +516,10 @@ def test_authority_probe_does_not_hold_coordinator_write_lock(tmp_path, monkeypa
                                  repo=task["repo"], task_id=task["id"])
 
 
-def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeypatch):
+@pytest.mark.parametrize("delivery", [
+    "accepted", "unknown", "receipt_failure", "receipt_failure_masked_unknown", "unavailable",
+])
+def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeypatch, delivery):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from agent_dispatch.coordinator_spawn import register_spawn_routes
@@ -534,7 +537,34 @@ def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeyp
     monkeypatch.setattr(bridge, "spawn_worker", lambda *a, **k: (
         calls.append(k) or SimpleNamespace(returncode=0, stdout='{"session_id":"trusted"}', stderr="")
     ))
-    monkeypatch.setattr(bridge, "resume_worker", lambda *a, **k: True)
+    def deliver(*args, **kwargs):
+        if delivery == "unavailable":
+            raise bridge.BridgeUnavailable("protocol support is unconfirmed")
+        if delivery in {"unknown", "receipt_failure_masked_unknown"}:
+            from agent_procutil.startup import StartupExpiry, StartupTimeouts
+            raise bridge.StartupOutcomeUnknown(
+                StartupExpiry("communication", 30, 30, "prompt-admission"), StartupTimeouts(),
+            )
+        return True
+    monkeypatch.setattr(bridge, "resume_worker", deliver)
+    if delivery in {"receipt_failure", "receipt_failure_masked_unknown"}:
+        from contextlib import contextmanager
+        import sqlite3
+        from agent_dispatch.coordinator_execution_sender import CoordinatorExecutionSender, ExecutionSendAttempt
+        original_attempt = CoordinatorExecutionSender.attempt
+
+        @contextmanager
+        def failed_receipt(self, kind):
+            if kind != "deliver":
+                with original_attempt(self, kind) as attempt:
+                    yield attempt
+                return
+            try:
+                yield ExecutionSendAttempt()
+            finally:
+                raise sqlite3.OperationalError("receipt settlement unavailable")
+
+        monkeypatch.setattr(CoordinatorExecutionSender, "attempt", failed_receipt)
     def admission(command, config, **kwargs):
         if kwargs["request"].get("phase") == "spawned":
             staging = client.queue.latest_reservation(task["id"])
@@ -552,7 +582,19 @@ def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeyp
         })
     assert result.status_code == 200, result.text
     assert result.json()["reserved"] is False
-    assert result.json()["coordinator_launch"]["ok"] is True
+    if delivery == "accepted":
+        assert result.json()["coordinator_launch"]["ok"] is True
+    else:
+        assert result.json()["coordinator_launch"]["outcome"] == "unknown"
+        assert result.json()["coordinator_launch"]["retryable"] is False
+        assert result.json()["coordinator_launch"]["delivery_accepted"] is (
+            True if delivery == "receipt_failure" else None
+        )
+        retained = client.queue.get_reservation(result.json()["reservation"]["key"])
+        assert retained.state == "spawned"
+        assert retained.session_handle == "local-body:trusted"
+        assert retained.release_requested is False
+        assert retained.startup_complete is False
     assert calls[0]["agent"] == EXECUTION["venue"]
     assert calls[0]["charter"] == EXECUTION["charter"]
 

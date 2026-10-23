@@ -238,6 +238,54 @@ def test_constructor_refuses_unobservable_serving_scope(setup):
         pass
 
 
+def test_stop_keeps_writer_until_all_parallel_reads_settle(setup, monkeypatch):
+    store, make, _ = setup
+    for number in range(1, 7):
+        store.execute(SCOPE, "register", {
+            **registration(), "request_id": f"request-{number}",
+            "number": number, "until": ("merged",),
+        }, expires_at=int(time.time()) + 60)
+    release = [threading.Event() for _ in range(4)]
+    entered = threading.Event()
+    calls = []
+    lock = threading.Lock()
+
+    def fetch(repo, number, *args, **kwargs):
+        with lock:
+            calls.append(number)
+            if len(calls) == 4:
+                entered.set()
+        assert release[number - 1].wait(8)
+        return PRSnapshot(merged=True)
+
+    monkeypatch.setattr(watch_observer, "fetch_snapshot", fetch)
+
+    async def scenario():
+        service = make()
+        await service.start()
+        try:
+            await wait_for(entered.is_set)
+            assert not service.status()["ready"]
+            with pytest.raises(TimeoutError):
+                await service.close(timeout=0.05)
+            for event in release[:3]:
+                event.set()
+            await asyncio.sleep(0.1)
+            assert service.status()["writer_held"] and not service._disk.done()
+            with pytest.raises(AlreadyRunningError):
+                contender(store).acquire()
+        finally:
+            for event in release:
+                event.set()
+            await service.close(timeout=3)
+        assert sorted(calls) == [1, 2, 3, 4]
+        assert store.execute(SCOPE, "pending", {}, expires_at=int(time.time()) + 60)["events"] == []
+        with contender(store):
+            pass
+
+    asyncio.run(scenario())
+
+
 def test_observation_shares_scope_and_restarts_from_original_event(setup, monkeypatch):
     store, make, _ = setup
     original = registration()
@@ -683,6 +731,8 @@ def test_drain_timeout_on_serving_write_does_not_release_writer(setup, monkeypat
 
     async def scenario():
         service = make()
+        # Exercise the separate serving write between observation cycles.
+        service.interval = 60
         await service.start()
         await wait_for(lambda: service.status()["ready"])
         monkeypatch.setattr(watch_replay_store, "_atomic_write_json", held)

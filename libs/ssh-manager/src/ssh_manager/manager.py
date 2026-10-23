@@ -17,6 +17,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -551,6 +552,8 @@ class ConnectionManager:
         command: str,
         timeout: float | None = 60.0,
         input_bytes: bytes | None = None,
+        *,
+        on_output: Callable[[str, bytes], None] | None = None,
     ) -> CommandResult:
         """Run a command over the multiplexed (or direct) SSH connection.
 
@@ -592,9 +595,14 @@ class ConnectionManager:
             try:
                 info.child_processes.append(proc)
                 try:
-                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                        proc.communicate(input=input_bytes), timeout=timeout
-                    )
+                    if on_output is None:
+                        capture = proc.communicate(input=input_bytes)
+                    else:
+                        from agent_procutil.streaming import communicate_progress
+                        capture = communicate_progress(
+                            proc, input_bytes=input_bytes, on_output=on_output,
+                        )
+                    stdout_bytes, stderr_bytes = await asyncio.wait_for(capture, timeout=timeout)
                 finally:
                     if proc in info.child_processes and proc.returncode is not None:
                         info.child_processes.remove(proc)
@@ -605,6 +613,11 @@ class ConnectionManager:
                 if proc in info.child_processes:
                     info.child_processes.remove(proc)
             except asyncio.CancelledError:
+                await _terminate_process_tree(proc)
+                if proc in info.child_processes:
+                    info.child_processes.remove(proc)
+                raise
+            except Exception:
                 await _terminate_process_tree(proc)
                 if proc in info.child_processes:
                     info.child_processes.remove(proc)

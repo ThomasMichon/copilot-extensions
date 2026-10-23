@@ -67,6 +67,12 @@ print(result.stdout)
 await manager.disconnect("my-server")
 ```
 
+`exec_command(..., on_output=callback)` optionally delivers
+`callback("stdout" | "stderr", chunk_bytes)` while the existing SSH command is
+running, before its final `CommandResult`. Captured output and stdin behavior
+are preserved. The existing command owner retains timeout/cancellation cleanup;
+the callback does not create another transport, retry policy or process owner.
+
 ## Optional finite reverse-forward selection
 
 `ssh_manager.reverse_candidates.FiniteReverseForward` subclasses the existing

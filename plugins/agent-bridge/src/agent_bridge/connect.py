@@ -166,6 +166,11 @@ class ConnectTracker:
         *,
         session_id: str = "",
     ) -> None:
+        if emit is None:
+            from .startup_progress import current
+            progress = current()
+            if progress is not None:
+                emit = progress.emit
         self._emit = emit
         self.session_id = session_id
         self._started_at: dict[ConnectStage, float] = {}
@@ -207,6 +212,8 @@ class ConnectTracker:
         retryable: bool | None = None,
     ) -> None:
         policy = STAGE_POLICIES[stage]
+        from .startup_progress import checkpoint
+        checkpoint(policy.label, status)
         data: dict[str, Any] = {
             "stage": int(stage),
             "stage_name": stage.name,

@@ -281,12 +281,28 @@ def register_spawn_routes(
                 bus.publish({"type": "spawn.spawned", "reservation": _reservation_dict(queue.get_reservation(reservation.key))})
                 from . import bridge
                 delivery_error = "admitted task turn delivery failed"
+                delivery_attempted = False
+                delivered = None
                 try:
                     with sender.attempt("deliver") as attempt:
+                        delivery_attempted = True
                         delivered = bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30)
                         if delivered:
                             attempt.sent()
-                except (TaskError, OSError, sqlite3.Error, subprocess.TimeoutExpired) as exc:
+                except (TaskError, OSError, sqlite3.Error, subprocess.SubprocessError,
+                        bridge.BridgeUnavailable) as exc:
+                    if delivery_attempted:
+                        # Transport or receipt settlement may fail after acceptance.
+                        # Keep custody; release is not observation recovery.
+                        return {
+                            "reserved": False,
+                            "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                            "coordinator_launch": {
+                                "ok": False, "outcome": "unknown", "retryable": False,
+                                "delivery_accepted": delivered,
+                                "error": str(exc), "session": handle["session"],
+                            },
+                        }
                     delivered = False
                     delivery_error = str(exc)
                 if not delivered:

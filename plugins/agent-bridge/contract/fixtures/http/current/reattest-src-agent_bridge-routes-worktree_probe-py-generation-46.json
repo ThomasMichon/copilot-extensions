@@ -1,0 +1,40 @@
+{
+  "captured_from": {
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+    "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
+    "protocol_generation": 46,
+    "source_sha256": "fac4bc5486b3095c28fb1a747822f2c108a9179e1b707070163c48afb418a865"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/worktrees/example-worktree/resume/{mode}"
+  },
+  "owner_query": [
+    "record",
+    "--worktree-id",
+    "example-worktree",
+    "--json"
+  ],
+  "required_owner_record": {
+    "ok": true,
+    "worktree": {
+      "id": "example-worktree",
+      "path": "example-workspace",
+      "branch": "example-branch",
+      "status": "active"
+    }
+  },
+  "lookup": {
+    "cached_fast_path": true,
+    "single_flight": true,
+    "requires_roster_publication": false,
+    "warms_inventory": false,
+    "metadata_is_execution_admission": false
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-worktree_probe-py-generation-45.json",
+    "sha256": "94b15e233be61eb3a22bcbad9f30b07fddfd5feffadd11a31fc2d03c7120aa60"
+  }
+}

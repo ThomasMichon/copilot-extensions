@@ -1,0 +1,189 @@
+{
+  "evidence_family": "ordinary-startup-observation-v1",
+  "evidence_kind": "independently-authored-model-free-operation-expectations",
+  "response": {
+    "protocol_version": 46,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "name": "startup_progress",
+    "required_protocol_version": 46,
+    "previous_peer": 45,
+    "legacy_fallback": false
+  },
+  "policy": {
+    "communication_seconds": 30,
+    "process_seconds": 300,
+    "expected_seconds": 60
+  },
+  "argv": [
+    "send",
+    "bridge-a",
+    "--prompt-file",
+    "-",
+    "--no-wait",
+    "--startup-communication-timeout",
+    "30",
+    "--startup-process-timeout",
+    "300"
+  ],
+  "progress_prefix": "@@agent-startup ",
+  "producer_events": [
+    {
+      "event": "startup_progress",
+      "data": {
+        "phase": "launch/prep",
+        "state": "running",
+        "elapsed_s": 0.0
+      }
+    },
+    {
+      "event": "startup_progress",
+      "data": {
+        "phase": "ready",
+        "state": "finished",
+        "elapsed_s": 0.0
+      }
+    }
+  ],
+  "observer_frames": [
+    {
+      "version": 1,
+      "event": "progress",
+      "phase": "lifecycle-lock",
+      "elapsed_s": 0.0
+    },
+    {
+      "version": 1,
+      "event": "progress",
+      "phase": "launch/prep",
+      "elapsed_s": 0.0,
+      "target_event": "startup_progress"
+    },
+    {
+      "version": 1,
+      "event": "progress",
+      "phase": "launch/prep",
+      "elapsed_s": 0.0,
+      "target_event": "future-startup-v100"
+    },
+    {
+      "version": 1,
+      "event": "progress",
+      "phase": "launch/prep",
+      "elapsed_s": 0.0,
+      "target_event": "_heartbeat"
+    },
+    {
+      "version": 1,
+      "event": "ready",
+      "phase": "launch/prep",
+      "elapsed_s": 0.0,
+      "expected_s": 60,
+      "expected_exceeded": false
+    }
+  ],
+  "floor_refusal": {
+    "exit_code": 69,
+    "json": {
+      "outcome": "refused_unavailable",
+      "target": "bridge-a",
+      "retryable": false,
+      "reason": "unsupported_protocol",
+      "error": "startup observation requires a progress-capable daemon"
+    },
+    "non_json_stdout": "",
+    "requests": 0
+  },
+  "preflight": {
+    "method": "GET",
+    "path": "/health",
+    "late_receipt_seconds": 31,
+    "clock": "communication",
+    "mutations": 0,
+    "maximum_socket_timeout_seconds": 30
+  },
+  "resume_acknowledgement": {
+    "session_id": "bridge-a",
+    "invalid_results": [
+      null,
+      {},
+      [],
+      {
+        "session_id": "bridge-a"
+      },
+      {
+        "status": "idle"
+      },
+      {
+        "session_id": "bridge-a",
+        "status": "starting"
+      },
+      {
+        "session_id": "other",
+        "status": "idle"
+      }
+    ],
+    "ready": false,
+    "reason": "resume_unknown",
+    "resume_posts": 1,
+    "prompt_posts": 0
+  },
+  "canonical_session": {
+    "reference": "native-acp",
+    "session_id": "bridge-a",
+    "status": "stopped",
+    "resumed_ids": [
+      "bridge-a"
+    ]
+  },
+  "prompt_request": {
+    "method": "POST",
+    "path": "/api/v1/sessions/bridge-a/turns",
+    "body": {
+      "prompt": "one exact continuation",
+      "no_resume": true
+    },
+    "request_timeout": 30,
+    "allow_retry": false,
+    "count": 1
+  },
+  "invalid_admission_statuses": [
+    "",
+    "not-a-lifecycle-status"
+  ],
+  "lost_ack": {
+    "exit_code": 70,
+    "json": {
+      "outcome": "unknown",
+      "target": "bridge-a",
+      "retryable": false,
+      "clock": null,
+      "reason": "admission_unknown",
+      "phase": "prompt-admission",
+      "elapsed_s": 600.0
+    },
+    "ready_before_admission": true,
+    "remote_cancellation": false,
+    "replacement": false,
+    "replay": false
+  },
+  "ownership": {
+    "startup_only_process_budget": true,
+    "local_timer_is_contact": false,
+    "unknown_events_are_contact": true,
+    "contact_uses_local_receipt_not_payload_timestamp": true
+  },
+  "shared_operation_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-observation-generation-46.json",
+    "sha256": "f33f4502f3a0f087857733c086c8068985867be98e0bc46cb69baa518cf241a5"
+  },
+  "captured_from": {
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+    "source_git_blob": "1b374ada091e57067a196dc29d950b8a803679e6",
+    "protocol_generation": 46,
+    "source_sha256": "41e18f0905911c4c54e17550d605de21da3b1b4ca528bd7ea2f6c2dfcf91d146"
+  }
+}

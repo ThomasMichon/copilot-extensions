@@ -1,0 +1,41 @@
+{
+  "captured_from": {
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+    "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+    "protocol_generation": 46,
+    "source_sha256": "c8fc03580dd580f50bac1307cc3882fcd3a2e29766ddc006aa3f815203ebcdfb"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions/bridge-a/turns/native-bound",
+    "json": {
+      "prompt": "assigned task",
+      "queue": false,
+      "no_resume": true,
+      "expected_native_session_id": "native-a"
+    }
+  },
+  "response": {
+    "status": "running",
+    "session_id": "bridge-a",
+    "native_session_id": "native-a",
+    "turn_index": 0,
+    "queued": false,
+    "queue_id": null,
+    "position": null
+  },
+  "health": {
+    "protocol_version": 45,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 33,
+    "older_route_status": 404
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-prompt_models-py-generation-45.json",
+    "sha256": "cf772bd5608954922b883eba06f87b8f984c470c17b26632e3eb6cb19f397085"
+  }
+}

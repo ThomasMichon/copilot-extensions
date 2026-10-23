@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from concurrent.futures import Future
 from dataclasses import replace
 
 import pytest
@@ -50,6 +51,20 @@ def cycle(owner, **kwargs):
     return owner.cycle(expires_at=int(owner.store.clock()) + 60, **kwargs)
 
 
+def start_cycle(owner, **kwargs):
+    result = Future()
+
+    def run():
+        try:
+            result.set_result(cycle(owner, **kwargs))
+        except BaseException as error:
+            result.set_exception(error)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    return thread, result
+
+
 def test_coalesces_consumers_but_not_accounts_and_skips_pending(store, monkeypatch):
     for scope in (SCOPE, PEER, FOREIGN):
         register(store, scope)
@@ -65,7 +80,7 @@ def test_coalesces_consumers_but_not_accounts_and_skips_pending(store, monkeypat
         binding(FOREIGN, credential_command=(sys.executable, "account-b")),
     ))
     assert cycle(owner) == {"status": "observed", "observed": 2, "unavailable": 0, "unbound": 0}
-    assert [item[3] for item in calls] == [
+    assert sorted(item[3] for item in calls) == [
         [sys.executable, "account-a"], [sys.executable, "account-b"],
     ]
     events = [execute(store, "pending", scope=scope)["events"][0]
@@ -91,6 +106,7 @@ def test_unbound_account_or_repository_never_uses_another_binding(store, monkeyp
 
 
 def test_fetch_releases_disk_custody_and_does_not_apply_to_new_registration(store, monkeypatch):
+    monkeypatch.setattr(observer, "_MAX_READS", 1)
     original, receipt = register(store)
     second = ReplayStore(store.root, store.namespace)
     fresh = []
@@ -118,6 +134,7 @@ def test_fetch_releases_disk_custody_and_does_not_apply_to_new_registration(stor
 def test_earlier_read_skips_completed_target_and_preserves_later_progress(
     store, monkeypatch, completion,
 ):
+    monkeypatch.setattr(observer, "_MAX_READS", 1)
     now = [time.time()]
     store.clock = lambda: now[0]
     register(store)
@@ -231,6 +248,7 @@ def test_oversized_event_is_target_local_across_repeated_cycles(store, monkeypat
     ValueError("invalid observation"), storage.ReplayStoreInvalid("corrupt store"),
 ])
 def test_other_observation_refusals_stop_cycle(store, monkeypatch, error):
+    monkeypatch.setattr(observer, "_MAX_READS", 1)
     register(store)
     register(store, request="other", number=2)
     calls = []
@@ -251,6 +269,7 @@ def test_other_observation_refusals_stop_cycle(store, monkeypatch, error):
 
 @pytest.mark.parametrize("fail_read", [False, True])
 def test_authority_loss_in_read_stops_apply_and_later_reads(store, monkeypatch, fail_read):
+    monkeypatch.setattr(observer, "_MAX_READS", 1)
     register(store)
     register(store, request="second", number=2)
     lost = [False]
@@ -355,6 +374,238 @@ def test_parallel_cycle_is_refused_without_waiting_for_inflight_provider(store, 
         thread.join(3)
     assert not thread.is_alive()
     assert results[0]["observed"] == 1
+
+
+def test_slow_target_does_not_block_bounded_refill_or_shared_delivery(store, monkeypatch):
+    for number in range(1, 8):
+        register(store, request=f"request-{number}", number=number)
+    register(store, PEER, number=2)
+    register(store, FOREIGN, number=8)
+    slow, release, full, advance, refilled = (threading.Event() for _ in range(5))
+    lock = threading.Lock()
+    calls, active, peak = [], 0, 0
+    observe = store.observe
+    applied = []
+    delivered = []
+
+    def fetch(repo, number, *args, **kwargs):
+        nonlocal active, peak
+        with lock:
+            calls.append(number)
+            active += 1
+            peak = max(peak, active)
+            if active == 4:
+                full.set()
+        try:
+            if number == 1:
+                slow.set()
+                assert release.wait(8)
+            else:
+                assert advance.wait(8)
+            return PRSnapshot(merged=True)
+        finally:
+            with lock:
+                active -= 1
+
+    def commit(target, snapshot, **kwargs):
+        result = observe(target, snapshot, **kwargs)
+        applied.append(target.number)
+        if set(applied) == set(range(2, 8)):
+            delivered.extend((
+                execute(store, "pending")["events"],
+                execute(store, "pending", scope=PEER)["events"][0],
+            ))
+            refilled.set()
+        return result
+
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    monkeypatch.setattr(store, "observe", commit)
+    owner = ReplayObserver(store, bindings=(binding(),))
+    thread, result = start_cycle(owner)
+    try:
+        assert slow.wait(3) and full.wait(3)
+        assert sorted(calls) == [1, 2, 3, 4]
+        advance.set()
+        assert refilled.wait(5)
+        assert thread.is_alive() and not result.done()
+        assert peak == 4 and active == 1
+        assert sorted(calls) == list(range(1, 8))
+        events, peer_event = delivered
+        shared = next(event for event in events if event["number"] == 2)
+        assert shared["event_id"] != peer_event["event_id"]
+        assert shared["registration_id"] != peer_event["registration_id"]
+        with pytest.raises(RuntimeError, match="already running"):
+            cycle(owner)
+    finally:
+        advance.set()
+        release.set()
+        thread.join(8)
+    assert not thread.is_alive()
+    assert result.result() == {
+        "status": "observed", "observed": 7, "unavailable": 0, "unbound": 1,
+    }
+
+
+@pytest.mark.parametrize("ending", ["disconnect", "uncertain", "invalid"])
+def test_parallel_failure_stops_refill_but_joins_actual_reads(store, monkeypatch, ending):
+    for number in range(1, 8):
+        register(store, request=f"request-{number}", number=number)
+    entered, release, lost, failed = (threading.Event() for _ in range(4))
+    calls = []
+    observe = store.observe
+
+    def checkpoint():
+        if lost.is_set():
+            failed.set()
+            raise PermissionError("disconnected")
+
+    def fetch(repo, number, *args, **kwargs):
+        calls.append(number)
+        if number == 1:
+            entered.set()
+            assert release.wait(8)
+        else:
+            assert entered.wait(3)
+        return PRSnapshot(merged=True)
+
+    def commit(target, snapshot, **kwargs):
+        if ending == "disconnect":
+            lost.set()
+            checkpoint()
+        if ending == "invalid":
+            failed.set()
+            raise ValueError("invalid state")
+        observe(target, snapshot, **kwargs)
+        failed.set()
+        return {"status": "uncertain", "reason": "state_commit_uncertain"}
+
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    monkeypatch.setattr(store, "observe", commit)
+    owner = ReplayObserver(store, bindings=(binding(),))
+    thread, result = start_cycle(owner, checkpoint=checkpoint)
+    try:
+        assert failed.wait(5)
+        assert thread.is_alive() and not result.done()
+        assert set(calls) <= {1, 2, 3, 4}
+        with pytest.raises(RuntimeError, match="already running"):
+            cycle(owner)
+    finally:
+        release.set()
+        thread.join(8)
+    assert not thread.is_alive()
+    if ending == "uncertain":
+        assert result.result()["status"] == "uncertain"
+        events = execute(store, "pending")["events"]
+        assert len(events) == 1
+        assert cycle(ReplayObserver(store, bindings=()))["observed"] == 0
+        assert execute(store, "pending")["events"] == events
+    else:
+        with pytest.raises(PermissionError if ending == "disconnect" else ValueError):
+            result.result()
+        assert execute(store, "pending")["events"] == []
+    assert set(calls) <= {1, 2, 3, 4}
+
+
+def test_real_native_slow_child_does_not_delay_another_target(store, tmp_path, monkeypatch):
+    register(store)
+    _, receipt = register(store, request="second", number=2)
+    native, entered, release = (tmp_path / name for name in ("native.py", "entered", "release"))
+    native.write_text(
+        "import json,pathlib,sys,time\n"
+        f"entered=pathlib.Path({str(entered)!r})\n"
+        f"release=pathlib.Path({str(release)!r})\n"
+        "number=int(sys.argv[4])\n"
+        "deadline=time.monotonic()+8\n"
+        "if number==1: entered.touch()\n"
+        "while not (release.exists() if number==1 else entered.exists()):\n"
+        "    assert time.monotonic()<deadline\n"
+        "    time.sleep(.01)\n"
+        f"print(json.dumps(dict(schema='agent-worktrees.pr-snapshot',version=1,repo={SCOPE.repo!r},"
+        "pr=number,provider='github',pr_state='closed',merged=True,head_sha='head',"
+        "base_ref='main',mergeable=True,checks_state='success',title='Fixture',draft=False)))\n",
+        encoding="utf-8",
+    )
+    applied = threading.Event()
+    events = []
+    observe = store.observe
+
+    def commit(target, snapshot, **kwargs):
+        result = observe(target, snapshot, **kwargs)
+        if target.number == 2:
+            events.extend(execute(store, "pending")["events"])
+            applied.set()
+        return result
+
+    monkeypatch.setattr(store, "observe", commit)
+    owner = ReplayObserver(store, bindings=(binding(prefix=(sys.executable, str(native))),))
+    thread, result = start_cycle(owner)
+    try:
+        assert applied.wait(5)
+        assert entered.exists() and not release.exists() and thread.is_alive()
+        assert len(events) == 1 and events[0]["registration_id"] == receipt["registration_id"]
+    finally:
+        release.touch()
+        thread.join(10)
+    assert not thread.is_alive() and result.result()["observed"] == 2
+    assert {event["number"] for event in execute(store, "pending")["events"]} == {1, 2}
+
+
+def test_deadlines_are_swept_while_every_read_slot_is_blocked(store, monkeypatch):
+    now = [time.time()]
+    store.clock = lambda: now[0]
+    for number in range(1, 5):
+        register(store, request=f"request-{number}", number=number)
+    original, receipt = register(store, request="deadline", number=5, deadline_at=now[0] + 10)
+    full, release, swept, idle = (threading.Event() for _ in range(4))
+    lock = threading.Lock()
+    calls, events = [], []
+    writes, polls = [], []
+    sweep = store.sweep_timeouts
+    write = storage._atomic_write_json
+
+    def commit(path, state):
+        writes.append(state)
+        return write(path, state)
+
+    def fetch(repo, number, *args, **kwargs):
+        with lock:
+            calls.append(number)
+            if len(calls) == 4:
+                full.set()
+        assert release.wait(8)
+        return PRSnapshot(merged=True)
+
+    def timeouts(**kwargs):
+        result = sweep(**kwargs)
+        if full.is_set() and now[0] <= original["deadline_at"]:
+            polls.append(result)
+            if len(polls) >= 3:
+                idle.set()
+        if now[0] > original["deadline_at"] and not swept.is_set():
+            events.extend(execute(store, "pending")["events"])
+            swept.set()
+        return result
+
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    monkeypatch.setattr(store, "sweep_timeouts", timeouts)
+    monkeypatch.setattr(storage, "_atomic_write_json", commit)
+    thread, result = start_cycle(ReplayObserver(store, bindings=(binding(),)))
+    try:
+        assert full.wait(3)
+        assert idle.wait(3)
+        assert writes == []
+        now[0] += 11
+        assert swept.wait(3)
+        assert thread.is_alive() and sorted(calls) == [1, 2, 3, 4]
+        assert len(events) == 1 and events[0]["timed_out"]
+        assert events[0]["registration_id"] == receipt["registration_id"]
+        assert len(writes) == 1
+    finally:
+        release.set()
+        thread.join(8)
+    assert not thread.is_alive() and result.result()["observed"] == 4
+    assert sorted(calls) == [1, 2, 3, 4]
+    assert execute(store, "register", original) == receipt
 
 
 @pytest.mark.parametrize("field", ["prefix", "credential_command"])

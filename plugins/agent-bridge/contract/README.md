@@ -74,6 +74,47 @@ are checked by tests. Provenance names a real local source checkpoint, not an
 invented future publication commit. This is source evidence, not a deployed
 daemon, qualified native session or task-verification claim.
 
+## HTTP-46 startup observation evidence
+
+HTTP generation 46 adds startup-progress capability negotiation for observing an
+existing ordinary hosted session. `inputs/http46/startup-observation.json` is
+independently authored operation evidence: the real parser, producer, observer,
+GET preflight, extracted prompt client and send renderer replay its expectations
+against synthetic peers and clocks. It covers JSON and text protocol-45 refusal
+before mutation, receipt-time communication expiry, additive progress/keepalives,
+the independent 300-second startup ceiling, readiness ending startup clocks, and
+exactly one `no_resume: true`, `allow_retry: false` prompt submission. A lost
+admission acknowledgement after readiness remains code 70/unknown, not retryable.
+This packet is not a real deployed-daemon or native-host capture.
+
+Every generation-45 fixture remains byte-for-byte frozen. Generation-46 linked
+re-attestations retain those complete old packet bodies, including their old
+advertisements and capability floors, and name the exact predecessor path/hash.
+They assert preservation of those operation families, not new independent
+runtime observations or current health responses. The separate new-operation
+packet asserts the actual current advertisement/floor of 46. Shared startup
+packets explicitly link that new operation; they are not independent captures.
+`client_prompt.py` owns the extracted observed prompt-admission wire behavior
+and is registered as semantic. Preparation/connection forwarders are classified
+non-semantic because the registered startup producer owns their event framing.
+
+After committing matching source, stage the new replay test and independent
+input so the repository snapshot runner includes them, then run with the
+repository's existing Python 3.11 outer tooling:
+
+```text
+python plugins/agent-bridge/contract/capture_http46.py --source-commit <full-source-commit> --write
+python plugins/agent-bridge/contract/capture_http46.py --source-commit <full-source-commit>
+python tools/run-plugin-tests.py agent-bridge --allow-explicit-tiers --test-file tests/test_http46_startup_evidence.py
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+The generator verifies committed source bytes and all historical fixture hashes,
+runs the bounded model-free replay before writing, and writes only new
+generation-46 fixture paths plus the registry. It does not edit old captures,
+production source, capability floors or the checker. Stage its new outputs
+before the final snapshot-based replay. Missing history is never fetched.
+
 The client and CLI keyed-send vectors reference that shared new-operation
 evidence explicitly; they are not independent captures or legacy re-attestations.
 Prompt admission also retains linked native-bound and managed-drain predecessor

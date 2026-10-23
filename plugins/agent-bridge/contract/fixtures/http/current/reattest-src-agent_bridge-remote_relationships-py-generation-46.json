@@ -1,0 +1,76 @@
+{
+  "capability": {
+    "remote_acp_ownership": 43,
+    "remote_acp": 38,
+    "remote_acp_targets": 41,
+    "unsupported_status": 426
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions",
+    "json": {
+      "agent": "remote-acp:example-agent",
+      "caller_owner_ref": "example-host/example-project/example-worktree",
+      "remote_session_id": "native-example",
+      "protocol_version": 45
+    }
+  },
+  "journal": {
+    "id": "relationship-example",
+    "owner": "example-host/example-project/example-worktree",
+    "claim": {
+      "ref": "example-authority/relationships/l1.example"
+    },
+    "native_id": "native-example",
+    "uncertain": false
+  },
+  "inspection": {
+    "ownership": "owned",
+    "relationship_id": "relationship-example",
+    "owner": "example-host/example-project/example-worktree",
+    "claim_ref": "example-authority/relationships/l1.example",
+    "native_id": "native-example",
+    "uncertain_remote_outcome": false
+  },
+  "unreserved_retirement": {
+    "authority": {
+      "schema": "copilot-extensions.resource-relationship",
+      "version": 1,
+      "ok": true,
+      "owner": "example-host/example-project/example-worktree",
+      "request_id": "relationship-example",
+      "absent": true
+    },
+    "inspection": {
+      "ownership": "closed",
+      "relationship_id": "relationship-example",
+      "owner": "example-host/example-project/example-worktree",
+      "claim_ref": null,
+      "native_id": null,
+      "uncertain_remote_outcome": false,
+      "reservation_absent": true
+    }
+  },
+  "terminal_phases": [
+    "retired",
+    "closed"
+  ],
+  "retirement": {
+    "peer_service_owned": false,
+    "peer_history_deleted": false,
+    "transfer_supported": false
+  },
+  "independent_expectations": "Hand-authored managed owner capability floor, client request identity and public relationship inspection shape. Local-only retirement and unsupported transfer are exercised by managed lifecycle and native provider tests, not inferred from this vector.",
+  "captured_from": {
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/remote_relationships.py",
+    "source_git_blob": "7c1c1ed66582315cafc9d6242846b81f283b0095",
+    "protocol_generation": 46,
+    "source_sha256": "e53882344d73fea5c1334bc280d4db253e34b7773d7c790a6da4af81c0dcfd2a"
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-remote_relationships-py-generation-45.json",
+    "sha256": "e696a81ae82090ce16ac5962dc224e293f0b51d9ff52e11f81649f92558ef908"
+  }
+}

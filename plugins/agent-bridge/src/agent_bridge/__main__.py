@@ -174,6 +174,11 @@ def _add_stream_args(p: argparse.ArgumentParser) -> None:
 
 
 def _worktrees_get(key: str) -> str | None:
+    from .startup_observation import current
+    observation = current()
+    if observation is not None:
+        observation.local_phase("caller-discovery")
+        observation.check()
     exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow agent-worktrees-management
     if not exe:
         return None
@@ -186,6 +191,9 @@ def _worktrees_get(key: str) -> str | None:
             "Worktree lookup failed (%s): %s", key, type(exc).__name__,
         )
         return None
+    if observation is not None:
+        observation.received(event="caller-discovery-response")
+        observation.check()
     if r.returncode != 0:
         logging.getLogger(__name__).warning(
             "Worktree lookup failed (%s): exit %s", key, r.returncode,
@@ -266,6 +274,13 @@ def _phased_timeouts():
 
 
 def _startup_request_timeout(*, resume: bool = False, fresh_fallback: bool = False) -> float:
+    from .startup_observation import current
+    observation = current()
+    if observation is not None:
+        if observation.clock.ready:
+            return observation.clock.policy.communication
+        observation.check()
+        return observation.clock.process_remaining()
     from .session_manager import _MAX_RESUME_ROUNDS
 
     timeouts = _phased_timeouts()

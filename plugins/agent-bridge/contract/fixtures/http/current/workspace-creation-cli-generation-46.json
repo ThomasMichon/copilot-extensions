@@ -1,0 +1,72 @@
+{
+  "evidence_family": "ordinary-workspace-creation-cli-v1",
+  "request": {
+    "argv": [
+      "--json",
+      "create",
+      "example@local",
+      "--creation-key",
+      "logical-work",
+      "--min-daemon-protocol",
+      "45"
+    ],
+    "wire": {
+      "protocol_version": 45,
+      "agent": "example@local",
+      "creation_key": "logical-work",
+      "sender_repo": "example",
+      "caller_id": "caller",
+      "force_new": true
+    }
+  },
+  "server_response": {
+    "session_id": "bridge-a",
+    "status": "idle",
+    "creation": {
+      "status": "complete",
+      "native_session_id": "native-a",
+      "worktree": {
+        "id": "worktree-a",
+        "path": "synthetic-path"
+      }
+    }
+  },
+  "complete_receipt": {
+    "session_id": "bridge-a",
+    "status": "awaiting_first_prompt",
+    "creation": {
+      "status": "complete",
+      "native_session_id": "native-a",
+      "worktree": {
+        "id": "worktree-a",
+        "path": "synthetic-path"
+      }
+    },
+    "connection": {
+      "repo": "example",
+      "worktree_id": "worktree-a",
+      "native_session_id": "native-a",
+      "target_dir": "synthetic-path"
+    },
+    "ready": true
+  },
+  "floor_refusal": {
+    "daemon_protocol": 44,
+    "required_protocol": 45,
+    "status": 426,
+    "creation_requests": 0
+  },
+  "scope": "Independent synthetic expected vectors for the real CLI/parser/client builder; no workspace allocation or native backend is executed.",
+  "captured_from": {
+    "commit": "fc439fc4b4e4c6e160868e94450c4bed57eddac0",
+    "plugin_version": "0.4.1-dev3",
+    "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
+    "source_git_blob": "e34368a3bc620f55c3d0e97032ccf8c1e117c9f3",
+    "protocol_generation": 46,
+    "source_sha256": "0ccd7487c5b9e661a45ebcfb8859fb9994eeb4672c26f1beb8b2f97fe821925f"
+  },
+  "reattested_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-cli-generation-45.json",
+    "sha256": "5108d0d7bdd605652c00b1aa6dec218a560bed9e8f632991596e497878a9bd60"
+  }
+}

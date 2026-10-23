@@ -13,6 +13,10 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent_procutil.startup import StartupTimeouts
 
 from agent_procutil.diagnostics import (
     normalized_diagnostic_text,
@@ -160,8 +164,9 @@ class Trace:
 
 def begin(prefix: list[str], argv: list[str], *, prompt_input: str | None = None,
           input_reference: str | None = None, timeout: float | None = 180,
-          input_source: str = "frozen_startup_invocation") -> Trace | None:
-    """Record the actual call, not a recipe or an alternate execution route."""
+          input_source: str = "frozen_startup_invocation",
+          startup_policy: StartupTimeouts | None = None) -> Trace | None:
+    """Record the actual call; optional startup clocks disambiguate legacy timeout."""
     root = install_dir()
     if not _enabled(root):
         return None
@@ -207,6 +212,12 @@ def begin(prefix: list[str], argv: list[str], *, prompt_input: str | None = None
                 "content": "omitted",
             },
         }
+        if startup_policy is not None:
+            record["startup_policy"] = {
+                "communication_seconds": startup_policy.communication,
+                "process_seconds": startup_policy.process,
+                "expected_seconds": startup_policy.expected,
+            }
         with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
                        "w", encoding="utf-8") as sink:
             sink.write(json.dumps(record, ensure_ascii=True) + "\n")

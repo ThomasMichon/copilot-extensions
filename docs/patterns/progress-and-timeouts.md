@@ -19,6 +19,12 @@ for slow preparation, contention and disruptions. They are independently named
 and selected; an old generic `timeout` must not silently serve both purposes.
 This contract does not select one universal numeric default.
 
+Startup readiness and task execution are different boundaries. Measure ordinary
+startup against the one-minute end-to-end expectation, separately from its
+selected disruption allowance. End the startup clock at readiness and retain
+the subsequent turn's own execution policy; do not turn a five-minute startup
+grace ceiling into a five-minute limit on already-running work.
+
 Start the communication clock when waiting for the target, not after the first
 update: startup silence is observable too. Measure local elapsed intervals
 monotonically. Receipt of a target update renews the silence deadline from its

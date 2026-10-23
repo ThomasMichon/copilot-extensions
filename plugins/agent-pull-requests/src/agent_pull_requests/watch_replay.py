@@ -240,10 +240,13 @@ class WatchReplay:
             )
         ), None)
 
-    def _change(self, operation: Callable[[WatchReplay], dict]) -> dict:
+    def _change(
+        self, operation: Callable[[WatchReplay], dict], *, skip_unchanged: bool = False,
+    ) -> dict:
         with self._lock:
+            before = self._snapshot()
             staged = WatchReplay(
-                self.namespace, state=self._snapshot(), commit=self._commit, clock=self._clock,
+                self.namespace, state=before, commit=self._commit, clock=self._clock,
             )
             staged._records = [
                 record for record in staged._records
@@ -252,11 +255,21 @@ class WatchReplay:
             ]
             result = operation(staged)
             envelope = staged._snapshot()
-            try:
-                self._commit(envelope)
-            except StateCommitUncertain:
-                self._records, self._registries = staged._records, staged._registries
-                return {"status": "uncertain", "reason": "state_commit_uncertain"}
+            comparable = envelope
+            if skip_unchanged:
+                comparable = copy.deepcopy(envelope)
+                # Replay deadlines are absolute; elapsed monotonic projections
+                # alone are not a durable state change.
+                for state in (before, comparable):
+                    for group in state["registries"]:
+                        for entry in group["subscriptions"]:
+                            entry.pop("remaining_timeout", None)
+            if not skip_unchanged or comparable != before:
+                try:
+                    self._commit(envelope)
+                except StateCommitUncertain:
+                    self._records, self._registries = staged._records, staged._registries
+                    return {"status": "uncertain", "reason": "state_commit_uncertain"}
             self._records, self._registries = staged._records, staged._registries
             return result
 
@@ -381,7 +394,7 @@ class WatchReplay:
                 registry.sweep_timeouts()
             return {"status": "swept"}
 
-        return self._change(sweep)
+        return self._change(sweep, skip_unchanged=True)
 
     def pending(self, scope: ConsumerScope, *, limit: int = MAX_BATCH) -> dict:
         if type(limit) is not int or not 1 <= limit <= MAX_BATCH:

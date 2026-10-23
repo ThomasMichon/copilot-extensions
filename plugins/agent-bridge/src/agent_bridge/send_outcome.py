@@ -125,6 +125,7 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
     is exactly one JSON document."""
     global _json_stdout
     from .client import BridgeClientError
+    from .startup_observation import StartupObservationError
 
     as_json = bool(getattr(args, "json", False))
     target = getattr(args, "target", None)
@@ -150,6 +151,16 @@ def run_send(args: Any, send: Callable[[Any], None]) -> None:
             # The target vanished after it was resolved (e.g. while resuming it).
             raise SendRefused("refused_unavailable", reason="not_found", retryable=False,
                               target=target, error=str(exc.detail)) from exc
+    except StartupObservationError as exc:
+        print(f"[UNKNOWN] {exc}", file=sys.stderr, flush=True)
+        if as_json:
+            emit({
+                "outcome": "unknown", "target": target, "retryable": False,
+                "clock": exc.clock,
+                "reason": exc.reason or f"startup_{exc.clock}_timeout", "phase": exc.phase,
+                "elapsed_s": round(exc.elapsed, 3),
+            })
+        sys.exit(70)
     except SendRefused as refused:
         refused.target = refused.target or target
         print(f"[FAIL] {refused.error}", file=sys.stderr)
