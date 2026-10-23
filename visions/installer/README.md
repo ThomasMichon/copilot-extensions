@@ -279,6 +279,15 @@ Ordinary CLI, agent, hook and maintenance callers submit durable requests rather
 than becoming independent installers. Waiting observes that same operation;
 closing a caller does not abandon its execution or result.
 
+Exclusivity means one active installation operation for the same installation,
+including its subordinate installer work, not ownership of unrelated services
+or agent sessions. Lock and owner records identify the live installer process
+and its source. They coordinate cooperation; stale records, an absent source
+or an installer that is no longer running cannot permanently veto a new
+installer. A fresh intact installer can assume control through the supported
+normal or explicitly approved repair path without depending on the broken
+installation to grant permission.
+
 The execution owner has a standalone installation foundation available before
 plugin provisioning, including first installation without an existing Python
 runtime. A plugin can establish that foundation from its own installation
@@ -289,10 +298,14 @@ installers. Once ready, first-use publication follows the same durable request
 contract as later updates. Missing, incompatible or interrupted foundation state
 is explicit, never permission to fall back to an independent installer.
 
-Equivalent pending requests can coalesce without erasing an explicit target,
-source selection or installation boundary. Pending, running, interrupted,
-blocked and completed outcomes remain attributable and observable. Recovery
-does not mistake an uncertain prior execution for success or silently replay it.
+Equivalent same-target requests debounce and share the active operation's
+observable result; different-target requests wait or queue rather than race.
+One authoritative desired-version selection supplies normal installation
+targets, keeping automatic advancement monotonic instead of allowing competing
+callers to cause accidental rollback. Deliberate repair or rollback selection
+remains explicit. Pending, running, interrupted, blocked and completed outcomes
+remain attributable and observable. Recovery does not mistake a failed prior
+execution for success or silently replay it.
 Existing per-slot construction and publication custody remains in force beneath
 the transaction owner.
 
@@ -310,6 +323,35 @@ responsibility: a maintenance trigger submits to the execution owner rather
 than introducing another installation driver. Standalone plugins retain their
 independent installation and recovery paths; adopting this suite-level owner
 does not make Manager a mandatory plugin dependency.
+
+### normal-and-repair-installation
+Normal background installation limits trigger fan-out and converges on the
+authoritative desired version. Same-version requests debounce; a different
+version waits or queues behind the active installation. Blocking acquisition,
+I/O, permission or execution failures leave clean failed-candidate state
+without activating the failed version. Compatible zero-downtime handoff is
+preferred, not a veto on the selected replacement: an incompatible or stalled
+old service is retired by bounded cold takeover rather than defeating the new
+installation solely because handoff failed. Success still requires the new
+installation to be ready.
+
+Explicit force/repair installation gives any intact authorized installer a
+bounded way to take charge of its addressed installation, including when the
+previous installation, queue or owner records are corrupt. Agents request
+operator approval before invoking this disruptive mode. It may briefly attempt
+cooperation, then terminates previous installers and older managed service
+daemons within that installation's process scope, invalidates stale ownership
+and installation-control state, and converges on its explicitly selected code.
+An old installer cannot veto its replacement. Competing repair callers still
+converge on one active writer rather than repeatedly killing one another.
+
+A successful repair leaves old generations inert: no older managed installer
+or daemon remains serving or able to reactivate itself through stale launch,
+routing or maintenance state. Inert rollback artifacts need not be physically
+erased. The repair preserves application data and unrelated installations;
+its approval does not authorize an indiscriminate process kill or data wipe.
+Zero downtime is not guaranteed. Failures remain explicit rather than falsely
+claiming that all old code is retired or the new installation is ready.
 
 ### source-backed-maintenance
 An opted-in installation stays healthy and current through regular,
