@@ -39,8 +39,9 @@ native acceptance targets, not claims inferred from helper tests.
   the [configuration amendment](configuration-cache-seam.md#execution-amendment).
   Startup composition, scalar binding/API/epoch logic, pending binding,
   telemetry, authoritative row-feed and protocol ownership remain unchanged.
-- Shared `harness_state` supplier extraction is proposal-only until separately
-  admitted. No other phase gains that authority by implication.
+- Shared `harness_state` supplier extraction and the narrow locality/refusal
+  seams now have explicit admission, subject to the additional source-plan
+  review below. No other phase gains authority by implication.
 
 ## Context
 
@@ -121,6 +122,8 @@ episode requiring its own reviewed source amendment before implementation.
   retry, manual clear/rebind races and zero-work warm reads.
 - [ ] Obtain supplier-API admission before editing `harness_state`; then qualify
   the actual selected-supplier path without unrelated-project discovery.
+- [ ] Review the supplier/locality amendment before those functional edits;
+  keep the headed-launch bypass guarded or explicitly blocked pending admission.
 - [ ] Pass review and required checks, merge source PRs and explicitly retain
   native/release/installed obligations. Do not close #7940 with a production
   supplier or derived-view gap.
@@ -258,3 +261,27 @@ interfaces. Do not create a general request broker or shared polling layer.
   no invented template syntax, saturated-host benchmark or installed rollout.
 - Shared supplier extraction remains unapproved. The source amendment is
   proposed, not already implemented.
+
+### 2026-10-23 — Supplier and locality admission amendment
+
+- Fresh issue/PR/task checks found no competing owner. Existing prototype and
+  original failing-control evidence are preserved separately from this
+  documentation-only amendment.
+- Admitted: the exact `ProjectAnchorSelection`/`project_anchor_selection` owner
+  API and extraction/reuse of existing registry path/anchor rules; plus
+  `data_local.is_local` not-ready handling and immediate
+  `engine_maintenance_actions._resume_decision`/`_decide` visible refusal.
+- Known locality stays Boolean. Unavailable configuration is an explicit
+  not-ready outcome, never a successful `False`. Internal deferred decisions
+  retain a refusal marker even if Restore changes their action label; `_decide`
+  reports the reason and returns without exit/launch. Existing known-local and
+  known-remote paths keep their current results.
+- One additional immediate consumer bypass was found:
+  `headed_actions.open_worktree_cli_headed` builds a launch request without
+  `_decide`. Its one refusal-marker guard needs explicit admission before that
+  path is safe to publish. No generic action-engine rewrite is proposed.
+- Source review additionally identified `_resume_embodied_worktree_cli`'s
+  unconditional result mutation/success after `_decide`, and the direct
+  locality checks in its synthetic path and `_embody_task_cli`. Their exact
+  no-effect refusal controls are explicit additional admission/publication
+  dependencies in the amended plan.
