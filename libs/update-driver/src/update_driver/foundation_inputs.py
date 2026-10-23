@@ -14,7 +14,7 @@ PACKAGES = {
     "single-instance-lease": ("agent-single-instance-lease", set()),
 }
 SUPPORT = (
-    "installer-engine.ps1",
+    "installer-engine.ps1", "installer-engine.sh",
     "installer_engine.py", "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_dependency_config.py", "runtime_launcher.py", "versioned_runtime.py",
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
@@ -117,8 +117,9 @@ def check_health() -> None:
         raise FoundationInputError("unsupported foundation execution protocol")
     for package, names in (
         (agent_procutil, ("native_daemon.ps1", "native_owned.ps1")),
-        (single_instance_lease, ("operation.ps1",)),
-        (update_driver, ("participant.ps1", "foundation.ps1", "directory.ps1")),
+        (single_instance_lease, ("operation.ps1", "operation.sh")),
+        (update_driver, ("participant.ps1", "foundation.ps1", "directory.ps1",
+                         "foundation.sh", "foundation-source.sh", "json-query.awk")),
     ):
         if any(not files(package).joinpath(name).is_file() for name in names):
             raise FoundationInputError("foundation is missing native custody assets")

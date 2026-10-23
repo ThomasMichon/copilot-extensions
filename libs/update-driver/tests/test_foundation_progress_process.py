@@ -15,38 +15,9 @@ import agent_procutil as pu
 from update_driver import InterruptedError, RequestSpec, TrustedRunner, enqueue, foundation_status
 from update_driver import foundation_state as fs
 from update_driver._directory import create_queue_directory
-from update_driver.foundation_inputs import PACKAGES, SUPPORT, inspect
+from update_driver.foundation_inputs import SUPPORT, inspect
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="stock Windows native foundation progress")
-
-
-@pytest.fixture
-def native_source(area):
-    common = area / "source"
-    for directory, (name, dependencies) in PACKAGES.items():
-        package = common / directory
-        package.mkdir(parents=True)
-        lines = [
-            "[project]", f"name = {json.dumps(name)}", 'version = "1.0.0"',
-            "dependencies = " + json.dumps(sorted(dependencies)), "[tool.uv.sources]",
-        ]
-        for dependency in sorted(dependencies):
-            target = next(key for key, value in PACKAGES.items() if value[0] == dependency)
-            lines.append(f'{dependency} = {{ path = "../{target}", editable = true }}')
-        (package / "pyproject.toml").write_text("\n".join(lines), encoding="utf-8")
-        (package / "source.py").write_text("pass\n", encoding="utf-8")
-    plugin = common / "update-driver"
-    (plugin / "scripts").mkdir()
-    for name in SUPPORT:
-        (plugin / "scripts" / name).write_text("# fixture\n", encoding="utf-8")
-    # The native inventory must match Python's exclusion and case-sensitive sorting.
-    (plugin / "__pycache__").mkdir()
-    (plugin / "__pycache__" / "ignored.pyc").write_bytes(b"ignored")
-    (plugin / "Z.py").write_text("Z\n", encoding="utf-8")
-    (plugin / "a.py").write_text("a\n", encoding="utf-8")
-    (plugin / "\ue000.py").write_text("bmp\n", encoding="utf-8")
-    (plugin / "\U00010000.py").write_text("astral\n", encoding="utf-8")
-    return plugin
 
 
 def command(root, plugin, mode):
@@ -98,6 +69,19 @@ def test_native_directory_creation_matches_queue_policy_without_acl_migration(na
     assert (root / "trailing" / "fresh").is_dir()
     assert (root / "directory-ok").is_file()
     assert not (root / fs.FILENAME).exists()
+
+
+def test_native_freeze_cannot_mutate_sources_below_an_ancestor_execution_root(native_source, area):
+    before = {
+        path.relative_to(native_source.parent): path.read_bytes()
+        for path in native_source.parent.rglob("*") if path.is_file()
+    }
+    run_native(area, native_source, "refuse-freeze")
+    after = {
+        path.relative_to(native_source.parent): path.read_bytes()
+        for path in native_source.parent.rglob("*") if path.is_file()
+    }
+    assert after == before and not (area / fs.FILENAME).exists()
 
 
 def test_canonical_prerequisite_helpers_preserve_signed_preference_and_python_floor(native_source, area):

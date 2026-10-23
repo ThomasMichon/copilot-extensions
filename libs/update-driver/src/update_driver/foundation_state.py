@@ -28,6 +28,10 @@ class FoundationStateError(RuntimeError):
     """Missing ownership, corrupt progress or unproved native settlement."""
 
 
+class _SnapshotReplaced(FoundationStateError):
+    """An ordinary progress file changed between its path and descriptor probes."""
+
+
 @dataclass(frozen=True)
 class FoundationOperation:
     operation_id: str
@@ -152,6 +156,19 @@ def _open_read(path: Path):
 
 def read(root: Path) -> FoundationOperation | None:
     """Read a bounded snapshot; absence never creates or repairs anything."""
+    attempts = 0
+    while True:
+        try:
+            return _read_snapshot(root)
+        except _SnapshotReplaced as error:
+            attempts += 1
+            if attempts == 3:
+                raise FoundationStateError(
+                    "foundation operation changed during repeated observation",
+                ) from error
+
+
+def _read_snapshot(root: Path) -> FoundationOperation | None:
     path = _root(root) / FILENAME
     try:
         before = path.lstat()
@@ -170,8 +187,10 @@ def read(root: Path) -> FoundationOperation | None:
             raise FoundationStateError("foundation operation must be a bounded plain file")
         with _open_read(path) as stream:
             opened = os.fstat(stream.fileno())
-            if not _plain(opened) or not os.path.samestat(before, opened):
-                raise FoundationStateError("foundation operation changed during observation")
+            if not _plain(opened):
+                raise FoundationStateError("foundation operation descriptor must be a plain file")
+            if not os.path.samestat(before, opened):
+                raise _SnapshotReplaced("foundation operation changed during observation")
             raw = stream.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES:
             raise FoundationStateError("foundation operation exceeds its size bound")

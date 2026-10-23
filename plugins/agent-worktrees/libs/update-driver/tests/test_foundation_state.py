@@ -79,6 +79,35 @@ def test_begin_requires_exact_live_execution_custody(space):
     assert foundation_status(root=space) is None
 
 
+@pytest.mark.parametrize("continuous", [False, True])
+def test_snapshot_replacement_retries_only_verified_identity_races(space, monkeypatch, continuous):
+    path = space / fs.FILENAME
+    initial = fs.FoundationOperation("a" * 32, DIGEST, BOOT, "running", 1)
+    selected = replace(initial, operation_id="b" * 32)
+    path.write_text(json.dumps(document(initial)), encoding="utf-8")
+    original_open = fs._open_read
+    probes = []
+
+    def replacing_open(candidate):
+        probes.append(candidate)
+        if continuous or len(probes) == 1:
+            temporary = space / "replacement.json"
+            temporary.write_text(json.dumps(document(selected)), encoding="utf-8")
+            os.replace(temporary, path)
+        return original_open(candidate)
+
+    monkeypatch.setattr(fs, "_open_read", replacing_open)
+    if continuous:
+        with pytest.raises(StateError, match="repeated observation"):
+            foundation_status(root=space)
+        assert len(probes) == 3
+    else:
+        assert foundation_status(root=space) == selected
+        assert len(probes) == 2
+    assert json.loads(path.read_text()) == document(selected)
+    assert not (space / "queue.sqlite3").exists()
+
+
 def test_duplicate_begin_does_not_interrupt_or_overwrite_its_live_operation(space):
     with custody(space) as owned:
         running = fs.begin(space, DIGEST, owned)
