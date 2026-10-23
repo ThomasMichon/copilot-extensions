@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agent_bridge import provider_process
 from agent_bridge.__main__ import (
     _connection_identity,
     _print_connection_identity,
@@ -99,25 +100,25 @@ class TestWorktreesGet:
     def test_worktrees_get_returns_value(self, monkeypatch):
         import agent_bridge.__main__ as m
         monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
-        monkeypatch.setattr(m.subprocess, "run", self._fake_run("dotfiles\n"))
+        monkeypatch.setattr(provider_process, "run_captured", self._fake_run("dotfiles\n"))
         assert m._worktrees_get("project") == "dotfiles"
 
     def test_sender_repo(self, monkeypatch):
         import agent_bridge.__main__ as m
         monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
-        monkeypatch.setattr(m.subprocess, "run", self._fake_run("SPO.Core\n"))
+        monkeypatch.setattr(provider_process, "run_captured", self._fake_run("SPO.Core\n"))
         assert m._sender_repo() == "SPO.Core"
 
     def test_caller_id_uses_worktree_dir(self, monkeypatch):
         import agent_bridge.__main__ as m
         monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
-        monkeypatch.setattr(m.subprocess, "run", self._fake_run("D:/wt/x\n"))
+        monkeypatch.setattr(provider_process, "run_captured", self._fake_run("D:/wt/x\n"))
         assert m._get_caller_id() == "D:/wt/x"
 
     def test_empty_output_is_none(self, monkeypatch):
         import agent_bridge.__main__ as m
         monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
-        monkeypatch.setattr(m.subprocess, "run", self._fake_run("\n"))
+        monkeypatch.setattr(provider_process, "run_captured", self._fake_run("\n"))
         assert m._worktrees_get("project") is None
 
     def test_binary_missing_is_none(self, monkeypatch):
@@ -128,5 +129,5 @@ class TestWorktreesGet:
     def test_nonzero_rc_is_none(self, monkeypatch):
         import agent_bridge.__main__ as m
         monkeypatch.setattr(m.shutil, "which", lambda n: "agent-worktrees")
-        monkeypatch.setattr(m.subprocess, "run", self._fake_run("boom", rc=1))
+        monkeypatch.setattr(provider_process, "run_captured", self._fake_run("boom", rc=1))
         assert m._worktrees_get("bogus") is None
