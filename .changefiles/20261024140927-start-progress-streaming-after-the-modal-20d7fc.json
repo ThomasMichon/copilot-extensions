@@ -1,0 +1,9 @@
+{
+  "comment": "Start progress streaming after the modal's first layout so immediate device instructions are fully visible.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

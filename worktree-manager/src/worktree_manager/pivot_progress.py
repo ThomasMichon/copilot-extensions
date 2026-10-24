@@ -90,7 +90,7 @@ class PivotProgressScreen(ModalScreen):
 
     def on_mount(self):
         self.query_one("#view-cancel", Button).focus()
-        self.run_worker(self._run())
+        self.call_after_refresh(lambda: self.run_worker(self._run()))
 
     async def _run(self):
         loop = asyncio.get_running_loop()
