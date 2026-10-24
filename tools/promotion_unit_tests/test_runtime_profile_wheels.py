@@ -161,7 +161,7 @@ def test_runtime_record_strong_digests_preserve_archive_sha256(algorithm):
         _verify(profile, wheels)
 
 @pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512"])
-def test_generic_record_policy_preserves_sha256_source_facts_and_verified_unpacked_size(algorithm):
+def test_record_source_facts(algorithm):
     profile, wheels = _inputs(mutate={"record_algorithm": algorithm})
     stream = wheels[profile.record()["wheels"][0]["filename"]]
     limits = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
@@ -183,14 +183,14 @@ def test_generic_record_policy_preserves_sha256_source_facts_and_verified_unpack
     ("max_archive_bytes", 1), ("max_expanded_bytes", 1), ("max_member_bytes", 1),
     ("max_metadata_bytes", 1), ("max_metadata_member_bytes", 1), ("max_members", 3),
 ])
-def test_complete_profile_honors_additional_bounded_inspector_limits(field, value):
+def test_inspector_limits(field, value):
     profile, wheels = _inputs()
     limits = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
     with pytest.raises(ProfileError):
         _verify(profile, wheels, limits=replace(limits, **{field: value}))
 
 @pytest.mark.parametrize("deadline", [0, -1, True, float("nan"), float("inf")])
-def test_complete_profile_rejects_invalid_or_exhausted_deadline(deadline):
+def test_invalid_deadline(deadline):
     profile, wheels = _inputs()
     with pytest.raises(ProfileError):
         _verify(profile, wheels, deadline=deadline)
@@ -257,8 +257,41 @@ def test_directory_budget(explicit_limits):
             _verify(profile, wheels, max_metadata_bytes=500,
                     limits=replace(limits, max_metadata_bytes=1_000))
 
+
+def test_final_hash_deadline(monkeypatch):
+    import installer_wheel_inputs
+    import runtime_profile_wheels
+
+    profile, wheels = _inputs()
+    now = [0]
+    final_rehash = [False]
+    monkeypatch.setattr(installer_wheel_inputs, "time", SimpleNamespace(monotonic=lambda: now[0]))
+
+    class ExpiringEOF(io.BytesIO):
+        def read(self, size=-1):
+            data = super().read(size)
+            if final_rehash[0] and not data:
+                now[0] = 2
+            return data
+
+    filename = list(wheels)[-1]
+    stream = ExpiringEOF(wheels[filename].getvalue())
+    wheels[filename] = stream
+    original = runtime_profile_wheels.inspect_wheel
+
+    def inspection(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if args[0] is stream:
+            final_rehash[0] = True
+        return result
+
+    monkeypatch.setattr(runtime_profile_wheels, "inspect_wheel", inspection)
+    with pytest.raises(ProfileError):
+        _verify(profile, wheels, deadline=1)
+    assert final_rehash[0] and now[0] == 2
+
 @pytest.mark.parametrize("parser", ["parse_tag", "parse_wheel_filename", "Requirement"])
-def test_expiry_during_profile_validation_stops_subsequent_packaging_parsing(monkeypatch, parser):
+def test_validation_deadline(monkeypatch, parser):
     import installer_wheel_inputs
     import runtime_profile
 

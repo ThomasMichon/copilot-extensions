@@ -86,6 +86,8 @@ This slice is complete only when its component and integration checks pass or
 an explicit named receiving objective accepts a residual. The parent effort
 retains all acquisition, platform, fallback, retention and rollout obligations.
 
+## Journal
+
 ### Component validation, 2026-10-23
 
 The shared stdlib archive verifier and repository-only semantic profile facade
@@ -167,3 +169,19 @@ Concurrent upstream work added `agent-pull-requests` to the Python installer
 consumer roster before this component merged. The reconciliation preserves
 that new consumer and synchronizes the verifier into its payload too, rather
 than restoring the older roster. Its patch changefile was already included.
+
+### Final digest deadline, 2026-10-24
+
+A final-rehash EOF read can exhaust the deadline without producing another
+chunk, so a pre-read-only guard permits success after expiration. The
+failing-first retained-stream regression reproduces that exact last-wheel
+boundary. The digest helper and complete-profile return boundary now both check
+the shared deadline before success. Validation history is separated from the
+completion specification under this Journal heading.
+
+Four newly added test labels were shortened without changing bodies,
+decorators or cases: the admitted report measured 193,680 repeated label bytes
+for those redundant prefixes. This keeps all new regressions in the unchanged
+bounded packet rather than dropping tests or raising its cap. All 247 selected
+component/profile/bootstrap checks pass locally; fresh publication gates remain
+required.

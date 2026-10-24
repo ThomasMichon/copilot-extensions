@@ -23,6 +23,7 @@ def _archive_digest(archive: BinaryIO, limit: int, deadline: float) -> tuple[str
         if size > limit:
             raise ProfileError("wheel archives exceed the supplied byte budget")
         digest.update(chunk)
+    _check_deadline(deadline)
     return "sha256:" + digest.hexdigest(), size
 
 
@@ -82,6 +83,7 @@ def verify_profile_wheels(
                 raise ProfileError("wheel archive changed during verification")
             remaining_archive -= size
             remaining_unpacked -= unpacked
+        _check_deadline(deadline)
     except (OSError, ValueError, TypeError, PromotionArtifactError) as exc:
         if isinstance(exc, ProfileError):
             raise
