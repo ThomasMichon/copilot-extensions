@@ -1249,8 +1249,16 @@ installers are not dependencies of that repair.
 The fresh Manager then repairs the core through its
 supported, source-policy/ownership-admitted installer before running its normal
 whole-suite `update` orchestration, without fetching a second Manager source.
-An admitted partial shared installation provisions its missing runtime bin
-before updating. An explicit cell retains its canonical context, actual runtime
+For an admitted partial shared installation, Manager requests the native
+update's private missing-runtime opt-in instead of running separate provision
+and update lifecycles. The opt-in requires an explicit legacy root and an
+existing lifecycle ticket; the ordinary ownership and publication-policy checks
+still run before staging and before mutation. It retains the Git prerequisite,
+creates only an ordinary missing runtime bin, and continues through the existing
+full update body. A substituted file or reparse point is refused. Ordinary
+update without the opt-in still refuses an absent runtime bin, and Manager
+rejects an exit-zero repair that leaves it absent.
+An explicit cell retains its canonical context, actual runtime
 root and publication custody throughout repair; invalid or changed cell
 ownership never falls back to the shared root.
 The same applies when current activation selects that cell automatically:
@@ -2016,7 +2024,16 @@ Fix — the **`install-contract:v4 self-stage`** prologue (byte-identical, at ea
 installer entry): when running from the marketplace payload, copy the **whole**
 payload into a **unique per-invocation** dir `~/.<name>/.install-stage/<ts>-<pid>/`
 and **re-exec from there**. The singleton payload is then touched only for the fast
-copy, never the whole (possibly-wedged) install. Guards:
+copy, never the whole (possibly-wedged) install. PowerShell copies ordinary files
+through the native .NET file API rather than paying provider overhead per file.
+The complete tree is retained, including hidden entries, empty directories and
+bytecode; reparse points retain `Copy-Item` semantics. Copy errors still reach
+the existing staging failure path. PowerShell 5.1 and 7 use the same helper.
+The byte-identical `payload-copy` block follows required output initialization
+and precedes contextual staging. Worktrees also uses it for its structured
+payload copy, without changing context selection, canonical-library handling,
+staging paths or watchdog ownership.
+Guards:
 - `COPILOT_PLUGIN_INSTALL_STAGED=1` prevents a re-exec loop; the stage path (not under
   `installed-plugins`) is authoritative. An inherited staging flag from another
   installer cannot suppress staging when the actual script still resides in the
@@ -2328,13 +2345,17 @@ the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
 success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call in unadopted wrappers.
-Vault's cold primary and payload commands instead submit to the packaged
+Vault's cold primary/payload commands and legacy session bootstrap instead submit to the packaged
 installation driver's canonical queue before taking any outer provisioning
 lock. They retain the inner canonical installer lock, publication admission,
 source identity and default service recipe. Healthy invocation bypasses driver
 work; missing support and unsupported cold namespaced/platform paths refuse
-without a legacy foreground fallback. Bootstrap hooks and explicit installer
-entry points are separate, unadopted callers. The
+without a legacy foreground fallback. Vault's hook selects only canonical
+stamp or provision, retains its healthy/non-deployment no-ops and emits only
+`{}` plus a diagnostic launch acknowledgement, not a completion receipt.
+It neither holds nor reaps the old PID-based reconciliation guard.
+Other bootstrap hooks and explicit installer entry points remain separate,
+unadopted callers. The
 [driver contract](../libs/update-driver/README.md#fixed-first-use-handoff-and-vault-command-adoption)
 owns the native waiter, receipt/result and qualification boundaries.
 
@@ -3196,6 +3217,29 @@ invalid explicit selection is refused rather than silently replaced. Discovery
 never installs Python or changes PATH. Interpreter paths cross the native-output boundary as
 ASCII-safe JSON strings, preserving non-ASCII paths without changing the host's
 console or pipeline encoding.
+The payload-only admission CLI and its interpreter probes use `-I -S -B`:
+they need only the standard library and explicitly loaded payload helpers,
+not site-package initialization. This does not change candidate construction
+or installed-runtime interpreter startup.
+
+When a Worktrees caller explicitly supplies its existing interpreter
+(`-BootstrapPython` on Windows or `--runtime-publication-python` for Bash),
+early context reads use the payload-owned canonical Python validator in
+isolated, no-site UTF-8 mode. Windows reuses the existing hidden-process reader and
+retains diagnostic stderr and the actual exit; empty output is not turned
+into a blank output record. Its consecutive initial validate and status
+queries run through one finite payload-local transport process. That process
+calls the same canonical SDK CLI actions with their original arguments,
+preserves each raw JSON response, and stops on the first failed query. It
+does not cache a decision, introduce another authorizer, or combine reads
+across staging or construction. Publication and later revalidation remain
+fresh calls at their existing boundaries.
+The same validate, status, publication and
+governance-revalidation checks remain at their original boundaries, with
+their original arguments. Without the hint, POSIX retains the Python-free
+Bash reader and Windows retains the native PowerShell reader. This selects
+an existing read adapter, not a different installation owner, construction
+interpreter, publication lease or recovery authority; it never installs Python.
 
 Canonical admission uses the requested package root as its working directory.
 Relative package/configuration relationships are retained without accumulating
@@ -3210,6 +3254,20 @@ context. Exact reuse never obtains exclusive construction ownership or invokes
 venv/package writers, even when construction tools are absent. Unfinished
 builders recheck under the canonical OS lease; completed content drift or
 invalid evidence refuses instead of rewriting a published slot.
+
+An explicitly selected `extras` tuple on `numbered_candidate()` installs only
+declared optional groups on the primary package, inside that same retained UV
+transaction. Names are normalized and ordered; unknown, duplicate and mutable
+selections refuse before runtime writes. Non-base admission fingerprints bind
+both the complete source fingerprint and the selected extras. An empty selection
+retains the existing source-only identity and origin-receipt compatibility.
+Changing selection cannot reuse or rewrite another completed profile under the
+same slot name. The installed-origin receipt records non-base selections and is
+checked again on reuse, even after frozen inputs have been retired.
+The caller still owns the distinct slot name, profile-specific health/launch
+contract and lifecycle; this seam does not select a machine's desired profile,
+activate a runtime, provision sibling environments or qualify a native platform.
+Mutable `dev_candidate()` does not accept non-base profiles.
 
 Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline

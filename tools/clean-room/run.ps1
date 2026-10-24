@@ -54,9 +54,8 @@
   Explicit npm feed for the image BUILD only (installs the Copilot CLI prereq).
   Empty = public registry.npmjs.org; never auto-detected from the host.
 .PARAMETER UvIndex
-  Opt-in uv-index fixture: point the deploy stage's uv at an internal index on a
-  governed box (runtime analog of -NpmRegistry). Empty = off, so the governed uv
-  jam surfaces. Also settable via $env:CR_UV_INDEX.
+  Runtime Python index. Defaults to the anonymous public Microsoft package feed.
+  Overrides CR_UV_INDEX; explicitly pass an empty string for no index fixture.
 
 .EXAMPLE
   ./run.ps1                                   # base: full generic-single-plugin scenario
@@ -65,7 +64,7 @@
 .EXAMPLE
   ./run.ps1 -Until 1 -Then shell              # install the plugin, then hand off
 .EXAMPLE
-  ./run.ps1 -UvIndex https://…/pypi/simple/   # opt-in uv-index fixture (governed box)
+  ./run.ps1 -UvIndex https://…/pypi/simple/   # override the public runtime index
 .EXAMPLE
   ./run.ps1 -BlockPublicFeeds -UvIndex https://…  # reproduce a network-blocked
                                                     # machine (book2) from an
@@ -94,12 +93,12 @@ param(
     [ValidateSet('none','shell','down')]
     [string]$Then = 'none',
     [string]$NpmRegistry = '',
-    # Opt-in uv-index fixture: point the deploy stage's uv at an internal index
-    # (governed box). Empty = off, so the governed uv jam surfaces. Runtime
-    # analog of -NpmRegistry (which is build-time). Also $env:CR_UV_INDEX.
+    # CLI override, then CR_UV_INDEX, then the public default. An explicit empty
+    # argument leaves the container's Python index unconfigured.
     [string]$UvIndex = '',
     # Null-route the known public package-feed hostnames (pypi.org,
-    # files.pythonhosted.org, registry.npmjs.org, download.pytorch.org) at the
+    # files.pythonhosted.org, registry.npmjs.org, download.pytorch.org, and the
+    # public Microsoft mirror) at the
     # container network layer via Docker --add-host, regardless of the HOST's
     # real connectivity -- reproduces a network-blocked machine (book2) from an
     # unrestricted dev box. Combine with -UvIndex to prove installs still
@@ -164,6 +163,15 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+if (-not $PSBoundParameters.ContainsKey('UvIndex')) {
+    $configuredIndex = [Environment]::GetEnvironmentVariable('CR_UV_INDEX')
+    $UvIndex = if ($null -ne $configuredIndex) {
+        $configuredIndex
+    } else {
+        'https://packagefeedproxy.microsoft.io/pypi/simple/'
+    }
+}
 
 # --- Until validation: 'all' or a non-negative integer ------------------------
 if ($Until -ne 'all' -and $Until -notmatch '^\d+$') {
@@ -265,12 +273,16 @@ if ($Os -eq 'windows') {
     }
 
     Write-Host "== running Windows clean-room scenario '$sname' (through stage $Until) ==" -ForegroundColor Cyan
+    $uvArgs = @()
+    if ($UvIndex) { $uvArgs = @('-e', "UV_DEFAULT_INDEX=$UvIndex") }
     & docker @dh run --rm --isolation=hyperv `
         -v "${sdir}:C:\scenario:ro" `
         -v "${libDir}:C:\lib:ro" `
         -v "${ResultsDir}:C:\out" `
         -v "${partner}:C:\partner:ro" `
         @tokenArgs `
+        @uvArgs `
+        -e "CR_UV_INDEX=$UvIndex" `
         -e "CR_LIB=C:\lib\clean-room-lib.ps1" `
         -e "CR_PARTNER_PATH=C:\partner" `
         -e "CR_PARTNER_NAME=$PartnerName" `
@@ -502,10 +514,13 @@ function Start-Container {
             '--add-host', 'pypi.org:127.0.0.1',
             '--add-host', 'files.pythonhosted.org:127.0.0.1',
             '--add-host', 'registry.npmjs.org:127.0.0.1',
-            '--add-host', 'download.pytorch.org:127.0.0.1'
+            '--add-host', 'download.pytorch.org:127.0.0.1',
+            '--add-host', 'packagefeedproxy.microsoft.io:127.0.0.1'
         )
-        Write-Host "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org null-routed" -ForegroundColor DarkGray
+        Write-Host "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org, packagefeedproxy.microsoft.io null-routed" -ForegroundColor DarkGray
     }
+    $uvArgs = @()
+    if ($UvIndex) { $uvArgs = @('-e', "UV_DEFAULT_INDEX=$UvIndex") }
     docker run -d --init --name $Container `
         --label $CleanRoomLabel `
         -v "${scenDir}:/home/operator/scenario:ro" `
@@ -514,6 +529,7 @@ function Start-Container {
         @scenLibArgs `
         @harnessArgs `
         @blockArgs `
+        @uvArgs `
         -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" `
         -e "CR_SCENARIO_NAME=$ScenarioName" `
         -e "CR_MARKETPLACE_REPO=$MarketplaceRepo" `

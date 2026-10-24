@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http47-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-live_startup_controls-py-generation-46.json",
+    "sha256": "bc5f780aec96f463b9c456117b761bdbf1a77b2f18377ab40968f434fde6a934"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-owned-cold-drain.json",
+    "sha256": "90380f37b4ffec05ef1fd722a3f532357bc02e8d150ae829ec9609371abcfc09"
+  },
+  "scope": "source bytes unchanged; previous-generation vector preserved, not a new runtime capture",
+  "captured_from": {
+    "commit": "006a01a6b2a887503fae717cd4804306bd5db58c",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 47,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
+    "source_git_blob": "8b1f74d379be0c4f56871f553fdf546c0127627b",
+    "source_sha256": "54ad082ab38b584c277963d9583076da4542f7fd9a80852c35fc495d017f0f92"
+  }
+}

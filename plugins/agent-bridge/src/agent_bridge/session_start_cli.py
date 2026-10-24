@@ -242,6 +242,38 @@ def _prepare_sender_preference(
     )
 
 
+@dataclass(frozen=True)
+class _CallerContext:
+    agent_name: str
+    caller_id: str | None
+    session_id: str | None
+    owner_ref: str | None
+
+
+def _prepare_caller_context(client, agent_name: str, caller_id: str | None) -> _CallerContext:
+    from .client import BridgeClientError
+    from .protocol import REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION
+    from .remote_acp_config import is_remote_address
+
+    core = _core()
+    caller = caller_id if caller_id is not None else core._get_caller_id()
+    owner = None
+    if is_remote_address(agent_name):
+        from .relationship_authority import RelationshipRefused, canonical_owner
+
+        owner = core._worktrees_get("owner-ref")
+        if (caller or "AGENT_WORKTREES_OWNER_REF" in os.environ) and not owner:
+            raise BridgeClientError(422, "Managed remote request has no qualified host owner")
+        if owner is not None:
+            try:
+                canonical_owner(owner)
+            except RelationshipRefused as exc:
+                raise BridgeClientError(422, str(exc)) from exc
+            if not client.daemon_supports(REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION):
+                raise BridgeClientError(426, "daemon does not support retained remote host ownership")
+    return _CallerContext(agent_name, caller, core._get_caller_session_id(), owner)
+
+
 def _start_agent_session(
     client,
     agent_name: str,
@@ -256,6 +288,8 @@ def _start_agent_session(
     worktree_id: str | None = None,
     agent_inventory: list[dict] | None = None,
     sender_preference: _SenderPreference | None = None,
+    caller_id: str | None = None,
+    caller_context: _CallerContext | None = None,
 ) -> str:
     core = _core()
     from .client import BridgeClientError
@@ -266,14 +300,15 @@ def _start_agent_session(
     if sender_preference is not None and sender_preference.agent_name != agent_name:
         print("[FAIL] Prepared sender preference belongs to a different target.", file=sys.stderr)
         raise SystemExit(2)
-    caller_id = core._get_caller_id()
-    caller_owner_ref = core._worktrees_get("owner-ref") if is_remote_address(agent_name) else None
-    if is_remote_address(agent_name):
-        from .protocol import REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION
-        if (caller_id or "AGENT_WORKTREES_OWNER_REF" in os.environ) and not caller_owner_ref:
-            raise BridgeClientError(422, "Managed remote request has no qualified host owner")
-        if caller_owner_ref is not None and not client.daemon_supports(REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION):
-            raise BridgeClientError(426, "daemon does not support retained remote host ownership")
+    if caller_context is None:
+        caller_context = _prepare_caller_context(client, agent_name, caller_id)
+    elif caller_context.agent_name != agent_name or (
+        caller_id is not None and caller_context.caller_id != caller_id
+    ):
+        print("[FAIL] Prepared caller context belongs to a different request.", file=sys.stderr)
+        raise SystemExit(2)
+    caller_id = caller_context.caller_id
+    caller_owner_ref = caller_context.owner_ref
 
     daemon_reuse = is_remote_address(agent_name) and (
         not agent_name.startswith("remote-acp:")
@@ -315,7 +350,7 @@ def _start_agent_session(
             charter=charter,
             target_dir=target_dir,
             caller_id=caller_id,
-            caller_session_id=core._get_caller_session_id(),
+            caller_session_id=caller_context.session_id,
             sender_repo=sender_preference.project,
             force_new=force_new,
             caller_owner_ref=caller_owner_ref if is_remote_address(agent_name) else core._worktrees_get("owner-ref"),
@@ -355,6 +390,8 @@ def _start_agent_session(
                     worktree_id=worktree_id,
                     agent_inventory=agent_inventory,
                     sender_preference=sender_preference,
+                    caller_id=caller_id,
+                    caller_context=caller_context,
                 )
             if session.get("status", "") == "running":
                 if not force:
@@ -378,6 +415,8 @@ def _start_agent_session(
                     worktree_id=worktree_id,
                     agent_inventory=agent_inventory,
                     sender_preference=sender_preference,
+                    caller_id=caller_id,
+                    caller_context=caller_context,
                 )
             return _reuse_existing(client, session, agent_name)
         raise

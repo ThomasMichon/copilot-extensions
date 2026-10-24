@@ -6,12 +6,18 @@ import runpy
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 from agent_procutil import no_window_kwargs
+
+try:
+    from update_telemetry.human import HumanOperation, current_operation
+except ImportError:  # older runtimes retain their original output
+    HumanOperation = None
 
 
 @dataclass(frozen=True)
@@ -55,11 +61,23 @@ def prepare_update(rest: list[str]) -> PreparedUpdate:
     """Consume only the private bootstrap prefix before ordinary orchestration."""
     if rest[:1] != ["--repair-engine"]:
         return PreparedUpdate(rest)
-    if len(rest) < 2:
-        print("Update repair requires its fresh source checkout.", file=sys.stderr)
-        return PreparedUpdate(rest, True, 2)
-    repaired = _repair_installation(Path(rest[1]))
-    return PreparedUpdate(rest[2:], True, repaired.exit_code, repaired.environment)
+    scope = HumanOperation("update/manager/engine_repair") if HumanOperation else nullcontext()
+    with scope as human:
+        if len(rest) < 2:
+            message = "Update repair requires its fresh source checkout."
+            if human is not None:
+                human.progress(message, state="failed")
+            else:
+                print(message, file=sys.stderr)
+            prepared = PreparedUpdate(rest, True, 2)
+        else:
+            repaired = _repair_installation(Path(rest[1]))
+            prepared = PreparedUpdate(rest[2:], True, repaired.exit_code, repaired.environment)
+        if human is not None:
+            human.complete(
+                "done" if prepared.exit_code == 0 else "failed", f"exit {prepared.exit_code}",
+            )
+        return prepared
 
 
 def _policy_sdk(
@@ -369,9 +387,16 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
             native += ["--runtime-publication-python", str(Path(
                 getattr(sys, "_base_executable", sys.executable),
             ).resolve())]
+    if (
+        action == "update" and installation.context_arguments is None
+        and not (installation.root / "bin").is_dir()
+    ):
+        native.append(
+            "-ProvisionMissingRuntime" if os.name == "nt" else "--provision-missing-runtime"
+        )
     base = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
     command = [
-        base, "-I", "-B", "-X", "utf8",
+        base, "-I", "-S", "-B", "-X", "utf8",
         str(installation.sdk / "scripts/command_binding.py"),
         "--payload-root", str(installation.sdk),
         "--source-payload-root", str(installation.payload),
@@ -405,22 +430,22 @@ def _repair_installation(source: Path) -> RepairResult:
         selected = _incumbent(source, environment, refreshed.payload)
         if _identity(selected) != expected:
             raise RuntimeError("Engine installation/source identity changed during acquisition")
-        actions = (
-            ("update",) if selected.context_arguments is not None
-            or (selected.root / "bin").is_dir() else ("provision", "update")
-        )
-        for action in actions:
-            current = _incumbent(source, environment, refreshed.payload)
-            if _identity(current) != expected:
-                raise RuntimeError("Engine installation/source identity changed during repair")
-            rc = _invoke(current, action, environment)
-            if rc:
-                return RepairResult(rc)
-            if action == "provision" and not (current.root / "bin").is_dir():
-                raise RuntimeError("Engine provisioning returned success without its runtime bin")
+        current = _incumbent(source, environment, refreshed.payload)
+        if _identity(current) != expected:
+            raise RuntimeError("Engine installation/source identity changed during repair")
+        rc = _invoke(current, "update", environment)
+        if rc:
+            return RepairResult(rc)
+        if not (current.root / "bin").is_dir():
+            raise RuntimeError("Engine update returned success without its runtime bin")
         return RepairResult(0, environment)
     except (OSError, ValueError, RuntimeError, ImportError) as error:
-        print(f"Engine repair refused: {error}", file=sys.stderr)
+        message = f"Engine repair refused: {error}"
+        human = current_operation() if HumanOperation else None
+        if human is not None:
+            human.progress(message, state="failed")
+        else:
+            print(message, file=sys.stderr)
         return RepairResult(1)
 
 

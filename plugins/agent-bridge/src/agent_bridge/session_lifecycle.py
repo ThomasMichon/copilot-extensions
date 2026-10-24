@@ -234,6 +234,10 @@ class _SessionLifecycleMixin:
         if allow_background_recovery is None:
             allow_background_recovery = not cancel_turn
 
+        if not allow_background_recovery:
+            self._db.request_cold_recovery_stop(session_id)
+            session.background_recovery_enabled = False
+
         # Serialize with in-flight reattach/resume (same lock resume_session
         # uses): otherwise a reattach begun before this stop could land a
         # live client after stop already persisted dormancy (review of #3058).
@@ -257,8 +261,9 @@ class _SessionLifecycleMixin:
             session.status = SessionStatus.STOPPED
             session._stop_requested = False  # the stop a notice announced has happened
             now = time.time()
-            self._db.update_session_stopped(session_id, now, allow_background_recovery)
-            session.background_recovery_enabled = allow_background_recovery
+            session.background_recovery_enabled = self._db.update_session_stopped(
+                session_id, now, allow_background_recovery,
+            )
             if not allow_background_recovery:
                 self._clear_disconnected_reattach_retry_state(session_id)
         # Release the per-worktree ownership reservation (#2912): a stopped

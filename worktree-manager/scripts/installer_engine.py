@@ -39,6 +39,7 @@ class FrozenInputs:
     payload_hash: str
     transaction: RetainedUVInstall | None = None
     retained_hash: str | None = None
+    extras: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -48,10 +49,47 @@ class ReadyCandidate:
     reused: bool
     descriptor: int
     frozen_plugin: Path
+    extras: tuple[str, ...] = ()
 
 
 class HealthRepairRequired(RuntimeError):
     """Published health needs a distinct generation, never an in-place rebuild."""
+
+
+def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(extras, tuple) or any(
+        not isinstance(name, str)
+        or re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", name) is None
+        for name in extras
+    ):
+        raise ValueError("Runtime extras must be an immutable tuple of ordinary extra names")
+    normalized = tuple(sorted(re.sub(r"[-_.]+", "-", name).lower() for name in extras))
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("Runtime extras contain duplicate selections")
+    if not normalized:
+        return ()
+    data = tomllib.loads((plugin / "pyproject.toml").read_text(encoding="utf-8"))
+    groups = data.get("project", {}).get("optional-dependencies", {})
+    if not isinstance(groups, dict):
+        raise ValueError("Runtime optional dependencies must be a table")
+    declared = [re.sub(r"[-_.]+", "-", name).lower() for name in groups]
+    if len(set(declared)) != len(declared):
+        raise ValueError("Runtime optional dependencies have ambiguous extra names")
+    missing = set(normalized) - set(declared)
+    if missing:
+        raise ValueError(f"Runtime extras are not declared: {', '.join(sorted(missing))}")
+    return normalized
+
+
+def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...]) -> str:
+    source_hash = runtime.fingerprint_source(files)
+    if not extras:
+        return source_hash
+    # Keep source-only identities compatible; non-base admission also binds selection.
+    return hashlib.sha256(json.dumps({
+        "schema": "installer-engine.dependency-profile", "version": 1,
+        "source_hash": source_hash, "extras": extras,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def _package_roots(plugin: Path) -> tuple[Path, ...]:
@@ -200,7 +238,9 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
          *(["--reinstall"] if refresh else []),
          *(argument for package in inputs.packages
            for argument in ("-r", str(package / "pyproject.toml"))),
-         *map(str, inputs.packages)],
+         *(str(package) + (
+             f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
+         ) for package in inputs.packages)],
         env=environment, cwd=inputs.plugin,
         trusted_source_roots=inputs.packages,
     ) as transaction:
@@ -209,7 +249,7 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
         if (
             _package_roots(inputs.plugin) != inputs.packages
             or _source_files(inputs.packages) != files
-            or runtime.fingerprint_source(files) != inputs.payload_hash
+            or _construction_hash(files, inputs.extras) != inputs.payload_hash
         ):
             raise RuntimeError("Runtime inputs changed while retaining UV inputs")
         if not set(files) <= set(transaction.source_hashes):
@@ -228,6 +268,7 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
         yield FrozenInputs(
             plugin, packages, inputs.payload_hash, transaction,
             runtime.fingerprint_source(_source_files(packages)),
+            inputs.extras,
         )
 
 
@@ -301,9 +342,10 @@ assert sys.version_info >= (3, 11), "installer runtime requires Python 3.11+"
 if sys.argv[4]:
     getattr(module, sys.argv[4])()
 expected_origins = json.loads(sys.argv[3])
+expected_extras = json.loads(sys.argv[6])
 proof = slot / ".runtime-input-origins.json"
 assert not proof.is_symlink(), "frozen origin evidence is a symlink"
-if sys.argv[5] == "fresh":
+if sys.argv[5] == "fresh" or expected_extras:
     assert proof.is_file(), "fresh runtime has no frozen origin evidence"
 recorded_origins = None
 if proof.exists():
@@ -312,6 +354,8 @@ if proof.exists():
         type(receipt["version"]) is int and receipt["version"] == 1, \
         "frozen origin evidence has an unsupported schema"
     recorded_origins = receipt["packages"]
+    assert receipt.get("extras", []) == expected_extras, \
+        "frozen origin evidence differs from the selected dependency profile"
     assert isinstance(recorded_origins, dict) and set(recorded_origins) == set(expected_origins), \
         "frozen origin evidence does not cover the dependency graph"
     if sys.argv[5] == "fresh":
@@ -336,7 +380,8 @@ for name, expected in expected_origins.items():
     try:
         _child(
             [str(python), "-I", "-B", "-c", probe, str(slot), module, json.dumps(origins),
-             health_callable or "", "fresh" if require_frozen_origin else "reuse"],
+             health_callable or "", "fresh" if require_frozen_origin else "reuse",
+             json.dumps(inputs.extras)],
             inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         )
     except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
@@ -433,6 +478,7 @@ def numbered_candidate(
     process_retention: bool = False,
     reuse_generations: bool = False,
     expected_source_identity: dict | None = None,
+    extras: tuple[str, ...] = (),
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     """Construct or reuse an immutable identity; lifecycle owns cutover/governance."""
@@ -444,6 +490,7 @@ def numbered_candidate(
         construction_callable=construction_callable, construction_data=construction_data,
         process_retention=process_retention, reuse_generations=reuse_generations,
         expected_source_identity=expected_source_identity,
+        extras=extras,
         wait_timeout=wait_timeout, child_timeout=child_timeout,
     )
 
@@ -468,14 +515,19 @@ def _candidate(
     process_retention: bool = False, dev_owner: str | None = None,
     reuse_generations: bool = False,
     expected_source_identity: dict | None = None,
+    extras: tuple[str, ...] = (),
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     root = root.resolve()
     _assert_source_pin(plugin, expected_source_identity)
+    extras = _selected_extras(plugin, extras)
+    if dev_owner is not None and extras:
+        raise ValueError("Dependency profiles require an immutable numbered runtime")
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     packages = _package_roots(plugin)
     inputs = FrozenInputs(
-        plugin.resolve(strict=True), packages, runtime.fingerprint_source(_source_files(packages)),
+        plugin.resolve(strict=True), packages, _construction_hash(_source_files(packages), extras),
+        extras=extras,
     )
     with ExitStack() as retained:
         if dev_owner is not None:
@@ -511,7 +563,9 @@ def _candidate(
                     require_frozen_origin=False,
                 )
                 _assert_source_pin(plugin, expected_source_identity)
-                yield ReadyCandidate(slot, inputs.payload_hash, True, descriptor, inputs.plugin)
+                yield ReadyCandidate(
+                    slot, inputs.payload_hash, True, descriptor, inputs.plugin, inputs.extras,
+                )
             return
         with ExitStack() as construction:
             with runtime.construction_lease(root, version, timeout=wait_timeout) as descriptor:
@@ -540,6 +594,7 @@ def _candidate(
                     origin_proof.write_text(json.dumps({
                         "schema": "installer-engine.frozen-input-origins", "version": 1,
                         "packages": _input_origins(inputs),
+                        **({"extras": list(inputs.extras)} if inputs.extras else {}),
                     }, indent=2) + "\n", encoding="utf-8")
                     if process_retention:
                         bootstrap = slot / ".runtime-bootstrap"
@@ -581,4 +636,6 @@ def _candidate(
                     require_frozen_origin=False,
                 )
             _assert_source_pin(plugin, expected_source_identity)
-            yield ReadyCandidate(slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin)
+            yield ReadyCandidate(
+                slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin, inputs.extras,
+            )
