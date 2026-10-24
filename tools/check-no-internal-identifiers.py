@@ -83,6 +83,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
@@ -473,23 +474,62 @@ def _read_worktree_text(rel: str) -> str | None:
         return None
 
 
-def _make_git_ref_loader(ref: str) -> Callable[[str], str | None]:
-    def _read_git_ref_text(rel: str) -> str | None:
-        try:
-            result = subprocess.run(
-                ["git", "show", f"{ref}:{rel}"],
-                cwd=REPO,
-                capture_output=True,
-                check=True,
-            )
-        except subprocess.CalledProcessError:
-            return None
-        try:
-            return result.stdout.decode("utf-8")
-        except UnicodeDecodeError:
-            return None
+def _make_git_ref_loader(ref: str, files: list[str]) -> Callable[[str], str | None]:
+    """Resolve literal paths once, then read bounded, content-addressed batches."""
+    selected = set(files) - SELF
+    if not selected:
+        return lambda rel: None
+    options = {
+        "cwd": REPO, "capture_output": True, "check": True,
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    }
+    result = subprocess.run(["git", "ls-tree", "-r", "-l", "-z", ref, "--"], **options)
+    objects: dict[str, tuple[str, int]] = {}
+    for record in result.stdout.split(b"\0"):
+        if not record:
+            continue
+        metadata, separator, raw_path = record.partition(b"\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 4:
+            raise ValueError("malformed identifier scan tree metadata")
+        path = raw_path.decode("utf-8", "surrogateescape")
+        if fields[1] != b"blob" or path not in selected:
+            continue
+        if (
+            re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})", fields[2]) is None
+            or not fields[3].isdigit()
+        ):
+            raise ValueError("malformed identifier scan blob metadata")
+        objects[path] = (fields[2].decode("ascii"), int(fields[3]))
 
-    return _read_git_ref_text
+    pending = list(dict.fromkeys(objects.values()))
+    texts: dict[str, str | None] = {}
+    while pending:
+        batch = []
+        size = 0
+        while pending and len(batch) < 32 and (not batch or size + pending[0][1] <= 8 * 1024 * 1024):
+            blob, length = pending.pop(0)
+            batch.append((blob, length))
+            size += length
+        result = subprocess.run(
+            ["git", "cat-file", "--batch"],
+            input="".join(f"{blob}\n" for blob, _length in batch).encode("ascii"),
+            **options,
+        )
+        stream = io.BytesIO(result.stdout)
+        for blob, length in batch:
+            if stream.readline() != f"{blob} blob {length}\n".encode("ascii"):
+                raise ValueError("malformed identifier scan blob response")
+            body = stream.read(length)
+            if len(body) != length or stream.read(1) != b"\n":
+                raise ValueError("truncated identifier scan blob response")
+            try:
+                texts[blob] = body.decode("utf-8")
+            except UnicodeDecodeError:
+                texts[blob] = None
+        if stream.read(1):
+            raise ValueError("unexpected trailing identifier scan blob response")
+    return lambda rel: texts[objects[rel][0]] if rel in objects else None
 
 
 def _compile_patterns(identifiers: list[str]) -> dict[str, re.Pattern[str]]:
@@ -681,7 +721,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.paths_file
         else _files_to_scan(args.all, args.base, emit_status=not args.ci, head=args.git_ref)
     )
-    text_loader = _make_git_ref_loader(args.git_ref) if args.git_ref else None
+    text_loader = _make_git_ref_loader(args.git_ref, files_to_scan) if args.git_ref else None
     violations = _scan(
         files_to_scan,
         identifiers,
