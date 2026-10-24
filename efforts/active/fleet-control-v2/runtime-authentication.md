@@ -371,6 +371,38 @@ neither an old reply nor an observation event can execute or issue work again.
 Provider renewal/revocation of external credentials remains distinct from fleet
 identity revocation. Neither implicitly kills already accepted work.
 
+### Resource-specific credential continuity
+
+**Operator clarification, provider-neutral summary:** the fleet application
+resource requests only its own required permissions. Separately governed source
+resources can impose shorter renewal or interaction requirements; the relay and
+redundant authorized producers address that independent availability problem.
+The application must not add frequent human-presence prompts or forced periodic
+sign-out. An adopter's acceptable interaction cadence is not a guaranteed
+provider allowance or an application-imposed session deadline.
+
+Keep the fleet-control identity session independent of each downstream
+provider/account/resource credential. Access-token expiry normally triggers
+silent renewal, not interactive sign-in. A source-resource challenge blocks the
+affected credential need; it does not invalidate unrelated fleet-control access
+or another resource's valid credentials. Fleet admission still enforces its own
+current identity, enrollment, policy and revocation evidence.
+
+A minimal application resource is not an exemption from tenant-wide or
+resource-specific policy. The provider and tenant administrator retain authority
+over sign-in frequency, device compliance, risk and revocation. Neither the
+Gateway nor a relay producer may lengthen those allowances.
+
+Redundancy selects only producers already authorized for the exact same
+provider/account/resource/permission and recipient context. One producer's
+unavailability or challenge need not prevent another independently eligible
+producer from fulfilling that need. Recheck current eligibility and request
+authority before delivery; do not silently select a different account, reuse a
+revoked credential, broaden permissions, or use retries across producers to
+circumvent a resource-wide denial or policy challenge. If no eligible producer
+can supply a valid credential, expose one correlated resource-scoped blocked
+outcome instead of repeated unattended sign-in or fleet-wide sign-out.
+
 ## Freshness, bounds and failure semantics
 
 **Recommended initial implementation budgets, to prove before advertising support:**
@@ -445,6 +477,11 @@ sign-in, auth downgrade or retry of an uncertain command effect.
    revocation, key rotation, issuer outage, slow consumers and credential
    correlation/recipient protection. Neither mocked crypto nor a health probe
    establishes this boundary.
+   Include two independently governed source resources and redundant authorized
+   producers: a source-specific challenge or shorter lifetime must not sign out
+   fleet control, widen another producer's eligibility, hide a resource-wide
+   denial, or permit expired/revoked delivery. Cache reuse is not renewal proof;
+   observe an actually renewed provider credential without interactive APIs.
 5. Run fresh Windows/Linux role/client and container installation in the existing
    clean-room/lifecycle lanes, then the separately authorized live lane.
    Test rejected trust changes preserving valid configuration, owned key custody,

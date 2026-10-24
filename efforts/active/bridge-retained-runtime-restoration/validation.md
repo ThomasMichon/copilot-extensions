@@ -16,6 +16,12 @@ It covers [custody](custody-contract.md) and the
 | E - Installer convergence | Dedicated shell branches, wrappers, platform integration and publication recovery | Full current-controller restoration with exact executable/route/manifest/native integration readback; no forbidden fallback |
 | F - Native/release/adoption | Assigned qualification and integration owners | Platform-specific evidence, ordinary source review/release and separately authorized installed-cohort acceptance |
 
+The [provenance layout prerequisite](provenance-layout.md) refines only the
+source-evidence portion of this matrix. Its own review precedes implementation;
+complete lossless provenance, immutable artifact integrity and all canonical
+reader/writer entry points must pass before returning to the inbox source PR.
+It does not change the native, custody, installer or adoption gates below.
+
 Do not edit another contributor's uncommitted work or assume an adjacent
 lifecycle fix has landed. The Integration owner supplies reviewed committed
 dependencies and resolves content conflicts before each slice. Shared library

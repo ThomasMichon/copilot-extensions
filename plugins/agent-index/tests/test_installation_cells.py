@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -4432,6 +4433,8 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
     processes: list[subprocess.Popen[bytes]] = []
     endpoints: list[tuple[Path, int]] = []
     resolved: list[tuple[Path, int]] = []
+    shutdown_tokens: dict[int, str] = {}
+    shutdown_errors: dict[int, Exception] = {}
     try:
         for name in ("one", "two"):
             root = tmp_path / name
@@ -4536,41 +4539,50 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
         assert refused["reason"] == "ownership-mismatch"
         assert processes[1].poll() is None
 
+        shutdown_tokens[0] = str(
+            json.loads(
+                urllib.request.urlopen(
+                    f"http://{first_endpoint}/health",
+                    timeout=2,
+                ).read()
+            )["instanceToken"]
+        )
         request = urllib.request.Request(
             f"http://{first_endpoint}/shutdown",
             data=b"",
             method="POST",
             headers={
                 "X-Agent-Index-Installation-Id": "one/agent-index",
-                "X-Agent-Index-Instance-Token": str(
-                    json.loads(
-                        urllib.request.urlopen(
-                            f"http://{first_endpoint}/health",
-                            timeout=2,
-                        ).read()
-                    )["instanceToken"]
-                ),
+                "X-Agent-Index-Instance-Token": shutdown_tokens[0],
             },
         )
-        urllib.request.urlopen(request, timeout=2).read()
-        processes[0].wait(timeout=15)
+        response = json.loads(urllib.request.urlopen(request, timeout=2).read())
+        assert response["shutdown"] is True
+        assert processes[0].wait(timeout=15) == 0
         assert processes[1].poll() is None
         with urllib.request.urlopen(
             f"http://127.0.0.1:{resolved[1][1]}/health",
             timeout=2,
         ) as response:
             assert response.status == 200
+            shutdown_tokens[1] = str(json.loads(response.read())["instanceToken"])
     finally:
         for index, (endpoint_path, _) in enumerate(resolved):
+            if processes[index].poll() is not None:
+                continue
             try:
                 record = json.loads(endpoint_path.read_text(encoding="utf-8"))
                 endpoint = record["endpoint"]
-                health = json.loads(
-                    urllib.request.urlopen(
-                        f"http://{endpoint}/health",
-                        timeout=2,
-                    ).read()
-                )
+                token = shutdown_tokens.get(index)
+                if token is None:
+                    token = str(
+                        json.loads(
+                            urllib.request.urlopen(
+                                f"http://{endpoint}/health",
+                                timeout=2,
+                            ).read()
+                        )["instanceToken"]
+                    )
                 request = urllib.request.Request(
                     f"http://{endpoint}/shutdown",
                     data=b"",
@@ -4579,21 +4591,93 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(
                         "X-Agent-Index-Installation-Id": (
                             "one/agent-index" if index == 0 else "two/agent-index"
                         ),
-                        "X-Agent-Index-Instance-Token": str(
-                            health["instanceToken"]
-                        ),
+                        "X-Agent-Index-Instance-Token": token,
                     },
                 )
-                urllib.request.urlopen(request, timeout=2).read()
-            except Exception:
-                pass
-        for process in processes:
+                response = json.loads(urllib.request.urlopen(request, timeout=2).read())
+                assert response["shutdown"] is True, response
+            except Exception as error:
+                shutdown_errors[index] = error
+        failures = []
+        for index, process in enumerate(processes):
             try:
-                process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                raise AssertionError(
-                    f"Agent Index process {process.pid} did not stop gracefully"
+                returncode = process.wait(timeout=15)
+            except subprocess.TimeoutExpired as error:
+                failures.append(
+                    f"Agent Index process {process.pid} did not stop gracefully: {error!r}"
                 )
+            else:
+                if returncode != 0:
+                    failures.append(
+                        f"Agent Index process {process.pid} exited with {returncode}"
+                    )
+        failures.extend(
+            f"Agent Index process {processes[index].pid} control error: {error!r}"
+            for index, error in shutdown_errors.items()
+        )
+        if failures:
+            raise AssertionError("; ".join(failures)) from next(
+                iter(shutdown_errors.values()), None
+            )
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [
+        ("shutdown-ack", "control error"),
+        ("shutdown-transport", "injected shutdown response failure"),
+        ("nonzero-exit", "exited with 37"),
+        ("wait-timeout", "did not stop gracefully"),
+    ],
+)
+def test_two_cell_shutdown_reports_failures(
+    monkeypatch, tmp_path: Path, capsys, fault: str, message: str
+) -> None:
+    real_popen = subprocess.Popen
+    real_urlopen = urllib.request.urlopen
+    observed: list[subprocess.Popen[bytes]] = []
+
+    def start(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        observed.append(process)
+        if len(observed) == 2:
+            real_wait = process.wait
+
+            def wait(timeout=None):
+                returncode = real_wait(timeout=timeout)
+                if fault == "nonzero-exit":
+                    return 37
+                if fault == "wait-timeout":
+                    raise subprocess.TimeoutExpired(process.args, timeout)
+                return returncode
+
+            monkeypatch.setattr(process, "wait", wait)
+        return process
+
+    def open_url(request, *args, **kwargs):
+        response = real_urlopen(request, *args, **kwargs)
+        if (
+            isinstance(request, urllib.request.Request)
+            and request.full_url.endswith("/shutdown")
+            and request.get_header("X-agent-index-installation-id") == "two/agent-index"
+            and fault in ("shutdown-ack", "shutdown-transport")
+        ):
+            response.read()
+            response.close()
+            if fault == "shutdown-ack":
+                return io.BytesIO(b'{"shutdown":false}')
+            if fault == "shutdown-transport":
+                raise OSError("injected shutdown response failure")
+        return response
+
+    monkeypatch.setattr(subprocess, "Popen", start)
+    monkeypatch.setattr(urllib.request, "urlopen", open_url)
+    with pytest.raises(AssertionError, match=message):
+        test_two_cell_local_services_bind_distinct_os_assigned_ports(
+            monkeypatch, tmp_path, capsys
+        )
+    assert len(observed) == 2
+    assert all(process.poll() == 0 for process in observed)
 
 
 def test_cross_platform_sources_keep_legacy_and_cell_lifecycle_separate() -> None:

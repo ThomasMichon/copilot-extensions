@@ -141,6 +141,16 @@ only selected code remains active on success. It does not guarantee ZDD.
 This requirement supersedes a blanket prohibition on takeover of a live
 installer; it does not authorize a live repair merely by landing this plan.
 
+**Operator clarification (2026-10-23):** an explicit order to repair,
+clean-install or force-reinstall is sufficient authorization for this mode.
+Historical cleanup evidence is not required. A separate, request-bound audited
+pre-launch recovery is allowed, but cannot become a mandatory gate before
+repair. Record operator authorization as such, never as native cleanup proof;
+retain the original failed outcome and any unknown historical effects without
+giving them continuing control of the installation. The
+[verbatim request](inception-transcript.md#explicit-repair-authorization-and-legacy-pre-launch-audit)
+does not order a concrete host repair by itself.
+
 **Agent-recommended implementation and validation scope:**
 
 1. Define one authoritative target resolver using the existing installation/
@@ -162,6 +172,10 @@ installer; it does not authorize a live repair merely by landing this plan.
    and a killed predecessor is not proof that the newcomer is ready.
 4. Add explicit repair admission outside the broken old owner's veto while
    retaining existing source/authentication and installation-scope selection.
+   Do not demand historical native settlement, a pre-launch audit or a
+   successful old-owner callback after the operator has explicitly ordered
+   repair. Separate operator-authorized retirement of stale control from
+   positive native proof, retaining original failure and pending history.
    Bound cooperation, retire the exact old installer process scope, then
    invalidate its locks/owner/queue-control evidence under the new takeover
    authority. An installer losing authority cannot continue installation or
@@ -216,10 +230,12 @@ existing installation execution implementer:
    current authority, request journal and native cleanup primitives.
 3. Provide an explicit supported path for existing interrupted records,
    including records whose older producer lacks the new admission evidence.
-   The validation must establish how those records can be safely reconciled
-   without assuming a free lock, process-name/PID absence, elapsed time or a
-   reboot. Refuse insufficient evidence with an actionable outcome; do not
-   fabricate a successful result or erase the original failure.
+   Automatic settlement must not assume a free lock, process-name/PID absence,
+   elapsed time or a reboot proves cleanup. Refuse insufficient automatic
+   evidence with an actionable outcome. Explicit operator repair uses its
+   separate authorization instead and requires no historical cleanup proof;
+   audited pre-launch recovery is optional. Neither route may fabricate native
+   settlement, a successful prior result or erase the original failure.
 4. Preserve healthy serving generations, pending requests and unrelated
    services across recovery and subsequent normal update. A newly requested
    installation is distinct from replaying an ambiguous prior transaction.
@@ -251,6 +267,11 @@ current scope; this is not a competing driver or proof of a live repair.
   successful normal update, preserve original failure/pending history, and prove
   no overlapping installer or unrelated service interruption. No reboot,
   timestamp/PID shortcut, arbitrary queue edit or success-shaped reset qualifies.
+- Exercise explicit operator repair with absent historical cleanup evidence
+  and separately with an optional pre-launch audit. Ordinary callers must not
+  silently choose repair. Preserve the distinct authorization/native-proof
+  labels and old failure history; verify current scoped takeover and selected
+  readiness rather than requiring the broken producer to certify its past.
 - Verify read-only status, malformed state, unavailable launch/runtime,
   authentication failure, held authority and supervised-debug contention.
   Failures preserve the previous healthy selection and remain visible.
