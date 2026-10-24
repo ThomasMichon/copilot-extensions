@@ -659,7 +659,7 @@ canonical queued request receipts.
 ### Fixed first-use recipes and command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
-support the owning Agent Vault, Agent Pull Requests and Agent SSH payloads' existing legacy
+support the owning Agent Vault, Agent Pull Requests, Agent SSH and Agent CodeSpaces payloads' existing legacy
 **direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
@@ -669,6 +669,20 @@ Vault's legacy session bootstrap also uses the fixed stamp/provision actions.
 Explicit installer entry points remain separate, unadopted callers.
 Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
+
+CodeSpaces' fixed `stamp`/`provision` prerequisite admits only its canonical
+installed payload and default legacy root. It retains its snapshot-default
+declaration and bespoke native gates, projects its own context and preserves
+the canonical config-derived Connection Owner behavior; no Vault service flags
+are supplied. Windows stamping retains its snapshot layout; POSIX legacy
+stamping retains its original installed-payload pointer. Its ordinary commands,
+bootstrap and explicit installers are not migrated by adding recipe support.
+Snapshots, compound actions, cells and custom roots refuse before acquisition
+or queue/plugin mutation. The manual `codespaces-recipes` portfolio qualifies
+actual materialized installation and installed CLI origin with isolated
+disabled config, native enabled/disabled/unknown registration adapters and
+caller loss. Adapter observations do not establish live host registration or
+serving readiness; no real CodeSpace or connection is needed.
 
 Pull Requests' legacy cold payload and generated primary commands use the same
 fixed recipe before outer provisioning locks or cold resolver writes. The
