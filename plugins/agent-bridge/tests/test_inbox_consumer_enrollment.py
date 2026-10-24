@@ -8,7 +8,7 @@ import threading
 
 import pytest
 
-from agent_bridge.db import Database
+from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.db_adoption import open_existing_writable
 from agent_bridge.inbox_consumer_schema import definitions, validate_schema
 from agent_bridge.inbox_custody import InboxConsumer
@@ -277,7 +277,7 @@ def test_v31_history_index_migration_preserves_original_custody_and_requires_pre
         passive.close()
     migrated = Database(db.db_path)
     try:
-        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == 32
+        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         validate_schema(migrated._get_conn())
         for table, history in before.items():
             assert [dict(row) for row in migrated.execute_read(f"SELECT * FROM {table}")] == history

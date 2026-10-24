@@ -26,6 +26,10 @@ def definitions() -> dict[str, tuple[str, str, str]]:
         "live_messages_retained_session": ("index", "live_messages",
             "CREATE INDEX IF NOT EXISTS live_messages_retained_session ON live_messages(session_id) "
             "WHERE runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL"),
+        "live_messages_handoff_pending": ("index", "live_messages",
+            "CREATE INDEX IF NOT EXISTS live_messages_handoff_pending "
+            "ON live_messages(session_id,id) "
+            "WHERE handoff_json IS NOT NULL AND consumed_at IS NULL"),
         "bridge_inbox_consumers_immutable": ("trigger", table,
             "CREATE TRIGGER IF NOT EXISTS bridge_inbox_consumers_immutable "
             f"BEFORE UPDATE ON {table} WHEN "
@@ -67,10 +71,15 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-def validate_schema(conn: sqlite3.Connection, *, require_history_indexes: bool = True) -> None:
+def validate_schema(
+    conn: sqlite3.Connection, *, require_history_indexes: bool = True,
+    require_recovery_index: bool = True,
+) -> None:
     """Never repair missing enrollment history on a prepared database."""
     for name, (kind, table, statement) in definitions().items():
         if name in _HISTORY_INDEXES and not require_history_indexes:
+            continue
+        if name == "live_messages_handoff_pending" and not require_recovery_index:
             continue
         row = conn.execute(
             "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,),

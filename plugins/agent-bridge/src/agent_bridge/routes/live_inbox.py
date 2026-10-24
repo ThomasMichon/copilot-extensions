@@ -8,14 +8,15 @@ from dataclasses import asdict
 import ipaddress
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..db import Database
+from ..db_live_message_receipts import MAX_RECOVERY_MESSAGE_ID
 from ..inbox_custody import InboxConsumer
 from ..live_inbox_models import (
-    InboxBeginResult, InboxCurrentRequest, InboxEnrollRequest, InboxHandoffRequest,
+    InboxBeginResult, InboxEnrollRequest, InboxHandoffRequest, InboxPollRequest,
     InboxNegotiateRequest, InboxNegotiationInfo, InboxOutcomeRequest, InboxOutcomeResult,
-    InboxPollResult, RetainedInboxMessage,
+    InboxPollResult, InboxHandoffReceipt, InboxRecoveryResult, RetainedInboxMessage,
 )
 from ..live_inbox_runtime import LiveInboxRuntime
 from ..loop_governance import LoopGovernance
@@ -34,7 +35,7 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
-def _local_database(request: Request) -> Database:
+def _local_database(request: Request, *, write: bool = True) -> Database:
     # Shared-token middleware remains mandatory. Loopback alone is not a user
     # ACL; this additionally refuses unsupported network/proxy ingress.
     config = getattr(request.app.state, "config", None)
@@ -53,9 +54,35 @@ def _local_database(request: Request) -> Database:
     db = getattr(request.app.state, "db", None)
     if not isinstance(db, Database):
         raise HTTPException(status_code=503, detail="database not ready")
-    if db.read_only:
+    if write and db.read_only:
         raise HTTPException(status_code=503, detail="retained inbox database is read-only")
     return db
+
+
+@router.get("/recovery", response_model=InboxRecoveryResult)
+def recover_handoffs(
+    session_id: str, request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+    after: int = Query(default=0, ge=0, le=MAX_RECOVERY_MESSAGE_ID),
+) -> InboxRecoveryResult:
+    """Read pending original observations without enrollment or admission."""
+    db = _local_database(request, write=False)
+    with _refusals():
+        rows = db.inspect_live_handoff_recovery(session_id, limit=limit, after=after)
+    return InboxRecoveryResult.model_validate(rows)
+
+
+@router.get("/recovery/{message_id}", response_model=InboxHandoffReceipt)
+def recover_handoff(
+    session_id: str, message_id: int, request: Request,
+) -> InboxHandoffReceipt:
+    """Observe an original attempt, including a consumed outcome after reply loss."""
+    db = _local_database(request, write=False)
+    with _refusals():
+        row = db.live_message_handoff_receipt(session_id, message_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="original inbox handoff is unavailable")
+    return InboxHandoffReceipt.model_validate(row)
 
 
 def _current_owners(request: Request) -> tuple[Database, LoopGovernance, LiveInboxRuntime]:
@@ -153,11 +180,12 @@ def enroll(
 
 
 @router.post("/poll", response_model=InboxPollResult)
-def poll(session_id: str, body: InboxCurrentRequest, request: Request) -> InboxPollResult:
+def poll(session_id: str, body: InboxPollRequest, request: Request) -> InboxPollResult:
     db, governance, runtime = _current_owners(request)
     with _refusals():
         rows = runtime.poll(
-            db, governance, _consumer(session_id, body), body.binding.observation(), now=time.time(),
+            db, governance, _consumer(session_id, body), body.binding.observation(),
+            now=time.time(), limit=body.limit,
         )
     return InboxPollResult(
         binding=body.binding, consumer=body.consumer,
