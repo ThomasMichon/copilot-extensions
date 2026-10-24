@@ -2009,6 +2009,13 @@ provider, then proves byte-identical reuse without another compiler invocation.
 Headless execution and the 20-second native child deadline remain unchanged.
 This fixture does not alter snapshot copying or the separate NoService contract.
 
+Vault's NoService snapshot fixture invokes the actual installer and isolated
+runtime root through a PowerShell wrapper with throwing scheduled-task mutation
+controls. The existing stamp case proves all five controls refuse mutation,
+preserves arguments containing spaces and verifies exact nonzero exit forwarding.
+Real snapshot provisioning and compatibility launch retain their original
+assertions and deadlines; installer/runtime code and host services are unchanged.
+
 Vault's two snapshot-provisioning integration cases explicitly allow 60 seconds
 per item: fixture setup performs one complete four-package installation,
 health gate and publication transaction. The remaining items keep the default

@@ -1,0 +1,9 @@
+{
+  "comment": "Guard snapshot NoService provisioning against scheduled-task mutations while preserving real installer arguments and exit status.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

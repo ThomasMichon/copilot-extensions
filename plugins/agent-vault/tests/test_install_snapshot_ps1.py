@@ -641,12 +641,57 @@ def stamped_snapshot(tmp_path_factory):
     )
 
 
+def _no_service_provision_command(home: Path, installer: Path, pwsh: str) -> list[str]:
+    runner = home / "tmp" / "provision.ps1"
+    runner.write_text(
+        "param($Installer, $InstallRoot)\n"
+        "function Get-ScheduledTask {}\n"
+        "function Stop-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Start-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Register-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Set-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Unregister-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "& $Installer provision -NoService -InstallDir $InstallRoot\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    return [
+        pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        str(runner), str(installer), str(home / ".agent-vault"),
+    ]
+
+
 def test_stamp_snapshot_retains_resources_without_creating_runtime(stamped_snapshot) -> None:
     state = stamped_snapshot
     assert (state.snapshot / "scripts" / "installer-engine.ps1").is_file()
     assert (state.snapshot / "scripts" / "installer-engine.sh").is_file()
     # Capture stamp status before provisioning so contract order is irrelevant.
     assert state.stamp_status == {"selected": False, "venvs": [], "events": []}
+    installer = state.fixture_root / "refusal control.ps1"
+    installer.write_text(
+        "param($Action, [switch]$NoService, $InstallDir)\n"
+        "if ($Action -ne 'provision' -or -not $NoService "
+        "-or $InstallDir -ne $env:AGENT_VAULT_HOME) { exit 1 }\n"
+        "if (@(Get-ScheduledTask).Count -ne 0) { exit 2 }\n"
+        "$commands = 'Stop-ScheduledTask', 'Start-ScheduledTask', "
+        "'Register-ScheduledTask', 'Set-ScheduledTask', 'Unregister-ScheduledTask'\n"
+        "foreach ($name in $commands) {\n"
+        "  if ((Get-Command $name).CommandType -ne 'Function') { exit 3 }\n"
+        "  try { & $name; exit 4 } catch {\n"
+        "    if ($_.Exception.Message -ne 'unexpected service mutation') { exit 5 }\n"
+        "  }\n"
+        "}\n"
+        "[Console]::WriteLine('all scheduled-task mutations refused')\n"
+        "exit 37\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        _no_service_provision_command(state.home, installer, state.pwsh),
+        env=state.env, capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
+        **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 37, result.stdout + result.stderr
+    assert result.stdout.strip() == "all scheduled-task mutations refused"
 
 
 @pytest.fixture(scope="module")
@@ -658,24 +703,14 @@ def provisioned_snapshot(stamped_snapshot):
     # and retain the entire consumer UV graph rather than its own inputs.
     if os.name == "nt":
         provision = subprocess.run(
-            [
-                pwsh,
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(snapshot / "scripts" / "install.ps1"),
-                "provision",
-                "-NoService",
-                "-InstallDir",
-                str(home / ".agent-vault"),
-            ],
+            _no_service_provision_command(home, snapshot / "scripts" / "install.ps1", pwsh),
             env=env,
             cwd=state.fixture_root,
             capture_output=True,
             text=True,
             timeout=420,
             check=False,
+            **agent_procutil.no_window_kwargs(),
         )
         assert provision.returncode == 0, provision.stdout + provision.stderr
         assert "Releasing legacy .venv" not in provision.stdout
