@@ -44,7 +44,34 @@ $plugin = $identity.name
 switch -CaseSensitive ($plugin) {
     'agent-vault' { $prefix = 'AGENT_VAULT' }
     'agent-pull-requests' { $prefix = 'AGENT_PULL_REQUESTS' }
+    'agent-ssh' { $prefix = 'AGENT_SSH' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
+}
+if ($plugin -ceq 'agent-ssh') {
+    if ($RuntimeRoot -ine (Join-Path $env:USERPROFILE '.agent-ssh') -or
+        [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ine
+            (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
+        [IO.Path]::GetFileName($Payload) -cne 'agent-ssh') {
+        throw 'SSH first use requires its canonical installed payload and default legacy root.'
+    }
+    $sshDeclaration = @{
+        module = 'agent_ssh'; legacyRuntimeRoot = '.agent-ssh'
+        payloadRootEnv = 'AGENT_SSH_PAYLOAD_ROOT'
+    }
+    foreach ($field in $sshDeclaration.GetEnumerator()) {
+        $value = $invocation.PSObject.Properties[$field.Key]
+        if ($null -eq $value -or $value.Value -isnot [string] -or $value.Value -cne $field.Value) {
+            throw 'SSH first use requires its declared native runtime gate.'
+        }
+    }
+    if ($invocation.payloadDispatcher -isnot [PSCustomObject] -or
+        $invocation.payloadDispatcher.posix -isnot [string] -or
+        $invocation.payloadDispatcher.windows -isnot [string] -or
+        $invocation.payloadDispatcher.posix -cne 'scripts/runtime-gate.sh' -or
+        $invocation.payloadDispatcher.windows -cne 'scripts/runtime-gate.ps1' -or
+        @($invocation.payloadDispatcher.PSObject.Properties).Count -ne 2) {
+        throw 'SSH first use requires its declared native runtime gate.'
+    }
 }
 if ($plugin -ceq 'agent-pull-requests') {
     $installed = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
@@ -79,8 +106,17 @@ $recipe = @{
     schema = 'copilot-extensions.payload-invocation'
     command = $plugin
     noSelfProvisionEnv = $noSelf
-    provisionMode = 'direct'
     installationContext = 'required'
+}
+$provisionMode = $invocation.PSObject.Properties['provisionMode']
+if ($plugin -ceq 'agent-ssh') {
+    if ($null -ne $provisionMode -and
+        ($provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'snapshot')) {
+        throw 'Owning payload does not declare the fixed first-use provision recipe.'
+    }
+} elseif ($null -eq $provisionMode -or
+    $provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'direct') {
+    throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
 foreach ($field in $recipe.GetEnumerator()) {
     $value = $invocation.PSObject.Properties[$field.Key]

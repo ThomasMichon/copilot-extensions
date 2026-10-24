@@ -236,7 +236,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
         "candidate_profiles", "ssh_snapshot", "wheel_inputs",
         "guardian_followthrough", "guardian_ref",
-        "runtime_profiles",
+        "runtime_profiles", "chat_construction",
+        "immutable_runtime", "immutable_runtime_ref",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -253,18 +254,21 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
+        "chat-construction-linux", "chat-construction-windows",
         "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
         "wheel-inputs-linux", "wheel-inputs-windows",
         "guardian-followthrough-macos",
         "runtime-profile-policy-linux", "runtime-profile-policy-windows",
+        "immutable-runtime-linux", "immutable-runtime-macos",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
         assert job["if"] == (
-            "${{ !inputs.guardian_followthrough && !inputs.watch_owner "
+            "${{ !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner "
             "&& !inputs.dispatch_delegation && !inputs.pr_service "
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
-            "&& !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}"
+            "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs "
+            "&& !inputs.runtime_profiles }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -340,6 +344,35 @@ def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None
             "--test-timeout", "60", "--timeout", "180",
         ]
         assert not job.get("continue-on-error")
+
+
+def test_ssh_recipes_use_explicit_bounded_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "ssh-recipes" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    for name, runner, opt_in in (
+        ("ssh-recipes-linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("ssh-recipes-windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-recipes'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 25
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        assert checkout["with"]["persist-credentials"] is False
+        commands = [step["run"].split() for step in job["steps"] if "run" in step]
+        assert commands == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_ssh.py",
+             "--test-timeout", "900", "--timeout", "1080"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_genesis.py", "-k", "owning_ssh",
+             "--test-timeout", "900", "--timeout", "1080"],
+        ]
 
 
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:

@@ -7,6 +7,48 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional immutable Worktrees runtime qualification
+
+The manual `installation-context-acceptance.yml` selector
+`immutable_runtime=true` runs only `tests/test_python_runtime_dev_live.py` through
+the canonical isolated `agent-worktrees` plugin runner. Its four native matrix
+cells use two explicit jobs with literal Linux (`ubuntu-latest`) and macOS
+(`macos-latest`) runner routes, each with a `legacy`/`namespaced` mode matrix
+and fail-fast disabled. Python and `UV_PYTHON` are 3.11,
+matching the supported first-adopter floor. No host-state opt-in, live
+installation or service deployment is used.
+
+```bash
+gh workflow run installation-context-acceptance.yml --ref <published-workflow-branch> \
+  -f immutable_runtime=true -f immutable_runtime_ref=<full-40-hex-candidate-commit>
+```
+
+Publish the candidate normally first; the dispatch branch must contain this
+workflow definition. `immutable_runtime_ref` accepts only a full immutable
+40-hex commit, or empty to select `github.sha`. Branch names, PR refs and short
+SHAs are refused before checkout. Checkout does not persist credentials; each
+job verifies and records the actual SHA, parents, interpreter and platform.
+The workflow definition's dispatch ref is distinct from the source SHA tested.
+
+Each matrix cell runs:
+
+```bash
+python tools/run-plugin-tests.py agent-worktrees \
+  --test-file tests/test_python_runtime_dev_live.py -k <legacy-or-namespaced> \
+  --timeout 2500 --plugin-timeout 2700
+```
+
+The 50-minute job envelope covers the existing 2700-second plugin suite plus
+setup. It does not raise the 2400-second test-item cap or the 480-second
+production deadline. The plugin runner prepares its own isolated, seasoned
+tooling. Selecting this lane suppresses the default diagnostics, while all
+other explicit selectors keep their routes. It adds no schedule, required CI
+gate or Windows rotation coverage.
+
+Workflow contract tests and CI enablement are not native qualification. Inspect
+all four cells' actual selected test outcomes and skips against the recorded
+candidate SHA; only real Linux/macOS execution can establish native PASS.
+
 ## Optional macOS guardian follow-through
 
 The manual `installation-context-acceptance.yml` selector
@@ -53,6 +95,20 @@ also covers retained live-owner refusal and PID-reuse reclamation with both
 integer and macOS `seconds:microseconds` birth identities. The native
 companion-lifecycle node above exercises that same lock through concurrent
 creation recovery and launch, rather than replacing it with a test double.
+
+## Optional SSH installation recipes
+
+The manual `installation-context-full.yml` portfolio `ssh-recipes` runs only
+the fixed SSH stamp/provision prerequisite on fresh Windows and Linux runners.
+It uses the existing isolated runner, canonical materializer, native foundation
+and ordinary queue. The packet covers no-write admission refusals, actual
+service-less installation, failed-candidate preservation, source-independent
+installed CLI/module origin and caller Job/group loss during Python-free cold
+acquisition. It does not adopt ordinary command/bootstrap publishers, exercise
+remote SSH, qualify retained snapshots or cells, or enroll the operator host.
+Run the non-download subset locally with `tools/run-plugin-tests.py update-driver
+--test-file tests/test_first_use_ssh.py`; the native cold cases require their
+existing explicit Windows/Linux genesis opt-ins.
 
 ## Optional SSH session snapshot
 

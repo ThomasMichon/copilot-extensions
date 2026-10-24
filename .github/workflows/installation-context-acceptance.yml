@@ -3,6 +3,14 @@ name: Installation context native acceptance
 on:
   workflow_dispatch:
     inputs:
+      immutable_runtime:
+        description: Qualify native POSIX Worktrees development lifecycle at an immutable source
+        type: boolean
+        default: false
+      immutable_runtime_ref:
+        description: Full immutable 40-hex commit for runtime qualification (empty uses the dispatch SHA)
+        type: string
+        default: ""
       guardian_followthrough:
         description: Run only the bounded native macOS guardian and disclosed regression packet
         type: boolean
@@ -57,7 +65,7 @@ permissions:
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -78,7 +86,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -101,6 +109,86 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  immutable-runtime-linux:
+    if: ${{ inputs.immutable_runtime }}
+    name: Native immutable runtime (Linux, ${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [legacy, namespaced]
+    env:
+      UV_PYTHON: "3.11"
+    steps: &immutable-runtime-steps
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate immutable runtime commit before checkout
+        id: runtime-source
+        env:
+          IMMUTABLE_RUNTIME_REF: ${{ inputs.immutable_runtime_ref }}
+          DISPATCH_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+
+          sha = os.environ["IMMUTABLE_RUNTIME_REF"] or os.environ["DISPATCH_SHA"]
+          if re.fullmatch(r"[0-9a-fA-F]{40}", sha) is None:
+              raise SystemExit("immutable_runtime_ref must be empty or a full immutable 40-hex commit")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"sha={sha.lower()}\n")
+          PY
+      - uses: actions/checkout@v4
+        id: runtime-checkout
+        with:
+          ref: ${{ steps.runtime-source.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Record actual immutable runtime qualification identity
+        env:
+          EXPECTED_SHA: ${{ steps.runtime-source.outputs.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          import platform
+          import subprocess
+          import sys
+
+          actual = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          if actual != os.environ["EXPECTED_SHA"]:
+              raise SystemExit("runtime checkout does not match the selected immutable commit")
+          print(f"Checkout: {actual}", flush=True)
+          print(subprocess.check_output(
+              ["git", "show", "-s", "--format=Parents: %P", "HEAD"], text=True,
+          ).strip(), flush=True)
+          print(f"Python: {sys.version}", flush=True)
+          print(f"OS: {platform.platform()}", flush=True)
+          PY
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Qualify isolated native development lifecycle
+        env:
+          RUNTIME_MODE: ${{ matrix.mode }}
+        run: python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_python_runtime_dev_live.py -k "$RUNTIME_MODE" --timeout 2500 --plugin-timeout 2700
+
+  immutable-runtime-macos:
+    if: ${{ inputs.immutable_runtime }}
+    name: Native immutable runtime (macOS, ${{ matrix.mode }})
+    runs-on: macos-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [legacy, namespaced]
+    env:
+      UV_PYTHON: "3.11"
+    steps: *immutable-runtime-steps
 
   runtime-profile-policy-linux:
     if: ${{ inputs.runtime_profiles }}
