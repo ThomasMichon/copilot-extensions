@@ -204,6 +204,53 @@ def test_corrupt_retained_plan_cannot_be_presented_or_confirmed(tmp_path):
         store.read()
 
 
+@pytest.mark.parametrize("projection", ["composition", "suggested", "embedded", "all"])
+def test_foreign_fleet_projections_cannot_be_published_in_an_owned_candidate(tmp_path, projection):
+    from fleet_manager.loadouts import design_loadout
+
+    plan = design_loadout(*inputs(), now=150)
+    if projection in ("composition", "all"):
+        plan["composition"]["fleet_id"] = "foreign"
+    if projection in ("suggested", "all"):
+        plan["suggested_config"]["fleet_id"] = "foreign"
+    if projection in ("embedded", "all"):
+        plan["suggested_config"]["extensions"]["loadout_composition"]["fleet_id"] = "foreign"
+    plan["digest"] = digest({key: value for key, value in plan.items() if key != "digest"}, output=True)
+    store = PreparationStore(tmp_path / "owned.sqlite", fleet="example", installation="controller-1")
+    with pytest.raises(PlanError):
+        store.publish(candidate(plan), plan, expected=0, now=150)
+    assert store.read() is None
+
+
+def test_persisted_foreign_plan_cannot_be_inspected_or_confirmed(tmp_path):
+    from fleet_manager.loadouts import design_loadout
+
+    values = inputs()
+    values[0]["fleet_id"] = values[1]["fleet_id"] = "fleet-a"
+    owned = design_loadout(*values, now=150)
+    path = tmp_path / "owned.sqlite"
+    store = PreparationStore(path, fleet="fleet-a", installation="controller-1")
+    store.publish({**candidate(owned), "fleet": "fleet-a"}, owned, expected=0, now=150)
+    foreign = design_loadout(*inputs(), now=150)
+    envelope = {**candidate(foreign), "fleet": "fleet-a"}
+    with store._transaction() as connection:
+        connection.execute(
+            "UPDATE proposal SET candidate=?,plan=?,decision=NULL",
+            (canonical(envelope), canonical(foreign, output=True)),
+        )
+    store = PreparationStore(path, fleet="fleet-a", installation="controller-1")
+    with pytest.raises(PlanError, match="fleet"):
+        store.read_metadata()
+    with pytest.raises(PlanError, match="fleet"):
+        store.confirm(
+            generation=1, selected_digest=digest(envelope),
+            reviewer={"principal": "caller-a", "account": "account-a", "policy_revision": "policy-1"},
+            now=150,
+        )
+    with store._transaction() as connection:
+        assert connection.execute("SELECT decision FROM proposal").fetchone() == (None,)
+
+
 def test_exact_maximum_plan_pages_validate_full_content_once_and_refuse_stale_selection(tmp_path, monkeypatch):
     import hashlib
 
@@ -235,7 +282,8 @@ def test_exact_maximum_plan_pages_validate_full_content_once_and_refuse_stale_se
 
     monkeypatch.setattr(loadout_preparation, "canonical", counted)
     assert "plan" not in store.read_metadata()
-    assert full_encodings == []
+    assert 1 <= len(full_encodings) <= 2
+    cold_encodings = len(full_encodings)
     chunks = [
         store.read_plan_range(generation=1, selected_digest=current["digest"], offset=offset)
         for offset in range(0, len(encoded), PLAN_CHUNK)
@@ -243,7 +291,7 @@ def test_exact_maximum_plan_pages_validate_full_content_once_and_refuse_stale_se
     assert len(chunks) == 256 and all(len(chunk) == PLAN_CHUNK for chunk in chunks)
     assert b"".join(chunks) == encoded
     assert hashlib.sha256(b"".join(chunks)).hexdigest() == selected["plan_digest"]
-    assert 1 <= len(full_encodings) <= 2
+    assert len(full_encodings) == cold_encodings
     encodings_after_download = len(full_encodings)
     assert store.read_metadata()["digest"] == current["digest"]
     assert len(full_encodings) == encodings_after_download

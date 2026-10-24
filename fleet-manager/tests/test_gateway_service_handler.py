@@ -196,10 +196,10 @@ def test_lifetimes_are_independent_and_never_reopen():
     second.check()
 
 
-@pytest.mark.parametrize("stage", ["response-start", "body-read", "chunk-send"])
+@pytest.mark.parametrize("stage", ["response-start", "header-send", "body-read", "chunk-send"])
 def test_http_response_cannot_enter_ack_wait_after_native_read_swallows_cancellation(stage):
     async def scenario():
-        started, closed = asyncio.Event(), asyncio.Event()
+        started, closed, body_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
         frames = []
 
         async def native_read():
@@ -225,6 +225,9 @@ def test_http_response_cannot_enter_ack_wait_after_native_read_swallows_cancella
                 closed.set()
 
             async def iter_chunked(self, _size):
+                body_started.set()
+                if stage == "header-send":
+                    await asyncio.Event().wait()
                 if stage == "body-read":
                     await native_read()
                 yield b"must-not-wait-for-an-ack"
@@ -236,7 +239,8 @@ def test_http_response_cannot_enter_ack_wait_after_native_read_swallows_cancella
         class Socket:
             async def send_str(self, raw):
                 frame = json.loads(raw)
-                if stage == "chunk-send" and frame["type"] == "chunk":
+                if ((stage == "chunk-send" and frame["type"] == "chunk")
+                        or (stage == "header-send" and frame["type"] == "headers")):
                     await native_read()
                 else:
                     frames.append(frame)
@@ -254,6 +258,8 @@ def test_http_response_cannot_enter_ack_wait_after_native_read_swallows_cancella
             await asyncio.wait_for(started.wait(), 1)
             await asyncio.wait_for(pending, 1)
             assert closed.is_set()
+            if stage == "header-send":
+                assert not body_started.is_set()
             assert all(frame["type"] not in ("chunk", "end") for frame in frames)
             assert frames[-1] == {"type": "error", "id": exchange.id, "code": "backend-timeout"}
         finally:

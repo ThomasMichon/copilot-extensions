@@ -213,6 +213,24 @@ def test_published_change_invalidates_old_decision_and_never_accepts_uploaded_co
     asyncio.run(scenario())
 
 
+def test_matching_foreign_config_and_inventory_cannot_cross_the_gateway_fleet_binding(tmp_path, repositories):
+    async def scenario():
+        async with running(tmp_path) as rig:
+            controller, inventory = service(tmp_path, repositories)
+            inventory["fleet_id"] = repositories["config"]["fleet_id"]
+            await connect_handler(rig, controller.handle)
+            thin = client(rig)
+            blocked = await thin.refresh()
+            assert blocked["candidate"]["fleet"] == "fleet-a"
+            assert blocked["candidate"]["status"] == "blocked"
+            assert blocked["candidate"]["reason"] == "published-loadout-invalid"
+            assert controller.store.read()["plan"] is None
+            with pytest.raises(PlanError):
+                await thin.confirm(generation=blocked["generation"], selected_digest=blocked["digest"])
+            assert controller.store.read()["decision"] is None
+    asyncio.run(scenario())
+
+
 def test_current_policy_denial_and_withdrawal_during_real_pull_have_no_decision(tmp_path, repositories):
     publish_fleet(repositories)
     selected = {"scope": ReviewScope("account-a", "policy-1", True)}

@@ -221,6 +221,7 @@ class ServiceConnector:
             selected = headers(response.headers.items(), RESPONSE_HEADERS)
             await send(ws, {"type": "headers", "id": exchange.id,
                             "status": response.status, "headers": selected})
+            exchange.lifetime.check()
             total = 0
             async for data in response.content.iter_chunked(CHUNK_BYTES):
                 exchange.lifetime.check()

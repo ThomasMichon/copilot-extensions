@@ -19,7 +19,9 @@ from .loadout_sources import GitSource
 from .loadouts import design_loadout
 from .observation_store import ObservationStore
 from .observations import CurrentUpdate, ObservationCursor, OriginBinding
-from .planning import MAX_PLAN_BYTES, PlanError, canonical, decode, identifier, integer
+from .planning import (
+    MAX_PLAN_BYTES, PlanError, canonical, configuration_capacity, decode, identifier, integer,
+)
 
 LOG = logging.getLogger(__name__)
 
@@ -225,8 +227,10 @@ class PreparedLoadoutService:
             candidate["reason"] = "inventory-unavailable"
             inventory = decode(canonical(await asyncio.wait_for(self.inventory(), timeout=remaining)))
             candidate["reason"] = "published-loadout-invalid"
+            configuration = config.document()
+            configuration_capacity(configuration, fleet_id=self.fleet)
             plan = await _settled(lambda: design_loadout(
-                config.document(), inventory, catalog.document() if catalog else None,
+                configuration, inventory, catalog.document() if catalog else None,
                 now=time.time(),
             ))
             encoded = canonical(plan, output=True)

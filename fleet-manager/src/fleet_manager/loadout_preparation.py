@@ -8,7 +8,10 @@ import json
 from pathlib import Path
 import sqlite3
 
-from .planning import MAX_BYTES, MAX_PLAN_BYTES, PlanError, canonical, digest, identifier, integer, record
+from .planning import (
+    MAX_BYTES, MAX_PLAN_BYTES, PlanError, canonical, configuration_capacity,
+    digest, identifier, integer, record,
+)
 
 PLAN_CHUNK = 16 * 1024
 _APPLICATION = 0x464D4C50
@@ -137,6 +140,15 @@ class PreparationStore:
                     {key: value for key, value in plan.items() if key != "digest"}, output=True,
                 )):
             raise PlanError("prepared plan content differs from its candidate")
+        composition = plan.get("composition")
+        if not isinstance(composition, dict) or composition.get("fleet_id") != self.fleet:
+            raise PlanError("prepared composition fleet differs from its store")
+        suggested = plan.get("suggested_config")
+        configuration_capacity(suggested, fleet_id=self.fleet)
+        extensions = suggested.get("extensions")
+        if (not isinstance(extensions, dict)
+                or extensions.get("loadout_composition") != composition):
+            raise PlanError("prepared and suggested compositions differ")
 
     def _read(self, connection, *, include_plan=True):
         row = connection.execute(
@@ -189,7 +201,11 @@ class PreparationStore:
 
     def read_metadata(self) -> dict | None:
         with self._transaction() as connection:
-            return self._read(connection, include_plan=False)
+            current = self._read(connection, include_plan=False)
+            if (current is not None and current["candidate"]["plan_bytes"]
+                    and self._plan_cache is None):
+                self._read(connection)
+            return current
 
     def read_plan_range(self, *, generation: int, selected_digest: str, offset: int) -> bytes:
         integer(generation, "selected preparation generation", minimum=1)

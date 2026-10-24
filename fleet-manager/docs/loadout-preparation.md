@@ -99,11 +99,15 @@ the prior decision.
 Failed acquisition/invalid input publishes a blocked candidate without erasing
 the last valid plan. The blocked candidate cannot reuse earlier approval.
 Candidate metadata and persisted review scope are checked on readback. Full
-plan reads and admission validate content; paged inspection retains one bounded
-immutable encoded plan per validated generation/digest. Metadata/status reads
-do not traverse that blob, and each range transaction rechecks the current
-generation/digest. A changed concurrent generation refuses rather than
-overwriting another controller's proposal.
+plan reads and admission validate content, including the composition and
+suggested configuration's fleet IDs against the store's fleet. The suggested
+configuration must carry the same composition; matching foreign config and
+inventory cannot be relabeled by an owned candidate envelope.
+Paged inspection retains one bounded immutable encoded plan per validated
+generation/digest. A cold or changed generation validates that content once;
+warm metadata/status and range reads avoid repeating that work. Each range
+transaction rechecks the current generation/digest. A changed concurrent
+generation refuses rather than overwriting another controller's proposal.
 
 Confirmation accepts exactly `{"generation": ..., "digest": ...}`. It pulls
 the adopted sources again, reads current inventory, reruns the designer and
@@ -159,6 +163,10 @@ cannot enroll or replace it.
 `test_loadout_preparation.py` exercises actual Git publication, controller
 fetch, dirty-file exclusion, remote/mode refusal, disabled transaction hooks,
 durable restart, exact decision/repeat/CAS, expiry and plan corruption.
+Cross-fleet controls cover every composition/config projection, persisted
+readback/confirmation and matching foreign source/inventory through the real
+Gateway. Exact-limit paging and real settled native-output refusal controls
+cover bounded work and recoverable source failure.
 `test_loadout_gateway.py` carries that real Git source through actual TLS/PoP/
 WebSocket transport and the thin client, including chunked inspection, scoped
 notification/replay, confirmation, changed inventory/source, current-policy
@@ -167,7 +175,8 @@ All identities and repositories are disposable test fixtures.
 
 Both Gateway backend profiles check disconnect custody after an awaited chunk
 send and before waiting for its ACK. The HTTP profile also checks after native
-response-start/body reads. A native read/write that consumes task cancellation
+response-start/body reads and header writes, before entering another body read.
+A native read/write that consumes task cancellation
 must not leave the connector reader waiting on an exchange that itself needs
 that reader to deliver an ACK. Deterministic start/read/send race controls and
 the unchanged real caller deadline/recovery tests cover this boundary; no
