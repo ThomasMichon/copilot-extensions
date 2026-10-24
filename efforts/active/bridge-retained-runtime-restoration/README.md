@@ -256,6 +256,11 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   still needs source review, and actual user-scoped registration, retained
   transport/SDK integration and native recovery remain separate open gates.
   No installed authentication or running service changes.
+- Align birth-time retirement with the registration owner's existing tolerance:
+  an accepted rounding-only heartbeat must not permanently retire enrollment.
+  Null transitions and real process-birth changes still retire it. Registered
+  DB-owner changes also require fresh committed-source HTTP-47 evidence through
+  the existing capture owner; no historical packet or protocol floor changes.
 
 ### 2026-10-24 - Installation-binding prerequisite merged; enroll the consumer next
 - #8519 merged as `5f4bc412a942b11719393c1e056499c860243b53` after

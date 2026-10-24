@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from .db_live_session_aliases import PROCESS_START_TOLERANCE_SECONDS
 from .runtime_custody import RuntimeCustodyError, _normalized_schema
 
 
@@ -38,7 +39,10 @@ def definitions() -> dict[str, tuple[str, str, str]]:
             "CREATE TRIGGER IF NOT EXISTS live_sessions_retire_inbox_consumer_update "
             "AFTER UPDATE ON live_sessions WHEN "
             "NEW.session_id IS NOT OLD.session_id OR NEW.pid IS NOT OLD.pid "
-            "OR NEW.process_started_at IS NOT OLD.process_started_at "
+            "OR (NEW.process_started_at IS NOT OLD.process_started_at AND ("
+            "NEW.process_started_at IS NULL OR OLD.process_started_at IS NULL OR "
+            "ABS(NEW.process_started_at - OLD.process_started_at) "
+            f">= {PROCESS_START_TOLERANCE_SECONDS})) "
             "OR NEW.machine IS NOT OLD.machine OR NEW.venue IS NOT OLD.venue "
             "OR NEW.status != 'live' BEGIN "
             f"UPDATE {table} SET current=0 WHERE session_id=OLD.session_id AND current=1; END"),

@@ -106,6 +106,7 @@ def test_legacy_heartbeat_does_not_enroll_or_resurrect_retired_consumer(enrolled
     "UPDATE live_sessions SET session_id='native-b'",
     "UPDATE live_sessions SET pid=103",
     "UPDATE live_sessions SET process_started_at=2",
+    "UPDATE live_sessions SET process_started_at=NULL",
     "UPDATE live_sessions SET machine='machine-b'",
     "UPDATE live_sessions SET venue='remote'",
 ])
@@ -138,6 +139,21 @@ def test_deleted_registration_cannot_silently_reenroll_old_incarnation(enrolled)
     with pytest.raises(RuntimeCustodyError, match="retired or reused"):
         enroll(*enrolled)
     enroll(db, owner, admission, replace(consumer, incarnation="new"))
+
+
+@pytest.mark.parametrize("rounding", [-5e-7, 5e-7])
+def test_tolerated_heartbeat_birth_rounding_keeps_current_enrollment(enrolled, rounding):
+    db, owner, admission, consumer = enrolled
+    row = message(*enrolled)
+    before = db.runtime_epoch(owner)
+    register(db, replace(consumer, process_started_at=consumer.process_started_at + rounding))
+    enroll(*enrolled)
+    assert db.runtime_epoch(owner) == before
+    assert db.execute_read("SELECT current FROM bridge_inbox_consumers")[0][0] == 1
+    assert db.poll_live_message_handoffs(owner, admission, consumer, now=12.0)[0]["id"] == row["id"]
+    assert db.begin_live_message_handoff(
+        owner, admission, consumer, row["id"], row["handoff"]["id"], now=12.0,
+    )
 
 
 def test_concurrent_reload_cas_has_one_winner_and_retains_loser_as_unenrolled(enrolled):
