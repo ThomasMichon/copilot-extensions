@@ -33,6 +33,37 @@ def test_generated_local_exclusions_refuse_invalid_names_before_uv(names):
             pytest.fail("invalid exclusions cannot reach UV or admit retained inputs")
 
 
+def test_generated_local_exclusions_canonicalize_owned_temp_aliases(monkeypatch):
+    from contextlib import contextmanager
+
+    temporary = policy._configuration.temporary_inputs
+    observed = []
+    expected = object()
+
+    @contextmanager
+    def aliased(parent):
+        with temporary(parent) as directory:
+            path = Path(directory)
+            yield str(path / ".." / path.name)
+
+    @contextmanager
+    def retain(_uv, arguments, **options):
+        constraint, = options["_generated_constraints"]
+        assert constraint == constraint.resolve()
+        assert constraint.read_text(encoding="utf-8") == "example-local<0,>=0\n"
+        assert arguments[-2:] == ["--constraint", str(constraint)]
+        observed.append(constraint)
+        yield expected
+
+    monkeypatch.setattr(policy._configuration, "temporary_inputs", aliased)
+    monkeypatch.setattr(policy, "_retain_uv_install", retain)
+    with policy.retain_uv_install(
+        "unused-uv", [], excluded_local_packages=("Example_Local",),
+    ) as transaction:
+        assert transaction is expected
+    assert len(observed) == 1 and not observed[0].exists()
+
+
 @pytest.mark.parametrize("fraction", ["1", "12", "123", "1234", "12345", "123456", "123456789"])
 def test_absolute_cutoff_fraction_is_python310_compatible_and_conservative(fraction):
     value = policy._cutoff_value(f"Absolute(2026-10-06T00:00:00.{fraction}Z)", NOW)
