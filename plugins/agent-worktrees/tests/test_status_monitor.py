@@ -4250,6 +4250,65 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
     assert swept == [True]
 
 
+def test_status_monitor_recovers_repository_map_after_transient_owner_check(tmp_path, monkeypatch):
+    from agent_worktrees import self_retire, status_monitor_cutover as smc
+
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
+    elected = [42]
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: elected[0])
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: False)
+    monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
+    monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        m.loop_governance_mod, "LoopGovernance",
+        lambda: type("Governance", (), {"recheck": lambda self, checkpoint: {"status": "ready"}})(),
+    )
+    handles, generations = [], []
+    request = {"repository_map_version": 1, "scope": str(tmp_path.resolve())}
+
+    class Control:
+        port = 12345
+
+        def __init__(self, handle, **kwargs):
+            handles.append(handle)
+
+        def start(self):
+            assert handles[0]("promote", {})["adopted"]
+
+        def current_read_count(self, action="worktrees-read"):
+            return 0
+
+        def close(self):
+            assert handles[0]("repos-map-read", request)["ok"] is False
+
+    monkeypatch.setattr(smc, "ControlServer", Control)
+
+    def sweep(*args, **kwargs):
+        result = handles[0]("repos-map-read", request)
+        assert result["ok"], result
+        generations.append(result["projection"]["generation"])
+        if len(generations) == 1:
+            elected[0] = None
+            assert handles[0]("repos-map-read", request)["error"]["code"] == "superseded"
+            health = handles[0]("health", {})
+            assert health["worktrees"]["status"] == "ready"
+            assert health["repositories"]["admitting"] is False
+            elected[0] = 42
+        else:
+            assert len(generations) == 2 and generations[1] != generations[0]
+            assert handles[0]("shutdown", {}) == {"shutdown": True}
+            elected[0] = None
+        return 1
+
+    monkeypatch.setattr(m, "_monitor_sweep", sweep)
+    assert m.cmd_status_monitor(argparse.Namespace(interval=2, passive=True)) == 0
+    assert len(generations) == 2
+
+
 @pytest.mark.parametrize("shutdown_mode", ["requested", "interrupted"])
 def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
     tmp_path, monkeypatch, shutdown_mode,

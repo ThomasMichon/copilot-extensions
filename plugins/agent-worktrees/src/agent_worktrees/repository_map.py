@@ -170,5 +170,8 @@ class RepositoryMapRuntime:
         with self._lock:
             return {
                 "capabilities": [CAPABILITY],
-                "repositories": {"status": self._reason, "generation": self._generation},
+                "repositories": {
+                    "status": self._reason, "generation": self._generation,
+                    "admitting": self._admitting,
+                },
             }

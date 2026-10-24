@@ -54,6 +54,9 @@ and drain lifecycle. In-flight reads remain accounted until transport
 completion. Drain closes map admission; a late producer result cannot reopen
 it or publish into a replacement generation. Map demand contributes a bounded
 30-second linger to the existing idle-exit policy, not a separate service.
+If a transient route read closes only map admission, the resident's
+current-owner recovery path reopens it even when the Worktrees roster remains
+ready. Explicit drain and shutdown still prevent readmission.
 
 This is a browsing projection, not execution or mutation permission. A
 read-only/reference class stays read-only; consumers must still perform the

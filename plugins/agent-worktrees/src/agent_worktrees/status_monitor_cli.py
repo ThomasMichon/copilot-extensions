@@ -788,12 +788,15 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         while True:
             _cleanup_retired_request_surfaces()
             active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
-            roster_ready = worktrees_runtime.health()["worktrees"]["status"] == "ready"
-            if active_generation is not None and (not published_lock or not roster_ready):
+            readers_ready = (
+                worktrees_runtime.health()["worktrees"]["status"] == "ready"
+                and repositories_runtime.health()["repositories"]["admitting"]
+            )
+            if active_generation is not None and (not published_lock or not readers_ready):
                 with state_lock:
                     if (
                         not admission_closed and not shutdown_requested.is_set()
-                        and (not published_lock or not roster_ready)
+                        and (not published_lock or not readers_ready)
                     ):
                         published_lock = True
                         published_lock = _start_request_surfaces()
