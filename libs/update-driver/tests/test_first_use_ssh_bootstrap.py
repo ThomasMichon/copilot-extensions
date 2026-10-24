@@ -21,6 +21,11 @@ from test_first_use_vault import cold_environment, native_genesis
 from test_first_use_vault_bootstrap import ordinary_receipt, owned_hook, receipt_completed_count
 
 
+pytestmark = pytest.mark.skipif(
+    os.name != "nt" and sys.platform != "linux", reason="native Windows/Linux SSH bootstrap",
+)
+
+
 def hook_command(payload, project, native_directory):
     hook = payload / "scripts" / (
         "bootstrap-check.ps1" if os.name == "nt" else "bootstrap-check.sh"

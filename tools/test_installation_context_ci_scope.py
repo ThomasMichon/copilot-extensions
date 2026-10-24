@@ -400,7 +400,11 @@ def test_ssh_bootstrap_uses_explicit_bounded_native_portfolio() -> None:
             ["python", "tools/run-plugin-tests.py", "agent-ssh",
              "--test-file", "tests/test_bootstrap_check_reconcile_always_on.py",
              "--test-file", "tests/test_bootstrap_driver.py",
+             "--test-file", "tests/test_payload_invocation.py", "-k", '"bootstrap"',
              "--test-timeout", "60", "--timeout", "180"],
+            ["python", "tools/run-plugin-tests.py", "agent-ssh",
+             "--test-file", "tests/test_install_snapshot.py", "-k", "checkout_stamp",
+             "--test-timeout", "120", "--timeout", "240"],
         ]
 
 

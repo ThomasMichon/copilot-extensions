@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -134,7 +135,7 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     return env
 
 
-@pytest.mark.skipif(_BASH is None or os.name == "nt", reason="native Linux hook routing")
+@pytest.mark.skipif(_BASH is None or sys.platform != "linux", reason="native Linux hook routing")
 def test_sh_reconciles_without_any_opt_in_config(tmp_path):
     """No .copilot-extensions/config.yaml at all -- reconcile must still
     proceed unconditionally now that the opt-in gate is gone."""
@@ -160,7 +161,7 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path):
     assert "bootstrap provision supervision launched" in result.stderr, result.stderr
 
 
-@pytest.mark.skipif(_BASH is None or os.name == "nt", reason="native Linux hook routing")
+@pytest.mark.skipif(_BASH is None or sys.platform != "linux", reason="native Linux hook routing")
 def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     """A leftover `background_reconcile_<plugin>: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is

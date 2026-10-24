@@ -119,6 +119,10 @@ caller Job/group loss, ordinary receipt/result, manifest-selected drift and
 healthy reentry. No-write publication/source/nested/skew refusals and independent
 hook/deadline controls run alongside it. Initial runtime preparation uses the
 already-qualified fixed recipe, not an unadopted SSH command. This lane does
+also exercise checkout stamping and dependency-policy validation after removing
+the checkout, to retain the new dependency closure without a network install.
+That packaging check does not qualify the separate retained-source timeout.
+The lane does
 not qualify retained-source #5379, command publishers, cells, explicit installers
 or host rollout. The non-download subset is
 `tools/run-plugin-tests.py update-driver --test-file tests/test_first_use_ssh_bootstrap.py`.

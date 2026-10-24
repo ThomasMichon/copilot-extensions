@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -45,6 +46,9 @@ def test_ssh_foundation_uses_existing_source_materialization_owner():
 
 
 @pytest.mark.parametrize("phase", ["cold", "drift"])
+@pytest.mark.skipif(
+    os.name != "nt" and sys.platform != "linux", reason="native Windows/Linux bootstrap",
+)
 @pytest.mark.parametrize("condition", [
     "ordinary", "empty-no-self", "no-ack", "foreign-ack", "driver-refused", "old-driver",
     "wrong-plugin", "array-plugin",

@@ -53,13 +53,13 @@ def test_bootstrap_stands_down_for_explicit_installation_context() -> None:
     sh = (PLUGIN / "scripts" / "bootstrap-check.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts" / "bootstrap-check.ps1").read_text(encoding="utf-8")
 
-    assert 'if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then' in sh
+    assert 'if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then' in sh
     assert "if ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }" in ps1
-    assert sh.index('\nif [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then') < sh.index(
+    assert sh.index('if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then') < sh.index(
         '\nInstallDir="$HOME/.agent-ssh"'
     )
-    assert ps1.index("\nif ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }") < ps1.index(
-        "\n$InstallDir = Join-Path $env:USERPROFILE '.agent-ssh'"
+    assert ps1.index("if ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }") < ps1.index(
+        "$InstallDir = Join-Path $env:USERPROFILE '.agent-ssh'"
     )
 
 

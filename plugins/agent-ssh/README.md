@@ -19,7 +19,10 @@ registration and session guidance keep their independent hooks.
 Managed publication, disabled self-provisioning, pinned reads, nested owners,
 unavailable sources and unsupported retained/custom sources refuse before queue
 or installation writes. Drift never replaces the manifest's selected source
-with the current hook payload. The native service-less installer is unchanged.
+with the current hook payload. Native service-less actions/options and
+transaction custody are unchanged. Checkout stamping retains the foundation's
+complete local dependency graph so later snapshot provisioning stays
+self-contained; this is packaging, not adoption of the snapshot publisher.
 Ordinary SSH command publishers, explicit installers, retained snapshots, custom
 roots and cells are not adopted by this bootstrap change.
 
