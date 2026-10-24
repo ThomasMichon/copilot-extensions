@@ -67,7 +67,8 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(monkeypatch, tmp_p
     spec.loader.exec_module(capture)
     snapshot = tmp_path / "capture-source"
     contract = "plugins/agent-bridge/contract"
-    registry = json.loads((ROOT / contract / "registry.json").read_text())
+    metadata = capture.registry_codec.load(ROOT)
+    registry = copy.deepcopy(metadata.materialized)
     current = contract + "/fixtures/http/current/"
     retained = {
         current + name for name in (
@@ -96,7 +97,12 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(monkeypatch, tmp_p
         destination = snapshot / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / path, destination)
-    (snapshot / contract / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    for path, data in {
+        **metadata.inputs, **capture.registry_codec.plan(snapshot, metadata, registry),
+    }.items():
+        destination = snapshot / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
     shutil.copyfile(ROOT / "plugins/agent-bridge/plugin.json",
                     snapshot / "plugins/agent-bridge/plugin.json")
     for source in registry["contracts"][0]["source_paths"]:

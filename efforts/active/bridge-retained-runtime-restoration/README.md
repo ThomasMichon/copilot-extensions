@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; DB foundation merged, inbox source in review; provenance layout proposal pending, full Phase 1 open
+- **Status:** Active; DB foundation merged, inbox source in review; provenance source committed and qualification in progress, full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -100,8 +100,8 @@ for the existing inbox source PR #8389; it grants no runtime operation.
 
 All decomposition, proposed API/storage names and test cases below and in the
 linked contracts are **agent-recommended design**. The existing custody and
-installer plan cleared proposal review; the later provenance proposal has its
-own pending review gate. Implementation and its source/native evidence still
+installer plan cleared proposal review; the provenance contract cleared its
+separate gate in #8420. Implementation and its source/native evidence still
 require their own review and qualification.
 
 ## Plan
@@ -148,7 +148,7 @@ require their own review and qualification.
       plugin changefiles; preserve unit-only, impact-scoped PR/promotion gates.
 
 ### Phase 4a - Preserve source evidence with lossless provenance sidecars
-- [ ] Review the [versioned provenance layout](provenance-layout.md) before
+- [x] Review the [versioned provenance layout](provenance-layout.md) before
       implementing the bounded source-format change.
 - [ ] Complete its reader/writer, publication and validation gates, then
       return to #8389 without dropping evidence or increasing the size guard.
@@ -189,10 +189,25 @@ The source ownership and integration order are in those documents.
 The proposal merged through normal repository review in
 [#8179](https://github.com/ThomasMichon/copilot-extensions/pull/8179).
 This establishes the reviewed plan, not implementation or running adoption.
-The later [provenance layout](provenance-layout.md) is a separate source-format
-proposal and must pass its own normal review before implementation.
+The later [provenance layout](provenance-layout.md) cleared normal review in
+[#8420](https://github.com/ThomasMichon/copilot-extensions/pull/8420).
+Its source implementation and qualification remain open.
 
 ## Journal
+
+### 2026-10-23 - Provenance contract merged; source implementation next
+- #8420 merged to `dev` as `a9b307b165a8ef14a305ecf0136250572f36aa2c`,
+  with sole parent `210518070267f654a1534ac98f98f602946d0cbb`.
+  Copilot approved actual head `8c5b426eda1df5df2b9781224c9bfc9d15fb5198`
+  and required CI passed before the normal managed merge.
+- The earlier approval on the pre-index head was not treated as current
+  approval. A bounded timeout led to a normal current-head review request,
+  not reviewer diagnostics or a bypass.
+- The existing source venue was pulled forward onto the merged plan. Next is
+  the complete actual reader/writer trace and the reviewed lossless format
+  implementation, followed by source review and genuine qualification.
+  No codec, schema conversion, sidecar or runtime action is implemented by
+  this plan merge; #8389 and all remaining effort gates stay open.
 
 ### 2026-10-23 - Propose the lossless evidence-format prerequisite
 - #8203 merged the bounded DB/storage foundation; full Phase 1 remains open.

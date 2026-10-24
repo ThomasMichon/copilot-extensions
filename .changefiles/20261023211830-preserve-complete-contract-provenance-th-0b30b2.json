@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve complete contract provenance through bounded immutable sidecars and recoverable capture publication.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -6,14 +6,15 @@ import ast
 import copy
 import hashlib
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import re
-import stat
 import subprocess
 import sys
 from typing import Any
 
 import agent_bridge_contract_git as git_evidence
+import agent_bridge_contract_registry as registry_codec
+from agent_bridge_contract_paths import safe
 
 CONTRACT = "plugins/agent-bridge/contract/"
 REGISTRY = CONTRACT + "registry.json"
@@ -133,43 +134,6 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def safe(root: Path, relative: str) -> Path:
-    """Reject traversal, links/reparse points and file aliases before any write."""
-    path = PurePosixPath(relative)
-    if (
-        not relative
-        or path.is_absolute()
-        or path.as_posix() != relative
-        or any(part in {".", "..", ".git"} for part in path.parts)
-        or "\\" in relative
-        or ":" in relative
-    ):
-        raise ValueError(f"unsafe capture path: {relative}")
-    if not root.is_absolute() or root.resolve(strict=True) != root:
-        raise ValueError("capture root must be an absolute unlinked checkout")
-    target = root / relative
-    for node in (target, *target.parents):
-        if node == root:
-            break
-        if node.is_symlink():
-            raise ValueError(f"linked capture path: {relative}")
-        try:
-            info = node.lstat()
-        except FileNotFoundError:
-            continue
-        if getattr(info, "st_file_attributes", 0) & getattr(
-            stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400
-        ):
-            raise ValueError(f"reparse capture path: {relative}")
-        if node == target and stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
-            raise ValueError(f"aliased capture path: {relative}")
-        if node != target and not stat.S_ISDIR(info.st_mode):
-            raise ValueError(f"non-directory capture parent: {relative}")
-    if not target.resolve().is_relative_to(root):
-        raise ValueError(f"escaping capture path: {relative}")
-    return target
-
-
 def git(root: Path, *args: str) -> bytes:
     git_evidence.require_local_object_reads()
     result = subprocess.run(
@@ -199,7 +163,9 @@ def constant(data: bytes, name: str) -> int:
     raise ValueError(f"missing integer capture constant: {name}")
 
 
-def proof_paths(root: Path, registry: dict) -> set[str]:
+def proof_paths(
+    root: Path, registry: dict, *, metadata_paths: set[str] | None = None,
+) -> set[str]:
     """Pin execution dependencies broadly; only AFFECTED owns new semantic vectors."""
     paths = (
         set(AFFECTED)
@@ -212,6 +178,9 @@ def proof_paths(root: Path, registry: dict) -> set[str]:
             CONTRACT + "registry.schema.json",
         }
     )
+    if (root / (CONTRACT + "provenance.schema.json")).exists():
+        paths.add(CONTRACT + "provenance.schema.json")
+    paths.update(metadata_paths or set())
     for contract in registry["contracts"]:
         paths.update(item["path"] for item in contract["source_paths"])
     for folder in (
@@ -252,7 +221,10 @@ def source_snapshot(
         mode, kind, blob = metadata.decode().split()
         tree[path.decode("utf-8")] = (mode, kind, blob)
     result = {}
-    for path in sorted(proof_paths(root, registry)):
+    metadata = baseline_snapshot(root, commit)
+    for path in sorted(proof_paths(
+        root, registry, metadata_paths=set(metadata.inputs) - {REGISTRY},
+    )):
         node = safe(root, path)
         entry = tree.get(path)
         if entry is None or entry[:2] not in {("100644", "blob"), ("100755", "blob")}:
@@ -274,7 +246,7 @@ def source_snapshot(
     return result
 
 
-def baseline(root: Path, commit: str) -> dict:
+def baseline_snapshot(root: Path, commit: str) -> registry_codec.Snapshot:
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("HTTP-47 capture requires a full real source commit")
     if (
@@ -302,11 +274,18 @@ def baseline(root: Path, commit: str) -> dict:
         raise ValueError(
             "HTTP-47 capture cannot move the negotiated-drain capability floor"
         )
-    result = json.loads(git(root, "show", commit + ":" + REGISTRY))
+    snapshot = registry_codec.load(
+        root, read=lambda path: git(root, "show", commit + ":" + path),
+    )
+    result = snapshot.materialized
     http = next(c for c in result["contracts"] if c["id"] == "agent-bridge.http-wire")
     if http["declared_range"]["current"] != 47:
         raise ValueError("this capture owns only declared HTTP generation 47")
-    return result
+    return snapshot
+
+
+def baseline(root: Path, commit: str) -> dict:
+    return baseline_snapshot(root, commit).materialized
 
 
 def source_fixture_path(source: str) -> str:
@@ -331,6 +310,8 @@ def check_history(
     if outputs is not None:
         validate_outputs(root, registry, outputs)
     snapshot: dict[str, str | None] = {}
+    metadata = registry_codec.load(root)
+    snapshot.update({path: digest(data) for path, data in metadata.inputs.items()})
     for contract in registry["contracts"]:
         for fixture in contract["fixtures"]:
             data = safe(root, fixture["path"]).read_bytes()
@@ -486,14 +467,27 @@ def build_outputs(
                 source,
                 "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
             )
-    outputs[REGISTRY] = encode(registry, indent=None)
+    snapshot = baseline_snapshot(root, commit)
+    if snapshot.materialized != original:
+        raise ValueError("capture baseline differs from the committed registry")
+    outputs.update(registry_codec.plan(root, snapshot, registry))
     return outputs
 
 
 def validate_outputs(root: Path, original: dict, outputs: dict[str, bytes]) -> None:
     plan = output_paths(original)
-    if set(outputs) != plan:
+    proposed = registry_codec.load(
+        root, read=lambda path: outputs[path] if path in outputs
+        else registry_codec.read_file(root, path),
+    )
+    chunks = set(proposed.inputs) - {REGISTRY}
+    if set(outputs) - chunks != plan:
         raise ValueError("capture output plan differs from committed ownership")
+    old_contracts = {c["id"]: c for c in original["contracts"]}
+    for contract in proposed.materialized["contracts"]:
+        before = old_contracts[contract["id"]]["provenance"]
+        if contract["provenance"][:len(before)] != before:
+            raise ValueError("capture changed historical provenance")
     packets = plan - {REGISTRY}
     immutable = {
         f["path"]
@@ -517,20 +511,26 @@ def validate_outputs(root: Path, original: dict, outputs: dict[str, bytes]) -> N
         f["path"]: f["sha256"] for c in original["contracts"] for f in c["fixtures"]
     }
     for relative in outputs:
+        if len(outputs[relative]) > registry_codec.MAX_ARTIFACT_BYTES:
+            raise ValueError(f"capture output exceeds the unchanged size guard: {relative}")
         target = safe(root, relative)
         if target.exists() and not target.is_file():
             raise ValueError(f"capture output is not a plain file: {relative}")
         if relative == REGISTRY:
-            current = json.loads(target.read_bytes())
+            current = registry_codec.load(root).materialized
             current_key = json.dumps(current, sort_keys=True, allow_nan=False)
             allowed = (
                 json.dumps(original, sort_keys=True, allow_nan=False),
                 json.dumps(
-                    json.loads(outputs[REGISTRY]), sort_keys=True, allow_nan=False
+                    proposed.materialized, sort_keys=True, allow_nan=False
                 ),
             )
             if current_key not in allowed:
                 raise ValueError("dirty capture registry output")
+        if relative in chunks:
+            if target.exists() and target.read_bytes() != outputs[relative]:
+                raise ValueError(f"immutable provenance output changed: {relative}")
+            continue
         if relative != REGISTRY and target.exists():
             existing = json.loads(target.read_bytes())
             planned = json.loads(outputs[relative])

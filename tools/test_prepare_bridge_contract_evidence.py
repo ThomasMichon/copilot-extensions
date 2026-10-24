@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import prepare_bridge_contract_evidence as preparation
+import agent_bridge_contract_registry as codec
 
 COMMIT = "1" * 40
 REMOTE = "https://github.com/example/repository.git"
@@ -19,11 +20,25 @@ def _packet(root: Path, commit=COMMIT) -> None:
     path.write_text(json.dumps({"captured_from": {"commit": commit}}), encoding="utf-8")
 
 
-def _runner(monkeypatch, results):
+def _registry() -> dict:
+    return {
+        "schema_version": 1,
+        "contracts": [{"id": "example", "provenance": [{"commit": COMMIT}]}],
+        "deferred_contracts": [],
+    }
+
+
+def _runner(monkeypatch, results, metadata=None):
     calls = []
+    metadata = {codec.REGISTRY: codec.encode(_registry()).decode()} if metadata is None else metadata
 
     def run(root, *arguments, timeout=10):
         calls.append((arguments, timeout))
+        if arguments[0] == "show":
+            path = arguments[1].split(":", 1)[1]
+            return subprocess.CompletedProcess(
+                arguments, 0 if path in metadata else 1, metadata.get(path, ""), "",
+            )
         return subprocess.CompletedProcess(arguments, next(results), "", "")
 
     monkeypatch.setattr(preparation, "_run", run)
@@ -35,7 +50,10 @@ def test_available_capture_needs_no_fetch(tmp_path, monkeypatch):
     _packet(tmp_path)
     calls = _runner(monkeypatch, iter([0]))
     assert preparation.prepare(tmp_path, REMOTE) == COMMIT
-    assert calls == [(("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10)]
+    assert calls == [
+        (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
+        (("show", f"{COMMIT}:{codec.REGISTRY}"), 10),
+    ]
 
 
 def test_missing_capture_fetches_only_exact_object_from_selected_remote(tmp_path, monkeypatch):
@@ -51,7 +69,36 @@ def test_missing_capture_fetches_only_exact_object_from_selected_remote(tmp_path
         (("fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",
           "--no-auto-maintenance", "--no-write-fetch-head", REMOTE, COMMIT), 60),
         (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
+        (("show", f"{COMMIT}:{codec.REGISTRY}"), 10),
     ]
+
+
+@pytest.mark.parametrize("fault", ["none", "missing", "hash"])
+def test_preparation_reads_complete_captured_provenance_chunks(tmp_path, monkeypatch, fault):
+    _packet(tmp_path)
+    chunk = codec.encode({
+        "schema": codec.CHUNK_SCHEMA, "schema_version": 1, "contract": "example",
+        "record_offset": 0, "provenance": [{"commit": COMMIT}],
+    })
+    sha256 = codec.digest(chunk)
+    relative = f"{codec.PROVENANCE}example/{sha256}.json"
+    registry = _registry()
+    registry["schema_version"] = 2
+    registry["contracts"][0].update(provenance=[], provenance_chunks=[{
+        "contract": "example", "path": relative, "sha256": sha256, "record_count": 1,
+    }])
+    metadata = {codec.REGISTRY: codec.encode(registry).decode(), relative: chunk.decode()}
+    if fault == "missing":
+        metadata.pop(relative)
+    elif fault == "hash":
+        metadata[relative] += " "
+    calls = _runner(monkeypatch, iter([0]), metadata)
+    if fault == "none":
+        assert preparation.prepare(tmp_path, REMOTE) == COMMIT
+    else:
+        with pytest.raises(ValueError, match="metadata is unavailable|hash mismatch"):
+            preparation.prepare(tmp_path, REMOTE)
+    assert calls[-1] == (("show", f"{COMMIT}:{relative}"), 10)
 
 
 @pytest.mark.parametrize("results,diagnostic", [
@@ -107,7 +154,11 @@ def test_native_git_captured_tree_survives_without_an_advertised_branch(tmp_path
         ).stdout.strip()
 
     git("init")
-    tree = git("hash-object", "-w", "-t", "tree", "--stdin")
+    registry = tmp_path / codec.REGISTRY
+    registry.parent.mkdir(parents=True)
+    registry.write_bytes(codec.encode(_registry()))
+    git("add", ".")
+    tree = git("write-tree")
     commit = subprocess.run(
         ["git", "-C", str(tmp_path), "-c", "user.name=Fixture", "-c",
          "user.email=fixture@example.invalid", "commit-tree", tree, "-m", "captured checkpoint"],

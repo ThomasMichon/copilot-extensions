@@ -131,8 +131,9 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
         REPO / PLUGIN / "src", snapshot / PLUGIN / "src",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
-    registry_path = snapshot / CONTRACT / "registry.json"
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    import agent_bridge_contract_registry as registry_codec
+    registry_snapshot = registry_codec.load(snapshot)
+    registry = registry_snapshot.materialized
     fixture_paths = {
         fixture["path"]
         for contract in registry["contracts"] for fixture in contract["fixtures"]
@@ -161,7 +162,8 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
             shutil.copy2(REPO / relative, destination)
     for name in ("check-agent-bridge-contracts.py", "agent_bridge_contract_git.py",
                  "bridge_http45_evidence.py", "bridge_http47_evidence.py",
-                 "bridge_http47_validation.py"):
+                 "bridge_http47_validation.py", "agent_bridge_contract_registry.py",
+                 "agent_bridge_contract_paths.py", "agent_bridge_contract_publication.py"):
         destination = snapshot / "tools" / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / "tools" / name, destination)
@@ -211,7 +213,10 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
         sha256=hashlib.sha256(canonical).hexdigest(), semantic=False,
         non_semantic_reason="Comment-only flow maintenance; wire behavior and floors are unchanged.",
     )
-    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+    for relative, data in registry_codec.plan(snapshot, registry_snapshot, registry).items():
+        path = snapshot / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
     run(["git", "add", "-A"])
     run(["git", "commit", "-qm", "implementation-only update"])
     assert set(run(["git", "diff", "--name-only", baseline, "HEAD"]).splitlines()) == {

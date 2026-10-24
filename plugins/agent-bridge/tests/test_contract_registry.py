@@ -14,6 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import agent_bridge_contract_registry as registry_codec
 from fastapi import HTTPException
 
 from agent_bridge import protocol as bridge_protocol
@@ -51,6 +52,8 @@ _GIT_ENV_NAMES = {
 
 
 def _fixture(relative: str) -> dict:
+    if relative == "registry.json":
+        return registry_codec.load(REPO).materialized
     return json.loads((CONTRACT / relative).read_text(encoding="utf-8"))
 
 

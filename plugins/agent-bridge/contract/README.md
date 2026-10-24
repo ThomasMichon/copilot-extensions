@@ -4,6 +4,37 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+## Lossless provenance layout
+
+The shared reader in `tools/agent_bridge_contract_registry.py` accepts the
+legacy version-1 registry and the version-2 provenance layout. Version 2 retains
+each contract's ordered historical prefix in immutable JSON chunks under
+`provenance/<contract-id>/<sha256>.json`; `provenance_chunks` pins their contract,
+path, byte hash and record count. Inline `provenance` follows that prefix.
+Chunk offsets preserve order and repeated records across chunk boundaries.
+Reading materializes the complete legacy-shaped history without writing.
+The checker still owns semantic source, fixture and capture validation.
+
+The existing capture owners plan conversion explicitly on their write path
+when the registry would exceed its unchanged 1 MiB cap. Each chunk is bounded
+to 256 KiB and the reader limits the complete inventory to 256 chunks. The
+registry and every artifact remain subject to the original per-file guard.
+Neither conversion nor a no-write capture may discard old provenance, rewrite
+an archived prefix, modify historical packets or raise the cap. Version-1
+inputs remain valid; older tools without version-2 support cannot validate a
+converted registry and must not be used to rewrite it.
+
+Capture publication uses one stable kernel lock and an ignored
+`.capture-publication/` journal containing the original and planned bytes.
+Immutable chunks publish without replacing an existing path; the registry
+publishes last. Each target is checked before publication, and the complete
+input history is rechecked immediately before the registry commit. A failed
+publication retains its journal rather than claiming success. Repeating the
+identical source/byte plan may resume after the capture's own validation;
+changed inputs or another plan refuse and require explicit recovery. Reading
+and no-write validation never perform that recovery or retire old chunks.
+This source-evidence mechanism grants no runtime or deployment authority.
+
 ## Updating a contract
 
 Classify the change before touching a golden packet:

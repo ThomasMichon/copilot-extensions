@@ -22,12 +22,24 @@ SEED_STATES = pytest.mark.parametrize(
 )
 
 
+def read_registry(root: Path) -> dict:
+    return evidence.registry_codec.load(root).materialized
+
+
+def write_registry(root: Path, registry: dict) -> None:
+    snapshot = evidence.registry_codec.load(root)
+    for relative, data in evidence.registry_codec.plan(root, snapshot, registry).items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+
 def fixture_git(root: Path, *args: str) -> str:
     return evidence.git(root, *args).decode("utf-8").strip()
 
 
 def test_http47_registry_encoding_is_lossless_and_bounded() -> None:
-    registry = json.loads((ROOT / evidence.REGISTRY).read_bytes())
+    registry = evidence.registry_codec.load(ROOT).index
     compact = evidence.encode(registry, indent=None)
     assert json.loads(compact) == registry
     assert len(compact) <= 1024 * 1024
@@ -37,7 +49,8 @@ def test_http47_registry_encoding_is_lossless_and_bounded() -> None:
 @pytest.fixture(scope="module")
 def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     seed = tmp_path_factory.mktemp("http47-registered-seed")
-    registry = json.loads((ROOT / evidence.REGISTRY).read_bytes())
+    metadata = evidence.registry_codec.load(ROOT)
+    registry = metadata.materialized
     paths = evidence.proof_paths(ROOT, registry) | {
         evidence.REGISTRY,
         evidence.CONTRACT + "registry.schema.json",
@@ -48,13 +61,11 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
         for item in registry["deferred_contracts"]
         if "reference_path" in item
     )
+    paths.update(metadata.inputs)
     for path in paths:
         destination = seed / path
         destination.parent.mkdir(parents=True, exist_ok=True)
-        if path == evidence.REGISTRY:
-            destination.write_bytes(evidence.encode(registry))
-        else:
-            shutil.copyfile(ROOT / path, destination)
+        shutil.copyfile(ROOT / path, destination)
     evidence.check_history(seed, registry)
     fixture_git(seed, "init", "-q")
     commit = commit_fixture(seed, "Synthetic capture source seed")
@@ -93,7 +104,7 @@ def repository(
     root = tmp_path / "repository"
     state = getattr(request, "param", "registered-refresh")
     assert state in {"initial", "registered-refresh"}
-    registry = json.loads((source_seed / evidence.REGISTRY).read_bytes())
+    registry = read_registry(source_seed)
     owned = evidence.output_paths(registry) - {evidence.REGISTRY}
 
     def omit_owned(directory: str, names: list[str]) -> list[str]:
@@ -111,7 +122,7 @@ def repository(
                     item for item in contract["fixtures"]
                     if item["path"] not in owned or item["generation"] != 47
                 ]
-        (root / evidence.REGISTRY).write_bytes(evidence.encode(registry))
+        write_registry(root, registry)
     assert (root / evidence.PRIMARY).exists() == (state == "registered-refresh")
     evidence.check_history(root, registry)
     fixture_git(root, "init", "-q")
@@ -119,11 +130,12 @@ def repository(
     return root, commit
 
 
-def output_bytes(root: Path) -> dict[str, bytes | None]:
-    registry = json.loads((root / evidence.REGISTRY).read_bytes())
+def output_bytes(root: Path, paths: set[str] | None = None) -> dict[str, bytes | None]:
+    if paths is None:
+        paths = evidence.output_paths(read_registry(root))
     return {
         path: (root / path).read_bytes() if (root / path).is_file() else None
-        for path in sorted(evidence.output_paths(registry))
+        for path in sorted(paths)
     }
 
 
@@ -138,7 +150,10 @@ def test_http47_generated_registry_is_lossless_and_bounded(
     )
     data = outputs[evidence.REGISTRY]
     assert len(data) <= 1024 * 1024
-    generated = json.loads(data)
+    generated = evidence.registry_codec.load(
+        root, read=lambda path: outputs[path] if path in outputs
+        else evidence.registry_codec.read_file(root, path),
+    ).materialized
     for before, after in zip(original["contracts"], generated["contracts"], strict=True):
         assert after["provenance"][:len(before["provenance"])] == before["provenance"]
     assert generated["deferred_contracts"] == original["deferred_contracts"]
@@ -161,7 +176,7 @@ def test_http47_capture_semantic_upgrade_requires_registered_same_source(
     http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
     record = next(item for item in http["fixtures"] if item["path"] == path)
     record["sha256"] = evidence.digest(data)
-    (root / evidence.REGISTRY).write_bytes(evidence.encode(registry))
+    write_registry(root, registry)
     commit = commit_fixture(root, "Synthetic prior current-family ownership")
     proof = evidence.source_snapshot(root, commit, registry)
     outputs = evidence.build_outputs(
@@ -231,7 +246,7 @@ def test_http47_capture_reproducible_real_commit_preserves_history(repository, m
     assert times_before == {path: (root / path).stat().st_mtime_ns for path in outputs}
     assert len(calls) == 2
     for path in outputs:
-        if path == evidence.REGISTRY:
+        if path == evidence.REGISTRY or path.startswith(evidence.registry_codec.PROVENANCE):
             continue
         packet = json.loads(outputs[path])
         proof = packet["captured_from"]
@@ -240,8 +255,8 @@ def test_http47_capture_reproducible_real_commit_preserves_history(repository, m
             fixture_git(root, "rev-parse", commit + ":" + proof["source_path"])
             == proof["source_git_blob"]
         )
-    updated = json.loads(outputs[evidence.REGISTRY])
-    old = json.loads(fixture_git(root, "show", initial_commit + ":" + evidence.REGISTRY))
+    updated = read_registry(root)
+    old = evidence.baseline(root, initial_commit)
     current = next(c for c in updated["contracts"] if c["id"] == "agent-bridge.http-wire")
     previous = next(c for c in old["contracts"] if c["id"] == "agent-bridge.http-wire")
     assert current["capability_versions"] == previous["capability_versions"]
@@ -326,7 +341,7 @@ def test_http47_capture_post_probe_substitution_cannot_write(repository, monkeyp
             )
             path.write_bytes(path.read_bytes() + b"\n")
         elif mutation == "history":
-            original = json.loads((root / evidence.REGISTRY).read_bytes())
+            original = read_registry(root)
             history_path = next(
                 f["path"] for f in original["contracts"][0]["fixtures"]
                 if f["path"] not in owned
@@ -353,6 +368,7 @@ def test_http47_capture_post_probe_substitution_cannot_write(repository, monkeyp
 @SEED_STATES
 def test_http47_capture_hardlink_output_refuses_before_write(repository, monkeypatch, target):
     root, commit = repository
+    paths = evidence.output_paths(read_registry(root))
     node = root / target
     if target == evidence.PRIMARY:
         node.unlink(missing_ok=True)  # Only this isolated fixture's owned output.
@@ -360,12 +376,12 @@ def test_http47_capture_hardlink_output_refuses_before_write(repository, monkeyp
     else:
         (root / "registry-alias.json").hardlink_to(node)
     before = public_hashes(root)
-    outputs_before = output_bytes(root)
+    outputs_before = output_bytes(root, paths)
     calls = stub_transport(monkeypatch)
     with pytest.raises(ValueError, match="aliased"):
         capture.capture(root, commit, write=True)
     assert calls == [] and public_hashes(root) == before
-    assert output_bytes(root) == outputs_before
+    assert output_bytes(root, paths) == outputs_before
     assert node.stat().st_nlink == 2
 
 
@@ -397,9 +413,9 @@ def test_http47_capture_unowned_or_dirty_output_is_not_overwritten(repository, m
     if kind == "unowned":
         (root / evidence.PRIMARY).write_text('{"unowned":true}')
     elif kind == "registry-boolean":
-        registry = json.loads((root / evidence.REGISTRY).read_bytes())
+        registry = read_registry(root)
         registry["contracts"][0]["declared_range"]["minimum"] = True
-        (root / evidence.REGISTRY).write_text(json.dumps(registry))
+        write_registry(root, registry)
     else:
         (root / evidence.PRIMARY).write_text(
             json.dumps(
@@ -413,14 +429,14 @@ def test_http47_capture_unowned_or_dirty_output_is_not_overwritten(repository, m
             )
         )
     if kind != "registry-boolean":
-        registry = json.loads((root / evidence.REGISTRY).read_bytes())
+        registry = read_registry(root)
         registered = next(
             (f for c in registry["contracts"] for f in c["fixtures"]
              if f["path"] == evidence.PRIMARY), None
         )
         if registered is not None:
             registered["sha256"] = evidence.digest((root / evidence.PRIMARY).read_bytes())
-            (root / evidence.REGISTRY).write_bytes(evidence.encode(registry))
+            write_registry(root, registry)
             commit = commit_fixture(root, "Commit a coherent negative ownership baseline")
         evidence.check_history(root, evidence.baseline(root, commit))
     before = public_hashes(root)
@@ -454,7 +470,7 @@ def test_http47_capture_immutable_reference_collision_precedes_probes(
     primary = root / evidence.PRIMARY
     if not primary.exists():
         shutil.copyfile(source_seed / evidence.PRIMARY, primary)
-    registry = json.loads((root / evidence.REGISTRY).read_bytes())
+    registry = read_registry(root)
     sha = evidence.git_evidence.sha256_bytes(primary.read_bytes())
     error = "collision.*immutable reference"
     if owner == "deferred":
@@ -477,7 +493,7 @@ def test_http47_capture_immutable_reference_collision_precedes_probes(
             generation=45 if owner == "http-historical" else record["generation"],
         )
         contract["fixtures"].append(record)
-    (root / evidence.REGISTRY).write_bytes(evidence.encode(registry))
+    write_registry(root, registry)
     commit = commit_fixture(root, "Commit a coherent conflicting evidence reference")
     original = evidence.baseline(root, commit)
     evidence.check_history(root, original)
@@ -496,7 +512,7 @@ def test_http47_capture_unplanned_prior_generation_packet_remains_immutable(
 ):
     root, commit = repository
     path = evidence.CURRENT + "startup-observation-generation-46.json"
-    registry = json.loads((root / evidence.REGISTRY).read_bytes())
+    registry = read_registry(root)
     assert path not in evidence.output_paths(registry)
     assert any(
         f["path"] == path and f["generation"] == 46
@@ -605,6 +621,8 @@ def test_http47_capture_contained_dispatch_binds_input_report_and_portfolio(
             "--test-file", "tests/test_cold_recovery_races.py",
             "--test-file", "tests/test_cold_recovery_drain.py",
             "--test-file", "tests/test_cold_recovery_handoff_fence.py",
+            "--test-file", "tests/test_cold_recovery_stop.py",
+            "--test-file", "tests/test_cold_recovery_launch_cancellation.py",
         ]
         assert argv[-2] == "-k"
         assert set(argv[-1].split(" or ")) == set(evidence.PROBES)
@@ -639,10 +657,11 @@ def test_http47_capture_contained_dispatch_binds_input_report_and_portfolio(
     )
     if fault == "none":
         assert capture.run_probes(root, {}, expected) == expected["expected"]
+        assert capture.run_probes(root, {}, expected) == expected["expected"]
     else:
         with pytest.raises(ValueError):
             capture.run_probes(root, {}, expected)
-    assert len(calls) == 1
+    assert len(calls) == (2 if fault == "none" else 1)
 
 
 @pytest.mark.parametrize("fault", ["none", "digest", "output", "input"])
@@ -735,7 +754,7 @@ def test_http47_capture_canonical_closure_rejects_self_consistent_tamper(
             value["shared_operation_evidence"]["sha256"] = primary["sha256"]
             path.write_bytes(evidence.encode(value))
             fixture["sha256"] = evidence.digest(path.read_bytes())
-    (root / evidence.REGISTRY).write_bytes(evidence.encode(registry))
+    (root / evidence.REGISTRY).write_bytes(evidence.registry_codec.encode(registry))
     checked = subprocess.run(
         [sys.executable, str(root / "tools/check-agent-bridge-contracts.py")],
         capture_output=True, text=True, timeout=90,

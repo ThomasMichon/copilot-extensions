@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 
@@ -32,7 +31,10 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
             metadata, path = line.split("\t", 1)
             mode, kind, blob = metadata.split()
             tree[path] = (mode, kind, blob)
-        original = json.loads(evidence.git(root, "show", commit + ":" + evidence.REGISTRY))
+        metadata = evidence.registry_codec.load(
+            root, read=lambda path: evidence.git(root, "show", commit + ":" + path),
+        )
+        original = metadata.materialized
         # Compute completeness against the captured tree, not a digest supplied
         # by the producer or a later checkout's unrelated new files.
         required = set(evidence.AFFECTED) | set(evidence.TESTS) | {
@@ -44,6 +46,10 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
             item["path"] for contract in original["contracts"]
             for item in contract["source_paths"]
         )
+        required.update(set(metadata.inputs) - {evidence.REGISTRY})
+        provenance_schema = evidence.CONTRACT + "provenance.schema.json"
+        if provenance_schema in tree:
+            required.add(provenance_schema)
         required.update(path for path in tree if closure_python(path))
         if set(proof) != required:
             raise ValueError("HTTP-47 execution closure inventory differs from source tree")
@@ -52,8 +58,10 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
         # inventory plus content-addressed blobs is the conservative fallback;
         # a changed inventory requires a fresh capture, never an opaque waiver.
         tree = None
+        metadata = evidence.registry_codec.load(root)
         if set(proof) != evidence.proof_paths(
-            root, json.loads(evidence.safe(root, evidence.REGISTRY).read_bytes())
+            root, metadata.materialized,
+            metadata_paths=set(metadata.inputs) - {evidence.REGISTRY},
         ):
             raise ValueError("HTTP-47 execution closure inventory is unprovable")
     for path, identity in proof.items():

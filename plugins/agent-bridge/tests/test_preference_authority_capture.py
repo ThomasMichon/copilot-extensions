@@ -65,11 +65,13 @@ def test_preference_authority_capture_replays_terminal_and_host(capture_tool) ->
 
 
 @pytest.mark.parametrize("indent", [1, 2, None])
-def test_preference_authority_capture_retains_registry_indentation(
+def test_preference_authority_capture_accepts_legacy_json_layouts(
     capture_tool, monkeypatch: pytest.MonkeyPatch, indent: int | None,
 ) -> None:
     root = capture_tool.REPO
-    original = json.loads((root / capture_tool.REGISTRY).read_text(encoding="utf-8"))
+    original = copy.deepcopy(capture_tool.registry_codec.load(root).materialized)
+    for contract in original["contracts"]:
+        contract["provenance"] = contract["provenance"][:3]
     registry_text = json.dumps(original, indent=indent) + "\n"
 
     def committed(_commit: str, path: str) -> str:
@@ -90,7 +92,7 @@ def test_preference_authority_capture_retains_registry_indentation(
     output = capture_tool.capture("a" * 40)
 
     registry = json.loads(output[capture_tool.REGISTRY])
-    assert output[capture_tool.REGISTRY] == json.dumps(registry, indent=indent) + "\n"
+    assert output[capture_tool.REGISTRY].encode() == capture_tool.registry_codec.encode(registry)
     assert registry["contracts"][0] == original["contracts"][0]
     assert set(output) == {capture_tool.REGISTRY, *(
         capture_tool.CURRENT + name for name in capture_tool.FILES
