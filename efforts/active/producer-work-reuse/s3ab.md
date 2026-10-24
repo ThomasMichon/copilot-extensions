@@ -438,3 +438,34 @@ development/integration lane, not an addition to required unit-only CI.
   registered and drained through existing owner helpers. Canonical source/account
   producer owns reconcile/coalescing, never a per-Gate poller. All such consumer
   hunks remain unimplemented/unadmitted; Option F/#5761 boundaries unchanged.
+
+Fresh correction validation (not reconstruction of the original 92, and not
+another A/N1 native run):
+
+- Tested implementation head `64bd8343e541809215c941d89d2bfd8c28c828dd`,
+  clean tracked tree. Existing bounded runner with
+  `--test-file tests/test_inventory_store.py`; explicit `PYTEST_ADDOPTS`
+  supplied real JUnit without changing the shared runner.
+- **128 passed; zero failures/errors/skips.** Ruff F/E9, install-contract,
+  changed-file module-size and documentation consistency each exit 0.
+- Retained root: `.test-venvs/r1b-policy-captured-20261024-151913/`.
+  Each stage's `*.stdout.log`/`*.stderr.log` was opened before execution.
+  `manifest.json` records exact physical argv, source hashes before/after,
+  real JUnit case totals and strict owned-Job cleanup; all pins unchanged.
+- Closed `receipt-index.json` SHA-256:
+  `d02c24f3835526acc7faac2c9b7369e96977aeeb1e920f711cb33c403a4ad3f1`.
+  `manifest.json`:
+  `e03244508c77bea3dd82c6abff9f4c85a96d2b6fbc6efdf485017fdeda15237e`.
+  `junit.xml`:
+  `401e7bd31b17e9157ad717f60b1fe1c0779b1f48c6b107c5740429f7431d4a83`.
+  `units.stdout.log`:
+  `1280256ba9c23c5b470ebc28f71ce94be687935270e393e0ae73d34bcfa5bf21`.
+  Unit stderr is empty; individual guard hashes are in the closed index.
+- AST comparison against accepted R1a confirms every store definition except
+  `apply_account_observation` and `classify_status` unchanged. This is not a
+  new native proof at the correction head. All prior originals/archive are
+  retained; no N1/N2 execution, timing qualification, consumer activation,
+  independent-review reconstruction, ready or merge claim.
+- All owned test/guard children reaped; strict Jobs confirmed empty and closed.
+  No owned helper remains. Draft publication is a separate normal identity-gated
+  operation; this checkpoint does not close the source effort or old gates.
