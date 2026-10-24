@@ -1,0 +1,9 @@
+{
+  "comment": "Compare DWORD and QWORD registry values numerically to avoid formatting-only drift.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

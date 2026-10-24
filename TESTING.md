@@ -1616,6 +1616,14 @@ All diagnostics remain inside the unchanged test and subprocess deadlines.
 
 ### Native Agent Machines lifecycle boundaries
 
+`tools/run-plugin-tests.py agent-machines --test-file tests/test_registry_native.py`
+checks DWORD/QWORD convergence against real `reg.exe` hexadecimal output.
+It reads the existing Windows `InstallDate`/`InstallTime` values independently
+with `winreg`, then exercises dry-run and apply through a query-only runner.
+No registry value is created, changed or deleted. Missing Windows prerequisites
+skip explicitly; a skip is not native convergence proof. Pure injected-runner
+controls remain in `tests/test_resources.py`; required unit CI is unchanged.
+
 `plugins/agent-machines/tests/test_payload_installer_lifecycle_powershell.py`
 likewise gives each cleanup outcome, staging/watchdog outcome and output
 encoding its own function-scoped sandbox and pytest item. The default remains
