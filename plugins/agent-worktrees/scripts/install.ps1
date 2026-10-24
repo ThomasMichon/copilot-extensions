@@ -153,6 +153,15 @@ if ($Action -eq 'publish-runtime-helpers' -and (
 }
 # === command-lifecycle: admission before staging ===
 if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
+    $admissionProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT -and
+        $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT)
+    } elseif ($env:COPILOT_PROJECT_DIR) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+            $env:COPILOT_PROJECT_DIR)
+    } else { $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath }
+    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $admissionProject
     # Admission and its shared human-output helper require Python 3.10+.
     # Runtime construction independently selects its 3.11+ base interpreter.
     $probeAdmissionPython = {
@@ -242,7 +251,8 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
     $admissionArgs = @(
         '-I', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
         '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
-        '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource
+        '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource,
+        '--project-root', $admissionProject
     )
     $admissionOperation = if ($Action -eq 'uninstall') { 'teardown' } else { 'publish' }
     if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
@@ -2011,7 +2021,8 @@ function Write-V3Manifest {
         $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
         $manifest | ConvertTo-Json -Depth 8 | & $VenvPython -B -E -X utf8 $bindingHelper `
             --payload-root $PluginDir --plugin-id agent-worktrees --legacy-root $InstallDir `
-            --publish-legacy --write-manifest --source-payload-root $pluginPath | Out-Null
+            --publish-legacy --write-manifest --source-payload-root $pluginPath `
+            --project-root $admissionProject | Out-Null
         $bindingExit = $LASTEXITCODE
     } finally {
         $OutputEncoding = $previousOutputEncoding

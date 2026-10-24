@@ -15,6 +15,7 @@ from .store import (
 )
 
 MAX_PENDING = 128
+UNANNOTATED = object()
 
 
 class ClientError(Exception):
@@ -356,11 +357,115 @@ class Client:
             ],
         }
 
-    def post(self, channel: str, text: str, request_id: str) -> dict:
+    def thread(self, channel: str, event_id: int, **controls) -> dict:
+        return self._view("thread", channel, event_id=event_id, **controls)
+
+    def inbox(self, channel: str, **controls) -> dict:
+        return self._view("inbox", channel, **controls)
+
+    def _view(self, op: str, channel: str, **controls) -> dict:
+        from .collaboration import normalize, validate_view
+
+        result = self.request(op, channel=channel, codename=self.actor["codename"], **controls)
+        try:
+            fields = {
+                "schema", "version", "view", "channel", "codename", "epoch", "head",
+                "entries", "recent", "count", "more", "next",
+            } | ({"thread_root"} if op == "thread" else set())
+            if (set(result) != fields or result["schema"] != "agent-chat.collaboration-view"
+                    or type(result["version"]) is not int or result["version"] != 1
+                    or result["view"] != op or result["channel"] != channel
+                    or result["codename"] != self.actor["codename"]
+                    or not isinstance(result["epoch"], str)
+                    or not re.fullmatch(r"[a-f0-9]{32}", result["epoch"])
+                    or type(result["head"]) is not int or not 0 <= result["head"] <= 2**63 - 1
+                    or type(result["count"]) is not int or result["count"] < 0
+                    or type(result["more"]) is not bool
+                    or controls.get("epoch", result["epoch"]) != result["epoch"]
+                    or controls.get("head", result["head"]) != result["head"]
+                    or len(json_bytes(result)) + 1 > controls.get("max_bytes", MAX_PAGE_BYTES)):
+                raise ValueError("view envelope")
+            if op == "thread" and (
+                type(result["thread_root"]) is not int
+                or not 1 <= result["thread_root"] <= controls["event_id"] <= result["head"]
+                or result["recent"] != []
+            ):
+                raise ValueError("thread root")
+            positions = {}
+            count = 0
+            for name, position in (("entries", "after"), ("recent", "recent_after")):
+                rows = result[name]
+                if not isinstance(rows, list):
+                    raise ValueError("view entries")
+                previous = controls.get(position, 0)
+                for item in rows:
+                    if not isinstance(item, dict) or set(item) != {
+                        "event", "collaboration", "thread_root", "attention",
+                    }:
+                        raise ValueError("view entry fields")
+                    event = _event(item["event"])
+                    if (event["channel"] != channel or not previous < event["id"] <= result["head"]
+                            or type(item["thread_root"]) is not int
+                            or not 1 <= item["thread_root"] <= event["id"]):
+                        raise ValueError("view entry identity")
+                    value = item["collaboration"]
+                    if value is not None and normalize(value) != value:
+                        raise ValueError("unnormalized collaboration")
+                    if op == "thread":
+                        if item["thread_root"] != result["thread_root"] or item["attention"] is not None:
+                            raise ValueError("thread entry")
+                    elif name == "entries":
+                        if value is None or (
+                            item["attention"] == "reply"
+                            and (value["kind"] != "question" or self.actor["codename"] not in value["to"])
+                        ) or (
+                            item["attention"] == "review" and value["kind"] != "answer"
+                        ) or item["attention"] not in {"reply", "review"}:
+                            raise ValueError("pending attention")
+                    elif item["attention"] is not None:
+                        raise ValueError("ambient attention")
+                    previous = event["id"]
+                positions[position] = previous
+                count += len(rows)
+            if (count != result["count"] or count > controls.get("limit", 50)
+                    or len(result["recent"]) > controls.get("recent_limit", 10)):
+                raise ValueError("view count")
+            if result["more"]:
+                if not isinstance(result["next"], dict):
+                    raise ValueError("view continuation fields")
+                validate_view({
+                    "op": op, **result["next"],
+                    **({"event_id": controls["event_id"]} if op == "thread" else {}),
+                })
+                expected = {"epoch": result["epoch"], "head": result["head"], "after": positions["after"]}
+                if op == "inbox":
+                    position = result["next"]["after"]
+                    if (not positions["after"] <= position <= result["head"]
+                            or position == controls.get("after", 0)
+                            and positions["recent_after"] == controls.get("recent_after", 0)
+                            or not count and position == result["head"]):
+                        raise ValueError("inbox scan progress")
+                    expected.update(
+                        after=position,
+                        recent_after=positions["recent_after"], recent_limit=controls.get("recent_limit", 10),
+                    )
+                if (op == "thread" and not count) or result["next"] != expected:
+                    raise ValueError("view continuation")
+            elif result["next"] is not None:
+                raise ValueError("terminal continuation")
+        except (ChatError, ValueError, TypeError, KeyError):
+            raise ClientError("invalid_response", "Invalid non-consuming collaboration view.") from None
+        return result
+
+    def post(self, channel: str, text: str, request_id: str, *, collaboration=UNANNOTATED) -> dict:
+        from .collaboration import normalize
+
         request = {
             "op": "post", "channel": channel, "codename": self.actor["codename"],
             "text": text, "request_id": request_id,
         }
+        if collaboration is not UNANNOTATED:
+            request["collaboration"] = normalize(collaboration)
         validate_request(request)
         key = hashlib.sha256(request_id.encode("utf-8")).hexdigest()
         path = self.directory / "pending-posts" / (key + ".json")
@@ -374,13 +479,23 @@ class Client:
             _atomic_json(path, request)
             try:
                 result = self.request(**request)
-                if set(result) != {"event", "duplicate"}:
+                fields = {"event", "duplicate"} | (
+                    {"collaboration", "thread_root"} if "collaboration" in request else set()
+                )
+                if set(result) != fields:
                     raise ClientError("invalid_response", "Invalid post response fields.")
                 event = _event(result.get("event"))
                 if (type(result.get("duplicate")) is not bool or event["channel"] != channel
                         or event["author"]["codename"] != self.actor["codename"]
                         or event["request_id"] != request_id or event["text"] != text):
                     raise ClientError("invalid_response", "Post response does not match the original request.")
+                if "collaboration" in request and (
+                    normalize(result["collaboration"]) != request["collaboration"]
+                    or result["collaboration"] != request["collaboration"]
+                    or type(result["thread_root"]) is not int
+                    or not 1 <= result["thread_root"] <= event["id"]
+                ):
+                    raise ClientError("invalid_response", "Post annotation is not confirmed.")
             except ClientError as error:
                 if not retained and error.status is not None and 400 <= error.status < 500:
                     path.unlink()

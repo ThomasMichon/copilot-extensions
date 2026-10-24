@@ -373,6 +373,13 @@ When the user asks to clean up worktrees:
    automatically disposable. Ask before adding `--include-unused` or
    `--include-conversations`; the former does not authorize removal of
    conversation-only work.
+5. **Verify the requested outcome, not just successful commands.** For a
+   per-repository target, count actual remaining checkouts in each repository,
+   including retained finalized and system checkouts. Preserve live owners and
+   real unfinished work; backups, archive refs, hidden rows, and released claims
+   are not checkout removal. Report retained owners and unsupported bookkeeping
+   separately. The fleet guide covers producer containment and cohort-based
+   reconciliation without weakening action-time safety checks.
 
 **Never blanket-`--force` a batch of dirty worktrees.** `cleanup` refuses a
 worktree with uncommitted changes *on purpose* -- that refusal protects real,

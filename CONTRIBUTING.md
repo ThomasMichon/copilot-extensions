@@ -38,7 +38,9 @@ Use the worktree's actual assigned public codename, not a fabricated label.
 Optional `root` is another assigned public handle; optional `enc` is the
 base64 AWI1 envelope produced by the shared-key attribution tools. Handles are
 lowercase alphanumeric segments joined by hyphens, at most 64 characters.
-Encryption is optional; never publish raw machine, worktree or session fields.
+Encryption is optional; never publish raw machine, worktree or session fields
+in this source-attribution comment. The standard `Copilot-Session` commit
+trailer is allowed separately (see *Commit Messages*).
 Place the comment on its own line outside code fences or quoted examples.
 Indented code, blockquotes, escaped comments and list-contained fenced examples
 are not source metadata; the trusted check parses Markdown containers rather
@@ -1385,3 +1387,8 @@ causes.
 - Descriptive, imperative mood: "Fix Unicode crash on cp1252 consoles"
 - Reference this repo's GitHub issue numbers where applicable: "Fix #372: …"
 - Include `Co-authored-by` trailer for Copilot-assisted commits
+- The standard `Copilot-Session: <session-id>` trailer is allowed public commit
+  provenance. Preserve it when supplied by the runtime or operator; do not ask
+  to remove it solely because it contains a session identifier. This exception
+  does not permit private session content, paths, links, or other identifiers
+  in public prose or raw fields in source-attribution comments.
