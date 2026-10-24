@@ -12,6 +12,16 @@
 - **Umbrella issue:** #7937
 - **Sub-issues:** #7936 · #7946
 
+### Private F3 checkpoint (2026-10-24)
+
+An isolated new-file-only reducer and focused `test_source_publications.py`
+candidate are unit-qualified for review, disconnected from production.
+The model boundary is documented in [implementation.md](implementation.md)
+and the bounded command evidence in [validation.md](validation.md).
+This is not source/loader integration, owner receipt support, issue closure,
+native qualification or whole-effort completion. All remaining phase and
+nominal/installed acceptance gates retain their existing status.
+
 ## Guiding Intent
 
 Refresh and successful maintenance must converge on the selected producer's

@@ -1,5 +1,49 @@
 # Validation contract
 
+## Private F3 pure checkpoint (2026-10-24)
+
+Base: `ba25d5f5d58cdc02736cce67da42a39a72737076`, with merged F1
+contracts. Functional edits are limited to the new private
+`worktree-manager/src/worktree_manager/production_picker/picker_tui/source_publications.py`
+and new `worktree-manager/tests/test_source_publications.py`, plus this
+effort's documentation and the required Manager changefile.
+
+The selected contained source-runner commands (new files staged first):
+
+```powershell
+python tools\run-plugin-tests.py worktree-manager --test-file tests/test_source_publications.py
+# 35 passed in 1.88s; exit 0 (initial checkpoint).
+python tools\run-plugin-tests.py worktree-manager --test-file tests/test_source_publications.py --test-file tests/production_picker/test_worktree_observations.py
+# 63 passed in 9.60s; exit 0 (expanded reducer plus actual F1 contracts).
+python -m ruff check --select F,E9 worktree-manager\src\worktree_manager\production_picker\picker_tui\source_publications.py worktree-manager\tests\test_source_publications.py
+# All checks passed; exit 0.
+```
+
+The source runner selected CPython 3.12.14 and isolated its state. Tests are
+deterministic objects with no live endpoint, GUI, process, timing measurement
+or storage fixture. The reducer imports only stdlib and Manager-owned pure
+F1 value/receiver modules. Production importer count is zero.
+
+Coverage includes A10 locked → point A11 unlocked → twenty heartbeat/read
+ticks, independent B11 and feed base10, A12 new-owner supersession, source/
+project collisions, selected-identity refusal, epoch cancellation,
+same-generation reconnect, complete fresh generation reset, exact order and
+point-only tail, revision-qualified tombstones, equal-version conflicts
+without partial mutation, semantic/fact/closure-version regressions,
+observation-only publications, partial/unavailable fact freshness, exact-row
+receipt fences, pending/degraded non-proof, generation invalidation,
+unknown/filtered/incomplete/bounded wire refusal and detached immutable values.
+
+This proves the private pure model only. The actual loader/Inbox/screen
+twenty-tick test, source command/transport routing, F2 owner receipt production,
+F4 maintenance convergence, native end-to-end, fresh-runtime, GUI, external,
+installed and nominal performance qualification are **not run: outside this
+new-file-only checkpoint's admission**. No production receipt endpoint or
+request-correlation evidence is claimed. Existing v1 paths are unmodified;
+the private candidate explicitly refuses v1 rather than claiming v1
+integration. This checkpoint is for acceptance before integration or merge;
+the remaining F2/F3/F4/F5 and whole-effort gates stay open.
+
 Back to [the effort](README.md) and [implementation contract](implementation.md).
 Tests below are implementation obligations, not claims that new tests exist
 or have passed. New test basenames are proposed explicitly.
