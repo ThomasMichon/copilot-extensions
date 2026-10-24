@@ -208,6 +208,89 @@ class TestRuntimeProfileWheels:
         with pytest.raises(ProfileError):
             _verify(profile, wheels, deadline=1)
 
+    def test_complete_profile_does_not_inherit_the_first_party_archive_cap(self, monkeypatch):
+        import promotion_python_artifacts as promotion
+
+        profile, wheels = _inputs()
+        monkeypatch.setattr(promotion, "_BUNDLE_LIMIT", 1)
+        _verify(profile, wheels)
+        wheel = profile.record()["wheels"][0]
+        with pytest.raises(promotion.PromotionArtifactError, match="archive limit"):
+            promotion.validate_wheel(
+                wheels[wheel["filename"]], wheel | {"generator": "locked"},
+            )
+
+    def test_per_wheel_archive_limit_bounds_the_initial_digest_pass(self):
+        profile, wheels = _inputs()
+
+        class MeasuredStream(io.BytesIO):
+            read_bytes = 0
+
+            def read(self, size=-1):
+                data = super().read(size)
+                self.read_bytes += len(data)
+                return data
+
+        filename = next(iter(wheels))
+        stream = MeasuredStream(wheels[filename].getvalue())
+        wheels[filename] = stream
+        limits = WheelLimits(16, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
+        with pytest.raises(ProfileError):
+            _verify(profile, wheels, limits=limits)
+        assert stream.read_bytes == limits.max_archive_bytes + 1
+
+    @pytest.mark.parametrize("parser", ["parse_tag", "parse_wheel_filename", "Requirement"])
+    def test_expiry_during_profile_validation_stops_subsequent_packaging_parsing(self, monkeypatch, parser):
+        import installer_wheel_inputs
+        import runtime_profile
+
+        profile, wheels = _inputs()
+        now = [0]
+        clock = SimpleNamespace(monotonic=lambda: now[0])
+        monkeypatch.setattr(installer_wheel_inputs, "time", clock)
+        monkeypatch.setattr(runtime_profile, "time", clock)
+        original = getattr(runtime_profile, parser)
+        calls = []
+
+        def expiring_parser(*args, **kwargs):
+            if calls:
+                pytest.fail("packaging parsing continued after profile deadline")
+            calls.append(args)
+            result = original(*args, **kwargs)
+            now[0] = 2
+            return result
+
+        monkeypatch.setattr(runtime_profile, parser, expiring_parser)
+        with pytest.raises(ProfileError):
+            _verify(profile, wheels, deadline=1)
+        assert len(calls) == 1
+
+    def test_expiry_during_dependency_walk_stops_before_the_next_marker(self, monkeypatch):
+        import installer_wheel_inputs
+        import runtime_profile
+        from packaging.markers import Marker
+
+        profile, wheels = _inputs()
+        now = [0]
+        clock = SimpleNamespace(monotonic=lambda: now[0])
+        monkeypatch.setattr(installer_wheel_inputs, "time", clock)
+        monkeypatch.setattr(runtime_profile, "time", clock)
+        original = Marker.evaluate
+        calls = []
+
+        def expiring_marker(self, *args, **kwargs):
+            if calls:
+                pytest.fail("dependency walk continued after profile deadline")
+            calls.append(self)
+            result = original(self, *args, **kwargs)
+            now[0] = 2
+            return result
+
+        monkeypatch.setattr(Marker, "evaluate", expiring_marker)
+        with pytest.raises(ProfileError):
+            _verify(profile, wheels, deadline=1)
+        assert len(calls) == 1
+
     @pytest.mark.parametrize("algorithm", ["md5", "sha1", "sha224"])
     def test_runtime_record_weak_digests_refuse(self, algorithm):
         profile, wheels = _inputs(mutate={"record_algorithm": algorithm})

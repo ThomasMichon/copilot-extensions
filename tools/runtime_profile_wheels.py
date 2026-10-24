@@ -47,6 +47,7 @@ def verify_profile_wheels(
         _check_deadline(deadline)
         record = validate_profile(
             profile.record(), max_tags=limits.max_tags if limits is not None else 10_000,
+            deadline=deadline,
         ).record()
         expected = {wheel["filename"]: wheel for wheel in record["wheels"]}
         if set(archives) != set(expected):
@@ -55,7 +56,10 @@ def verify_profile_wheels(
         remaining_unpacked = max_unpacked_bytes
         for filename, wheel in expected.items():
             archive = archives[filename]
-            digest, size = _archive_digest(archive, remaining_archive, deadline)
+            archive_limit = min(
+                remaining_archive, limits.max_archive_bytes if limits is not None else remaining_archive,
+            )
+            digest, size = _archive_digest(archive, archive_limit, deadline)
             if digest != wheel["sha256"]:
                 raise ProfileError("wheel archive digest differs from the exact profile")
             if remaining_unpacked <= 0:
@@ -63,6 +67,7 @@ def verify_profile_wheels(
             archive.seek(0)
             metadata, unpacked = inspect_wheel(
                 archive, wheel, max_unpacked_bytes=remaining_unpacked,
+                max_archive_bytes=archive_limit,
                 max_metadata_bytes=max_metadata_bytes, limits=limits, deadline=deadline,
             )
             requires_python = metadata.get_all("Requires-Python", [])

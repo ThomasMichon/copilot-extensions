@@ -378,6 +378,7 @@ def validate_wheel(
     inspect_wheel(
         archive, wheel, expected_generator=wheel["generator"],
         record_algorithms=frozenset({"sha256"}),
+        max_archive_bytes=_BUNDLE_LIMIT,
         source_dir=source_dir, component=component, candidate_root=candidate_root,
     )
 
@@ -385,6 +386,7 @@ def validate_wheel(
 def inspect_wheel(
     archive: BinaryIO, wheel: dict, *, expected_generator: str | None = None,
     max_unpacked_bytes: int = _BUNDLE_LIMIT, max_metadata_bytes: int = _MANIFEST_LIMIT,
+    max_archive_bytes: int = _BUNDLE_LIMIT,
     record_algorithms: frozenset[str] = frozenset({"sha256", "sha384", "sha512"}),
     source_dir: Path | None = None, component: str | None = None,
     candidate_root: Path | None = None,
@@ -397,7 +399,7 @@ def inspect_wheel(
     must supply their own acquisition/approval evidence outside this parser.
     """
     if any(type(value) is not int or value <= 0 for value in (
-        max_unpacked_bytes, max_metadata_bytes,
+        max_unpacked_bytes, max_metadata_bytes, max_archive_bytes,
     )):
         raise PromotionArtifactError("wheel inspection requires positive byte limits")
     if not record_algorithms or not record_algorithms <= {"sha256", "sha384", "sha512"}:
@@ -407,7 +409,7 @@ def inspect_wheel(
     try:
         deadline = time.monotonic() + 120 if deadline is None else deadline
         limits = limits or WheelLimits(
-            max_archive_bytes=_BUNDLE_LIMIT, max_expanded_bytes=max_unpacked_bytes,
+            max_archive_bytes=max_archive_bytes, max_expanded_bytes=max_unpacked_bytes,
             max_member_bytes=max_unpacked_bytes, max_metadata_bytes=3 * max_metadata_bytes,
             max_members=100_000, max_tags=_WHEEL_TAG_LIMIT,
             max_metadata_member_bytes=max_metadata_bytes,
@@ -415,6 +417,7 @@ def inspect_wheel(
         facts = inspect_archive(
             archive, limits=replace(
                 limits,
+                max_archive_bytes=min(limits.max_archive_bytes, max_archive_bytes),
                 max_expanded_bytes=min(limits.max_expanded_bytes, max_unpacked_bytes),
                 max_member_bytes=min(limits.max_member_bytes, max_unpacked_bytes),
                 max_metadata_bytes=min(limits.max_metadata_bytes, 3 * max_metadata_bytes),

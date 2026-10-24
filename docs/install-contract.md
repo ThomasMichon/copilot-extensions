@@ -3170,8 +3170,12 @@ The complete-profile verifier above uses this bounded core through the shared
 promotion inspector, not a separate per-wheel semantic facade. Its existing
 byte budgets retain their total-closure and per-metadata-file meanings; callers
 may additionally supply `WheelLimits` and a shared monotonic `deadline`.
-Record validation bounds compressed filename and target tags before calling
-the packaging parsers. Runtime RECORD policy permits SHA-256/384/512, while
+The initial archive hash uses the smaller of the remaining closure budget and
+the optional per-wheel archive limit; default runtime inspection derives its
+archive cap from the caller's closure budget rather than promotion's cap.
+Record validation and its dependency walk share the same deadline and bound
+compressed filename and target tags before calling the packaging parsers.
+Runtime RECORD policy permits SHA-256/384/512, while
 source-binding member facts always retain SHA-256 and first-party promotion
 still requires SHA-256 RECORD entries. Neither facts nor a matching digest
 authenticate the profile, admit a feed or authorize cached input. A successful

@@ -125,3 +125,12 @@ syntax/import checks pass. Fresh hosted native, real-built artifact, required
 CI and review evidence are still required for this integrated head; the prior
 head's green runs are not credited to it. Authenticated acquisition, retained
 construction and the parent effort's remaining gates stay open.
+
+The integrated review identified three caller-boundary defects: the promotion
+archive cap leaked into runtime verification, initial hashing used only the
+closure budget, and profile validation renewed rather than shared the supplied
+deadline. All reproduced before fixing. Runtime archive bounds now derive from
+the caller, initial hashing reads no more than the per-wheel cap plus one
+overflow byte, and validation/packaging/dependency walks retain the same
+deadline. The corrected profile/source/native cohort passes 292 tests; fresh
+review and hosted evidence remain required after these fixes.
