@@ -1576,6 +1576,11 @@ class TestInRepoConfigCommittedRefResolution:
     happens to have checked out (a stale/wrong local branch on the anchor
     must never shadow it -- the anchor is a read-only mirror by design)."""
 
+    @pytest.fixture
+    def legacy_reads(self, monkeypatch):
+        from agent_worktrees import inrepo_config_source
+        monkeypatch.setattr(inrepo_config_source, "_read_committed_batch", lambda *_a, **_k: None)
+
     @staticmethod
     def _resolve(anchor: Path) -> dict:
         from agent_worktrees import inrepo_config_source
@@ -1682,7 +1687,7 @@ class TestInRepoConfigCommittedRefResolution:
         self._git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=anchor)
         self._git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main", cwd=anchor)
 
-    def test_absent_candidates_use_one_fresh_presence_probe(self, tmp_path, monkeypatch):
+    def test_absent_candidates_use_one_fresh_batch_probe(self, tmp_path, monkeypatch):
         from agent_worktrees import git_ops
 
         self._empty_committed_anchor(tmp_path)
@@ -1695,7 +1700,7 @@ class TestInRepoConfigCommittedRefResolution:
         monkeypatch.setattr(git_ops, "git", observed)
         assert self._resolve(tmp_path) == {}
         assert len(calls) == 2
-        assert calls[1][:4] == ("--literal-pathspecs", "ls-tree", "-z", "--full-tree")
+        assert calls[1] == ("cat-file", "--batch")
         path = cfg.inrepo_config_path(tmp_path)
         path.parent.mkdir(parents=True)
         path.write_text("marker: newly-committed\n", encoding="utf-8")
@@ -1717,6 +1722,12 @@ class TestInRepoConfigCommittedRefResolution:
             reads.append(args)
             if args[0] == "symbolic-ref":
                 text = "refs/remotes/origin/main\n"
+            elif args[0] == "cat-file":
+                data = f"marker: {marker[0]}\nnested: {{value: original}}\n".encode()
+                specs = kwargs["input_data"].splitlines()
+                packet = b"0" * 40 + b" blob " + str(len(data)).encode() + b"\n" + data + b"\n"
+                packet += b"".join(spec + b" missing\n" for spec in specs[1:])
+                return SimpleNamespace(returncode=0, stdout=packet)
             elif "ls-tree" in args:
                 text = f"100644 blob {'0' * 40}\t{args[args.index('--') + 1]}\0"
             else:
@@ -1731,14 +1742,14 @@ class TestInRepoConfigCommittedRefResolution:
             assert self._resolve(tmp_path) == {
                 "marker": "first", "nested": {"value": "original"},
             }
-            assert len(reads) == 3
+            assert len(reads) == 2
         assert self._resolve(tmp_path)["marker"] == "changed"
-        assert len(reads) == 6
+        assert len(reads) == 4
         with src.resolution_budget():
             assert self._resolve(tmp_path)["marker"] == "changed"
             marker[0] = "latest"
             assert self._resolve(tmp_path)["marker"] == "latest"
-        assert len(reads) == 12
+        assert len(reads) == 8
 
     @pytest.mark.parametrize("difference", ["anchor", "candidates", "remote", "parser"])
     def test_resolution_snapshot_does_not_mix_sources_or_custom_parsers(
@@ -1754,6 +1765,10 @@ class TestInRepoConfigCommittedRefResolution:
             reads.append(args)
             if args[0] == "symbolic-ref":
                 text = args[-1].removesuffix("HEAD") + "main\n"
+            elif args[0] == "cat-file":
+                data = b"marker: source\n"
+                packet = b"0" * 40 + b" blob " + str(len(data)).encode() + b"\n" + data + b"\n"
+                return SimpleNamespace(returncode=0, stdout=packet)
             elif "ls-tree" in args:
                 text = f"100644 blob {'0' * 40}\t{args[args.index('--') + 1]}\0"
             else:
@@ -1771,15 +1786,15 @@ class TestInRepoConfigCommittedRefResolution:
             src.load_inrepo_config_from_committed_ref(
                 anchor, paths, remote, parser=parser,
             )
-        assert len(reads) == 6
+        assert len(reads) == 4
 
     @pytest.mark.parametrize("text,expected", [
         ("", {}),
         ("[malformed", {}),
         ("marker: first\n", {"marker": "first"}),
     ])
-    def test_presence_probe_retains_first_match_and_never_reads_lower_priority_blob(
-        self, tmp_path, monkeypatch, text, expected,
+    def test_legacy_presence_probe_retains_first_match_and_never_reads_lower_priority_blob(
+        self, tmp_path, monkeypatch, text, expected, legacy_reads,
     ):
         from agent_worktrees import git_ops
 
@@ -1807,8 +1822,8 @@ class TestInRepoConfigCommittedRefResolution:
         "failure",
         ["exit", "timeout", "non-text", "os-error", "git-error", "unterminated", "malformed"],
     )
-    def test_presence_probe_unavailability_retains_bounded_blob_reads_and_warns(
-        self, tmp_path, monkeypatch, caplog, failure,
+    def test_legacy_presence_probe_unavailability_retains_bounded_blob_reads_and_warns(
+        self, tmp_path, monkeypatch, caplog, failure, legacy_reads,
     ):
         import subprocess
         import types
@@ -1846,7 +1861,9 @@ class TestInRepoConfigCommittedRefResolution:
         assert reads == [f"origin/main:{path.relative_to(tmp_path).as_posix()}"]
         assert "presence probe" in caplog.text and "bounded ordered reads" in caplog.text
 
-    def test_presence_probe_skips_absent_higher_priority_candidates(self, tmp_path, monkeypatch):
+    def test_legacy_presence_probe_skips_absent_higher_priority_candidates(
+        self, tmp_path, monkeypatch, legacy_reads,
+    ):
         from agent_worktrees import git_ops
 
         self._empty_committed_anchor(tmp_path)
@@ -1908,7 +1925,7 @@ class TestInRepoConfigCommittedRefResolution:
             assert self._resolve(tmp_path) == {}
             assert self._resolve(tmp_path) == {}
         assert [timeout for _, timeout in calls] == [15, 15]
-        assert "ls-tree" in calls[1][0]
+        assert "cat-file" in calls[1][0]
         assert "bounded ordered reads" in caplog.text
 
     def _make_remote_with_branch_configs(
