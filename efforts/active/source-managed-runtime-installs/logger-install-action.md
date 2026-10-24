@@ -120,6 +120,7 @@ Local bounded action/identity/other-plugin checks passed 12 cases. A full
 local Logger-file attempt reached its 480-second aggregate wall budget after
 38 cases without an assertion failure; it is not a complete passing run.
 All 13 install contracts, canonical helper synchronization and touched Python
-lint pass. Final native cold/registration qualification and implementation
-review/merge remain pending. No host task/unit registration, personal
+lint pass. Native Windows/Linux cold/registration and caller-loss qualification
+passed and the implementation merged; the dated Journal records exact source,
+outcomes and remaining boundaries. No host task/unit registration, personal
 processing, ordinary publisher adoption or rollout occurred.

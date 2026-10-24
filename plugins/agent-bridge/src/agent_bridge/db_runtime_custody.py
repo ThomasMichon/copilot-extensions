@@ -15,15 +15,19 @@ from .runtime_custody import (
 
 class _RuntimeCustodyMixin:
     @contextmanager
-    def _runtime_transaction(self, *, write: bool) -> Iterator[sqlite3.Connection]:
+    def _runtime_transaction(
+        self, *, write: bool, full_sync: bool = True,
+    ) -> Iterator[sqlite3.Connection]:
         if write and self.read_only:
             raise PermissionError("Read-only database cannot change runtime custody")
         with self._write_lock:
             conn = self._get_conn()
             if conn.in_transaction:
                 raise RuntimeCustodyError("Runtime custody cannot borrow an unfinished transaction")
-            synchronous = conn.execute("PRAGMA synchronous").fetchone()[0] if write else None
-            if write and synchronous < 2:
+            synchronous = (
+                conn.execute("PRAGMA synchronous").fetchone()[0] if write and full_sync else None
+            )
+            if synchronous is not None and synchronous < 2:
                 conn.execute("PRAGMA synchronous=FULL")
             try:
                 conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
@@ -33,14 +37,14 @@ class _RuntimeCustodyMixin:
                 conn.rollback()
                 raise
             finally:
-                if write and synchronous < 2:
+                if synchronous is not None and synchronous < 2:
                     conn.execute(f"PRAGMA synchronous={synchronous}")
 
     def _execute_runtime_admitted_write(
         self, statement: str, parameters: tuple[object, ...],
         admission: RuntimeAdmission | None,
     ) -> sqlite3.Cursor:
-        """Sync associated inbox admission without changing ordinary event writes."""
+        """Sync retained admission without changing ordinary event writes."""
         if admission is None:
             return self.execute_write(statement, parameters)
         with self._runtime_transaction(write=True) as conn:

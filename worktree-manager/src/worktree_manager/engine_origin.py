@@ -4,16 +4,19 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic, sleep
 from types import SimpleNamespace
 from typing import Any
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 from agent_procutil.owned_process import OwnedCleanupError, _run_owned, run_caller_owned
+from update_telemetry.human import current_operation
 from plugin_resolve.execution import (
     execution_environment,
     execution_executable,
@@ -26,6 +29,16 @@ from plugin_resolve.reflection import identity
 from plugin_resolve.registration import _settings_document, strict_json
 
 _WINDOWS = os.name == "nt"
+_ACQUISITION_TIMEOUT_S = 180.0
+_SHARING_ATTEMPTS = 3
+_SHARING_BACKOFF_S = 1.0
+_SHARING_ERROR = re.compile(r"\b(?:WinError\s+|os\s+error\s+)(?:32|33)\b", re.IGNORECASE)
+_REFUSAL = re.compile(
+    r"\b(?:401|403|EACCES|EPERM|EINTEGRITY|unauthori[sz]ed|authentication|authorization|"
+    r"policy|checksum|signature|certificate|hash)\b|permission denied|access is denied|"
+    r"\b(?:WinError\s+|os\s+error\s+)5\b|\b(?:CERT|ERR_TLS|ERR_SSL)_",
+    re.IGNORECASE,
+)
 _GIT_SELECTORS = {
     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_PREFIX",
     "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
@@ -204,7 +217,8 @@ def select_registered_origin(
 
 
 def _native_acquisition(
-    argv: list[str], environment: dict[str, str], cwd: Path,
+    argv: list[str], environment: dict[str, str], cwd: Path, *,
+    timeout: float = _ACQUISITION_TIMEOUT_S,
 ) -> subprocess.CompletedProcess[str]:
     """Bound output and keep native descendants in caller-owned containment."""
     if not _WINDOWS:
@@ -212,14 +226,14 @@ def _native_acquisition(
         request = json.dumps({"argv": argv, "environment": environment, "cwd": str(cwd)})
         if sys.platform.startswith("linux"):
             result = run_caller_owned(
-                command, timeout=180, input_text=request,
+                command, timeout=timeout, input_text=request,
                 max_stdout_bytes=65536, max_stderr_bytes=65536,
             )
         else:
             # The portable owner pins its session/group leader with WNOWAIT;
             # Linux additionally observes caller lifetime and the retired group.
             result = _run_owned(
-                command, timeout=180, input_text=request, capture_limits=(65536, 65536),
+                command, timeout=timeout, input_text=request, capture_limits=(65536, 65536),
             )
         return subprocess.CompletedProcess(
             argv, result.returncode, result.stdout[:8192], result.stderr[:8192],
@@ -239,7 +253,7 @@ def _native_acquisition(
             )
         try:
             try:
-                rc = process.wait(timeout=180)
+                rc = process.wait(timeout=timeout)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 if job is None:
                     process.kill()
@@ -259,6 +273,18 @@ def _native_acquisition(
             argv, rc, stdout.read(8192).decode("utf-8", "replace"),
             stderr.read(8192).decode("utf-8", "replace"),
         )
+
+
+def _sharing_failure(result: subprocess.CompletedProcess[str]) -> bool:
+    detail = result.stdout + "\n" + result.stderr
+    # A capped diagnostic cannot prove that no refusal followed the captured text.
+    return bool(
+        _WINDOWS and result.returncode == 1
+        and len(result.stdout.encode("utf-8")) < 8192
+        and len(result.stderr.encode("utf-8")) < 8192
+        and _SHARING_ERROR.search(detail)
+        and not _REFUSAL.search(detail)
+    )
 
 
 def refresh_registered_origin(
@@ -306,15 +332,47 @@ def refresh_registered_origin(
         scratch = tempfile.TemporaryDirectory(prefix="engine-origin-")
         retained = False
         try:
-            try:
-                result = _native_acquisition(argv, child, Path(scratch.name))
-            except OwnedCleanupError as error:
-                retained = True
-                scratch._finalizer.detach()
-                error.neutral_directory = Path(scratch.name)
-                raise
-            except RuntimeError as error:
-                raise _error("Native acquisition containment", origin.source, str(error)) from error
+            deadline = monotonic() + _ACQUISITION_TIMEOUT_S
+            for attempt in range(_SHARING_ATTEMPTS):
+                if attempt:
+                    revalidate()
+                    if _registrations(origin.copilot_home) != registrations:
+                        raise ValueError("Native acquisition changed marketplace registrations")
+                    if _ledger(origin.copilot_home, origin.source, origin.payload) is None:
+                        raise ValueError("Native update ledger changed before retry")
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(argv, _ACQUISITION_TIMEOUT_S)
+                try:
+                    result = _native_acquisition(
+                        argv, child, Path(scratch.name), timeout=remaining,
+                    )
+                except OwnedCleanupError as error:
+                    retained = True
+                    scratch._finalizer.detach()
+                    error.neutral_directory = Path(scratch.name)
+                    raise
+                except RuntimeError as error:
+                    raise _error(
+                        "Native acquisition containment", origin.source, str(error),
+                    ) from error
+                if (
+                    verb != "update" or not _sharing_failure(result)
+                    or attempt == _SHARING_ATTEMPTS - 1
+                    or deadline - monotonic() <= _SHARING_BACKOFF_S
+                ):
+                    break
+                message = (
+                    "Native payload refresh hit transient Windows sharing contention; "
+                    f"retrying attempt {attempt + 2}/{_SHARING_ATTEMPTS} "
+                    "within the original acquisition budget"
+                )
+                operation = current_operation()
+                if operation is not None:
+                    operation.progress(message, state="warning")
+                else:
+                    print(message, file=sys.stderr)
+                sleep(_SHARING_BACKOFF_S)
         finally:
             if not retained:
                 scratch.cleanup()

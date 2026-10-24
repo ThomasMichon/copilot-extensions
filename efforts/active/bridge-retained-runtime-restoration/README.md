@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; opt-in SDK source integration in progress; native qualification and full Phase 1 open
+- **Status:** Active; opt-in SDK source merged; remaining custody, native qualification and restoration open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -154,8 +154,9 @@ require their own review and qualification.
       authenticated proxy owners and reject unsupported exposure.
       The explicit local HTTP-48 adapter merged in #8540 and ordinary HTTP-49
       producer admission/recovery merged in #8569. Actual extension SDK
-      enrollment/delivery is now wired behind an explicit opt-in, with controlled
-      source qualification; actual native/platform qualification remains open.
+      enrollment/delivery merged in #8674 behind an explicit opt-in, with
+      controlled source qualification; actual native/platform qualification
+      remains open.
       Bounded, read-only original-handoff
       recovery and one-message polling through the existing inbox/receipt
       owners merged in #8661. The
@@ -244,9 +245,55 @@ historical capture-owner qualification merged in
 [#8503](https://github.com/ThomasMichon/copilot-extensions/pull/8503).
 The dependent internal inbox owner and fresh committed-source evidence merged
 in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
-Full custody, authenticated consumer/SDK integration and restoration remain open.
+Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Retained creation/turn durability prerequisite
+- The existing session and turn owners still committed explicitly associated
+  admissions under ordinary SQLite `NORMAL` policy. Focused failing controls
+  reproduce this for session creation, direct turns, atomic queue-to-turn
+  admission and keyed native turns on both normal and adopted connections.
+- Reuse the existing runtime transaction owner with `FULL` durability only for
+  associated admissions. Queue consumption remains in the same transaction;
+  refusal or failed commit rolls it back. Restore the original connection
+  policy, including stronger policies; leave ordinary admissions unchanged.
+- The bounded combined regression selection passes 202 controls. A real child
+  exits without close or reply after all four original admissions; reopened
+  storage retains the same rows/association and the original keyed receipt
+  remains recoverable after closure. This is process-exit and SQLite-policy
+  coverage, not a power-loss, native-send or platform qualification claim.
+- This is a prerequisite within Phase 1, not completion of creation/native
+  effect-owner mediation. Normal source review and merge remain owed.
+  Final native/start/resume fences, other custody cohorts, cross-owner closure,
+  target compatibility, guarded restoration and running adoption remain open.
+- The first required source-coverage guard exposed two stale registered source
+  fingerprints. Refresh only the changed implementation-only session/turn
+  records and explain their unchanged public wire behavior. Preserve every
+  historical fixture and provenance record; no capture is regenerated or
+  protocol floor changed for this durability repair.
+
+### 2026-10-24 - Retained SDK source merged; continue remaining effect owners
+- #8674 merged as `53b8cdb9f4aba9e162d0d81990cd9b9a41218f32` at
+  14:07:33 PDT. Independent Copilot approval `5639977314` names exact head
+  `70fdf8645a0ff2dd383757e27c9747770fe70ae8`; both reproduced recovery
+  findings are resolved. All three refreshed required checks passed before
+  normal managed completion. The earlier pending-check refusal was honored,
+  not bypassed. The parent issue #8063 remains open.
+- Reread the full Plan and Validation Plan. This lands the explicit local
+  consumer source slice and its controlled process/recovery evidence, not
+  complete Phase 1b, native Linux/Windows qualification, full runtime custody,
+  guarded restoration or running adoption. Legacy defaults and installed
+  settings are unchanged.
+- Guarded source reconciliation verified the merged head and zero post-merge
+  commits, preserved that reviewed tip in the managed backup, and advanced only
+  the owned source venue to the provider's actual squash merge.
+- Next continue the remaining creation/queued-native effect-owner mediation
+  under the existing installation epoch and original operation owners. Preserve
+  unknown native acceptance and explicit unsupported cohorts; no ordinary
+  drain or partial inventory may qualify target restoration. Target-declared
+  compatibility, continuing custody and installer convergence remain later
+  source gates, not implied permission for a live experiment.
 
 ### 2026-10-24 - Wire the explicit retained SDK consumer
 - The existing interactive extension selects retained delivery only through

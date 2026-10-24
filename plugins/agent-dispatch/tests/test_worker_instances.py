@@ -20,6 +20,7 @@ from agent_dispatch.worker_instances import (
     read_records, save_instance, templates,
 )
 from agent_dispatch.workers_catalog import catalog, _observation as real_observation
+from tests.test_worker_templates import repository_map
 
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
@@ -32,7 +33,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_dispatch.workers_catalog._observation", lambda: {"known": False})
     monkeypatch.setattr(
         "agent_dispatch.worker_templates.run_agent_worktrees_capture",
-        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"inventory_authority":"complete","repos":[]}', stderr=""),
+        lambda *args, **kwargs: repository_map(),
     )
 
 

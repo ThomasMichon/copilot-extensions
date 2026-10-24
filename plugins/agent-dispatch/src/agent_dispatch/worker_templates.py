@@ -1,4 +1,4 @@
-"""Read-only provider template discovery; never registration or materialization."""
+"""Read-only provider discovery and current local-instantiation capabilities."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from .registrar import RegistrarError
 from .registrations import RegistrationKind
 from .repo_config import layered_repo_surface_dirs, surface_entry_present
 from .repository_resource_capture import run_agent_worktrees_capture
-from .repository_resources import split_repository_resource
+from .repository_resources import RepositoryResourceSnapshot, split_repository_resource
 from .worker_instances import digest, templates
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
@@ -185,7 +185,11 @@ def _text(value: object, field: str, limit: int) -> str:
     return value
 
 
-def _entry(source: TemplateSource, entry: object, root: Path, index: Path) -> dict:
+def _entry(
+    source: TemplateSource, entry: object, root: Path, index: Path, *,
+    activation: ActivationReport, definitions: dict | None = None,
+    snapshot: RepositoryResourceSnapshot,
+) -> dict:
     if not isinstance(entry, dict) or set(entry) - {
         "id", "title", "description", "kind", "declaration", "requirements",
     }:
@@ -216,32 +220,68 @@ def _entry(source: TemplateSource, entry: object, root: Path, index: Path) -> di
         raise ValueError("template kind differs from its declaration fragment")
     identity = {**source.identity(), "root": str(root), "index": str(index)}
     row_id = f"template:provider:{digest(identity)[:32]}:{name}"
-    revision = digest({"entry": entry, "document": document, "context": identity, "declaration": str(document_path)})
+    from .worker_template_materialization import inspect_template
+
+    try:
+        if source.provider.startswith("repo-pointer:"):
+            raise RegistrarError("template instantiation requires a canonical registered repository identity")
+        resolved, recipe_context = inspect_template(document_path, activation, snapshot)
+        if resolved.get("kind", "supervised-lane") != kind:
+            raise RegistrarError("template kind differs from its resolved recipe")
+    except (RegistrarError, OSError, ValueError, RuntimeError) as exc:
+        recipe_context = {"error": str(exc)}
+        unsupported = f"Template materialization unavailable: {exc}".replace("\0", "\\0")[:4096]
+    else:
+        unsupported = ""
+    revision = digest({
+        "entry": entry, "document": document, "context": identity,
+        "declaration": str(document_path), "recipes": recipe_context,
+    })
     body = (
         f"{description}\n\nProvider: {source.provider}\n\nIndex: {index}"
         f"\n\nDeclaration: {document_path}\n\nApplicability: {json.dumps(list(source.scopes))}"
         f"\n\nRoot kind: {source.kind}\n\nRevision: {revision}"
-        "\n\nThis is an inert fragment, not an effective registration. "
-        "Inheritance and execution prerequisites have not been resolved."
-        f"\n\n{UNSUPPORTED}"
+        "\n\nThis is an inert fragment, not an effective registration."
+        "\n\n" + (unsupported or
+            "Instantiate through the existing local Save lifecycle. Supply declaration overrides "
+            "(including existing recipe params) and repository context. Saving validates "
+            "dependencies and refuses any source-relative meaning that cannot be preserved. "
+            "Save alone never publishes, starts agents or creates tasks.")
     )
     if requirements:
         body += "\n\nDeclared requirements:\n" + "\n".join(f"- {value}" for value in requirements)
-    return {
+    row = {
         "id": row_id, "title": title, "group": "Available templates",
         "description": description, "kind": kind, "revision": revision,
         "provenance": source.provider, "source": identity,
         "source_path": str(document_path), "repo_scopes": list(source.scopes),
         "validity": "fragment", "enabled": "not-instantiated", "activity": "not-applicable",
-        "editable": "false", "instantiable": "false", "unsupported_reason": UNSUPPORTED,
+        "editable": "false", "instantiable": "false" if unsupported else "true",
+        "unsupported_reason": unsupported,
         "requirements": requirements, "prerequisites": "\n".join(requirements),
-        "dependency_status": "not-resolved", "dependency_errors": [],
-        "resolution": "discovered-only", "components": [], "components_basis": "template",
+        "dependency_status": "unsupported" if unsupported else "inputs-required",
+        "dependency_errors": [unsupported] if unsupported else [],
+        "resolution": "unsupported" if unsupported else "recipe-resolved",
+        "components": [], "components_basis": "template",
         "card": {"title": title, "body": body},
     }
+    if definitions is not None:
+        reference = (
+            f"{source.provider}:{document_path.relative_to(root).as_posix()}"
+            if source.provider.startswith("repo:") else str(document_path)
+        )
+        definitions[row_id] = {
+            "row": row, "path": document_path, "reference": reference, "document": document,
+            "recipe_context": recipe_context,
+        }
+    return row
 
 
-def _read_source(source: TemplateSource, findings: list[dict]) -> list[dict]:
+def _read_source(
+    source: TemplateSource, findings: list[dict], *,
+    activation: ActivationReport, definitions: dict | None = None,
+    snapshot: RepositoryResourceSnapshot,
+) -> list[dict]:
     try:
         if source.kind == "user-local" and not surface_entry_present(source.root):
             return []
@@ -281,15 +321,21 @@ def _read_source(source: TemplateSource, findings: list[dict]) -> list[dict]:
         try:
             if isinstance(entry, dict) and isinstance(entry.get("id"), str) and names[entry["id"]] > 1:
                 raise ValueError(f"duplicate template id {entry['id']!r}")
-            rows.append(_entry(source, entry, root, index))
+            rows.append(_entry(
+                source, entry, root, index, activation=activation,
+                definitions=definitions, snapshot=snapshot,
+            ))
         except (OSError, ValueError, RuntimeError) as exc:
             _finding(findings, f"{source.index}#{offset}", "invalid-template", str(exc))
     return rows
 
 
-def discover_templates(activation: ActivationReport) -> tuple[list[dict], dict]:
+def discover_templates(
+    activation: ActivationReport, *, _definitions: dict | None = None,
+) -> tuple[list[dict], dict]:
     """Enumerate inert provider rows and separately scoped completeness findings."""
     findings: list[dict] = []
+    snapshot = RepositoryResourceSnapshot(execution=False)
     sources = []
     for finding in activation.findings:
         _finding(findings, "plugin-activation", "activation-finding", str(finding))
@@ -314,9 +360,11 @@ def discover_templates(activation: ActivationReport) -> tuple[list[dict], dict]:
         if token in seen:
             continue
         seen.add(token)
-        rows.extend(_read_source(source, findings))
+        rows.extend(_read_source(
+            source, findings, activation=activation, definitions=_definitions, snapshot=snapshot,
+        ))
     return rows, {
         "state": "partial" if findings else "complete",
         "provider_templates": len(rows), "findings": findings,
-        "instantiation": "builtin-only",
+        "instantiation": "existing-local-save",
     }

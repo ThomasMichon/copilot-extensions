@@ -50,6 +50,13 @@ Actual `create_session`, `create_turn` and live-message insertion writes accept 
 producer association. SQLite checks it against the open installation/epoch and
 enrolled frontend in the same insertion transaction. The ordered insertion
 trigger also refuses unassociated legacy inserts after explicit DB closure.
+Associated session and turn admissions use connection-local `synchronous=FULL`
+before returning, including atomic queued-row consumption and keyed native
+admission. They restore the prior policy after commit or refusal; ordinary
+unassociated admissions keep their existing policy. A keyed retry recovers the
+original turn receipt after closure without another insert or send permission.
+This durability prerequisite does not enroll native transports or fence their
+actual send boundary.
 Closing admission uses the original transition, target assembly and enrolled
 predecessor observations, CASes the observed epoch/revision, then advances the
 epoch once. Exact closure retries observe the same closed transition; restart
@@ -114,7 +121,7 @@ control before expiry or claim mutations; ACK and withdrawal cannot settle it.
 Control admission and pending-control enrollment are serialized as described
 below; never-enrolled legacy control behavior is unchanged.
 
-Custody transactions, including associated inbox insertion, commit with
+Custody transactions, including associated session, turn and inbox insertion, commit with
 connection-local `synchronous=FULL` before returning. Both normal and adopted
 connections restore their prior setting afterward, including on refusal.
 Unrelated event/metadata writes retain their existing `NORMAL` policy. A

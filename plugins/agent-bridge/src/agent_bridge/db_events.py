@@ -99,10 +99,10 @@ class _EventsMixin:
             receipt = admission_receipt(session_id, turn_index, native_admission)
             encoded = json.dumps({"facts": native_admission.facts(), "receipt": receipt},
                                  sort_keys=True, allow_nan=False)
-            with self._write_lock:
-                conn = self._get_conn()
-                conn.execute("BEGIN IMMEDIATE")
-                try:
+            try:
+                with self._runtime_transaction(
+                    write=True, full_sync=runtime_admission is not None,
+                ) as conn:
                     saved = stored_receipt(self, session_id, native_admission, connection=conn)
                     if saved is not None:
                         conn.rollback()
@@ -113,44 +113,34 @@ class _EventsMixin:
                         "VALUES (?,?,?,?,?,?,?)",
                         (session_id, turn_index, prompt, now, delivery_id, encoded, custody),
                     )
-                    conn.commit()
                     return {"inserted": True, "receipt": receipt}
-                except sqlite3.IntegrityError as exc:
-                    conn.rollback()
-                    raise ValueError("native_admission_conflict") from exc
-                except BaseException:
-                    conn.rollback()
-                    raise
+            except sqlite3.IntegrityError as exc:
+                raise ValueError("native_admission_conflict") from exc
         sql = (
             "INSERT INTO turns (session_id, turn_index, prompt, started_at, "
             "acquisition_delivery_id,runtime_custody_json) VALUES (?, ?, ?, ?, ?, ?)"
         )
         params = (session_id, turn_index, prompt, now, delivery_id, custody)
         if pending_prompt_id is None:
-            self.execute_write(sql, params)
+            self._execute_runtime_admitted_write(sql, params, runtime_admission)
             return
         if self.read_only:
             raise PermissionError("Read-only database cannot execute writes")
-        with self._write_lock:
-            conn = self._get_conn()
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                removed = conn.execute(
-                    "DELETE FROM pending_prompts WHERE session_id=? AND id=? AND prompt=?",
-                    (session_id, pending_prompt_id, prompt),
-                )
-                if removed.rowcount != 1:
-                    if conn.execute(
-                        "SELECT 1 FROM pending_prompts WHERE session_id=? AND id=?",
-                        (session_id, pending_prompt_id),
-                    ).fetchone() is None:
-                        raise PendingPromptRemovedError("Queued prompt removed before turn admission")
-                    raise ValueError("Queued prompt changed before turn admission")
-                conn.execute(sql, params)
-                conn.commit()
-            except BaseException:
-                conn.rollback()
-                raise
+        with self._runtime_transaction(
+            write=True, full_sync=runtime_admission is not None,
+        ) as conn:
+            removed = conn.execute(
+                "DELETE FROM pending_prompts WHERE session_id=? AND id=? AND prompt=?",
+                (session_id, pending_prompt_id, prompt),
+            )
+            if removed.rowcount != 1:
+                if conn.execute(
+                    "SELECT 1 FROM pending_prompts WHERE session_id=? AND id=?",
+                    (session_id, pending_prompt_id),
+                ).fetchone() is None:
+                    raise PendingPromptRemovedError("Queued prompt removed before turn admission")
+                raise ValueError("Queued prompt changed before turn admission")
+            conn.execute(sql, params)
 
     def update_turn(
         self,
