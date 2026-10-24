@@ -122,9 +122,10 @@ one-shot marker that could disappear after SDK acceptance would not fence replay
 
 These internal owner methods are **not consumer authentication or an SDK
 integration**. The local transport below composes them with the established
-access boundary. The ordinary extension poller and installer do not activate
-them. A future SDK integration must call the final primitive at its actual
-effect boundary, never cache a true result as reusable permission, interpret
+access boundary. The ordinary legacy extension poller and installer do not
+activate them. The explicitly selected [SDK consumer](retained-sdk-consumer.md)
+calls the final primitive at its actual effect boundary; it must never cache a
+true result as reusable permission, interpret
 false/timeout as non-delivery, downgrade to legacy delivery or rebuild an
 independent outbox.
 
@@ -231,7 +232,8 @@ enrollment nor reinitializes it. Original message, handoff and consumer identiti
 must match. Lost final-admission replies remain outstanding and cannot be
 converted to a second true result by repeating `/begin`.
 
-The actual SDK consumer is not switched to this adapter yet.
+The actual SDK extension now has an explicitly selected
+[retained consumer](retained-sdk-consumer.md); ordinary defaults are not switched.
 Unassociated legacy inbox rows remain unqualified and
 refuse a retained batch without partial handoff commits. No SDK event,
 consumption evidence, automatic replay, proxy implementation or native behavior
@@ -270,8 +272,8 @@ to an enrolled target, including readiness controls before a startup prompt.
 Enrollment refuses pending legacy controls, so control insertion and enrollment
 have one serial order; it never retires or silently settles the control.
 Direct internal owner methods and other producer cohorts are not thereby
-qualified. Full SDK wiring, outcome/consumption recovery and native/platform
-evidence remain open.
+qualified. The opt-in SDK consumer uses these owners; actual native/platform
+evidence and full runtime custody remain open.
 
 ## Original handoff recovery
 
@@ -310,8 +312,9 @@ send opportunity for a newly enrolled successor.
 Schema 33 adds a partial pending-handoff index through normal writable
 preparation. The read projection selects no bodies and avoids scanning consumed
 history. Migration preserves original rows; passive adoption refuses an older
-schema and damaged current indexes without DDL or repair. These source controls
-are prerequisites for the still-open actual SDK consumer integration.
+schema and damaged current indexes without DDL or repair. The opt-in SDK
+consumer uses these source controls for original outcome recovery; native
+qualification and full custody remain open.
 
 ## Inventory is observation, not qualification
 
@@ -344,13 +347,15 @@ host admission epochs or verified native host receipts; they always retain
 
 ## Remaining gates
 
-Final acquisition/start/resume/background admission, SDK poll/send/ACK custody,
-native-send settlement, host/remote enrollment, cross-owner revision closure,
-target-declared state compatibility and continuing installer retention remain
-unimplemented beyond the inbox owners and explicit local adapter above.
-No existing drain, SDK consumer or installer path is switched to this foundation.
-Only the bounded ordinary inbox-producer route above selects enrolled custody.
-No Dispatch database or adopter effect owner is involved.
+Final acquisition/start/resume/background admission, native-send settlement,
+host/remote enrollment, cross-owner revision closure, target-declared state
+compatibility and continuing installer retention remain unimplemented beyond
+the owners above. The opt-in SDK consumer wires bounded poll/send/outcome
+recovery but does not qualify native behavior or those other custody cohorts.
+No existing drain, legacy SDK consumer or installer default is switched.
+Only the ordinary inbox-producer route and explicitly selected SDK consumer
+select enrolled inbox custody. No Dispatch database or adopter effect owner is
+involved.
 
 The focused tests cover real SQLite serial ordering, queue rollback, original
 history, legacy/incomplete inventory and fresh strict host storage. They belong

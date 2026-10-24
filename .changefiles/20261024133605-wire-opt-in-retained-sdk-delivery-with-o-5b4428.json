@@ -1,0 +1,9 @@
+{
+  "comment": "Wire opt-in retained SDK delivery with original handoff and consumption recovery",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
