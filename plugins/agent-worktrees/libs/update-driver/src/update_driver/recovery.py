@@ -11,12 +11,12 @@ from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import boot, foundation_state
 from .core import (
     DriverError, Request, StateError, _assert_database_identity, _database,
-    _foundation_operation, _request, _root, status,
+    _foundation_operation, _request, _root, _upgrade_schema, status,
 )
 
 
 class RecoveryError(DriverError):
-    """Positive descendant settlement cannot be proved."""
+    """Explicit recovery cannot acquire custody or satisfy its selected policy."""
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class RecoveryStatus:
 def _assess(requests: tuple[Request, ...], current: str) -> RecoveryStatus:
     eligible, refused = [], []
     for request in requests:
-        if request.state not in {"running", "interrupted", "blocked"} or request.settled_at is not None:
+        if not request.unresolved:
             continue
         reason = None
         if not boot.valid_boot_identity(request.boot_id):
@@ -113,9 +113,11 @@ def recover_after_restart(*, root: Path | None = None) -> tuple[Request, ...]:
             assessment = _assess(requests, current)
             if assessment.refused:
                 raise RecoveryError("recovery evidence changed; reconciliation refused")
+            _upgrade_schema(db, root, lock)
             for identifier in assessment.eligible_ids:
                 db.execute(
                     """UPDATE requests SET state='interrupted',settled_boot_id=?,settled_at=?,
+                    settlement_kind='kernel_restart',
                     finished_at=COALESCE(finished_at,?),
                     error=COALESCE(error,'previous owner interrupted across kernel restart')
                     WHERE id=?""",
@@ -131,6 +133,65 @@ def recover_after_restart(*, root: Path | None = None) -> tuple[Request, ...]:
             return settled
     except StateError as error:
         raise RecoveryError(f"recovery state unavailable: {error}") from error
+    finally:
+        lock.release()
+
+
+def recover_for_repair(
+    *, authorized: bool = False, root: Path | None = None,
+) -> tuple[Request, ...]:
+    """Release queue fences by explicit operator authority, never by cleanup proof.
+
+    This prepares the ordinary installer to accept new work. It does not run an
+    installation, replay interrupted work, or certify descendant settlement.
+    """
+    if authorized is not True:
+        raise RecoveryError("explicit operator repair authorization is required")
+    root = _root(root)
+    database_path = root / "queue.sqlite3"
+    try:
+        identity = database_path.lstat()
+    except FileNotFoundError as error:
+        raise RecoveryError("queue missing; recovery refused") from error
+    lock = OperationLock(root / "execution.lock")
+    try:
+        lock.acquire()
+    except OperationLockedError as error:
+        raise RecoveryError("installation execution is active; repair recovery refused") from error
+    try:
+        _assert_database_identity(database_path, identity)
+        foundation = _foundation_operation(root)
+        if foundation is not None and foundation.fenced:
+            raise RecoveryError("native foundation requires its own explicit repair operation")
+        with _database(root, writable=True, expected_identity=identity) as db:
+            db.execute("BEGIN IMMEDIATE")
+            requests = tuple(_request(row, root) for row in db.execute("SELECT * FROM requests"))
+            candidates = tuple(request for request in requests if request.unresolved)
+            if not candidates:
+                return ()
+            _upgrade_schema(db, root, lock)
+            released_at = time.time()
+            for request in candidates:
+                db.execute(
+                    """UPDATE requests SET state=CASE WHEN state='running'
+                    THEN 'interrupted' ELSE state END,
+                    finished_at=COALESCE(finished_at,?),
+                    error=COALESCE(NULLIF(error,''),'operator authorized repair; settlement unconfirmed'),
+                    recovery_authority='operator_repair',released_at=? WHERE id=?""",
+                    (released_at, released_at, request.id),
+                )
+            released = tuple(
+                _request(db.execute("SELECT * FROM requests WHERE id=?", (request.id,)).fetchone(), root)
+                for request in candidates
+            )
+            lock.assert_owned()
+            if _foundation_operation(root) != foundation:
+                raise RecoveryError("foundation state changed during repair recovery")
+            _assert_database_identity(database_path, identity)
+            db.commit()
+            return released
+    except StateError as error:
+        raise RecoveryError(f"repair recovery state unavailable: {error}") from error
     finally:
         lock.release()
 

@@ -21,6 +21,7 @@ def test_all_packaged_launchers_and_validators_match():
         ("agent-logger", "_peer_launch.py"), ("agent-index", "_peer_launch.py"),
         ("agent-machines", "_peer_launch.py"),
         ("agent-pull-requests", "_peer_launch.py"),
+        ("agent-ssh", "_peer_launch.py"),
     ):
         package = ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")
         assert (package / filename).read_bytes() == canonical.read_bytes()
@@ -59,7 +60,7 @@ def test_sync_tool_registers_all_packaged_primitives():
     for plugin in (
         "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
         "agent-worktrees", "agent-logger", "agent-index", "agent-machines",
-        "agent-pull-requests",
+        "agent-pull-requests", "agent-ssh",
     ):
         assert (
             ROOT / "plugins" / plugin / "src" / plugin.replace("-", "_")

@@ -115,11 +115,28 @@ class _Process:
             self._handle = None
 
 
+def _environment_block(environment):
+    if environment is None:
+        return None
+    entries = []
+    for key, value in sorted(environment.items(), key=lambda item: str(item[0]).upper()):
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise TypeError("native child environment must contain text keys and values")
+        if not key or "\0" in key or "\0" in value or "=" in key[1:]:
+            raise ValueError("native child environment contains an invalid key or NUL")
+        entries.append(key + "=" + value)
+    return ctypes.create_unicode_buffer("\0".join(entries) + "\0\0")
+
+
 def spawn(argv: list[str], **kwargs):
     """Create the target in its strict Job atomically, before it can run."""
     import msvcrt
     from agent_procutil.owned_process import OwnedCleanupError
 
+    environment = _environment_block(kwargs.get("env"))
+    cwd = os.fspath(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
+    if cwd is not None and (not isinstance(cwd, str) or "\0" in cwd):
+        raise ValueError("native child working directory must be NUL-free text")
     kernel = _api()
     handle = kernel.CreateJobObjectW(None, None)
     if not handle:
@@ -184,8 +201,9 @@ def spawn(argv: list[str], **kwargs):
                 for fd in child_fds:
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
                 if not kernel.CreateProcessW(
-                    None, command, None, None, True, 0x80000 | 0x8000000 | 4,
-                    None, None, ctypes.byref(startup), ctypes.byref(info),
+                    None, command, None, None, True,
+                    0x80000 | 0x8000000 | 4 | (0x400 if environment is not None else 0),
+                    environment, cwd, ctypes.byref(startup), ctypes.byref(info),
                 ):
                     raise ctypes.WinError(ctypes.get_last_error())
                 process = _Process(argv, info, streams)

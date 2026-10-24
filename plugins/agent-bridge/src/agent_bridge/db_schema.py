@@ -7,6 +7,17 @@ import sqlite3
 from .db_core import SCHEMA_VERSION, _SCHEMA_SQL, _SESSIONS_ENSURE_COLUMNS, log
 
 
+def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
+    """Require writable preparation of the durable cold-recovery stop gate."""
+    column = next(
+        (row for row in conn.execute("PRAGMA table_info(sessions)")
+         if row[1] == "cold_recovery_stop_token"),
+        None,
+    )
+    if column is None or column[2].upper() != "TEXT" or column[3] != 0:
+        raise ValueError("Cold recovery stop gate requires supported writable preparation")
+
+
 class _SchemaMixin:
     """Schema initialization and migration helpers."""
 
@@ -152,6 +163,13 @@ class _SchemaMixin:
             conn.execute(
                 "UPDATE sessions SET background_recovery_enabled = "
                 "CASE WHEN status = 'stopped' THEN 0 ELSE 1 END"
+            )
+        if "cold_recovery_stop_token" in added:
+            # Legacy dormancy cannot distinguish an explicit stop from cold
+            # drain suppression. Preserve that ambiguity conservatively.
+            conn.execute(
+                "UPDATE sessions SET cold_recovery_stop_token=lower(hex(randomblob(16))) "
+                "WHERE status='stopped' AND background_recovery_enabled=0"
             )
         if added:
             conn.commit()
@@ -682,3 +700,10 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (28,))
             conn.commit()
             log.info("Schema migrated to version 28: required runtime custody storage")
+
+        if from_version < 29:
+            self._ensure_current_columns(conn)
+            validate_cold_recovery_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (29,))
+            conn.commit()
+            log.info("Schema migrated to version 29: durable cold-recovery stop gate")

@@ -159,3 +159,18 @@ def test_catalog_includes_the_workspace_module_in_its_verified_closure(installat
     with pytest.raises(ClientError) as caught:
         catalog.installed_catalog()
     assert caught.value.code == "invalid_installation"
+
+
+@pytest.mark.parametrize("damage", ["changed", "missing", "unhashed"])
+def test_catalog_includes_collaboration_in_its_verified_closure(installation, damage):
+    resource = installation.package / "collaboration.py"
+    entry = next(item for item in installation.entries if str(item).endswith("/collaboration.py"))
+    if damage == "changed":
+        resource.write_bytes(b"changed collaboration resource")
+    elif damage == "missing":
+        resource.unlink()
+    else:
+        entry.hash = None
+    with pytest.raises(ClientError) as caught:
+        catalog.installed_catalog()
+    assert caught.value.code == "invalid_installation"

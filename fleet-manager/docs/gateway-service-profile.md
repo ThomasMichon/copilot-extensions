@@ -137,6 +137,16 @@ audience/proof binding still refuses. Vendor adapters and private selection stay
 downstream; no claim rewriting, alternate issuer, re-signing or bearer fallback
 is supplied.
 
+### Explicit enrolled-key profile
+
+Complete service-policy version `3` explicitly selects
+[`enrolled-pop-v1`](gateway-enrolled-identity.md). It verifies original signed
+application tokens with exact client/subject mapping and independently enrolled
+keys, using the same common signature/proof/replay engine and actual serving
+paths. Its separate bounded `enrollment` envelope does not broaden versions
+`1` or `2`, let providers return enrollment, or change `jwt-pop-v1` defaults.
+Source authentication and durable enrollment/revision custody remain external.
+
 ## Authentication and attachment
 
 The existing maintained-library verifier checks real access JWTs and DPoP

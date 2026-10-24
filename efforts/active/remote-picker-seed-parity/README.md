@@ -100,6 +100,12 @@ The operator confirmed the slug `remote-picker-seed-parity`.
 
 ### Phase 3 -- Validation, release and closure
 
+- [ ] Reconcile the current native-seed transport fences: #6176 subsequently
+  made remote composers and `--require-native-seed` unsupported. Restore the
+  requested target-owned SSH contract through negotiated capability, not by
+  removing safety checks; prove this against current installed sources.
+- [ ] Integrate the separately tracked #8375 attempt journal so a failed New
+  or Resume retains private prompt/options and correlated outcome evidence.
 - [ ] Complete the Validation Plan, fixing failures in the changed contract.
 - [ ] Obtain passing current-head review and CI, merge implementation and
   confirm promotion and installed source identity on validation targets.
@@ -151,6 +157,13 @@ The host may render the composer locally. Location equivalence applies to
 target-owned execution and persistence, not to requiring a second UI runtime.
 An old or unavailable target reports why it cannot accept intent instead of
 hiding the problem or silently dropping text.
+
+The operator's October 23 follow-up reports continuing crash-associated New
+prompt loss and restates target-owned SSH creation with the seed. The linked
+`worktree-launch-attempt-journal` effort (#8375) owns the newly requested
+private 90-day attempt/outcome audit, not replacement execution authority.
+Earlier checked implementation items remain historical source evidence; they
+do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
@@ -683,3 +696,11 @@ hiding the problem or silently dropping text.
   cases pass on Windows and native POSIX, including the native first-touch CLI
   contract. Add the corrected probe to fast guards and retain the ordinary
   review, full release, immutable publication and installed Picker proof gates.
+- **2026-10-15** -- Repository-probe guard repair #6785 merged as
+  `4f7b62facbe44df61f159dcde9b1afb11d34b3ea` after its exact head received
+  Approved with zero findings and full required CI, workflow and attribution
+  gates passed. Continue the normal release lane and inspect the remaining
+  not-yet-cleared Worktrees groups locally under the unchanged containment
+  budgets, rather than waiting to discover each later fixture mismatch in a
+  separate full-release cycle. Local tail evidence is supplementary, not a
+  replacement for a containing hosted release or immutable publication.

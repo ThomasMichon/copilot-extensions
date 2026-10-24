@@ -228,7 +228,7 @@ class _PromptClient:
 @pytest.mark.parametrize("result,outcome", [
     ({"turn_index": 3}, "delivered"), ({"queued": True, "queue_id": 4, "position": 1}, "queued")])
 def test_prompt_path_outcomes_and_stdout_is_only_json(monkeypatch, capsys, result, outcome):
-    def resolve(_client, _target, force=False):
+    def resolve(_client, _target, force=False, caller_id=None):
         print("[>] Resuming stopped session s-1...")  # progress text must not reach stdout
         return "s-1"
 
@@ -255,7 +255,7 @@ def test_a_prompt_that_handed_off_reports_the_successor_throughout(monkeypatch, 
 
 def test_an_unknown_target_is_refused_unavailable_not_silent(monkeypatch, capsys):
     """A stale id that is neither a session nor an agent: one typed document."""
-    def unknown(_client, target, force=False):
+    def unknown(_client, target, force=False, caller_id=None):
         print(f"[FAIL] '{target}' is not a known agent name or session ID", file=__import__("sys").stderr)
         raise SystemExit(m._SEND_UNAVAILABLE_EXIT)
 
@@ -308,7 +308,7 @@ def test_a_turn_that_starts_between_the_check_and_the_submit_is_refused_busy(mon
 
 
 def test_a_busy_target_is_refused_busy_with_exit_75(monkeypatch, capsys):
-    def busy(_client, _target, force=False):
+    def busy(_client, _target, force=False, caller_id=None):
         print("[BUSY] running a turn", file=__import__("sys").stderr)
         raise SystemExit(m._SEND_BUSY_EXIT)
 
@@ -346,7 +346,7 @@ def test_an_older_daemons_unnamed_handoff_is_reported_not_misattributed(monkeypa
 
 
 def test_a_target_gone_while_resolving_is_refused_unavailable(monkeypatch, capsys):
-    def gone(_client, target, force=False):
+    def gone(_client, target, force=False, caller_id=None):
         raise BridgeClientError(404, f"Session {target} not found")  # e.g. during its resume
 
     monkeypatch.setattr(m, "_resolve_target", gone)

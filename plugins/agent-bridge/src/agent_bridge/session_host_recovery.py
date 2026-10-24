@@ -79,6 +79,7 @@ class _SessionHostRecoveryMixin:
         *,
         remote_recovery_timeout: float = 60.0,
         claim_hosts: bool = True,
+        recover_cold: bool = True,
     ) -> int:
         """Reconnect to every surviving Session Host on startup (goal 3).
 
@@ -153,6 +154,12 @@ class _SessionHostRecoveryMixin:
         reattached = 0
         now = time.time()
         for rec in self._live_host_records():
+            from .cold_outages import latest
+
+            if latest(self._db, rec.session_id) is not None:
+                # Cold-series attachment and launch share the durable/kernel
+                # recovery owner, including registered replacement hosts.
+                continue
             session = self._sessions.get(rec.session_id)
             if (
                 session is not None
@@ -288,6 +295,10 @@ class _SessionHostRecoveryMixin:
                 reattached += 1
         if reattached:
             log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
+        if claim_hosts and recover_cold:
+            from .cold_outages import recover
+
+            reattached += await recover(self)
         return reattached
 
     async def _recover_remote_host_records(
