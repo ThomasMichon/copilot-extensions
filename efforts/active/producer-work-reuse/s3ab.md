@@ -9,8 +9,10 @@
   concurrency, and compatible atomic heartbeat generation fencing.
 - **Current contract:** [selected admission, full publication](selected-authority-contract.md),
   explicitly selected by the user and reviewed/merged in #8278.
-- **Current blocker:** the successor plan is reviewed and merged; record its
-  storage/grace/action/publication decisions and exact implementation admission.
+- **Current slice:** CodeSpaces R1a private JSON storage/pure model is admitted
+  with explicit limits/policy inputs and injected-OS unit validation only.
+  Production grace/action/publication decisions and R1b consumer/transport
+  admission remain pending.
   The additive candidate seam has narrow explicit user authorization, not an
   owner release. The previous multi-mux cost conflict is historical analysis,
   not the new representative profile's ceiling. No cache/push algorithm is
@@ -18,9 +20,9 @@
 - **Historical evidence:** [authority accounting](s3ab-authority-proposal.md) and
   [strict-boundary lower bound](s3ab-boundary-decision.md) remain retained, not
   current-policy performance qualification.
-- **Next admission packet:** [R1a storage and pure freshness](inventory-freshness-admission.md),
-  with proposed APIs/bounds, grounded policy options and explicit F/S control
-  authority choice. No functional admission is implied.
+- **R1a contract:** [storage and pure freshness](inventory-freshness-admission.md)
+  records the exact pure-slice admission/API. Production defaults and F/S
+  control-authority options remain unselected.
 
 ## Request
 
@@ -42,6 +44,14 @@ launch/recovery, production deployment or live venue probes.
 - [x] Review and merge the explicit selected-authority semantic amendment (#8278).
 - [x] Obtain narrow explicit authorization for the candidate read-result seam;
   preserve every other #5761 reservation.
+- [x] Obtain exact R1a pure JSON storage/model admission, with no runtime
+  activation or existing caller/shared-helper edits.
+- [x] Implement the unwired R1a model/store with pure injected-OS unit coverage;
+  no production limits, policy, path resolution or control permissions.
+- [x] Independently review R1a and pass its targeted units and existing fast
+  guards; no native qualification is implied.
+- [ ] Draft-publish R1a after pure units/fast guards;
+  retain all earlier runtime/performance/native gates.
 - [x] Implement immutable inventory and batch protocol with explicit wave adapter.
 - [x] Implement bounded concurrent probes, cancellation and atomic renewal fence.
 - [ ] Validate and independently review; publish and merge through normal gates.
@@ -287,12 +297,50 @@ defers to the next due wave, with no hidden per-venue refresh.
   ownership. #8143 remains draft at its previous
   published head with its authority-fanout review finding still open.
 
+### 2026-10-23 — Admitted R1a pure storage/model checkpoint
+
+- Implemented only `inventory_store.py` and `test_inventory_store.py`, with
+  directly related docs/changefile updates. Fresh open-PR checks found no
+  competing change to those exact files. No existing lifecycle, availability,
+  forward, config/auth, picker/resolver, SSH/Bridge or shared helper changed.
+- Dedicated JSON remains an unwired internal prototype. Limits/policy have no
+  defaults; caller-supplied paths must have existing plain parents. The unit
+  calibration is not a production cap or policy selection.
+- Added explicit source + cache-creation epoch + revision CAS. Initial writes
+  require actual absence/revision 1; updates require exactly one increment and
+  the same source/epoch. Corrupt/wrong-source state is never silently repaired.
+  Busy is nonblocking; postcommit uncertainty is unknown without rollback.
+- Existing `OperationLock` and `atomic_write_text` are reused unchanged.
+  Precommit parent/target/custody checks and postcommit verification do not add
+  a directory-fsync/power-loss or fully hostile filesystem-race guarantee.
+- Bounded max+1 reads precede parsing. Strict schema/duplicates/types/finite
+  values, independent limits, streamed serialization, frozen/deep-copied input
+  handling and conservative observation merges have injected-OS controls.
+  Freshness returns status labels/reasons only, never control authority.
+- Initial unit run had three fixture tuple/list representation failures;
+  corrected the fixture to represent JSON arrays, without relaxing the codec.
+  Final targeted selection: **91 passed**. Ruff F/E9, install contract, source
+  module-size and documentation-consistency guards pass. Fresh independent
+  source review found no significant issues.
+- No actual OS lock/multiprocess/crash/Windows-sharing fixture, native
+  performance sample, provider call or production activation ran. F1's native
+  slot and all previous S3/performance/consumer gates remain separate.
+- Next: ordinary draft-only source publication, then retain R1b policy and
+  exact consumer/transport-owner admission. No storage checkpoint constitutes
+  a whole-cache, source-merge, performance, release or installed completion.
+
 ## Reproduction and remaining cells
 
 Run from the source root with a supported Python and the existing bounded runner:
 
 ```text
 python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_owner_wave.py --test-file tests/test_owner_wave_native.py --test-file tests/test_session_forwards.py --test-file tests/test_lifecycle.py --test-file tests/test_transcript_mirror.py
+```
+
+R1a's admitted pure/injected-OS selection is separate:
+
+```text
+python tools/run-plugin-tests.py agent-codespaces --test-file tests/test_inventory_store.py
 ```
 
 The native baseline lane needs the pinned commit available in the local Git

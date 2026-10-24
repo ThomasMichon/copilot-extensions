@@ -2,39 +2,76 @@
 
 [Reviewed plan](inventory-freshness-plan.md) · [Episode](s3ab.md) · #7949
 
-**Decision packet only. Nothing below selects a production default or admits
-functional cache/push work.** “R1a” here means this CodeSpaces storage/model
-phase, not another campaign's similarly named slice.
+**R1a pure-storage/model admission recorded:** the dedicated JSON prototype and
+exact two-file source/unit slice below are admitted, with direct docs/changefile
+updates. No production storage activation, policy/default, consumer, cache/push
+effect, transport or new shared helper is admitted. “R1a” means this CodeSpaces
+storage/model phase, not another campaign's similarly named slice.
 
-## 1. Minimal R1a scope recommended for admission
+## Implemented private API refinements
+
+`inventory_store.py` remains unwired. `Limits` and `Policy` have required
+arguments and no defaults; the 1 MiB/1,024-row/4 KiB fixture is calibration, not
+a production quota. Frozen models accept only immutable tuples; bounded JSON
+decoding copies nested documents into those models.
+
+The implementation makes the proposed CAS token explicit:
+
+```text
+VersionToken(source: SourceKey, epoch: str, revision: int)
+Snapshot(schema_version, source, epoch, revision, accounts)
+read_inventory(path, *, expected_source, limits) -> ReadResult
+commit_inventory(path, candidate, *, expected_version, limits) -> CommitResult
+apply_account_observation(snapshot, observation, *, limits) -> Snapshot
+classify_status(observation, name, *, now_epoch, live_transport_epoch, policy)
+    -> StatusFreshness
+```
+
+`epoch` is the cache creation epoch, not a credential revision or proof of a
+live producer. An initial caller supplies a non-reused epoch with revision 1;
+`expected_version=None` works only for a truly absent file. An update compares
+source + epoch + revision under custody and requires candidate revision exactly
+one greater with the same source/epoch. It does not increment again. Epoch
+replacement is not an ordinary update. A post-write unknown result never rolls
+back or retries; retrying the old token cannot advance the revision twice.
+
+The pure classifier is per account-qualified venue, so different venues need
+not share a transport epoch. The row's optional `disconnected_at` separates
+known-disconnect display grace from last-seen time. No disk field restores live
+transport authority. The result has only label, age, reasons and reconcile.
+
+The reducer never deletes unseen/inactive rows. It merges positive rows from
+partial/error observations; retained unseen or unusable rows make the merged
+view incomplete, even if an incoming report was complete. Thus an empty or
+uncertain report cannot turn retained evidence into a false empty inventory.
+Source-qualified absence/control publication remains outside this model.
+
+Paths are supplied explicitly; the sibling lock is `<data-filename>.lock`.
+Absolute existing plain parents and plain targets are checked before custody,
+under custody and before the existing atomic helper. Post-write custody,
+parent/file identity and bounded decoded contents are checked; uncertainty is
+typed unknown, without rollback. These checks do not claim protection from
+every hostile filesystem race or add directory-fsync/power-loss guarantees.
+
+The following recommendations remain **unselected production policy**.
+
+## 1. Admitted minimal R1a scope
 
 **Only two new plugin-private files:**
 
 - `plugins/agent-codespaces/src/agent_codespaces/inventory_store.py`:
   immutable schema/types, explicit-field codec, bounded read, revision-CAS
   atomic commit, account-observation reducer and pure status-freshness classifier.
-  Target roughly 250–350 lines; no generic provider/backend/cache framework.
+  One bounded module under the unchanged source-size guard; no generic
+  provider/backend/cache framework.
 - `plugins/agent-codespaces/tests/test_inventory_store.py`: pure/isolated unit
   contracts, with the existing OS-lock/atomic-write boundaries replaced in
   unit tests. Real multi-process/crash/Windows-file-sharing qualification is a
   later explicitly scheduled integration lane, not a claimed unit result.
 
-Proposed API (names/signatures for this admission, not new shared APIs):
-
-```text
-SourceKey(installation, namespace)                         # actual non-secret identity
-Limits(max_bytes, max_rows, max_field_bytes)               # required, no default
-Policy(status_age_s, inactive_age_s, disconnected_grace_s) # required, no default
-AccountObservation(account, source_generation, observed_at,
-                   complete, error_code, rows)
-Snapshot(schema_version, source, writer_epoch, revision, accounts)
-
-read_inventory(path, *, expected_source, limits) -> ReadResult
-commit_inventory(path, candidate, *, expected_revision, limits) -> CommitResult
-apply_account_observation(snapshot, observation) -> Snapshot
-classify_status(snapshot, *, now_epoch, live_transport_epoch, policy)
-    -> StatusFreshness
-```
+The implemented private signatures above supersede the original integer-only
+`expected_revision` pseudocode. `Limits` and `Policy` remain explicit; these are
+not shared APIs or current runtime caller contracts.
 
 All are synchronous/pure except explicit `read_inventory`/`commit_inventory`
 I/O on the **caller-supplied path**. No import-time filesystem access, automatic
@@ -62,7 +99,7 @@ unknown; a local revision is not an authentication/currentness revision.
 
 ### Existing primitives, not another lock/storage owner
 
-Candidate eventual files are `inventory-v1.json` and `inventory-v1.lock` under
+Candidate eventual files are `inventory-v1.json` and `inventory-v1.json.lock` under
 the owner's already-resolved runtime namespace, separate from eligibility and
 hold stores. R1a itself accepts explicit paths and never resolves/creates that
 production namespace.

@@ -551,6 +551,15 @@ their own immutable projection. The Connection Owner uses the actual reports
 to withhold authority when a provider is indeterminate, including when retained
 configuration would otherwise produce the same merged value.
 
+`inventory_store` is an **unwired internal JSON/storage prototype**, not an
+enabled inventory cache. Its caller supplies an absolute existing data parent,
+source identity, explicit limits and policy. It reuses existing operation
+custody/atomic-replace primitives and compares source, creation epoch and
+revision before replacement. Read failures remain unknown; snapshots contain
+no credentials or credential digests. Pure freshness results label status only
+and cannot authorize connection or tenant mutation. No runtime path, production
+defaults, timer, provider read, push transport or consumer is activated.
+
 No private broker, persistent authentication daemon, PAT or repository opt-out
 is required. A remote terminal without an available browser can still use the
 displayed vendor verification URL/code in a browser. Native authorization and
