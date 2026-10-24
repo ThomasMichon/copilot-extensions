@@ -261,6 +261,11 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   Null transitions and real process-birth changes still retire it. Registered
   DB-owner changes also require fresh committed-source HTTP-47 evidence through
   the existing capture owner; no historical packet or protocol floor changes.
+- All 219 focused enrollment/registry controls pass after that correction.
+  The actual write and no-write HTTP-47 portfolios each pass 117 required probes
+  from source `2bf3a75667603cf2ba4880e7320e2048c874c278`, reproducing 66
+  outputs through the existing capture owner. This is committed-source evidence,
+  not qualification of a native consumer or running installation.
 
 ### 2026-10-24 - Installation-binding prerequisite merged; enroll the consumer next
 - #8519 merged as `5f4bc412a942b11719393c1e056499c860243b53` after
