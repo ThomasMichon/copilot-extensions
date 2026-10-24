@@ -296,7 +296,8 @@ def test_direct_read_only_pointer_discovery_does_not_apply_save_time_grammar(
     directory.mkdir(parents=True)
     script = supplier / "existing.ps1"
     script.write_text("Write-Output '[]'", encoding="utf-8")
-    command = ["pwsh", "-File", str(script)]
+    output = supplier / "optional.json"
+    command = ["pwsh", "-File", str(script), str(output)]
     spec = (
         {"id": "fixture", "command": command, "cwd": "repo:execution:.", "interval_seconds": 60}
         if kind == "emitter" else {
@@ -315,7 +316,8 @@ def test_direct_read_only_pointer_discovery_does_not_apply_save_time_grammar(
     assert authority == ScanAuthority.COMPLETE and len(declarations) == 1
     effective = declarations[0].spec
     argv = effective["command"] if kind == "emitter" else effective["evaluator_spec"]["scripts"]["selected"]
-    assert argv == ["pwsh", "-File", "repo:library:existing.ps1"]
+    assert argv == ["pwsh", "-File", "repo:library:existing.ps1", str(output)]
     resolved, cwd = repository_resources.resolve_execution_resources(argv, "repo:execution:.")
     assert resolved == command and cwd == str(execution)
+    assert not output.exists()
     assert source.read_bytes() == before

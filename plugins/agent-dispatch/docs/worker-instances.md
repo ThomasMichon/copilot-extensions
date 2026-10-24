@@ -248,8 +248,10 @@ so they neither reject the current selection nor lose source admission if
 retained for a later selection. Ordinary trusted-pointer discovery uses
 qualification only, not Save-time grammar admission: existing commands that the
 bounded Save validator cannot interpret remain discoverable with their named
-supplier paths and normal runtime admission. No dependency check executes
-provider code.
+supplier paths and normal runtime admission. PowerShell `-File` qualification
+names only its script operand, leaving subsequent optional data/output paths
+opaque even though strict Save admission does not yet support that option
+grammar. No dependency check executes provider code.
 Legacy webhook emitters keep their existing runtime builder; command/builtin
 validation applies only when the registration owner selects that shape.
 A worker identity must retain its defining

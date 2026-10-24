@@ -79,7 +79,7 @@ def qualify_supplier_context(
 
             roles = _render_command(command, change_ref="{change_ref}")
         try:
-            dependencies = {0, script_operand_index(roles)}
+            dependencies = {0, script_operand_index(roles, strict=strict)}
         except RegistrarError:
             if strict:
                 raise

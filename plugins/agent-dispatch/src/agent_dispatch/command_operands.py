@@ -23,13 +23,19 @@ def is_python_interpreter(executable: str) -> bool:
     ) is not None
 
 
-def script_operand_index(command: list[str], *, include_inline: bool = False) -> int | None:
+def script_operand_index(
+    command: list[str], *, include_inline: bool = False, strict: bool = True,
+) -> int | None:
     suffixes = {".py", ".sh", ".ps1"}
     if not is_python_interpreter(command[0]):
-        if _executable_name(command[0]) in {"pwsh", "powershell"} and any(
-            value.casefold() in {"-file", "-f"} for value in command[1:]
-        ):
-            raise RegistrarError("script dependencies after non-Python options cannot yet be validated safely")
+        if _executable_name(command[0]) in {"pwsh", "powershell"}:
+            for index, value in enumerate(command[1:], start=1):
+                if value.casefold() in {"-command", "-c", "-commandwithargs", "-encodedcommand", "-ec"}:
+                    break
+                if value.casefold() in {"-file", "-f"}:
+                    if strict:
+                        raise RegistrarError("script dependencies after non-Python options cannot yet be validated safely")
+                    return index + 1 if index + 1 < len(command) else None
         if _executable_name(command[0]) in {"sh", "bash", "dash", "ash", "zsh", "ksh", "fish"}:
             if len(command) > 1 and command[1] != "-" and not command[1].startswith("-"):
                 return 1
