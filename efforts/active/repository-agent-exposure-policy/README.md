@@ -426,3 +426,9 @@ daemon or separately resolved Worktrees owner has upgraded.
   against the published correction checkpoint; only the 66 owned current
   outputs change. Both contracts and all 583 fixtures validate with unchanged
   historical packets, independent expectations and protocol floors.
+- A clean provider review reported no open findings. A subsequent base-branch
+  conflict required integrating the upstream database schema lock before merge.
+  No runtime policy code conflicted. Reconciled the registry losslessly,
+  retaining both append-only histories and unchanged immutable chunks, then
+  recaptured the genuine public rebased checkpoint. Canonical write and no-write
+  runs each pass all 117 probes; this remains source evidence, not rollout.
