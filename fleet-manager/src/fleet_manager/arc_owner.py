@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 from .loadout_preparation import PreparationStore
 from .node_journal import NodeJournal
 from .operations import OperationIntent, TargetReceipt
-from .planning import PlanError, canonical, decode, digest, identifier, integer, record
+from .planning import MAX_BYTES, PlanError, _pairs, canonical, decode, digest, identifier, integer, record
 from .runtime_admission import AdmissionAuthority, Permit
 
 _NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
@@ -77,11 +77,12 @@ class ArcDeployment:
         settings = value["settings"]
         if not isinstance(settings, dict) or set(settings) != {
             "namespace", "release", "controller_namespace", "controller_service_account",
-            "node", "github_url", "runner_group", "credential_secret", "runner_image",
+            "runner_service_account", "node", "github_url", "runner_group",
+            "credential_secret", "runner_image",
         }:
             raise PlanError("ARC requires explicit supported settings")
         for name in ("namespace", "release", "controller_namespace",
-                     "controller_service_account", "credential_secret"):
+                     "controller_service_account", "runner_service_account", "credential_secret"):
             if type(settings[name]) is not str or not _NAME.fullmatch(settings[name]):
                 raise PlanError("ARC requires bounded Kubernetes names")
         if len(settings["release"]) > 45 or settings["namespace"] == settings["controller_namespace"]:
@@ -233,6 +234,8 @@ class ArcHelmOwner:
             },
             "template": {"spec": {
                 "automountServiceAccountToken": False,
+                "serviceAccountName": settings["runner_service_account"],
+                "restartPolicy": "Never",
                 "nodeSelector": {"kubernetes.io/hostname": settings["node"],
                                  "kubernetes.io/arch": {"x64": "amd64", "arm64": "arm64"}[
                                      slots["architecture"]]},
@@ -278,19 +281,20 @@ class ArcHelmOwner:
     def _inspect(self, selected, *, deadline):
         value = selected.to_dict()
         namespace, release = (value["settings"][name] for name in ("namespace", "release"))
-        listed = decode(self._helm(
+        listed = self._json(self._helm(
             ["list", "--all", "--namespace", namespace, "--filter", f"^{release}$",
              "--output", "json"], deadline=deadline,
-        ).encode())
+        ))
         if listed == []:
             return None
         if (not isinstance(listed, list) or len(listed) != 1
                 or not isinstance(listed[0], dict) or listed[0].get("name") != release
                 or listed[0].get("namespace") != namespace):
             raise PlanError("ARC release discovery differs from selection")
-        status = decode(self._helm(
-            ["status", release, "--namespace", namespace, "--output", "json"], deadline=deadline,
-        ).encode())
+        status = self._json(self._helm(
+            ["status", release, "--namespace", namespace, "--show-resources", "--output", "json"],
+            deadline=deadline,
+        ))
         owner = "fleet-manager:" + digest({
             key: value[key] for key in ("fleet", "installation", "target", "allocation")
         })
@@ -300,11 +304,56 @@ class ArcHelmOwner:
         if (status.get("name") != release or status.get("namespace") != namespace
                 or type(description) is not str or not description.startswith(owner + ":")):
             raise PlanError("ARC release is not owned by this installation")
-        values = decode(self._helm(
+        values = self._json(self._helm(
             ["get", "values", release, "--namespace", namespace, "--output", "json"],
             deadline=deadline,
-        ).encode())
+        ))
         return status, values, owner
+
+    @staticmethod
+    def _json(raw):
+        if type(raw) is not str or len(raw.encode("utf-8")) > MAX_BYTES:
+            raise PlanError("ARC native JSON exceeds its byte bound")
+        try:
+            value = json.loads(raw, object_pairs_hook=_pairs)
+            canonical(value, output=True)
+        except (ValueError, UnicodeError, RecursionError):
+            raise PlanError("ARC native JSON is invalid or exceeds its structural bounds") from None
+        return value
+
+    @staticmethod
+    def _live_resource(status, selected, values):
+        resources = status["info"].get("resources")
+        if not isinstance(resources, dict):
+            raise PlanError("ARC convergence lacks live resource evidence")
+        objects = resources.get("v1alpha1/AutoscalingRunnerSet")
+        if not isinstance(objects, list) or len(objects) != 1:
+            raise PlanError("ARC convergence lacks one live runner scale set")
+        live = objects[0]
+        settings = selected.to_dict()["settings"]
+        if (not isinstance(live, dict) or live.get("apiVersion") != "actions.github.com/v1alpha1"
+                or live.get("kind") != "AutoscalingRunnerSet"
+                or not isinstance(live.get("metadata"), dict)):
+            raise PlanError("ARC live resource identity is invalid")
+        metadata = live["metadata"]
+        if (metadata.get("name"), metadata.get("namespace")) != (
+            settings["release"], settings["namespace"],
+        ):
+            raise PlanError("ARC live resource scope differs from selection")
+        for name in ("uid", "resourceVersion"):
+            identifier(metadata.get(name), "ARC live resource identity")
+        expected = {name: values[name] for name in (
+            "githubConfigUrl", "githubConfigSecret", "runnerGroup", "runnerScaleSetName",
+            "minRunners", "maxRunners",
+        )}
+        spec = live.get("spec")
+        if (not isinstance(spec, dict) or set(spec) != {*expected, "template"}
+                or canonical({name: spec[name] for name in expected}) != canonical(expected)
+                or not isinstance(spec["template"], dict)
+                or canonical(spec["template"].get("spec")) != canonical(values["template"]["spec"])):
+            raise PlanError("ARC live resource differs from admitted capacity or workload")
+        return {"uid": metadata["uid"], "revision": metadata["resourceVersion"],
+                "spec": digest(spec)}
 
     def converge(self, request: OperationIntent, permit: Permit) -> TargetReceipt:
         """Run at most one Helm effect; UNKNOWN survives restart and forbids replay.
@@ -360,9 +409,10 @@ class ArcHelmOwner:
                 if (after is None or after[0]["info"]["status"] != "deployed"
                         or after[0]["info"]["description"] != description or after[1] != values):
                     raise PlanError("ARC convergence lacks matching terminal evidence")
+                live = self._live_resource(after[0], selected, values)
             evidence = {
                 "deployment": selected.deployment_digest, "revision": after[0]["version"],
-                "status": "deployed", "values": digest(after[1]),
+                "status": "deployed", "values": digest(after[1]), "live": live,
             }
             integer(evidence["revision"], "ARC Helm revision", minimum=1)
             result = request.to_dict()

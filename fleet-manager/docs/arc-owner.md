@@ -46,15 +46,15 @@ The deployment record binds:
   cluster reference, the selected chart SHA-256 and immutable bytes.
 - The exact transitive support-allocation closure with named targets and
   existing-owner receipt digests. Unknown or missing support is not readiness.
-- Existing separate runner/controller namespaces, release, controller service
-  account, named Kubernetes node, non-secret HTTPS forge scope/group, existing
+- Existing separate runner/controller namespaces, release, controller and
+  restricted runner service accounts, named node, non-secret HTTPS forge scope/group, existing
   same-namespace credential-secret name and digest-pinned runner image.
 
 No generic Compose, manifest, values, environment, mount, plugin, shell,
 command, post-renderer or inline secret is accepted. Selected values are a
 narrow fixed profile: named-node/architecture placement, ephemeral capacity,
-per-runner CPU/memory/ephemeral-storage requests and limits, separate controller
-service account, no pod token automount or privilege escalation, and dropped
+per-runner CPU/memory/ephemeral-storage requests and limits, selected controller
+and restricted runner service accounts, no pod token automount or privilege escalation, and dropped
 Linux capabilities. This profile does not provide privileged Docker-in-Docker,
 Kubernetes job-container mode, custom mounts or extra containers. A workload
 needing those features requires its own reviewed supported profile, not raw
@@ -85,7 +85,7 @@ not a distributed backend fence. The adoption owner must independently ensure
 that another installation/manager cannot write the same physical Helm release;
 using another database or another alias is not safe takeover.
 
-Discovery uses exact `helm list`, `status` and `get values` queries. A release
+Discovery uses exact `helm list`, `status --show-resources` and `get values` queries. A release
 without this installation/allocation's ownership marker refuses before a write.
 Convergence invokes only `helm upgrade --install` on retained chart bytes,
 with `--reset-values`, `--no-hooks`, `--skip-crds`, `--atomic`, `--wait`,
@@ -98,8 +98,15 @@ The ownership marker binds the selected chart and generated values, rather than
 the incidental proposal generation. A repeated original operation returns its
 retained receipt without any native call. A newly admitted generation always
 reapplies through Helm, even if stored release values match: Helm history is
-not live-resource evidence, so deleted or manually patched ARC resources cannot
-justify skipping convergence. This API does not yet provide a live-spec-proven
+not live-resource evidence. Helm 3 uses a two-way merge for unstructured custom
+resources, so reapplication alone may leave manually patched fields unchanged.
+Post-operation `status --show-resources` retrieves live objects from the cluster.
+Success additionally requires exactly one matching ARC scale set, its physical
+UID/resource version, admitted forge/group/secret/capacity fields and exact
+fixed-profile runner pod spec. Missing, extra, changed or unavailable owned-spec
+evidence leaves UNKNOWN, even when Helm reports deployed. The adapter does not
+force-replace resources or silently take broader repair permission.
+This API does not yet provide a live-spec-proven
 no-write optimization. Admission also checks the permit's fleet against the
 selected fleet before journal custody or native work.
 
@@ -112,8 +119,8 @@ retained as `native_failure`; further native operations refuse until its existin
 owner settles it. The parent outfitting budget includes inspection and Helm's
 own possible rollback; an outer timeout remains UNKNOWN, not failed recovery.
 
-Success requires actual post-operation Helm status and values matching the
-selected desired release. Its canonical `TargetReceipt` means observed Helm
+Success requires actual post-operation Helm status, values and live owned ARC
+spec matching the selected desired release. Its canonical `TargetReceipt` means observed Helm
 convergence, **not** listener health, forge authentication, actual capacity,
 support readiness, job use or whole-loadout completion. Historical successful
 receipts are not a current health probe.
@@ -125,7 +132,10 @@ preparation store and node journal plus actual contained native processes
 implementing a synthetic Helm protocol. It covers exact grant binding,
 revocation, fleet isolation, no takeover, exact repeat, stored/live-resource drift, lost replies,
 restart and UNKNOWN custody. This is process-boundary/component evidence,
-not a real Helm deployment or live-cluster proof.
+not a real Helm deployment or live-cluster proof. Its separate live-resource
+fixture models Helm's unchanged custom-resource merge: unchanged stored values
+do not automatically overwrite live field drift; that drift must refuse
+successful reconciliation.
 
 The opt-in `test_arc_offline_helm.py` invokes real Helm against an explicitly
 selected, SHA-256-checked official chart, using generated typed owner values:

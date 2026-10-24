@@ -44,7 +44,22 @@ if args[0] == "list":
         "name": option("--filter").strip("^$"), "namespace": option("--namespace"),
     }]))
 elif args[0] == "status":
-    print(state.read_text())
+    status = json.loads(state.read_text())
+    if "--show-resources" in args:
+        objects = []
+        if live.exists():
+            values = json.loads(live.read_text())
+            objects.append({
+                "apiVersion": "actions.github.com/v1alpha1", "kind": "AutoscalingRunnerSet",
+                "metadata": {"name": status["name"], "namespace": status["namespace"],
+                             "uid": "actual-resource", "resourceVersion": "1"},
+                "spec": {key: values[key] for key in (
+                    "githubConfigUrl", "githubConfigSecret", "runnerGroup", "runnerScaleSetName",
+                    "minRunners", "maxRunners", "template",
+                )},
+            })
+        status["info"]["resources"] = {"v1alpha1/AutoscalingRunnerSet": objects}
+    print(json.dumps(status))
 elif args[:2] == ["get", "values"]:
     print(json.dumps(json.loads(state.read_text())["config"]))
 elif args[0] == "upgrade":
@@ -59,7 +74,8 @@ elif args[0] == "upgrade":
         "config": values,
     }
     state.write_text(json.dumps(value))
-    live.write_text(json.dumps(values))
+    if not live.exists() or previous.get("config") != values:
+        live.write_text(json.dumps(values))
     if (root / "lost-reply").exists():
         raise SystemExit(7)
     print("{}")
@@ -106,6 +122,7 @@ def rig(tmp_path, monkeypatch, keys):
         "settings": {
             "namespace": "arc-runners", "release": "example-runners",
             "controller_namespace": "arc-system", "controller_service_account": "arc-controller",
+            "runner_service_account": "existing-restricted-runner",
             "node": "node-a", "github_url": "https://github.com/example/repository",
             "runner_group": "restricted-group", "credential_secret": "existing-app",
             "runner_image": "ghcr.io/example/runner@sha256:" + "c" * 64,
@@ -157,6 +174,20 @@ def rig(tmp_path, monkeypatch, keys):
 def commands(rig):
     path = rig["root"] / "commands.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def test_live_status_envelope_has_explicit_byte_depth_and_duplicate_key_bounds():
+    value = "leaf"
+    for _ in range(14):
+        value = {"nested": value}
+    assert ArcHelmOwner._json(json.dumps(value)) == value
+    for raw in (
+        json.dumps({"extra": {"extra": value}}),
+        '{"repeated":1,"repeated":2}',
+        " " * (1024 * 1024 + 1),
+    ):
+        with pytest.raises(PlanError):
+            ArcHelmOwner._json(raw)
 
 
 def test_real_native_boundary_converges_and_repeat_does_not_replay(rig):
@@ -313,10 +344,16 @@ def test_new_admitted_generation_reapplies_without_trusting_stored_helm_values(r
     rig["harness"].current = policy(fleet="example", revision=2, enrollments=(actor(operations=(
         OperationGrant("runner.converge", "worker-a", 2, next_request.request_digest),
     )),))
-    result = rig["owner"].converge(next_request, rig["permit"](next_request))
-    assert result.to_dict()["status"] == "succeeded"
+    if drift == "live-spec":
+        with pytest.raises(PlanError, match="live resource differs"):
+            rig["owner"].converge(next_request, rig["permit"](next_request))
+        assert rig["journal"].inspect(next_request).to_dict()["status"] == "unknown"
+        assert json.loads(live.read_text())["maxRunners"] == 99
+    else:
+        result = rig["owner"].converge(next_request, rig["permit"](next_request))
+        assert result.to_dict()["status"] == "succeeded"
+        assert live.read_bytes() == original
     assert len([entry for entry in commands(rig) if entry[0] == "upgrade"]) == 2
-    assert live.read_bytes() == original
 
 
 def test_foreign_fleet_permit_refuses_before_journal_custody_or_native_work(rig):
@@ -331,6 +368,41 @@ def test_foreign_fleet_permit_refuses_before_journal_custody_or_native_work(rig)
     assert commands(rig) == []
     with sqlite3.connect(rig["journal"].path) as connection:
         assert connection.execute("SELECT count(*) FROM external_owners").fetchone()[0] == 0
+
+
+def test_live_evidence_checks_all_owned_scope_capacity_and_workload_fields(rig):
+    request = rig["request"]()
+    rig["owner"].converge(request, rig["permit"](request))
+    selected = rig["selected"][0]
+    status = rig["owner"]._inspect(selected, deadline=time.monotonic() + 10)[0]
+    values = rig["owner"]._values(selected, rig["allocation"])
+    changes = [
+        (("metadata", "namespace"), "wrong"),
+        (("metadata", "uid"), None),
+        (("spec", "minRunners"), True),
+        (("spec", "maxRunners"), 99),
+        (("spec", "githubConfigSecret"), "unrelated-secret"),
+        (("spec", "template", "spec", "automountServiceAccountToken"), True),
+        (("spec", "template", "spec", "serviceAccountName"), "privileged-account"),
+        (("spec", "template", "spec", "hostNetwork"), True),
+        (("spec", "template", "spec", "nodeSelector"), {}),
+        (("spec", "template", "spec", "containers", 0, "image"), "unselected:latest"),
+        (("spec", "template", "spec", "containers", 0, "resources"), {}),
+        (("spec", "template", "spec", "containers", 0, "securityContext"), {}),
+    ]
+    for path, replacement in changes:
+        changed = copy.deepcopy(status)
+        node = changed["info"]["resources"]["v1alpha1/AutoscalingRunnerSet"][0]
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = replacement
+        with pytest.raises(PlanError):
+            rig["owner"]._live_resource(changed, selected, values)
+    for resources in ({}, {"v1alpha1/AutoscalingRunnerSet": []}):
+        changed = copy.deepcopy(status)
+        changed["info"]["resources"] = resources
+        with pytest.raises(PlanError, match="live"):
+            rig["owner"]._live_resource(changed, selected, values)
 
 
 def test_generation_migration_and_unsettled_resource_ownership(rig):
