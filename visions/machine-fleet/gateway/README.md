@@ -59,6 +59,31 @@ decision. Invalid, stale or unapproved candidates preserve the serving state.
 Existing credential expiry/revocation and admitted stop controls remain
 effective while a deployment proposal awaits confirmation.
 
+### confirmed-complete-outfitting
+
+A prepared deployment covers the complete declared loadout, not just its
+application containers. It accounts for required authentication relays,
+tunnels, API and UX exposure, persistent storage and control-side deployments,
+with explicit placement, dependency ownership and resource admission.
+Subscribers can inspect that whole change before confirming its exact
+prepared generation through fleet-manager.
+
+Confirmation starts an operation with an admitted, observable outfitting
+duration. Within that bound, the controller either verifies the complete
+declared capability ready or reports precise blocked, failed, partial or
+uncertain outcomes. Container creation, a connected tunnel or an accepted
+manager request alone is not end-to-end readiness. Unsupported or unavailable
+prerequisites cannot silently become success or authorize broader access.
+Unresolved effects retain their original ownership and recovery correlation;
+expiry does not imply that they stopped or make blind replay safe.
+
+The Gateway coordinates the existing deployment, service, transport and
+credential owners rather than replacing them. Invalid candidates and failed
+activation preserve the last valid serving state where their owners support
+that transition. Bootstrap and recovery of the controller and its deployment
+manager remain independently available; outfitting cannot depend on calling
+an unavailable copy of its own control plane.
+
 Fleet-manager may also request temporary/preview or diagnostic adjustments
 through admitted operations. These remain distinct from persistent configuration,
 which changes through source pull requests and ordinary propagation.

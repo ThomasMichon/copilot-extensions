@@ -243,7 +243,8 @@ def launch_session_host(
     state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
 
     host_argv = [sys.executable, "-m", "agent_bridge.session_host",
-                 "--port", "0", "--state-file", str(state_file)]
+                 "--port", "0", "--state-file", str(state_file),
+                 "--local-birth-evidence"]
     if session_id:
         host_argv += ["--session-id", session_id]
     if host_version:
@@ -447,6 +448,7 @@ async def run_host(
     reverse_forwards: list[str] | None = None,
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
+    local_birth_evidence: bool = False,
 ) -> None:
     """Spawn the child, serve the reattachable endpoint, run until closed.
 
@@ -486,6 +488,17 @@ async def run_host(
                        on_child_exit=_publish_child_exit,
                        preference_receipt=preference_receipt)
     bound_port = await host.serve(port=port)
+    # The remote zipapp intentionally has no zdd dependency. Only a full local
+    # runtime can publish the birth evidence used by local destructive control.
+    birth_evidence = {}
+    if local_birth_evidence:
+        from zdd.diagnostics import process_start_time
+
+        birth_evidence = {
+            "host_process_start_time": process_start_time(os.getpid()),
+            "child_process_start_time": process_start_time(child.pid),
+        }
+
     state.update({
         "version": 2,
         "session_id": session_id,
@@ -507,6 +520,7 @@ async def run_host(
         "boot_id": _boot_id(),
         "host_start_ticks": _process_start_ticks(os.getpid()),
         "child_start_ticks": _process_start_ticks(child.pid),
+        **birth_evidence,
     })
     if state_path is not None:
         _write_host_state(state_path, state)
@@ -608,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cwd", default=None)
     ap.add_argument("--unexpected-reap-seconds", type=float, default=60.0)
     ap.add_argument("--active-reap-seconds", type=float, default=0.0)
+    ap.add_argument("--local-birth-evidence", action="store_true")
     ap.add_argument("child", nargs=argparse.REMAINDER,
                     help="child command after `--` (e.g. -- copilot --acp --stdio)")
     args = ap.parse_args(argv)
@@ -629,6 +644,7 @@ def main(argv: list[str] | None = None) -> int:
             reverse_forwards=args.reverse_forward,
             unexpected_reap_seconds=args.unexpected_reap_seconds,
             active_reap_seconds=args.active_reap_seconds,
+            local_birth_evidence=args.local_birth_evidence,
         ))
     except KeyboardInterrupt:
         return 0

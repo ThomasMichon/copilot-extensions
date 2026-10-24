@@ -24,6 +24,46 @@ SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("names", [
+    [], "example", ("../example",), ("example", "EXAMPLE"), (False,),
+])
+def test_generated_local_exclusions_refuse_invalid_names_before_uv(names):
+    with pytest.raises(policy.DependencyPolicyError, match="excluded local packages"):
+        with policy.retain_uv_install("unused-uv", [], excluded_local_packages=names):
+            pytest.fail("invalid exclusions cannot reach UV or admit retained inputs")
+
+
+def test_generated_local_exclusions_canonicalize_owned_temp_aliases(monkeypatch):
+    from contextlib import contextmanager
+
+    temporary = policy._configuration.temporary_inputs
+    observed = []
+    expected = object()
+
+    @contextmanager
+    def aliased(parent):
+        with temporary(parent) as directory:
+            path = Path(directory)
+            yield str(path / ".." / path.name)
+
+    @contextmanager
+    def retain(_uv, arguments, **options):
+        constraint, = options["_generated_constraints"]
+        assert constraint == constraint.resolve()
+        assert constraint.read_text(encoding="utf-8") == "example-local<0,>=0\n"
+        assert arguments[-2:] == ["--constraint", str(constraint)]
+        observed.append(constraint)
+        yield expected
+
+    monkeypatch.setattr(policy._configuration, "temporary_inputs", aliased)
+    monkeypatch.setattr(policy, "_retain_uv_install", retain)
+    with policy.retain_uv_install(
+        "unused-uv", [], excluded_local_packages=("Example_Local",),
+    ) as transaction:
+        assert transaction is expected
+    assert len(observed) == 1 and not observed[0].exists()
+
+
 @pytest.mark.parametrize("fraction", ["1", "12", "123", "1234", "12345", "123456", "123456789"])
 def test_absolute_cutoff_fraction_is_python310_compatible_and_conservative(fraction):
     value = policy._cutoff_value(f"Absolute(2026-10-06T00:00:00.{fraction}Z)", NOW)
@@ -941,7 +981,8 @@ def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypat
         )
 
 
-def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("excluded", [(), ("unused-local",)])
+def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch, excluded):
     source = source_project(
         tmp_path / "runtime" / ".install-stage" / ("stage-" + "x" * 40)
         / "plugin" / "libs" / "fixture-source",
@@ -985,6 +1026,7 @@ def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path,
     installed = policy.run_uv_install(
         shutil.which("uv"), ["--no-index", "--target", str(target), "--python", sys.executable, str(source)],
         cwd=cwd, env=offline_environment(tmp_path), trusted_source_roots=(source,),
+        excluded_local_packages=excluded,
         capture_output=True, text=True, timeout=30, now=NOW,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr

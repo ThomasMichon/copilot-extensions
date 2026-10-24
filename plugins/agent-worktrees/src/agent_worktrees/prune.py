@@ -516,7 +516,8 @@ def default_paired_sibling_final(
             return True
         if rec.pair_kind == "anchor":
             return True
-        sibling = tracking.find_paired_record(rec)
+        from . import paired_claims
+        sibling = paired_claims.reciprocal_sibling(rec)
         if sibling is None:
             return None
         return sibling.status == "finalized"

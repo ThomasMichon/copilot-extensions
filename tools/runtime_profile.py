@@ -13,7 +13,6 @@ import json
 import re
 from typing import Any, Iterable, Mapping
 
-from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.tags import parse_tag
@@ -23,7 +22,11 @@ from packaging.version import InvalidVersion, Version
 SCHEMA = "copilot-extensions.exact-runtime-profile"
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _REFERENCE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._:-]{0,255}\Z")
-_ENVIRONMENT = frozenset(default_environment())
+_ENVIRONMENT = frozenset({
+    "implementation_name", "implementation_version", "os_name", "platform_machine",
+    "platform_release", "platform_system", "platform_version", "python_full_version",
+    "platform_python_implementation", "python_version", "sys_platform",
+})
 
 
 class ProfileError(ValueError):

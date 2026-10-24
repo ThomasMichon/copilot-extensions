@@ -4,7 +4,7 @@ wiring in run.sh / run.ps1 (private-downstream-repo feed-neutral-build-config ef
 
 Docker is not assumed to be available wherever these tests run, so these are
 deliberately structural (text-based) checks rather than a live container run:
-they confirm the flag is wired to null-route the same four public feed
+they confirm the flag is wired to null-route the same public feed
 hostnames, consistently, in both host wrappers. A live end-to-end proof (run
 the harness with --block-public-feeds and no substitute feed, confirm the
 existing toolchain-uv jam fires; then with --uv-index set, confirm success)
@@ -26,6 +26,7 @@ PUBLIC_FEED_HOSTS = (
     "files.pythonhosted.org",
     "registry.npmjs.org",
     "download.pytorch.org",
+    "packagefeedproxy.microsoft.io",
 )
 
 

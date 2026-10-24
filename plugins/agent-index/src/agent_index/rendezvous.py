@@ -49,6 +49,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import BinaryIO
 
 SCHEMA = 1
 _ENDPOINT_LOCK_TIMEOUT = 5.0
@@ -251,6 +252,50 @@ def _endpoint_lock(runtime_dir: Path | str) -> Iterator[None]:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _replace_endpoint(source: Path, destination: Path) -> None:
+    """Atomically replace the name without invalidating an open reader."""
+    if sys.platform != "win32":
+        os.replace(source, destination)
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    class RenameInfo(ctypes.Structure):
+        _fields_ = [
+            ("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
+            ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    kernel.SetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+    ]
+    kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+    # DELETE access; open the staged name itself, not a substituted source link.
+    handle = kernel.CreateFileW(str(source), 0x10000, 0x7, None, 3, 0x00200080, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        name = str(destination.absolute()).encode("utf-16-le", errors="surrogatepass")
+        offset = RenameInfo.FileName.offset
+        buffer = ctypes.create_string_buffer(max(ctypes.sizeof(RenameInfo), offset + len(name) + 2))
+        info = RenameInfo.from_buffer(buffer)
+        info.Flags = 0x1 | 0x2  # REPLACE_IF_EXISTS | POSIX_SEMANTICS
+        info.FileNameLength = len(name)
+        ctypes.memmove(ctypes.addressof(buffer) + offset, name, len(name))
+        if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def write_endpoint(
     runtime_dir: Path | str,
     transport: str,
@@ -261,7 +306,7 @@ def write_endpoint(
 ) -> Path:
     """Advertise a bound endpoint by writing the rendezvous file **atomically**.
 
-    Writes a temp file in the same directory and ``os.replace()``\\ s it over the
+    Writes a temp file in the same directory and atomically replaces the
     target, so a concurrent reader never sees a half-written record. Call it on
     every bind (the port/pid may change; newest bind wins). Returns the file path.
     """
@@ -280,7 +325,7 @@ def write_endpoint(
         if sys.platform != "win32":
             with contextlib.suppress(OSError):
                 os.chmod(tmp, 0o600)
-        os.replace(tmp, target)  # atomic within the same filesystem
+        _replace_endpoint(tmp, target)
     return target
 
 
@@ -319,10 +364,43 @@ def clear_endpoint(runtime_dir: Path | str, *, owner_pid: int | None = None) -> 
             _LOG.warning("Endpoint cleanup failed for %s", path, exc_info=True)
 
 
+def _open_endpoint(path: Path) -> BinaryIO:
+    """Keep an atomic publisher from being blocked by a discovery reader."""
+    if sys.platform != "win32":
+        return path.open("rb")
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # GENERIC_READ; share read/write/delete so replacement preserves this snapshot.
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def read_endpoint(runtime_dir: Path | str) -> Endpoint | None:
     """Read + parse the rendezvous file; ``None`` if absent, unreadable, or malformed."""
     try:
-        raw = endpoint_file(runtime_dir).read_text(encoding="utf-8")
+        with _open_endpoint(endpoint_file(runtime_dir)) as handle:
+            raw = handle.read().decode("utf-8")
     except (OSError, UnicodeError):
         return None
     try:

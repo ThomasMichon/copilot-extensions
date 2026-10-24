@@ -1,0 +1,133 @@
+{
+  "schema": "producer-work-reuse.representative-profile-characterization",
+  "version": 1,
+  "source_checkpoint": "e259fee6858cdb7b77036ab7cccb544a147090cf",
+  "baseline_consumer": "35872e7ad67e1c0ef182a1f4401a49af69c4afb6",
+  "baseline_scope": "pinned SessionForwards consumer with current shared resolution/config/auth/listing functions; not authority-equivalent to the draft",
+  "primary_fixture": {
+    "accounts": 2,
+    "active_venues": [
+      0,
+      1,
+      4,
+      8
+    ],
+    "total_copilot_sessions_per_active_venue": 1,
+    "modes": [
+      "mux-only",
+      "mixed-eight-mux-slice-only"
+    ],
+    "placement": [
+      "balanced",
+      "single-account-four-venues"
+    ],
+    "retained_stopped_venues": [
+      0,
+      12
+    ],
+    "production_limit": false
+  },
+  "routes": {
+    "mux": "measured actual SessionForwards callgraph, synthetic external/process/keyring/store-lock boundaries",
+    "acp": "unavailable; Bridge-owned Session.public_state/liveness_state and AcpClient transport contract required",
+    "mixed": "Mux slice only; four ACP venues in inventory are not observed or costed",
+    "bridge_forward_health": "optional actual consumer chain; zero additional Copilot sessions"
+  },
+  "runs": [
+    {
+      "file": "profile-run-01.jsonl",
+      "frames": 288,
+      "runner_exit": 0,
+      "tests": "96 passed",
+      "phases": [
+        "cold-due",
+        "warm-due",
+        "unchanged-not-due"
+      ],
+      "all_expected_mux_observations_complete": true,
+      "capture_instrumentation_git_blobs": {
+        "test_owner_representative_profile.py": "193346f9118c6df5a28b6b6c828e56dbf98f48eb",
+        "test_owner_authority_work.py": "e1125f150289fe23ea9b531f6dde0d970db11984"
+      }
+    },
+    {
+      "file": "profile-run-02.jsonl",
+      "frames": 4,
+      "runner_exit": 0,
+      "tests": "10 passed,117 deselected; includes six original source-fixture compatibility controls",
+      "cases": [
+        "confirmed-stopped-no-connect",
+        "two-account-inventory-at-page-limit-unknown-no-connect"
+      ],
+      "retained_control_cardinality": [
+        1,
+        102
+      ],
+      "performance_savings_claim": false
+    }
+  ],
+  "artifact_byte_representation": "UTF-8 with LF record terminators; integrity metadata covers repository blobs, not platform checkout EOL bytes",
+  "artifacts": {
+    "profile-run-01.jsonl": {
+      "sha256": "7d8431cc4d5bfd9be705779c270357b795fdd138f3c985b0b0e1bd1adf00929d",
+      "bytes": 330678
+    },
+    "profile-run-02.jsonl": {
+      "sha256": "a86b86cbbcc5be3321af00ba20177c8ed560cb23f08e866681017482f6d62ff0",
+      "bytes": 2392
+    }
+  },
+  "previous_uncached_selected_contract_derived_bound": {
+    "classification": "derived-not-cache-measurement-or-current-acceptance-ceiling",
+    "accounts": 2,
+    "mux_cli_formula_for_C_positive": "6 + 4B + 4C",
+    "B": "completed-result batches, ceil(C/4)<=B<=C; no waiting to fill",
+    "minimum_batches": [
+      {
+        "venues": 1,
+        "batches": 1,
+        "cli_requests": 14,
+        "measured_original_cold": 8,
+        "measured_original_warm": 6
+      },
+      {
+        "venues": 4,
+        "batches": 1,
+        "cli_requests": 26,
+        "measured_original_cold": 26,
+        "measured_original_warm": 24
+      },
+      {
+        "venues": 8,
+        "batches": 2,
+        "cli_requests": 46,
+        "measured_original_cold": 50,
+        "measured_original_warm": 48
+      }
+    ],
+    "configured_bridge_health_extra": "4C ideal CLI requests; not another Copilot session",
+    "omits": [
+      "selected metadata overhead",
+      "connection overhead",
+      "retries",
+      "extra publication batches"
+    ]
+  },
+  "future_cache_cases": {
+    "local-cache-hit": "not implemented; not measured; no zero-cost receipt",
+    "accepted-push-delta": "not implemented; not measured; no zero-cost receipt",
+    "fresh-due-action-under-successor-contract": "not implemented; not measured; no zero-cost receipt",
+    "stale-expiry-reconcile": "not implemented; not measured; no zero-cost receipt",
+    "disconnected-inactive-out-of-band-change": "not implemented; not measured; no zero-cost receipt"
+  },
+  "historical_stress_evidence": "prior authority-run-01 through authority-run-10 unchanged in retained implementation; not relabelled as representative",
+  "qualification": "characterization only; no performance/source/release/installed pass; no comparison or freshness waiver",
+  "unmeasured": [
+    "actual ACP effects and full mixed-fleet cost",
+    "durable cache and push",
+    "native processes/SSH descendants",
+    "opaque gh-internal HTTP",
+    "CPU and wall-clock tails"
+  ],
+  "next": "review inventory-freshness-plan.md and select storage/grace/action/publication policy and exact owner seam admissions before functional changes"
+}

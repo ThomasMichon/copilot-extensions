@@ -51,8 +51,9 @@ FAMILIES: dict[str, list[str]] = {
         "agent-codespaces",
         "agent-logger",
         "agent-pull-requests",
-        "agent-vault",
     ],
+    # Vault submits typed stamp/provision requests to the shared execution owner.
+    "versioned-venv/driver-agent-vault": ["agent-vault"],
     # Containers slots also bind its persistent base/provider-exec dependency choice.
     "versioned-venv/dependency-profile-agent-containers": ["agent-containers"],
     # budget-guidance can stamp its payload-local command before Python exists.

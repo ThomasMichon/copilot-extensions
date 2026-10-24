@@ -43,6 +43,60 @@ def test_bootstrap_config_dir_handoff_does_not_load_configuration(
         assert output == "project"
 
 
+def test_optional_bootstrap_configuration_uses_one_effective_load(monkeypatch, tmp_path, capfd):
+    registry_anchor = _bootstrap(monkeypatch, tmp_path, tmp_path / "anchor")
+    configured_anchor = tmp_path / "configured-anchor"
+    monkeypatch.setattr(worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
+    loads, validated = [], []
+    config = SimpleNamespace(
+        machine="host", default_repo=SimpleNamespace(anchor=str(configured_anchor)),
+    )
+    monkeypatch.setattr(
+        context_cli.cfg, "load_config",
+        lambda **kwargs: loads.append(kwargs) or config,
+    )
+    from agent_worktrees import execution_spaces
+    monkeypatch.setattr(execution_spaces, "require_current_execution_space", validated.append)
+
+    assert context_cli.cmd_picker_bootstrap(
+        SimpleNamespace(json=True, project_config=True),
+    ) == 0
+    fields = json.loads(capfd.readouterr().out)["project_config"]
+    assert fields == {
+        "config_dir": str(tmp_path), "repo_dir": str(configured_anchor), "machine": "host",
+    }
+    assert fields["repo_dir"] != str(registry_anchor)
+    assert loads == [{"include_control_plane_related_pr": False, "project": "project"}]
+    assert validated == [config]
+
+
+@pytest.mark.parametrize("failure", ["configuration", "identity"])
+def test_optional_bootstrap_configuration_refuses_failed_authority(
+    monkeypatch, tmp_path, capfd, failure,
+):
+    _bootstrap(monkeypatch, tmp_path, tmp_path / "anchor")
+    monkeypatch.setattr(worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
+    from agent_worktrees import execution_spaces
+    config = SimpleNamespace(machine="host", default_repo=SimpleNamespace(anchor="configured"))
+
+    def fail(*args, **kwargs):
+        raise ValueError("configuration refused") if failure == "configuration" else (
+            execution_spaces.ExecutionSpaceError("identity refused")
+        )
+
+    monkeypatch.setattr(
+        context_cli.cfg, "load_config",
+        fail if failure == "configuration" else lambda **k: config,
+    )
+    monkeypatch.setattr(execution_spaces, "require_current_execution_space", fail)
+    assert context_cli.cmd_picker_bootstrap(
+        SimpleNamespace(json=True, project_config=True),
+    ) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert result["error"]
+    assert "project_config" not in result
+
+
 def test_bootstrap_does_not_substitute_registry_anchor_for_configured_repo(
     monkeypatch, tmp_path, capfd,
 ):

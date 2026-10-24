@@ -163,7 +163,8 @@ def capture(commit: str) -> dict[str, str]:
         input_paths.append(path)
     terminal = importlib.import_module("agent_bridge.preference_exec")
     host = importlib.import_module("agent_bridge.session_host.preference_spawn")
-    registry = json.loads(committed(commit, REGISTRY))
+    registry_text = committed(commit, REGISTRY)
+    registry = json.loads(registry_text)
     vectors = [json.loads(committed(commit, CURRENT + name)) for name in FILES]
     authority, execution, consent = vectors
     frame, status, executed = producer_probe(a, terminal, authority, b"\x01")
@@ -250,7 +251,10 @@ def capture(commit: str) -> dict[str, str]:
             ),
         )
         contract["provenance"].append(provenance)
-    output[REGISTRY] = json.dumps(registry, indent=2) + "\n"
+    indentation = re.search(r'(?m)^( +)"', registry_text)
+    output[REGISTRY] = json.dumps(
+        registry, indent=len(indentation[1]) if indentation else None,
+    ) + "\n"
     for path in set(input_paths):
         unchanged(commit, path)
     return output
