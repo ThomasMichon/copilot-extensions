@@ -100,6 +100,31 @@ def test_local_replacement_blob_cannot_substitute_unpublished_configuration(repo
     assert snapshot.commit == rig["commit"] and snapshot.document() == rig["config"]
 
 
+def test_acquired_commit_does_not_follow_a_concurrently_moved_local_snapshot_ref(repositories):
+    rig = repositories
+    controller = rig["controller"]
+    unpublished = {**rig["config"], "revision": "unpublished"}
+    (controller / "config.json").write_bytes(canonical(unpublished))
+    rig["run"]("add", "config.json", cwd=controller)
+    tree = rig["run"]("write-tree", cwd=controller)
+    alternate = rig["run"](
+        "-c", "user.name=Example", "-c", "user.email=example@example.invalid",
+        "commit-tree", tree, "-p", rig["commit"], "-m", "Unpublished alternate",
+        cwd=controller,
+    )
+    source = rig["source"]()
+    original = source.run
+
+    def moved_ref(argv, **options):
+        result = original(argv, **options)
+        if "fetch" in argv:
+            rig["run"]("update-ref", "refs/fleet-manager/" + source.source, alternate, cwd=controller)
+        return result
+
+    snapshot = replace(source, run=moved_ref).pull(deadline=time.monotonic() + 15)
+    assert snapshot.commit == rig["commit"] and snapshot.document() == rig["config"]
+
+
 def test_fixture_git_commands_ignore_inherited_external_repository_selection(tmp_path, monkeypatch, request):
     external = tmp_path / "external"
     external.mkdir()

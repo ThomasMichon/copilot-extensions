@@ -128,12 +128,15 @@ class GitSource:
 
         remote()
         git("check-ref-format", self.ref)
-        destination = f"refs/fleet-manager/{self.source}"
+        advertised = git("ls-remote", "--exit-code", "--refs", "--", self.remote, self.ref).split()
+        if (len(advertised) != 2 or advertised[1] != self.ref
+                or not _OID.fullmatch(advertised[0])):
+            raise PlanError("published source ref identity is invalid")
+        commit = advertised[0]
         git("fetch", "--quiet", "--no-tags", "--no-recurse-submodules",
-            "--no-write-fetch-head", "--", self.remote, f"+{self.ref}:{destination}")
+            "--no-write-fetch-head", "--", self.remote, commit)
         remote()
-        commit = git("rev-parse", "--verify", f"{destination}^{{commit}}").strip()
-        if not _OID.fullmatch(commit):
+        if git("cat-file", "-t", commit).strip() != "commit":
             raise PlanError("published source commit identity is invalid")
         entry = git("ls-tree", "-z", commit, "--", self.path, limit=2048)
         parts = entry.rstrip("\0").split("\t")

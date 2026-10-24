@@ -56,9 +56,11 @@ repository adoption owner supplies:
   repository owner's existing runtime facility, not a second process supervisor
   installed by Fleet.
 
-The controller verifies the remote, fetches that selected published ref into
-`refs/fleet-manager/<source>`, resolves the immutable commit and reads only an
-ordinary `100644` JSON blob. It does not check out files, execute templates,
+The controller verifies the remote, resolves the exact advertised branch
+commit and fetches that immutable object without using a mutable local snapshot
+ref or writing `FETCH_HEAD`. It reads only an ordinary `100644` JSON blob.
+Concurrent local ref changes cannot redirect that captured commit.
+It does not check out files, execute templates,
 run repository hooks, fetch submodules or start Git maintenance. Dirty local
 files and local Git replacement objects are not configuration inputs: every
 invocation disables replacement refs, preserving the reported commit's actual
