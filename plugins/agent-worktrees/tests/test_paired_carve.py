@@ -186,10 +186,28 @@ class TestCarvePairedKnowledge:
         assert krec.codename_source == "built-in"
         assert krec.pair_id == "20260806-ab"
         assert krec.pair_ref == f"{machine}/citadel-harness/{harness_id}"
+        assert krec.owner_ref == krec.pair_ref
         assert krec.machine_identity == identity
         assert krec.machine == ("physical-host" if tuple_first else machine)
         assert krec.execution_machine == machine
         assert not (tmp_path / f"{harness_id}-k.yaml").exists()
+        from agent_worktrees import terminal_conclusion as tc
+        harness = tk.create_new_record(
+            harness_id, f"worktree/{harness_id}", str(tmp_path / harness_id),
+            "citadel-harness", krec.machine, platform, tmp_path,
+            machine_identity=identity,
+        )
+        for field, value in stamp.items():
+            setattr(harness, field, value)
+        assert tc._sibling_preservation_reason(krec, harness) == (
+            "pair-sibling-outstanding-obligations"
+        )
+        krec.status = "finalized"
+        assert tc._sibling_preservation_reason(krec, harness) is None
+        krec.owner_ref = f"{machine}/other/foreign"
+        assert tc._sibling_preservation_reason(krec, harness) == (
+            "pair-sibling-outstanding-obligations"
+        )
 
     @pytest.mark.parametrize("tuple_first", [False, True])
     def test_non_worktree_class_pairs_anchor(self, monkeypatch, tmp_path, tuple_first):
@@ -825,11 +843,13 @@ class TestCreatePairPluginComposition:
     def test_composition_failure_preserves_created_pair_identity(
         self, monkeypatch, tmp_path, capsys
     ):
-        record = types.SimpleNamespace(
-            pair_id=None,
-            pair_role=None,
-            pair_ref=None,
-            pair_kind=None,
+        record = tk.WorktreeRecord(
+            worktree_id="wt-h", branch="worktree/wt-h",
+            worktree_path=str(tmp_path / "harness"), repo="citadel-harness",
+            machine="test", platform="windows",
+            started_at="2026-09-02T00:00:00",
+            last_resumed_at="2026-09-02T00:00:00", resume_count=0,
+            title=None, status="active", completed_at=None, sessions=[],
         )
         saved = []
         monkeypatch.setattr(

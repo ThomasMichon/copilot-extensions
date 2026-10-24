@@ -1468,7 +1468,7 @@ def test_invalid_candidate_identity_fails_before_git_or_source_access(tmp_path):
         )
 
 
-def _run_workflow_validator(repo, directory, dev, main, monkeypatch):
+def _run_workflow_validator(repo, directory, dev, main, monkeypatch, *, report=None):
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
     current = source_owned(workflow["jobs"])
@@ -1479,6 +1479,29 @@ def _run_workflow_validator(repo, directory, dev, main, monkeypatch):
             else "Validate untrusted bundles using only trusted default-branch code"
         )
     )
+    if "compose-candidate" in workflow["jobs"]:
+        import promotion_frozen_candidate as frozen
+
+        assert "reviewed-helpers/tools/promotion_frozen_candidate.py" in validator["run"]
+        assert '--candidate-sha "$CANDIDATE_SHA"' in validator["run"]
+        frozen_dir = directory.parent / (directory.name + "-frozen")
+        candidate = report["commit"] if report is not None else "f" * 40
+        if report is not None:
+            tree = _git(["rev-parse", candidate + "^{tree}"], repo)
+            content_tree = promotion._tree_excluding_state(tree, repo=repo)
+            state = json.loads(_git(["show", candidate + ":" + promotion.PIPELINE_STATE_PATH], repo))
+            frozen.export_candidate(
+                frozen_dir, repo=repo, report=report, content_tree=content_tree,
+                prepared_at=state["last_promotion"]["promoted_at"],
+            )
+        monkeypatch.setattr(sys, "argv", [
+            "promotion_frozen_candidate.py", "--repo", str(repo),
+            "--directory", str(frozen_dir), "--dev-sha=" + dev,
+            "--main-before", main, "--candidate-sha", candidate,
+            "--validate-artifacts", str(directory),
+        ])
+        frozen.main()
+        return
     script = heredoc(validator["run"])
     if current:
         if all(isinstance(value, str) and len(value) == 40
@@ -1496,7 +1519,7 @@ def _run_workflow_validator(repo, directory, dev, main, monkeypatch):
 
 
 def test_workflow_validator_rejects_invalid_identity_before_git(tmp_path, monkeypatch):
-    with pytest.raises(artifacts.PromotionArtifactError, match="candidate commit identity"):
+    with pytest.raises((artifacts.PromotionArtifactError, ValueError), match="candidate commit identity"):
         _run_workflow_validator(tmp_path, tmp_path, "--untrusted-option", MAIN, monkeypatch)
 
 
@@ -1506,14 +1529,14 @@ def test_workflow_validator_rejects_changed_bundle(repo, tmp_path, monkeypatch):
     dev = _commit(repo, "candidate")
     main = _git(["rev-parse", "main"], repo)
     directory = tmp_path / "export"
-    promotion.promote(
+    report = promotion.promote(
         repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
         toolchain_source="seasoned-public", toolchain_min_age_days=7,
     )
     index = json.loads((directory / artifacts.INDEX_NAME).read_text())
     (directory / index["artifacts"][0]["filename"]).write_bytes(b"changed")
     with pytest.raises(artifacts.PromotionArtifactError, match="artifact digest mismatch"):
-        _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+        _run_workflow_validator(repo, directory, dev, main, monkeypatch, report=report)
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
@@ -1526,7 +1549,7 @@ def test_candidate_artifact_validation_resolves_temporary_root_aliases(
     dev = _commit(repo, "candidate")
     main = _git(["rev-parse", "main"], repo)
     directory = tmp_path / "export"
-    promotion.promote(
+    report = promotion.promote(
         repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
         toolchain_source="seasoned-public" if entrypoint == "workflow" else "governed",
         toolchain_min_age_days=7 if entrypoint == "workflow" else None,
@@ -1547,7 +1570,7 @@ def test_candidate_artifact_validation_resolves_temporary_root_aliases(
 
     monkeypatch.setattr(artifacts.tempfile, "TemporaryDirectory", AliasedTemporaryDirectory)
     if entrypoint == "workflow":
-        _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+        _run_workflow_validator(repo, directory, dev, main, monkeypatch, report=report)
     elif entrypoint == "promote":
         report = promotion.promote(
             repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=directory,
@@ -1593,14 +1616,20 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     )
     if current:
         assert_source_owned_boundary(jobs)
-        assert "artifacts.validate_composed_artifacts(" in validator["run"]
         assert "checkout-index" not in validator["run"]
-        assert 'trusted_source=helpers' in validator["run"]
-        assert "normal artifact validation cannot bypass the pause" in validator["run"]
+        if "compose-candidate" in jobs:
+            assert "reviewed-helpers/tools/promotion_frozen_candidate.py" in validator["run"]
+            assert '--candidate-sha "$CANDIDATE_SHA"' in validator["run"]
+            assert "consume_pending_changes" not in validator["run"]
+        else:
+            assert "artifacts.validate_composed_artifacts(" in validator["run"]
+            assert 'trusted_source=helpers' in validator["run"]
+            assert "normal artifact validation cannot bypass the pause" in validator["run"]
     else:
         assert "artifacts.validate_artifacts(" in validator["run"]
         assert '"checkout-index", "--all"' in validator["run"]
-    assert 'source_policy="seasoned-public", min_age_days=7' in validator["run"]
+    if "compose-candidate" not in jobs:
+        assert 'source_policy="seasoned-public", min_age_days=7' in validator["run"]
     assert "promote_release.py" not in json.dumps(signer)
     assert "build_python_artifacts.py" not in json.dumps(signer)
     attestation = next(step for step in steps if "attest-build-provenance" in step.get("uses", ""))

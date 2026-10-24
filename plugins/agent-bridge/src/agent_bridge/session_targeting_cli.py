@@ -229,7 +229,9 @@ def _send(args: argparse.Namespace) -> None:
         raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
                           target=target, error="prepared startup cannot fall back to ACP or create a session")
     caller_id = core._caller_id_for(args)
-    session_id = core._resolve_target(client, target, force=getattr(args, "force", False))
+    session_id = core._resolve_target(
+        client, target, force=getattr(args, "force", False), caller_id=caller_id,
+    )
     if not getattr(args, "full_history", False):
         _mark_resume_if_behind(client, session_id, caller_id=caller_id)
     core._submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
@@ -454,7 +456,9 @@ def _busy_session_message(client, session_id: str, agent_name: str, caller_id: s
     return "\n".join(lines)
 
 
-def _resolve_known_session(client, session_id: str, session: dict, *, force: bool) -> str:
+def _resolve_known_session(
+    client, session_id: str, session: dict, *, force: bool, caller_id: str | None = None,
+) -> str:
     """Given an already-fetched session record, apply the shared idle/stopped/
     busy dispatch and return the session id to operate on (which the caller
     delivers to). Exits on an unrecoverable busy-without-force conflict."""
@@ -480,23 +484,26 @@ def _resolve_known_session(client, session_id: str, session: dict, *, force: boo
             file=sys.stderr,
         )
         sys.exit(core._SEND_BUSY_EXIT)
-    from .session_start_cli import _prepare_sender_preference
+    if not agent:
+        print(
+            f"[FAIL] Session {session_id} has no agent recorded; cannot create a "
+            "replacement. The existing session is retained.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    from .session_start_cli import _prepare_caller_context, _prepare_sender_preference
 
-    sender_preference = _prepare_sender_preference(client, agent) if agent else None
+    sender_preference = _prepare_sender_preference(client, agent)
+    caller_context = _prepare_caller_context(client, agent, caller_id)
     print(f"[>] --force: ending busy session {session_id} to take over...")
     try:
         client.end_session(session_id)
     except Exception:
         pass
-    if agent:
-        return core._start_agent_session(
-            client, agent, force=False, sender_preference=sender_preference,
-        )
-    print(
-        f"[FAIL] Session {session_id} ended; no agent recorded -- re-send to the agent name to start a fresh session.",
-        file=sys.stderr,
+    return core._start_agent_session(
+        client, agent, force=False, sender_preference=sender_preference,
+        caller_id=caller_context.caller_id, caller_context=caller_context,
     )
-    sys.exit(1)
 
 
 def _resolve_target(
@@ -511,6 +518,7 @@ def _resolve_target(
     charter: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    caller_id: str | None = None,
 ) -> str:
     core = _core()
     from .client import BridgeClientError
@@ -518,7 +526,7 @@ def _resolve_target(
     try:
         session = client.get_session(target)
         if session:
-            return _resolve_known_session(client, target, session, force=force)
+            return _resolve_known_session(client, target, session, force=force, caller_id=caller_id)
     except BridgeClientError as exc:
         if exc.status != 404:
             raise
@@ -551,7 +559,9 @@ def _resolve_target(
                 raise
             session = None
         if session:
-            return _resolve_known_session(client, worktree_session_id, session, force=force)
+            return _resolve_known_session(
+                client, worktree_session_id, session, force=force, caller_id=caller_id,
+            )
 
     from .session_start_cli import _read_agent_inventory
 
@@ -580,6 +590,7 @@ def _resolve_target(
             target_dir=target_dir,
             worktree_id=worktree_id,
             agent_inventory=agents,
+            caller_id=caller_id,
         )
 
     try:
@@ -595,6 +606,7 @@ def _resolve_target(
             target_dir=target_dir,
             worktree_id=worktree_id,
             agent_inventory=agents,
+            caller_id=caller_id,
         )
     except BridgeClientError as exc:
         if exc.status != 404:
@@ -805,6 +817,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
             charter=getattr(args, "charter", None),
             target_dir=getattr(args, "target_dir", None),
             worktree_id=getattr(args, "worktree_id", None),
+            caller_id=caller_id,
         )
     except _AgentSessionConflict as conflict:
         sid = conflict.existing_session_id

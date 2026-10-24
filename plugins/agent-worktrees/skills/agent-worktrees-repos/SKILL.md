@@ -139,6 +139,7 @@ All commands are accessed via
 
 ```
 repos list [--class reference|singleton|worktree] [--json]
+repos map --json
 repos find <name>
 repos add <name> <path> [--class C] [--remote URL]
                         [--account LOGIN] [--default-branch B]
@@ -155,6 +156,12 @@ repos allow-edits <repo> --reason <why> [--minutes N]    # break-glass grant
 repos allow-edits --list                                 # show active grants
 repos allow-edits <repo> --revoke                        # end a grant early
 ```
+
+For the whole registered name-to-root/class map, use `repos map --json` once
+rather than `repos list` followed by a lookup per repository. The existing
+resident produces that [bounded map](../../docs/repository-map.md); missing,
+stale or unavailable inventory is not healthy empty inventory. This browsing
+projection does not grant execution or editing authority.
 
 ### `allow-edits` -- break-glass edit grants
 

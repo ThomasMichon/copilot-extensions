@@ -1,3 +1,4 @@
+# Installation driver lifecycle contract: vault-stamp-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,
@@ -26,7 +27,6 @@ if ($env:OS -ne 'Windows_NT' -or $PSVersionTable.PSEdition -ne 'Desktop' -or $PS
 }
 $foundation = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 . (Join-Path $foundation 'src\update_driver\foundation.ps1')
-$shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 foreach ($path in @($Payload, $Project)) {
     $null = [CopilotExtensions.NativeFoundationState]::CheckPath($path, $true, $false)
 }
@@ -64,22 +64,17 @@ if ($identity.name -isnot [string] -or $identity.name -cne 'agent-vault' -or
     $invocation.version -ne 2 -or $installer -isnot [string] -or $installer -cne 'install') {
     throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
-$probe = @(
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-File',
-    (Join-Path $Payload 'scripts\installation-context\installation-context.ps1'),
-    'probe-plugin-publication', '-PayloadRoot', $Payload,
-    '-PluginId', 'agent-vault', '-LegacyRoot', $RuntimeRoot,
-    '-ProjectRoot', $Project
-)
+# Admission is already in stock PowerShell; additional interpreter startups exceed hook budgets.
+$modeRunner = Join-Path $Payload 'scripts\installation-context\installation-context.ps1'
 $previousPayload = $env:COPILOT_PLUGIN_ROOT
 try {
     $env:COPILOT_PLUGIN_ROOT = $Payload
-    $document = @(& $shell @probe)
+    $document = @(& $modeRunner -Action probe-plugin-publication `
+        -PayloadRoot $Payload -PluginId agent-vault -LegacyRoot $RuntimeRoot -ProjectRoot $Project)
     $code = $LASTEXITCODE
     if ($code -ne 0) { throw 'Owning installation refused first-use publication.' }
-    $sourceDocument = @(& $shell -NoLogo -NoProfile -NonInteractive -File `
-        (Join-Path $Payload 'scripts\installation-context\installation-context.ps1') `
-        resolve -PayloadRoot $Payload -PluginId agent-vault -ProjectRoot $Project)
+    $sourceDocument = @(& $modeRunner -Action resolve `
+        -PayloadRoot $Payload -PluginId agent-vault -ProjectRoot $Project)
     if ($LASTEXITCODE -ne 0) { throw 'Owning payload provenance could not be resolved.' }
 } finally {
     if ($null -eq $previousPayload) {

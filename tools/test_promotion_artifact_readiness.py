@@ -557,9 +557,15 @@ def test_workflow_readiness_precedes_pr_creation_and_pins_the_merge_head():
     promoter = next(step for step in steps if step.get("id") == "promote")
     assert '--github-output "$GITHUB_OUTPUT"' in promoter["run"]
     assert '--promotion-time "$PROMOTION_TIME"' in promoter["run"]
-    clock = next(step for step in steps if step.get("id") == "candidate-clock")
+    if "compose-candidate" in jobs:
+        clock = next(step for step in jobs["compose-candidate"]["steps"] if step.get("id") == "freeze")
+        assert '--promotion-time "$prepared_at"' in clock["run"]
+        assert promoter["env"]["PROMOTION_TIME"] == "${{ needs.compose-candidate.outputs.prepared_at }}"
+        assert jobs["compose-candidate"]["outputs"]["prepared_at"] == "${{ steps.freeze.outputs.prepared_at }}"
+    else:
+        clock = next(step for step in steps if step.get("id") == "candidate-clock")
+        assert steps.index(clock) < steps.index(promoter)
     assert "--jq .created_at" in clock["run"] and "run_started_at" not in clock["run"]
-    assert steps.index(clock) < steps.index(promoter)
     assert "secrets." not in json.dumps(clock)
     assert 'candidate_sha=$(printf' not in ready["run"]
     final = next(step for step in jobs["publish-python-artifacts"]["steps"] if "run" in step

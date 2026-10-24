@@ -72,7 +72,8 @@ From `tools/clean-room/` (`run.ps1` on Windows, `run.sh` on Linux/WSL/macOS):
 ./run.ps1 -Image base -NameSuffix agc        # second concurrent base box (cr-base-agc)
 ./run.ps1 -Until 3 -Then shell               # prepare through stage 3, then hand off to a shell
 ./run.ps1 -NpmRegistry https://…/npm/        # build-time Copilot CLI feed on governed hosts
-./run.ps1 -UvIndex https://…/pypi/simple/    # opt-in uv-index fixture (governed box)
+./run.ps1 -UvIndex https://…/pypi/simple/    # override the public runtime Python feed
+./run.ps1 -UvIndex ''                       # explicitly unconfigured-index control
 ./run.ps1 -TokenAccount <user>               # choose the host gh account for token injection
 ./run.ps1 -NoToken -Mode auth                # fallback device-code cached :authed image path
 ./run.ps1 -Mode bridge-register              # expose the box as an agent-bridge agent (Tier-E transport)
@@ -97,17 +98,21 @@ Notes:
 - **Pick the image by what you're falsifying.** `base` (git, python3, node, uv)
   for a plain install check; `pristine` (Copilot + git, with only the system
   `python3` a real box would have — no venv module, pip, uv, `~/.local/bin`, or
-  feed governance) to force self-provisioning so uv/venv/pip-feed jams
-  **surface**.
+  baked feed configuration) to force self-provisioning. Use an explicit empty
+  `-UvIndex ''` / `--uv-index ''` when falsifying missing feed governance.
 - **Auth is borrowed, not tested.** By default a Copilot token from your host
   `gh` is injected automatically; the account must have Copilot entitlement
   (`-TokenAccount <user>` / `--token-account <user>` to pick which `gh` account).
   `-NoToken` / `--no-token` falls back to the explicit device-code `auth` image.
   Never bake credentials into a base/pristine image.
-- **Governed box.** Pass an internal npm feed explicitly to install the Copilot
-  prereq (`-NpmRegistry …`); the runner does **not** auto-forward host config
-  (that would bias the fresh-machine experiment). The `toolchain-uv` asymmetry
-  (pip's feed set, uv's not) is reproduced with `-UvIndex` / the fixture.
+- **Feeds.** Runtime uv defaults to the anonymous public
+  `https://packagefeedproxy.microsoft.io/pypi/simple/` via container
+  `UV_DEFAULT_INDEX`. CLI `-UvIndex` / `--uv-index` overrides `CR_UV_INDEX`,
+  which overrides that default; an explicit empty argument disables the fixture.
+  Host feed configuration and credentials are never auto-forwarded. An npm feed
+  remains an explicit build-time choice (`-NpmRegistry …`). The public-feed
+  blocking control includes the Microsoft mirror; use another reachable index
+  explicitly for its positive control.
 - **Never write run artifacts into the repo tree.** Results land in a machine-local
   dir outside the repo (the run prints its exact path). The rig may run from an
   anchor checkout; per-run state in a repo is a hazard.

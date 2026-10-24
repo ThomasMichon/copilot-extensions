@@ -70,6 +70,38 @@ plugins and register against the same contract.
 - **Static fleet driver** (`<catalog argv[0]> fleet-targets`) -- describe only
   explicitly selected normalized registry records, with source revision and
   qualified provider identity. No probe, tunnel, enrollment or lifecycle action.
+- **Session snapshot** (`<catalog argv[0]> session-snapshot --json`) -- fresh
+  declared topology plus this client's managed-fragment coverage, without
+  OpenSSH evaluation, connectivity probes, profile generation or persisted warnings.
+
+## Inspect the session snapshot
+
+The exact-session guidance file carries a bounded snapshot from the already
+available runtime; unavailable or older runtimes are reported without provisioning.
+Rerun `<catalog argv[0]> session-snapshot --json` for full current data.
+`--path` selects a topology file and `--config-d` selects a fragment directory.
+Existing caller topology discovery wins over optional external-state lookup;
+a selected invalid source is never replaced by a fallback.
+
+`generated` means the managed fragment matches its declared sources, not that
+OpenSSH selects it. `missing`, `refused` and `indeterminate` describe local
+profile evidence, not a down host. Effective routes and connectivity remain
+unobserved; `ssh.ready` is declared state. Use explicit `verify` only when a
+live probe is intended.
+
+### When every route is unavailable
+
+After one bounded retry and diagnosis, do not retry indefinitely or bypass the
+normal installer. Put repeatable state in agent-machines requirement packages
+or another declared auto-update owner, then queue residual local work as a
+machine-scoped maintenance issue in an explicitly identified user repository.
+A target-local session uses the optional
+`agent-machines:performing-machine-maintenance` skill when that plugin is active.
+Without it, maintenance is inspection-only: preserve the issue, but do not
+mutate the target until that skill or an equivalent trusted workflow supplies
+the queue, claim, revision, confirmation and verification contract.
+Authentication/configuration failures remain diagnosis paths; issue text is
+never executable input.
 
 ## Emit a profile
 
@@ -227,18 +259,13 @@ chdirs there itself before launching agent-ssh, and fails the invocation closed
 if `<repo>` doesn't resolve, rather than silently falling back to the caller's
 cwd.
 
-A cwd-gated `sessionStart` hook (`scripts/emit-mesh-pointer.*`) emits only a
-**succinct pointer** to this command when the repo has a `machines.yaml`, rather
-than injecting the whole table every session — run `mesh-status` on demand for
-the detail. The same pointer defines the unreachable-route handoff: after every
-declared route remains unavailable following bounded diagnosis, put repeatable
-state in agent-machines or another declared auto-update owner and queue residual
-local work in the explicitly identified user repository. Target-local execution
-uses the optional cross-plugin `agent-machines:performing-machine-maintenance`
-skill when active. Without it, maintenance is inspection-only: preserve the
-machine-scoped issue and do not mutate until an equivalent trusted workflow
-supplies queue location, atomic claim, revision, confirmation, and verification
-semantics.
+The exact-session writer captures the bounded `session-snapshot` described
+above for a validated caller cwd, including when no caller topology exists:
+this allows the optional bound external-state lookup. It does not require a
+root `machines.yaml` and does not infer a missing topology is an empty fleet.
+Run `mesh-status` for the caller's complete declared mesh; use
+`session-snapshot --json` for full current local-profile evidence. The
+skill-owned unavailable-route procedure above governs repair and maintenance.
 Authentication, host-key, profile, and transport-configuration failures remain
 diagnosis paths rather than maintenance queue entries.
 
