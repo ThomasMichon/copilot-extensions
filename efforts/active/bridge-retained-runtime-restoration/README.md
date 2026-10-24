@@ -267,6 +267,11 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   effect-owner mediation. Normal source review and merge remain owed.
   Final native/start/resume fences, other custody cohorts, cross-owner closure,
   target compatibility, guarded restoration and running adoption remain open.
+- The first required source-coverage guard exposed two stale registered source
+  fingerprints. Refresh only the changed implementation-only session/turn
+  records and explain their unchanged public wire behavior. Preserve every
+  historical fixture and provenance record; no capture is regenerated or
+  protocol floor changed for this durability repair.
 
 ### 2026-10-24 - Retained SDK source merged; continue remaining effect owners
 - #8674 merged as `53b8cdb9f4aba9e162d0d81990cd9b9a41218f32` at
