@@ -2,7 +2,8 @@
 
 Parent: [Linux role fleet](README.md). Integration: #8377. Standing intent:
 [convention-discoverable diagnostic logs](../../../visions/machine-fleet/README.md#convention-discoverable-diagnostic-logs).
-This is a reviewed-plan prerequisite, not a running-state or retention claim.
+This records the reviewed plan and bounded source progress, not a running-state
+or whole-fleet retention claim.
 
 ## Operator direction and scope
 
@@ -113,7 +114,7 @@ not the whole feature or any live deployment gate.
   handles cannot be renamed/truncated by the new handler.
 - [x] Implement and validate application UTC attribution, exact record-age
   retention, real concurrent writers and active/archived/fallback discovery.
-- [ ] Publish the bounded source through passing review and required CI.
+- [x] Publish the bounded source through passing review and required CI.
 - [ ] Integration owner: qualify release and authorized running adoption, and
   complete the remaining native/installer/Bridge/telemetry/controller/container
   inventory, owner adapters and failure-stage correlation gates above.
@@ -173,3 +174,42 @@ installer attempts, optional spools or a deployment adapter.
   This preserves disabled task recovery, governance backoff and existing queue
   behavior while qualifying quiet diagnostic maintenance. The diagnostic module
   now has 20 cases, including the actual lifespan boundary.
+- 2026-10-24 UTC — #8415 was approved at exact head
+  `ad4c5f51645007438c1f26721e343c1b1d440f06`, with required CI green and all
+  inline discussions resolved. The managed provider confirmed squash merge to
+  `dev` at `107f1900fee0ed0c7030d3d9815d8d6df89fbdc9`. Re-read this plan and the
+  parent amendment after merge; resolve only the Dispatch application-source
+  publication gate. The parent effort and #8377 remain open.
+
+### Remaining acceptance transferred to integration
+
+The campaign/integration owner retains these explicit next stretches; source
+acceptance above is not permission or evidence for any of them:
+
+1. **Native lifetime/capture:** extend the existing capture owner
+   (`agent-procutil.daemon` and its Bridge/Dispatch launch consumers), not an
+   external file sweeper. Its interface must identify each stream's locations,
+   timestamp coverage, child/process/runtime identity where known, completed
+   versus still-open/protected capture and degraded output. Prove dual-stream
+   draining, retained descendants, quiet maintenance and real Windows/POSIX
+   inherited-handle rollover without rename/truncation behind writers. This
+   interface is not supplied by the application handler.
+2. **Installer composition:** consume #8370's owner-provided bootstrap/attempt
+   discovery and completion/protection semantics; preserve active and incomplete
+   attempts and primary failure results. #6812 retains presentation. No shared
+   installer implementation was pre-patched here.
+3. **Other source owners:** adopt elapsed-age retention and actual discovery for
+   ZDD lifecycle, boot/shim/reconcile and Bridge/session diagnostics. Coordinate
+   optional spool retention with the producer/path owner while preserving #8334's
+   one-write append, fail-open, Unicode, format, privacy and no-parent-creation
+   contract; do not rotate its raw files externally.
+4. **Fleet/deployment:** explicitly own controller/connector bootstrap sinks and
+   role/container output mappings through their deployment adapters and
+   privacy-aware loggers. Inventory active, archived, alternate and missing/
+   degraded paths; a container size/count limit is not elapsed-age retention.
+5. **Qualification/activation:** qualify Linux/macOS native lanes, the real failed
+   candidate/rollback/commit/retirement/serving boundary and actual adopter
+   mappings. After release and explicit authorization, use the existing update
+   and coordinator/supervisor lifecycle path, then verify the imported running
+   version/process identity and `agent-dispatch logs` destinations. No source
+   merge, release, payload refresh or HTTP health sample alone is live proof.

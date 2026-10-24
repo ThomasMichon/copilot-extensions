@@ -60,6 +60,10 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   modify #8370's installer-attempt capture or #6812's progress formatter.
   Native capture, Bridge/telemetry, controller/container mappings and actual
   released/running qualification remain explicit integration acceptance.
+  The bounded application source merged as #8415 after approval and required
+  CI; the [logging sub-plan](logging-conventions.md) records its exact merge,
+  validation and transferred remaining interfaces. None of the broad logging
+  amendment's checkboxes is closed by that partial source delivery.
 - **Trusted image slice:** #8352 owns the bounded
   [trusted harness container plan](trusted-harness-containers.md) under #6030.
   Its proposed `.devcontainer/trusted-harness-base/` reservation does not transfer
