@@ -237,6 +237,14 @@ def test_profile_policy_never_clears_managed_publication_gate(adopter):
     assert result["runtimeProfiles"]["status"] == "ready"
     assert result["deployment"]["allowPluginPublication"] is False
     assert result["runtimeProfiles"]["policyId"] != first
+    profiled = result["runtimeProfiles"]
+    policy.pop("runtimeProfiles")
+    _write_json(path, policy)
+    managed_only = module.resolve_runtime_profile_policy(**arguments)
+    assert managed_only["deployment"]["allowPluginPublication"] is False
+    assert managed_only["runtimeProfiles"]["selection"] == profiled["selection"]
+    assert managed_only["runtimeProfiles"]["owner"] == profiled["owner"]
+    assert managed_only["runtimeProfiles"]["policyId"] != profiled["policyId"]
 
 
 def test_actual_fresh_isolated_cli_reads_configured_channel_and_cpu_default(adopter):

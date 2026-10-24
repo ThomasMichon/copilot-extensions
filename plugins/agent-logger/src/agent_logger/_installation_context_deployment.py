@@ -214,6 +214,7 @@ def resolve_runtime_profile_policy(
         "owner": owner, "selection": selection,
         "managed": deployment["managed"],
         "allowPluginPublication": deployment["allowPluginPublication"],
+        "profileAwarePublicationRequired": "runtimeProfiles" in deployment,
     }
     digest = hashlib.sha256(json.dumps(
         identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True,

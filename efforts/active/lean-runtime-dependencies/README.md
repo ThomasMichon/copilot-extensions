@@ -857,3 +857,14 @@ profile-record API or a competing admission constructor.
   15.860 seconds. Sync, source hashes, lint, install/docs and trusted-CI
   contracts also pass locally.
   Current-head unit evidence, native acceptance and a fresh review remain gates.
+- Review of the management correction found an additional invalidation gap:
+  managed-only policy and managed policy with an empty profile object shared
+  an identity, despite different management-publication permission. Pure and
+  actual owner-bound regressions reproduced that collision. The policy digest
+  now also binds the profile-aware-publication requirement. The preceding
+  head passed all 1467 required units and hosted Linux/Windows reader/custody
+  acceptance; those results do not substitute for validation and review of
+  this correction.
+  The corrected local slice passes 53 actor-observed units with coverage in
+  22.047 seconds and all 20 actual owner-policy/isolated-CLI cases in
+  30.83 seconds; source closure and fatal lint also pass.

@@ -247,6 +247,13 @@ def test_effective_policy_change_invalidates_identity_without_widening_publicati
     assert result["runtimeProfiles"]["policyId"] != original
     assert result["runtimeProfiles"]["selection"]["allowSourceFallback"] is False
     assert result["deployment"]["allowPluginPublication"] is False
+    resolution["deployment"]["runtimeProfiles"] = {}
+    profiled = context_module.resolve_runtime_profile_policy()["runtimeProfiles"]
+    resolution["deployment"].pop("runtimeProfiles")
+    managed_only = context_module.resolve_runtime_profile_policy()["runtimeProfiles"]
+    assert profiled["selection"] == managed_only["selection"]
+    assert profiled["owner"] == managed_only["owner"]
+    assert profiled["policyId"] != managed_only["policyId"]
 
 
 @pytest.mark.parametrize("ready", [True, False])

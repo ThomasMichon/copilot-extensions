@@ -731,7 +731,10 @@ The returned `runtimeProfiles` object contains readiness, the existing owner,
 effective selection intent and a `policyId` over that owner, intent, managed
 flag and publication hold. Equivalent JSON formatting does not change it; a changed effective policy
 or installation does. This is a policy invalidation input, not a reusable
-admission receipt or whole-record approval. Unresolved provenance, pending mode
+admission receipt. The identity also binds profile presence, so adding an empty
+profile object changes the management-publication policy even when plugin
+publication was already held by `managed: true`. It is not a whole-record
+approval. Unresolved provenance, pending mode
 activation and invalid policy return blocked intent, never a CPU default.
 Pending activation includes mode resolution reporting `status: "ready"` with
 `reason: "activation-required"`; it does not resolve a legacy-root profile.
