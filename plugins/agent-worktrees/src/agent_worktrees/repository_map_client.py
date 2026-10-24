@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import math
-import re
 import time
 from pathlib import Path
 
 from zdd import routing
 
 from . import config as cfg, output, status_monitor_cutover as control, status_monitor_runtime as monitor
-from .repository_map import CONTRACT_VERSION, MAX_AGE
+from .repository_map import CONTRACT_VERSION, MAX_AGE, valid_repository_name
 
 READ_TIMEOUT = 1.0
 
@@ -54,8 +53,7 @@ def validate_result(result: dict, scope: str, *, now: float | None = None) -> di
     for entry in entries:
         if (
             not isinstance(entry, dict)
-            or not isinstance(entry.get("name"), str)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", entry["name"])
+            or not valid_repository_name(entry.get("name"))
             or entry["name"] in names
             or entry.get("class") not in {"reference", "singleton", "worktree", "knowledge"}
         ):

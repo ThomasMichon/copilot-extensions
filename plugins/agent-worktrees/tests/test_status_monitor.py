@@ -4162,6 +4162,16 @@ def _elect_monitor_for_one_iteration(monkeypatch):
     monkeypatch.setattr(self_retire, "is_superseded", lambda *args: next(retired, True))
 
 
+def _repository_map_ready(handle, request):
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        result = handle("repos-map-read", request)
+        if result.get("ok"):
+            return result
+        time.sleep(.005)
+    pytest.fail(f"repository map did not become ready: {result}")
+
+
 @pytest.mark.parametrize("first_failure", ["sqlite", "election", "persistent"])
 def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before_sweep(
     tmp_path, monkeypatch, first_failure,
@@ -4288,7 +4298,7 @@ def test_status_monitor_recovers_repository_map_after_transient_owner_check(tmp_
     monkeypatch.setattr(smc, "ControlServer", Control)
 
     def sweep(*args, **kwargs):
-        result = handles[0]("repos-map-read", request)
+        result = _repository_map_ready(handles[0], request)
         assert result["ok"], result
         generations.append(result["projection"]["generation"])
         if len(generations) == 1:
@@ -4376,8 +4386,8 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
 
     def sweep(*args, **kwargs):
         sweeps.append(True)
-        repository_map = handles[0](
-            "repos-map-read", {"repository_map_version": 1, "scope": str(tmp_path.resolve())},
+        repository_map = _repository_map_ready(
+            handles[0], {"repository_map_version": 1, "scope": str(tmp_path.resolve())},
         )
         assert repository_map["ok"] and repository_map["inventory_authority"] == "complete"
         assert "repos-map-v1" in handles[0]("health", {})["capabilities"]
@@ -4397,6 +4407,7 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
 
     def wait(*args, **kwargs):
         waits.append(True)
+        time.sleep(.01)
         if shutdown_mode == "interrupted":
             raise KeyboardInterrupt
         assert handles[0]("health", {})["published"] is False

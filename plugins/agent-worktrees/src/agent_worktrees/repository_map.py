@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import re
+import sys
 import threading
 import time
 import uuid
 from pathlib import Path
 
 from . import repos
+from .repos_registry_reader import read_registry
 from .repos_registry_transaction import read_bytes, revision
 
 CONTRACT_VERSION = 1
@@ -17,15 +18,21 @@ READ_ACTION = "repos-map-read"
 CAPABILITY = "repos-map-v1"
 MAX_AGE = 60.0
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
-_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
-def build_snapshot(scope: str, generation: str, sequence: int, *, now: float) -> dict:
-    registry = repos.read_registry(strict=True)
+def valid_repository_name(value: object) -> bool:
+    """Registry labels are data; consumers own executable resource-name syntax."""
+    return isinstance(value, str) and bool(value) and "\0" not in value
+
+
+def build_snapshot(
+    scope: str, generation: str, sequence: int, *, now: float, registry_path: Path,
+) -> dict:
+    registry = read_registry(registry_path, strict=True)
     if registry._baseline is None:
         raise repos.RepositoryResolutionError("repository registry has no source revision")
     source, source_revision = registry._baseline
-    if any(not isinstance(name, str) or not _NAME.fullmatch(name) for name in registry.repos):
+    if any(not valid_repository_name(name) for name in registry.repos):
         raise repos.RepositoryResolutionError("repository registry has an invalid identity")
     entries = []
     for name, entry in sorted(registry.repos.items()):
@@ -73,8 +80,11 @@ def build_snapshot(scope: str, generation: str, sequence: int, *, now: float) ->
 class RepositoryMapRuntime:
     """Reads copy a published snapshot; only the resident producer resolves roots."""
 
-    def __init__(self, scope: Path, *, now=time.time, monotonic=time.monotonic):
+    def __init__(
+        self, scope: Path, *, now=time.time, monotonic=time.monotonic, wait=None,
+    ):
         self.scope = str(scope.resolve())
+        self._registry_path = repos._repos_yaml_path().resolve()
         self._now = now
         self._monotonic = monotonic
         self._last_demand: float | None = None
@@ -86,9 +96,49 @@ class RepositoryMapRuntime:
         self._reason = "unready"
         self._snapshot: str | None = None
         self._error: str | None = None
+        self._refreshing = False
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._wait = wait or (lambda event, seconds: event.wait(seconds))
+        self._thread: threading.Thread | None = None
+
+    def start(self, interval: float = 15.0) -> None:
+        interval = min(max(interval, 1.0), MAX_AGE / 2)
+        with self._lock:
+            if self._thread is not None or self._stop.is_set():
+                return
+            worker = threading.Thread(
+                target=self._produce, args=(interval,),
+                name="agent-worktrees-repository-map", daemon=True,
+            )
+            worker.start()
+            self._thread = worker
+
+    def _produce(self, interval: float) -> None:
+        while not self._stop.is_set():
+            self._wake.clear()
+            self.refresh()
+            self._wait(self._wake, interval)
+
+    def shutdown(self) -> bool:
+        self._stop.set()
+        self.close_admission("shutdown")
+        self._wake.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            settled = not self._thread.is_alive()
+            if not settled:
+                try:
+                    print("repository-map producer still draining", file=sys.stderr)
+                except (OSError, ValueError):
+                    pass
+            return settled
+        return True
 
     def activate(self) -> None:
         with self._lock:
+            if self._stop.is_set():
+                return
             if not self._admitting:
                 self._epoch += 1
                 self._generation = uuid.uuid4().hex
@@ -96,6 +146,7 @@ class RepositoryMapRuntime:
                 self._error = None
             self._admitting = True
             self._reason = "unready" if self._snapshot is None else "ready"
+        self._wake.set()
 
     def close_admission(self, reason: str) -> None:
         with self._lock:
@@ -105,19 +156,27 @@ class RepositoryMapRuntime:
 
     def refresh(self) -> None:
         with self._lock:
-            if not self._admitting:
+            if not self._admitting or self._stop.is_set() or self._refreshing:
                 return
+            self._refreshing = True
             epoch, generation, sequence = self._epoch, self._generation, self._sequence + 1
         try:
-            result = build_snapshot(self.scope, generation, sequence, now=self._now())
+            result = build_snapshot(
+                self.scope, generation, sequence, now=self._now(), registry_path=self._registry_path,
+            )
             encoded = json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
             if len(encoded.encode("utf-8")) > MAX_RESPONSE_BYTES - 1024:
                 raise repos.RepositoryResolutionError("repository map exceeds its response bound")
             error = None
         except (OSError, TypeError, ValueError, RuntimeError) as exc:
             encoded, error = None, str(exc)[:4096]
+        except BaseException:
+            with self._lock:
+                self._refreshing = False
+            raise
         with self._lock:
-            if not self._admitting or self._epoch != epoch:
+            self._refreshing = False
+            if not self._admitting or self._stop.is_set() or self._epoch != epoch:
                 return
             self._error = error
             if encoded is not None:
@@ -173,5 +232,6 @@ class RepositoryMapRuntime:
                 "repositories": {
                     "status": self._reason, "generation": self._generation,
                     "admitting": self._admitting,
+                    "refreshing": self._refreshing,
                 },
             }

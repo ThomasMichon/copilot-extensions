@@ -50,8 +50,8 @@ def published(monkeypatch, tmp_path):
 
 def test_actual_cli_reads_complete_map_and_observes_changes_and_admission(published, monkeypatch):
     owner, server, path, checkout = published
-    read_registry = repos.read_registry
-    monkeypatch.setattr(repos, "read_registry", lambda **kw: pytest.fail("handler read registry"))
+    read_registry = maps.read_registry
+    monkeypatch.setattr(maps, "read_registry", lambda *a, **kw: pytest.fail("handler read registry"))
     started = time.monotonic()
     result = subprocess.run(
         [sys.executable, "-m", "agent_worktrees", "repos", "map", "--json"],
@@ -63,10 +63,10 @@ def test_actual_cli_reads_complete_map_and_observes_changes_and_admission(publis
     assert len(data["repos"]) == 100 and data["inventory_authority"] == "complete"
     assert data["projection"]["scope"] == owner.scope
     assert time.monotonic() - started < 5
-    monkeypatch.setattr(repos, "read_registry", read_registry)
+    monkeypatch.setattr(maps, "read_registry", read_registry)
     path.write_text('{"repos":{}}', encoding="utf-8")
     owner.refresh()
-    monkeypatch.setattr(repos, "read_registry", lambda **kw: pytest.fail("handler read registry"))
+    monkeypatch.setattr(maps, "read_registry", lambda *a, **kw: pytest.fail("handler read registry"))
     updated = control.ControlClient(
         f"http://127.0.0.1:{server.port}", token="fixture-map", timeout=1,
     ).repositories_read({"repository_map_version": 1, "scope": owner.scope})

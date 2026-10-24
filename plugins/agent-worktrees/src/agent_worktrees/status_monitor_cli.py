@@ -639,6 +639,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("worktrees-read")
         if control_server.current_read_count(repository_map.READ_ACTION):
             reasons.append("repos-map-read")
+        if repositories_runtime.health()["repositories"]["refreshing"]:
+            reasons.append("repos-map-producer")
         if receipts.active_count():
             reasons.append("prompt-receipt")
         return reasons
@@ -658,6 +660,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             "worktrees-feed": worktrees_runtime.feed.active_count(),
             "worktrees-read": control_server.current_read_count(),
             "repos-map-read": control_server.current_read_count(repository_map.READ_ACTION),
+            "repos-map-producer": int(repositories_runtime.health()["repositories"]["refreshing"]),
             "prompt-receipt": receipts.active_count(),
             "lifecycle": lifecycle_count,
         }
@@ -785,6 +788,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         _locks.write_lock(lock, extra=_lock_extra())
 
     try:
+        repositories_runtime.start(interval)
         while True:
             _cleanup_retired_request_surfaces()
             active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
@@ -858,7 +862,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 continue
             try:
                 core._status_monitor_recheck(governance, "iteration-boundary")
-                repositories_runtime.refresh()
                 core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
                 _locks.write_lock(lock, extra=_lock_extra())
 
@@ -958,6 +961,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             _enter_drain_only_state()
             worktrees_runtime.close_admission("shutdown")
             repositories_runtime.close_admission("shutdown")
+        repositories_runtime.shutdown()
         worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
         _close_request_surfaces()
         control_server.close()

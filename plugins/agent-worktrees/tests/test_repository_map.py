@@ -3,6 +3,7 @@
 import copy
 import json
 import threading
+import time
 
 import pytest
 
@@ -36,20 +37,20 @@ def test_one_strict_read_flattens_all_classes_and_unavailable_roots(registry, tm
     entries["relative"] = {"class": "worktree", platform: "relative"}
     entries["remote-only"] = {"class": "reference"}
     write_registry(registry, entries)
-    read = repos.read_registry
+    read = maps.read_registry
     calls = []
 
-    def counted(**kwargs):
-        calls.append(kwargs)
-        return read(**kwargs)
+    def counted(path, **kwargs):
+        calls.append((path, kwargs))
+        return read(path, **kwargs)
 
-    monkeypatch.setattr(repos, "read_registry", counted)
+    monkeypatch.setattr(maps, "read_registry", counted)
     monkeypatch.setattr(repos, "resolve_registered_repo", lambda *a: pytest.fail("point lookup"))
     owner = maps.RepositoryMapRuntime(tmp_path, now=lambda: 100)
     owner.activate()
     owner.refresh()
     result = owner.read(request(owner))
-    assert calls == [{"strict": True}]
+    assert calls == [(registry, {"strict": True})]
     assert [r["name"] for r in result["repos"]] == sorted(entries)
     ready = [r for r in result["repos"] if r["registration"] == "ready"]
     assert {r["class"] for r in ready} == {"reference", "singleton", "worktree", "knowledge"}
@@ -77,7 +78,7 @@ def test_empty_registry_and_readers_do_not_recompute(registry, tmp_path, monkeyp
     owner = maps.RepositoryMapRuntime(tmp_path, now=lambda: 100)
     owner.activate()
     owner.refresh()
-    monkeypatch.setattr(repos, "read_registry", lambda **kw: pytest.fail("reader read registry"))
+    monkeypatch.setattr(maps, "read_registry", lambda *a, **kw: pytest.fail("reader read registry"))
     monkeypatch.setattr(repos, "registered_entry_root", lambda *a: pytest.fail("reader resolved root"))
     first = owner.read(request(owner))
     assert first["ok"] and first["repos"] == [] and first["inventory_authority"] == "complete"
@@ -222,3 +223,85 @@ def test_registry_change_during_construction_is_not_published(registry, tmp_path
     result = owner.read(request(owner))
     assert result["ok"] is False
     assert "changed during" in result["error"]["message"]
+
+
+def test_map_preserves_registered_labels_without_consumer_resource_restrictions(registry, tmp_path):
+    root = tmp_path / "checkout"
+    root.mkdir()
+    names = [".github", "_tools", "healthy", "a" * 81, "space alias"]
+    write_registry(registry, {
+        name: {"class": "reference", repos._current_platform(): str(root)} for name in names
+    })
+    owner = maps.RepositoryMapRuntime(tmp_path)
+    owner.activate()
+    owner.refresh()
+    result = client.validate_result(owner.read(request(owner)), owner.scope)
+    assert [r["name"] for r in result["repos"]] == sorted(names)
+    assert all(r["registration"] == "ready" for r in result["repos"])
+
+
+def test_producer_keeps_its_installation_registry_when_caller_context_changes(registry, tmp_path, monkeypatch):
+    write_registry(registry, {})
+    owner = maps.RepositoryMapRuntime(tmp_path)
+    foreign = tmp_path / "foreign.yaml"
+    foreign.write_text("repos: false", encoding="utf-8")
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: foreign)
+    owner.activate()
+    owner.refresh()
+    result = owner.read(request(owner))
+    assert result["ok"] and result["inventory_authority"] == "complete"
+    assert result["repos"] == []
+
+
+def test_periodic_producer_stays_current_during_a_long_sweep(registry, tmp_path):
+    clock = [100.0]
+    tick, waiting = threading.Event(), threading.Event()
+    intervals = []
+
+    def fake_wait(wake, interval):
+        intervals.append(interval)
+        waiting.set()
+        while not wake.is_set():
+            if tick.wait(.01):
+                tick.clear()
+                waiting.clear()
+                return False
+        return True
+
+    owner = maps.RepositoryMapRuntime(tmp_path, now=lambda: clock[0], wait=fake_wait)
+    owner.activate()
+    owner.start(interval=120)
+
+    def published_at_now():
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            result = owner.read(request(owner))
+            if result.get("projection", {}).get("observed_at") == clock[0]:
+                return client.validate_result(result, owner.scope, now=clock[0])
+            time.sleep(.005)
+        pytest.fail("owned producer did not publish after its scheduled tick")
+
+    try:
+        first = published_at_now()
+        for _ in range(6):
+            assert waiting.wait(2)
+            clock[0] += 30
+            tick.set()
+            result = published_at_now()
+            assert result["projection"]["revision"] > first["projection"]["revision"]
+        assert clock[0] - first["projection"]["observed_at"] == 180
+        assert intervals and max(intervals) <= maps.MAX_AGE / 2
+    finally:
+        assert owner.shutdown()
+    owner.activate()
+    assert owner.read(request(owner))["error"]["code"] == "shutdown"
+
+
+def test_failed_producer_thread_start_keeps_shutdown_available(registry, tmp_path, monkeypatch):
+    owner = maps.RepositoryMapRuntime(tmp_path)
+    monkeypatch.setattr(
+        threading.Thread, "start", lambda self: (_ for _ in ()).throw(RuntimeError("thread unavailable")),
+    )
+    with pytest.raises(RuntimeError, match="thread unavailable"):
+        owner.start()
+    assert owner.shutdown()

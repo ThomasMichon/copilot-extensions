@@ -36,11 +36,15 @@ The producer reads the strict registry once, resolves its entries in process
 through the same registered-root helper used by registered-only point
 resolution, and checks the source revision before publication. Invalid or
 duplicate registry data never becomes a complete empty map. No source-root
-discovery fallback participates.
+discovery fallback participates. Registered labels, including `.github` and
+`_tools`, remain inventory data; a consumer's executable resource-name syntax
+must not invalidate unrelated map entries.
 
-Publication is immutable to readers. The resident refreshes the map through
-its ordinary producer sweep, including root-availability changes without
-registry edits. A failed refresh retains last-good data only as explicitly
+Publication is immutable to readers. One owned producer thread inside the
+existing resident refreshes the pinned installation registry independently of
+Worktrees sweeps, including root-availability changes without registry edits.
+Its cadence is at most 30 seconds even when a sweep takes longer than the map's
+60-second freshness bound. A failed refresh retains last-good data only as explicitly
 advisory/stale. Observations older than 60 seconds are stale too. The CLI
 refuses these as current inventory and exits 2, as it does for an absent,
 unready, incompatible, draining or wrong-scope resident. Consumers must retain
@@ -51,8 +55,11 @@ one resolver process per entry.
 
 The map reuses the resident's election, authenticated route, health, admission
 and drain lifecycle. In-flight reads remain accounted until transport
-completion. Drain closes map admission; a late producer result cannot reopen
-it or publish into a replacement generation. Map demand contributes a bounded
+completion, and producer work is included in drain observations. Drain closes
+map admission; a late producer result cannot reopen it or publish into a
+replacement generation. Shutdown stops and joins the owned producer with a
+bounded wait; an unsettled producer remains fenced from publication.
+Map demand contributes a bounded
 30-second linger to the existing idle-exit policy, not a separate service.
 If a transient route read closes only map admission, the resident's
 current-owner recovery path reopens it even when the Worktrees roster remains

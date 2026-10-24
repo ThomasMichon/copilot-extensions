@@ -512,6 +512,20 @@ def test_unavailable_map_entry_keeps_healthy_registered_peer(monkeypatch, tmp_pa
     }]
 
 
+def test_consumer_name_restrictions_do_not_poison_healthy_map_peers(monkeypatch, tmp_path):
+    root = tmp_path / "library"
+    write_index(root, index=root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json")
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **kw: repository_map(
+        registered_root(".github", root), registered_root("_tools", root),
+        registered_root("library", root),
+    ))
+    rows, summary = wt.discover_templates(empty_activation())
+    assert len(rows) == 1 and rows[0]["source"]["provider"] == "repo:library"
+    assert summary["state"] == "partial"
+    assert len(summary["findings"]) == 2
+    assert {finding["reason"] for finding in summary["findings"]} == {"invalid"}
+
+
 def test_repository_names_do_not_inherit_template_id_length_limit(monkeypatch, tmp_path):
     name = "a" * 81
     root = tmp_path / "library"
