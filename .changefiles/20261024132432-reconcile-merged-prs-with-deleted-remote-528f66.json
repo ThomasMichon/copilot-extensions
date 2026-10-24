@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile merged PRs with deleted remote refs and owned fast-forward publication without operator recovery approval.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

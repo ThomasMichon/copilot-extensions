@@ -483,7 +483,7 @@ def test_normal_entrypoints_refuse_unproved_reconciliation(
 @pytest.mark.parametrize("command", ["push-changes", "sync"])
 @pytest.mark.parametrize("changed", ["provider", "remote", "source", "tracking", "destination"])
 def test_reconciliation_rechecks_after_retaining_objects(
-    owned_publication, monkeypatch, command, changed,
+    owned_publication, monkeypatch, capfd, command, changed,
 ) -> None:
     config, wid, wt, remote, saved, branch, published = owned_publication
     retain = pr_recovery.retain_rewrite
@@ -511,6 +511,10 @@ def test_reconciliation_rechecks_after_retaining_objects(
     monkeypatch.setattr(pr_recovery, "retain_rewrite", interpose)
     monkeypatch.setattr(git_ops, "push", lambda *a, **k: pytest.fail("Changed proof must not push."))
     assert not invoke(command, config, wid)
+    if changed == "source":
+        diagnostic = capfd.readouterr().out
+        assert "retry the normal command" in diagnostic
+        assert "sign-off" not in diagnostic
     assert record(wid).pr.head_sha == saved
     assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == (
         saved if changed == "remote" else published

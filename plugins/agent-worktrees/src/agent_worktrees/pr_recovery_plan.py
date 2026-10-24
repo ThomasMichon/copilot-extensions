@@ -72,7 +72,7 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
 def build(
     config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
     *, source_head: str, expected_head: str, identity: str, overrides: tuple[str, ...],
-    cwd: str,
+    cwd: str, routine: bool = False,
 ) -> pr_break_glass.RecoveryPreview:
     point = None
     evidence = ""
@@ -95,6 +95,10 @@ def build(
             point = None
     if pr.number is None:
         raise ValueError("Recovery requires a numbered existing PR.")
+    forward = (
+        routine and point is None and not unusable
+        and git_ops.is_commit_ancestor(expected_head, source_head, cwd=cwd)
+    )
     return pr_break_glass.RecoveryPreview(
         provider=pr.provider or config.default_repo.pr.provider,
         repo=pr.repo, number=pr.number, branch=pr.branch,
@@ -104,9 +108,15 @@ def build(
             record.worktree_id, record.repo, record.worktree_path, record.branch,
             pr.pr_id, pr_publication_state.authority(pr), config.default_repo.pr.api_base,
         )),
-        action="settle-publication" if point is not None else "rewrite",
-        evidence_fingerprint=_fingerprint((evidence, asdict(point))) if point is not None else evidence,
-        evidence_status="unusable" if unusable else "backed-sync" if point is not None else "none",
+        action="settle-publication" if point is not None or forward else "rewrite",
+        evidence_fingerprint=(
+            _fingerprint((evidence, asdict(point))) if point is not None else
+            _fingerprint(("source-lineage", evidence, expected_head, source_head)) if forward else evidence
+        ),
+        evidence_status=(
+            "unusable" if unusable else "backed-sync" if point is not None else
+            "source-lineage" if forward else "none"
+        ),
         rebase_base_sha=point.target_head if point is not None else "",
         overrides=overrides,
     )
@@ -116,7 +126,7 @@ def revalidate(
     config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
     operation: pr_break_glass.RecoveryPreview, *, remote: str,
     observe: Callable[[Config, tracking.PRRecord], PullResult], cwd: str,
-    allow_feature_head: bool = False,
+    allow_feature_head: bool = False, routine: bool = False,
 ) -> None:
     """Refuse changed input after retention; transport still CASes the exact ref."""
     pr_publication_state.require_current(record, pr)
@@ -154,7 +164,9 @@ def revalidate(
         raise ValueError("Provider and remote no longer agree on the exact recovery PR head.")
     current = build(
         config, record, pr, source_head=source, expected_head=tip,
-        identity=identity, overrides=operation.overrides, cwd=cwd,
+        identity=identity, overrides=operation.overrides, cwd=cwd, routine=routine,
     )
     if current != operation:
+        if routine:
+            raise ValueError("Routine publication state changed; retry the normal command against current state.")
         raise ValueError("Recovery plan changed before publication; obtain a fresh preview and sign-off.")
