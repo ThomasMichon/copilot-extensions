@@ -1414,7 +1414,31 @@
     "tools/promotion_unit_tests/test_runtime_profile_wheels.py::test_no_implicit_or_unlimited_budget[None-max_unpacked_bytes]",
     "tools/promotion_unit_tests/test_runtime_profile_wheels.py::test_no_implicit_or_unlimited_budget[None-max_metadata_bytes]",
     "tools/promotion_unit_tests/test_runtime_profile_wheels.py::test_first_party_wrapper_still_requires_its_locked_generator",
-    "tools/promotion_unit_tests/test_runtime_profile_wheels.py::test_mutation_while_inspecting_cannot_certify_a_different_archive"
+    "tools/promotion_unit_tests/test_runtime_profile_wheels.py::test_mutation_while_inspecting_cannot_certify_a_different_archive",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_age_boundary_future_and_snapshot]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_build_command_is_fixed_and_preserves_path_boundaries]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_build_stages_only_approved_bytes_and_inspects_archive]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_buildx_json_lines_deduplicate_only_identical_selected_records]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_cancelled_build_retains_unknown_outcome]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_context_is_allowlisted_and_line_ending_stable]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_default_or_unbounded_builder_refused]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_failed_engine_keeps_failure_receipt_without_success_claim]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_foreign_default_context_and_changed_context_refused]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_foreign_node_endpoint_cannot_borrow_local_container_limits]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_locked_recipe_is_seasoned]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_output_injection_and_own_recipe_refused_before_engine]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_runtime_identity_and_auth_boundary]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_unknown_inputs_bool_schema_and_changed_context_refused]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_wrong_builder_instance_and_timeout_inputs_refused]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_wrong_platform_and_corrupt_layer_refused]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[RuntimePersistenceTests.test_foreign_and_nonempty_root_mounts_refused_without_adoption]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[RuntimePersistenceTests.test_foreign_or_wrong_mode_identity_refused]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[RuntimePersistenceTests.test_linked_mount_home_subdirectory_and_identity_file_refused]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[RuntimePersistenceTests.test_linked_projection_refused_without_changing_canonical_id]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[RuntimePersistenceTests.test_malformed_machine_and_keypair_refused_without_rewriting]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[RuntimePersistenceTests.test_missing_public_key_or_machine_id_and_empty_identity_refused]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[RuntimePersistenceTests.test_partial_identity_never_regenerates_host_key]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[RuntimePersistenceTests.test_public_regular_projection_with_private_home_and_identity]"
   ],
   "sources": {
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
@@ -1544,7 +1568,11 @@
     "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990",
     "libs/installer-engine/installer_wheel_inputs.py": "9bed756f0f00f61dce1d8745800c67eb79c49fcdf81e28cb7150b00200fd3070",
     "tools/wheel_input_fixture.py": "ed58b3876bcf48c89e6d327b8d5550246f626f79e68b7b77812eaf0fe606c122",
-    "tools/promotion_unit_tests/test_wheel_inputs.py": "1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b"
+    "tools/promotion_unit_tests/test_wheel_inputs.py": "1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py": "7efb40abd03d986bb6367c220e4f3f6f960a2c166a320d69a407a75e8d87c1d9",
+    ".devcontainer/trusted-harness-base/tests/test_contract.py": "943b21af752a130e7548e2993199c9d421147c8c570e9496a50264e881a7a5af",
+    ".devcontainer/trusted-harness-base/build.py": "b298986a93c81007351a91d7ba8dd863dfd216f5f3a598d8de687bd2ce79df0d",
+    ".devcontainer/trusted-harness-base/install.py": "8e68a2f7e732993ae3d04eefe15d812452f03dd7d91b0caf1700cee308e0dce8"
   },
   "coverage_targets": [
     "plugins/agent-worktrees/src/agent_worktrees/context_cli.py",
@@ -1606,7 +1634,9 @@
     "tools/promotion_development_map.py",
     "tools/promotion_frozen_candidate.py",
     "tools/promotion_candidate.py",
-    "libs/installer-engine/installer_wheel_inputs.py"
+    "libs/installer-engine/installer_wheel_inputs.py",
+    ".devcontainer/trusted-harness-base/build.py",
+    ".devcontainer/trusted-harness-base/install.py"
   ],
   "max_seconds": 300
 }
