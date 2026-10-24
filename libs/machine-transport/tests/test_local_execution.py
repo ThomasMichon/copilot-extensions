@@ -240,6 +240,53 @@ def test_unique_display_binding_preserves_the_literal_observed_host(
     assert display == keyed
 
 
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("count", [1, 2])
+def test_unrelated_display_metadata_cannot_replace_an_established_local_binding(
+    environment: str, count: int,
+) -> None:
+    binding = "local-binding-wsl" if environment == "wsl" else "local-binding"
+    baseline = resolve_local_execution_context(
+        {}, hostname="raw-host", environment=environment, configured_machine=binding,
+    )
+    entries = {
+        f"other-{index}": MachineEntry(
+            f"other-{index}", binding, hostname=f"other-host-{index}", execution_platform=environment,
+        )
+        for index in range(count)
+    }
+    assert resolve_local_execution_context(
+        entries, hostname="raw-host", environment=environment, configured_machine=binding,
+    ) == baseline
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+def test_locally_associated_display_binding_retains_matching_customization(environment: str) -> None:
+    entry = MachineEntry(
+        "custom-execution", "Friendly", hostname="raw-host",
+        physical_host="physical", execution_platform=environment,
+    )
+    context = resolve_local_execution_context(
+        {entry.key: entry}, hostname="raw-host", environment=environment, configured_machine="Friendly",
+    )
+    assert (context.machine, context.execution_machine, context.customization_key) == (
+        "physical", entry.key, entry.key,
+    )
+
+
+def test_derived_guest_does_not_claim_native_customization() -> None:
+    entry = MachineEntry("friendly", "Friendly", hostname="raw-host")
+    entries = {entry.key: entry}
+    observed = resolve_local_execution_context(entries, hostname="raw-host", environment="wsl")
+    configured = resolve_local_execution_context(
+        entries, hostname="raw-host", environment="wsl", configured_machine=entry.key,
+    )
+    assert observed == configured
+    assert (observed.machine, observed.execution_machine, observed.customization_key) == (
+        "friendly", "friendly-wsl", None,
+    )
+
+
 @pytest.mark.parametrize("shadow", ["key", "alias"])
 def test_literal_display_name_cannot_shadow_an_explicit_identity(shadow: str) -> None:
     local = MachineEntry("literal-wsl", "Friendly", hostname="literal-wsl")
@@ -401,7 +448,7 @@ def test_registry_whitespace_cannot_change_a_literal_observed_identity(
     )
     assert context.machine == hostname
     assert context.execution_machine == (f"{hostname}-wsl" if environment == "wsl" else hostname)
-    assert context.customization_key == key
+    assert context.customization_key == (None if environment == "wsl" else key)
 
 
 @pytest.mark.parametrize(("environment", "first_key", "second_key"), [
@@ -592,7 +639,9 @@ def test_missing_guest_alias_fallback_preserves_its_resolved_physical_family(
 
 def test_missing_guest_metadata_does_not_hide_ambiguous_physical_families() -> None:
     entries = {
-        key: MachineEntry(key, "Shared", execution_platform="windows", physical_host=physical)
+        key: MachineEntry(
+            key, "Shared", hostname="Shared", execution_platform="windows", physical_host=physical,
+        )
         for key, physical in (("first", "physical-a"), ("second", "physical-b"))
     }
     with pytest.raises(ValueError, match="ambiguous"):

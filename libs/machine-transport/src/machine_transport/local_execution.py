@@ -62,6 +62,14 @@ def _platform(entry: MachineEntry, observed: str) -> str:
     return split_machine_environment(entry.key).environment
 
 
+def _matches_observation(entry: MachineEntry, observed: str) -> bool:
+    return observed.casefold() in {
+        entry.key.strip().casefold(), entry.hostname.strip().casefold(), entry.alias.strip().casefold(),
+        _physical(entry, observed).casefold(),
+        *(alias.strip().casefold() for alias in entry.compatibility_aliases),
+    }
+
+
 def _entry_execution(entry: MachineEntry, observed: str) -> str:
     execution = entry.key.strip()
     presentation = (
@@ -161,9 +169,17 @@ def resolve_local_execution_context(
         ):
             raise IdentityError("configured SSH profile conflicts with the current execution environment")
         # Keep the OS observation out of target-shaped suffix inference; keys,
-        # aliases and display labels still use the shared selector.
+        # aliases and locally associated display labels use the shared selector.
+        local_displays = {
+            entry.display_name.casefold()
+            for entry in registry.values() if _matches_observation(entry, observed)
+        }
         target_registry = {
-            key: replace(entry, hostname="") if entry.hostname.strip().casefold() == observed.casefold() else entry
+            key: replace(
+                entry,
+                hostname="" if entry.hostname.strip().casefold() == observed.casefold() else entry.hostname,
+                display_name=entry.display_name if entry.display_name.casefold() in local_displays else "",
+            )
             for key, entry in registry.items()
         }
         if _literal_binding(target_registry, configured, observed, platform):
@@ -186,14 +202,7 @@ def resolve_local_execution_context(
         )
 
     folded = observed.casefold()
-    matches = [
-        entry for entry in registry.values()
-        if folded in {
-            entry.key.strip().casefold(), entry.hostname.strip().casefold(), entry.alias.strip().casefold(),
-            _physical(entry, observed).casefold(),
-            *(alias.strip().casefold() for alias in entry.compatibility_aliases),
-        }
-    ]
+    matches = [entry for entry in registry.values() if _matches_observation(entry, observed)]
     families = {_physical(entry, observed) for entry in matches}
     folded_families = {family.casefold() for family in families}
     candidates = [
@@ -212,11 +221,11 @@ def resolve_local_execution_context(
     if candidates:
         entry = candidates[0]
         physical = _physical(entry, observed)
+        derived_guest = platform == "wsl" and _platform(entry, observed) != "wsl"
         execution = (
-            f"{physical}-wsl" if platform == "wsl" and _platform(entry, observed) != "wsl"
-            else entry.key
+            f"{physical}-wsl" if derived_guest else entry.key
         )
-        customization_key = entry.key
+        customization_key = None if derived_guest else entry.key
     else:
         if len(folded_families) > 1:
             raise IdentityError(f"observed hostname {observed!r} has ambiguous physical associations")
