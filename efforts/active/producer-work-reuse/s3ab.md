@@ -328,6 +328,16 @@ defers to the next due wave, with no hidden per-venue refresh.
 - No actual OS lock/multiprocess/crash/Windows-sharing fixture, native
   performance sample, provider call or production activation ran. F1's native
   slot and all previous S3/performance/consumer gates remain separate.
+- Evidence-capture limitation: the final local runner output was delivered
+  through the tool channel without a durable stdout file; no JUnit output was
+  requested or reported. Independent-review results likewise have no original
+  disk receipt. No original file hash can be supplied for those missing
+  artifacts. Existing current-head CI logs verify their own gates, not the
+  identity of the local 92-test execution. No rerun/reviewer was used to fill
+  that gap; later qualification must configure capture before execution.
+- Prepared a separate [real-OS N1/N2 proposal](inventory-storage-native-plan.md)
+  for actual primitive custody/CAS, Windows sharing and explicitly bounded
+  fault/crash controls. It is not native execution admission.
 - Published the R1a implementation checkpoint to the existing draft #8143;
   its description explicitly preserves earlier performance/native findings.
   Current-head CI remains a separate gate, not a performance receipt. No new

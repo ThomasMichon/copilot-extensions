@@ -232,6 +232,9 @@ No live probe, agent contact or remote operation was used for this packet.
 
 ## 5. Pure work that can be admitted now; named next consumer
 
+The next real-OS qualification is a separate
+[N1/N2 proposal](inventory-storage-native-plan.md), not an execution admission.
+
 R1a can test schema round trips; absent versus authoritative empty; wrong
 source/schema/clock; bounds; partial/duplicate preservation; CAS/busy/write
 failure behavior; no secret serialization; explicit-policy freshness; and
