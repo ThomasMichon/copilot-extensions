@@ -316,6 +316,11 @@ reports the sync command's exit code and retains the latest run's output in
 metadata directories under `session-state`; invalid session identities still
 fail explicitly.
 
+Accounting capture reads at most 32 sessions per batch and splits batches that
+exceed the existing per-read row budget. Large corpora therefore retain complete
+per-session evidence without increasing read limits. A single session exceeding
+that budget still fails explicitly; healthy sibling batches continue.
+
 The scheduled sync (a systemd user timer on POSIX, a Scheduled Task on
 Windows) runs with no meaningful working directory of its own, so it can't
 rely on CWD-based repo-local config discovery the way an interactive shell
