@@ -7,6 +7,47 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional macOS guardian follow-through
+
+The manual `installation-context-acceptance.yml` selector
+`guardian_followthrough=true` runs a bounded packet on a fresh `macos-latest`
+runner, outside required CI. It uses Python 3.11 (supported by the shared
+library's Python >=3.10 floor and matching an originally affected interpreter)
+and preserves existing test/runner timeouts. `guardian_ref` accepts only a full
+40-hex commit; empty means the immutable dispatch SHA, never a moving branch.
+Validation precedes checkout, credentials are not persisted, and the job records
+the actual checked-out SHA, its parents, Python version and OS.
+
+```bash
+gh workflow run installation-context-acceptance.yml --ref dev \
+  -f guardian_followthrough=true -f guardian_ref=<full-40-hex-commit>
+```
+
+For a pending change, first prepare an immutable merge-preview commit containing
+the candidate and current development baseline, then pass that commit's SHA.
+Do not pass a mutable PR merge ref or modify the contributor's branch merely to
+run qualification. The workflow definition comes from the dispatch ref; the
+recorded checkout SHA identifies the source actually tested.
+
+The packet runs all shared-library `test_caller_owned.py` cases (including
+Darwin census positive/negative controls when present in the selected source),
+all Worktrees `test_installer_guardian.py` cases, the exact companion-lifecycle
+guidance/concurrent-embody node, the explicit inline-allowlist guard, and the
+Windows-command-shim simulation family. Library tests use the existing
+process-containment harness; plugin tests use the existing isolated runner and
+seasoned dependency preparation. No host-state opt-in, deployment, live profile
+adoption or elevation is used. Selecting this packet suppresses the default
+diagnostics; other explicit selectors retain their existing behavior.
+
+Each family has its own logged step. After tooling succeeds, later families
+still run following an earlier assertion failure, but that failure keeps the
+job red. Setup failure or cancellation is not a pass. Inspect native skips and
+individual outcomes, not just collection: Linux/Windows-only controls may
+legitimately skip on macOS. Local workflow-schema tests, Windows/Linux results,
+or adding this lane do not constitute native macOS PASS. A successful packet
+qualifies only its recorded source/interpreter/OS and selected contracts, not a
+full plugin corpus, performance benchmark, installation rollout or fleet.
+
 ## Optional SSH session snapshot
 
 The manual `installation-context-acceptance.yml` selector `ssh_snapshot=true`

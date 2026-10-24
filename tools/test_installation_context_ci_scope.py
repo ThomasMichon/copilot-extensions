@@ -235,6 +235,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     assert set(inputs) == {
         "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
         "candidate_profiles", "ssh_snapshot", "wheel_inputs",
+        "guardian_followthrough", "guardian_ref",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -253,11 +254,13 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "candidate-profiles-linux", "candidate-profiles-windows",
         "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
         "wheel-inputs-linux", "wheel-inputs-windows",
+        "guardian-followthrough-macos",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
         assert job["if"] == (
-            "${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service "
+            "${{ !inputs.guardian_followthrough && !inputs.watch_owner "
+            "&& !inputs.dispatch_delegation && !inputs.pr_service "
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
             "&& !inputs.ssh_snapshot && !inputs.wheel_inputs }}"
         )
