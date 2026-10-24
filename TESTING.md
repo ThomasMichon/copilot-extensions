@@ -551,7 +551,7 @@ identity after clean drain and must refuse without native reads or replay writes
 This is a disk-schema/update safeguard, not an image build, automatic migration,
 cross-host writer fence or completed update/rollback lifecycle.
 
-## Optional diagnostic telemetry
+## Optional SSH service and native relay
 
 The independent `ssh_service=true` selector runs the contained standalone
 `services/ssh` suite on Linux and Windows. It covers installed foreground
@@ -568,6 +568,8 @@ modify existing SSH configuration. Do not select
 The Windows lane remains control-plane-only and explicitly skips Linux-native
 cases. These tests do not qualify a built native container image, normal Fleet
 placement, provider/Vault admission or a preserving production migration.
+
+## Optional diagnostic telemetry
 
 Manager's source-native consumer lane is documented in
 [`worktree-manager/docs/source-observation.md`](worktree-manager/docs/source-observation.md).

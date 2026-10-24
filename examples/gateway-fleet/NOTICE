@@ -1,9 +1,0 @@
-Experimental source snapshot, distributed under this repository's MIT license.
-
-The token-gateway/vendor/agent_vault reference subset and
-ssh-mesh/libs/agent_procutil helper originate in the MIT-licensed
-ThomasMichon/copilot-extensions project. Retained license copies accompany
-those directories. Identifying deployment material is not part of this example.
-
-This is a reference snapshot, not a new supported fork, installation channel,
-release artifact or compatibility promise for any deployed service.

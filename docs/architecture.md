@@ -52,8 +52,10 @@ channel. Declared principal/generation bindings gate automatic public-key
 admission; durable revisions and bounded notifications let the existing machine
 Fleet owner converge agent-ssh profiles and native login authorization.
 Its offline container recipe is independent of Copilot or a source checkout.
-Native OpenSSH remains the data plane: this registration does not introduce
-generic TCP routing into the HTTP Gateway or complete managed SSH installation.
+An optional owned, non-root Linux OpenSSH child provides the native relay with
+distinct relay keys and verified listener custody before registration. Native
+OpenSSH remains the data plane: this registration does not introduce generic
+TCP routing into the HTTP Gateway or complete managed SSH installation.
 
 The standalone [agent-chat-service](../services/chat/README.md) currently
 provides dependency-free conversation state and a callable RPC core, plus an
