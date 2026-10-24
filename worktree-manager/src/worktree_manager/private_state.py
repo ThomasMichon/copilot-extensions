@@ -25,9 +25,18 @@ def reject_links(path: Path) -> None:
             raise OSError("Private storage must not use symlinks or reparse points.")
 
 
-def protect(path: Path, *, directory: bool = False) -> None:
+def _private_metadata(path: Path, *, directory: bool) -> os.stat_result:
+    import stat
+
     reject_links(path)
-    path.lstat()
+    metadata = path.lstat()
+    if not (stat.S_ISDIR(metadata.st_mode) if directory else stat.S_ISREG(metadata.st_mode)):
+        raise OSError("Private storage requires a real directory or regular file.")
+    return metadata
+
+
+def protect(path: Path, *, directory: bool = False) -> None:
+    _private_metadata(path, directory=directory)
     if os.name != "nt":
         path.chmod(0o700 if directory else 0o600)
         return
@@ -65,10 +74,7 @@ def verify_private(
     """Read-only verification for private evidence readers, never ACL repair."""
     import stat
 
-    reject_links(path)
-    metadata = path.stat()
-    if stat.S_ISDIR(metadata.st_mode) != directory:
-        raise OSError("Private storage has an unexpected file type.")
+    metadata = _private_metadata(path, directory=directory)
     if os.name != "nt":
         expected = 0o700 if directory else 0o600
         if metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != expected:

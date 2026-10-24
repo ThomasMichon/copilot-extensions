@@ -131,6 +131,16 @@ def test_same_identity_is_idempotent_only_for_identical_unexpired_intent(tmp_pat
     assert len(store.entries()) == 1
 
 
+def test_unicode_multiline_input_and_option_text_round_trip_without_normalization(tmp_path):
+    store = journal.LaunchAttempts(tmp_path)
+    prompt = "  r\u00e9sum\u00e9 \u4e2d\u6587 \U0001f9ea e\u0301\n'quoted' $literal; & text\n"
+    options = {"title": "\u03b4 title\nsecond line", "no_mux": False}
+    attempt_id = record(store, prompt=prompt, options=options)
+    assert store.detail(attempt_id, include_input=True)["input"] == {
+        "prompt": prompt, "options": options,
+    }
+
+
 def test_concurrent_first_writers_publish_one_complete_database_and_all_intents(tmp_path):
     def submit(index):
         return record(journal.LaunchAttempts(tmp_path), prompt=f"private-{index}")
@@ -480,6 +490,30 @@ def test_links_and_orphan_sidecars_are_explicit_not_empty(tmp_path, suffix):
         store.entries()
     with pytest.raises(journal.LaunchAttemptError):
         record(store)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO file type")
+def test_special_database_file_is_refused_before_any_header_open(tmp_path, monkeypatch):
+    store = journal.LaunchAttempts(tmp_path)
+    store.path.parent.mkdir(mode=0o700)
+    os.mkfifo(store.path, 0o600)
+    attempt_id = uuid4().hex
+    opened = []
+    original_open = type(store.path).open
+    def no_fifo_open(path, *args, **kwargs):
+        if path == store.path:
+            opened.append(path)
+            pytest.fail("a special database file must be refused before opening its header")
+        return original_open(path, *args, **kwargs)
+    monkeypatch.setattr(type(store.path), "open", no_fifo_open)
+    for operation in (
+        store.entries, lambda: store.detail(attempt_id), store.expire,
+        lambda: store.append(attempt_id, owner="manager", phase="unknown"),
+        lambda: record(store, attempt_id=attempt_id),
+    ):
+        with pytest.raises(journal.LaunchAttemptError):
+            operation()
+    assert opened == [] and stat.S_ISFIFO(store.path.lstat().st_mode)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions; Windows uses the shared ACL helper")

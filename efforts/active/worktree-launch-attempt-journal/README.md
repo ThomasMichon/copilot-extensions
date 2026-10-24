@@ -257,3 +257,10 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   Regressions include the actual colliding expiry trigger, a concurrent Windows
   journal read without ACL repair and whole-directory comparison on refused WAL
   reads. The focused storage portfolio passes 49 cases with three skips.
+- POSIX special-file review found that a FIFO could pass the old non-directory
+  check and block before SQLite's deadline. The shared private-state helper now
+  requires a regular file (or a real directory when requested) before protection,
+  verification or header access. All existing private-state consumers pass
+  together: 199 focused cases with ten platform/privilege skips. Actual POSIX
+  FIFO checks refuse all five read/write operations without opening or waiting
+  for the FIFO; the bounded native alarm is never reached.
