@@ -107,6 +107,9 @@ installed receipt/closure corruption, and preservation of the selected prior
 after health failure or cancellation. These are real local first-touch and
 consumer-contract controls, not an authenticated approval/feed adapter or
 production consumer activation.
+The large-closure control constructs and reuses 97 actual wheels: its complete
+receipt exceeds 32 KiB, while each real health-child command stays below
+16,000 characters using digest-bound evidence read from the owned receipt.
 
 ## Optional Dispatch service replay
 

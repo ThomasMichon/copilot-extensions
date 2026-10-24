@@ -656,37 +656,12 @@ def retain_closed_wheel_install(
     installed health. This mode accepts no resolver arguments or source inputs;
     ordinary source installation retains its separate seasoning preflight.
     """
-    from installer_wheel_snapshot import WheelSnapshot
-
-    if not isinstance(snapshot, WheelSnapshot):
-        raise DependencyPolicyError("closed wheel installation requires retained wheel custody")
-    python = Path(python)
-    if not python.is_absolute():
-        raise DependencyPolicyError("closed wheel interpreter must be an absolute candidate path")
-    uv = _select_uv_executable(uv)
-    environment = {
-        key: value for key, value in _captured_environment(env).items()
-        if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))
-        and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
-    }
-    with _temporary_inputs(None) as temporary:
-        root = _private_retained_root(Path(temporary)).resolve()
-        requirements = root / "wheels.txt"
-        requirements.write_text("".join(
-            f"{name.split('-', 1)[0]} @ "
-            f"{path.as_uri()}#sha256={snapshot.digests[name].removeprefix('sha256:')} "
-            f"--hash={snapshot.digests[name]}\n"
-            for name, path in sorted(snapshot.paths.items())
-        ), encoding="utf-8")
-        snapshot.verify()
-        yield RetainedUVInstall(
-            (uv, "pip", "install", "--no-config", "--no-cache", "--offline",
-             "--no-python-downloads", "--no-index", "--no-deps", "--no-build",
-             "--no-sources", "--require-hashes", "--link-mode", "copy",
-             "--python", str(python), "--requirements", str(requirements)),
-            environment, root, {}, {},
-        )
-        snapshot.verify()
+    with _configuration.retain_closed_wheels(
+        uv, snapshot, python=python, env=env,
+        captured_environment=_captured_environment, select_uv=_select_uv_executable,
+        transaction_type=RetainedUVInstall, error_type=DependencyPolicyError,
+    ) as transaction:
+        yield transaction
 
 
 @contextmanager

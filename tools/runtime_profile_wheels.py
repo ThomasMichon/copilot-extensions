@@ -4,13 +4,15 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from typing import BinaryIO, Mapping
+from typing import TYPE_CHECKING, BinaryIO, Mapping
 
 from promotion_python_artifacts import PromotionArtifactError, inspect_wheel
 from installer_wheel_inputs import WheelLimits, _check_deadline
-from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot
 from packaging.utils import canonicalize_name
 from runtime_profile import ProfileError, RuntimeProfile, validate_profile
+
+if TYPE_CHECKING:
+    from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot
 
 
 def _archive_digest(archive: BinaryIO, limit: int, deadline: float) -> tuple[str, int]:
@@ -59,6 +61,8 @@ def profile_wheel_inputs(
     Existing release/profile/feed owners must admit the selected record before
     using this data. Keep the snapshot's context open through installed health.
     """
+    from installer_wheel_snapshot import WheelInstallInputs, WheelSnapshot
+
     if not isinstance(snapshot, WheelSnapshot):
         raise ProfileError("profile construction requires retained wheel custody")
     # Freeze the semantic input independently of a caller's mutable record.

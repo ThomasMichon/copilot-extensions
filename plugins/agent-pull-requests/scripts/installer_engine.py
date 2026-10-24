@@ -419,8 +419,17 @@ def _verify_installed(
     origins = _input_origins(inputs)
     excluded = _excluded_packages(inputs)
     wheel_receipt = inputs.wheel_inputs.receipt() if inputs.wheel_inputs is not None else None
+    origins_argument = json.dumps(origins)
+    wheel_argument = ""
+    if wheel_receipt is not None:
+        origins_argument = hashlib.sha256(json.dumps(
+            origins, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        wheel_argument = hashlib.sha256(json.dumps(
+            wheel_receipt, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
     probe = """
-import importlib, importlib.metadata, json, pathlib, sys
+import hashlib, importlib, importlib.metadata, json, pathlib, sys
 slot = pathlib.Path(sys.argv[1]).resolve()
 module = importlib.import_module(sys.argv[2])
 assert module.__file__ and pathlib.Path(module.__file__).resolve().is_relative_to(slot), \
@@ -428,24 +437,36 @@ assert module.__file__ and pathlib.Path(module.__file__).resolve().is_relative_t
 assert sys.version_info >= (3, 11), "installer runtime requires Python 3.11+"
 if sys.argv[4]:
     getattr(module, sys.argv[4])()
-expected_origins = json.loads(sys.argv[3])
+wheel_binding = sys.argv[9]
+expected_origins = None if wheel_binding else json.loads(sys.argv[3])
 expected_extras = json.loads(sys.argv[6])
 expected_selection = json.loads(sys.argv[7])
 excluded_packages = json.loads(sys.argv[8])
-expected_wheels = json.loads(sys.argv[9])
+expected_wheels = None
 proof = slot / ".runtime-input-origins.json"
 assert not proof.is_symlink(), "frozen origin evidence is a symlink"
-if sys.argv[5] == "fresh" or expected_extras or expected_selection is not None or expected_wheels is not None:
+if sys.argv[5] == "fresh" or expected_extras or expected_selection is not None or wheel_binding:
     assert proof.is_file(), "fresh runtime has no frozen origin evidence"
 recorded_origins = None
 if proof.exists():
     receipt = json.loads(proof.read_text(encoding="utf-8"))
     assert receipt["schema"] == "installer-engine.frozen-input-origins" and \
-        type(receipt["version"]) is int and receipt["version"] == (2 if expected_wheels is not None else 1), \
+        type(receipt["version"]) is int and receipt["version"] == (2 if wheel_binding else 1), \
         "frozen origin evidence has an unsupported schema"
-    assert receipt.get("wheel_inputs") == expected_wheels, \
-        "frozen origin evidence differs from the selected wheel inputs"
     recorded_origins = receipt["packages"]
+    if wheel_binding:
+        expected_wheels = receipt["wheel_inputs"]
+        assert hashlib.sha256(json.dumps(expected_wheels, sort_keys=True, separators=(",", ":")).encode()).hexdigest() \
+            == wheel_binding, "frozen origin evidence differs from the selected wheel inputs"
+        assert isinstance(recorded_origins, dict) and set(recorded_origins) == set(expected_wheels["distributions"]), \
+            "frozen origin evidence does not cover the complete wheel closure"
+        if sys.argv[5] == "fresh":
+            assert hashlib.sha256(json.dumps(recorded_origins, sort_keys=True, separators=(",", ":")).encode()).hexdigest() \
+                == sys.argv[3], "frozen origin evidence differs from construction"
+        expected_origins = recorded_origins
+    else:
+        assert receipt.get("wheel_inputs") is None, \
+            "source origin evidence unexpectedly contains wheel inputs"
     assert receipt.get("extras", []) == expected_extras, \
         "frozen origin evidence differs from the selected dependency profile"
     assert receipt.get("local_packages") == expected_selection, \
@@ -499,10 +520,10 @@ for name in excluded_packages:
 """
     try:
         _child(
-            [str(python), "-I", "-B", "-c", probe, str(slot), module, json.dumps(origins),
+            [str(python), "-I", "-B", "-c", probe, str(slot), module, origins_argument,
              health_callable or "", "fresh" if require_frozen_origin else "reuse",
              json.dumps(inputs.extras), json.dumps(inputs.local_packages), json.dumps(excluded),
-             json.dumps(wheel_receipt)],
+             wheel_argument],
             inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         )
     except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:

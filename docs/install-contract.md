@@ -3180,7 +3180,11 @@ fragments in `direct_url.json` URLs with empty `archive_info`; installed health
 requires that exact hash-qualified origin and rejects conflicting archive hash
 fields. It also requires the exact complete installed distribution set, with no
 unexpected or duplicate distribution. Receipt/binding/origin/version changes
-refuse reuse. Source content plus the whole wheel binding enters the existing
+refuse reuse. The health child reads that existing owned receipt and compares
+its canonical wheel evidence with a parent-supplied SHA-256 binding; fresh
+origin maps have their own parent binding. Complete profiles/maps never enter
+argv, so valid large closures do not hit native command-line size limits.
+These bindings check consistency, not authority. Source content plus the whole wheel binding enters the existing
 immutable construction identity, so a changed policy, target or profile cannot
 reuse a numbered identity. A new retained copy of unchanged cached bytes can
 reuse a healthy runtime without a feed request or reconstruction.

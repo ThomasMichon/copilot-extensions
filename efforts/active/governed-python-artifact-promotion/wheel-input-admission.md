@@ -125,6 +125,19 @@ failure was resolved by supplying the declared seasoned test backend in the
 isolated test venv and rerunning that exact native control successfully.
 Hosted evidence and review remain required; local passes do not close those items.
 
+On #8534's initial head, all six optional Linux/Windows wheel-input,
+candidate-profile and real artifact jobs passed. Required CI correctly refused
+the oversized policy module and stale exact-source admission; the projection
+now lives in the existing private policy helper and the admitted byte-only
+verifier digest is updated without changing the no-actor inventory or gates.
+The review's Medium large-closure argv finding reproduced at 70,534 characters.
+Health now reads the existing owned receipt and validates parent-supplied
+canonical SHA-256 bindings instead of transmitting full profiles/maps in argv.
+A real 97-wheel construction/reuse control enforces a 16,000-character health
+command bound. The 100-case closed/profile cohort and four focused existing
+source construction/origin/reuse controls pass after this correction; fresh
+current-head CI, native acceptance and review are still owed.
+
 ### Exact-set byte custody, 2026-10-24
 
 The next component adds `installer_wheel_snapshot.retain_wheel_inputs` beneath

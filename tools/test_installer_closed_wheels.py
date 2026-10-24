@@ -264,6 +264,65 @@ def test_changed_closed_binding_cannot_reuse_numbered_identity(tmp_path, engine,
                     pytest.fail("changed exact binding reused a published runtime")
 
 
+def test_large_closed_receipt_does_not_cross_native_command_line_limit(
+    tmp_path, engine, plugin, monkeypatch,
+):
+    archives = {}
+    entries = []
+    dependencies = []
+    for number in range(96):
+        name = f"part{number}"
+        filename = f"{name}-1.0-py3-none-any.whl"
+        path = tmp_path / filename
+        path.write_bytes(wheel_bytes(
+            name=name, prefix=f"{name}-1.0.dist-info/",
+            metadata=f"Metadata-Version: 2.4\nName: {name}\nVersion: 1.0\n\n".encode(),
+        ))
+        archives[filename] = path
+        dependencies.append(f"{name}==1.0")
+    filename = "demo_pkg-1.0-py3-none-any.whl"
+    path = tmp_path / filename
+    path.write_bytes(wheel_bytes(metadata=(
+        "Metadata-Version: 2.4\nName: demo-pkg\nVersion: 1.0\n"
+        + "".join(f"Requires-Dist: {edge}\n" for edge in dependencies) + "\n"
+    ).encode()))
+    archives[filename] = path
+    digests = {
+        name: "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+        for name, path in archives.items()
+    }
+    for filename in archives:
+        entries.append({
+            "name": filename.split("-", 1)[0].replace("_", "-"), "version": "1.0",
+            "filename": filename, "sha256": digests[filename], "requires_python": "",
+            "provides_extras": [], "selected_extras": [],
+            "requires_dist": dependencies if filename.startswith("demo_pkg-") else [],
+        })
+    with retain_wheel_inputs(
+        archives, digests, max_wheels=100, max_archive_bytes=100_000,
+        max_total_bytes=1_000_000, max_snapshot_bytes=1_000_000,
+        deadline=time.monotonic() + 120,
+    ) as retained:
+        wheels = inspected(retained, wheels=entries)
+        assert len(json.dumps(wheels.receipt())) > 32_768
+        child = engine._child
+        probes = []
+
+        def bounded(argv, **kwargs):
+            if "-c" in argv:
+                assert len(subprocess.list2cmdline(argv)) < 16_000
+                probes.append(argv)
+            return child(argv, **kwargs)
+
+        monkeypatch.setattr(engine, "_child", bounded)
+        root = tmp_path / "runtime"
+        with candidate(engine, root, plugin, wheels) as built:
+            assert not built.reused
+        with candidate(engine, root, plugin, wheels) as reused:
+            assert reused.reused
+        assert len(probes) == 2
+
+
 @pytest.mark.parametrize("corrupt", [
     "extra-distribution", "archive-digest", "missing-digest", "receipt",
 ])
