@@ -68,6 +68,7 @@ composition; content integrity does not reduce to trusting a source marker.
 | Baseline prevention driver | Historical Phase 8 proposal/evidence; remaining activation transferred to the canonical campaign | #6430 / main-owned-workflow-control Phase 5 |
 | Regression admission contributor | First bounded contributor-regression unit cohort; existing broad periodic ownership retained | Managed source `chugging-wrench`; #3336 |
 | Stamped-candidate contributor | Bounded Phase 9c ordering and coverage-provenance correction; other campaign and control owners retained | Managed source `faded-washer`; #8390 |
+| Composite-source contributor | Phase 9d complete source publication and late Main-control reconciliation; existing artifact/profile and runtime owners retained | Managed source `stubborn-lantern`; #8736 |
 
 _Expand this table if/when work is split across additional participants
 (e.g. a dedicated worktree for the CI pipeline vs. one for CONTRIBUTING/AGENTS.md
@@ -84,6 +85,11 @@ rewrite)._
 - **Handoff:** journal every phase transition here before ending a session;
   Phase 2 (branch cutover) must not start until Phase 1 tooling is merged and
   proven idempotent against current `main`.
+- **Phase 9d:** the Composite-source contributor owns the bounded
+  [complete-source and late-control plan](complete-source-and-late-controls.md).
+  Historical Phase 9c attribution does not transfer current implementation
+  custody. #8367 retains its optional profile/index producer and API; coordinate
+  shared publication or documentation interfaces rather than superseding it.
 
 ## Context
 
@@ -110,6 +116,21 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-24 final promotion boundary and independently advancing Main controls
+(verbatim):**
+
+> The end of promotion includes and encompasses the final PR to main; by the time that occurs, all artifacts should already exist. That part I want to ensure. The artifacts obviously can't be aware of what will be the final commit hash on main, but we can produce the final source of eveything else as an artifact before posting the PR. Help come up ith someting within those bounds
+>
+> Keep in mind that main does not a small set of main-only files, notably the workflow specifications and some governance settings, which may advance on their own during a promotion run. We'll need a way to account for that before the final PR push and merge.
+>
+> Great. Drive this so we get clean promotion again
+
+**Settled summary:** the artifact-ready boundary precedes the final generated
+PR to Main, not an ordinary feature PR to Dev. Complete final source must
+include the independently governed Main inputs admitted for that landing.
+Phase 9d is the **agent-recommended** realization of this direction, under
+the existing release owner, unit/effect/time policy and Main-control authority.
 
 **2026-10-23 stamping, testing and coverage direction (verbatim):**
 
@@ -956,6 +977,22 @@ broader effort and adopter acceptance remain separately owned.)_
       and independently governed Main activation: natural run `40085094788`,
       generated Main #8550, independently verified release archive.
 
+### Phase 9d - Complete source and late Main controls
+
+_(Agent-recommended realization of the 2026-10-24 operator direction.
+Participant: Composite-source contributor; bounded tracker: #8736.
+Status: proposed; plan review precedes implementation.)_
+
+- [ ] Land this amendment through current-head review and required CI.
+- [ ] Implement the [complete-source and late-control plan](complete-source-and-late-controls.md)
+      through the existing composer, publisher and admission paths.
+- [ ] Preserve other active artifact/profile, construction, runtime and
+      Main-control owners; review shared interfaces before changing them.
+- [ ] Complete separately governed control activation and verify one real
+      promotion satisfies the complete pre-PR source/artifact contract,
+      preserves late Main changes and remains under thirty minutes including
+      queueing, publication, actual merge and tagging.
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
@@ -1164,6 +1201,15 @@ test witnesses run periodically and cannot hold promotion.
 - [x] Verify the containing qualified release and coverage readback within the
       existing cadence gate before completing this bounded slice.
 
+### Phase 9d validation
+
+- [ ] Resolve the [source, control and race validation obligations](complete-source-and-late-controls.md#validation-plan)
+      without adding general integration tests to promotion or required PR CI.
+- [ ] Verify complete immutable source/artifact readback before final PR
+      publication and exact full-tree equality at the actual Main landing.
+- [ ] Retain a control-refresh witness and its accepted or refused outcome;
+      never claim a quiet successful cycle exercised a late-control race.
+
 ## Proposal
 
 Phase 9 extends the existing source marker, generator, artifact identity and
@@ -1184,6 +1230,25 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-24 - Complete-source and late-control amendment proposed
+
+Captured the operator's clarified final-Main-PR boundary and independently
+advancing workflow/governance inputs above. Phase 9d closes the complete-source
+and control-freshness parts of the existing source-owned release vision,
+without making an incidental candidate or Main commit a second release owner.
+
+An independent provider check confirmed ordinary promotion `40138858673`
+completed successfully in 15m47s including queueing; generated Main #8724
+merged the exact qualified candidate tree. Its existing Dev-owned Release
+has package bundles, the unit-evidence archive and index, but no explicit
+complete composite-source asset; its source tag names Dev rather than the
+final generated tree. This is an operating baseline, not Phase 9d completion.
+
+Earlier frozen-candidate contributors confirmed their bounded slices are
+closed and did not accept this new slice. The new public claim is #8736.
+Plan review precedes production changes; no publisher, control activation,
+runtime rollout or extra release-test prerequisite has been introduced.
 
 ### 2026-10-23 - Composed-candidate ordering amendment
 

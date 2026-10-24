@@ -7,6 +7,23 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional Bridge scoped-stamp binding
+
+The manual `installation-context-full.yml` portfolio `bridge-binding` runs
+`test_bridge_cell_stamp_preserves_global_ownership` through the isolated
+`payload-invocation` runner on Ubuntu and Windows. It retains the 60-second
+test deadline and does not expand required PR CI.
+
+The packet stamps an actual selected cell with and without existing legacy
+global commands. Scoped stamping must preserve their exact bytes or leave them
+absent. A healthy cell runtime proves payload dispatch before ordinary-shell
+controls remove the incoming context. Existing globals may reach the active
+cell through its attributable publisher; publisher loss, pointer loss and
+activation-CAS deactivation must never turn that cell into a legacy
+resolver-only fallback. Synthetic distinct cell and legacy modules identify
+the runtime actually executed; no native runtime construction, service
+installation, live host adoption or performance-budget claim follows.
+
 ## Optional historical Bridge source proof
 
 The manual `installation-context-full.yml` portfolio `bridge-contracts`

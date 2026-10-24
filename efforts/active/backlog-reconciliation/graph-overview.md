@@ -105,11 +105,48 @@ after publication. The whole-queue census then recorded **931 open issues at
 2026-10-24 15:24:36 PDT**, still 202 above the fixed checkpoint. The campaign
 remains Active.
 
+## Second delivered consolidation
+
+Batch 92 considered eleven issues and superseded six redundant trackers only
+after complete direct receiving acceptance and readback:
+
+| Unfinished outcome | Superseded tracker | Existing receiving home |
+|--------------------|--------------------|-------------------------|
+| Native title composition and full asserted-title fidelity | #3588, #4413 | OPEN #3581, preserving all eight inherited #3583 rows |
+| Component-aware activity-first subtitle truncation | #5962 | OPEN #5912, preserving the actual title/claim relationship |
+| Installer preservation of explicit launch-setting choices | #5853 | OPEN #5952, retaining both original failed-read fidelity paths |
+| Complete Python and Python-less report verdicts | #5921 | Active test-portfolio ROOT and OPEN #1303 |
+| Honest repository activation-contribution authority | #7179 | Active Configuration ROOT and OPEN #6379 |
+
+The two ROOT contracts actually merged through reviewed #8737; #8742 adds
+the Configuration section's standard transfer anchor without changing its
+requirements. Local and actual global Validation, continuing Coordination
+and dated Journals are direct in the existing ROOTs. Every incumbent byte,
+checked row, historical journal, alternative and custodian remains.
+The three numeric bodies were delivered and fully read back before closure.
+No implementation, native qualification, release or rollout was completed.
+
+All eleven public bodies/states/reasons and the five receiving contracts were
+audited before the next census: **928 whole-queue open at 2026-10-24
+16:25:32 PDT**, comprising 769 original-cohort and 159 inflow issues.
+There are 681 eligible open issues and 247 untouched excluded-author issues;
+the fixed checkpoint is still 199 away.
+
+The operational graph preserves the original 695 identities and seven later
+eligible identities: **702 historical identities, not 702 current-open issues**.
+Twenty initial identities are no longer open; #8709 also changed closed before
+current body admission and receives no campaign credit. #8702 and #8715 have
+admitted semantic deltas but retain their explicit source claims. #8715's
+author-reported source delivery does not establish release, rollout or headed
+acceptance. Four arrivals remain metadata-only pending their own admission.
+The original research layers and all provenance remain unchanged.
+
 ## Continuing work
 
-The next candidate families concern title fidelity, literal clean-room verdicts,
-target capability preparation, declaration composition and configuration truth.
-They have receiving-fit and custody obligations, not automatic closure lists.
+Target capability preparation, declaration composition and the next wider
+per-track families still have receiving-fit and custody obligations, not
+automatic closure lists. The same four researchers are selecting coherent
+families from their completed graph partitions rather than repeating the sweep.
 In particular, #5922's scenario-axis contract and #8511's concurrent artifact
 allocation remain independent rather than becoming optimistic reduction credit.
 
