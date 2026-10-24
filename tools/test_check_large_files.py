@@ -34,6 +34,38 @@ def _load_module():
     return module
 
 
+def test_new_blob_paths_reads_all_commits_in_one_lossless_batch():
+    module = _load_module()
+    commits = ["a" * 40, "b" * 40]
+    blob = "c" * 40
+    names = ["line\nbreak.txt", "line\tbreak.map"]
+    raw = b"".join(
+        f":000000 100644 {'0' * 40} {blob} A\0{name}\0".encode()
+        for name in names
+    )
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, raw, b"",
+    )) as git:
+        assert module._new_blob_paths(commits, {blob: 1}) == [(names[1], 1)]
+    assert git.call_count == 1
+    assert "--stdin" in git.call_args.args
+    assert git.call_args.kwargs["input"] == ("\n".join(commits) + "\n").encode()
+
+
+def test_new_blob_paths_refuses_failed_batch_or_missing_paths():
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 1, b"", b"unavailable commit",
+    )):
+        with pytest.raises(module.GitEnumerationError, match="diff-tree --stdin"):
+            module._new_blob_paths(["a" * 40], {"b" * 40: 1})
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, b"", b"",
+    )):
+        with pytest.raises(module.GitEnumerationError, match="every new blob"):
+            module._new_blob_paths(["a" * 40], {"b" * 40: 1})
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True, encoding="utf-8")
 

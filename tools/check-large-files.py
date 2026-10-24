@@ -245,11 +245,19 @@ def _blob_candidates(paths: dict[str, set[str]], sizes: dict[str, int]) -> list[
 
 def _new_blob_paths(commits: list[str], sizes: dict[str, int]) -> list[tuple[str, int]]:
     paths: dict[str, set[str]] = {}
-    for commit in commits:
-        raw = _git_or_raise(
-            "diff-tree", "--root", "-m", "--no-commit-id", "--raw", "--no-abbrev",
-            "--no-renames", "-r", "--diff-filter=d", "-z", commit,
+    if commits:
+        if any(re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None for commit in commits):
+            raise GitEnumerationError("git reported an invalid introducing commit id")
+        result = _git_bytes(
+            "diff-tree", "--stdin", "--root", "-m", "--no-commit-id", "--raw", "--no-abbrev",
+            "--no-renames", "-r", "--diff-filter=d", "-z",
+            input=("\n".join(commits) + "\n").encode("ascii"),
         )
+        if result.returncode:
+            raise GitEnumerationError(
+                f"'git diff-tree --stdin' failed: {_decode(result.stderr).strip()}"
+            )
+        raw = _decode(result.stdout)
         parts = raw.split("\0")
         for index in range(0, len(parts) - 1, 2):
             meta, path = parts[index], parts[index + 1]

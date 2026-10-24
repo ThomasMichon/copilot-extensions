@@ -715,6 +715,125 @@ def test_git_ref_scan_reads_passive_pr_head_data_and_trusted_details(repo: Path,
     ]
 
 
+def test_git_ref_loader_preserves_literal_paths_binary_deletions_and_snapshot(repo: Path):
+    module = _load_module(repo)
+    paths = [" line\nbreak\tname.txt ", ":(glob)*", "binary.txt", "deleted.txt"]
+    for name, body in zip(paths, [f"{LEAK}\r\nsecond\n".encode(), b"", b"\xff", b"removed"]):
+        result = subprocess.run(
+            ["git", "hash-object", "-w", "--stdin"], cwd=repo, input=body,
+            capture_output=True, check=True,
+        )
+        blob = result.stdout.decode("ascii").strip()
+        subprocess.run(
+            ["git", "-c", "core.protectNTFS=false", "update-index", "-z", "--index-info"],
+            cwd=repo, input=f"100644 {blob}\t{name}\0".encode(),
+            capture_output=True, check=True,
+        )
+    _git(repo, "commit", "-qm", "literal names")
+    loader = module._make_git_ref_loader("HEAD", [*paths, "missing.txt"])
+    _git(repo, "update-index", "--force-remove", "--", "deleted.txt")
+    _git(repo, "commit", "-qm", "delete selected path")
+    assert loader(paths[0]) == f"{LEAK}\r\nsecond\n"
+    assert loader(paths[1]) == ""
+    assert loader(paths[2]) is None
+    assert loader(paths[3]) == "removed"
+    assert loader("missing.txt") is None
+    assert module._make_git_ref_loader("HEAD", paths)("deleted.txt") is None
+
+
+def test_git_ref_loader_batches_and_deduplicates_blobs(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(SCRIPT.parent.parent)
+    blobs = {f"{i:040x}": f"body {i}\n".encode() for i in range(65)}
+    names = {f"file-{i}": blob for i, blob in enumerate(blobs)}
+    names["duplicate"] = names["file-0"]
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if argv[1] == "ls-tree":
+            output = b"".join(
+                f"100644 blob {blob} {len(blobs[blob])}\t{name}\0".encode()
+                for name, blob in names.items()
+            )
+        else:
+            requested = kwargs["input"].decode().splitlines()
+            assert len(requested) <= 32
+            output = b"".join(
+                f"{blob} blob {len(blobs[blob])}\n".encode() + blobs[blob] + b"\n"
+                for blob in requested
+            )
+        return subprocess.CompletedProcess(argv, 0, output, b"")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    loader = module._make_git_ref_loader("HEAD", list(names))
+    assert all(loader(name) == blobs[blob].decode() for name, blob in names.items())
+    assert [args[1] for args in calls] == ["ls-tree", "cat-file", "cat-file", "cat-file"]
+
+
+@pytest.mark.parametrize("sizes,counts", [
+    ([4 * 1024 * 1024, 4 * 1024 * 1024, 1], [2, 1]),
+    ([8 * 1024 * 1024 + 1, 1], [1, 1]),
+])
+def test_git_ref_loader_bounds_batch_bytes(monkeypatch: pytest.MonkeyPatch, sizes, counts):
+    module = _load_module(SCRIPT.parent.parent)
+    blobs = {f"{i:040x}": b"x" * size for i, size in enumerate(sizes)}
+    observed = []
+
+    def run(argv, **kwargs):
+        if argv[1] == "ls-tree":
+            output = b"".join(
+                f"100644 blob {blob} {len(body)}\tfile-{i}\0".encode()
+                for i, (blob, body) in enumerate(blobs.items())
+            )
+        else:
+            requested = kwargs["input"].decode().splitlines()
+            observed.append(len(requested))
+            output = b"".join(
+                f"{blob} blob {len(blobs[blob])}\n".encode() + blobs[blob] + b"\n"
+                for blob in requested
+            )
+        return subprocess.CompletedProcess(argv, 0, output, b"")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    loader = module._make_git_ref_loader("HEAD", [f"file-{i}" for i in range(len(sizes))])
+    assert [len(loader(f"file-{i}")) for i in range(len(sizes))] == sizes
+    assert observed == counts
+
+
+@pytest.mark.parametrize("response", [
+    b"", b"a" * 40 + b" missing\n",
+    b"a" * 40 + b" tree 3\nabc\n",
+    b"b" * 40 + b" blob 3\nabc\n",
+    b"a" * 40 + b" blob 4\nabc\n",
+    b"a" * 40 + b" blob 3\nab",
+    b"a" * 40 + b" blob 3\nabc!",
+    b"a" * 40 + b" blob 3\nabc\nextra",
+])
+def test_git_ref_loader_refuses_incomplete_or_malformed_batches(
+    monkeypatch: pytest.MonkeyPatch, response: bytes,
+):
+    module = _load_module(SCRIPT.parent.parent)
+
+    def run(argv, **kwargs):
+        output = b"100644 blob " + b"a" * 40 + b" 3\tfile.txt\0" if argv[1] == "ls-tree" else response
+        return subprocess.CompletedProcess(argv, 0, output, b"")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    with pytest.raises(ValueError, match="identifier scan blob response"):
+        module._make_git_ref_loader("HEAD", ["file.txt"])
+
+
+def test_git_ref_loader_propagates_git_failure(monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(SCRIPT.parent.parent)
+
+    def fail(argv, **kwargs):
+        raise subprocess.CalledProcessError(1, argv)
+
+    monkeypatch.setattr(module.subprocess, "run", fail)
+    with pytest.raises(subprocess.CalledProcessError):
+        module._make_git_ref_loader("HEAD", ["file.txt"])
+
+
 def test_ci_mode_stdout_is_count_only(repo: Path):
     _write(repo, "plugins/new/clean.txt", f"oops {CI_TOKEN} sneaked in\n")
     _git(repo, "add", "-A")
