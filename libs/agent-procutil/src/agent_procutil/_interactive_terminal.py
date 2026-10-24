@@ -21,6 +21,28 @@ _BOOTSTRAP = (
 _BUFFER = 1024 * 1024
 
 
+def _above_stdio(fd):
+    if fd > 2:
+        return fd
+    import fcntl
+
+    moved = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, 3)
+    os.close(fd)
+    return moved
+
+
+def _private_pair(pair):
+    descriptors = list(pair)
+    try:
+        for index, fd in enumerate(descriptors):
+            descriptors[index] = _above_stdio(fd)
+        return tuple(descriptors)
+    except BaseException:
+        for fd in descriptors:
+            os.close(fd)
+        raise
+
+
 class _Termination(BaseException):
     def __init__(self, signum):
         self.signum = signum
@@ -78,6 +100,7 @@ class _Terminal:
                 ) from error
             return
         try:
+            fd = _above_stdio(fd)
             self.group = os.getpgrp()
             if os.tcgetpgrp(fd) != self.group or any(
                 value == "tty" and os.tcgetpgrp(index) != self.group
@@ -311,18 +334,19 @@ def _run(argv, env):
         if terminal.fd is not None:
             import termios
 
-            master, slave = os.openpty()
+            master, slave = _private_pair(os.openpty())
             descriptors.extend((master, slave))
             termios.tcsetattr(slave, termios.TCSANOW, terminal.attributes)
             terminal.size(master)
             os.set_blocking(master, False)
         with _lifetime_lock:
-            lifetime, writer = os.pipe()
+            lifetime, writer = _private_pair(os.pipe())
             descriptors.extend((lifetime, writer))
             _lifetime_writers.add(writer)
-        events, reply = os.pipe()
-        gate, start = os.pipe()
-        descriptors.extend((events, reply, gate, start))
+        events, reply = _private_pair(os.pipe())
+        descriptors.extend((events, reply))
+        gate, start = _private_pair(os.pipe())
+        descriptors.extend((gate, start))
         stream_values = [
             slave if value == "tty" else subprocess.DEVNULL if value == "absent" else None
             for value in stdio

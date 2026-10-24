@@ -438,3 +438,46 @@ def test_pty_relay_drains_output_beyond_its_buffer_without_losing_the_tail(tmp_p
     finally:
         _retire_fixture(process)
         os.close(master)
+
+
+@pytest.mark.parametrize("closed", range(1, 8))
+def test_completion_with_closed_standard_streams_keeps_private_control_pipes(tmp_path, closed):
+    receipt = tmp_path / "result.json"
+    ready = tmp_path / "ready.json"
+    gate = tmp_path / "gate"
+    command = """
+import json,os,sys,time
+from pathlib import Path
+Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid()}))
+while not Path(sys.argv[2]).exists():
+    time.sleep(.01)
+raise SystemExit(7)
+"""
+    caller = """
+import json,os,sys
+from pathlib import Path
+from agent_procutil.interactive import run_interactive
+for fd in range(3):
+    if int(sys.argv[2]) & (1<<fd):
+        os.close(fd)
+code=run_interactive([sys.executable,'-c',sys.argv[3],*sys.argv[4:]])
+Path(sys.argv[1]).write_text(json.dumps({'code':code}))
+"""
+    process = subprocess.Popen(  # noqa: S603 - isolated native fixture
+        [sys.executable, "-c", caller, str(receipt), str(closed), command, str(ready), str(gate)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env=_environment(), start_new_session=True,
+    )
+    child = None
+    try:
+        state = _wait(lambda: _read(ready), "closed-stdio completion did not start")
+        child = psutil.Process(state["pid"])
+        assert process.poll() is None and not _gone(child), "private lifetime was closed prematurely"
+        gate.touch()
+        assert process.wait(timeout=10) == 0
+        assert _read(receipt) == {"code": 7}
+        assert _gone(child)
+    finally:
+        _retire_fixture(process)
+        if child is not None and not _gone(child):
+            child.kill()

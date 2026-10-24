@@ -289,6 +289,8 @@ Job termination. Linux and macOS use a finite guardian with a private session.
 With a caller terminal, it owns a separate PTY: bytes and resize events are
 relayed, the completion terminal-device identity changes, and redirected
 non-TTY streams remain inherited rather than entering the relay. The caller's
+absent standard streams map to the null device, and private descriptors stay
+above fd 2 so those mappings cannot overwrite control pipes. The caller's
 terminal attributes are restored when the caller unwinds. Default SIGHUP,
 SIGTERM and SIGQUIT dispositions unwind cleanup before re-delivering the
 original signal; ignored and custom dispositions remain unchanged. An

@@ -95,6 +95,24 @@ def test_default_termination_restores_handlers_and_resignals_only_after_cleanup(
     assert handlers == original
 
 
+@pytest.mark.parametrize("descriptor", [0, 1, 2, 3])
+def test_private_descriptor_never_occupies_standard_stream_slots(monkeypatch, descriptor):
+    from agent_procutil import _interactive_terminal as terminal
+
+    duplicate, close = Mock(return_value=19), Mock()
+    monkeypatch.setitem(sys.modules, "fcntl", SimpleNamespace(
+        fcntl=duplicate, F_DUPFD_CLOEXEC=1030,
+    ))
+    monkeypatch.setattr(terminal, "os", SimpleNamespace(close=close))
+    assert terminal._above_stdio(descriptor) == (19 if descriptor <= 2 else descriptor)
+    if descriptor <= 2:
+        duplicate.assert_called_once_with(descriptor, 1030, 3)
+        close.assert_called_once_with(descriptor)
+    else:
+        duplicate.assert_not_called()
+        close.assert_not_called()
+
+
 @pytest.mark.parametrize("argv", [None, [], "command", [1], ["bad\0argument"]])
 def test_bad_command_never_launches(monkeypatch, argv):
     launch = Mock()
