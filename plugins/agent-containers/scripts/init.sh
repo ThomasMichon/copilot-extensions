@@ -352,11 +352,51 @@ deploy_binstub() {
     STUB="$LOCAL_BIN/agent-containers"
     mkdir -p "$LOCAL_BIN"
     deploy_resolver
-    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n' \
-        "$INSTALL_DIR" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$STUB"
+    local source_root="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    local bound_context="${COPILOT_EXTENSIONS_CONTEXT:-}" bound_mode=unknown decision="" durable=""
+    local -a binding_args=(status --payload-root "$source_root" --plugin-id agent-containers --legacy-root "$INSTALL_DIR")
+    if [[ -n "$bound_context" ]]; then
+        durable="$bound_context"
+        for _part in 1 2 3 4 5; do durable="$(dirname -- "$durable")"; done
+        binding_args+=(--context "$bound_context" --durable-home "$durable")
+    fi
+    decision="$(bash "$SCRIPT_DIR/installation-context/installation-context.sh" "${binding_args[@]}")" || {
+        _fail 'Cannot bind the global command to its installation context'
+        return 126
+    }
+    binding_value() {
+        LC_ALL=C awk -f "$SCRIPT_DIR/installation-context/json-query.awk" \
+            -v mode="${2:-get}" -v "query_path=$1" <<<"$decision"
+    }
+    if [[ "$(binding_value actualMode)" == namespaced &&
+          "$(binding_value runtimeRoot)" == "$INSTALL_DIR" &&
+          -n "$(binding_value context)" ]]; then
+        bound_mode=namespaced
+        bound_context="$(binding_value context)"
+    elif [[ -z "$bound_context" && ! -e "$INSTALL_DIR/install.json" &&
+            "$(binding_value $'legacy\034root')" == "$INSTALL_DIR" ]] &&
+         { [[ "$(binding_value status)" == ready && "$(binding_value actualMode)" == legacy &&
+              "$(binding_value desiredMode)" == legacy ]] ||
+           [[ "$(binding_value status)" == provenance-blocked &&
+              "$(binding_value $'policy\034enabled' type)" == boolean &&
+              "$(binding_value $'policy\034enabled')" == false &&
+              "$(binding_value $'legacy\034disposition')" == active &&
+              -z "$(binding_value $'legacy\034tombstone')" ]]; }; then
+        bound_mode=legacy
+    fi
+    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n_bound_context=%q\n_bound_mode=%q\n' \
+        "$INSTALL_DIR" "$source_root" "$bound_context" "$bound_mode" > "$STUB"
     cat >> "$STUB" << 'STUBEOF'
 set -euo pipefail
 export PYTHONUTF8=1
+if [[ -n "$_bound_context" ]]; then
+    if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
+          "$COPILOT_EXTENSIONS_CONTEXT" != "$_bound_context" ]]; then
+        printf '[agent-containers] requested context does not match the bound global command.\n' >&2
+        exit 126
+    fi
+    export COPILOT_EXTENSIONS_CONTEXT="$_bound_context"
+fi
 _snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
 _payload="$_snap"
 # Old ordinary snapshots have no canonical source receipt. Bind their exact
@@ -366,7 +406,7 @@ if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
     if [[ -n "$_snap" && -f "$_source/scripts/runtime-gate.sh" ]]; then _payload="$_source"; fi
 fi
 if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
-    if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    if [[ "$_bound_mode" == legacy && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         _resolver="$_root/bin/resolve-runtime.sh"
         if [[ -f "$_resolver" ]] &&
            grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then

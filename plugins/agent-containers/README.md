@@ -45,10 +45,15 @@ unchanged. Standalone
 provisioning retains the exact selected root, context, installer exit code and
 stderr; `AGENT_CONTAINERS_NO_SELFPROVISION` remains an opt-out.
 
-Stamped stubs retain the exact publisher and install root rather than searching
-other marketplaces or ambient commands. If the source pointer or retained gate
-is unavailable, a healthy legacy runtime can still use its co-deployed
-readiness resolver; cold provisioning and explicit-context fallback refuse.
+Stamped stubs retain the exact publisher, install root and selected context
+rather than searching other marketplaces or ambient commands. Stamping reads
+the shared installation decision; only a positively identified legacy binding
+can use the resolver-only fallback. A cell-bound command restores its retained
+context even in an ordinary shell and revalidates activation/generation through
+the gate. If its source pointer or retained gate is unavailable, it refuses
+rather than running that cell as legacy. A healthy known-legacy runtime can
+still use its co-deployed readiness resolver; cold provisioning and
+explicit-context fallback refuse.
 On POSIX systems without `flock`, stale PID-link recovery serializes reapers
 and only cleans up its own mutex. An unknown/abandoned reaper mutex is not
 deleted: after 30 one-second retries the command refuses with exit 126 and an

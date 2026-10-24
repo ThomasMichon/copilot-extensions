@@ -420,17 +420,56 @@ function Deploy-SelfProvisioningBinstub {
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
     $sourceRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $boundContext = [string]$env:COPILOT_EXTENSIONS_CONTEXT
+    $boundMode = 'unknown'
+    $bindingArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        (Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'),
+        'status', '-PayloadRoot', $sourceRoot, '-PluginId', 'agent-containers', '-LegacyRoot', $InstallDir
+    )
+    if ($boundContext) {
+        $durable = $boundContext
+        1..5 | ForEach-Object { $durable = Split-Path -Parent $durable }
+        $bindingArgs += @('-Context', $boundContext, '-DurableHome', $durable)
+    }
+    $nativeError = ''
+    $decisionJson = Invoke-Hidden -FilePath (Get-Process -Id $PID).Path -ArgList $bindingArgs -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Cannot bind the global command to its installation context: $decisionJson$nativeError" }
+    $decision = $decisionJson | ConvertFrom-Json -ErrorAction Stop
+    if ($decision.actualMode -ceq 'namespaced' -and $decision.context -and
+        [string]::Equals([string]$decision.runtimeRoot, $InstallDir, [StringComparison]::OrdinalIgnoreCase)) {
+        $boundMode = 'namespaced'
+        $boundContext = [string]$decision.context
+    } elseif (-not $boundContext -and -not [IO.File]::Exists((Join-Path $InstallDir 'install.json')) -and
+        [string]::Equals([string]$decision.legacy.root, $InstallDir, [StringComparison]::OrdinalIgnoreCase) -and
+        (($decision.status -ceq 'ready' -and $decision.actualMode -ceq 'legacy' -and $decision.desiredMode -ceq 'legacy') -or
+         ($decision.status -ceq 'provenance-blocked' -and $decision.policy.enabled -is [bool] -and
+          -not $decision.policy.enabled -and $null -eq $decision.legacy.tombstone -and
+          $decision.legacy.disposition -ceq 'active'))) {
+        $boundMode = 'legacy'
+    }
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-containers'
         $quote = "'" + '"' + "'" + '"' + "'"
         $rootSh = "'" + $InstallDir.Replace("'", $quote) + "'"
         $sourceSh = "'" + $sourceRoot.Replace("'", $quote) + "'"
+        $contextSh = "'" + $boundContext.Replace("'", $quote) + "'"
         $stubContent = @'
 #!/usr/bin/env bash
 _root=__ROOT__
 _source=__SOURCE__
+_bound_context=__CONTEXT__
+_bound_mode=__MODE__
 set -euo pipefail
 export PYTHONUTF8=1
+if [[ -n "$_bound_context" ]]; then
+    if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
+          "$COPILOT_EXTENSIONS_CONTEXT" != "$_bound_context" ]]; then
+        printf '[agent-containers] requested context does not match the bound global command.\n' >&2
+        exit 126
+    fi
+    export COPILOT_EXTENSIONS_CONTEXT="$_bound_context"
+fi
 _snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
 _payload="$_snap"
 if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
@@ -438,7 +477,7 @@ if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
     if [[ -n "$_snap" && -f "$_source/scripts/runtime-gate.sh" ]]; then _payload="$_source"; fi
 fi
 if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
-    if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+    if [[ "$_bound_mode" == legacy && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         _resolver="$_root/bin/resolve-runtime.sh"
         if [[ -f "$_resolver" ]] &&
            grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
@@ -464,7 +503,8 @@ export AGENT_CONTAINERS_STATE_DIR="$_root"
 export AGENT_CONTAINERS_PAYLOAD_ROOT="$_payload"
 exec bash "$_payload/scripts/runtime-gate.sh" "$@"
 '@
-        $stubContent = $stubContent.Replace('__ROOT__', $rootSh).Replace('__SOURCE__', $sourceSh).Replace("`r`n", "`n")
+        $stubContent = $stubContent.Replace('__ROOT__', $rootSh).Replace('__SOURCE__', $sourceSh).Replace(
+            '__CONTEXT__', $contextSh).Replace('__MODE__', $boundMode).Replace("`r`n", "`n")
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
         return
@@ -475,6 +515,16 @@ $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $_root = '__ROOT__'
 $_source = '__SOURCE__'
+$_boundContext = '__CONTEXT__'
+$_boundMode = '__MODE__'
+if ($_boundContext) {
+    if ($env:COPILOT_EXTENSIONS_CONTEXT -and
+        -not [string]::Equals($env:COPILOT_EXTENSIONS_CONTEXT, $_boundContext, [StringComparison]::OrdinalIgnoreCase)) {
+        [Console]::Error.WriteLine('[agent-containers] requested context does not match the bound global command.')
+        exit 126
+    }
+    $env:COPILOT_EXTENSIONS_CONTEXT = $_boundContext
+}
 $_pointer = Join-Path $_root 'payload-dir'
 $_snap = if ([IO.File]::Exists($_pointer)) { [IO.File]::ReadAllText($_pointer).Trim() } else { '' }
 $_payload = $_snap
@@ -485,7 +535,7 @@ if (-not $_snap -or -not [IO.File]::Exists((Join-Path $_snap 'snapshot-provenanc
 }
 $_gate = if ($_payload) { Join-Path $_payload 'scripts\runtime-gate.ps1' } else { '' }
 if (-not $_gate -or -not [IO.File]::Exists($_gate)) {
-    if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
+    if ($_boundMode -ceq 'legacy' -and -not $env:COPILOT_EXTENSIONS_CONTEXT) {
         $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
         if ([IO.File]::Exists($_resolver) -and
             (Select-String -LiteralPath $_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
@@ -523,7 +573,8 @@ $env:AGENT_CONTAINERS_PAYLOAD_ROOT = $_payload
 & $_gate @args
 exit $LASTEXITCODE
 '@
-    $ps1Content = $ps1Content.Replace('__ROOT__', $InstallDir.Replace("'", "''")).Replace('__SOURCE__', $sourceRoot.Replace("'", "''"))
+    $ps1Content = $ps1Content.Replace('__ROOT__', $InstallDir.Replace("'", "''")).Replace(
+        '__SOURCE__', $sourceRoot.Replace("'", "''")).Replace('__CONTEXT__', $boundContext.Replace("'", "''")).Replace('__MODE__', $boundMode)
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, (New-Object Text.UTF8Encoding($true)))
 
     $cmdPath = Join-Path $LocalBin 'agent-containers.cmd'
