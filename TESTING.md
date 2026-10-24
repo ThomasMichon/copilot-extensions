@@ -227,6 +227,48 @@ checks the actual tracked-tree invocation and nonzero unknown-owner result.
 That native subprocess control is separate from eligible-unit promotion
 evidence; this change does not add it to the admitted unit packet or alter CI.
 
+## Construction-result contract
+
+`tools/construction_qualification.py` is a pure result-admission library, not a
+runner or an active release gate. Its `assess_qualification(expected_plan,
+report)` API requires an independently derived expected plan. The version-one
+`copilot-extensions.construction-plan` binds the source commit, exact composed
+candidate digest, effective package-policy digest and nonempty environment
+matrix. Each row names its source project, profile, normalized sorted extras,
+exact native OS/interpreter patch/architecture/ABI, and digests of its canonical
+construction and installed-launch specifications. Those opaque specification
+digests bind the existing owners' actions; they are not a new execution format.
+`plan_digest` canonically orders rows without making different profiles,
+constructors, launch actions or native targets interchangeable.
+
+A `copilot-extensions.construction-results` report names that plan digest and
+one result per row. Every result records the observed native identity, elapsed
+seconds, terminal status and five check records: `construction`,
+`installed_origin`, `installed_launch`, `feed_policy` and `cold_environment`.
+Each check needs `passed` and its evidence digest. Missing/extra rows, stale
+bindings, another native interpreter, failed/skipped/timed-out/unavailable rows
+or incomplete evidence yield `qualified: false` with explicit reasons.
+Malformed schemas, duplicate rows, nonfinite/negative durations and invalid
+digests raise `QualificationError`; callers must surface these as failures.
+There is no successful skip or empty-matrix qualification.
+
+**Trust boundary:** matching self-reported hashes do not authenticate a producer
+or prove execution. The future trusted consumer must derive the complete plan
+from authoritative source/profile/platform declarations, bind actual policy and
+candidate inputs, acquire authenticated evidence from the expected producer and
+verify referenced artifacts before calling this library. It must not accept an
+expected plan supplied by the result producer. No complete environment catalog,
+feed resolver, native executor, artifact verifier, CI check, promotion consumer
+or publication authority is introduced here. Existing source-owner inventory
+and installer-readiness declarations alone are not that complete plan.
+
+Run `python -m unittest discover -s tools -p test_construction_qualification.py -v`
+for the in-process contract controls. These tests perform no installation,
+network or native-process work and are not yet added to the admitted unit
+packet. Hosted feed, native construction/launch and required negative
+CI/promotion enforcement remain open in the
+[feed-construction effort](efforts/active/feed-construction-release-gate/README.md).
+
 ## Native file-link prerequisites
 
 `tools/test_dependency_uv_executable_native.py` qualifies both absolute and

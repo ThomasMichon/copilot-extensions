@@ -169,7 +169,8 @@ cutover is activated by the reviewed documentation.
 |----------|------------------|
 | Checked-in policy | #7655 merged the construction/first-launch exception and canonical effort; implementation is permitted within that reviewed scope. |
 | Inventory implementation | #8304 merged the source-owner diagnostic and engine declaration. Every tracked Python project is classified against canonical rosters; complete construction environments and the native/profile matrix are still unqualified. |
-| Local selected-extra implementation | Unmerged source adds declared primary-package extras to the canonical candidate transaction, with profile-bound admission and installed-origin evidence. The full constructor file passes locally on Windows ARM64 with an explicit contention allowance (55 passed; one existing symlink-privilege skip). This is not a released primitive, default-budget performance proof or an active gate. |
+| Checked-in selected-extra constructor | #8393 merged at `e618cb2a44c1129139ffe5b2ae869f5c3c273540`: declared primary-package extras participate in the canonical transaction, admission identity and installed-origin evidence. Local constructor contracts passed with an explicit contention allowance (55 passed; one existing symlink-privilege skip), and the rebased base/profile integration controls passed again. This is not default-budget performance proof or an active gate. |
+| Released selected-extra constructor | The latest observed Main release `bc361f7fa05201e3869eb9021d26d30c85805fc3` does not contain the profile-aware canonical engine. No deployment or running-state qualification is claimed. |
 | Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate is active for this effort. |
 | Released gate | None: the existing release pipeline does not yet enforce this effort's configured-feed construction and first-launch contract. |
 | Installed evidence | Earlier consumer-specific Manager capture/origin results remain bounded observations, not full environment/profile coverage. The launch-maintenance effort separately records current selected-slot observations. |
@@ -502,3 +503,51 @@ cutover is activated by the reviewed documentation.
   hosted-feed evidence, trusted-controller integration and negative enforcement
   proof open under the parent effort. No release protection or host rollout is
   activated by this constructor slice.
+
+### 2026-10-23 - Land the selected-extra constructor prerequisite
+
+- #8393 merged as `e618cb2a44c1129139ffe5b2ae869f5c3c273540` after an actual
+  current-head Copilot approval, complete review/thread reads with no open
+  findings, and the required source CI and workflow-lockdown checks. The parent
+  issue remains open and has no closing reference from that partial slice.
+- The managed publication rebase included newer dependency-policy and process
+  helpers. Three real base/selected-profile construction controls passed again
+  against the exact reviewed head in about 67 seconds under the bounded local
+  allowance. This is integration evidence for those changed dependencies, not
+  a claim that the complete earlier native file ran again after the rebase.
+- The active source worktree was pulled forward through the managed flow.
+  The observed Main release still has the earlier canonical engine; source
+  merge is not release, deployment or active configured-feed enforcement.
+- Continue with the actual environment/profile/constructor/installed-launch
+  bindings and complete fail-closed coverage/result contract. The accepted
+  trusted-controller consumer seam remains an explicit prerequisite to CI and
+  promotion wiring; existing control ownership is unchanged.
+
+### 2026-10-23 - Separate readiness from pure qualification-result admission
+
+- The continued MCP trace confirms its existing readiness declaration names
+  platform installers and installed configuration validation, not an exact
+  interpreter architecture/ABI matrix or source/candidate-bound construction
+  evidence. A successful empty bridge configuration is valid module readiness,
+  but cannot establish release construction coverage.
+- Added a pure, versioned expected-plan/result admission library. Independently
+  supplied expected inputs bind source, composed candidate, package policy,
+  every declared environment/profile/extra selection, native interpreter and
+  canonical construction/launch specification digests. Exact row coverage,
+  actual native identity and complete successful check evidence are required;
+  failed, skipped, unavailable and timed-out results cannot qualify.
+- This is structural admission, not producer authentication or proof that a
+  self-reported digest is genuine. Complete authoritative environment/platform
+  declarations, authenticated evidence acquisition and referenced-artifact
+  verification remain prerequisites to a trusted consumer. No report-supplied
+  expected plan, inferred support matrix or readiness-only shortcut is added.
+- The implementation closes a bounded part of the reviewed result-contract
+  intent without changing existing installers, CI, promotion, credentials or
+  installed runtimes. The accepted #6237/#3336 consumer seam and all actual
+  hosted/native/negative-enforcement gates remain open.
+- Thirteen focused in-process controls passed with source lint. They cover
+  every plan/native binding dimension, exact row/check coverage, malformed and
+  unsuccessful outcomes, evidence references and order-independent profiles.
+  No additional native installation or clean-room run is applicable to this
+  pure data-contract slice. Actual feed/native execution still belongs to the
+  unimplemented producer and complete-plan integration, not this test result.
