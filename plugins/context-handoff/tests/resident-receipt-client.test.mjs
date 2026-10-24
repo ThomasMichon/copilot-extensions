@@ -171,3 +171,62 @@ test("a nonresponsive resident consumes one whole 2000ms observation, no retry l
 test("duplicate escaped JSON keys are refused", () => {
   assert.throws(() => parseUniqueJson('{"key":1,"\\u006bey":2}'));
 });
+
+function setGenerations(fixture, installGeneration, activationGeneration, owner = true) {
+  const values = { installGeneration, activationGeneration };
+  Object.assign(fixture.candidate, values);
+  Object.assign(fixture.catalog.binding.installation, values);
+  if (owner) Object.assign(fixture.owner, values);
+  fixture.writeCatalog();
+}
+
+test("installation generation changes reconcile an uncertain exact receipt by query", async () => {
+  await withFixture(async (f) => {
+    setGenerations(f, 1, 1);
+    const pending = {};
+    f.dropRecordReply = true;
+    assert.equal((await observeResidentReceipt(input(f, pending))).status, "unknown");
+    const subject = { ...pending.subject };
+    setGenerations(f, 2, 3);
+    f.owner.routeGeneration = f.route.generation = 2;
+    f.owner.runtimeGeneration = "runtime-two";
+    f.writeRoute();
+    f.dropRecordReply = false;
+    assert.equal((await observeResidentReceipt(input(f, pending))).status, "logged");
+    assert.deepEqual(pending.subject, subject);
+    assert.deepEqual(f.requests.filter((r) => r.action === "handoff-prompt-receipt")
+      .map((r) => r.payload.operation), ["record", "query"]);
+    assert.equal(f.requests.at(-1).payload.expectedOwner.installGeneration, 2);
+    assert.equal(f.requests.at(-1).payload.expectedOwner.activationGeneration, 3);
+    assert.equal(f.effects.size, 1);
+  });
+});
+
+test("installation generation changes allow retry after unavailable pre-send health", async () => {
+  await withFixture(async (f) => {
+    setGenerations(f, 1, 1);
+    const pending = {};
+    f.capability = false;
+    assert.equal((await observeResidentReceipt(input(f, pending))).status, "unavailable");
+    assert.equal(pending.uncertain, undefined);
+    setGenerations(f, 2, 2);
+    f.capability = true;
+    assert.equal((await observeResidentReceipt(input(f, pending))).status, "logged");
+    assert.equal(f.requests.filter((r) => r.action === "handoff-prompt-receipt").length, 1);
+    assert.equal(f.effects.size, 1);
+  });
+});
+
+test("current generation mismatch in health still refuses the receipt", async () => {
+  await withFixture(async (f) => {
+    setGenerations(f, 1, 1);
+    const pending = {};
+    f.capability = false;
+    assert.equal((await observeResidentReceipt(input(f, pending))).status, "unavailable");
+    setGenerations(f, 2, 2, false);
+    f.capability = true;
+    assert.equal((await observeResidentReceipt(input(f, pending))).status, "unavailable");
+    assert.equal(f.effects.size, 0);
+    assert.equal(f.requests.every((r) => r.action === "health"), true);
+  });
+});

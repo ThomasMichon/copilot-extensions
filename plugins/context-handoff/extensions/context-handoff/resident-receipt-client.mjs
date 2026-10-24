@@ -126,6 +126,12 @@ function installation(candidate) {
     .map((key) => [key, candidate[key]]));
 }
 
+function stableInstallation(value) {
+  if (!object(value)) return null;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== "installGeneration" && key !== "activationGeneration"));
+}
+
 function activeRoute(raw) {
   const route = parseUniqueJson(raw)?.active;
   if (!object(route) || route.bind !== "127.0.0.1"
@@ -226,7 +232,10 @@ export async function observeResidentReceipt({
     const guidance = join(sessionDir, "instructions", "agent-worktrees", "session-guidance.instructions.md");
     const candidate = candidateFromGuidance(await readBounded(guidance, GUIDANCE_BYTES, check));
     const selected = installation(candidate);
-    if (pending.installation && !same(pending.installation, selected)) refuse("installation-changed");
+    if (pending.installation
+        && !same(stableInstallation(pending.installation), stableInstallation(selected))) {
+      refuse("installation-changed");
+    }
     if (pending.runtimeRoot && pending.runtimeRoot !== candidate.runtimeRoot) refuse("installation-changed");
     const binding = parseUniqueJson(await readBounded(join(sessionDir, "worktree-binding.json"), FRAME_BYTES, check));
     const subject = subjectFromBinding(binding, sid, locator);

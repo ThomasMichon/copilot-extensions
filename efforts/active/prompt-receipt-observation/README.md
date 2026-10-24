@@ -455,3 +455,41 @@ new authority or ownership behavior requires a separate proposal.
   headless-launch source guard pass. The current source draft was rechecked:
   #8026 remains open/draft at `fb6d1592e103de14826e700207c9606b18b07960`.
   Source publication was not advanced past the failed qualification gate.
+
+### Merged shared-guard repair and concrete source-review follow-up
+
+- Verified the existing owner's #8392 repair merged as
+  `1bdf8b2d3540379d95f35c66feb50d537cd32c2e`. Took a local safety ref and used
+  the normal managed sync once; the branch advanced to
+  `6759329e709067466e9d96ee0e834cc637e63b3f` without conflicts. The repair is
+  an ancestor and its 69 relevant fixture/registry files match the merged bytes.
+  Seven owned consumer/backend/trace/native-test Git blobs were unchanged.
+  Checkout CRLF normalization initially confused a raw worktree/blob assertion;
+  canonical blob verification cleared it without editing source or evidence.
+- Published the refreshed owned draft through the normal provenance-aware
+  flow. Fresh CI run `40053222689` passed guards/lint, eligible units with
+  coverage and the required PR gate. No competing HTTP-47 patch, guard bypass,
+  CI rerun or existing-agent contact occurred. A prolonged local closure check
+  was stopped incomplete; no local pass was claimed in place of required CI.
+- Review `5636144877` reported three concrete receipt defects on the previous
+  candidate; the relevant source was unchanged after refresh, so they remained
+  actual blockers rather than being dismissed as stale/pre-existing:
+  compatibility query durability, query-window capacity after append, and
+  retries across install/activation-generation changes.
+- Compatibility matching now synchronizes the same open file before returning
+  receipt, including `activity --receipt-locator`; sync failures propagate
+  instead of acknowledging a readable row left by failed resident fsync.
+- Resident recording now reserves a queryable row and bytes, including any
+  separator newline, before append. Boundary refusal leaves history unchanged;
+  an admitted last-fitting receipt remains queryable and replayable.
+- Pending identity comparison distinguishes durable installation scope from
+  current install/activation generations. Stable source/installation/runtime-root
+  and subject fences remain; current generations must still match the live
+  health/expected-owner handshake. An uncertain retry only queries its original
+  subject, while a pre-send unavailable attempt may retry after revalidation.
+- Ten new contained Python regressions pass, including the actual compatibility
+  activity reader and exact row/byte/separator boundaries. Five selected Node
+  functional regressions pass for generation retry and existing identity
+  fences. No native/timing suite, archived fixture or historical raw evidence
+  was rerun or modified. The original native hold and absent readiness marker
+  remain unchanged; the source follow-up needs its own normal CI/review.

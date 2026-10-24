@@ -1,6 +1,7 @@
 """In-process receipt budgets and exact-incarnation replay; no resident launched."""
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import json
 import time
 from types import SimpleNamespace
@@ -208,3 +209,117 @@ def test_pre_effect_budget_is_one_second_or_earlier_caller_deadline(store, monke
 def test_missing_or_invalid_incarnation_never_records(store, nonce):
     assert invoke(record=True, nonce=nonce)["status"] == "unavailable"
     assert not (store / "logs").exists()
+
+
+def test_activity_query_cannot_acknowledge_failed_resident_fsync(store, monkeypatch, capsys):
+    from agent_worktrees import activity
+
+    fsync = receipt.os.fsync
+    attempts = []
+
+    def fail(fd):
+        attempts.append(fd)
+        raise OSError("controlled storage failure")
+
+    monkeypatch.setattr(receipt.os, "fsync", fail)
+    monkeypatch.setattr(activity.cfg, "active_project", lambda: "project")
+    assert invoke(record=True)["status"] == "unknown"
+    args = SimpleNamespace(receipt_locator="task:one", worktree_id="worktree")
+    assert activity.cmd_activity(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "prompt receipt unavailable" in captured.err
+    assert len(attempts) == 2
+    monkeypatch.setattr(receipt.os, "fsync", fsync)
+    assert activity.cmd_activity(args) == 0
+    assert json.loads(capsys.readouterr().out)["received"] is True
+    assert len(handoff_trace.read_trace("project", "worktree")) == 1
+
+
+def test_legacy_history_query_synchronizes_the_matching_open_file(store, monkeypatch):
+    legacy = store / "activity.jsonl"
+    legacy.write_text(json.dumps({
+        "event": receipt.EVENT, "worktree_id": "worktree",
+        "session_id": "subject", "locator": "task:one",
+    }) + "\n", encoding="utf-8")
+    fsync = receipt.os.fsync
+
+    def fail(_fd):
+        raise OSError("controlled storage failure")
+
+    monkeypatch.setattr(receipt.os, "fsync", fail)
+    with pytest.raises(OSError):
+        receipt.prompt_receipt("project", "worktree", "task:one", legacy_path=legacy)
+    monkeypatch.setattr(receipt.os, "fsync", fsync)
+    assert receipt.prompt_receipt(
+        "project", "worktree", "task:one", legacy_path=legacy,
+    )["received"] is True
+
+
+@pytest.fixture
+def capacity_store(store, monkeypatch):
+    stamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(receipt, "datetime", SimpleNamespace(now=lambda _zone: stamp))
+    monkeypatch.setattr(receipt, "time", SimpleNamespace(monotonic=lambda: 0.0))
+
+    @contextmanager
+    def trace(_path, *, deadline):
+        assert deadline == receipt.MAX_LOCK_SECONDS
+        yield
+
+    monkeypatch.setattr(receipt, "_append_lock", trace)
+    return store, stamp
+
+
+@pytest.mark.parametrize("existing_rows", [4095, 4096])
+def test_record_reserves_a_queryable_row(capacity_store, existing_rows):
+    path = handoff_trace.trace_path("project", "worktree")
+    path.parent.mkdir(parents=True)
+    before = b"{}\n" * existing_rows
+    path.write_bytes(before)
+    result = invoke(record=True)
+    if existing_rows == 4096:
+        assert result["status"] == "unavailable" and result["reason"] == "history-capacity-unavailable"
+        assert path.read_bytes() == before
+    else:
+        assert result["status"] == "received"
+        assert invoke()["status"] == "received"
+        assert invoke(record=True)["replayed"] is True
+        assert len(path.read_bytes().splitlines()) == 4096
+
+
+def _noise_bytes(size, *, partial_tail):
+    prefix, suffix = b'{"noise":"', b'"}\n'
+    row = prefix + b"x" * (4096 - len(prefix) - len(suffix)) + suffix
+    count, remainder = divmod(size, len(row))
+    tail = (b" " * (remainder - 3) + b"{}\n") if remainder >= 3 else b"\n" * remainder
+    data = row * count + tail
+    if partial_tail:
+        data = data[:-1] + b" "
+    assert len(data) == size and data.endswith(b"\n") is not partial_tail
+    return data
+
+
+@pytest.mark.parametrize("partial_tail", [False, True])
+@pytest.mark.parametrize("spare_bytes", [-1, 0, 1])
+def test_record_reserves_queryable_bytes_and_separator(capacity_store, partial_tail, spare_bytes):
+    _, stamp = capacity_store
+    encoded = (json.dumps({
+        "ts": stamp.isoformat(), "event": receipt.EVENT, "worktree_id": "worktree",
+        "creation_nonce": "incarnation", "session_id": "subject",
+        "source": "context-handoff", "locator": "task:one",
+    }, ensure_ascii=True) + "\n").encode("utf-8")
+    path = handoff_trace.trace_path("project", "worktree")
+    path.parent.mkdir(parents=True)
+    before = _noise_bytes(
+        receipt.MAX_SCAN_BYTES - len(encoded) - spare_bytes, partial_tail=partial_tail,
+    )
+    path.write_bytes(before)
+    result = invoke(record=True)
+    if spare_bytes < int(partial_tail):
+        assert result["status"] == "unavailable" and result["reason"] == "history-capacity-unavailable"
+        assert path.read_bytes() == before
+    else:
+        assert result["status"] == "received"
+        assert path.read_bytes() == before + (b"\n" if partial_tail else b"") + encoded
+        assert invoke()["status"] == "received"
+        assert invoke(record=True)["replayed"] is True

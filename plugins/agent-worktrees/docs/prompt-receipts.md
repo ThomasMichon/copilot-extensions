@@ -17,6 +17,9 @@ unknown project or invalid locator fails instead of claiming absence. No
 history is returned. Records are stream-matched with a bounded per-record buffer.
 An oversized individual record is unavailable rather than silently skipped:
 skipping a potentially matching receipt would weaken replay detection.
+Matching queries synchronize the same open history file before acknowledging
+receipt, including the compatibility activity reader. A synchronization failure
+propagates as unavailable instead of bypassing an earlier uncertain append.
 
 Older matching rolling-log receipts remain readable and migrate into the
 existing durable trace on a recording retry. The durable trace's ordinary
@@ -37,6 +40,9 @@ Contention admission is capped at 100 ms. Total consulted history is capped at
 1 MiB, 4,096 rows and 200 ms, with a 64 KiB individual-record cap. Pre-effect
 work is capped at 1,000 ms and the caller's absolute deadline. These bounds do
 not pretend that OS I/O or fsync can be interrupted.
+Before recording, the backend reserves row and byte capacity for the receipt
+and any separator newline. It refuses an append that would put the new receipt
+beyond the bounded query window, rather than creating an unreconcilable commit.
 
 Only an exact qualified query can return `absent`. Missing association,
 unqualified matching legacy rows, oversized input and exhausted budgets are

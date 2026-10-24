@@ -100,6 +100,10 @@ completion event may reconcile after a 30-second cooldown; there is no periodic
 poll or per-event queue. Successful receipt suppresses further attempts.
 Once a record may have been sent, only an exact query may reconcile it; source
 or incarnation changes do not silently redirect that pending identity.
+Install/activation generations are revalidated against the current health and
+expected-owner handshake, not treated as a different durable installation.
+A retry within the same source, installation, runtime root and subject may
+therefore reconcile after a generation change without issuing a second record.
 Matching incarnation/session/locator receipts are reconciled and appended by
 the [worktrees receipt backend](../agent-worktrees/docs/prompt-receipts.md).
 It reuses the existing durable handoff trace and its cross-process lock, returns
@@ -111,6 +115,7 @@ registration. It does not claim server rollback or cancellable fsync. Server
 in-flight ownership lasts until settlement; a local timeout is not completion.
 An exact replay is acknowledged only after the backend successfully synchronizes
 the existing receipt; a row left readable by a failed fsync stays uncertain.
+The compatibility activity query enforces the same durability requirement.
 Unsettled local file reads retain a single-flight fence rather than admitting
 more reads. These receipts are
 observational evidence, not ownership or consumption authorization.

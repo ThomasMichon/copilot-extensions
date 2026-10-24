@@ -40,7 +40,7 @@ def _validate(locator: str, session_id: str | None, *, record: bool) -> None:
 
 def _matching(path: Path, worktree_id: str, locator: str, session_id: str | None) -> bool:
     try:
-        handle = path.open("rb")
+        handle = path.open("r+b")
     except FileNotFoundError:
         return False
     with handle:
@@ -57,6 +57,7 @@ def _matching(path: Path, worktree_id: str, locator: str, session_id: str | None
                 and event.get("locator") == locator
                 and (session_id is None or event.get("session_id") == session_id)
             ):
+                os.fsync(handle.fileno())
                 return True
     return False
 
@@ -74,9 +75,6 @@ def prompt_receipt(
     path = trace_path(project, worktree_id)
     with _append_lock(path.with_suffix(path.suffix + ".lock")):
         if _matching(path, worktree_id, locator, session_id):
-            if record:
-                with path.open("a+b") as handle:
-                    os.fsync(handle.fileno())
             return {"received": True, "replayed": True}
         legacy = legacy_path is not None and _matching(
             legacy_path, worktree_id, locator, session_id,
@@ -241,12 +239,24 @@ def resident_prompt_receipt(
                     "source": "context-handoff", "locator": locator,
                 }
                 data = (json.dumps(event, ensure_ascii=True) + "\n").encode("utf-8")
+                if len(data) > _MAX_RECORD_BYTES:
+                    return result("unavailable", "record-limit")
+
+                def reserve_capacity(separator_bytes=0):
+                    if (
+                        budget.rows + 1 > MAX_SCAN_ROWS
+                        or budget.bytes + len(data) + separator_bytes > MAX_SCAN_BYTES
+                    ):
+                        raise _ReceiptUnavailable("history-capacity-unavailable")
+
+                reserve_capacity()
                 with path.open("a+b", buffering=0) as handle:
                     handle.seek(0, os.SEEK_END)
                     tail = b"\n"
                     if handle.tell():
                         handle.seek(-1, os.SEEK_END)
                         tail = handle.read(1)
+                    reserve_capacity(int(tail != b"\n"))
                     revalidate()
                     check()
                     may_have_committed = True
