@@ -130,6 +130,148 @@ def _initialize_shell_profiles(
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.timeout(60)
 @pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("existing_global", [False, True])
+@pytest.mark.parametrize("loss", [
+    "available", "pointer", "publisher", "publisher-and-pointer",
+    "deactivated-publisher-and-pointer",
+])
+def test_bridge_cell_stamp_preserves_global_ownership(
+    binding_fixture: dict, bridge_release: Path, shell: str, existing_global: bool, loss: str,
+) -> None:
+    fixture = binding_fixture
+    environment = _adopter(fixture, "agent-bridge", bridge_release)
+    for key in (
+        "COPILOT_PLUGIN_INSTALL_SMOKE", "AGENT_BRIDGE_NO_SELFPROVISION",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH", "COPILOT_EXTENSIONS_BOOT_TRACE",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
+    ):
+        environment.pop(key, None)
+    if os.name == "nt":
+        environment.pop("PSModulePath", None)
+        environment["LOCALAPPDATA"] = str(fixture["home"] / "AppData/Local")
+        environment["APPDATA"] = str(fixture["home"] / "AppData/Roaming")
+    shell_profiles = _initialize_shell_profiles(fixture, environment)
+
+    def stamp(root: Path):
+        suffix = "ps1" if shell == "powershell" else "sh"
+        command = _command(fixture, shell, fixture["payload"] / f"scripts/install.{suffix}")
+        command += (
+            ["-Action", "stamp", "-InstallDir", str(root)] if shell == "powershell" else
+            ["stamp", "--install-dir", str(root)]
+        )
+        result = _run(fixture, environment, command, None)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result
+
+    global_paths = [
+        fixture["home"] / ".local/bin" / name
+        for name in (
+            ("agent-bridge.ps1", "agent-bridge.cmd") if shell == "powershell" else
+            ("agent-bridge",)
+        )
+    ]
+    if existing_global:
+        stamp(fixture["legacy"])
+    globals_before = {path: path.read_bytes() if path.exists() else None for path in global_paths}
+    assert all(value is not None for value in globals_before.values()) is existing_global
+
+    cell, arguments = _selected_cell(fixture, environment)
+    _policy(fixture, cell, arguments, "standalone")
+    stamped = stamp(cell)
+    assert "Scoped install keeps the global compatibility binstub unchanged" in stamped.stdout
+    assert {path: path.read_bytes() if path.exists() else None for path in global_paths} == globals_before
+    assert (cell / "payload-dir").is_file()
+    for name in ("resolve-runtime.ps1", "resolve-runtime.sh"):
+        assert (cell / "bin" / name).is_file()
+
+    for root, marker in ((fixture["legacy"], "LEGACY"), (cell, "CELL")):
+        python = _completed_slot({**fixture, "legacy": root})
+        site = python.parent.parent / (
+            "Lib/site-packages" if os.name == "nt" else
+            f"lib/python{os.sys.version_info.major}.{os.sys.version_info.minor}/site-packages"
+        )
+        (site / "agent_bridge.py").write_text(
+            "import json, os, sys\n"
+            f"print(json.dumps({{'marker':{marker!r},"
+            "'root':os.environ['AGENT_BRIDGE_INSTALL_DIR'],"
+            "'context':os.environ.get('COPILOT_EXTENSIONS_CONTEXT'),"
+            "'installationId':os.environ.get('AGENT_BRIDGE_INSTALLATION_ID'),"
+            "'arguments':sys.argv[1:]}))\n",
+            encoding="utf-8",
+        )
+    suffix = ".ps1" if shell == "powershell" else ""
+    payload_entry = fixture["payload"] / "bin" / f"agent-bridge{suffix}"
+    selected = _run(fixture, environment, _command(fixture, shell, payload_entry, "--help"), None)
+    assert selected.returncode == 0, selected.stdout + selected.stderr
+    selected_record = json.loads(selected.stdout)
+    assert selected_record["marker"] == "CELL"
+    assert selected_record["root"] == str(cell)
+    assert selected_record["context"] == environment["COPILOT_EXTENSIONS_CONTEXT"]
+    assert selected_record["installationId"]
+
+    if loss.startswith("deactivated-"):
+        receipt = json.loads((cell / "installation-activation.json").read_text(encoding="utf-8"))
+        changed = fixture["primitive"].compare_and_swap_activation(
+            context=arguments["context"], expected_marketplace_id=receipt["marketplaceId"],
+            expected_plugin_id="agent-bridge",
+            expected_namespace_generation=receipt["namespaceGeneration"],
+            expected_install_generation=receipt["installGeneration"],
+            expected_activation_generation=receipt["generation"],
+            activation_mode="legacy", activation_state="deactivated", legacy_disposition="absent",
+            legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+            legacy_root=fixture["legacy"], environment=fixture["environment"],
+        )
+        assert changed["activationChanged"], changed
+        pointer = cell / "payload-dir"
+        pointer.rename(pointer.with_name("payload-dir.unavailable"))
+    if "publisher" in loss:
+        fixture["payload"].rename(fixture["payload"].with_name("publisher-unavailable"))
+    if (loss == "pointer" or loss.endswith("and-pointer")) and existing_global:
+        pointer = fixture["legacy"] / "payload-dir"
+        pointer.rename(pointer.with_name("payload-dir.unavailable"))
+    ordinary = environment.copy()
+    for key in (
+        "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_BRIDGE_INSTALL_DIR",
+        "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_PAYLOAD_ROOT", "AGENT_BRIDGE_INSTALLATION_ID",
+    ):
+        ordinary.pop(key, None)
+    assert {path: path.read_bytes() if path.exists() else None for path in global_paths} == globals_before
+    if not existing_global:
+        assert not any(path.exists() for path in global_paths)
+        return
+
+    before = _snapshot(fixture["home"])
+    for entry in global_paths:
+        command = (
+            [ordinary.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", str(entry), "--help"]
+            if entry.suffix == ".cmd" else _command(fixture, shell, entry, "--help")
+        )
+        result = _run(fixture, ordinary, command, None)
+        assert result.returncode == 0, result.stdout + result.stderr
+        record = json.loads(result.stdout)
+        if loss in {"available", "pointer"}:
+            assert record == selected_record
+        else:
+            assert record == {
+                "marker": "LEGACY", "root": str(fixture["legacy"]), "context": None,
+                "installationId": None, "arguments": ["--help"],
+            }
+    after = _snapshot(fixture["home"])
+    changed = {
+        name for name in before.keys() | after.keys()
+        if name not in shell_profiles and before.get(name) != after.get(name)
+    }
+    permitted = (
+        cell.relative_to(fixture["home"]).as_posix() if loss in {"available", "pointer"} else
+        fixture["legacy"].relative_to(fixture["home"]).as_posix()
+    )
+    assert changed <= {permitted, f"{permitted}/logs", f"{permitted}/logs/boot-trace.jsonl"}
+    assert {path: path.read_bytes() if path.exists() else None for path in global_paths} == globals_before
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize(("scope", "state", "entry"), [
     (scope, state, "payload")
     for scope in ("legacy", "selected-cell")
