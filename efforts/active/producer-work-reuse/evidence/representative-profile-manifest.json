@@ -66,14 +66,15 @@
       "performance_savings_claim": false
     }
   ],
+  "artifact_byte_representation": "UTF-8 with LF record terminators; integrity metadata covers repository blobs, not platform checkout EOL bytes",
   "artifacts": {
     "profile-run-01.jsonl": {
-      "sha256": "29ac8ee8bdcde119d87736b09f7a85742b711ac052854f3a6b6345da32aeaf52",
-      "bytes": 330966
+      "sha256": "7d8431cc4d5bfd9be705779c270357b795fdd138f3c985b0b0e1bd1adf00929d",
+      "bytes": 330678
     },
     "profile-run-02.jsonl": {
-      "sha256": "f5c59cf25f0aafc6eaaa3e6860434769d4e9343977f68634cf293f3fc93e3bdb",
-      "bytes": 2396
+      "sha256": "a86b86cbbcc5be3321af00ba20177c8ed560cb23f08e866681017482f6d62ff0",
+      "bytes": 2392
     }
   },
   "previous_uncached_selected_contract_derived_bound": {
