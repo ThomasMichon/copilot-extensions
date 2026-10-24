@@ -303,3 +303,17 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   unchanged 30-second runner item cap, explicitly not a CLI-startup latency
   qualification. Controlled serving-thread contention/storage assertions and
   production timeout/watchdog settings are unchanged.
+- 2026-10-24 UTC — Publication is administratively blocked, not accepted:
+  the latest fail-open warning/cleanup fix is committed locally as
+  `9891cdc265c38db0cf2e3a603ce60ad136ffd824` and its entrypoint/contract/diagnostic
+  portfolio passes 183 tests. PR #8495 remains at
+  `4a2a490c923a4f9cfacbd1c05f98823c581d7942`, with green required CI but the
+  warning finding still requiring this unpublished fix/re-review. Managed
+  publication first timed out and, on fresh-CWD retry, Git failed with
+  `could not read Username for 'https://github.com': terminal prompts disabled`.
+  Repository-scoped account resolution and API identity still agree; no ambient
+  account fallback or global switch was used. No credential/config/runtime repair
+  is authorized by this source-only stretch. The existing owner can inspect and,
+  if authorized, repair the repository-local credential pin through
+  `repos pin-credentials`, then resume normal managed push/review/CI/merge.
+  Keep the worktree, source responsibility, #8377 and all broader gates open.
