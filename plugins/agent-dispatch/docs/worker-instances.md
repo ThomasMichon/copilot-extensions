@@ -233,6 +233,10 @@ absolute local path; their existing runtime loader does not accept named
 repository resources, whether selected directly or by a lane.
 An absolute policy owned by a named supplier also refuses: that file loader
 cannot retain supplier admission for script contexts inside the policy.
+An evaluator inherited through a read-only supplier must use an inline policy,
+even when its file-backed policy lives elsewhere: a mutable policy file cannot
+carry that supplier's execution fence through publication. Declarative lane
+policies retain their existing non-script contract.
 The shared dependency validator uses the actual evaluator loader to inspect
 absolute policy files and the selected script's executable, script path and
 explicit working directory read-only, without evaluating a task or executing

@@ -130,6 +130,13 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
                 raise RegistrarError(
                     "supplier-owned file-backed evaluator policies cannot retain named source context"
                 )
+        if declaration.kind == "evaluator" and isinstance(policy, str) and any(
+            resources.is_read_only(repository) for repository in suppliers
+        ):
+            raise RegistrarError(
+                "file-backed evaluator policies cannot retain read-only supplier execution admission; "
+                "use an inline policy with named execution context"
+            )
         if declaration.kind == "supervised-lane" and declaration.evaluator and (
             not _absolute_or_named(declaration.evaluator)
             or declaration.evaluator.startswith("repo:")

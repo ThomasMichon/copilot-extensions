@@ -647,6 +647,52 @@ def test_supplier_owned_absolute_file_policy_refuses_unrepresentable_named_conte
     assert not instance_dir().exists() and not active_dir().exists()
 
 
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge", "worktree"])
+def test_external_file_policy_cannot_drop_read_only_supplier_admission(
+    monkeypatch, tmp_path, repo_class,
+):
+    from agent_dispatch import repository_resources
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    policy = tmp_path / "external-policy.json"
+    policy.write_text(json.dumps({
+        "scripts": {"policy": [sys.executable, "-c", "print('{}')"]}, "cwd": str(supplier),
+    }), encoding="utf-8")
+    document = {"kind": "evaluator", "spec": {
+        "repo": "example/project", "evaluator_ref": "policy", "evaluator": str(policy),
+    }}
+    (supplier / "base.json").write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository", lambda *a, **k: (supplier, repo_class),
+    )
+    _, row = provider({"extends": "repo:library:base.json"}, kind="evaluator")
+    if repo_class == "worktree":
+        assert save(row, document={"params": {"label": "fixture"}})["persisted"]
+    else:
+        with pytest.raises(RegistrarError, match="file-backed.*read-only supplier"):
+            save(row, document={"params": {"label": "fixture"}})
+        assert not instance_dir().exists()
+
+
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_external_declarative_lane_policy_keeps_its_existing_non_script_contract(
+    monkeypatch, tmp_path, repo_class,
+):
+    from agent_dispatch import repository_resources
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    policy = tmp_path / "external-policy.json"
+    policy.write_text('{"rules":[]}', encoding="utf-8")
+    (supplier / "base.json").write_text(json.dumps({**pool(), "evaluator": str(policy)}), encoding="utf-8")
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository", lambda *a, **k: (supplier, repo_class),
+    )
+    _, row = provider({"extends": "repo:library:base.json"}, kind="supervised-lane")
+    assert save(row, document={"params": {"label": "fixture"}})["persisted"]
+
+
 @pytest.mark.parametrize("kind", ["evaluator", "supervised-lane"])
 def test_missing_file_policy_refuses_before_persistence(tmp_path, kind):
     policy = str(tmp_path / "missing-policy.json")
