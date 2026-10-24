@@ -187,6 +187,203 @@ def test_compile_refuses_effective_editable_graph(tmp_path, monkeypatch):
         )
 
 
+def source_compile_settings(names, **options):
+    return compile_settings(**options).replace(
+        "no_emit_package: []",
+        "no_emit_package: [" + "".join(f"PackageName({json.dumps(name)},)," for name in names) + "]",
+    ).replace("settings: PipSettings {", "settings: PipSettings {\nsources: None,")
+
+
+def test_source_compile_retains_graph_and_derives_only_local_omissions(tmp_path, monkeypatch):
+    child = source_project(tmp_path / "child", name="fixture-child", dependencies='"registry-only>=1"')
+    project = source_project(
+        tmp_path / "root", sources=(
+            'fixture-child={path="../child", editable=true}\n'
+            'registry-only={index="fixture-index"}'
+        ),
+        dependencies='"fixture-child"',
+    )
+    names = ["fixture-child"]
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **options: subprocess.CompletedProcess(command, 0, source_compile_settings(names), ""),
+    )
+    with policy.retain_uv_source_compile(
+        "fixture-uv", [str(project / "pyproject.toml")], env={}, cwd=tmp_path,
+        trusted_source_roots=(tmp_path,), now=NOW,
+    ) as transaction:
+        assert transaction.argv[1:3] == ("pip", "compile")
+        omissions = [value for option, value in policy._argument_pairs(list(transaction.argv[3:]))
+                     if option == "--no-emit-package"]
+        assert omissions == names
+        assert transaction.sources.keys() == {project, child}
+        for source, retained in transaction.sources.items():
+            assert retained != source
+            assert retained.is_dir()
+            assert transaction.source_hashes[source / "pyproject.toml"]
+        assert "editable_mode=compat" not in transaction.argv
+        root = transaction.cwd
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("omissions", [[], ["fixture-source", "registry-only"], ["wrong-source"]])
+def test_source_compile_refuses_ambient_omission_drift(tmp_path, monkeypatch, omissions):
+    source_project(tmp_path / "child", name="fixture-child")
+    project = source_project(
+        tmp_path / "root", dependencies='"fixture-child"',
+        sources='fixture-child={path="../child"}',
+    )
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **options: subprocess.CompletedProcess(
+            command, 0, source_compile_settings(omissions), "",
+        ),
+    )
+    with pytest.raises(policy.DependencyPolicyError, match="omissions"):
+        with policy.retain_uv_source_compile(
+            "fixture-uv", [str(project / "pyproject.toml")], env={}, cwd=tmp_path,
+            trusted_source_roots=(tmp_path,), now=NOW,
+        ):
+            pytest.fail("changed output policy must not reach execution")
+
+
+@pytest.mark.parametrize("kind", [
+    "remote", "unowned", "duplicate", "artifact", "dynamic", "caller-omission", "conditional", "alternatives",
+])
+def test_source_compile_refuses_unsafe_graph_before_uv(tmp_path, monkeypatch, kind):
+    child = source_project(tmp_path / "child", name="fixture-child")
+    sources = 'fixture-child={path="../child"}'
+    if kind == "remote":
+        sources = 'fixture-child={git="https://example.invalid/child"}'
+    elif kind == "unowned":
+        sources = 'fixture-child={path="../../foreign"}'
+    elif kind == "artifact":
+        (tmp_path / "child.whl").write_bytes(b"not admitted")
+        sources = 'fixture-child={path="../child.whl"}'
+    elif kind == "conditional":
+        sources = 'fixture-child={path="../child", marker="sys_platform == \'never\'"}'
+    elif kind == "alternatives":
+        sources = 'fixture-child=[{path="../child"}]'
+    project = source_project(
+        tmp_path / "root", name="fixture-child" if kind == "duplicate" else "fixture-source",
+        sources=sources, dependencies='"fixture-child"',
+    )
+    if kind == "dynamic":
+        manifest = child / "pyproject.toml"
+        manifest.write_text(manifest.read_text().replace('version="1.0"', 'version="1.0"\ndynamic=["dependencies"]'))
+    arguments = [str(project / "pyproject.toml")]
+    if kind == "caller-omission":
+        arguments += ["--no-emit-package", "registry-only"]
+    monkeypatch.setattr(policy.subprocess, "run", lambda *args, **options: pytest.fail("unsafe graph reached UV"))
+    with pytest.raises(policy.DependencyPolicyError):
+        with policy.retain_uv_source_compile(
+            "fixture-uv", arguments, env={}, cwd=tmp_path,
+            trusted_source_roots=(tmp_path,), now=NOW,
+        ):
+            pytest.fail("unsafe graph reached export")
+
+
+def test_source_compile_refuses_effective_disabled_source_mappings(tmp_path, monkeypatch):
+    project = source_project(tmp_path / "root")
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **options: subprocess.CompletedProcess(
+            command, 0, source_compile_settings([]).replace("sources: None", "sources: All"), "",
+        ),
+    )
+    with pytest.raises(policy.DependencyPolicyError, match="disable"):
+        with policy.retain_uv_source_compile(
+            "fixture-uv", [str(project / "pyproject.toml")], env={}, cwd=tmp_path,
+            trusted_source_roots=(tmp_path,), now=NOW,
+        ):
+            pytest.fail("disabled source mappings reached export")
+
+
+@pytest.mark.parametrize("context", ["argument", "environment", "ambient"])
+@pytest.mark.parametrize("input_kind", ["registry", "recursive", "project"])
+def test_source_compile_refuses_context_only_local_mappings(tmp_path, monkeypatch, context, input_kind):
+    source_project(tmp_path / "child", name="fixture-child")
+    project = source_project(
+        tmp_path / "context", dependencies='"fixture-child"',
+        sources='fixture-child={path="../child"}',
+    )
+    operand = tmp_path / "input.in"
+    operand.write_text("fixture-child==2.0\n", encoding="utf-8")
+    if input_kind == "recursive":
+        root = tmp_path / "root.in"
+        root.write_text("-r input.in\n", encoding="utf-8")
+        operand = root
+    elif input_kind == "project":
+        operand = source_project(
+            tmp_path / "input-project", name="fixture-root", dependencies='"fixture-child==2.0"',
+        ) / "pyproject.toml"
+    arguments = [str(operand)]
+    environment = {}
+    cwd = tmp_path
+    if context == "argument":
+        arguments += ["--project", str(project)]
+    elif context == "environment":
+        environment["UV_PROJECT"] = str(project)
+    else:
+        cwd = project
+    monkeypatch.setattr(policy.subprocess, "run", lambda *args, **options: pytest.fail("context mappings reached UV"))
+    with pytest.raises(policy.DependencyPolicyError, match="context-only"):
+        with policy.retain_uv_source_compile(
+            "fixture-uv", arguments, env=environment, cwd=cwd,
+            trusted_source_roots=(tmp_path,), now=NOW,
+        ):
+            pytest.fail("context-only mapping suppressed a required registry pin")
+
+
+@pytest.mark.parametrize("kind", [
+    "direct-marker", "direct-extra", "recursive-marker", "recursive-extra",
+    "mapped-marker", "mapped-extra", "nested-unselected",
+])
+def test_source_compile_refuses_inactive_local_registry_ambiguity(tmp_path, monkeypatch, kind):
+    child = source_project(tmp_path / "child", name="fixture-child")
+    direct = "fixture-child @ " + child.as_uri()
+    registry = "fixture-child>=1"
+    marker = "; sys_platform == 'never'"
+    sources = 'fixture-child={path="../child"}' if kind.startswith("mapped-") else ""
+    dependencies = json.dumps(("registry-only>=1" if kind == "mapped-extra" else registry) if "extra" in kind else (
+        "fixture-child" + marker if kind == "mapped-marker" else direct + marker
+    ))
+    project = source_project(tmp_path / "root", dependencies=dependencies, sources=sources)
+    if kind == "nested-unselected":
+        nested = source_project(
+            tmp_path / "optional", name="fixture-optional", dependencies='"fixture-child"',
+            sources='fixture-child={path="../child"}',
+        )
+        assert nested.is_dir()
+        project = source_project(
+            project, dependencies=json.dumps(registry),
+            sources='fixture-optional={path="../optional"}',
+        )
+        extra = "fixture-optional"
+    else:
+        extra = "fixture-child" if kind == "mapped-extra" else direct
+    if "extra" in kind or kind == "nested-unselected":
+        manifest = project / "pyproject.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8")
+            + "\n[project.optional-dependencies]\nfeature=[" + json.dumps(extra) + "]\n",
+            encoding="utf-8",
+        )
+    operand = project / "pyproject.toml"
+    if kind.startswith("recursive"):
+        nested = tmp_path / "nested.in"
+        nested.write_text(direct + (marker if kind == "recursive-marker" else "") + "\n", encoding="utf-8")
+        operand = tmp_path / "input.in"
+        operand.write_text("-r nested.in\n" + registry + "\n", encoding="utf-8")
+    monkeypatch.setattr(policy.subprocess, "run", lambda *args, **options: pytest.fail("ambiguous graph reached UV"))
+    with pytest.raises(policy.DependencyPolicyError):
+        with policy.retain_uv_source_compile(
+            "fixture-uv", [str(operand)], env={}, cwd=tmp_path,
+            trusted_source_roots=(tmp_path,), now=NOW,
+        ):
+            pytest.fail("ambiguous local/registry identity reached export")
+
+
 @pytest.mark.parametrize("reference", ["requirements", "project", "sources"])
 def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp_path, reference):
     child = source_project(tmp_path / "child", name="fixture-child")
@@ -215,6 +412,7 @@ def test_native_compile_refuses_directory_dependencies_before_export_cleanup(tmp
 @pytest.mark.parametrize("missing_age", [False, True])
 def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
     tmp_path, monkeypatch, source_kind, missing_age, alias, nested_alias=False, root_anchor=False,
+    source_graph=False, metadata_name_conflict=False, recursive_source=False,
 ):
     artifacts = {}
     projects = {}
@@ -288,8 +486,21 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
     working_directory = Path(tmp_path.anchor) if root_anchor else tmp_path
     if source_kind == "project":
         project = source_project(tmp_path / "source", dependencies='"fixture-root>=1"')
+        if source_graph:
+            local = source_project(tmp_path / "local", name="fixture-owned", dependencies='"fixture-root>=1"')
+            if recursive_source:
+                source_project(tmp_path / "leaf", name="fixture-leaf", dependencies='"fixture-root>=1"')
+                local = source_project(
+                    local, name="fixture-owned", dependencies='"fixture-leaf"',
+                    sources='fixture-leaf={path="../leaf"}',
+                )
+            project = source_project(
+                project, name="fixture-root" if metadata_name_conflict else "fixture-source",
+                dependencies='"fixture-owned"',
+                sources='fixture-owned={path="../local", editable=true}',
+            )
         operand = project / "pyproject.toml"
-        roots = (project,)
+        roots = (tmp_path,) if source_graph else (project,)
     else:
         operand = tmp_path / "requirements.in"
         nested = tmp_path.as_posix() + "/./nested.in" if nested_alias else "nested.in"
@@ -308,6 +519,8 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         if "--show-settings" not in command and command[1:3] == ["pip", "compile"]:
             mutations.append(True)
             operand.write_text("unadmitted input\n", encoding="utf-8")
+            if source_graph:
+                (local / "pyproject.toml").write_text("unadmitted input\n", encoding="utf-8")
             included.write_text("unadmitted input\n", encoding="utf-8")
             config.write_text("invalid config\n", encoding="utf-8")
             assert Path(options["env"]["UV_CONFIG_FILE"]) != config
@@ -328,13 +541,20 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         assert unguarded.returncode == 0, unguarded.stderr
         assert "fixture-child==2.0" in unguarded.stdout
         downloads.clear()
-        result = policy.run_uv_compile(
-            "uv", [operand_argument, "-o", str(output) if root_anchor else "locked.txt", "--python", sys.executable,
-                   "--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu",
-                   "--only-binary", ":all:"],
-            env=environment, cwd=working_directory, now=NOW, trusted_source_roots=roots,
-            capture_output=True, text=True, timeout=30,
-        )
+        arguments = [operand_argument, "-o", str(output) if root_anchor else "locked.txt", "--python", sys.executable,
+                     "--python-version", "3.12", "--python-platform", "x86_64-unknown-linux-gnu",
+                     "--only-binary", ":all:"]
+        options = dict(env=environment, cwd=working_directory, now=NOW, trusted_source_roots=roots)
+        if source_graph:
+            with policy.retain_uv_source_compile("uv", arguments, **options) as transaction:
+                result = policy.subprocess.run(
+                    list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
+                    capture_output=True, text=True, timeout=30, creationflags=policy._HEADLESS,
+                )
+        else:
+            result = policy.run_uv_compile(
+                "uv", arguments, **options, capture_output=True, text=True, timeout=30,
+            )
         assert mutations == [True]
         assert retained_directories and all(not path.exists() for path in retained_directories)
         if missing_age:
@@ -346,6 +566,9 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
             assert "fixture-root==1.0" in text and "fixture-child==1.0" in text
             assert "fixture-child==2.0" not in text and "fixture-child==0.1" not in text
             assert "file:" not in text
+            if source_graph:
+                assert "fixture-owned" not in text and "fixture-source" not in text
+                assert "fixture-leaf" not in text
             for filename in ("fixture_root-1.0-py3-none-any.whl", "fixture_child-1.0-py3-none-any.whl"):
                 assert "--hash=sha256:" + hashlib.sha256(artifacts[filename]).hexdigest() in text
             assert not text.startswith("#")
@@ -354,6 +577,28 @@ def test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+@pytest.mark.parametrize("missing_age", [False, True])
+def test_native_source_compile_exports_only_seasoned_third_party_closure(tmp_path, monkeypatch, missing_age):
+    test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
+        tmp_path, monkeypatch, source_kind="project", missing_age=missing_age, alias=False,
+        source_graph=True,
+    )
+
+
+def test_native_source_compile_never_omits_a_root_metadata_registry_identity(tmp_path, monkeypatch):
+    test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
+        tmp_path, monkeypatch, source_kind="project", missing_age=False, alias=False,
+        source_graph=True, metadata_name_conflict=True,
+    )
+
+
+def test_native_source_compile_retains_recursive_local_mappings(tmp_path, monkeypatch):
+    test_native_compile_freezes_inputs_and_exports_only_seasoned_hashed_closure(
+        tmp_path, monkeypatch, source_kind="project", missing_age=False, alias=False,
+        source_graph=True, recursive_source=True,
+    )
 
 
 def test_native_compile_nested_absolute_include_cannot_reopen_original(tmp_path, monkeypatch):

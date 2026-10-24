@@ -226,9 +226,9 @@ refusals and the installation authority's explicit path selection.
       contributes the authority/selection and engine-consumer seam from #6234;
       its design is approved in #6795 and the inert record/selection slice
       merged in #7044. The release-channel approval adapter merged in #8568
-      and installation-owned policy intent in #8494; their authority-owned
-      composition, real exact closures, publication and consumer admission
-      remain open.
+      and installation-owned policy intent in #8494; their repository-only
+      planning composition merged in #8586. Independent exact source closures,
+      governed admission, real publication and consumer enablement remain open.
       The [zero-configuration amendment](../lean-runtime-dependencies/zero-configuration-defaults.md)
       requires a complete adopting-policy baseline: release profiles preferred,
       automatically selected governed source mode when permitted, and no
@@ -253,6 +253,10 @@ refusals and the installation authority's explicit path selection.
       through the existing pinned hosted Main attestation verifier (#8568).
       This is not real profile publication, governed feed admission or runtime
       enablement; installation-policy/source-fallback composition remains open.
+- [x] Compose existing owner-bound policy intent with release authentication
+      in the repository-only planner (#8586). Only explicit or typed approved
+      record absence can request permitted source fallback; source verification,
+      exact locking and feed admission remain prerequisites to construction.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -503,6 +507,13 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the bounded policy/release planning composition with the real
+      installation owner, fresh no-file defaults and isolated Python first
+      touch. Malformed preferences, foreign/invalid/pending owners and supplied
+      subject authentication failures refuse on every availability branch.
+      #8586's final head passes required CI, all four selected Linux/Windows
+      native jobs and Copilot approval with no unresolved findings. This is not
+      governed source-lock, acquisition or production-consumer proof.
 - [x] Qualify the bounded release-approval component with complete manifest/
       first-party binding, independent selection facts, forged origin refusal,
       exact private subject custody, inclusive byte limits and failure/timeout/
@@ -676,6 +687,75 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Independent retained source-graph export
+
+- Added an explicit `retain_uv_source_compile` API to the existing retained
+  transaction. Native UV resolves the retained local graph's transitive
+  requirements while omitting only unconditional local mappings required by
+  each owning project's unmarked base dependencies. Root metadata does not
+  suppress its own registry identity. Ordinary compile still refuses directory
+  dependencies. Effective omission drift, disabled local sources, ambiguous
+  identities, direct local requirements, conditional/alternative or optional-only
+  local mappings, remote inputs and local artifacts refuse; ordinary third-party
+  named-index mappings remain supported.
+- This realizes the reviewed source-fallback contract's candidate-export seam,
+  not its origin approval, exact installation receipt, governed acquisition or
+  consumer enablement. The caller must bind independently selected source
+  identity, lock and trigger before the existing constructor can use them.
+  No artifact manifest is required and no second constructor is introduced.
+- Canonical helpers are synchronized across their existing adopters with a
+  changefile for every affected plugin. The tests extend the existing optional
+  native compiler lane; no effectful test joins required unit-only CI.
+  Candidate-constraint generation remains owned by the external #6941.
+- Before review repair, targeted validation passed 331 controls, including real dated-feed
+  source retention, transitive seasoning/hash export, missing-age refusal,
+  ordinary directory refusal, named-index preservation and cleanup.
+  Install-contract, helper synchronization, Python lint and diff checks pass.
+  The unchanged required packet passes all 1497 units with no observed effects
+  in 234.219 seconds at `aee33e0ffb04d74f2d671acdef586e5d781cd65e`.
+  Published-head Linux/Windows qualification passes on the initial code.
+  Review found inactive marker/extra references could hide registry pins.
+  The repair adds explicit ambiguity refusal, root-metadata registry identity
+  and recursive-local controls (71 compiler checks pass). Recursive requirements
+  parsing and compile composition move to the existing configuration companion
+  without changing callbacks, keeping every policy copy under the 1000-line cap.
+  The repaired development regression packet passes 411 controls with one
+  POSIX-only installer-helper skip on Windows. Install/sync/changefile/module,
+  documentation, feed-neutrality, lint and diff guards pass. The unchanged
+  required packet passes all 1497 units without observed effects in 216.672
+  seconds at `cfffe6ca4eb359e5f3921fd199f9f1e08a5ef6d8`. Repaired published-head
+  CI and both Linux/Windows compile lanes passed. The next review found
+  configuration-only project mappings could still omit an actual registry pin.
+  The follow-up rejects explicit project contexts and ambient projects outside
+  compiled inputs, with nine argument/environment/ambient regressions across
+  direct, recursive and metadata inputs (80 compiler controls pass).
+  Rebased onto current development while preserving its newly admitted unit
+  entries. The current development packet passes 421 controls with the one
+  expected POSIX-only helper skip on Windows. The current required packet
+  passes all 1509 units without observed effects in 208.547 seconds at
+  `5ec1b831ee7bcc1f449e30017974aec2bb191f4f`. Final published-head CI,
+  native qualification and review remain open.
+  The parent Plan and Validation Plan remain open.
+
+### 2026-10-24 - Policy/release planner merged; exact source lock next
+
+- #8586 merged as `9e29b923da2ebc0b2c6c28b2b9ac419d24a0ef81` after
+  Copilot review `5638219232` approved exact head
+  `cedc19c9ecac5a81579e8dc5a82b81afd6885f45` with no open findings.
+  The one fixed review thread is resolved. Required CI `40093452938` and
+  native acceptance `40093501724` pass; all four selected Linux/Windows
+  wheel and runtime-policy jobs are green. Merge used the configured
+  Maintainer CODEOWNER exception, not a CI override.
+- Re-read this Plan and Validation Plan after merge. Marked only the bounded
+  planning component complete; the parent remains **Active**. No installer,
+  source acquisition, real profile producer or production runtime is enabled.
+- Continue the independent source-lock seam using the retained compiler and
+  existing selected-source identity. The compiler freezes effective resolver
+  configuration and exports hashes; neither result alone authenticates source
+  approval or feed admission. Reuse the existing source/retention owners.
+  Candidate-constraint generation is already owned by the still-open external
+  contributor PR #6941; do not duplicate or supersede that contribution.
 
 ### 2026-10-24 - Installation-policy and release-selection composition
 
