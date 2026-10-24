@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .db_live_session_aliases import CANONICAL_SESSION_SQL as _CANON
+from .db_live_session_aliases import CANONICAL_SESSION_SQL as _CANON, MESSAGE_TARGET_SQL
 
 
 class _LiveMessageReceiptsMixin:
@@ -13,8 +13,8 @@ class _LiveMessageReceiptsMixin:
         rows = self.execute_read(
             "SELECT session_id, id AS message_id, created_at AS admitted_at, "
             "delivered_at AS sdk_accepted_at, consumed_at FROM live_messages "
-            f"WHERE session_id={_CANON} AND id=? AND kind NOT LIKE 'control:%'",
-            (session_id, session_id, message_id),
+            f"WHERE session_id={MESSAGE_TARGET_SQL} AND id=? AND kind NOT LIKE 'control:%'",
+            (session_id, session_id, session_id, message_id),
         )
         if not rows:
             return None
@@ -57,9 +57,10 @@ class _LiveMessageReceiptsMixin:
         rows = self.execute_read(
             "SELECT id AS message_id, sender, kind, delivery, created_at AS admitted_at, "
             "delivered_at AS sdk_accepted_at FROM live_messages "
-            f"WHERE session_id={_CANON} AND consumed_at IS NULL "
+            f"WHERE session_id IN (?, {_CANON}) AND session_id={MESSAGE_TARGET_SQL} "
+            "AND consumed_at IS NULL "
             "AND (delivered_at IS NULL OR consumption_tracked=1) "
             "AND kind NOT LIKE 'control:%' ORDER BY id ASC LIMIT ?",
-            (session_id, session_id, limit),
+            (session_id, session_id, session_id, session_id, session_id, session_id, limit),
         )
         return [dict(row) for row in rows]

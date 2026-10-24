@@ -75,6 +75,11 @@ class _InboxCustodyMixin:
         with self._runtime_transaction(write=True) as conn:
             self._inbox_admission(conn, identity, admission)
             self._registered_inbox_consumer(conn, consumer, now)
+            if conn.execute(
+                "SELECT 1 FROM live_messages WHERE session_id=? AND kind LIKE 'control:%' "
+                "AND delivered_at IS NULL LIMIT 1", (consumer.session_id,),
+            ).fetchone() is not None:
+                raise RuntimeCustodyError("Pending legacy controls prevent retained inbox enrollment")
             original = conn.execute(
                 "SELECT * FROM bridge_inbox_consumers WHERE incarnation=?",
                 (consumer.incarnation,),

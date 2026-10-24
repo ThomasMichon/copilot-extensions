@@ -7,6 +7,8 @@ import sqlite3
 from .db_live_session_aliases import PROCESS_START_TOLERANCE_SECONDS
 from .runtime_custody import RuntimeCustodyError, _normalized_schema
 
+_HISTORY_INDEXES = frozenset(("bridge_inbox_consumers_session", "live_messages_retained_session"))
+
 
 def definitions() -> dict[str, tuple[str, str, str]]:
     table = "bridge_inbox_consumers"
@@ -19,6 +21,11 @@ def definitions() -> dict[str, tuple[str, str, str]]:
         "bridge_inbox_consumers_current": ("index", table,
             f"CREATE UNIQUE INDEX IF NOT EXISTS bridge_inbox_consumers_current ON {table}"
             "(session_id) WHERE current=1"),
+        "bridge_inbox_consumers_session": ("index", table,
+            f"CREATE INDEX IF NOT EXISTS bridge_inbox_consumers_session ON {table}(session_id)"),
+        "live_messages_retained_session": ("index", "live_messages",
+            "CREATE INDEX IF NOT EXISTS live_messages_retained_session ON live_messages(session_id) "
+            "WHERE runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL"),
         "bridge_inbox_consumers_immutable": ("trigger", table,
             "CREATE TRIGGER IF NOT EXISTS bridge_inbox_consumers_immutable "
             f"BEFORE UPDATE ON {table} WHEN "
@@ -60,9 +67,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-def validate_schema(conn: sqlite3.Connection) -> None:
+def validate_schema(conn: sqlite3.Connection, *, require_history_indexes: bool = True) -> None:
     """Never repair missing enrollment history on a prepared database."""
     for name, (kind, table, statement) in definitions().items():
+        if name in _HISTORY_INDEXES and not require_history_indexes:
+            continue
         row = conn.execute(
             "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,),
         ).fetchone()

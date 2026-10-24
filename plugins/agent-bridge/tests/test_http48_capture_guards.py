@@ -108,6 +108,22 @@ def test_http48_capture_refreshes_only_registered_current_outputs(
     assert {f["path"] for f in after["fixtures"]} == {f["path"] for f in before["fixtures"]}
 
 
+def test_http48_capture_ignores_observation_object_key_order(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, commit = repository
+    observed = expected(root)
+    for case in observed:
+        observed[case] = dict(reversed(list(observed[case].items())))
+        observed[case]["ordinary_producer"] = dict(reversed(list(
+            observed[case]["ordinary_producer"].items(),
+        )))
+    assert observed == expected(root)
+    monkeypatch.setattr(capture, "run_probes", lambda *args: observed)
+    outputs = capture.capture(root, commit, write=True)
+    assert capture.capture(root, commit) == outputs
+
+
 @pytest.mark.parametrize("fault", ["dirty-output", "foreign-owner", "dirty-registry"])
 def test_http48_capture_refresh_refuses_unowned_changes(
     repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, fault: str,

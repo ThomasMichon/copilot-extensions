@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; installation/current-consumer DB prerequisites merged; transport/SDK integration and full Phase 1 open
+- **Status:** Active; local HTTP-48 transport merged; ordinary producer/SDK integration and full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -152,6 +152,8 @@ require their own review and qualification.
 - [ ] Bind the existing installation and current SDK consumer through the
       established user-owned boundary; keep cross-container ingress under
       authenticated proxy owners and reject unsupported exposure.
+      The explicit local HTTP-48 adapter merged in #8540; ordinary producer and
+      actual extension SDK enrollment/delivery remain open.
 - [ ] Preserve original durable messages, handoffs and outcomes across
       disconnect, timeout, restart and lost replies; reconcile uncertainty
       without dropping work or blindly resending it.
@@ -238,6 +240,152 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, authenticated consumer/SDK integration and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Wire ordinary keyed producer admission through current enrollment
+- The ordinary message route now asks the existing SQLite inbox owner to
+  select current enrollment and insert the original producer association in
+  one write transaction. It does not initialize an epoch or enroll a consumer.
+  Never-enrolled legacy targets remain separate; stale, retired, unsupported
+  or missing retained owners refuse instead of downgrading.
+- Retained admission requires an original operation key. Exact retries recover
+  the unchanged original row after frontend replacement, closure, registration
+  cleanup or a real producer-process exit before reply. Changed inputs refuse;
+  a recovered admission does not authorize an SDK invocation.
+- Unqualified control/startup/interrupt insertion and pending-control enrollment
+  are fenced at their existing DB owners. The actual startup-readiness path
+  refuses before creating or waiting for an unsupported legacy control.
+- The bounded producer/inbox/freshness/legacy/readiness cohort passes 430 cases
+  with three capability skips and verified cleanup. The stronger two-owner
+  race test explicitly distinguishes a stale closure CAS from the subsequent
+  fresh reconciliation; no runtime fence was relaxed to make the test pass.
+- The independent HTTP-48 probe now observes the ordinary producer rather than
+  seeding its admission through an internal DB method. Actual write/no-write
+  capture passes both installation modes against committed source
+  `d411d903e347e41d558ad32eee45e078b06df486`, retaining 75 outputs and every
+  older packet/provenance record. The canonical checker accepts two contracts
+  and 657 fixtures; 124 contract/fixture/current-capture replay cases pass,
+  with two collection capability skips. Read-only producer refusal passes
+  separately in both installation modes.
+- The first capture correctly refused publication when equal observation
+  objects had different insertion order. A reproduced regression now sorts
+  only object keys, preserving all values and array order. The full current
+  capture/refusal portfolio passes; no fixture expectation was relaxed.
+- Normal review/merge remain required. Actual extension
+  enrollment, SDK invocation/outcome/consumption recovery, native qualification
+  and all remaining parent Plan/Validation items stay open.
+- The managed publication refreshed the base and exposed a required
+  install-contract failure: three Python installer helper copies lagged the
+  canonical engine. Its existing generator refreshed exactly those three
+  copies, without changing canonical behavior. Six bounded Python-engine
+  vendoring controls, the install contract and both canonical Bridge contracts
+  pass on that integrated source. Fresh current-head CI/review remain required.
+- Review reproduced original-key recovery failure after same-process native
+  renames and registration cleanup. The alias owner now forwards only legacy
+  rows: retained messages keep their original native target and handoff.
+  Twelve actual ASGI cases cover repeated renames, deregistration/purge,
+  unoffered/offered/started messages, reopened storage, refused changed input
+  and wrong targets, a successor that cannot inherit input, and late original
+  outcomes. The combined retained/legacy regression cohort passes 291 cases.
+  Committed source `79d457e533cc1d165c03557d4da83f3725e31aa4` passes actual
+  HTTP-48 write/no-write capture in both installation modes with 76 outputs,
+  including executed alias folding and retained outcomes after alias cleanup.
+  The checker accepts both contracts and 658 fixtures. Current-head review
+  remains owed; this correction does not complete the actual SDK or parent
+  restoration gates.
+- A subsequent review found active-alias gaps before cleanup: the HTTP route
+  erased the original target before admission, and receipt projection followed
+  aliases for retained rows. Nine focused cases reproduced those failures and
+  the prior enrollment test's obsolete row-moving expectation. The route now
+  preserves its requested target through admission and receipt recovery;
+  retained duplicate matching and read-only projections use exact native ids,
+  while legacy rows retain alias forwarding. Internal unqualified controls
+  also retain the original enrollment refusal. The corrected enrollment test
+  requires an empty successor inbox and the complete unchanged original row.
+  All 312 selected producer/enrollment/receipt/legacy cases pass. Actual
+  write/no-write capture from source
+  `1c8c09755d0d1a0dcb4a4cabe539032320485d3c` records 77 outputs, including
+  active-alias receipt recovery and successor/new-key refusal. The complete
+  current capture/contract/maintenance cohort passes 124 cases; two contracts
+  and 659 fixtures pass the canonical checker. Independent review remains
+  required; no runtime or parent gate is inferred.
+- The next independent pass found earlier readiness-control admission still
+  discarded the original alias target. Eight ASGI cases reproduced the same
+  failure for startup, standalone readiness and mode controls, asserting that
+  neither a control row nor any readiness/outcome waiter may be reached.
+  Existing readiness/control owners now retain the requested id through the
+  DB fence while keeping canonical identity for legacy response routing.
+  The coupled producer/readiness/control/create portfolio passes 146 cases.
+  Its parser test now selects an isolated metadata owner and a real temporary
+  checkout policy instead of depending on an ambient Worktrees executable;
+  production hosting admission is unchanged.
+- Actual committed source `7342384d638d71b9af4d8db745e55d1a203da24e`
+  passes write/no-write HTTP-48 capture with 77 outputs, including all four
+  alias-control refusals and no inserted control. The full 124-case current
+  capture/contract/maintenance cohort, two-contract/659-fixture checker,
+  install contract and changefile-presence checks pass. Current-head independent
+  review remains required; SDK/native and restoration gates remain open.
+- Review measured a new projection performance regression: custody-aware
+  matching scanned unrelated retained history. The real SQLite regression
+  reproduced 140,000 VM steps for an empty inbox with 20,000 unrelated retained
+  rows. An indexable requested/canonical-session prefilter now narrows candidates
+  before exact custody matching; zero-history and 20,000-row controls both stay
+  within the 1,000-step budget. All 173 selected projection/receipt/result/alias
+  cases pass without changing native identity or legacy forwarding semantics.
+- Committed source `e008e31f57455885dd352d912e830c14e8d132be` passes actual
+  HTTP-48 write/no-write capture with 77 outputs. The probe now exercises
+  pending inspection through both original and successor ids. All 124 current
+  capture/contract/maintenance cases and both contracts/659 fixtures pass;
+  independent current-head review remains required.
+- Review then found ordinary admission's consumer lookup scanning unrelated
+  retired history inside the writer transaction. Six real-SQLite controls
+  reproduced unbounded work for current, retired and never-enrolled targets.
+  Schema 32 adds a nonpartial session-history index through the existing schema
+  owner; current selection and history existence are separate indexed lookups,
+  never a filter that erases retirement. Ten zero/20,000-row controls cover both
+  unrelated history and the target's own retired incarnations within the
+  10,000-VM-step admission budget.
+- Normal schema-31 preparation adds only the index and preserves complete
+  enrollment, message, handoff, epoch and producer rows. Read-only/adoption
+  paths refuse old or damaged prepared state without repair; current-schema
+  missing-index controls refuse too. The 143 migration/custody/adoption controls
+  and 120 final producer/enrollment/index controls pass. No running database
+  was migrated and no target-state compatibility is inferred.
+- Source `329b9319c6cd3f3c4caf97a33caecd36e5d22ce8` passes actual
+  HTTP-48 write/no-write capture in both installation modes with 78 outputs,
+  including schema-32 and nonpartial-index observations. The unchanged checker
+  accepts both contracts and 660 fixtures; all 124 current
+  capture/contract/maintenance cases and the 18 changed-source module limits
+  pass. Current-head independent review remains required.
+- The reviewed head received approval, but a further same-owner check found
+  the retained-row fallback scanning the legacy target's own old unassociated
+  messages: 140,200 VM steps with 20,000 historical rows. The same unmerged
+  schema-32 preparation now also owns a partial retained-message session index.
+  Positive/negative controls require never-enrolled targets to stay legacy,
+  while an original retained row without consumer enrollment must still refuse
+  and remain unchanged. Both prepared indexes are required without passive DDL.
+  The final 199-case custody/adoption/producer/index/capture portfolio passes,
+  including the retained-row negative control. Refreshed committed-source
+  evidence and independent review remain required. The earlier approval is not
+  used for these additional changes.
+- Committed refinement `019bf810e360b7b219f7467f85de4d121afe7893`
+  passes actual write/no-write capture with 78 outputs and both prepared-index
+  observations. The 124-case current capture/contract/maintenance cohort,
+  two-contract/660-fixture checker and all changed-module/install/documentation/
+  changefile guards pass. Fresh independent exact-head review remains owed.
+
+### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
+- #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the
+  current-head Copilot review reported no open issues on
+  `d43e98f857d1746422797f3be078d36ecdc29544`, the installation-helper finding
+  was resolved, and provider-required checks passed.
+- The explicit local adapter and its corrected committed-source evidence are
+  landed prerequisites. They do not switch ordinary message producers or the
+  actual extension SDK to retained custody, enroll the full producer cohort,
+  qualify cross-container ingress, or change a running installation.
+- Reread the full Plan and Validation Plan. Full Phase 1b and the parent gates
+  remain open. Next connect the existing atomic message admission to the
+  current enrollment and bind the actual SDK send/consumption boundaries,
+  preserving original unknown work instead of legacy ACK/resend fallback.
 
 ### 2026-10-24 - Close the installation-owner capture gap found in review
 - Review of #8540 identified that the initial HTTP-48 closure covered the

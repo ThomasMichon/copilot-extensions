@@ -1,0 +1,9 @@
+{
+  "comment": "Associate ordinary keyed inbox sends with current retained enrollment and recover original admission after reply loss",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

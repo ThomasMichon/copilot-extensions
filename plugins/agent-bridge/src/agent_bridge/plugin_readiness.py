@@ -118,7 +118,7 @@ async def wait_plugin_readiness(
                 raise PluginReadinessError("startup-operation-input-changed")
             intent_key = None  # Keep the original intent; this retry makes a fresh observation.
     control_id, reason = db.enqueue_live_message_if_fresh(
-        current, sender=sender, body=json.dumps(payload, sort_keys=True),
+        session_id, sender=sender, body=json.dumps(payload, sort_keys=True),
         now=time.time(), kind=READINESS_CONTROL, delivery="queue", expected_session_id=current,
         **({"idempotency_key": intent_key} if intent_key is not None else {}),
     )

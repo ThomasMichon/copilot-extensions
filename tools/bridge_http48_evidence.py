@@ -20,7 +20,10 @@ FAMILY = "http48-retained-inbox-asgi-v1"
 AFFECTED = tuple(previous.PREFIX + name for name in (
     "protocol.py", "app_routes.py", "live_inbox_models.py", "live_inbox_runtime.py",
     "routes/live_inbox.py", "db_inbox_custody.py", "db_live_sessions.py",
-    "inbox_custody.py", "loop_governance.py",
+    "inbox_custody.py", "loop_governance.py", "live_message_enqueue.py", "routes/live_sessions.py",
+    "db_live_session_aliases.py", "db_live_message_receipts.py",
+    "plugin_readiness.py", "routes/live_startup_controls.py",
+    "db_core.py", "db_schema.py", "inbox_consumer_schema.py",
 ))
 TEST = "plugins/agent-bridge/tests/test_http48_capture_probes.py"
 EXTRA_PATHS = (INPUT, TEST, "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
@@ -85,6 +88,8 @@ def build_outputs(
     root: Path, commit: str, snapshot: previous.registry_codec.Snapshot,
     proof: dict, observed: dict,
 ) -> dict[str, bytes]:
+    # Object insertion order is not an observation; array order still is.
+    observed = json.loads(json.dumps(observed, sort_keys=True, allow_nan=False))
     registry = copy.deepcopy(snapshot.materialized)
     http = contract(registry)
     version = json.loads(safe(root, "plugins/agent-bridge/plugin.json").read_bytes())["version"]
@@ -152,7 +157,7 @@ def build_outputs(
             safe(root, installation.ENTRY).read_bytes(),
         )),
         "input_sha256": proof[INPUT]["sha256"], "checked_probes": PROBES,
-        "scope": "actual local ASGI/SQLite adapter; not ordinary producer, SDK or native qualification",
+        "scope": "actual local ASGI/SQLite adapter and ordinary producer; not SDK or native qualification",
     }, previous.PREFIX + "protocol.py", "Actual source-bound HTTP-48 local ASGI observations.")
     shared = {"path": PRIMARY, "sha256": digest(outputs[PRIMARY])}
     for source, row in sources.items():
