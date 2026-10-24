@@ -15,8 +15,6 @@ import json
 import math
 import os
 import sys
-import time
-from contextlib import contextmanager
 from pathlib import Path
 
 from agent_logger.config import Config, load_config
@@ -37,22 +35,8 @@ from agent_logger.sync.meta import (
 from agent_logger.sync.notify import post_notify
 from agent_logger.sync.origin import classify_for_sync, effective_harness, mark_all
 from agent_logger.sync.targets import build_target
+from agent_logger.sync.timing import timed_call
 from agent_logger.sync.worktree_binding import mark_all_worktrees
-
-
-@contextmanager
-def _phase(name: str):
-    started = time.monotonic()
-    print(f"session-sync: phase={name} started", file=sys.stderr, flush=True)
-    outcome = "interrupted"
-    try:
-        yield
-        outcome = "finished"
-    finally:
-        print(
-            f"session-sync: phase={name} {outcome} elapsed={time.monotonic() - started:.3f}s",
-            file=sys.stderr, flush=True,
-        )
 
 
 def _machine(cfg: Config) -> str:
@@ -361,13 +345,11 @@ def run_sync(
             print("session-sync: another sync holds the lock; skipping", file=sys.stderr)
             return 0
         reclamation = prepare_reclamation(cfg, machine, target, dry_run=False) if reclaim else None
-        with _phase("source-metadata"):
-            _mark_source(source, machine, effective, dry_run=False, verbose=verbose)
+        timed_call("source-metadata", _mark_source, source, machine, effective, dry_run=False, verbose=verbose)
 
         from agent_logger.usage_capture import capture_for_sync
 
-        with _phase("accounting"):
-            accounting_complete, accounting_failed = capture_for_sync(cfg, include, verbose=verbose)
+        accounting_complete, accounting_failed = timed_call("accounting", capture_for_sync, cfg, include, verbose=verbose)
         compaction = _pe.compaction_enabled(cfg)
 
         # On-device compaction (before the push): archive cold, in-scope,
@@ -377,8 +359,7 @@ def run_sync(
         if compaction and accounting_complete:
             from agent_logger.sync.compact import compact_local
 
-            with _phase("local-compaction"):
-                cres = compact_local(cfg, verbose=verbose)
+            cres = timed_call("local-compaction", compact_local, cfg, verbose=verbose)
             if cres.compacted:
                 mb = cres.reclaimed_bytes / (1024 * 1024)
                 print(
@@ -392,10 +373,9 @@ def run_sync(
                     file=sys.stderr,
                 )
 
-        with _phase("session-transfer"):
-            result = _push_incremental(
-                cfg, target, source, machine, include, force_full=full, verbose=verbose
-            )
+        result = timed_call(
+            "session-transfer", _push_incremental, cfg, target, source, machine, include, force_full=full, verbose=verbose
+        )
         if not result.ok:
             print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
             return 1
@@ -410,14 +390,12 @@ def run_sync(
                 f"file(s) in {len(result.excluded_roots)} root(s) ({mib:.1f} MiB)"
             )
 
-        with _phase("process-logs"):
-            process_logs_failed = not _pe.process_logs_skipped(cfg) and sync_process_logs(
-                cfg, target, machine, include, reclamation
-            )
+        process_logs_failed = not _pe.process_logs_skipped(cfg) and timed_call(
+            "process-logs", sync_process_logs, cfg, target, machine, include, reclamation
+        )
 
         if prune:
-            with _phase("retention"):
-                removed = target.prune(machine, cfg.sync_retention_days)
+            removed = timed_call("retention", target.prune, machine, cfg.sync_retention_days)
             if removed:
                 print(f"session-sync: pruned {removed} old session(s)")
 
@@ -425,8 +403,7 @@ def run_sync(
         # {machine}/archived/, compact the hub-only backlog, and reconcile away
         # the uncompressed hub duplicates.
         if compaction:
-            with _phase("archive-transfer"):
-                arc = target.push_archives(cfg.compact_archive_root, machine)
+            arc = timed_call("archive-transfer", target.push_archives, cfg.compact_archive_root, machine)
             if arc.ok and arc.file_count:
                 print(f"session-sync: pushed {arc.file_count} archive file(s)")
             elif not arc.ok:
@@ -447,16 +424,14 @@ def run_sync(
                     file=sys.stderr,
                 )
             else:
-                with _phase("hub-compaction"):
-                    backlog = target.compact_backlog(
-                        machine, opts["min_age_days"], opts["codec"],
-                        tracked_paths=tracked,
-                    )
+                backlog = timed_call(
+                    "hub-compaction", target.compact_backlog, machine, opts["min_age_days"], opts["codec"],
+                    tracked_paths=tracked,
+                )
                 if backlog:
                     print(f"session-sync: compacted {backlog} hub-only session(s)")
 
-                with _phase("hub-reconciliation"):
-                    reclaimed = target.reconcile_hub(machine)
+                reclaimed = timed_call("hub-reconciliation", target.reconcile_hub, machine)
                 if reclaimed:
                     print(f"session-sync: reconciled {reclaimed} hub session(s)")
 

@@ -60,17 +60,24 @@ def test_registry_names_and_classes() -> None:
 
 @pytest.mark.parametrize("interrupted", [False, True])
 def test_phase_timings_are_flushed_and_keep_failures(monkeypatch, capsys, interrupted):
+    from agent_logger.sync import timing
+
     ticks = iter([10.0, 12.5])
-    monkeypatch.setattr(engine.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(timing.time, "monotonic", lambda: next(ticks))
+
+    def capture(value, *, option):
+        assert value == 1 and option == 2
+        assert capsys.readouterr().err == "session-sync: phase=accounting started\n"
+        if interrupted:
+            raise RuntimeError("capture failed")
+        return "result"
+
     try:
-        with engine._phase("accounting"):
-            assert capsys.readouterr().err == "session-sync: phase=accounting started\n"
-            if interrupted:
-                raise RuntimeError("capture failed")
+        result = timing.timed_call("accounting", capture, 1, option=2)
     except RuntimeError as exc:
         assert interrupted and str(exc) == "capture failed"
     else:
-        assert not interrupted
+        assert not interrupted and result == "result"
     outcome = "interrupted" if interrupted else "finished"
     assert capsys.readouterr().err == (
         f"session-sync: phase=accounting {outcome} elapsed=2.500s\n"
