@@ -88,6 +88,39 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-PUB-REWRITE existing fresh destination refusal
+
+This settles only `tests/test_pr_rewrite.py:7`, header
+`@@ -272,6 +272,37 @@ def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(pr_repo, capsys):`,
+full hunk SHA256
+`dba58dd3f182a5480b1b34b59de0265a2f3c2bc72bf4aa23f4f567068b91ad04`.
+The complete `test_explicit_rewrite_uses_one_fresh_destination_snapshot`
+function has identical ASTs in the immutable source, actual merged #7886
+commit `c1ca9083463d0b0b7bad22cc401c37ab3e462b78`, and accepted comparison
+`3f93390187a00e538f5ae69f3ecef466015924ee`.
+
+The regression wraps the real `_remote_snapshot` and changes an actual
+local Git remote between target selection and the rewrite's later check.
+The first dry-run requires exactly two equal snapshots. The next invocation
+requires two fresh snapshots with unequal destination identities and the
+explicit destination-changed refusal. Tracking bytes and the recorded PR
+head in both original and repointed bare repositories must remain unchanged.
+The existing P implementation and B-REBASED fixture provide the separately
+owned dependencies; no cached authority or test double replaces those reads.
+
+The exact regression passes with two native Windows workers, retaining all
+existing marks and containment bounds: 37.72 seconds pytest, 46.91 seconds
+including preparation and cleanup. This is single-key functional evidence,
+not a normal-group timing result. The attempted complete rewrite module
+reached its unchanged 240-second wall limit after 36 passing cases and
+returned exit 124 at 244.55 seconds including preparation and cleanup.
+That attempt does not qualify the module; the #5682 timing obligation stays
+open, and no unchanged retry or increased limit is authorized by this entry.
+
+No runtime or test edit is needed. This admits one historical semantic key,
+not another fixture/publication residual or the still-open repeated complete
+same-head native Windows qualification.
+
 ### B-PUB-DEADLINE existing NUL absence and configured bounds
 
 This settles only `tests/test_publication_deadline.py:1`, header
