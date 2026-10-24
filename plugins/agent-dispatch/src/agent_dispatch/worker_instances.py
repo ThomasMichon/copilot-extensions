@@ -152,12 +152,16 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
     return data, declarations
 
 
+def _is_python_interpreter(executable: str) -> bool:
+    return re.fullmatch(
+        r"(?:pythonw?|pypy)(?:\d+(?:\.\d+)*)?(?:_d)?(?:\.exe)?",
+        Path(executable).name, re.IGNORECASE,
+    ) is not None
+
+
 def _command_script_operand(command: list[str]) -> str | None:
     suffixes = {".py", ".sh", ".ps1"}
-    if not re.fullmatch(
-        r"(?:pythonw?|pypy)(?:\d+(?:\.\d+)*)?(?:_d)?(?:\.exe)?",
-        Path(command[0]).name, re.IGNORECASE,
-    ):
+    if not _is_python_interpreter(command[0]):
         if len(command) > 1 and Path(command[1]).suffix.lower() in suffixes:
             return command[1]
         if len(command) > 1 and command[1].startswith("-") and any(
@@ -200,8 +204,13 @@ def _validate_command_dependency(command: list[str], directory: Path, *, explici
     if not available:
         raise RegistrarError(f"missing command dependency: {executable}")
     script = _command_script_operand(command)
-    if script is not None and not (directory / script).is_file():
-        raise RegistrarError(f"missing script dependency: {script}")
+    if script is not None:
+        target = directory / script
+        if not target.is_file() and not (
+            _is_python_interpreter(executable) and target.is_dir()
+            and any((target / name).is_file() for name in ("__main__.py", "__main__.pyc"))
+        ):
+            raise RegistrarError(f"missing script dependency: {script}")
 
 
 def _validate_evaluator_dependency(declaration, resources) -> None:

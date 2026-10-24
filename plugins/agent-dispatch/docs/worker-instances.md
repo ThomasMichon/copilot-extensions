@@ -239,7 +239,9 @@ explicit working directory read-only, without evaluating a task or executing
 the script. Unselected script entries do not become required dependencies.
 Python script operands are checked after supported interpreter options,
 including option values and `--`; inline-code and module-mode arguments are
-not mistaken for script files. Unknown Python options and script-file operands
+not mistaken for script files. Python directory entry points require a regular
+`__main__.py` or `__main__.pyc`; other interpreters retain regular-script-file
+checks. Unknown Python options and script-file operands
 after non-Python options refuse rather than claiming dependency validation.
 Script policies, including file-backed ones, require an explicit absolute or
 named working directory; the CLI's current directory is not evidence of the

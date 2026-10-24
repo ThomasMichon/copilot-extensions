@@ -735,6 +735,60 @@ def test_python_script_options_preserve_native_evaluator_invocation(tmp_path, op
     assert decision.reason == "native options"
 
 
+@pytest.mark.parametrize("kind", ["emitter", "evaluator"])
+@pytest.mark.parametrize("entrypoint", ["__main__.py", "__main__.pyc", None])
+def test_python_directory_entrypoints_match_native_execution(tmp_path, kind, entrypoint):
+    import py_compile
+    from agent_dispatch.producers.evaluator import load_registration_evaluator
+
+    application = tmp_path / "policy_app"
+    application.mkdir()
+    main = application / "__main__.py"
+    if entrypoint:
+        output = "[]" if kind == "emitter" else '{"decision":"noop","reason":"directory entrypoint"}'
+        main.write_text(f"print({output!r})", encoding="utf-8")
+        if entrypoint.endswith(".pyc"):
+            py_compile.compile(str(main), cfile=str(application / entrypoint), doraise=True)
+            main.unlink()
+    command = [sys.executable, "-u", "policy_app"]
+    spec = (
+        {"id": "{name}", "command": command, "cwd": str(tmp_path), "interval_seconds": 60}
+        if kind == "emitter" else {
+            "repo": "example/project", "evaluator_ref": "policy",
+            "evaluator_spec": {"scripts": {"policy": command}, "cwd": str(tmp_path)},
+        }
+    )
+    _, row = provider({"kind": kind, "spec": spec})
+    if entrypoint is None:
+        with pytest.raises(RegistrarError, match="missing script dependency"):
+            save(row)
+        assert not instance_dir().exists()
+        return
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    if kind == "evaluator":
+        assert load_registration_evaluator(dict(declaration.spec)).evaluate({})[0].reason == "directory entrypoint"
+    else:
+        child = subprocess.run(
+            declaration.spec["command"], cwd=declaration.spec["cwd"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert child.returncode == 0 and child.stdout.strip() == "[]", child.stderr
+
+
+def test_non_python_script_dependency_cannot_use_a_python_directory(tmp_path):
+    from agent_dispatch.worker_instances import _validate_command_dependency
+
+    executable = tmp_path / "fixture.tool"
+    executable.write_text("fixture", encoding="utf-8")
+    script = tmp_path / "script.sh"
+    script.mkdir()
+    (script / "__main__.py").write_text("print('[]')", encoding="utf-8")
+    with pytest.raises(RegistrarError, match="missing script dependency"):
+        _validate_command_dependency([str(executable), "script.sh"], tmp_path, explicit_cwd=True)
+
+
 @pytest.mark.parametrize("arguments", [
     ["-c", "print('[]')", "data.py"], ["-cprint('[]')", "--consumer-option", "data.py"],
     ["-m", "example.module", "data.py"], ["-mexample.module", "data.py"], ["--", "-"],
