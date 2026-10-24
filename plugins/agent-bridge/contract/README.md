@@ -46,6 +46,24 @@ When a wire contract does change:
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
+HTTP generation 47 adds explicitly negotiated incompatible-preservation cold
+drain. Confirmed disjoint ranges select cold by default; graceful-only control
+refuses before destructive effects. Independent expected control vectors live in
+`inputs/http47/negotiated-drain.json`; the real ASGI and owned-process counterparts
+are in `tests/test_cold_drain.py`. The preservation range is independent of the
+HTTP generation. A confirmed cold result cannot satisfy a required-graceful
+consumer. Same-native recovery admits one new outage-keyed reconnect prompt,
+not a replay of the interrupted request. See the
+[cold-drain contract](../docs/cold-drain.md).
+As with every semantic generation, publication must capture matching committed
+source and update the registry; expected input vectors alone are not immutable
+capture provenance. Published generation-46 startup packets and older evidence remain unchanged.
+An explicitly affected source may promote its registered current-generation
+unchanged-source link to shared semantic observations. That transition requires
+the same canonical source path and the exact registered packet hash; dirty,
+unregistered or foreign packets still refuse. Older-generation packets and
+their provenance are never rewritten by that promotion.
+
 HTTP generation 45 adds distinct ordinary native keyed-admission and
 receipt-only endpoints. Immutable binding facts and an admission receipt are
 inserted atomically with the turn using the existing unique delivery key.
@@ -137,6 +155,92 @@ probes through the existing contained runner, then writes only the corrected
 current families and registry. The no-write command verifies reproducibility.
 Historical vectors and capability floors are preserved. Execute it only in an
 admitted test environment; a passing source replay is not host qualification.
+
+## Capturing HTTP generation 47
+
+`tools/capture_bridge_http47.py` owns only generation 47. Do not use or broaden
+the generation-45 or three-vector preference-authority tools for this flow.
+
+Make an ordinary reviewed **source checkpoint commit first**, including the
+runtime changes, capture tool/helper, independent inputs and selected probe
+tests. Keep hooks enabled. This repository's `tools/hooks/pre-commit` checks
+staged lint/structure/size; it does not require generated contract evidence.
+The contract gate remains required before publication/CI completion, not before
+this local source checkpoint. No hook bypass, fabricated SHA, temporary guard
+disablement or version edit is needed. The later evidence changes form their
+own ordinary commit.
+
+The generated registry uses one-space JSON indentation to retain every
+provenance record within the repository's unchanged file-size limit. Packet
+formatting and historical packet bytes remain unchanged.
+
+From the Bridge development interpreter in an admitted, bounded test environment:
+
+```text
+python tools/capture_bridge_http47.py --source-commit <real-full-source-checkpoint> --write
+python tools/capture_bridge_http47.py --source-commit <real-full-source-checkpoint>
+python tools/check-agent-bridge-contracts.py
+```
+
+Use the consuming harness's bounded supervisor around these invocations. The
+capture itself runs the existing contained plugin runner with an exact
+model-free ASGI/owned-process probe portfolio. A missing, skipped, failed or
+duplicated required probe refuses publication. No real model, workspace owner,
+service installer or production target is used.
+
+Independent expected cases are in `inputs/http47/capture-cases.json`.
+The generated primary packet records actual observations, including graceful,
+strict refusal, authenticated default cold drain, real fixture-process exit,
+same-native loading, actual reconnect RPC response evidence and unchanged
+no-native allocation. Supporting native-fixture regressions cover ownership
+races, interrupted drain/registration/claim windows, supersession ordering,
+partial exit and uncertain admission. The required portfolio also covers
+ordinary and cold recovery versus concurrent drain, strict completion-flag
+decoding, the unresolved-reconnect fence across
+prompt-triggered, automatic and externally seeded handoffs, durable explicit-stop
+intent across recovery and schema migration, and real cancelled launcher threads
+retained in same-frontend, rehydrated and orphan-row drain censuses.
+These are source evidence, not native
+Copilot, deployment or host qualification.
+
+The affected semantic owners share this explicitly labelled operation evidence.
+Unchanged semantic sources receive link-only reattestations to hash-verified
+previous-generation vectors; they are not copied or relabelled as newly observed
+runtime packets. Existing generation-46 and older files, provenance, support floors and
+other contracts remain intact.
+
+The tool requires a genuine local generation-47 commit and committed execution
+inputs, checks source/input bytes before and after probes, and binds imported
+local production bytes. The primary packet retains the complete execution
+manifest, not just its digest. The canonical checker reconstructs its inventory
+from the source checkpoint and validates each source/blob/hash, including the
+cold-termination owner. If the checkpoint is orphaned, validation requires the
+complete current inventory and independently provable content-addressed blobs;
+an unprovable or changed inventory requires a fresh capture.
+
+Capture-only instrumentation verifies production module origins and executable
+code in the observer and every contributing recovery worker, Session Host and
+stdio peer. Each actual child launch must have its own pre-execution entrypoint
+receipt; crash-window exits do not depend on `atexit`. Missing bootstrap,
+substituted child-only source, stale executable bytecode or incomplete launch
+coverage refuses capture. The observer's third-party pytest entrypoint is
+checked against its installed distribution record, not claimed as repository
+source. Private PID/path receipts are not published. The deterministic packet
+records the binding policy; the no-write pass must repeat the actual checks.
+
+Every output is confined to the owned HTTP-47 paths and
+registry; traversal, symlink/reparse, hardlink, collision, unowned output and
+dirty-output cases refuse before writes. The no-write invocation reruns the
+probes and verifies reproducible evidence without rewriting public outputs.
+Registered HTTP47 packets are refreshable only within the exact write plan
+derived from the committed registry, under the existing family, generation,
+source-owner and registered-or-deterministically-planned hash checks. All planned
+outputs, including absent files and the registry, are snapshotted across probes.
+Unplanned packets, other contracts and deferred references retain committed-hash
+protection; a write-plan collision with any immutable reference refuses before
+probes or writes. Registered refresh followed by same-source no-write therefore
+does not require preserving obsolete hashes of its own authorized outputs.
+Neither invocation fetches history or supplies a guessed publication commit.
 
 HTTP generation 44 added the Bridge-owned startup plugin-readiness requirement,
 after generation 41's direct remote ACP targets and generation 42's attention

@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http47-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-client_worktrees-py-generation-46.json",
+    "sha256": "b60d0b1ba565e14d1bd46edb60550b0bcb4c88e556b9b2ed969c5a80c502bd99"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-owned-cold-drain.json",
+    "sha256": "92cecb3a89e40e28007c966a97e8f37b459bd9721ad632481a057718ab5eed22"
+  },
+  "scope": "source bytes unchanged; previous-generation vector preserved, not a new runtime capture",
+  "captured_from": {
+    "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 47,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+    "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+    "source_sha256": "15b4598ea31081173f418fc0e03a1bbecf0dac5d451cf27a726cf43a45671335"
+  }
+}

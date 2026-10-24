@@ -57,11 +57,20 @@ def _fixture(relative: str) -> dict:
 def test_http_declared_generation_matches_current_fixture() -> None:
     fixture = _fixture("fixtures/http/current/startup-observation-generation-46.json")
     body = fixture["response"]
+    assert body["protocol_version"] == bridge_protocol.STARTUP_PROGRESS_PROTOCOL_VERSION
+    assert body["min_protocol_version"] == bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED
+
+
+def test_http_declared_generation_matches_current_control_input() -> None:
+    fixture = _fixture("inputs/http47/negotiated-drain.json")
+    body = fixture["advertised"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
         == bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED
     )
+    previous = _fixture("fixtures/http/current/ordinary-native-admission-generation-45.json")
+    assert previous["response"]["protocol_version"] == bridge_protocol.KEYED_NATIVE_PROMPT_PROTOCOL_VERSION
 
 
 def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None:
@@ -72,7 +81,13 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
     assert bridge_protocol.REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION == 43
     assert bridge_protocol.PLUGIN_READINESS_PROTOCOL_VERSION == 44
     assert bridge_protocol.KEYED_NATIVE_PROMPT_PROTOCOL_VERSION == 45
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 46
+    assert bridge_protocol.STARTUP_PROGRESS_PROTOCOL_VERSION == 46
+    assert bridge_protocol.NEGOTIATED_DRAIN_PROTOCOL_VERSION == 47
+    assert (
+        bridge_protocol.NEGOTIATED_DRAIN_PROTOCOL_VERSION
+        > bridge_protocol.STARTUP_PROGRESS_PROTOCOL_VERSION
+    )
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 47
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -304,7 +319,7 @@ def test_workspace_creation_fixture_matches_additive_models_and_capability_floor
     assert fixture["capability"]["native_bound_prompt"] == bridge_protocol.NATIVE_BOUND_PROMPT_PROTOCOL_VERSION
 
 
-@pytest.mark.parametrize("generation", [35, bridge_protocol.HTTP_PROTOCOL_VERSION])
+@pytest.mark.parametrize("generation", [35, 45])
 def test_qualified_peer_contract_matches_current_fixture(generation) -> None:
     from agent_bridge.live_peer_address import LivePeerAddress
     from agent_bridge.remote_operations import REMOTE_PEER_REPLY_MIN_VERSION, REMOTE_RECEIPT_REPLY_MIN_VERSION
@@ -559,6 +574,7 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
     )
     actual = asyncio.run(health_route.health(request))
     expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION
+    expected["drain_contract"] = _fixture("inputs/http47/negotiated-drain.json")["advertised"]["drain_contract"]
     # "slot"."pid" is this test process's real pid (slot_descriptor calls
     # os.getpid() directly) -- not fixture-comparable byte-for-byte. Verify it
     # separately, then compare the rest of "slot" (and the whole body) exactly.
@@ -753,6 +769,58 @@ def test_available_historical_commit_with_missing_source_never_uses_frozen_fallb
     monkeypatch.setattr(subprocess, "run", git)
     with pytest.raises(subprocess.CalledProcessError):
         _historical_protocol("4ed08dcdd0e72377b95a67d6bd22aec819bf7fec")
+
+
+@pytest.fixture
+def empty_protocol_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key not in _GIT_ENV_NAMES
+        and not key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))
+    }
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    environment["GIT_CONFIG_GLOBAL"] = os.devnull
+    command = ["git", "-c", "core.hooksPath=" + os.devnull, "-C", str(tmp_path)]
+    options = {
+        "check": True, "capture_output": True, "text": True, "env": environment,
+        "timeout": 10, "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    }
+    subprocess.run([*command, "init", "--quiet"], **options)
+    subprocess.run([
+        *command, "-c", "user.name=Contract Fixture",
+        "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty",
+        "-m", "Empty historical protocol fixture",
+    ], **options)
+    commit = subprocess.run([*command, "rev-parse", "HEAD"], **options).stdout.strip()
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+    return commit
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_real_absent_historical_commit_verifies_frozen_source(
+    empty_protocol_repository: str, monkeypatch: pytest.MonkeyPatch, corrupt: bool,
+) -> None:
+    captured = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
+    commit = captured["captured_from"]["commit"]
+    assert commit != empty_protocol_repository
+    if corrupt:
+        captured["source_text"] += "\n"
+        monkeypatch.setattr(sys.modules[__name__], "_fixture", lambda _: captured)
+        with pytest.raises(AssertionError):
+            _historical_protocol(commit)
+    else:
+        protocol = _historical_protocol(commit)
+        assert protocol.PROTOCOL_VERSION == 1
+
+
+def test_real_existing_commit_without_source_refuses_frozen_fallback(
+    empty_protocol_repository: str,
+) -> None:
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _historical_protocol(empty_protocol_repository)
+    assert raised.value.returncode == 128
+    assert "show" in raised.value.cmd
 
 
 def _message_frames(protocol) -> dict[str, dict[str, str]]:

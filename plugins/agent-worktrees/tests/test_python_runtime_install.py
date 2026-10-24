@@ -21,6 +21,9 @@ from agent_procutil import no_window_kwargs
 def driver(monkeypatch):
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     monkeypatch.syspath_prepend(str(scripts))
+    # Track both first import and replacement so teardown restores the prior module.
+    monkeypatch.setitem(sys.modules, "runtime_install_governance", None)
+    monkeypatch.delitem(sys.modules, "runtime_install_governance")
     spec = importlib.util.spec_from_file_location("worktrees_python_runtime_install", scripts / "runtime_install.py")
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)
@@ -31,6 +34,42 @@ def driver(monkeypatch):
                        "runtime_generation": "test-generation"},
     })
     return module
+
+
+def test_driver_governance_uses_current_scripts(driver):
+    governance = sys.modules[driver.Governance.__module__]
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    assert Path(governance.__file__).resolve().parent == scripts
+    assert governance.SCRIPTS == scripts
+
+
+@pytest.mark.parametrize(("section", "field"), [
+    ("state", key) for key in (
+        "actualMode", "desiredMode", "status", "reason", "runtimeRoot",
+        "context", "activationGeneration", "installGeneration", "allowMutation",
+    )
+] + [
+    ("receipt", key) for key in (
+        "marketplaceId", "namespaceGeneration", "generation", "pluginRoot",
+    )
+])
+def test_governance_recheck_uses_signed_fields(driver, monkeypatch, section, field):
+    governance = driver.Governance.__new__(driver.Governance)
+    governance.initial = ({}, {
+        key: "original" for key in (
+            "marketplaceId", "namespaceGeneration", "generation", "pluginRoot",
+        )
+    })
+    state, receipt = (dict(value) for value in governance.initial)
+    monkeypatch.setattr(governance, "read", lambda: (state, receipt))
+    governance.recheck()
+    observed = state if section == "state" else receipt
+    observed["untracked"] = "ignored"
+    governance.recheck()
+    observed[field] = "changed"
+    diagnostic = "governance" if section == "state" else "receipt"
+    with pytest.raises(driver.InstallationRefused, match=f"Installation {diagnostic} changed"):
+        governance.recheck()
 
 
 @pytest.fixture(scope="module")
@@ -797,7 +836,9 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     }
     frozen_scripts = Path(provenance["frozen_plugin"]) / "scripts"
     frozen_scripts.mkdir(parents=True)
-    assert {"command_binding.py", "command_lifecycle.py"} <= set(installer._LIFECYCLE_FILES)
+    assert {
+        "command_binding.py", "command_lifecycle.py", "runtime_install_governance.py",
+    } <= set(installer._LIFECYCLE_FILES)
     for name in installer._LIFECYCLE_FILES:
         (frozen_scripts / name).write_text("frozen lifecycle", encoding="utf-8")
     (frozen_scripts / "installation-context").mkdir()

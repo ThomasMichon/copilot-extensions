@@ -480,6 +480,9 @@ POST   /api/v1/gc                        # Prune aged terminal/disconnected sess
 
 These back the zero-downtime redeploy flow -- see
 [Zero-Downtime Redeploy](#zero-downtime-redeploy).
+The separate [negotiated cold-drain contract](cold-drain.md) covers explicit
+incompatible-preservation interruption and same-native reconnect; it does not
+satisfy required-graceful rollout.
 
 ### Session States
 

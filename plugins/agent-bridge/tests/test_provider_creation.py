@@ -25,11 +25,10 @@ pytestmark = pytest.mark.contract("agent_bridge.provider_creation")
 
 
 def _current_refresh_fixture():
-    from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
-
+    # Placement semantics are frozen independently of unrelated HTTP additions.
     path = Path(__file__).resolve().parents[1] / "contract" / "fixtures" / "http" / "current"
     return json.loads(
-        (path / f"provider-creation-refresh-generation-{HTTP_PROTOCOL_VERSION}.json").read_text(encoding="utf-8"),
+        (path / "provider-creation-refresh-generation-45.json").read_text(encoding="utf-8"),
     )
 
 
@@ -416,7 +415,7 @@ def test_current_refresh_fixture_matches_real_http_producer_and_consumer(
     from agent_bridge.models import StartSessionRequest, StartSessionResponse
 
     fixture = _current_refresh_fixture()
-    expected = fixture["response"]
+    expected = {**fixture["response"], "protocol_version": protocol.HTTP_PROTOCOL_VERSION}
     rig = provider_rig
     rig.target = replace(rig.target, venue=json.loads(json.dumps(expected["creation"]["venue"])))
     rig.client.acp_session_id = expected["creation"]["native_session_id"]
@@ -441,7 +440,8 @@ def test_current_refresh_fixture_matches_real_http_producer_and_consumer(
     assert consumed.protocol_version == expected["protocol_version"]
     assert consumed.min_protocol_version == expected["min_protocol_version"]
     capability = fixture["capability"]
-    assert protocol.HTTP_PROTOCOL_VERSION == fixture["captured_from"]["protocol_generation"]
+    assert fixture["captured_from"]["protocol_generation"] == 45
+    assert protocol.HTTP_PROTOCOL_MIN_SUPPORTED <= 45 <= protocol.HTTP_PROTOCOL_VERSION
     assert protocol.PROVIDER_CREATION_PROTOCOL_VERSION == capability["provider_creation"]
     assert protocol.WORKSPACE_CREATION_PROTOCOL_VERSION == capability["workspace_creation"]
     assert StartSessionRequest(creation_key="ordinary").provider_instance == capability["ordinary_provider_instance_default"]

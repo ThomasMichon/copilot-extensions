@@ -824,6 +824,8 @@ missing legacy generation evidence remains unknown.
 
 Installation-cell governance waits use the caller's bounded installer wait
 budget, not the directory-lock helper's short initialization grace period.
+The installer keeps authority checks and lock ownership in the sibling
+`runtime_install_governance.py` module, retained with the installed bootstrap.
 On Windows, temporary frozen package inputs use the OS temporary directory:
 `CreateProcess` cannot start a build backend with an overlong working directory,
 even when long file paths are enabled. The installed slot stays in its authorized
