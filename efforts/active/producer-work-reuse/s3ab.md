@@ -18,6 +18,9 @@
 - **Historical evidence:** [authority accounting](s3ab-authority-proposal.md) and
   [strict-boundary lower bound](s3ab-boundary-decision.md) remain retained, not
   current-policy performance qualification.
+- **Next admission packet:** [R1a storage and pure freshness](inventory-freshness-admission.md),
+  with proposed APIs/bounds, grounded policy options and explicit F/S control
+  authority choice. No functional admission is implied.
 
 ## Request
 
