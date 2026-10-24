@@ -78,6 +78,7 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(monkeypatch, tmp_p
         )
     }
     http = registry["contracts"][0]
+    http["declared_range"]["current"] = 45
     http["fixtures"] = [row for row in http["fixtures"] if row["path"] in retained]
     sources = {
         capture.PREFIX + name for name in (
@@ -161,6 +162,7 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(monkeypatch, tmp_p
 def test_workspace_cli_creation_family_uses_real_parser_builder_and_complete_receipt(monkeypatch, capsys):
     from agent_bridge import __main__ as core, session_start_cli, workspace_creation_cli
     from agent_bridge.client import BridgeClient, BridgeClientError
+    from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
     from agent_bridge.session_preferences import SOURCE_ENV, CONTEXT_ENV
     vector = json.loads((INPUTS / "workspace-creation-cli.json").read_text(encoding="utf-8-sig"))
     monkeypatch.delenv(SOURCE_ENV, raising=False)
@@ -185,7 +187,7 @@ def test_workspace_cli_creation_family_uses_real_parser_builder_and_complete_rec
                 return {"protocol_version": daemon, "min_protocol_version": 1}
             calls.append((method, path, body))
             assert (method, path) == ("POST", "/api/v1/sessions/workspace-creations")
-            assert body == vector["request"]["wire"]
+            assert body == {**vector["request"]["wire"], "protocol_version": HTTP_PROTOCOL_VERSION}
             return copy.deepcopy(vector["server_response"])
 
         client._request = request

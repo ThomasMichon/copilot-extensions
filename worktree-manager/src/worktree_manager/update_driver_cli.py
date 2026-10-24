@@ -54,11 +54,12 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     mode.add_argument("--request-status", metavar="ID")
     mode.add_argument("--recovery-status", action="store_true")
     mode.add_argument("--recover-after-restart", action="store_true")
+    mode.add_argument("--recover-for-repair", action="store_true")
     parser.add_argument("--json", action="store_true")
     options, forwarded = parser.parse_known_args(rest)
     if "--auth-report" in forwarded and (options.detach or options.supervised_debug):
         parser.error("--auth-report cannot select an installation execution mode")
-    recovery = options.recovery_status or options.recover_after_restart
+    recovery = options.recovery_status or options.recover_after_restart or options.recover_for_repair
     if (options.request_status or recovery) and forwarded:
         parser.error("request inspection/recovery does not accept installation options")
     if options.json and not (options.detach or options.request_status or recovery or "--auth-report" in forwarded):
@@ -143,6 +144,9 @@ def _summary(request) -> dict:
         "error": request.error,
         "log_path": str(request.log_path),
         "settled_at": getattr(request, "settled_at", None),
+        "settlement_kind": getattr(request, "settlement_kind", None),
+        "recovery_authority": getattr(request, "recovery_authority", None),
+        "released_at": getattr(request, "released_at", None),
     }
 
 
@@ -154,6 +158,8 @@ def _report(request, *, as_json: bool) -> None:
         print(f"Update request {request.id}: {request.state}; log: {request.log_path}")
         if request.error:
             print(request.error, file=sys.stderr)
+        if summary["recovery_authority"]:
+            print(f"Repair release: {summary['recovery_authority']}; cleanup remains unconfirmed.")
 
 
 def cmd_update_request(rest: list[str]) -> int:
@@ -182,6 +188,13 @@ def cmd_update_request(rest: list[str]) -> int:
             data = {"settled": [_summary(request) for request in settled], "replayed": False}
             print(json.dumps(data) if options.json else
                   f"Settled {len(settled)} interrupted request(s); no update was run.")
+            return 0
+        if options.recover_for_repair:
+            released = driver.recover_for_repair(authorized=True)
+            data = {"released": [_summary(request) for request in released], "replayed": False}
+            print(json.dumps(data) if options.json else
+                  f"Released {len(released)} queue fence(s) by operator authorization; "
+                  "cleanup remains unconfirmed; no update was run.")
             return 0
         if options.request_status:
             request = driver.status(options.request_status)

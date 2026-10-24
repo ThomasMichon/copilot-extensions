@@ -350,6 +350,7 @@ def _carve_paired_knowledge(
             pair_role="knowledge",
             pair_ref=harness_ref,
             pair_kind="worktree",
+            owner_ref=harness_ref,
             codename=knowledge_codename,
             codename_source=fresh_policy_kwargs["codename_source"],
         )
@@ -384,6 +385,8 @@ def _stamp_and_compose_paired_knowledge(
     record.pair_role = pair_stamp.get("pair_role")
     record.pair_ref = pair_stamp.get("pair_ref")
     record.pair_kind = pair_stamp.get("pair_kind")
+    from . import paired_claims
+    paired_claims.ensure_claim(record, save=False)
     tracking.save_record(record)
 
     from . import knowledge_plugins

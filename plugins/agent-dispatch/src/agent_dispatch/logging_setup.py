@@ -1,33 +1,20 @@
-"""Configure persistent, rotating file logging for the ``agent-dispatch``
-logger hierarchy.
-
-Every submodule across this package already calls ``logging.getLogger(
-"agent-dispatch.<name>")`` and logs meaningful operational events (body
-recovery, reservation retirement, carried-session decisions, coordinator
-errors) -- but **nothing in the package ever configures a logging handler**.
-Python's logging module silently drops every record below WARNING with no
-handler attached, and even WARNING/ERROR records only reach the "handler of
-last resort" (stderr) -- which goes nowhere for a daemon launched via
-``pythonw.exe`` with no attached console (the normal way both the coordinator
-and the supervisor run). The result: every ``log.info``/``log.warning``/
-``log.exception`` call in this package has been operationally invisible,
-making exactly the kind of diagnosis this module exists to support (why did
-the supervisor stop spawning anything?) require manual SQLite/process
-archaeology instead of reading a log file (copilot-extensions#4978).
+"""Configure retained application diagnostics for ``agent-dispatch.*``.
 
 Call :func:`configure_file_logging` once, early, from each long-running
 daemon entrypoint (the coordinator's ``serve`` and the supervisor's
 ``supervise serve``) -- never from a short-lived CLI invocation, which would
-needlessly create log files for every one-off command.
+needlessly create log files for every one-off command. Native stdout/stderr,
+installer attempts and old text handlers are separate owners; ``logs`` discovers
+their locations without claiming application retention covers them.
 """
 
 from __future__ import annotations
 
 import logging
-import logging.handlers
 from pathlib import Path
 
 from . import install_paths
+from .diagnostic_logs import DiagnosticLog
 
 #: Every submodule logs under this parent name (see the many
 #: ``logging.getLogger("agent-dispatch.<x>")`` call sites) -- attaching one
@@ -39,16 +26,12 @@ _PACKAGE_LOGGER_NAME = "agent-dispatch"
 #: rather than stacking duplicate handlers and double-logging every record.
 _HANDLER_MARKER = "_agent_dispatch_file_handler"
 
-_MAX_BYTES = 5_000_000
-_BACKUP_COUNT = 3
-
-
 def configure_file_logging(
     name: str, *, level: int = logging.INFO, install_dir: Path | None = None
 ) -> Path:
-    """Attach a rotating file handler for ``agent-dispatch.*`` loggers.
+    """Attach an age-retained JSONL handler for ``agent-dispatch.*`` loggers.
 
-    ``name`` picks the log file (``<install_dir>/logs/<name>.log``) -- pass a
+    ``name`` picks ``<install_dir>/logs/diagnostics/<name>.jsonl`` -- pass a
     distinct name per daemon (``"coordinator"``, ``"supervisor"``) so they
     don't interleave into one file. Returns the resolved log file path.
 
@@ -66,19 +49,8 @@ def configure_file_logging(
         return Path(existing)
 
     root = install_dir if install_dir is not None else install_paths.install_dir()
-    log_dir = root / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{name}.log"
-
-    handler = logging.handlers.RotatingFileHandler(
-        log_path, maxBytes=_MAX_BYTES, backupCount=_BACKUP_COUNT, encoding="utf-8"
-    )
-    handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-            datefmt="%Y-%m-%dT%H:%M:%S%z",
-        )
-    )
+    handler = DiagnosticLog(name, root)
+    log_path = handler.path
     setattr(handler, _HANDLER_MARKER, True)
 
     package_logger.addHandler(handler)

@@ -1,0 +1,14 @@
+{
+  "schema": "copilot-extensions.construction-targets",
+  "version": 1,
+  "python_minors": ["3.11", "3.12", "3.13", "3.14", "3.15"],
+  "targets": [
+    {"id": "windows-x64", "os": "windows", "architecture": "x64", "hardware": "generic"},
+    {"id": "windows-arm64", "os": "windows", "architecture": "arm64", "hardware": "generic"},
+    {"id": "linux-x64", "os": "linux", "architecture": "x64", "hardware": "generic"},
+    {"id": "linux-arm64", "os": "linux", "architecture": "arm64", "hardware": "generic"},
+    {"id": "macos-x64", "os": "macos", "architecture": "x64", "hardware": "generic"},
+    {"id": "macos-arm64", "os": "macos", "architecture": "arm64", "hardware": "generic"},
+    {"id": "raspberry-pi-5", "os": "linux", "architecture": "arm64", "hardware": "raspberry-pi-5"}
+  ]
+}

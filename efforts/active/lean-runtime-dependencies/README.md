@@ -213,8 +213,8 @@ API merged in #7044, not approval-source integration, a loader, publication or
 acquisition. #6941 retains the separate contributor-owned
 candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
 Darwin acceptance remain with #5768. Apply the reviewed profile contract under
-#6737, composing #6598 construction and #6707 admission rather than overlapping
-their open implementations. The effort and retained runtime/state stay open.
+#6737, composing the merged #6598 construction and #6707 admission rather than
+creating another constructor. The effort and retained runtime/state stay open.
 
 The next stretch follows the operator-approved
 [zero-configuration default](zero-configuration-defaults.md). A harness-supplied
@@ -682,3 +682,82 @@ profile-record API or a competing admission constructor.
   that is not evidence of abandonment or permission to create a replacement.
   Native integration remains blocked on an accepted owner contract, with
   responsibility retained here and no completed transfer claimed.
+
+### 2026-10-23 - Consume merged admission and verify actual profile wheel bytes
+- #6707 merged as `7519c4113c84c00b7831d3fc146dab455013097f` on October 20.
+  Consumed its shared constructor through managed post-merge reconciliation;
+  the earlier open-draft coordination wait no longer applies. Its retained
+  source transaction, construction/health ownership and source identity remain
+  the implementation to compose, not a replacement target.
+- #7092 merged as `1028136fa616c3d81401b4e07ff1f89a60c90310` after a clean
+  reduced current-head review and successful CI `39001643452`, with all 45
+  actual contexts complete. Re-read the canonical Plan and default sub-plan;
+  only intent/review accounting closed. The earlier native timeout remains
+  tracked separately in #7020, not resolved by a different passing invocation.
+- Advanced the actual-byte prerequisite of the reviewed exact-profile
+  contract. The existing wheel validator now supplies inspected metadata and
+  unpacked size to a repository-only complete-set verifier. Exact archive
+  digests, actual Python/dependency/extra metadata, wheel identity/tags and
+  RECORD content must agree within explicit caller budgets; no extraction or
+  package execution occurs. First-party promotion keeps its generator check.
+- The source-only pure unit packet includes the actual-byte refusal and
+  boundary controls; it does not become a runtime integration test. This
+  precursor neither authenticates the profile nor proves a real permitted CPU
+  closure, target device, feed admission or reusable receipt. Those and native
+  application remain open. #6941 retains candidate-input ownership.
+- The operator renewed direction to continue driving this campaign as owner.
+  Keep the next authority/actual governed closure and native integration gates
+  here; no takeover, accepted transfer, model/corpus mutation or rollout is
+  inferred from the admission merge or byte verification.
+- Actual Windows packet validation exposed native operations in two existing
+  unit wrappers: FIFO creation skipped without `os.mkfifo`, and preservation
+  file access reached the native loader. Retained the original assertions with
+  synthetic FIFO metadata and ordinary synthetic file read/replace adapters.
+  Production adapters and original native library tests remain unchanged.
+  Keep the observer, zero-skip rule and whole-packet deadline intact (#1303).
+- Pre-publication code validation passed the complete admitted packet: 1,175 cases,
+  no skips or actor effects, 234.094 seconds including coverage recording
+  within the unchanged 300-second bound. The focused verifier/source-metadata
+  regression selection passed 135 cases; the earlier normal and optimized
+  Python selections each passed 121. Actual retained file handles exercise the
+  helper's consumer contract, not just in-memory asserted records.
+- Module ceilings and changed-code lint pass. The static source-metadata
+  validator moved unchanged into its existing source-admission component with
+  a public re-export; its function AST is identical. Broader mixed native
+  artifact cohorts exceeded their bounded invocation windows; their full
+  completion is not claimed. Initial Windows fixture-path failures were
+  diagnosed and avoided with a shorter private fixture root, without changing
+  Git configuration or filesystem policy.
+- Clean-room provisioning and live engine validation are not applicable to
+  this repository-only, non-enabled helper slice. Real governed acquisition,
+  first-use construction, approved CPU/accelerator closure and external native
+  acceptance remain explicit prerequisites of the later consumer integration.
+- Hosted Linux CI exposed an incidental native-loader import through the
+  builder's filename parser. Moved that pure grammar into the existing static
+  source-admission component and retained the builder's public delegation/error
+  type. Byte verification now has a regression that forbids builder/feed
+  imports; no effect-observer exception or preloading workaround is used.
+- Review also corrected runtime wheel compatibility for dotted distribution
+  aliases and SHA-384/SHA-512 RECORD entries. Archive/source identities remain
+  SHA-256, and first-party promotion keeps its existing generator, exact
+  version spelling and SHA-256 RECORD requirements. These corrections do not
+  add a feed, acquisition authority or construction mode.
+- Post-review controls passed 154 cases under both normal and optimized Python,
+  including the old builder parser API. All 187 changed byte-verifier and
+  portable-wrapper nodes also passed under the unchanged effect observer with
+  coverage in 49.734 seconds. The latest whole-Windows packet reached its
+  unchanged 300-second bound and is not counted as a completed packet; required
+  hosted full-packet validation remains independent. No deadline was widened
+  or partial result promoted to a full receipt.
+- Subsequent review caught a caller-side `packaging` dependency in that shared
+  token parser. Restored dependency-free structural parsing and the builder's
+  original numeric-version policy; PEP 440 comparison remains lazy in the
+  runtime inspection path. A real fresh `-I -S` caller with `packaging`
+  deliberately unavailable now exercises both the builder parser and
+  first-party inspector, preserving the locked-toolchain bootstrap boundary.
+- That clean-caller correction passed 156 focused cases under normal and
+  optimized Python, plus all 188 changed nodes under the original effect
+  observer in 71.281 seconds including coverage. The native child check stays
+  outside the no-actor packet. Upstream unit-inventory conflicts were
+  reconciled as this PR's exact delta, preserving other contributors' additions
+  and removals and rebinding merged source hashes without changing policy.
