@@ -88,6 +88,42 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-IMPERFECT existing fixture and fault prerequisites remain separate
+
+This settles only these two original keys; their headers, hashes and
+`MX-IMPERFECT` dispositions below remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_recovery_imperfect_evidence.py:1` | `1f82f652d7f943859137afca807e46728abda964d4f96597a9d56a550ee9707f` |
+| `tests/test_pr_recovery_imperfect_evidence.py:2` | `b05aada0c2ef638008644b590df6bdf065fc1e6ef1b8763df435d05d904744d4` |
+
+Hunk 1's recovered/backed seed and `backed_pr` imports, plus the replacement
+`BackedPR` type, belong to B-BACKED. Hunk 2's `backed_pr: BackedPR` argument
+and direct seven-field unpack replace fresh `backed_publication` construction
+under that same fixture contract. Actual #7918 merge
+`59ca4d10403d517063528539e3b9e8a9ef173178` contains these changes. The
+complete imperfect-evidence module matches both that merge and the immutable
+source by AST at comparison `8f53af6dfc`.
+
+The added `pr_rebase` import in hunk 1 and `encoding_probes` accumulator in
+hunk 2 instead belong to B-RECOVERY-FAULT. Both already exist in actual #7898
+merge `74dfe1d06ab9085648d5444c270d937de1650fa0` and remain present exactly
+once. The unusable-checkpoint test's body after the initial unpack matches
+that merge by AST, including the accumulator and its real binary-transport
+consumer. Only its fixture signature and initial unpack were subsequently
+replaced by B-BACKED; there is no whole-function equivalence claim against
+#7898. The separately admitted fault hunks 3-4 are not reopened.
+
+Surrounding unchanged imports, parameters, checkpoint reads and defect
+labels are context, not extra ownership. No implementation or test change
+is needed. The complete imperfect-evidence module passes all 15 cases:
+190.37 pytest seconds, 210.30 seconds including preparation and cleanup,
+exactly two contained native Windows workers and all original marks and
+limits. This is focused functional evidence only, not normal-group or
+repeated complete same-head timing qualification. Other residuals and the
+parent Windows qualification obligation remain open.
+
 ### MX-FINAL existing imports retain separate S and F ownership
 
 This settles only `src/agent_worktrees/finalize_ref.py:1`. Its exact header is:
