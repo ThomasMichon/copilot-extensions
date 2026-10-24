@@ -1,5 +1,62 @@
 # Atomic creation and handoff review proposal
 
+## Counterexample at the admitted recovery boundary
+
+The caller-only owner fencing is now admitted, with existing-token-only
+authentication and no new ZDD implementation. Before claiming that wiring
+could establish the full recovery contract, a bounded injected probe exercised
+the **existing actual guarded ZDD rollback and actual ControlClient.undrain**
+with a retained token, exact old/new endpoints, successful successor-exit
+confirmation, and an old-process identity health predicate.
+
+Two causal cases fail: change the retained old PID/start identity, or publish
+a third owner, at the restoration-publication/undrain boundary. In each case,
+the existing rollback still invokes `ControlClient.undrain()`. The
+constructor's `refuse_old` callback is not consulted at this normal rollback
+publication or immediately before that request. Its request carries no
+retained-owner condition. A positive unbound reply can also set
+`rolled_back=True`; that flag alone is not verified recovery.
+
+The new cases in `tests/test_status_monitor_cutover_helper.py` are deliberately
+failing at this explicit stop. They are a component-boundary counterexample,
+**not** a completed `activate_after_update`/orchestrator integration proof and
+not native qualification. The first run exposed a missing `ok` fixture
+argument; after correcting only that fixture, both cases failed on the actual
+unexpected undrain calls. Production code is unchanged.
+
+Raw evidence was opened before execution and retained:
+
+- `.venv-tools/r1a-guarded-rollback-boundary-failfirst-20261024.log`
+- `.venv-tools/r1a-guarded-rollback-boundary-regression-20261024.patch`
+
+### Exact remaining owner decision
+
+Do not silently extend the newly admitted caller hunk or auto-undrain a
+superseded process. The receiving monitor's existing `undrain` branch currently
+sets `admission_closed=False` before activation. Its projection authority check
+uses `active_generation_for_pid`, which checks routed **PID only**, not the
+retained native start identity. That is not enough to qualify the PID-reuse
+case; existing projection election can reject a third PID, but does not make
+the unbound client request itself a retained-owner receipt.
+
+The smallest additional candidate is an exact receiving-side
+`status_monitor_cli.py:_handle_control("undrain")` owner fence **before any
+admission/publisher/receipt/carrier reopening**. It would use existing route
+and native self-identity mechanisms to refuse a route that no longer names
+that actual process, including start identity, and preserve closed state on
+failure. No new wire field or ZDD implementation is proposed implicitly.
+Present legacy records lacking the necessary identity must remain explicitly
+unqualified, never rewritten merely to match the expectation. This candidate
+still requires an owner decision and actual server/client/guarded-rollback
+pairing tests: it is not proven by the injected unbound-client probe.
+
+If the required contract instead forbids even issuing an undrain RPC after
+owner change, an explicit receiver-bound conditional operation or a stronger
+existing lifetime/authority primitive must first be selected. A caller-side
+second snapshot alone only moves the race; do not call it atomic recovery.
+Neither candidate is implemented at this stop. Atomic/facade implementation
+and source acceptance remain unfinished; native admission remains absent.
+
 ## Admission update and newly exposed recovery stop
 
 The exact private-adapter deadline/stream-retention amendment, local

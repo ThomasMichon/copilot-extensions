@@ -22,6 +22,14 @@ performance-measurement, headless-launch and process-containment patterns.
 
 ### Current admitted slice
 
+**Current stop:** the caller-only guarded recovery amendment is admitted,
+but two injected guarded-rollback/actual-client boundary cases still issue
+unbound undrain after PID/start reuse or a third-owner publication. The
+counterexample and exact receiving-side fence candidate are at the top of
+the [recovery proposal](atomic-creation-and-drain-review-proposal.md).
+The new regression cases intentionally fail locally; they are not published
+or waived. No additional production/native/client implementation is claimed.
+
 The implementation amendment is **Windows first; keep POSIX work open**.
 The draft #8458 now includes the exact instance-owned caller-custody and
 nonblocking Windows Job settlement design in
