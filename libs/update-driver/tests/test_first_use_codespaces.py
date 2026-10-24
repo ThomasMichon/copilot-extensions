@@ -238,7 +238,7 @@ def test_actual_codespaces_cold_install_preserves_selection_and_installed_origin
     # Owner queries intentionally ignore CWD and read only adopted repositories.
     installation.mkdir()
     (installation / "adopted-repos.yaml").write_text(
-        json.dumps({"repos": [{"path": str(project)}]}), encoding="utf-8",
+        "repos:\n  - path: " + json.dumps(str(project)) + "\n", encoding="utf-8",
     )
     if os.name == "nt":
         # Never let the canonical disabled-config branch inspect a host task.
@@ -285,6 +285,13 @@ def test_actual_codespaces_cold_install_preserves_selection_and_installed_origin
     slot = installation / "versions" / version
     completion = slot / ".install-complete.json"
     complete = completion.read_bytes()
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    owner = subprocess.run(
+        [str(python), "-I", "-B", "-m", "agent_codespaces", "owner", "--status"],
+        env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert owner.returncode == 0, owner.stdout + owner.stderr
+    assert json.loads(owner.stdout)["enabled"] is False
     project_file = payload / "pyproject.toml"
     project_file.write_text(re.sub(
         r'(?m)^version\s*=\s*"[^"]+"', 'version = "99.0.0"', project_file.read_text(),
@@ -301,13 +308,6 @@ def test_actual_codespaces_cold_install_preserves_selection_and_installed_origin
     assert not (installation / "versions" / "99.0.0" / ".install-complete.json").exists()
     payload.rename(payload.with_name("removed-codespaces"))
     inputs.rename(area / "removed-foundation-source")
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    owner = subprocess.run(
-        [str(python), "-I", "-B", "-m", "agent_codespaces", "owner", "--status"],
-        env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
-    )
-    assert owner.returncode == 0, owner.stdout + owner.stderr
-    assert json.loads(owner.stdout)["enabled"] is False
     command = installation.parent / ".local" / "bin" / (
         "agent-codespaces.ps1" if os.name == "nt" else "agent-codespaces"
     )
