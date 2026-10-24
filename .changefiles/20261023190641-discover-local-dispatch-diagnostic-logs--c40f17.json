@@ -1,0 +1,9 @@
+{
+  "comment": "Discover local Dispatch diagnostic logs and retain application records by UTC elapsed age across concurrent writers and daemon maintenance.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

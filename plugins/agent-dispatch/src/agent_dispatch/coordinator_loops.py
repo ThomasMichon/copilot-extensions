@@ -438,6 +438,8 @@ async def _gc_loop(
     )
     while True:
         await asyncio.sleep(health.current_interval)
+        from .diagnostic_logs import maintain_file_logging
+        await asyncio.to_thread(maintain_file_logging)
         if await governance_backoff(
             governance,
             "iteration-boundary:liveness-gc",

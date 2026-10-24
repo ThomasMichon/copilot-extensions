@@ -96,3 +96,48 @@ The following implementation details are **agent-recommended**:
   native/live evidence for changed owners. An unavailable lane stays explicit.
 - [ ] Publish source through review/CI, then separately qualify released and
   admitted running behavior. Do not mark the parent effort Done at plan merge.
+
+## Dispatch application source slice (#8377)
+
+`spinning-sprocket` takes only the Dispatch application-handler and local
+discovery slice. Reconciliation confirmed #8370's independent installer capture
+and #6812's progress presentation ownership; neither shared implementation is
+modified. The source realization is described in
+[Dispatch diagnostic logs](../../../plugins/agent-dispatch/docs/diagnostic-logs.md).
+It closes part of the reviewed `convention-discoverable-diagnostic-logs` intent,
+not the whole feature or any live deployment gate.
+
+- [x] Reconcile the bounded application/native writer seams and preserve adjacent
+  installer/progress ownership before editing.
+- [x] Select an explicit application namespace so legacy/native inherited
+  handles cannot be renamed/truncated by the new handler.
+- [x] Implement and validate application UTC attribution, exact record-age
+  retention, real concurrent writers and active/archived/fallback discovery.
+- [ ] Publish the bounded source through passing review and required CI.
+- [ ] Integration owner: qualify release and authorized running adoption, and
+  complete the remaining native/installer/Bridge/telemetry/controller/container
+  inventory, owner adapters and failure-stage correlation gates above.
+
+The broad Plan and validation items remain open: an application handler cannot
+promise timestamps or retention for native stdout/stderr, early bootstrap,
+installer attempts, optional spools or a deployment adapter.
+
+### Journal
+
+- 2026-10-23 — Implementation starts with Dispatch application diagnostics using
+  its existing install resolver, operation lock, package logger, daemon GC and
+  supervisor iteration. Read-only JSON discovery includes unmanaged legacy/
+  native/fallback locations and missing files. No new collector or deployment
+  operation; #8370/#6812/#8334 implementation seams remain untouched.
+- 2026-10-23 — Native Windows source validation: 240 tests pass across the new
+  diagnostics and existing coordinator/supervisor suites; the focused final
+  diagnostics plus telemetry run passes 40 tests (13 diagnostics). This includes
+  real concurrent process/thread Unicode rotation, exact cutoff/timezone/skew,
+  continuous active output, forced idle/restart pruning, actual daemon
+  maintenance before governance backoff, fresh read-only CLI discovery,
+  fail-open replacement/initialization and excluded arbitrary LogRecord extras.
+  Ruff F/E9, install-contract (13 plugins), documentation consistency and diff
+  whitespace checks pass. These are application-handler tests, not native
+  stdout/stderr framing or deployed service proof. Linux/macOS native lanes and
+  live external qualification are not available in this source-only Windows
+  scope; those gates remain open with the integration owner.
