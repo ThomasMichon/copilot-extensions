@@ -193,7 +193,7 @@ def _check_requirement(
     candidate = _contained(candidate, roots)
     if not candidate.is_dir():
         raise DependencyPolicyError("local artifacts cannot prove release age; only owned source directories are exempt")
-    if isinstance(seen, _CompileMetadata):
+    if isinstance(seen, (_CompileMetadata, _SourceCompileMetadata)):
         raise DependencyPolicyError("lock export cannot retain directory dependencies or local artifacts")
     _check_project(candidate, roots, seen, expected)
     return candidate
@@ -527,18 +527,10 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
 
 
 def _compile_arguments(arguments, environment, cwd, roots, operation):
-    packages = ()
-    if operation == "source-compile":
-        _, projects, _, _ = _source_inputs(
-            arguments, environment, cwd, roots, operation=operation,
-        )
-        packages = tuple(sorted(_identity(_toml(path / "pyproject.toml")["project"]["name"])
-                                for path in projects))
-        if not packages or len(set(packages)) != len(packages):
-            raise DependencyPolicyError("source lock export needs an unambiguous owned project graph")
-    return _configuration.compile_arguments(
-        arguments, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
-        source_packages=packages,
+    return _configuration.source_compile_arguments(
+        arguments, environment, cwd, roots, operation, source_inputs=_source_inputs,
+        toml=_toml, identity=_identity, argument_pairs=_argument_pairs,
+        error_type=DependencyPolicyError,
     )
 
 
@@ -580,7 +572,7 @@ def prepare_uv_install(
     if operation == "compile":
         _configuration.check_compile_projection(
             result.stdout, arguments, argument_pairs=_argument_pairs,
-            balanced=_balanced, error_type=DependencyPolicyError,
+            balanced=_balanced, error_type=DependencyPolicyError, source_graph=_operation == "source-compile",
         )
     if _projection is not None:
         _projection.append(result.stdout)
@@ -600,41 +592,11 @@ def _check_requirements_sources(
     projects: set[Path] | None = None, files: set[Path] | None = None,
     editables: set[Path] | None = None,
 ) -> None:
-    projects = set() if projects is None else projects
-    if path.suffix == ".toml":
-        if path.name != "pyproject.toml":
-            raise DependencyPolicyError("dependency TOML input lacks attributable project identity")
-        _check_project(path.parent, roots, projects)
-        return
-    path = path.resolve()
-    if path in seen:
-        raise DependencyPolicyError("cyclic requirement includes cannot prove dependency sources")
-    seen = seen | {path}
-    if files is not None:
-        files.add(path)
-    try:
-        text = re.sub(r"\\\r?\n", " ", path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise DependencyPolicyError("dependency sources file could not be read") from exc
-    for line in text.splitlines():
-        line = re.split(r"\s+#", line, maxsplit=1)[0].strip()
-        if not line or line.startswith("#"):
-            continue
-        include = re.fullmatch(r"(?:-r|--requirements?|--constraints?|-c)\s+(.+)", line)
-        if include:
-            _check_requirements_sources(
-                path.parent / include[1], seen, roots, base, projects, files, editables,
-            )
-        elif line.startswith(("--index-url ", "--extra-index-url ", "--index-url=", "--extra-index-url=")):
-            continue
-        elif line.startswith(("-e ", "--editable ")):
-            source = _check_requirement(line.split(maxsplit=1)[1], base, roots, projects)
-            if source is not None and editables is not None:
-                editables.add(source)
-        elif line.startswith("-"):
-            raise DependencyPolicyError("unsupported dependency sources option")
-        else:
-            _check_requirement(re.sub(r"\s+--hash=\S+", "", line), base, roots, projects)
+    _configuration.check_requirements_sources(
+        path, seen, roots, base, projects, files, editables,
+        check_project=_check_project, check_requirement=_check_requirement,
+        error_type=DependencyPolicyError,
+    )
 
 
 _configuration_path = Path(__file__).with_name("installer_dependency_config.py")
@@ -998,12 +960,7 @@ def retain_uv_compile(uv: str, arguments: list[str], **options):
 
 
 def retain_uv_source_compile(uv: str, arguments: list[str], **options):
-    """Retain an owned source graph and omit only its projects from lock output.
-
-    The caller independently verifies source identity and owns the returned
-    snapshot through export consumption. This is a candidate third-party lock,
-    not feed admission, source approval or permission to construct a runtime.
-    """
+    """Retain source metadata for candidate export, never origin/feed approval."""
     return retain_uv_install(uv, arguments, _operation="source-compile", **options)
 
 

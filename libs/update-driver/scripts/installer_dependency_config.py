@@ -486,6 +486,45 @@ def cutoff_arguments(settings, *, now, operation, min_age, balanced, remote_refe
     return [*result, "--reinstall"] if operation == "install" else result
 
 
+def source_compile_packages(projects, *, toml, identity, error_type):
+    names = []
+    omissions = set()
+    for path in projects:
+        data = toml(path / "pyproject.toml")
+        project = data["project"]
+        names.append(identity(project["name"]))
+        required = {
+            identity(match[1])
+            for requirement in project.get("dependencies", [])
+            if isinstance(requirement, str) and ";" not in requirement and "@" not in requirement
+            and (match := re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", requirement))
+        }
+        for name, mapping in data.get("tool", {}).get("uv", {}).get("sources", {}).items():
+            if isinstance(mapping, dict) and "path" in mapping:
+                name = identity(name)
+                if name not in required:
+                    raise error_type("source lock export cannot omit a conditional or unselected local dependency")
+                omissions.add(name)
+    if not names or len(set(names)) != len(names):
+        raise error_type("source lock export needs an unambiguous owned project graph")
+    return tuple(sorted(omissions))
+
+
+def source_compile_arguments(
+    arguments, environment, cwd, roots, operation, *,
+    source_inputs, toml, identity, argument_pairs, error_type,
+):
+    packages = ()
+    if operation == "source-compile":
+        _, projects, _, _ = source_inputs(
+            arguments, environment, cwd, roots, operation=operation,
+        )
+        packages = source_compile_packages(projects, toml=toml, identity=identity, error_type=error_type)
+    return compile_arguments(
+        arguments, argument_pairs=argument_pairs, error_type=error_type, source_packages=packages,
+    )
+
+
 def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=()):
     """Bounded requirements export, never an implicit incremental lock update."""
     values = {
@@ -533,7 +572,7 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
             *[argument for name in source_packages for argument in ("--no-emit-package", name)]]
 
 
-def check_compile_projection(projection, arguments, *, argument_pairs, balanced, error_type):
+def check_compile_projection(projection, arguments, *, argument_pairs, balanced, error_type, source_graph=False):
     """Output policy is effective configuration, not merely a CLI intention."""
     for field, expected in (
         ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
@@ -558,7 +597,7 @@ def check_compile_projection(projection, arguments, *, argument_pairs, balanced,
     expected = [value for option, value in argument_pairs(arguments) if option == "--no-emit-package"]
     if names != expected:
         raise error_type("UV lock export output omissions differ from the retained source graph")
-    if expected and not re.search(r"(?m)^\s*sources:\s*None,\s*$", projection):
+    if source_graph and not re.search(r"(?m)^\s*sources:\s*None,\s*$", projection):
         raise error_type("source lock export cannot disable its retained source mappings")
     outputs = [value for option, value in argument_pairs(arguments) if option in ("-o", "--output-file")]
     output = re.search(r"(?m)^\s*output_file:\s*(None,|Some\()", projection)
@@ -573,6 +612,48 @@ def check_compile_projection(projection, arguments, *, argument_pairs, balanced,
             raise error_type("UV lock export output path is unsupported") from exc
     if selected != (outputs[-1] if outputs else None):
         raise error_type("UV lock export output must be selected explicitly by the caller")
+
+
+def check_requirements_sources(
+    path, seen, roots, base, projects, files, editables, *,
+    check_project, check_requirement, error_type,
+):
+    projects = set() if projects is None else projects
+    if path.suffix == ".toml":
+        if path.name != "pyproject.toml":
+            raise error_type("dependency TOML input lacks attributable project identity")
+        check_project(path.parent, roots, projects)
+        return
+    path = path.resolve()
+    if path in seen:
+        raise error_type("cyclic requirement includes cannot prove dependency sources")
+    seen = seen | {path}
+    if files is not None:
+        files.add(path)
+    try:
+        text = re.sub(r"\\\r?\n", " ", path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise error_type("dependency sources file could not be read") from exc
+    for line in text.splitlines():
+        line = re.split(r"\s+#", line, maxsplit=1)[0].strip()
+        if not line or line.startswith("#"):
+            continue
+        include = re.fullmatch(r"(?:-r|--requirements?|--constraints?|-c)\s+(.+)", line)
+        if include:
+            check_requirements_sources(
+                path.parent / include[1], seen, roots, base, projects, files, editables,
+                check_project=check_project, check_requirement=check_requirement, error_type=error_type,
+            )
+        elif line.startswith(("--index-url ", "--extra-index-url ", "--index-url=", "--extra-index-url=")):
+            continue
+        elif line.startswith(("-e ", "--editable ")):
+            source = check_requirement(line.split(maxsplit=1)[1], base, roots, projects)
+            if source is not None and editables is not None:
+                editables.add(source)
+        elif line.startswith("-"):
+            raise error_type("unsupported dependency sources option")
+        else:
+            check_requirement(re.sub(r"\s+--hash=\S+", "", line), base, roots, projects)
 
 
 def compile_requirement_includes(text, source, mirror, remap=None):

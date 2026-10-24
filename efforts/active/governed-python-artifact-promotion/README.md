@@ -692,11 +692,13 @@ win grows with build complexity.
 
 - Added an explicit `retain_uv_source_compile` API to the existing retained
   transaction. Native UV resolves the retained local graph's transitive
-  requirements while omitting exactly its unique first-party distributions
-  from hashed third-party output. Ordinary compile still refuses directory
+  requirements while omitting only unconditional local mappings required by
+  each owning project's unmarked base dependencies. Root metadata does not
+  suppress its own registry identity. Ordinary compile still refuses directory
   dependencies. Effective omission drift, disabled local sources, ambiguous
-  identities, conditional/alternative local mappings, remote inputs and local
-  artifacts refuse; ordinary third-party named-index mappings remain supported.
+  identities, direct local requirements, conditional/alternative or optional-only
+  local mappings, remote inputs and local artifacts refuse; ordinary third-party
+  named-index mappings remain supported.
 - This realizes the reviewed source-fallback contract's candidate-export seam,
   not its origin approval, exact installation receipt, governed acquisition or
   consumer enablement. The caller must bind independently selected source
@@ -706,13 +708,22 @@ win grows with build complexity.
   changefile for every affected plugin. The tests extend the existing optional
   native compiler lane; no effectful test joins required unit-only CI.
   Candidate-constraint generation remains owned by the external #6941.
-- Final targeted validation passed 331 controls, including real dated-feed
+- Before review repair, targeted validation passed 331 controls, including real dated-feed
   source retention, transitive seasoning/hash export, missing-age refusal,
   ordinary directory refusal, named-index preservation and cleanup.
   Install-contract, helper synchronization, Python lint and diff checks pass.
   The unchanged required packet passes all 1497 units with no observed effects
   in 234.219 seconds at `aee33e0ffb04d74f2d671acdef586e5d781cd65e`.
-  Published-head Linux/Windows qualification and review remain open.
+  Published-head Linux/Windows qualification passes on the initial code.
+  Review found inactive marker/extra references could hide registry pins.
+  The repair adds explicit ambiguity refusal, root-metadata registry identity
+  and recursive-local controls (71 compiler checks pass). Recursive requirements
+  parsing and compile composition move to the existing configuration companion
+  without changing callbacks, keeping every policy copy under the 1000-line cap.
+  The repaired development regression packet passes 411 controls with one
+  POSIX-only installer-helper skip on Windows. Install/sync/changefile/module,
+  documentation, feed-neutrality, lint and diff guards pass. Final repaired
+  required units, native qualification and review remain open.
   The parent Plan and Validation Plan remain open.
 
 ### 2026-10-24 - Policy/release planner merged; exact source lock next
