@@ -9,8 +9,9 @@ from .execution_identity import IdentityError
 from .machine_environment import normalize_environment, split_machine_environment
 from .registry import (
     MachineEntry,
+    MissingExecutionSpaceError,
     entry_physical_host,
-    machine_name,
+    machine_identity_names,
     normalize_machine_entries,
     resolve_machine_selection,
 )
@@ -41,7 +42,9 @@ def _physical(entry: MachineEntry, observed: str) -> str:
         return entry.physical_host
     if entry.execution_platform:
         return entry_physical_host(entry)
-    if not entry.hostname and entry.key.casefold() == observed.casefold():
+    if entry.key.casefold() == observed.casefold() and (
+        not entry.hostname or entry.hostname.casefold() == observed.casefold()
+    ):
         return entry.key
     return split_machine_environment(entry.key).machine
 
@@ -49,9 +52,44 @@ def _physical(entry: MachineEntry, observed: str) -> str:
 def _platform(entry: MachineEntry, observed: str) -> str:
     if entry.execution_platform:
         return entry.execution_platform
-    if not entry.hostname and entry.key.casefold() == observed.casefold():
+    if entry.key.casefold() == observed.casefold() and (
+        not entry.hostname or entry.hostname.casefold() == observed.casefold()
+    ):
         return ""
     return split_machine_environment(entry.key).environment
+
+
+def _context(
+    registry: Mapping[str, MachineEntry], observed: str, physical: str,
+    platform: str, execution: str, customization_key: str | None,
+) -> LocalExecutionContext:
+    collision = next(
+        (entry for key, entry in registry.items() if key.casefold() == execution.casefold()), None,
+    )
+    if collision is not None and (
+        collision.key != customization_key
+        or collision.execution_platform not in ("", platform)
+    ):
+        raise IdentityError(f"local execution identity {execution!r} conflicts with a registered machine")
+    return LocalExecutionContext(
+        observed, _name(physical, "physical machine"), platform,
+        _name(execution, "execution machine"), customization_key,
+    )
+
+
+def _literal_binding(registry: Mapping[str, MachineEntry], configured: str, observed: str) -> bool:
+    if configured.casefold() != observed.casefold():
+        return False
+    direct = [
+        entry for entry in registry.values()
+        if configured.casefold() in {
+            name.casefold() for name in machine_identity_names(entry, include_metadata=False)
+        }
+    ]
+    return not direct or (
+        len(direct) == 1 and direct[0].key.casefold() == observed.casefold()
+        and not direct[0].execution_platform and not _platform(direct[0], observed)
+    )
 
 
 def resolve_local_execution_context(
@@ -78,11 +116,19 @@ def resolve_local_execution_context(
         if not isinstance(configured_machine, str) or not configured_machine.strip():
             raise IdentityError("configured machine must be a nonempty string")
         configured = configured_machine.strip()
-        selected = resolve_machine_selection(registry, configured, platform)
-        execution = selected.entry.key if selected.entry is not None else selected.target.logical_machine
-        return LocalExecutionContext(
-            observed, _name(selected.target.machine, "physical machine"), platform,
-            _name(execution, "execution machine"),
+        if _literal_binding(registry, configured, observed):
+            configured_machine = None
+    if configured_machine is not None:
+        try:
+            selected = resolve_machine_selection(registry, configured, platform)
+        except MissingExecutionSpaceError:
+            # This binding is already local; a missing customization is not
+            # enrollment authority. Explicit key/platform conflicts still raise.
+            target = split_machine_environment(configured, platform)
+            return _context(registry, observed, target.machine, platform, target.logical_machine, None)
+        return _context(
+            registry, observed, selected.target.machine, platform,
+            selected.entry.key if selected.entry is not None else selected.target.logical_machine,
             selected.entry.key if selected.entry is not None else None,
         )
 
@@ -101,6 +147,9 @@ def resolve_local_execution_context(
         if _platform(entry, observed) in ("", platform)
         and _physical(entry, observed).casefold() in folded_families
     ]
+    scoped = [entry for entry in candidates if _platform(entry, observed) == platform]
+    if scoped:
+        candidates = scoped
     exact = [entry for entry in candidates if entry.key.casefold() == folded]
     if exact:
         candidates = exact
@@ -110,8 +159,8 @@ def resolve_local_execution_context(
         entry = candidates[0]
         physical = _physical(entry, observed)
         execution = (
-            entry.key if entry.execution_platform else
-            f"{physical}-wsl" if platform == "wsl" else machine_name(entry)
+            f"{physical}-wsl" if platform == "wsl" and _platform(entry, observed) != "wsl"
+            else entry.key
         )
         customization_key = entry.key
     else:
@@ -120,15 +169,4 @@ def resolve_local_execution_context(
         physical = min(families) if families else observed.casefold()
         execution = f"{physical}-wsl" if platform == "wsl" else physical
         customization_key = None
-    collision = next(
-        (entry for key, entry in registry.items() if key.casefold() == execution.casefold()), None,
-    )
-    if collision is not None and (
-        collision.key != customization_key
-        or collision.execution_platform not in ("", platform)
-    ):
-        raise IdentityError(f"local execution identity {execution!r} conflicts with a registered machine")
-    return LocalExecutionContext(
-        observed, _name(physical, "physical machine"), platform,
-        _name(execution, "execution machine"), customization_key,
-    )
+    return _context(registry, observed, physical, platform, execution, customization_key)

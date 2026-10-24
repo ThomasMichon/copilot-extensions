@@ -44,13 +44,27 @@ def test_observed_hostname_is_not_legacy_address_syntax(hostname: str, environme
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_unscoped_literal_host_key_does_not_reclassify_observed_hostname(environment: str) -> None:
-    entry = MachineEntry("literal-wsl", "")
+@pytest.mark.parametrize("redundant_hostname", [False, True])
+@pytest.mark.parametrize("configured", [False, True])
+def test_unscoped_literal_host_key_does_not_reclassify_observed_hostname(
+    environment: str, redundant_hostname: bool, configured: bool,
+) -> None:
+    entry = MachineEntry("literal-wsl", "", hostname="literal-wsl" if redundant_hostname else "")
     context = resolve_local_execution_context(
         {entry.key: entry}, hostname=entry.key, environment=environment,
+        configured_machine=entry.key if configured else None,
     )
     assert context.machine == entry.key
     assert context.execution_machine == (f"{entry.key}-wsl" if environment == "wsl" else entry.key)
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+def test_unmapped_literal_hostname_can_remain_the_local_binding(environment: str) -> None:
+    context = resolve_local_execution_context(
+        {}, hostname="literal-wsl", environment=environment, configured_machine="literal-wsl",
+    )
+    assert context.machine == "literal-wsl"
+    assert context.execution_machine == ("literal-wsl-wsl" if environment == "wsl" else "literal-wsl")
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl"])
@@ -140,10 +154,58 @@ def test_missing_sibling_physical_spelling_is_deterministic() -> None:
 
 
 @pytest.mark.parametrize("key", ["raw-host-wsl", "RAW-HOST-WSL"])
-def test_generated_guest_key_cannot_shadow_native_entry(key: str) -> None:
+@pytest.mark.parametrize("configured", [False, True])
+def test_generated_guest_key_cannot_shadow_native_entry(key: str, configured: bool) -> None:
     entries = {key: MachineEntry(key, "", execution_platform="windows")}
-    with pytest.raises(IdentityError, match="conflicts"):
-        resolve_local_execution_context(entries, hostname="raw-host", environment="wsl")
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(
+            entries, hostname="raw-host", environment="wsl",
+            configured_machine="raw-host" if configured else None,
+        )
+
+
+@pytest.mark.parametrize("unrelated", [False, True])
+def test_configured_guest_does_not_require_optional_guest_entry(unrelated: bool) -> None:
+    entries = {
+        "native": MachineEntry(
+            "native", "", execution_platform="windows",
+            physical_host="elsewhere" if unrelated else "friendly",
+        ),
+    }
+    context = resolve_local_execution_context(
+        entries, hostname="raw-host", environment="wsl", configured_machine="friendly-wsl",
+    )
+    assert (context.machine, context.execution_machine, context.customization_key) == (
+        "friendly", "friendly-wsl", None,
+    )
+    if not unrelated:
+        with pytest.raises(ValueError, match="no wsl logical entry"):
+            resolve_machine_selection(entries, "friendly-wsl", "wsl")
+
+
+@pytest.mark.parametrize("hostname", ["raw-host", "host"])
+def test_unscoped_guest_sibling_precedes_unscoped_native_fallback(hostname: str) -> None:
+    entries = {
+        key: MachineEntry(key, "", hostname="raw-host")
+        for key in ("host", "host-wsl")
+    }
+    context = resolve_local_execution_context(entries, hostname=hostname, environment="wsl")
+    assert (context.machine, context.execution_machine, context.customization_key) == (
+        "host", "host-wsl", "host-wsl",
+    )
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+def test_selected_unscoped_keys_are_not_regenerated_from_metadata(environment: str) -> None:
+    key = "custom-wsl" if environment == "wsl" else "custom"
+    entry = MachineEntry(key, "", hostname="raw-host", alias="friendly", physical_host="physical")
+    entries = {key: entry}
+    automatic = resolve_local_execution_context(entries, hostname="raw-host", environment=environment)
+    configured = resolve_local_execution_context(
+        entries, hostname="raw-host", environment=environment, configured_machine=key,
+    )
+    assert automatic == configured
+    assert automatic.execution_machine == key
 
 
 @pytest.mark.parametrize("hostname", ["", "two terms", "../host", "host/project/id"])

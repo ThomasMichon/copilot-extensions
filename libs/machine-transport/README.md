@@ -103,6 +103,14 @@ configured conflicts, ambiguous customizations and invalid declarations still
 raise. Do not supply a requested target or a record's stored owner as the
 current configured binding.
 
+An established guest binding remains usable when only its native customization
+exists. This local adapter handles the registry's specific
+`MissingExecutionSpaceError` (`ValueError` subtype); the target selector still
+refuses the missing logical target. Both configured and observed results check
+execution-key collisions. Actual-platform entries take precedence over
+unscoped native fallbacks, and a selected entry keeps its registry key rather
+than regenerating it from aliases or physical metadata.
+
 Consumers must separately prove the receiving project, namespace, ledger and
 retained allocation before writing or replaying. New naming facts do not
 authorize relabeling an admitted allocation, changing its references or

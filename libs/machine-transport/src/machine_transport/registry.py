@@ -57,6 +57,10 @@ class AmbiguousMachineError(ValueError):
     """A configured identity matches more than one machine or SSH target."""
 
 
+class MissingExecutionSpaceError(ValueError):
+    """A known physical family has no entry for the requested environment."""
+
+
 class PhysicalMachineError(ValueError):
     """Physical metadata needs an execution context to select a logical machine."""
 
@@ -512,7 +516,7 @@ def _find_machine_entry(
             }
             for entry in entries.values()
         ):
-            raise ValueError(f"machine {name!r} has no {execution_platform} logical entry")
+            raise MissingExecutionSpaceError(f"machine {name!r} has no {execution_platform} logical entry")
         return selected if selected and not getattr(selected, "execution_platform", "") else None
     if name in entries:
         return entries[name]
