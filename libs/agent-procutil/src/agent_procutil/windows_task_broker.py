@@ -476,10 +476,9 @@ def spawn(
     """Use an adopted broker; never provision or retry an ambiguous transaction."""
     if os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
         raise _refuse("contained activation refused")
-    configured, owner = os.environ.get(CONFIG_ENV), os.environ.get(OWNER_ENV)
-    if not configured or not owner:
-        raise _refuse("adoption required")
-    config = load(Path(configured), owner)
+    from .windows_broker_installation import load_current
+
+    config = load_current()
     request = LaunchRequest.parse({
         "argv": command, "cwd": cwd, "env": env, "creationflags": creationflags,
         "log_path": log_path, "stderr_log_path": stderr_log_path,

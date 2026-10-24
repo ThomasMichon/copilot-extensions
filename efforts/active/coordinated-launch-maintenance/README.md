@@ -881,3 +881,36 @@ The correction retains that previous identity; a healthy, already-published
 registration now returns without disabling or re-registering it. Stopped
 readoption and failed-readoption rollback have separate controls. This requires
 a fresh exact-candidate hosted run, not a retry of the failed commit.
+
+That corrected run,
+[40084215435](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40084215435),
+passed in 48 seconds at exact source
+`b213a588f4cccd3eb3b64ee80e35d0f026390be1`. It reported actual driver-owned
+adoption and canonical installed actions, both native resident cycles and
+all-caller-Job closures, exact delivery, finite broker retirement, negative
+topology, both publisher-death/recovery boundaries, crash-surviving references
+and old-action collection before the second cycle. Stop/readopt and final
+owned cleanup passed. The corrected contained selection passed 144 cases.
+This closes the disposable foundation-adoption slice, not the remaining
+normal-consumer, maintenance, desktop, POSIX, review/release or rollout gates.
+
+### 2026-10-24 - Installed-module discovery, source only
+
+- The explicit Task client now discovers adoption from its imported
+  `agent_procutil` module's fixed numbered installation layout, not an
+  environment-selected registration, working directory or `sys.prefix`.
+  Source/vendored and linked layouts refuse before Scheduler access. A newer
+  consumer slot can still discover an older retained action under the same
+  installation root. Missing adoption remains a read-only failure.
+- The targeted discovery, adapter, retention and probe controls passed 125
+  contained cases. This includes a real venv subprocess under `-I -S` whose
+  prefix names the base interpreter, while discovery returns the exact owned
+  installation without changing adoption metadata. Changed Python lint passed.
+- The hosted-only fixture now imports each cycle's actual installed consumer
+  package under `-I -S`, with no broker owner/config environment hints. This
+  changed exact candidate still requires its disposable Windows run; prior
+  hosted results do not qualify the new client binding.
+- `spawn_daemon` still uses the held legacy default. Canonical consumer
+  installers, dependency closure, actual maintenance handoff, interactive
+  desktop/POSIX qualification and review/release remain open. No shared-host
+  Task, installed runtime, service, update or rollout was performed.

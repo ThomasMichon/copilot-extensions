@@ -289,8 +289,6 @@ def inspect(root: Path) -> dict[str, object]:
     from agent_procutil.daemon_broker import _outside_job
     from agent_procutil.windows_broker_native import NativeChild, _duplicate
     from agent_procutil.windows_task_broker import (
-        CONFIG_ENV,
-        OWNER_ENV,
         Registration,
         reconcile,
         task_operation,
@@ -433,14 +431,12 @@ def inspect(root: Path) -> dict[str, object]:
             offer_path = root / "caller-offer.json"
             offer_path.unlink(missing_ok=True)
             env = fixture_environment(dict(os.environ), control=True)
-            env.update({
-                CONFIG_ENV: str(config.config_path), OWNER_ENV: config.installation,
-                "BROKER_FIXTURE_VALUE": "live-only-synthetic\n&",
-            })
+            env["BROKER_FIXTURE_VALUE"] = "live-only-synthetic\n&"
+            caller_packages = Path(config.entrypoint).parent.parent
             process, outer = pu.spawn_sync_in_kill_on_close_job(
                 [
-                    str(Path(sys.base_prefix) / "python.exe"), "-I", str(Path(__file__).resolve()),
-                    "caller", str(controller), str(root),
+                    str(Path(sys.base_prefix) / "python.exe"), "-I", "-S",
+                    str(Path(__file__).resolve()), "caller", str(caller_packages), str(root),
                 ],
                 require_job=True, allow_breakaway=False, env=env, cwd=root,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -504,6 +500,7 @@ def inspect(root: Path) -> dict[str, object]:
             child.close()
             result["cycles"].append({
                 "cycle": cycle + 1, "actual_child_pid": child.pid,
+                "installed_module_discovery": True,
                 "finite_broker_exit_proved": True, "all_caller_jobs_closed": True,
                 "exact_contract": True, "actual_child_cleanup_confirmed": True,
             })

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 from types import SimpleNamespace
 import venv
 
@@ -124,6 +125,77 @@ def test_published_foreign_identity_is_not_treated_as_missing_adoption(installed
     assert config.config_path.read_bytes() == before
 
 
+def test_current_discovery_uses_module_not_prefix_environment_or_action_slot(
+    installed, monkeypatch,
+):
+    import sys
+    from agent_procutil import windows_task_broker as broker
+
+    root, slot = installed
+    config = installation.registration(root, slot)
+    broker._publish(config)
+    caller = root / "versions" / "2.0.0" / "Lib" / "site-packages" / "agent_procutil"
+    caller.mkdir(parents=True)
+    module = caller / "windows_broker_installation.py"
+    module.write_text("# newer installed consumer\n")
+    monkeypatch.setattr(installation, "__file__", str(module))
+    monkeypatch.setattr(sys, "prefix", str(root.parent / "unrelated-prefix"))
+    monkeypatch.setenv(broker.OWNER_ENV, "foreign/owner")
+    monkeypatch.setenv(broker.CONFIG_ENV, str(root.parent / "foreign.json"))
+    monkeypatch.chdir(root.parent)
+    before = config.config_path.read_bytes()
+    monkeypatch.setattr(
+        broker, "task_operation",
+        lambda *args, **kwargs: pytest.fail("read-only discovery invoked the scheduler"),
+    )
+    assert installation.load_current() == config
+    assert config.config_path.read_bytes() == before
+    assert not config.pending_path.exists()
+
+
+@pytest.mark.parametrize("module", [
+    Path("relative") / "Lib" / "site-packages" / "agent_procutil"
+    / "windows_broker_installation.py",
+    Path(__file__).parent / "windows_broker_installation.py",
+    Path(__file__).parent / "versions" / "1.0.0" / "src" / "agent_procutil"
+    / "windows_broker_installation.py",
+    Path(__file__).parent / "runtime" / "1.0.0" / "Lib" / "site-packages"
+    / "agent_procutil" / "windows_broker_installation.py",
+    Path(__file__).parent / "versions" / "1.0.0" / "Lib" / "site-packages"
+    / "agent_procutil" / "foreign.py",
+])
+def test_current_discovery_refuses_noninstalled_layout_before_reading_adoption(
+    module, monkeypatch,
+):
+    from agent_procutil import DaemonSpawnError
+
+    monkeypatch.setattr(installation, "__file__", str(module))
+    monkeypatch.setattr(
+        installation, "load",
+        lambda root: pytest.fail("noninstalled caller reached adoption metadata"),
+    )
+    with pytest.raises(DaemonSpawnError, match="installed broker context required"):
+        installation.load_current()
+
+
+def test_current_discovery_does_not_adopt_when_configuration_is_absent(installed, monkeypatch):
+    from agent_procutil import DaemonSpawnError
+    from agent_procutil import windows_task_broker as broker
+
+    root, slot = installed
+    module = slot / "Lib" / "site-packages" / "agent_procutil" / "windows_broker_installation.py"
+    module.write_text("# installed consumer\n")
+    monkeypatch.setattr(installation, "__file__", str(module))
+    monkeypatch.setattr(
+        broker, "task_operation",
+        lambda *args, **kwargs: pytest.fail("missing adoption invoked the scheduler"),
+    )
+    with pytest.raises(DaemonSpawnError, match="adoption required"):
+        installation.load_current()
+    assert not (root / "windows-launch-broker.json").exists()
+    assert not (root / "windows-launch-broker.pending.json").exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="real Windows direct base interpreter")
 def test_real_venv_action_qualifies_without_redirector_or_ambient_imports(tmp_path, monkeypatch):
     import agent_procutil
@@ -152,3 +224,22 @@ def test_real_venv_action_qualifies_without_redirector_or_ambient_imports(tmp_pa
     assert Path(config.pythonw) != slot / "Scripts" / "pythonw.exe"
     broker._qualify(config)
     assert not config.config_path.exists()
+    broker._publish(config)
+    before = config.config_path.read_bytes()
+    code = (
+        "import json,sys;"
+        "sys.path.insert(0,sys.argv[1]);"
+        "from agent_procutil.windows_broker_installation import load_current;"
+        "c=load_current();"
+        "print(json.dumps({'root':c.root,'prefix':sys.prefix,'entrypoint':c.entrypoint}))"
+    )
+    result = subprocess.run(
+        [str(slot / "Scripts" / "python.exe"), "-I", "-S", "-c", code, str(packages)],
+        cwd=root.parent, capture_output=True, text=True, timeout=15, check=True,
+        **agent_procutil.no_window_kwargs(),
+    )
+    discovered = json.loads(result.stdout)
+    assert Path(discovered["prefix"]) != slot
+    assert Path(discovered["root"]) == root
+    assert discovered["entrypoint"] == config.entrypoint
+    assert config.config_path.read_bytes() == before

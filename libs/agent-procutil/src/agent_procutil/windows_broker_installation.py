@@ -74,3 +74,23 @@ def load(root: Path) -> Registration:
 
     identity = installation_identity(root)
     return load_registration(Path(root) / "windows-launch-broker.json", identity)
+
+
+def load_current() -> Registration:
+    """Read the adoption owned by this installed module, never ambient hints."""
+    from .windows_task_broker import _refuse
+
+    module = Path(__file__)
+    suffix = Path("Lib") / "site-packages" / "agent_procutil" / module.name
+    if (
+        module.name != "windows_broker_installation.py"
+        or not module.is_absolute()
+        or len(module.parents) < 6
+        or Path(*module.parts[-4:]) != suffix
+        or module.parents[4].name != "versions"
+        or module.resolve() != module
+    ):
+        raise _refuse("installed broker context required")
+    # -S may leave sys.prefix at the base interpreter. The imported module is
+    # the installation binding; its adopted action may retain an older slot.
+    return load(module.parents[5])

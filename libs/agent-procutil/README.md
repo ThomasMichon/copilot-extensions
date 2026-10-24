@@ -521,7 +521,14 @@ selector bypasses the Windows venv redirector; the fixed entrypoint supplies its
 own installed import directory without a saved environment. The slot's canonical
 completion validator is used; mutable dev slots, missing helpers and linked
 paths refuse. `load(root)` reads that root's adoption without trusting ambient
-owner/config hints or repairing it. Installation adapters use
+owner/config hints or repairing it. The explicit Task client's `spawn` calls
+`load_current()`, binding discovery to this module's fixed installed
+`versions/<generation>/Lib/site-packages/agent_procutil` location. It does not
+use `sys.prefix` (which can name the base interpreter under `-S`), the caller's
+cwd or owner/config environment variables. Source, vendored and linked import
+layouts refuse; a newer consumer slot may still use its installation's retained
+older broker action. Discovery never registers, repairs or activates a Task.
+Installation adapters use
 `update_driver.windows_broker.adopt` under actual inherited execution custody;
 this does not yet switch `spawn_daemon` from its held legacy fallback.
 

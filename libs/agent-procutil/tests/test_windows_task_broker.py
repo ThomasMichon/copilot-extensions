@@ -18,6 +18,7 @@ from zdd.private_protocol import PeerIdentity
 from zdd.private_protocol import Deadline
 
 from agent_procutil import DaemonSpawnError
+from agent_procutil import windows_broker_installation as installation
 from agent_procutil import windows_task_broker as task
 from agent_procutil.owned_process import run_caller_owned
 
@@ -76,7 +77,7 @@ def test_unsafe_registration_is_refused(overrides):
 def test_contained_spawn_does_not_read_adoption_or_activate(monkeypatch):
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     load, operation = Mock(), Mock()
-    monkeypatch.setattr(task, "load", load)
+    monkeypatch.setattr(installation, "load_current", load)
     monkeypatch.setattr(task, "task_operation", operation)
     with pytest.raises(DaemonSpawnError, match="contained"):
         task.spawn(
@@ -95,7 +96,25 @@ def test_missing_adoption_never_installs(monkeypatch, missing):
     monkeypatch.delenv(missing)
     operation = Mock()
     monkeypatch.setattr(task, "task_operation", operation)
+    monkeypatch.setattr(
+        installation, "load_current",
+        Mock(side_effect=DaemonSpawnError("adoption required")),
+    )
     with pytest.raises(DaemonSpawnError, match="adoption required"):
+        task.spawn(
+            ["python"], cwd=r"C:\state", env={}, creationflags=0x08000000,
+            log_path=r"C:\state\out.log", stderr_log_path=None,
+        )
+    operation.assert_not_called()
+
+
+def test_source_import_cannot_select_an_adoption_with_ambient_pointers(monkeypatch):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setenv(task.CONFIG_ENV, r"C:\state\windows-launch-broker.json")
+    monkeypatch.setenv(task.OWNER_ENV, "test/plugin")
+    operation = Mock()
+    monkeypatch.setattr(task, "task_operation", operation)
+    with pytest.raises(DaemonSpawnError, match="installed broker context required"):
         task.spawn(
             ["python"], cwd=r"C:\state", env={}, creationflags=0x08000000,
             log_path=r"C:\state\out.log", stderr_log_path=None,
@@ -513,9 +532,9 @@ def test_native_error_code_is_fixed_width_not_arbitrary_text(monkeypatch, line, 
 def spawn_fixture(monkeypatch, activation=None):
     config = registration()
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
-    monkeypatch.setenv(task.CONFIG_ENV, str(config.config_path))
-    monkeypatch.setenv(task.OWNER_ENV, config.installation)
-    monkeypatch.setattr(task, "load", Mock(return_value=config))
+    monkeypatch.delenv(task.CONFIG_ENV, raising=False)
+    monkeypatch.delenv(task.OWNER_ENV, raising=False)
+    monkeypatch.setattr(installation, "load_current", Mock(return_value=config))
     api = Mock()
     api.identity.return_value = PeerIdentity(91001, "300", config.principal)
     api.process_image.return_value = config.pythonw
