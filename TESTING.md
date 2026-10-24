@@ -567,6 +567,11 @@ matching `ci.yml` and admission workflow when testing a historical snapshot.
 The existing bounded process-tree supervisor contains those local rehearsals;
 they do not become additional promotion or required-PR test dependencies.
 
+The coupled source-checkout, artifact-validator and readiness-clock regressions
+also follow the frozen path. Git-based Windows development fixtures need a short
+private scratch root and explicit short pytest base directory; deeply nesting
+their synthetic Git stores below a worktree can exceed Git's path limit.
+
 Source PR CI has a separate exact-input reuse boundary in
 `tools/ci_pr_unit_reuse.py`. It binds the current source/merge/base, workflow,
 manifest/source closure, hosted image, Python identity, actual installed

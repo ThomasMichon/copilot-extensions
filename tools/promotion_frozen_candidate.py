@@ -87,6 +87,9 @@ def import_candidate(
     """Import only object data and recheck the full candidate and content trees."""
     import promote_release as promotion
 
+    if any(not isinstance(value, str) or not _SHA.fullmatch(value)
+           for value in (dev_sha, main_before, candidate_sha)):
+        raise ValueError("invalid expected candidate commit identity")
     if directory.is_symlink() or {path.name for path in directory.iterdir()} != FILES:
         raise ValueError("frozen candidate transport has an unexpected inventory")
     record = validate_record(

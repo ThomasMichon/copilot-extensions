@@ -1252,6 +1252,17 @@ negative unit verifies rejection before Git import; real-workflow assertions
 verify the trusted output reaches units, build, validation and publication.
 The record schema and Dev-owned release identity are unchanged.
 
+The remaining directly coupled checkout, artifact-validator and clock fixtures
+now exercise the frozen path as well. The source-checkout regression proves a
+valid baseline before mutating negative cases, admits the declared pinned helper
+checkout and retains history needed to import the recorded Git object.
+Seventeen bounded development checks pass, including real Git/bundle transport,
+artifact refusal and successful validation, temporary-root aliases and immutable
+creation-time propagation. Their first deeply nested Windows fixture path
+exceeded Git's path limit; the same cases pass in the verified private short
+scratch root without changing production behavior or any deadline. These tests
+remain outside promotion dependencies.
+
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as
   `a1f431264eede9764c1e051112b0869b0351d88a` after exact-head approval
