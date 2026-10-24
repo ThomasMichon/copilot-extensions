@@ -58,6 +58,8 @@ while not Path(sys.argv[1]).exists():
 _GUARD_DIAGNOSTICS = """
 import faulthandler,os,traceback
 from agent_procutil._interactive_groups import SessionCustody
+_stack=open(os.environ['PTY_FIXTURE_GUARDIAN'],'a',encoding='utf-8')
+faulthandler.dump_traceback_later(1,repeat=True,file=_stack)
 _retire=SessionCustody.retire
 def observed(self,*args,**kwargs):
     with open(os.environ['PTY_FIXTURE_GUARDIAN'],'a',encoding='utf-8') as stream:
@@ -283,7 +285,7 @@ def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_pat
             before = _wait(count, "managed workload did not publish a heartbeat")
             _wait(lambda: (count() or 0) > before, "managed workload stopped progressing")
     except BaseException:
-        print(_diagnostics(receipt))
+        print(output[-4096:].decode(errors="replace"), _diagnostics(receipt))
         raise
     finally:
         _retire_fixture(process)
@@ -333,7 +335,7 @@ def test_pty_relay_preserves_redirected_json_stdout(tmp_path):
         assert stdout == b'{"ok":true}\n'
         assert _read(receipt) == {"code": 0, "attributes": True, "foreground": True}
     except BaseException:
-        print(_diagnostics(receipt))
+        print(output[-4096:].decode(errors="replace"), _diagnostics(receipt))
         raise
     finally:
         _retire_fixture(process)
@@ -372,10 +374,12 @@ def test_pty_relay_drains_output_beyond_its_buffer_without_losing_the_tail(tmp_p
         return True
 
     try:
-        _wait(
-            lambda: drain() and process.poll() is not None,
-            "large terminal output did not settle",
-        )
+        import time
+
+        deadline = time.monotonic() + 10
+        while process.poll() is None:
+            assert time.monotonic() < deadline, "large terminal output did not settle"
+            drain()
         while select.select([master], [], [], 0)[0]:
             try:
                 data = os.read(master, 65536)
