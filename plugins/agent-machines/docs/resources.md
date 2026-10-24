@@ -162,6 +162,12 @@ Apply queries the current value first via `reg.exe`, then writes
 (`reg delete ... /f`) for `state: absent`. If `reg` is not on PATH the resource
 is skipped with a reason.
 
+`DWord` and `QWord` data are compared numerically: decimal declarations (including
+YAML integers) and `0x`-prefixed hexadecimal strings match equivalent hexadecimal
+`reg query` output. Values must fit the unsigned 32-bit or 64-bit type.
+Other data retain exact text comparison, and a different registry type still
+requires a write even when its data represent the same number.
+
 ### `feature`
 
 Converge an OS feature via a named `manager`. Identity is `(manager, id)`.

@@ -1480,9 +1480,31 @@ def test_registry_apply_writes_value(tmp_path, monkeypatch):
     assert "/t" in add and "REG_DWORD" in add
 
 
-def test_registry_apply_already_correct_no_change(tmp_path, monkeypatch):
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize(
+    ("value_type", "reg_type", "value", "observed"),
+    [
+        ("DWord", "REG_DWORD", "1", "1"),
+        ("DWord", "REG_DWORD", 1, "0x1"),
+        ("DWord", "REG_DWORD", "10", "0xa"),
+        ("DWord", "REG_DWORD", "0X0A", "0xa"),
+        ("DWord", "REG_DWORD", "00010", "0xa"),
+        ("DWord", "REG_DWORD", 0, "0x0"),
+        ("DWord", "REG_DWORD", 4294967295, "0xffffffff"),
+        ("QWord", "REG_QWORD", 1, "0x1"),
+        ("QWord", "REG_QWORD", "4294967296", "0x100000000"),
+        ("QWord", "REG_QWORD", "18446744073709551615", "0xffffffffffffffff"),
+        ("QWord", "REG_QWORD", "0x000000000000000a", "0xa"),
+        ("String", "REG_SZ", "1", "1"),
+    ],
+)
+def test_registry_apply_already_correct_no_change(
+    tmp_path, monkeypatch, dry_run, value_type, reg_type, value, observed
+):
     monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/reg.exe")
-    query_out = RunOutcome(0, "HKEY_CURRENT_USER\\Software\\App\n    Flag    REG_DWORD    1\n", "")
+    query_out = RunOutcome(
+        0, f"HKEY_CURRENT_USER\\Software\\App\n    Flag    {reg_type}    {observed}\n", ""
+    )
     runner = FakeRunner(script={("reg", "query"): query_out})
     pkg = _pkg(
         tmp_path,
@@ -1492,15 +1514,69 @@ def test_registry_apply_already_correct_no_change(tmp_path, monkeypatch):
                 "type": "registry",
                 "path": "HKCU:/Software/App",
                 "name": "Flag",
-                "value": "1",
-                "value_type": "DWord",
+                "value": value,
+                "value_type": value_type,
             }
         ],
     )
-    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False)
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=dry_run)
     res = next(r for r in results if r.type == "registry")
-    assert not res.changed and res.action == "none"
-    assert not any(c[:2] == ["reg", "add"] for c in runner.calls)
+    assert res.ok and not res.changed and res.action == "none"
+    assert res.commands == []
+    assert all(c[:2] == ["reg", "query"] for c in runner.calls)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+@pytest.mark.parametrize(
+    ("value_type", "reg_type", "value", "observed"),
+    [
+        ("DWord", "REG_DWORD", 1, "0x2"),
+        ("QWord", "REG_QWORD", "4294967296", "0x100000001"),
+        ("DWord", "REG_SZ", 1, "1"),
+        ("DWord", "REG_QWORD", 1, "0x1"),
+        ("QWord", "REG_DWORD", 1, "0x1"),
+        ("String", "REG_SZ", "1", "0x1"),
+        ("ExpandString", "REG_EXPAND_SZ", "10", "0xa"),
+        ("MultiString", "REG_MULTI_SZ", "1", "0x1"),
+        ("Binary", "REG_BINARY", "10", "0a"),
+        ("DWord", "REG_DWORD", 1, "not-a-number"),
+        ("DWord", "REG_DWORD", "not-a-number", "0x1"),
+        ("DWord", "REG_DWORD", "4294967296", "0x100000000"),
+        ("QWord", "REG_QWORD", "18446744073709551616", "0x10000000000000000"),
+        ("DWord", "REG_DWORD", "-1", "-1"),
+        ("DWord", "REG_DWORD", "1_0", "0xa"),
+    ],
+)
+def test_registry_apply_real_drift_still_writes(
+    tmp_path, monkeypatch, dry_run, value_type, reg_type, value, observed
+):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/reg.exe")
+    runner = FakeRunner(
+        script={("reg", "query"): RunOutcome(0, f"    Flag    {reg_type}    {observed}\n", "")}
+    )
+    pkg = _pkg(
+        tmp_path,
+        "acme/a",
+        [
+            {
+                "type": "registry",
+                "path": "HKCU:/Software/App",
+                "name": "Flag",
+                "value": value,
+                "value_type": value_type,
+            }
+        ],
+    )
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=dry_run)
+    res = next(r for r in results if r.type == "registry")
+    assert res.ok and res.changed and res.action == "write"
+    assert res.commands == [
+        [
+            "reg", "add", "HKEY_CURRENT_USER\\Software\\App", "/v", "Flag",
+            "/t", R.REGISTRY_TYPE_MAP[value_type], "/d", str(value), "/f",
+        ]
+    ]
+    assert any(c[:2] == ["reg", "add"] for c in runner.calls) is not dry_run
 
 
 def test_registry_apply_absent_deletes(tmp_path, monkeypatch):
@@ -2659,4 +2735,3 @@ def test_copilot_cli_update_auto_update_conflict(tmp_path):
     b = _pkg(tmp_path, "acme/b", [{"type": "copilot-cli-update", "auto_update": True}])
     findings = detect_conflicts([a, b], "box-1", "windows")
     assert any(f.level == "error" and "conflicting values" in f.message for f in findings)
-

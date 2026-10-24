@@ -143,6 +143,18 @@ load an installed runtime. Native prerequisite diagnostics, exceptions and the
 launched Manager's streams and exit status retain their existing ownership;
 this is not a claim that those separate producers are all framed.
 
+The fresh Manager's private update-repair prefix then opens its own
+`update/manager/engine_repair` human scope before the aggregate update run
+exists. Its start, missing-source or caught-refusal diagnostics, and final
+exit status use the shared UTC/monotonic stderr formatter. A failed repair
+ends that scope as failed and does not start aggregate orchestration.
+Native repair children explicitly forward the caller's existing standard
+descriptors, retaining redirected Windows streams even when no new console
+is allocated. They settle through the existing lifecycle owner; their
+diagnostics are not captured or decorated by this scope. The exit-only repair
+entry remains unframed when called outside a human scope, and older runtimes
+without the formatter retain the original diagnostics.
+
 `doctor` also reports **plugin-catalog alignment**: whether the authored
 catalog (`data/plugins.toml`) still matches the discovered plugin membership
 (same report as `plugins --reconcile`, folded into one surface). A discovered
@@ -687,6 +699,7 @@ worktree-manager update --detach --json
 worktree-manager update --request-status <request-id> --json
 worktree-manager update --recovery-status --json
 worktree-manager update --recover-after-restart --json
+worktree-manager update --recover-for-repair --json
 worktree-manager update --supervised-debug
 ```
 
@@ -734,6 +747,14 @@ exclusive authority. It refuses same-boot, missing, malformed or unsupported
 boot evidence; age and PID disappearance are not substitutes. Settlement retains
 the interrupted failure and does not replay it or start an update. Submit a new
 ordinary update explicitly after recovery.
+
+`--recover-for-repair` instead records explicit operator authorization to release
+valid queue fences without historical cleanup or boot evidence. It preserves the
+failed outcome and reports `recovery_authority`/`released_at`, not native
+settlement. It neither runs nor replays an installation. The
+[driver recovery contract](../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+defines its scope, atomic migration, current-owner refusal and remaining
+foundation/active-takeover limitations.
 
 The same authority wraps public `stage-update` acquisition and
 `reconcile-plugins --apply`, including the session provisioning hook. They

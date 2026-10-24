@@ -302,6 +302,91 @@ documented durable data and refuses to erase unresolved memberships or another
 owner's resources. A merged source change, built image, successful health
 response or retained rollback receipt proves only its stated tier.
 
+### Standard Chat setup adapter
+
+This is an **agent-recommended derivation**, not a shipped installer or an
+extension of another component's source ownership. The adapter belongs with
+`services/chat`; the connection plugin consumes its selected command and
+readiness evidence. Worktree Manager may drive the same adapter, but neither
+Manager nor fleet-manager is a prerequisite for standalone Chat installation.
+Coordination for this slice is through scoped, reviewed changes, not direct
+agent outreach or PR/issue comments.
+
+The current foundations have distinct limits:
+
+| Foundation | Reuse | Do not infer |
+| --- | --- | --- |
+| [Standard installation contract](../../../docs/install-contract.md#python-owned-construction-foundation) | Retained dependency-policy inputs, canonical immutable construction, installed-origin health and runtime retention | Chat role selection, command ownership, configuration custody or service supervision |
+| [Installer/readiness modules](../../../libs/installer-readiness/README.md) | Attributable declarations and read-only dependency planning when an actual independently runnable adapter exists | Execution, release selection or permission to create a hosting role |
+| [Worktree Manager](../../../worktree-manager/README.md#plugin-knowledge-model-phase-1) | An out-of-plugin caller and installer-owned knowledge overlay | A Chat executor: current `setup` drives the Worktrees core installer, and catalog steps alone install nothing |
+| [Chat installed catalog](../../../services/chat/README.md) | Exact interpreter-local command and checked installed resources | A selected release, authenticated endpoint, assigned inbox or listening attachment |
+| [Fleet lifecycle](../../../fleet-manager/README.md) | Optional explicitly selected product-role integration through its existing owners | A complete current Chat installer or a mandatory Fleet dependency |
+
+**Inputs and ownership.** An explicit nonsecret desired configuration identifies
+the installation, dedicated durable root, selected release/source and role.
+Separate runtime slots from client configuration/state and hosted data/run
+directories. A standalone installation is not implicitly a core-plugin
+marketplace cell. The payload-only connection plugin must not create a cell,
+adopt a legacy installation by name, or derive selected ownership from `PATH`.
+An existing private or legacy client remains untouched until a separately
+authorized migration names its source, destination and retained obligations.
+
+**Role closure precedes construction.** Client-only setup admits the core,
+client dependencies and manual command without a host registration, credential
+issuance, listener or enrollment. The service role adds its declared hosting
+dependencies and existing foreground entry point, not an implicit plugin or
+Gateway. Bind the selected role and exact source/dependency inputs into candidate
+identity; different roles cannot reuse an incompatible completed slot.
+Current `installer_engine.numbered_candidate()` accepts a package root and
+traverses every local `tool.uv.sources` entry. Chat currently declares both
+client and service sources there. Passing that project unchanged therefore does
+not prove client-only construction. Establish a supported role-selective input
+through the canonical construction owner before using that path; do not delete
+dependencies from an admitted project, mutate a completed slot, or copy the
+constructor into Chat to work around the missing seam.
+
+**One lifecycle, explicit outcomes.** Normal `install` and `update` converge
+the declared role through the same adapter. Construction and isolated health
+finish before selected commands or service routing change. Preserve the old
+selection and retain candidate/rollback custody through publication, recovery
+and actual process settlement. A command catalog is emitted from the selected,
+ownership-checked installation, not merely any wheel that answers `catalog`.
+Keep local installed-resource evidence separate from selected-release and
+service-health evidence. Read-only `status` must not install, authenticate,
+join, start a host or repair an ambiguous selection.
+
+The service-bearing adapter uses the existing lifecycle owner's stable launcher,
+user-mode ensure and health/cutover contracts. Chat supplies its authenticated
+health, singleton/write custody, bounded drain and storage compatibility.
+A passive host must not open the active store merely to satisfy candidate
+health. If the owner lacks a compatible passive/commit or bounded cold-recovery
+binding, report that exact service dependency before changing the running
+selection; a second Chat supervisor or an indefinitely required predecessor
+handshake is not a substitute. `start` and `stop` remain diagnostic controls,
+not additional required provisioning/cutover steps.
+
+**Configuration and removal.** Keep explicit client/host configuration and
+external credential-provider references outside immutable slots. Install/update
+must not rewrite pending requests, membership or cursors, silently accept config
+drift, generate a key or treat actor labels as authorization. Preserve durable
+configuration/data on ordinary `uninstall`. Withdraw only physically attributable
+commands, selectors and registrations through canonical publication/removal
+custody; foreign replacements and unresolved operations remain visible and
+protected. Destructive migration or data removal requires its own exact scope.
+
+**Qualification and sequencing.** Review this derivation before executable
+adoption. First prove role-isolated construction and selected manual-client
+invocation from independently installed artifacts; then integrate service
+supervision only through its supported owner binding. Add Manager knowledge or
+installer/readiness declarations only when they reference a real qualified
+adapter. Prove fresh/repeat install, different-code update, candidate refusal,
+interrupted publication/recovery, retained invocation and preserving uninstall
+on each supported native platform. Service qualification additionally proves
+post-caller health, single-writer recovery and unchanged durable conversation
+state. The parent's platform, clean-room and portfolio gates remain unchanged.
+Neither this derivation nor a client-only implementation closes managed service
+lifecycle, native assignment/shared-feed, migration or live adoption.
+
 ## Maintenance and platform ownership
 
 Routine accepted maintenance should use one current operation correlation,

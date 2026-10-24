@@ -27,6 +27,104 @@ def _assert_batch_skipped(capsys, harness: CleanupHarness, reason: str) -> None:
     assert reason in (captured.out + captured.err)
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_reap_one_reports_live_holder_deferral(capsys, monkeypatch, tmp_path, force):
+    from types import SimpleNamespace
+    from agent_worktrees import cleanup_gc_cli, cleanup_reap
+
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    rec = make_record(tmp_path)
+    path = harness.seed(rec)
+    harness.set_classifier(info(S.COMPLETED), info(S.COMPLETED))
+    harness.set_reap_callback(
+        lambda latest, fresh: cleanup_reap._reap_locked(
+            latest, fresh, harness.repo, harness.tracking_dir,
+        ),
+    )
+    monkeypatch.setattr(cleanup_reap, "retirement_blocker", lambda record: None)
+    monkeypatch.setattr(
+        cleanup_reap.procs, "processes_with_cwd_under",
+        lambda root, **kwargs: [{"pid": 12345, "name": "holder"}],
+    )
+
+    def unexpected_removal(*args, **kwargs):
+        pytest.fail("A deferred retirement must not remove or prune checkout state")
+
+    monkeypatch.setattr(cli.git_ops, "remove_worktree", unexpected_removal)
+    monkeypatch.setattr(cli.git_ops, "prune_worktrees", unexpected_removal)
+    result = harness.run_reap_one(force=force)
+    assert result["removed"] is False
+    assert result["skipped"] is True
+    assert result["ok"] is False
+    assert "live process" in result["reason"]
+    assert tracking.load_record(path).reaped_at is None
+
+    assert cleanup_gc_cli._cleanup_one(
+        SimpleNamespace(worktree_id=rec.worktree_id, force=force, json=False),
+    ) == 1
+    text = capsys.readouterr().out
+    assert "wt1: skipped" in text and "live process" in text
+    assert "wt1: removed" not in text
+
+
+@pytest.mark.parametrize("mode", ["batch", "sweep"])
+def test_cleanup_sweeps_do_not_count_deferred_retirement_as_removed(
+    capsys, monkeypatch, tmp_path, mode,
+):
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    rec = make_record(tmp_path)
+    harness.seed(rec)
+    harness.set_classifier(info(S.COMPLETED), info(S.COMPLETED))
+    harness.set_reap_callback(lambda latest, fresh: (1, ["live process holder; cleanup deferred"]))
+    if mode == "batch":
+        assert harness.run_batch() == 0
+        text = capsys.readouterr().out
+        assert "Skipping wt1:" in text and "cleanup deferred" in text
+        assert "Cleaned 1" not in text
+    else:
+        report = harness.run_sweep()
+        assert report["removed"] == []
+        assert report["skipped"] == [{"id": rec.worktree_id, "reason": "live process holder; cleanup deferred"}]
+
+
+def test_reap_one_reports_removed_checkout_with_branch_failure(capsys, monkeypatch, tmp_path):
+    from pathlib import Path
+    from types import SimpleNamespace
+    from agent_worktrees import cleanup_gc_cli, cleanup_reap
+
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    rec = make_record(tmp_path)
+    harness.seed(rec)
+    harness.set_classifier(info(S.COMPLETED), info(S.COMPLETED))
+    harness.set_reap_callback(
+        lambda latest, fresh: cleanup_reap._reap_locked(
+            latest, fresh, harness.repo, harness.tracking_dir,
+        ),
+    )
+    monkeypatch.setattr(cleanup_reap, "retirement_blocker", lambda record: None)
+    monkeypatch.setattr(cleanup_reap.procs, "processes_with_cwd_under", lambda *a, **k: [])
+
+    def remove(*args, **kwargs):
+        Path(rec.worktree_path).rmdir()
+        return True
+
+    monkeypatch.setattr(cli.git_ops, "remove_worktree", remove)
+    monkeypatch.setattr(cli.git_ops, "delete_branch", lambda *a, **k: False)
+    monkeypatch.setattr(cleanup_reap.tracking, "retire_record", lambda *a: False)
+    result = harness.run_reap_one()
+    assert result["removed"] is True
+    assert result["skipped"] is False
+    assert result["ok"] is False
+    assert any("Could not delete branch" in warning for warning in result["warnings"])
+    monkeypatch.setattr(cli, "reap_one", lambda *a, **k: result)
+    assert cleanup_gc_cli._cleanup_one(
+        SimpleNamespace(worktree_id=rec.worktree_id, json=False),
+    ) == 1
+    text = capsys.readouterr()
+    assert "wt1: removed" in text.out
+    assert "Could not delete branch" in text.out + text.err
+
+
 def test_cmd_cleanup_dirty_after_scan_refused(capsys, monkeypatch, tmp_path):
     harness = CleanupHarness(monkeypatch, tmp_path)
     rec = make_record(tmp_path, status="finalized")

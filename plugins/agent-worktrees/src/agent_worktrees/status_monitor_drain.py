@@ -14,6 +14,7 @@ from zdd import lifecycle
 
 BUSY_REASONS = (
     "sweep", "hook", "classify", "tracking-write", "worktrees-feed", "worktrees-read",
+    "repos-map-read", "repos-map-producer",
 )
 COUNT_FIELDS = (*BUSY_REASONS, "tracking-write-compute", "lifecycle")
 _PROGRESS_INTERVAL_S = 5.0

@@ -17,7 +17,7 @@ from .registrar import RegistrarError
 from .registrations import RegistrationKind
 from .repo_config import layered_repo_surface_dirs, surface_entry_present
 from .repository_resource_capture import run_agent_worktrees_capture
-from .repository_resources import RepositoryResourceSnapshot, split_repository_resource
+from .repository_resources import split_repository_resource
 from .worker_instances import digest, templates
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
@@ -52,14 +52,14 @@ def _finding(findings: list[dict], source: str, reason: str, detail: str) -> Non
 
 def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
     roots: dict[str, Path] = {}
-    snapshot = RepositoryResourceSnapshot(execution=False)
     try:
-        result = run_agent_worktrees_capture("repos", "list", "--strict", "--json", timeout=5)
+        result = run_agent_worktrees_capture("repos", "map", "--json", timeout=5)
     except RegistrarError as exc:
         result = None
         _finding(findings, "registered-repositories", "unavailable", str(exc))
     names: set[str] = set()
     ambiguous: set[str] = set()
+    registered = {}
     if result is None or result.returncode:
         detail = "Optional registered-repository discovery is unavailable or timed out."
         if result is not None:
@@ -70,10 +70,18 @@ def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
             data = json.loads(result.stdout)
             entries = data.get("repos") if isinstance(data, dict) else None
             if not isinstance(entries, list):
-                raise ValueError("expected a repos list")
-            if data.get("inventory_authority") != "complete":
+                raise ValueError("expected a repository map")
+            if (
+                type(data.get("repository_map_version")) is not int
+                or data["repository_map_version"] != 1
+                or data.get("inventory_authority") != "complete"
+                or not isinstance(data.get("projection"), dict)
+                or data["projection"].get("quality") != "current"
+                or data.get("availability") is not None
+            ):
                 _finding(findings, "registered-repositories", "inventory-authority-unavailable",
-                         "The repository owner lacks the strict inventory contract; discovery is partial.")
+                         "A current resident repository map is unavailable; discovery is partial.")
+                entries = []
             valid_names = []
             for offset, entry in enumerate(entries):
                 try:
@@ -86,6 +94,11 @@ def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
                     valid_names.append(entry["name"])
             counts = Counter(valid_names)
             names.update(name for name, count in counts.items() if count == 1)
+            registered = {
+                entry["name"]: entry for entry in entries
+                if isinstance(entry, dict) and isinstance(entry.get("name"), str)
+                and entry["name"] in names
+            }
             for name, count in counts.items():
                 if count > 1:
                     ambiguous.add(name)
@@ -107,8 +120,19 @@ def _repository_sources(findings: list[dict]) -> list[TemplateSource]:
                 legacy.append(pointer)
     for name in sorted(names):
         try:
-            roots[f"repo:{name}"] = snapshot.root(name)
-        except RegistrarError as exc:
+            entry = registered.get(name)
+            if entry is None:
+                raise RegistrarError("repository is not present in the resident registered map")
+            if entry.get("registration") != "ready":
+                raise RegistrarError(entry.get("reason") or "registered local root is unavailable")
+            raw = entry.get("path")
+            if (
+                entry.get("class") not in {"reference", "singleton", "worktree", "knowledge"}
+                or not isinstance(raw, str) or not Path(raw).is_absolute()
+            ):
+                raise RegistrarError("repository map has an invalid class or local root")
+            roots[f"repo:{name}"] = Path(raw)
+        except (RegistrarError, TypeError, ValueError) as exc:
             _finding(findings, f"repo:{name}", "unavailable", str(exc))
     for pointer in legacy:
         roots[f"repo-pointer:{pointer.name}"] = Path(pointer.location).expanduser()

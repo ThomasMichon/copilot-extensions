@@ -13,9 +13,13 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 HOSTS = [
     host for name in ("pwsh", "powershell.exe")
-    if (host := shutil.which(name))
+    if (host := shutil.which(name)) and (os.name == "nt" or not host.lower().endswith(".exe"))
 ]
 pytestmark = pytest.mark.guard
+
+
+def test_admission_hosts_match_running_platform():
+    assert os.name == "nt" or all(not host.lower().endswith(".exe") for host in HOSTS)
 
 
 def _quote(value: str | Path) -> str:
@@ -32,7 +36,7 @@ def admission(tmp_path: Path):
     (scripts / "command_binding.py").write_text(
         "import json,os,sys\nfrom pathlib import Path\n"
         "Path(os.environ['TEST_RECEIPT']).write_text(json.dumps({"
-        "'python':sys.executable,'arguments':sys.argv[1:]}))\n",
+        "'python':sys.executable,'arguments':sys.argv[1:],'no_site':sys.flags.no_site}))\n",
         encoding="utf-8",
     )
     source = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
@@ -97,6 +101,16 @@ def _run(admission, host: str, candidates: dict, explicit: Path | None = None):
     )
     assert not (home / "never-created").exists()
     return result, json.loads(receipt.read_text()) if receipt.exists() else None
+
+
+@pytest.mark.parametrize("host", HOSTS)
+def test_admission_uses_payload_only_no_site_startup(admission, host):
+    result, receipt = _run(
+        admission, host, {}, explicit=Path(sys.executable),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert receipt["no_site"] == 1
+    assert "--run-lifecycle" in receipt["arguments"]
 
 
 @pytest.mark.parametrize("host", HOSTS)

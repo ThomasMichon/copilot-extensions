@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"09811db19a551248d8a4e7838ee9be86b9e792665dc82891f0a1aaa897da1ffb","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.18-dev1","renderedBytes":3016,"schema":"copilot-extensions.instruction-projection","sourceId":"cross-repo-debug-tracking","template":"instructions/cross-repo-debug-tracking.instructions.md","templateBytes":2196,"templateSha256":"1e36d1ad73a5d0b2b22d656cb3953518272a4bc97147478bbd8d7545aebc3eee","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"09811db19a551248d8a4e7838ee9be86b9e792665dc82891f0a1aaa897da1ffb","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.19-dev1","renderedBytes":3016,"schema":"copilot-extensions.instruction-projection","sourceId":"cross-repo-debug-tracking","template":"instructions/cross-repo-debug-tracking.instructions.md","templateBytes":2196,"templateSha256":"1e36d1ad73a5d0b2b22d656cb3953518272a4bc97147478bbd8d7545aebc3eee","version":1} -->
 
 
 # Cross-repo debug tracking fallback
@@ -38,4 +38,4 @@ authorization and the target's required safety/permission gates; do not
 create a parallel scheduler or silently claim that a merge updated a running
 system.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"658f3c2574ccd451cec4f926ba5e680c3c80ab8353b480287bdffb50f9fec081"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"0ed6ada636302cb1ce94b477cb6b50ae50c65225c5acd397b74fa1c65433dc44"} -->

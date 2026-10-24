@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import uuid
 
 from .runtime_custody import RuntimeAdmission, admission_document
 
@@ -56,7 +57,7 @@ class _SessionsMixin:
 
     def update_session_stopped(
         self, session_id: str, now: float, background_recovery_enabled: bool,
-    ) -> None:
+    ) -> bool:
         """Atomically persist STOPPED status + the dormancy gate together.
 
         Two separate writes (status, then the gate) could leave a row
@@ -64,11 +65,29 @@ class _SessionsMixin:
         interrupted between them -- an interrupted stop must stay
         conservatively dormant (review of #3058).
         """
-        self.execute_write(
-            "UPDATE sessions SET status='stopped', pid=NULL, "
-            "background_recovery_enabled=?, updated_at=? WHERE id=?",
-            (1 if background_recovery_enabled else 0, now, session_id),
-        )
+        if self.read_only:
+            raise PermissionError("Read-only database cannot execute writes")
+        conn = self._get_conn()
+        with self._write_lock:
+            try:
+                conn.execute(
+                    "UPDATE sessions SET status='stopped', pid=NULL, "
+                    "background_recovery_enabled=CASE WHEN ?=1 "
+                    "AND cold_recovery_stop_token IS NULL THEN 1 ELSE 0 END, "
+                    "updated_at=? WHERE id=?",
+                    (1 if background_recovery_enabled else 0, now, session_id),
+                )
+                row = conn.execute(
+                    "SELECT background_recovery_enabled FROM sessions WHERE id=?",
+                    (session_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(session_id)
+                conn.commit()
+                return bool(row["background_recovery_enabled"])
+            except BaseException:
+                conn.rollback()
+                raise
 
     def update_session_acp_id(self, session_id: str, acp_session_id: str) -> None:
         """Persist the ACP session ID for resume support."""
@@ -78,13 +97,36 @@ class _SessionsMixin:
         )
 
     def update_session_background_recovery(
-        self, session_id: str, enabled: bool
-    ) -> None:
-        """Persist whether daemon background recovery may touch a session."""
-        self.execute_write(
-            "UPDATE sessions SET background_recovery_enabled=? WHERE id=?",
-            (1 if enabled else 0, session_id),
+        self, session_id: str, enabled: bool, *, expected_stop_token: str | None = None,
+    ) -> bool:
+        """Persist recovery permission only if no newer durable stop forbids it."""
+        cursor = self.execute_write(
+            "UPDATE sessions SET background_recovery_enabled=? WHERE id=? "
+            "AND (?=0 OR cold_recovery_stop_token IS ?)",
+            (1 if enabled else 0, session_id, 1 if enabled else 0, expected_stop_token),
         )
+        return enabled and cursor.rowcount == 1
+
+    def request_cold_recovery_stop(self, session_id: str) -> str:
+        """Persist fresh stop intent before teardown can yield to recovery."""
+        token = uuid.uuid4().hex
+        cursor = self.execute_write(
+            "UPDATE sessions SET cold_recovery_stop_token=?, "
+            "background_recovery_enabled=0 WHERE id=?",
+            (token, session_id),
+        )
+        if cursor.rowcount != 1:
+            raise KeyError(session_id)
+        return token
+
+    def clear_cold_recovery_stop(self, session_id: str, expected_token: str | None) -> bool:
+        """Clear only the stop intent observed by an admitted manual resume."""
+        cursor = self.execute_write(
+            "UPDATE sessions SET cold_recovery_stop_token=NULL "
+            "WHERE id=? AND cold_recovery_stop_token IS ?",
+            (session_id, expected_token),
+        )
+        return cursor.rowcount == 1
 
     def update_session_target(
         self, session_id: str, target_json: str, target_dir: str | None = None,
