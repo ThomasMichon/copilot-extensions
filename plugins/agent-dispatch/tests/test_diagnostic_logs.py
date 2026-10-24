@@ -496,3 +496,29 @@ def test_actual_lifespan_prunes_with_task_gc_disabled_without_reconciling(tmp_pa
     finally:
         package.removeHandler(handler)
         handler.close()
+
+
+def test_explicit_retained_spool_api_preserves_fields_and_old_factory(tmp_path):
+    from agent_dispatch import telemetry
+
+    (tmp_path / "retained").mkdir()
+    raw = tmp_path / "legacy.jsonl"
+    event = {"ts": int(datetime.now(timezone.utc).timestamp() * 1000),
+             "kind": "state", "name": "λ🚀", "nested": {"count": 1}}
+    telemetry.make_spool_sink(raw)(event)
+    original = raw.read_bytes()
+    sink = telemetry.make_retained_spool_sink(tmp_path)
+    sink(event)
+    assert json.loads(sink.store.path.read_text(encoding="utf-8")) == event
+    assert raw.read_bytes() == original
+    assert sink.inventory()["active"] != str(raw)
+
+
+def test_explicit_retained_spool_never_creates_parent(tmp_path):
+    from agent_dispatch import telemetry
+
+    missing = tmp_path / "owner-not-provisioned"
+    sink = telemetry.make_retained_spool_sink(missing)
+    sink({"kind": "state"})
+    assert not missing.exists()
+    assert sink.store.last_error is not None

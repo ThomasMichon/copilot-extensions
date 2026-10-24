@@ -73,9 +73,17 @@ class BufferedSink:
     def __init__(
         self, sink: TelemetrySink, *, capacity: int = 128, max_bytes: int = 4096,
         batch_size: int = 32, batch_sink: bool = False,
+        on_start=None,
+        on_iteration=None,
     ) -> None:
         if not callable(sink):
             raise ValueError("sink must be callable")
+        if on_start is not None and not callable(on_start):
+            raise ValueError("on_start must be callable")
+        if on_iteration is not None and not callable(on_iteration):
+            raise ValueError("on_iteration must be callable")
+        self._on_start = on_start
+        self._on_iteration = on_iteration
         if any(type(value) is not int for value in (capacity, max_bytes, batch_size)):
             raise ValueError("queue bounds must be integers")
         if type(batch_sink) is not bool:
@@ -143,6 +151,11 @@ class BufferedSink:
         self._closed = True
         self._stop.set()
 
+    @property
+    def closed(self) -> bool:
+        """Owner closure, not proof that the worker has exited."""
+        return self._closed
+
     def join(self, timeout: float = 0.0) -> bool:
         """Optional bounded off-path wait; never flush or call sink shutdown."""
         if not math.isfinite(timeout) or not 0 <= timeout <= 5:
@@ -157,6 +170,11 @@ class BufferedSink:
         return {name: counter.read() for name, counter in self._counts.items()}
 
     def _run(self) -> None:
+        if self._on_start is not None and not self._closed:
+            try:
+                self._on_start()
+            except Exception:
+                next(self._counts["sink_failed"])
         while not self._closed:
             with self._lock:
                 batch = [
@@ -183,6 +201,11 @@ class BufferedSink:
                     next(self._counts["sink_failed"])
                 else:
                     next(self._counts["delivered"])
+            if self._on_iteration is not None and not self._closed:
+                try:
+                    self._on_iteration()
+                except Exception:
+                    next(self._counts["sink_failed"])
             self._stop.wait(0.025)
         with self._lock:
             while self._queue:

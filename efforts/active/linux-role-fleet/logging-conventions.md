@@ -213,3 +213,154 @@ acceptance above is not permission or evidence for any of them:
    and coordinator/supervisor lifecycle path, then verify the imported running
    version/process identity and `agent-dispatch logs` destinations. No source
    merge, release, payload refresh or HTTP health sample alone is live proof.
+
+## Shared policy and Bridge application continuation
+
+The reviewed convention continues beyond Dispatch: reuse its policy in the
+existing dependency-free `process-telemetry` library, with explicit consumer
+paths, attribution, timestamp decoder and custody. Dispatch's compatibility
+adapter retains the existing public behavior; Bridge is a second actual
+application consumer, not another plugin-specific copy or new framework.
+
+Bridge's serving producer must not inherit a blocking file/handler mutex or
+history rewrite. Its existing bounded diagnostic writer owns initialization,
+formatting, storage and maintenance through its normal batch/idle iteration;
+shutdown never waits for a stuck sink. This source work does not
+ascribe an independently observed watchdog stall to logging or claim a live fix.
+
+- [x] Reconcile the shared architecture and async/compatibility boundary before
+  implementation, preserving #8370/#6812 and native lifetime ownership.
+- [x] Extract shared policy without importing plugins or lock dependencies into
+  the library; keep Dispatch's discovery/retention contract.
+- [x] Adopt actual Bridge bootstrap, batch/idle maintenance and logger namespaces
+  with bounded producer work and truthful loss/storage counters.
+- [x] Expose an explicit, separate retained-spool Python API with owner-provided
+  new namespace/maintenance, no parent creation and unchanged legacy factories.
+- [ ] Complete native Windows source validation and normal review/required CI;
+  qualify unavailable platform/live lanes separately.
+- [ ] Record the accepted source merge and retain all remaining logging-owner,
+  installer/native, deployment and released/running gates under #8377.
+
+### Continuation journal
+
+- 2026-10-24 UTC — Shared implementation retains real Bridge and Dispatch
+  consumers; declared materialized consumers are Bridge, Dispatch and standalone
+  Manager, each with a changefile. Existing optional-library import behavior
+  remains inert and dependency-closed.
+- 2026-10-24 UTC — Actual bootstrap validation identified Uvicorn's handler-close
+  `dictConfig` boundary; Bridge adopts its worker after that boundary, not before
+  it. Real bootstrap, quiet heartbeat, held mutex/handler lock, slow storage,
+  bounded shutdown, overflow, exception-argument exclusion, concurrent retained
+  spool rotation and unchanged legacy append are separate source regressions.
+  No installer, raw native capture, lifecycle/bootstrap or container adapter is
+  represented as delivered.
+- 2026-10-24 UTC — Native Windows source portfolios pass: Bridge 115 tests,
+  Dispatch 284 tests, and standalone Manager 70 tests with one optional OTLP SDK
+  case skipped because that extra is not installed. Bridge exercises the actual
+  Uvicorn handler-close boundary and heartbeat owner; held mutexes/handler locks,
+  slow storage, overflow and close do not block its producer. Existing direct-start
+  refusal coverage now explicitly pins both caller-Job observations instead of
+  depending on the test runner's ambient Job; production native launch code is
+  unchanged. The additional explicit millisecond-decoder regression retains
+  exact-cutoff/timezone/skew and unsupported-timestamp acceptance separately
+  from the shared application's ISO timestamp tests.
+- 2026-10-24 UTC — Final Bridge portfolio passes 118 tests, including both
+  application logger namespaces and bounded worker format expansion. Dispatch
+  remains 284 passes; Manager remains 70 passes/one optional SDK skip. Ruff F/E9,
+  install-contract (13 plugins), documentation consistency and diff whitespace
+  checks pass. Linux/macOS native and live external qualification are not claimed
+  by this explicitly source-only Windows stretch. Released helper/config
+  adoption and actual running-state readback remain integration work.
+- 2026-10-24 UTC — #8495 source review identified a nested mapping-key formatting
+  bypass and loss of ordinary failure records with Path/exception arguments.
+  Complete conversion validation now rejects unsupported mapping keys before
+  interpolation; safe bounded type placeholders preserve those failures without
+  producer-side repr/str/equality hooks or raw exception arguments. The actual
+  registry-parse failure callsite is a regression. Required CI's shrink-only app
+  size guard is addressed by factoring the existing heartbeat pause/enqueue
+  boundary into the logging adapter, without widening a baseline or adding a task.
+- 2026-10-24 UTC — HTTP-47 binds the application, CLI orchestrator and health
+  sources as semantic owners. All three therefore remain byte-for-byte unchanged,
+  with the original registry and every capture/fixture/provenance artifact.
+  Register local discovery through the already-owned command registrar and use
+  the existing bounded writer's batch/idle iteration for maintenance. Loss/status
+  counters are ordinary `diagnostic_buffer_callbacks` records, not a wire observer,
+  new status registry, timer or task. This supersedes the earlier heartbeat-hook
+  candidate without weakening any captured source binding.
+- 2026-10-24 UTC — Re-review's queued-maintenance starvation observation is
+  covered by the final owned worker-iteration seam: maintenance is not a droppable
+  queue offer and runs after normal batches as well as while idle. A regression
+  fills the queue, proves the explicit maintenance offer is dropped, then verifies
+  old records still expire while all 128 admitted new records are retained.
+- 2026-10-24 UTC — Follow-up review identified a secondary failure if the
+  fallback warning's stderr is closed/unwritable. Warning output and diagnostic
+  cleanup are now best-effort, with regressions preserving both successful and
+  failed primary startup outcomes. No native output handling, fixture or
+  protected wire source is changed.
+- 2026-10-24 UTC — The new fresh-state CLI functional smoke hit a transient
+  20-second cold-import timeout; the same isolated command plus fail-open
+  regressions then passed. Its child allowance is now 25 seconds inside the
+  unchanged 30-second runner item cap, explicitly not a CLI-startup latency
+  qualification. Controlled serving-thread contention/storage assertions and
+  production timeout/watchdog settings are unchanged.
+- 2026-10-24 UTC — Publication is administratively blocked, not accepted:
+  the latest fail-open warning/cleanup fix is committed locally as
+  `9891cdc265c38db0cf2e3a603ce60ad136ffd824` and its entrypoint/contract/diagnostic
+  portfolio passes 183 tests. PR #8495 remains at
+  `4a2a490c923a4f9cfacbd1c05f98823c581d7942`, with green required CI but the
+  warning finding still requiring this unpublished fix/re-review. Managed
+  publication first timed out and, on fresh-CWD retry, Git failed with
+  `could not read Username for 'https://github.com': terminal prompts disabled`.
+  Repository-scoped account resolution and API identity still agree; no ambient
+  account fallback or global switch was used. No credential/config/runtime repair
+  is authorized by this source-only stretch. The existing owner can inspect and,
+  if authorized, repair the repository-local credential pin through
+  `repos pin-credentials`, then resume normal managed push/review/CI/merge.
+  Keep the worktree, source responsibility, #8377 and all broader gates open.
+- 2026-10-24 UTC — Publication recovered through the existing repository-scoped
+  transport without persistent configuration/credential changes or runtime
+  operations. The tested fix and historical blocker journal are now published;
+  the earlier blocker entry is retained as history, not current disposition.
+  Fresh review identified idle maintenance retrying unavailable storage each
+  worker tick. Maintenance now debounces attempts before filesystem work, while
+  preserving explicit force retry and primary operation behavior.
+- 2026-10-24 UTC — The new maintenance fix is local
+  `21236fcf31f140ec9dcfa9cb426e40fdfc3b1b1b` (170 Bridge contract/target/diagnostic
+  tests and 49 Dispatch diagnostic/telemetry tests pass). Authentication recovery
+  remains valid, but two subsequent managed publications using the same scoped
+  child-only transport hit the unchanged 30-second push deadline; provider
+  readback confirms #8495 still has the prior published head. Read-only inspection
+  finds the managed Git hook delegates through an unqualified command; a
+  child-only attempt to route that command to the existing catalogue shell
+  launcher fails its canonical-account-home check. These are observations, not
+  a claim about the cause of the deadline or any serving-watchdog stall. No hook,
+  runtime, persistent config, credential store or lock was changed; no guard was
+  skipped. Current-head publication/review/CI/merge remain blocked on an
+  authorized native publication carrier. Keep all source/adopter/native gates open.
+- Adopter prerequisite remains **not delivered**: current telemetry configuration
+  loads a zero-argument `sink` factory and registers it synchronously. It cannot
+  pass the mandatory directory to `make_retained_spool_sink(directory)`, schedule
+  quiet maintenance, or establish/close an owned buffer. The delivered core is
+  the explicit Python API, its `maintain`/`inventory` methods and optional existing
+  buffer startup/iteration hooks. An owner adapter must connect that lifecycle
+  and a newly provisioned exclusive namespace before any retained configuration
+  or running-retention claim; legacy factories and paths stay unchanged.
+- 2026-10-24 UTC — Native managed publication recovered without persistent
+  configuration, credential, hook or lock changes. Provider head readback matches
+  the published maintenance fix and historical journal; current-head required CI
+  passes. Fresh review identified a platform-specific test assumption: process
+  identity lookup legitimately returns no start token on unsupported platforms.
+  The actual consumer now checks the existing identity authority's result and a
+  separate regression preserves an explicit unknown token rather than inventing
+  attribution. This is a source-test correction, not macOS/live qualification.
+  Native Windows managed Bridge diagnostic portfolio: 28 passed; touched-test
+  Ruff F/E9 and diff whitespace checks pass.
+- 2026-10-24 UTC — Subsequent current-head review identified platform timestamp
+  conversion raising `OSError` for out-of-range producer values. The decoder
+  boundary now treats that range failure as an unknown timestamp, preserving the
+  original record while still expiring valid old records in the same segment.
+  Regression coverage includes both extreme epoch values and an injected
+  platform-style range error; no legacy append/factory or configuration changes.
+  Native managed source validation passes 31 Bridge diagnostic tests and 49
+  Dispatch diagnostic/telemetry tests; touched-code Ruff F/E9 and whitespace
+  checks pass.

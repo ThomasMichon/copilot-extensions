@@ -233,6 +233,17 @@ def make_spool_sink(spool: str | os.PathLike[str] | None = None) -> TelemetrySin
     return sink
 
 
+def make_retained_spool_sink(directory):
+    """Explicit API opt-in; owner provisions directory/retained and maintenance."""
+    from process_telemetry.retained_spool import RetainedSpool
+    from .diagnostic_logs import operation_custody
+
+    return RetainedSpool(
+        directory, "agent-dispatch-telemetry", service="agent-dispatch",
+        custody=operation_custody,
+    )
+
+
 # Lifecycle fields that are safe to surface: state and structure only. The task
 # prompt/payload are deliberately excluded so telemetry can never leak a secret.
 _SAFE_TASK_FIELDS = (

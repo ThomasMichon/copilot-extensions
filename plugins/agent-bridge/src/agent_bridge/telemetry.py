@@ -311,6 +311,17 @@ def make_spool_sink(spool: str | os.PathLike[str] | None = None) -> TelemetrySin
     return sink
 
 
+def make_retained_spool_sink(directory):
+    """Explicit API opt-in; owner provisions directory/retained and maintenance."""
+    from process_telemetry.retained_spool import RetainedSpool
+    from .diagnostic_logs import operation_custody
+
+    return RetainedSpool(
+        directory, "agent-bridge-telemetry", service="agent-bridge",
+        custody=operation_custody,
+    )
+
+
 def session_lifecycle_event(
     event_type: str,
     session_id: str | None,

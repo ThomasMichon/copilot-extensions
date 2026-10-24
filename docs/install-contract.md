@@ -2345,6 +2345,16 @@ the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
 success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call in unadopted wrappers.
+The canonical version-1 payload shim and Bridge/Dispatch retained command gates
+serialize stale PID-link revalidation with `.provision.reap.mutex` when `flock`
+is unavailable. They install cleanup before acquisition, release only a mutex
+they acquired, relinquishing custody before directory removal so a signal cannot
+remove a peer's replacement. They exit 130/143 on INT/TERM rather than continuing provisioning.
+An unowned mutex is never removed automatically: after 30 one-second retries,
+the caller exits 126 with an explicit repair diagnostic. This also bounds refusal
+after an untrappable interruption or death between `mkdir` and ownership recording.
+Waiting for a live provisioning PID remains separate and is not subject to that
+reaper-mutex retry budget.
 Vault's cold primary/payload commands and legacy session bootstrap instead submit to the packaged
 installation driver's canonical queue before taking any outer provisioning
 lock. They retain the inner canonical installer lock, publication admission,
