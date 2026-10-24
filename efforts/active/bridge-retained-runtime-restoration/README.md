@@ -318,6 +318,12 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   Its parser test now selects an isolated metadata owner and a real temporary
   checkout policy instead of depending on an ambient Worktrees executable;
   production hosting admission is unchanged.
+- Actual committed source `7342384d638d71b9af4d8db745e55d1a203da24e`
+  passes write/no-write HTTP-48 capture with 77 outputs, including all four
+  alias-control refusals and no inserted control. The full 124-case current
+  capture/contract/maintenance cohort, two-contract/659-fixture checker,
+  install contract and changefile-presence checks pass. Current-head independent
+  review remains required; SDK/native and restoration gates remain open.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the
