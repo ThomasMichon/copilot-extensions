@@ -167,6 +167,13 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-24** -- #8615 merged local/seedless resolution receipts and saved
+  attempt propagation through both launch hops, with current-head approval,
+  no findings and required CI passing. Target prompted admission retains its
+  own durable version-2 receipt; seedless SSH planning remains forwarding only.
+  Re-read this plan and the journal effort after merge. Native process,
+  conversation/handoff evidence, containing release, authorized rollout,
+  installed same-conversation local/SSH acceptance and cleanup remain open.
 - **2026-10-24** -- Linked attempt-journal proposal #8380 merged with current-head
   approval and required CI. The reviewed plan preserves target-owned execution,
   protected 90-day prompt retention and original installed acceptance gates.

@@ -1,0 +1,9 @@
+{
+  "comment": "Retain prompt-free deferred execution receipts with explicit attempt, resolution and parent identity; preserve unknown native acceptance and consoleless launches.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
