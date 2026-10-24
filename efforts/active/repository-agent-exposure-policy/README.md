@@ -556,3 +556,8 @@ daemon or separately resolved Worktrees owner has upgraded.
   Real legacy-receiver probes are witnessed before assertions of zero launch,
   allocation or seed effects. Native qualification and provider re-review
   remain required; the existing Dispatch qualification is unchanged.
+- Native qualification of that review correction passes 577 Worktrees cases
+  with eight platform skips and 172 Manager cases with 12 skips. The real
+  PowerShell receiver matrix covers allowed, unsupported, malformed and denied
+  answers before a fake launch effect; all bounded jobs verify cleanup.
+  Review, release and installed correction remain separate gates.
