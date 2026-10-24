@@ -260,6 +260,53 @@ def test_cancelled_draft_does_not_create_an_attempt(private_root, scope):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("scope", [False, True])
+def test_mock_composer_confirmation_never_persists(private_root, monkeypatch, scope):
+    from worktree_manager.seed_history import SeedHistory
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Mock confirmation attempted persistence")
+
+    monkeypatch.setattr(LaunchAttempts, "record_intent", forbidden)
+    monkeypatch.setattr(SeedHistory, "remember", forbidden)
+
+    async def run():
+        dialog = (
+            ScopeDlgScreen({"opts": []}, show_prompt=True, journal_enabled=False)
+            if scope else PromptDlgScreen("Resume", "Prompt", journal_enabled=False)
+        )
+        app, outcomes = App(), []
+        async with app.run_test() as pilot:
+            app.push_screen(dialog, outcomes.append)
+            await pilot.pause()
+            dialog.query_one(SeedPromptField).load_text("synthetic mock input")
+            activate(dialog)
+            await settled(pilot, lambda: bool(outcomes))
+            assert outcomes == [True]
+            assert dialog.seed_prompt == "synthetic mock input"
+            assert dialog.attempt_id is None
+            assert not LaunchAttempts(private_root).path.exists()
+    asyncio.run(run())
+
+
+def test_mock_resume_entry_forwards_the_persistence_boundary(monkeypatch):
+    from types import SimpleNamespace
+    from worktree_manager.production_picker.picker_tui import resume_prompt_actions
+
+    dialogs = []
+    row = {"raw": {"id": "mock-worktree"}, "is_local": True}
+    screen = SimpleNamespace(
+        real_ops=False, debug="",
+        _find_internal_worktree=lambda *_: (row, None),
+        _session_action_verbs=lambda _: ["Resume prompt\u2026"],
+        _resume_decision=lambda *_args, **_kw: {"action": "resume", "is_local": True},
+        app=SimpleNamespace(push_screen=lambda dialog, _callback: dialogs.append(dialog)),
+    )
+    resume_prompt_actions.open_resume_prompt(screen, row)
+    assert len(dialogs) == 1
+    assert dialogs[0]._journal_enabled is False
+
+
 @pytest.mark.parametrize("action,options,expected", [
     ("new", {}, "new"),
     ("resume", {}, "resume"),

@@ -55,6 +55,7 @@ def confirm_before_effect(
     prompt: str | None = None,
     refusal: str | None = None,
     history: SeedHistory | None = None,
+    enabled: bool = True,
 ) -> bool:
     """Show saving immediately, then invoke *saved* only after durable intent.
 
@@ -69,6 +70,12 @@ def confirm_before_effect(
         return False
     snapshot = deepcopy(decision)
     snapshot["project"] = project
+    if not enabled:
+        if refusal:
+            owner.notify(refusal, severity="error")
+            return False
+        saved(snapshot)
+        return True
     options = deepcopy(snapshot.get("options") or {})
     execution_prompt = options.pop("seed_prompt", "")
     options["title"] = snapshot.get("title")

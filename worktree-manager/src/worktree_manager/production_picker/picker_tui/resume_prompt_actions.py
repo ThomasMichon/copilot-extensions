@@ -48,6 +48,7 @@ def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
         "Prompt (optional; saved for retry until Copilot takes this cold resume):",
         seed_refusal=refusal,
         launch_decision=decision,
+        journal_enabled=getattr(screen, "real_ops", True),
     )
 
     def _after(confirmed):

@@ -2559,7 +2559,7 @@ def test_resume_prompt_seed_carries_through_to_resume_decision():
             dlg.query_one("#q-0", _AutoExpandTextArea).text = "sync, then status"
             await pilot.press("enter")   # the textarea's own accept + advance
             await pilot.press("enter")   # confirm
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
 
         assert app.result is not None
         assert app.result["action"] == "resume"
@@ -2624,7 +2624,7 @@ def test_resume_prompt_refuses_live_dispatch_but_retains_confirmed_racing_intent
             rec["mux_live"] = True
             await pilot.press("enter")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             assert app.result["action"] == "resume"
             assert app.result["options"]["seed_prompt"] == "must not run"
 
@@ -4941,7 +4941,7 @@ def test_new_worktree_bare_refuses_prompt_but_allows_blank_launch(monkeypatch):
             await pilot.press("space")          # toggle Bare on
             await pilot.press("tab")            # options -> buttons
             await pilot.press("enter")          # confirm Create
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             assert app.screen is dlg and app.result is None
             field = dlg.query_one("#q-0", _AutoExpandTextArea)
             assert field.text == "fix the flaky test"
@@ -4949,7 +4949,7 @@ def test_new_worktree_bare_refuses_prompt_but_allows_blank_launch(monkeypatch):
             from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
             dlg.on_focus_group_activated(
                 FocusGroup.Activated(dlg.query_one(FocusGroup), 0, "confirm"))
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["options"]["bare"] is True
@@ -4987,7 +4987,7 @@ def test_new_worktree_no_mux_preserves_seed_prompt(monkeypatch):
             await pilot.press("space")          # toggle No Mux on
             await pilot.press("tab")            # options -> buttons
             await pilot.press("enter")          # confirm Create
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
@@ -5020,7 +5020,7 @@ def test_new_worktree_seed_prompt_carries_through(monkeypatch):
             dlg = _scope_dlg(scr)
             dlg.query_one("#q-0", _AutoExpandTextArea).text = "fix the flaky test"
             await pilot.press("enter")          # confirm Create, no options
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result["action"] == "new"
         assert app.result["options"]["seed_prompt"] == "fix the flaky test"
 
@@ -5058,7 +5058,7 @@ def test_new_worktree_no_mux_option():
             assert dlg._dlg["opts"][nm]["on"] is True
             await pilot.press("tab")            # options -> button group
             await pilot.press("enter")          # confirm Create
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             # No Mux bypasses the mux pane `embody`'s delivery depends on
             # entirely, so the (blank) prompt is dropped -- this must go
             # straight to the launch decision, same as Bare.
@@ -5091,7 +5091,7 @@ def test_new_worktree_ahp_option_defaults_off_and_toggles():
             await pilot.press("space")
             await pilot.press("tab")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result["options"]["ahp"] is True
         assert app.result["options"]["no_mux"] is False
 
@@ -5126,7 +5126,7 @@ def test_new_worktree_modifiers_can_be_combined():
             await pilot.press("space")
             await pilot.press("tab")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             # No Mux bypasses the mux pane `embody`'s delivery depends on
             # entirely, so the (blank) prompt is dropped here too.
         assert app.result["options"]["no_mux"] is True
@@ -5182,7 +5182,7 @@ def test_new_worktree_anchor_option_shows_selected_state():
             assert "Selected: Anchor repo" in prompt.render().plain
             await pilot.press("tab")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
             # Anchor resolves via `--base`, which the engine's own resolve
             # CLI rejects alongside `--seed` -- the (blank) prompt is
             # dropped here too, same as Bare/No Mux.

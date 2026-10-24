@@ -844,14 +844,8 @@ class ScopeDlgScreen(ModalScreen[bool]):
             decision = new_decision(
                 self._dlg, self._collect_prompt(), is_local=self._launch_local is not False,
             )
-            if not self._journal_enabled:
-                self.seed_prompt = decision["options"]["seed_prompt"]
-                self.launch_decision = decision
-                self.dismiss(True)
-                return
-
             def saved(result):
-                self.attempt_id = result["attempt_id"]
+                self.attempt_id = result.get("attempt_id")
                 self.launch_decision = result
                 self.seed_prompt = result["options"]["seed_prompt"]
                 self.dismiss(True)
@@ -861,6 +855,7 @@ class ScopeDlgScreen(ModalScreen[bool]):
                 prompt=str(field.text) if field is not None else "",
                 refusal=field.refusal(options=options) if field is not None else None,
                 history=field.seed_store if field is not None else None,
+                enabled=self._journal_enabled,
             )
             return
         if self.app.screen is not self:

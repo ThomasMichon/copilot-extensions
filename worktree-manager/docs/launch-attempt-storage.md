@@ -31,7 +31,9 @@ that continuation later.
 Empty prompts are recorded. Unsupported prompt/option combinations retain
 `confirmed` and `refused` observations without dismissing the original composer
 or creating a legacy history entry. Cancellation before confirmation records
-nothing. A save failure reports a sanitized error, preserves the draft and
+nothing. Explicit Picker mock mode disables confirmation persistence for both
+New and cold Resume; it creates neither journal nor legacy-history entries.
+A save failure reports a sanitized error, preserves the draft and
 prevents launch; explicitly retrying identical failed input reuses its attempt
 ID. A later separate action after a successful confirmation gets a new ID.
 The journal preserves raw text independently of existing execution-text

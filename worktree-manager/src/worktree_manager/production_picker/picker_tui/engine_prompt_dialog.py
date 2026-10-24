@@ -37,13 +37,14 @@ class PromptDlgScreen(ModalScreen[bool]):
 
     def __init__(
         self, title: str, hint: str, *, seed_refusal: str | None = None,
-        launch_decision: dict | None = None,
+        launch_decision: dict | None = None, journal_enabled: bool = True,
     ) -> None:
         super().__init__()
         self._title = title
         self._hint = hint
         self._seed_refusal = seed_refusal
         self._launch_decision = launch_decision or {"action": "resume", "is_local": True}
+        self._journal_enabled = journal_enabled
         self.attempt_id: str | None = None
         self.launch_decision: dict | None = None
         self.seed_prompt = ""            # set on Confirm
@@ -89,7 +90,7 @@ class PromptDlgScreen(ModalScreen[bool]):
             decision.setdefault("options", {})["seed_prompt"] = self._collect_prompt()
 
             def saved(result):
-                self.attempt_id = result["attempt_id"]
+                self.attempt_id = result.get("attempt_id")
                 self.launch_decision = result
                 self.seed_prompt = result["options"]["seed_prompt"]
                 self.dismiss(True)
@@ -98,6 +99,7 @@ class PromptDlgScreen(ModalScreen[bool]):
                 self, context.project(), decision, surface="resume-prompt", saved=saved,
                 prompt=str(field.text), refusal=field.refusal(refusal_reason=self._seed_refusal),
                 history=field.seed_store,
+                enabled=self._journal_enabled,
             )
         else:
             self.action_cancel()
