@@ -43,7 +43,7 @@ def ordinary_receipt(log):
     return None
 
 
-def completed_count(root, count, log):
+def receipt_completed_count(root, count, log):
     receipt = ordinary_receipt(log)
     if receipt is None:
         return False
@@ -79,21 +79,21 @@ def test_bootstrap_observer_waits_for_committed_receipt_without_masking_bad_stat
             with pytest.raises(StateError, match="unsupported update-driver schema"):
                 status(root=root)
             log.write_text('{"launched":true}\n', encoding="utf-8")
-            assert not completed_count(root, 1, log)
+            assert not receipt_completed_count(root, 1, log)
             log.write_text('{"request_id":"partial"', encoding="utf-8")
-            assert not completed_count(root, 1, log)
+            assert not receipt_completed_count(root, 1, log)
         finally:
             release.set()
         request = future.result(timeout=15)
     log.write_text(json.dumps({"request_id": request.id, "state": "pending"}) + "\n", encoding="utf-8")
-    assert not completed_count(root, 1, log)
+    assert not receipt_completed_count(root, 1, log)
     drain(root=root, executor=lambda _transaction: 0)
-    assert completed_count(root, 1, log)
+    assert receipt_completed_count(root, 1, log)
     with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
         db.execute("PRAGMA user_version=999")
     before = (root / "queue.sqlite3").read_bytes()
     with pytest.raises(StateError, match="unsupported update-driver schema"):
-        completed_count(root, 1, log)
+        receipt_completed_count(root, 1, log)
     assert (root / "queue.sqlite3").read_bytes() == before
 
 
@@ -236,6 +236,10 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
             if path.is_file() and (path.suffix == ".log" or path.name in {"stdout", "stderr"})
         )
 
+    def completed_count(count):
+        requests = status(root=root)
+        return len(requests) == count and all(item.state == "completed" for item in requests)
+
     def assert_request(request, action):
         assert request.exit_code == 0, diagnostic()
         admission = json.loads(request.spec.source)
@@ -271,7 +275,7 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
             assert operation.state == "running", diagnostic()
             cold.close_caller()
             assert not cold.exited(), diagnostic()
-            observe(lambda: completed_count(root, 1, cold.receipt_log) or cold.exited(), 850, diagnostic)
+            observe(lambda: receipt_completed_count(root, 1, cold.receipt_log) or cold.exited(), 850, diagnostic)
             assert ordinary_receipt(cold.receipt_log), diagnostic()
             assert completed_count(1), diagnostic()
             stamp = status(root=root)[0]
@@ -308,7 +312,7 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
             timeout=deadline, diagnostic=diagnostic,
         ) as drift:
             drift.close_caller()
-            observe(lambda: completed_count(root, 3, drift.receipt_log) or drift.exited(), 850, diagnostic)
+            observe(lambda: receipt_completed_count(root, 3, drift.receipt_log) or drift.exited(), 850, diagnostic)
             assert ordinary_receipt(drift.receipt_log), diagnostic()
             assert completed_count(3), diagnostic()
             request = next(item for item in status(root=root) if item.id not in {stamp.id, client.id})
