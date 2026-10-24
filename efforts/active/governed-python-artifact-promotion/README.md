@@ -727,8 +727,11 @@ win grows with build complexity.
   required unit manifest; its node selection and budget are unchanged.
 - The development regression packet passes **562 tests**, with one expected
   POSIX-only helper skip on Windows. Contract, synchronization, documentation,
-  feed-neutrality and Python lint checks pass. The required packet and repaired
-  published-head CI/native review gates remain open. This is still an
+  feed-neutrality and Python lint checks pass. The unchanged required packet
+  passes all **1509 units** without observed effects in **198.360 seconds**
+  against the repaired source bytes before publication. Committed-diff module,
+  changefile and effort-structure guards pass. Repaired published-head CI/native
+  review gates remain open. This is still an
   input-binding component, not governed acquisition or an enabled constructor;
   the parent remains **Active**.
 
