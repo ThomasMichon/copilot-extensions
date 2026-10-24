@@ -104,3 +104,11 @@ driver's `--fixture-contract-smoke` mode validate factor/argument representation
 without importing the observer, opening a socket, creating a native session or
 invoking the backend. Fixture preparation and smoke validation are not permission
 to execute the native selector.
+
+One bounded full33-case factor2 source-fixture run was accepted at preparation
+head `8f0b0f30ec570f4abf2fc1ab65e377f13607fd83`: all cases and their cleanup
+assertions passed, with zero code-path helpers and at most four in-flight
+operations. All51 captured observations were below4,000ms; two were not below
+the nominal2,000ms target (maximum3,851.874ms). The SDK shell in that lane was
+explicitly a double. This is not actual SDK-host/refork, whole hook-dispatcher,
+installed or nominal-SLA acceptance, and does not enable the ready capability.

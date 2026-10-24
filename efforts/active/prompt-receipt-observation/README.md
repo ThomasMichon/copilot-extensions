@@ -609,3 +609,29 @@ new authority or ownership behavior requires a separate proposal.
   smoke mode do not construct a resident, import the observer, invoke a backend,
   connect to an SDK host or create a native session. Preparation is not native
   execution permission or evidence of passing the retained failed gates.
+
+### Accepted bounded factor2 source-fixture qualification
+
+- The integration owner accepted the single full33-case run at
+  `8f0b0f30ec570f4abf2fc1ab65e377f13607fd83`, with metadata production bytes
+  from `b12982076b6534537f01f459c4227fd3612ee2c8`. All33 exact prepared case
+  names passed, including teardown, with no skip/error or subset retry.
+- All51 captured observations retained actual monotonic measurements and were
+  below the experiment's4,000ms ceiling; two were at least2,000ms and the maximum
+  was3,851.874ms. This is **factor2 acceptance, not nominal-SLA acceptance**.
+  Helpers were zero and maximum in-flight work was four. The runner exited0,
+  streams closed, and the unchanged fixture teardown asserted settled backend
+  custody, zero active work and no remaining fixture server/handler threads.
+- The51 records comprised49 explicit transport-fixture gates and two
+  SDK-shaped RPC-owner doubles. No actual SDK-host/refork, whole hook-dispatcher,
+  installed deployment or platform-wide qualification follows. No factor3 run
+  was needed or authorized; no readiness marker or rollout was added.
+- The owner independently verified the closed raw hashes, original preparation
+  bytes, exact selectors and observations. Five generated provider Python-cache
+  files were disclosed and preserved. The accepted22-member archive is
+  `h2-native-factor2-20261024.zip`, SHA-256
+  `78ac793064349481a3fc8dd087a456d756f5cba2dc069007897297cc557a3a48`.
+  Historical failed evidence remains retained; the native slot was released.
+- Publication/review of preparation source must use its current head, not the
+  older b129 review. The PR remains draft/no-merge while the distinct actual
+  SDK-host and remaining composition/installed/platform gates stay open.
