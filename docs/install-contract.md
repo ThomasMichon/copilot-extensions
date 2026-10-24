@@ -3275,6 +3275,11 @@ rather than fetching an omitted first-party distribution from a registry.
 Installer-owned contradictory constraints forbid those omitted names, including
 prereleases. Selected roots alone supply runtime requirements and package
 operands; unselected roots do not contribute unconditional dependencies.
+The retained dependency-policy owner creates these generated constraints
+through `retain_uv_install(excluded_local_packages=(...))`, snapshots and
+audits them before execution, and keeps them outside the caller-relative
+source-layout anchor. Deep source paths therefore do not become deeper
+retained backend working directories merely because a role excludes packages.
 This does not modify `pyproject.toml`, infer a machine role or duplicate a
 PEP 508 resolver.
 

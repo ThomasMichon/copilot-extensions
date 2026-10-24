@@ -219,8 +219,8 @@ def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform, ru
     for selector in ("local_role", "local_package", "role_health", "selected_extras"):
         assert selector in execution["run"]
     assert not execution.get("continue-on-error", False)
-    for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
-        assert "!inputs.candidate_profiles" in workflow["jobs"][name]["if"]
+    for diagnostics in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
+        assert "!inputs.candidate_profiles" in workflow["jobs"][diagnostics]["if"]
     required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
     assert name not in required["jobs"]
 

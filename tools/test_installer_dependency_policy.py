@@ -24,6 +24,15 @@ SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("names", [
+    [], "example", ("../example",), ("example", "EXAMPLE"), (False,),
+])
+def test_generated_local_exclusions_refuse_invalid_names_before_uv(names):
+    with pytest.raises(policy.DependencyPolicyError, match="excluded local packages"):
+        with policy.retain_uv_install("unused-uv", [], excluded_local_packages=names):
+            pytest.fail("invalid exclusions cannot reach UV or admit retained inputs")
+
+
 @pytest.mark.parametrize("fraction", ["1", "12", "123", "1234", "12345", "123456", "123456789"])
 def test_absolute_cutoff_fraction_is_python310_compatible_and_conservative(fraction):
     value = policy._cutoff_value(f"Absolute(2026-10-06T00:00:00.{fraction}Z)", NOW)
@@ -941,7 +950,8 @@ def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypat
         )
 
 
-def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("excluded", [(), ("unused-local",)])
+def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch, excluded):
     source = source_project(
         tmp_path / "runtime" / ".install-stage" / ("stage-" + "x" * 40)
         / "plugin" / "libs" / "fixture-source",
@@ -985,6 +995,7 @@ def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path,
     installed = policy.run_uv_install(
         shutil.which("uv"), ["--no-index", "--target", str(target), "--python", sys.executable, str(source)],
         cwd=cwd, env=offline_environment(tmp_path), trusted_source_roots=(source,),
+        excluded_local_packages=excluded,
         capture_output=True, text=True, timeout=30, now=NOW,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr

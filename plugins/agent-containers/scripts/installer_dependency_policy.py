@@ -652,7 +652,47 @@ def retain_uv_install(
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
+    excluded_local_packages: tuple[str, ...] = (),
     _operation: str = "install",
+):
+    """Own the admitted graph and optional first-party exclusion constraints."""
+    if not isinstance(excluded_local_packages, tuple) or any(
+        not isinstance(name, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None
+        for name in excluded_local_packages
+    ):
+        raise DependencyPolicyError("excluded local packages must be an immutable tuple of names")
+    names = tuple(re.sub(r"[-_.]+", "-", name).lower() for name in excluded_local_packages)
+    if len(set(names)) != len(names):
+        raise DependencyPolicyError("excluded local packages contain duplicate names")
+    options = dict(
+        env=env, cwd=cwd, now=now, trusted_source_roots=trusted_source_roots,
+        retained_resource_roots=retained_resource_roots, _operation=_operation,
+    )
+    if not names:
+        with _retain_uv_install(uv, arguments, **options) as transaction:
+            yield transaction
+        return
+    with _temporary_inputs(None) as temporary:
+        constraint = Path(temporary) / "excluded-local-packages.txt"
+        constraint.write_text(
+            "".join(f"{name}<0,>=0\n" for name in sorted(names)), encoding="utf-8",
+        )
+        with _retain_uv_install(
+            uv, [*arguments, "--constraint", str(constraint)],
+            _generated_constraints=(constraint,), **options,
+        ) as transaction:
+            yield transaction
+
+
+@contextmanager
+def _retain_uv_install(
+    uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
+    cwd: Path | None = None, now: datetime | None = None,
+    trusted_source_roots: tuple[Path, ...] = (),
+    retained_resource_roots: tuple[Path, ...] = (),
+    _operation: str = "install",
+    _generated_constraints: tuple[Path, ...] = (),
 ):
     """Own the admitted graph until the caller's execution and health settle."""
     now = datetime.now(timezone.utc) if now is None else now
@@ -734,9 +774,14 @@ def retain_uv_install(
         context_project = dict(_argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
         pairs = list(_argument_pairs(arguments))
         operands = [value for option, value in pairs if not option]
+        layout_files = files - set(_generated_constraints)
         compact_sources = (
-            projects and operands and not files and not editables and not context_project
-            and not any(option in _FILE_OPTIONS | {"--group"} for option, _ in pairs)
+            projects and operands and not layout_files and not editables and not context_project
+            and not any(
+                option in _FILE_OPTIONS | {"--group"}
+                and (option == "--group" or (base / value).resolve() not in _generated_constraints)
+                for option, value in pairs
+            )
             and not any(environment.get(key) for key in (
                 "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE",
             ))
@@ -747,7 +792,8 @@ def retain_uv_install(
         )
         # An unrelated caller cwd must not force absolute build inputs to retain
         # their entire checkout/staging ancestry. Relative-input layouts stay intact.
-        paths = [*projects, *files, *resources]
+        # Generated absolute constraints carry no caller-relative source layout.
+        paths = [*projects, *layout_files, *resources]
         if not compact_sources:
             paths.append(base)
         if context_project:
@@ -761,6 +807,8 @@ def retain_uv_install(
 
         def mirror(path):
             path = Path(path).resolve()
+            if path in _generated_constraints:
+                return root / "generated" / path.name
             anchor = hashlib.sha256(path.anchor.encode()).hexdigest()[:12]
             return root / anchor / path.relative_to(anchors[path.anchor.lower()])
 
@@ -928,7 +976,9 @@ def run_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
-    retained_resource_roots: tuple[Path, ...] = (), _operation: str = "install", **run_options,
+    retained_resource_roots: tuple[Path, ...] = (),
+    excluded_local_packages: tuple[str, ...] = (),
+    _operation: str = "install", **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
     result = None
@@ -937,6 +987,8 @@ def run_uv_install(
             uv, arguments, env=env, cwd=cwd, now=now,
             trusted_source_roots=trusted_source_roots,
             retained_resource_roots=retained_resource_roots,
+            **({"excluded_local_packages": excluded_local_packages}
+               if excluded_local_packages != () else {}),
             **({"_operation": _operation} if _operation != "install" else {}),
         ) as transaction:
             run_options.setdefault("creationflags", _HEADLESS)

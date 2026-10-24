@@ -829,6 +829,36 @@ def test_incomplete_local_role_cannot_fall_back_or_complete(
 
 
 @pytest.mark.timeout(180)
+def test_deep_local_role_keeps_generated_constraints_out_of_source_ancestry(
+    engine, tmp_path, role_inputs,
+):
+    plugin, uv = role_inputs
+    deep = tmp_path / ("caller-" + "x" * 80) / "workspace" / "repo"
+    deep.parent.mkdir(parents=True)
+    shutil.move(str(plugin.parent), str(deep))
+    plugin = deep / plugin.name
+    packages = engine._package_roots(plugin)
+    files = engine._source_files(packages)
+    before = engine.runtime.fingerprint_source(files)
+    inputs = engine.FrozenInputs(plugin, packages, before)
+    with engine._retained_inputs(inputs, uv, Path(sys.executable), refresh=False) as legacy:
+        baseline_depth = len(legacy.plugin.parts)
+    with engine.numbered_candidate(
+        tmp_path / "runtime", "1.0.0+client", plugin=plugin, uv=uv,
+        base_python=Path(sys.executable), health_module="example_module",
+        extras=("client",), local_packages=("agent-procutil", "example-dependency"),
+    ) as candidate:
+        assert not candidate.reused
+        assert len(candidate.frozen_plugin.parts) == baseline_depth
+        assert len(str(candidate.frozen_plugin)) < 260
+        assert engine.runtime.is_complete(
+            tmp_path / "runtime", candidate.slot.name, expect_hash=candidate.payload_hash,
+        )
+    assert engine._source_files(packages) == files
+    assert engine.runtime.fingerprint_source(files) == before
+
+
+@pytest.mark.timeout(180)
 def test_role_health_refuses_an_excluded_installed_distribution(
     engine, role_inputs, tmp_path, monkeypatch,
 ):

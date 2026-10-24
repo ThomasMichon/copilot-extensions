@@ -10,6 +10,10 @@
       "type": "patch"
     },
     {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-dispatch",
       "type": "patch"
     },
@@ -19,6 +23,14 @@
     },
     {
       "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
       "type": "patch"
     },
     {
@@ -35,6 +47,10 @@
     },
     {
       "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
       "type": "patch"
     },
     {

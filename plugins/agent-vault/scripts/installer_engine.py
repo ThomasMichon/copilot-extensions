@@ -20,7 +20,6 @@ from types import ModuleType
 import tomllib
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
-from installer_dependency_config import temporary_inputs
 from installer_dependency_policy import (
     DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained,
     _select_uv_executable, retain_uv_install,
@@ -278,29 +277,20 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
     environment = dict(os.environ)
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         environment.pop(name, None)
-    with ExitStack() as retained:
-        selected = _installed_packages(inputs)
-        excluded = _excluded_packages(inputs)
-        constraints = []
-        if excluded:
-            directory = Path(retained.enter_context(temporary_inputs(None)))
-            path = directory / "excluded-local-packages.txt"
-            # Omitted first-party inputs must not fall back to registry distributions.
-            path.write_text("".join(f"{name}<0,>=0\n" for name in excluded), encoding="utf-8")
-            constraints = ["--constraint", str(path)]
-        transaction = retained.enter_context(retain_uv_install(
-            str(Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
-            ["--python", str(python), "--no-editable", "--link-mode", "copy",
-             *(["--reinstall"] if refresh else []),
-             *constraints,
-             *(argument for package in selected
-               for argument in ("-r", str(package / "pyproject.toml"))),
-             *(str(package) + (
-                 f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
-             ) for package in selected)],
-            env=environment, cwd=inputs.plugin,
-            trusted_source_roots=inputs.packages,
-        ))
+    selected = _installed_packages(inputs)
+    with retain_uv_install(
+        str(Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
+        ["--python", str(python), "--no-editable", "--link-mode", "copy",
+         *(["--reinstall"] if refresh else []),
+         *(argument for package in selected
+           for argument in ("-r", str(package / "pyproject.toml"))),
+         *(str(package) + (
+             f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
+         ) for package in selected)],
+        env=environment, cwd=inputs.plugin,
+        trusted_source_roots=inputs.packages,
+        excluded_local_packages=tuple(_excluded_packages(inputs)),
+    ) as transaction:
         if set(transaction.sources) != set(inputs.packages):
             raise RuntimeError("Retained UV inputs differ from the runtime dependency graph")
         if (
