@@ -7,6 +7,19 @@ from collections import Counter
 
 
 FAMILIES = {
+    "test_setup.py": """
+test_fresh_repeat_update_and_preserving_uninstall
+test_same_bytes_foreign_replacement_is_never_withdrawn
+test_existing_root_and_foreign_identity_are_not_adopted
+test_configuration_drift_never_rewrites_or_reconstructs
+test_failure_retains_old_selection_and_explicitly_settles_recovery
+test_config_and_state_must_be_outside_runtime_root
+test_persisted_context_must_match_the_journaled_baseline
+test_unsafe_root_ancestor_is_refused_before_directory_creation
+test_foreign_replacement_between_validation_and_capture_is_preserved
+test_unmanageable_slot_names_refuse_before_installation
+test_maximum_slot_name_remains_manageable
+""",
     "test_construction.py": """
 test_construction_floor_refuses_before_resource_loading
 test_occupied_import_scope_is_not_replaced
@@ -107,6 +120,7 @@ test_independent_sdist_refuses_missing_construction_input
 test_installed_constructor_preserves_the_separate_bootstrap_floor
 test_installed_construction_refuses_foreign_imports_without_mutation
 test_installed_constructor_builds_chat_client_from_independent_inputs
+test_installed_selected_manual_client_update_death_recovery_and_removal
 """,
     "test_local_endpoint.py": """
 test_local_endpoint_offline_status_never_resolves_or_executes
@@ -183,7 +197,9 @@ test_artifact_helper_preserves_cwd_stdin_and_environment
 """,
 }
 
-FULL_ONLY = {"test_hosting.py", "test_host_distribution.py", "test_setup_distribution.py"}
+FULL_ONLY = {
+    "test_hosting.py", "test_host_distribution.py", "test_setup_distribution.py", "test_setup.py",
+}
 EXPECTED = {
     f"{module}::{name}": "full-only" if module in FULL_ONLY else "acceptance"
     for module, names in FAMILIES.items() for name in names.split()
@@ -191,6 +207,11 @@ EXPECTED = {
 
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
+    "test_setup.py::test_same_bytes_foreign_replacement_is_never_withdrawn": 3,
+    "test_setup.py::test_failure_retains_old_selection_and_explicitly_settles_recovery": 2,
+    "test_setup.py::test_persisted_context_must_match_the_journaled_baseline": 3,
+    "test_setup.py::test_foreign_replacement_between_validation_and_capture_is_preserved": 2,
+    "test_setup.py::test_unmanageable_slot_names_refuse_before_installation": 7,
     "test_workspace.py::test_workspace_deadline_rounding_never_exceeds_original_budget": 2,
     "test_construction.py::test_occupied_import_scope_is_not_replaced": 6,
     "test_construction.py::test_installed_health_refuses_bootstrap_drift": 3,

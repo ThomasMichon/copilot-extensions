@@ -523,14 +523,20 @@ def _recover_locked(root: Path, entries: dict, proofs: dict, required: list[Path
 
 def recover_uncontested(
     context: Path, receipts: list[Path], output: Path, expected: list[list[str]],
-    baseline: dict[Path, PhysicalState | None],
+    baseline: dict[Path, PhysicalState | None], *, recovery_only: bool = False,
 ) -> list[Path]:
-    """Recover proven outputs only; foreign objects never authorize copyback."""
+    """Recover proven outputs only; foreign objects never authorize copyback.
+
+    Explicit recovery may consume durable receipt prefixes after producer death.
+    Such prefixes authorize reversal only, never successful publication.
+    """
+    if type(recovery_only) is not bool:
+        raise PublicationProofError("Invalid recovery-only control")
     root, entries = read_context(context)
     if set(baseline) != set(entries):
         raise PublicationProofError("Selective recovery baseline differs from its context")
     with target_leases(root, list(entries)):
-        proofs = _proofs(receipts, root, entries, expected)
+        proofs = _proofs(receipts, root, entries, expected, recovery_only=recovery_only)
         return _recover_uncontested_locked(root, entries, proofs, output, baseline)
 
 

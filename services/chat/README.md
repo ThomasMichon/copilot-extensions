@@ -35,11 +35,10 @@ requirement, rather than claiming construction support, on Python3.10.
 
 The offline installed catalog verifies these resources against this wheel's
 RECORD along with Chat's own modules. This remains **local installed-resource
-evidence**, not release selection, installation authority, a runnable setup
-interface or service supervision. Delivering the constructor does not execute
+evidence**, not release selection, installation authority or service
+supervision. Delivering the constructor does not execute
 it, acquire tools or credentials, create a slot, change commands or select a
-role. Selected manual-client setup and preserving removal remain separate
-adapter work.
+role. Explicit selected manual-client setup is described below.
 
 The internal `construction.client_candidate` seam applies Chat's exact client
 extra/local closure to that canonical engine; it does not construct a service
@@ -57,6 +56,69 @@ The canonical engine's wheel-inspection and snapshot companions are included
 unchanged as required transitive bootstrap resources. This adapter still uses
 declared-source construction; delivering those companions does not select a
 wheel profile or grant artifact admission.
+
+## Explicit selected manual-client setup
+
+The installed `agent_chat_service.setup` module is Chat's **manual-client**
+adapter over those canonical resources. Run it from an independently installed
+Chat client using Python3.11+; the selected client itself retains Python3.10
+support. It does not create a marketplace cell, change PATH, enroll a
+participant, obtain credentials, join a channel or register/start a host.
+Manager and Fleet are not prerequisites.
+
+All paths below stand for explicit absolute paths on the target platform.
+Supply an already-created nonsecret [client configuration](#installed-client-role).
+Its configuration and state directory must live outside the dedicated runtime
+root. The root must be absent on first install; a preexisting root without this
+adapter's matching journal is refused rather than adopted.
+
+```text
+<installed-client-python> -I -B -m agent_chat_service.setup
+  --root <dedicated-runtime-root> --installation-id <nonsecret-installation-id>
+  install --config <client.json> --project <independent-chat-source-project>
+  --version <immutable-slot-name> --uv <absolute-uv> --python <absolute-base-python>
+```
+
+`--project` supplies the complete independent sdist/source inputs and their
+unchanged declared local library layout; the adapter does not fetch a release
+or infer a source from PATH. `update` takes the same inputs and converges through
+the same implementation. A repeat with the same completed source/role selection
+does not republish selectors. A different-code update needs a distinct immutable
+slot. Slot names are 1-128 ASCII letters/digits plus `.`, `+`, `_` and `-`,
+begin with a letter/digit, and cannot be `dev`; setup validates this before
+creating the installation. Publication inputs/selectors use explicit private
+file modes independently of the caller's umask. Construction health and exact
+role closure finish before selection.
+Configuration drift is an explicit refusal, not permission to migrate state or
+rewrite configuration.
+
+With the same `--root` and `--installation-id`, the other commands are:
+
+| Command | Meaning |
+| --- | --- |
+| `status` | Read local selection/recovery state without acquiring a writer lease, spawning a child, contacting a provider or repairing anything. |
+| `catalog` | Derive the exact retained manual-client argv from the selected slot after its installed-resource RECORD check. |
+| `recover` | Explicitly reverse an unresolved publication, or finish an interrupted preserving removal, using retained created-object proofs. |
+| `uninstall` | Withdraw attributable selectors/selected command availability while preserving runtime slots, configuration, state and operation evidence. |
+
+There is one Chat installation-operation journal, not a second command registry
+or installer engine. It binds installation identity, immutable source hash,
+configuration hash and role to canonical `current-version`/`last-known-good`
+selectors and `selected.json`. Canonical copy publication retains the original
+context, backups and producer receipts. An interrupted operation blocks later
+mutation until explicit recovery. Same-byte replacements do not establish
+physical ownership; foreign objects remain protected and recovery stays visibly
+unresolved. Removal is resumable and does not reselect a previous generation.
+The supported journal is bounded to one MiB; reaching that bound refuses rather
+than dropping provenance.
+
+The selected catalog uses the slot-local canonical retention launcher before
+application imports. Retained explicit invocations remain usable after source
+removal and preserving uninstall, because removal does not delete runtime slots.
+Neither local selection nor this catalog authenticates a release feed, proves
+remote connectivity or establishes native listening/assignment. The service
+role, stable service launcher, health-gated activation, Manager discovery and
+optional container/Komodo execution remain separate lifecycle-owner integrations.
 
 ## Optional container loadout contribution
 
