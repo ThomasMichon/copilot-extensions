@@ -324,3 +324,24 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   Fresh review identified idle maintenance retrying unavailable storage each
   worker tick. Maintenance now debounces attempts before filesystem work, while
   preserving explicit force retry and primary operation behavior.
+- 2026-10-24 UTC — The new maintenance fix is local
+  `21236fcf31f140ec9dcfa9cb426e40fdfc3b1b1b` (170 Bridge contract/target/diagnostic
+  tests and 49 Dispatch diagnostic/telemetry tests pass). Authentication recovery
+  remains valid, but two subsequent managed publications using the same scoped
+  child-only transport hit the unchanged 30-second push deadline; provider
+  readback confirms #8495 still has the prior published head. Read-only inspection
+  finds the managed Git hook delegates through an unqualified command; a
+  child-only attempt to route that command to the existing catalogue shell
+  launcher fails its canonical-account-home check. These are observations, not
+  a claim about the cause of the deadline or any serving-watchdog stall. No hook,
+  runtime, persistent config, credential store or lock was changed; no guard was
+  skipped. Current-head publication/review/CI/merge remain blocked on an
+  authorized native publication carrier. Keep all source/adopter/native gates open.
+- Adopter prerequisite remains **not delivered**: current telemetry configuration
+  loads a zero-argument `sink` factory and registers it synchronously. It cannot
+  pass the mandatory directory to `make_retained_spool_sink(directory)`, schedule
+  quiet maintenance, or establish/close an owned buffer. The delivered core is
+  the explicit Python API, its `maintain`/`inventory` methods and optional existing
+  buffer startup/iteration hooks. An owner adapter must connect that lifecycle
+  and a newly provisioned exclusive namespace before any retained configuration
+  or running-retention claim; legacy factories and paths stay unchanged.
