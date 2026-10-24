@@ -12,6 +12,18 @@ from .registrar import RegistrarError
 _PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)\}(?!\})")
 
 
+def _parse_plugin_ref(ref: str) -> tuple[str, str]:
+    rest = ref[len("plugin:"):]
+    name_part, sep, relpath = rest.partition(":")
+    if not sep or not name_part or not relpath:
+        raise RegistrarError(
+            f"extends: malformed plugin: ref {ref!r}; expected "
+            "'plugin:<name>:<relative-path>' or "
+            "'plugin:<name>@<marketplace>:<relative-path>'"
+        )
+    return name_part, relpath
+
+
 def identity_context_origin(directory: Path | str, execution_repo: object) -> Path | str:
     if isinstance(execution_repo, str) and execution_repo:
         return f"repo:{execution_repo}:."

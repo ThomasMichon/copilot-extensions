@@ -28,7 +28,7 @@ class _SessionsMixin:
         background_recovery_enabled: bool = True,
         runtime_admission: RuntimeAdmission | None = None,
     ) -> None:
-        self.execute_write(
+        self._execute_runtime_admitted_write(
             "INSERT INTO sessions (id, name, agent_name, caller_id, "
             "caller_session_id, target_dir, "
             "target_type, status, config_json, target_json, "
@@ -39,6 +39,7 @@ class _SessionsMixin:
              target_dir, target_type,
              status, config_json, target_json, int(background_recovery_enabled),
              now, now, acp_session_id, admission_document(runtime_admission)),
+            runtime_admission,
         )
 
     def update_session_status(

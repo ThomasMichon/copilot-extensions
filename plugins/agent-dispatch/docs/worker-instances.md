@@ -18,8 +18,9 @@ The table distinguishes:
 - **Source declarations**: discovered repository/plugin declarations, read-only
   here. Ownership/provenance identifies their configuration flow.
 - **Available templates**: built-in recipes plus a bounded worker-pool template,
-  with **Instantiate** actions; provider-owned fragments are discoverable but
-  have no Instantiate action. Recipe fragments are not complete instances.
+  and provider-owned fragments with owner-reported **Instantiate** capabilities.
+  Unsupported fragments retain Details and a reason, not a Save action.
+  Recipe fragments are not complete instances.
 
 ### Shared catalog metadata
 
@@ -106,7 +107,7 @@ Select **Edit — Save only**, **Edit — Save and Activate**, or the correspond
 | Field | Meaning |
 |---|---|
 | `name` | Unique local instance name; immutable after creation |
-| `declaration` | Complete JSON declaration, prefilled with current values or a recipe scaffold |
+| `declaration` | Complete JSON for edits/built-ins; declaration overrides (including existing recipe `params`) for a provider template |
 | `repo_root` | Existing absolute repository root, required by issue/effort loops |
 
 The declaration uses the existing registrar's schema, filters, capacities, body,
@@ -145,7 +146,12 @@ overlay. They are reported separately, not merged using a new local-wins rule.
 Registering an active registrar pointer is not required to discover templates
 from an already registered repository. A legacy repository pointer retains its
 pointer attribution; its label/path basename is not a registered repo identity.
+It remains browse-only until a canonical repository identity is available.
 Arbitrary directory pointers are not additional template roots.
+Repository discovery consumes the resident repository map without point-lookup
+fan-out. Named recipe dependencies in one catalog refresh share the existing
+registered-resource snapshot and lookup deadline. Separate refreshes and Save
+rechecks retain fresh snapshots; this is not a persistent cache.
 
 ```json
 {
@@ -181,23 +187,130 @@ without a top-level kind.
 New rows qualify the provider's local ID with its source/root/layer context.
 The ID is stable while that context is stable; relocating a provider root
 produces a distinct variant. Revisions fingerprint the index entry, raw
-declaration object and resolution context, not unresolved inherited resources.
+declaration object, resolved inherited recipe documents and resolution context.
 Equal bytes at different relative dependency roots are distinct contributions.
+Inherited recipe files must be regular files; discovery and Save refuse
+nonregular sources without opening them.
 Details retain all provider-reported applicability scopes, root kind, index,
 declaration path, requirements and revision. Raw commands/specs/environment
 values are not returned by this discovery projection.
 
-Provider rows report `resolution: discovered-only`,
-`dependency_status: not-resolved`, `instantiable: "false"` and an explicit
-`unsupported_reason`. Only Details is available through the existing Manager
-contribution. The current `workers save` command still refuses these new IDs:
-safe external recipe materialization is not implemented. Do not treat declared
-requirements as evaluated prerequisites or copy relative references into the
-local-instance directory. Built-in IDs, recipe references and their existing
-save/activation actions are unchanged.
+Resolvable provider rows report `resolution: recipe-resolved`,
+`dependency_status: inputs-required` and `instantiable: "true"`. Their form keeps
+the existing name, advanced declaration and repository-root fields. The
+declaration field starts as `{}`: supply overrides and the existing recipe's
+`params`, rather than copying the source and accidentally overriding its path
+origins. The repository-root default is the selected provider root; an
+execution-repository selector remains an ordinary declaration field.
+
+`workers save` re-discovers the qualified source using current activation and
+checks its revision, materializes it through the existing `extends` parameter/
+deep-merge authority, validates dependencies, and compares its expanded
+registrations before and after relocation. Every recipe read, including
+inherited forge provenance checks, must match the selected revision's physical
+source identities and decoded documents; a named-root change refuses before
+reading an unselected file. It rechecks source closure after
+collision validation before persistence. Inherited emitter/reviewer cwd values
+retain their defining directories. Registered repository references remain
+`repo:` resources through persistence and publication, retaining their owner's
+execution admission (including refusal of a reference-only checkout).
+Absolute and implicit source-local execution contexts are qualified by the
+same supplier-context owner used by registrar discovery; composed forms that
+cannot retain that qualification refuse rather than publishing plain paths.
+Named defining-hop suppliers remain qualified even when the selected outer
+template is local or plugin-owned and the inherited cwd was written as an
+absolute path.
+Absolute executable and script operands inside a named supplier retain `repo:`
+qualification as well, including emitter side-load and inline evaluator argv.
+Other command arguments remain opaque, so an output path need not exist at
+Save time and does not become a required source resource. Only an
+independently admitted named execution cwd permits read-only source arguments;
+an omitted cwd or unrelated plain path does not erase source admission.
+Overlapping named supplier roots refuse materialization rather than selecting
+one namespace's execution authority by iteration order. Inherited suppliers
+qualify explicit execution contexts only; they do not manufacture a missing
+working directory. Implicit defaults remain owned by the selected provider.
+Dependency inspection resolves named command/cwd resources read-only without
+replacing their persisted names or granting execution authority.
+Emitter runtime tokens such as `{python}` are rendered only in the temporary
+dependency-check argv, through the same renderer used by the emitter.
+Static side-load executable/script dependencies receive the same checks as
+periodic commands, including the explicit-cwd requirement for relative paths.
+`{change_ref}` remains runtime data; using it to select an executable, script,
+Python module or inline code refuses because Save has no concrete execution
+dependency to validate. Shell script/program operands follow the same rule;
+unsupported dynamic shell shapes refuse instead of treating code as data.
+Ordinary arguments after an identified script or POSIX shell `-c` program
+remain runtime data.
+Only the selected evaluator entry receives strict option/dependency checks.
+Unsupported unused entries stay inert with conservative named supplier paths,
+so they neither reject the current selection nor lose source admission if
+retained for a later selection. Ordinary trusted-pointer discovery uses
+qualification only, not Save-time grammar admission: existing commands that the
+bounded Save validator cannot interpret remain discoverable with their named
+supplier paths and normal runtime admission. PowerShell `-File` qualification
+names only its script operand, leaving subsequent optional data/output paths
+opaque even though strict Save admission does not yet support that option
+grammar. No dependency check executes provider code.
+The non-admitting qualification path also recognizes bounded POSIX shell
+flag/option prefixes (for example `sh -u` and `bash -o nounset`), without
+qualifying arguments after the script or widening strict Save admission.
+Legacy webhook emitters keep their existing runtime builder; command/builtin
+validation applies only when the registration owner selects that shape.
+A worker identity must retain its defining
+repository context; a changed execution root is not permission to select an
+unrelated identity. The existing cross-repository relative script-forge guard
+is applied before flattening and remains a refusal, not a solved limitation.
+Relative evaluator script contexts or other dependencies whose meaning cannot
+be preserved refuse explicitly. File-backed evaluator policies require an
+absolute local path; their existing runtime loader does not accept named
+repository resources, whether selected directly or by a lane.
+An absolute policy owned by a named supplier also refuses: that file loader
+cannot retain supplier admission for script contexts inside the policy.
+An evaluator inherited through a read-only supplier must use an inline policy,
+even when its file-backed policy lives elsewhere: a mutable policy file cannot
+carry that supplier's execution fence through publication. Declarative lane
+policies retain their existing non-script contract.
+The shared dependency validator uses the actual evaluator loader to inspect
+absolute policy files and the selected script's executable, script path and
+explicit working directory read-only, without evaluating a task or executing
+the script. Unselected script entries do not become required dependencies.
+Python script operands are checked after supported interpreter options,
+including option values and `--`; inline-code and module-mode arguments are
+not mistaken for script files. Python directory entry points require a regular
+`__main__.py` or `__main__.pyc`; other interpreters retain regular-script-file
+checks. Unknown Python options and script-file operands
+after non-Python options refuse rather than claiming dependency validation.
+Script policies, including file-backed ones, require an explicit absolute or
+named working directory; the CLI's current directory is not evidence of the
+future evaluator process's context.
+Path-containing evaluator executables are checked and invoked relative to
+that admitted policy directory on both platforms, preserving parent traversal
+for native filesystem resolution rather than collapsing symlink-sensitive paths.
+This binding is explicitly selected by evaluators and command-emitter tick and
+side-load execution. Script-forge retains its declaring-repository path resolution
+and still refuses relative scripts without a declaring root. Saving relative
+command or script dependencies requires an explicit working directory rather than
+validating against a root the eventual emitter process will not use.
+Selected inline policies
+retain precedence over ignored file-policy fields, as in the evaluator owner.
+Policy files must be regular files before the owner loader is called.
+Effort-loop identity relocation also refuses until its
+expansion owner can preserve a distinct defining context.
+A `composite` fragment without a supported
+ordinary declaration shape remains unsupported. Ambiguous multi-root `plugin:`
+dependencies also refuse; browsing each distinct provider root remains valid.
+
+Unavailable recipe dependencies expose an explicit `unsupported_reason`, no
+form and no Instantiate action. Resolution-error reasons are NUL-free and
+bounded to 4,096 characters, matching ordinary discovery finding limits.
+Missing required user inputs or dependencies
+fail Save without a record. Requirements prose is not executable policy.
+Provider commands never run while browsing or saving. Built-in IDs, recipe
+references and their existing save/activation actions are unchanged.
 
 `summary.template_discovery` reports `state` (`complete` or `partial`),
-`provider_templates`, `findings` and `instantiation: builtin-only`. Its findings
+`provider_templates`, `findings` and `instantiation: existing-local-save`. Its findings
 also appear as read-only Discovery errors rows labelled Template discovery
 requires attention, with `finding_scope: templates`. Missing optional
 indexes are normal; broken canonical, fallback or active marketplace template
@@ -252,7 +365,8 @@ Roots come from the active installation's `registrar_dir()` resolver, including
 `AGENT_DISPATCH_REGISTRAR_DIR`; no operational machine or legacy home is baked in.
 
 - `worker-instances/<name>.json`: atomic draft record, immutable source ID and
-  template revision, current configuration revision, and last submission baseline.
+  template revision (plus provider/root/index/declaration provenance for provider
+  templates), current configuration revision, and last submission baseline.
 - `worker-instances-active/<name>.json`: atomically published declaration snapshot.
 - `pointers.json`: one exact `dir` pointer named `user-worker-instances`, owned by
   `user-local:workers`. A conflicting pointer is never silently retargeted.

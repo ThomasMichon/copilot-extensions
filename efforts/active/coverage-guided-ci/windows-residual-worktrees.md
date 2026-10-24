@@ -88,6 +88,80 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-HELPERS relocation, prepared reuse and retained publication control
+
+This reconciles only `tests/pr_test_helpers.py:1`, header
+`@@ -0,0 +1,99 @@`, full original hunk SHA256
+`a95367a4ca8c6bbbb5d9fc95b7cc4c2f8e63077bf956306f00e4bafbcc700071`.
+Its original census header, hash and `MX-HELPERS` disposition remain
+unchanged. Source-delta reconciliation does not close the failed native
+validation described below.
+
+The complete `_git` and `_stub_remote_target` ASTs at comparison
+`243b2014f3` match the immutable source. Only the latter adapter and its
+`replace` import belong to B-PUBSTUB, actual #7886 merge
+`c1ca9083463d0b0b7bad22cc401c37ab3e462b78`; the adapter still performs
+real transport validation before scenario relabeling.
+
+The five original `PRWorkflowSetup` methods now live in
+`tests/pr_workflow_setup.py`, not in the historical helper file. Their
+relocation belongs to M-MOVE, actual #7427 merge
+`039208cd6022e3cedb42b76f69a5d5ddb28dcb6c`.
+`_refspec_config`, `_fork_config` and `_move_head_to_fork` retain their
+complete immutable-source ASTs. `_required_config` retains all executable
+statements; its historical extra docstring is not reapplied as a cosmetic
+patch. The additional current `_branch_on_both`, `_blocked_while` and
+`_simulate_squash_merge` methods are outside this original key.
+
+The complete current `_fork_headed_rerun` matches actual B-FORK #7544
+merge `855ffa066206401e0b02bfddfac375ca5dc5ca1c`. Its prepared-fork
+recognition and feedback assertion match the immutable source. That
+accepted optimization already serves all eleven `test_pr_ops.py`
+consumers. The remaining `test_push_changes.py` consumer supplies
+unpublished input in both snapshot and refspec cases.
+
+The separate B-FORK-PUBLISHED source delta is deliberately not applied:
+the historical conditional initial `create_pr`/success-assertion/reload
+block would omit publication for already-published, unprepared input.
+That input occurs only in the adapter's explicit publication control,
+which currently requires one real `create_pr` call and verifies the
+resulting fork-only refs, record and feedback ancestry. Applying the
+shortcut would remove this exercised path without reducing setup in any
+of the eleven prepared consumers or the unpublished push consumer.
+Retire this shortcut delta from extraction, not the test, its real
+publication or its assertions. No runtime or test code changes.
+
+Five existing adapter cases retain their identities and expectations:
+unpublished and published inputs publish once; prepared input publishes
+zero times and leaves bytes unchanged; missing/changed prepared feedback
+refuses without publication or mutation. Their successful native result
+at the actual #7544 merge is recorded in B-FORK below, not represented as
+a current-head pass.
+
+Current native validation remains open under #5682. A nine-case cold
+selection lost two workers at the unchanged 30-second item watchdog;
+seven other cases passed after worker replacement, which is not accepted
+two-worker validation evidence. A separate instrumented diagnostic,
+with exactly two workers and replacement disabled, reproduced both
+losses: unpublished adapter setup reached its final ref checks, while
+the changed-feedback case was still constructing its session fork seed.
+Base seed setup took about 7.8 seconds and published seed setup another
+16.4 seconds before fork construction. This identifies cumulative
+setup cost, not a failed publication assertion or permission to move
+setup outside the watchdog. The diagnostic stopped with two failures
+and the other seven cases unexecuted. Its instrumentation was removed.
+An earlier invalid class selector collected no tests and supplies no
+evidence.
+
+No timing failure is waived or erased by this source reconciliation.
+Do not rerun the unchanged selection to obtain a lucky pass. A real
+setup optimization and successful unchanged-limit validation are still
+owed; normal-group and repeated complete same-head qualification remain
+open. No marks, skips, exclusions, selection policy, item/group/plugin
+deadlines, process/memory/temp ceilings or CI jobs change. Documentation
+impact is this ledger; provisioning clean-room and external deployment
+are inapplicable to a documentation-only disposition.
+
 ### MX-LANDING existing copy, no-mux and retained-case boundaries
 
 This settles only these two original keys; their census headers, hashes

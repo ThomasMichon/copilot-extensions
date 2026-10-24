@@ -94,8 +94,8 @@ def test_multi_root_templates_keep_identity_scope_revision_and_no_executables(tm
     assert summary["state"] == "complete" and summary["provider_templates"] == 2
     assert len({row["id"] for row in rows}) == len({row["revision"] for row in rows}) == 2
     assert [row["repo_scopes"] for row in rows] == [["global"], ["project:sample"]]
-    assert all(row["instantiable"] == row["editable"] == "false" for row in rows)
-    assert all(row["dependency_status"] == "not-resolved" for row in rows)
+    assert all(row["instantiable"] == "true" and row["editable"] == "false" for row in rows)
+    assert all(row["dependency_status"] == "inputs-required" for row in rows)
     assert "never-execute" not in json.dumps(rows)
     assert rows == wt.discover_templates(report)[0]
     assert before == bytes_at(tmp_path)
@@ -367,6 +367,20 @@ def test_external_probe_error_text_is_bounded_and_nul_free(monkeypatch):
     assert errors and all("\0" not in row["description"] and len(row["description"]) < 9000 for row in errors)
 
 
+def test_template_resolution_error_text_is_bounded_and_nul_free(monkeypatch, tmp_path):
+    from agent_dispatch.registrar import RegistrarError
+
+    root = tmp_path / "provider"
+    write_index(root)
+    def unavailable(*args):
+        raise RegistrarError("Fixture\0unavailable" + "x" * 5000)
+    monkeypatch.setattr("agent_dispatch.worker_template_materialization.inspect_template", unavailable)
+    report = plugin_report(ActivePluginRoot(root, ("global",), "installed"))
+    row = wt.discover_templates(report)[0][0]
+    assert row["instantiable"] == "false" and "fields" not in row
+    assert len(row["unsupported_reason"]) <= 4096 and "\0" not in row["unsupported_reason"]
+
+
 def test_new_provider_id_cannot_be_saved_or_activated(tmp_path):
     root = tmp_path / "provider"
     write_index(root)
@@ -400,9 +414,10 @@ runpy.run_module('agent_dispatch', run_name='__main__')
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
     row = next(row for row in data["entries"] if row["id"].startswith("template:provider:"))
-    assert row["instantiable"] == row["editable"] == "false"
-    assert row["resolution"] == "discovered-only" and "fields" not in row
-    assert "safe local instantiation is not supported" in row["card"]["body"]
+    assert row["instantiable"] == "true" and row["editable"] == "false"
+    assert row["resolution"] == "recipe-resolved" and row["fields"]
+    assert row["fields"][1]["default"] == "{}"
+    assert "Save alone never publishes" in row["card"]["body"]
     assert bytes_at(tmp_path) == before
 
 

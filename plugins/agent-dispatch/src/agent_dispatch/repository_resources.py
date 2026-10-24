@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import posixpath
 import re
 from collections.abc import Sequence
@@ -196,6 +197,7 @@ def execution_root(
 def resolve_execution_resources(
     argv: Sequence[str], cwd: str | None, *,
     snapshot: RepositoryResourceSnapshot | None = None,
+    bind_relative_executable: bool = False,
 ) -> tuple[list[str], str | None]:
     """Resolve source arguments separately from an explicitly named execution cwd."""
     snapshot = snapshot or RepositoryResourceSnapshot()
@@ -204,4 +206,8 @@ def resolve_execution_resources(
     # execute resources from a read-only repository in an implicit context.
     source_only = is_repository_resource(cwd)
     resolved_argv = [snapshot.resolve(part, execution=not source_only) for part in argv]
+    if bind_relative_executable and resolved_argv and resolved_cwd and not Path(resolved_argv[0]).is_absolute() and any(
+        separator in resolved_argv[0] for separator in (os.sep, os.altsep) if separator
+    ):
+        resolved_argv[0] = str(Path.cwd() / resolved_cwd / resolved_argv[0])
     return resolved_argv, resolved_cwd

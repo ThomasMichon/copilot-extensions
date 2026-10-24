@@ -20,8 +20,13 @@ from plugin_activation import ActivationReport, resolve_active_plugins
 
 from .recipes import EXTERNAL_AUTHOR_CLAUSE, RESOLUTION_CLAUSE, STAGNATION_CLAUSE, SUSPEND_CLAUSE
 from .registrar import RegistrarError
+from .registrar_recipe_io import (
+    read_recipe_document as _read_recipe_document,
+    read_resolved_recipe,
+)
 from .registrar_recipe_values import (
     _PLACEHOLDER_RE,
+    _parse_plugin_ref as _parse_plugin_ref,
     declaration_path_origins as _path_origins,
     deep_merge as deep_merge,
     identity_context_origin,
@@ -335,7 +340,6 @@ Completion requires the workspace to be clean and synchronized for reuse.
 
 #: Recipe files are declaration documents (YAML/JSON), same suffix contract
 #: `registrar_discovery.py` enforces for every other declaration file.
-_RECIPE_SUFFIXES = (".yaml", ".yml", ".json")
 
 #: Matches only a bare ``{identifier}`` placeholder -- never a format spec
 #: (``{0}``, ``{x:>10}``) and never anything containing a space, quote, or
@@ -380,47 +384,6 @@ def _safe_resolve_ref_path(path: Path, *, ref: str) -> Path:
         raise RegistrarIndeterminateError(
             f"extends: could not resolve recipe ref {ref!r} to a path: {exc}"
         ) from exc
-
-
-def _read_recipe_document(path: Path, *, ref: str) -> Mapping[str, Any]:
-    """Read and decode an already-resolved recipe file path.
-
-    Shared by every reference kind that ultimately resolves to an on-disk
-    file (a repo-local/cross-repo path, or a ``plugin:`` ref) -- the
-    suffix/encoding/read-error classification is identical regardless of
-    how ``path`` was derived.
-    """
-    from .registrar_discovery import (  # local import: avoid an import cycle
-        RegistrarIndeterminateError,
-        _decode,
-    )
-
-    if path.suffix not in _RECIPE_SUFFIXES:
-        raise RegistrarError(
-            f"extends: recipe file {ref!r} (resolved {path}) has unrecognized "
-            f"suffix {path.suffix!r}; expected one of {list(_RECIPE_SUFFIXES)}"
-        )
-    try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeError as exc:
-        raise RegistrarError(
-            f"extends: recipe file {ref!r} (resolved {path}) has invalid encoding: {exc}"
-        ) from exc
-    except ValueError as exc:
-        raise RegistrarError(
-            f"extends: recipe ref {ref!r} could not be resolved to a path: {exc}"
-        ) from exc
-    except OSError as exc:
-        # Indeterminate, not invalid: a transient permission/read race on an
-        # extends: target must not be classified the same as a genuinely
-        # malformed declaration -- registrar_registry._classify_declaration()
-        # preserves a plugin declaration's last-known state only for this
-        # error class, same contract read_declaration_file_set's own
-        # equivalent OSError branch already follows.
-        raise RegistrarIndeterminateError(
-            f"extends: could not read recipe file {ref!r} (resolved {path}): {exc}"
-        ) from exc
-    return _decode(text, path.suffix, where=str(path))
 
 
 def _load_recipe_document(ref: str, *, base_dir: Path) -> Mapping[str, Any]:
@@ -471,29 +434,21 @@ def _active_plugins() -> ActivationReport:
     return _ACTIVE_PLUGINS_CACHE
 
 
-def _parse_plugin_ref(ref: str) -> tuple[str, str]:
-    """Split a ``plugin:<name>[@marketplace]:<relative-path>`` ref into its
-    (name-part, relative-path) pieces. ``name-part`` includes ``@marketplace``
-    verbatim when the author disambiguated explicitly (two active plugins
-    sharing the same bare name across different marketplaces)."""
-    rest = ref[len(_PLUGIN_REF_PREFIX):]
-    name_part, sep, relpath = rest.partition(":")
-    if not sep or not name_part or not relpath:
-        raise RegistrarError(
-            f"extends: malformed plugin: ref {ref!r}; expected "
-            "'plugin:<name>:<relative-path>' or "
-            "'plugin:<name>@<marketplace>:<relative-path>'"
-        )
-    return name_part, relpath
-
-
-def _resolve_plugin_root(name_part: str, *, ref: str) -> Path:
+def _resolve_plugin_root(
+    name_part: str, *, ref: str, activation: ActivationReport | None = None,
+) -> Path:
     """Resolve ``name_part`` (a bare plugin name, or an explicit
     ``name@marketplace``) to its currently active, identity-verified live
     root -- the same resolution `registrar_registry.py` itself uses to
     validate a `registrar.d` manifest's own `plugin_root` before trusting
     anything it contributes."""
-    report = _active_plugins()
+    report = activation if activation is not None else _active_plugins()
+    if activation is not None and any(
+        len({selected.root for selected in plugin.live_roots}) > 1
+        for plugin in report.active.values()
+        if plugin.source == name_part or plugin.name == name_part
+    ):
+        raise RegistrarError(f"extends: plugin: ref {ref!r} has ambiguous live payload roots")
     if "@" in name_part:
         plugin = report.active.get(name_part)
         if plugin is None:
@@ -523,7 +478,7 @@ def _resolve_plugin_root(name_part: str, *, ref: str) -> Path:
     return next(iter(matches))
 
 
-def _resolve_plugin_ref_path(ref: str) -> Path:
+def _resolve_plugin_ref_path(ref: str, *, activation: ActivationReport | None = None) -> Path:
     """Resolve a ``plugin:<name>[@marketplace]:<relative-path>`` ref to its
     absolute on-disk path, scoped to the named plugin's own live root.
 
@@ -532,7 +487,9 @@ def _resolve_plugin_ref_path(ref: str) -> Path:
     specific plugin and fails loudly rather than silently reaching
     unrelated content."""
     name_part, relpath = _parse_plugin_ref(ref)
-    root = _safe_resolve_ref_path(_resolve_plugin_root(name_part, ref=ref), ref=ref)
+    root = _safe_resolve_ref_path(
+        _resolve_plugin_root(name_part, ref=ref, activation=activation), ref=ref,
+    )
     candidate = Path(relpath)
     if candidate.is_absolute():
         raise RegistrarError(
@@ -650,6 +607,7 @@ _MAX_CHAIN_DEPTH = 50
 
 def _ref_identity(
     ref: str, *, base_dir: Path, snapshot: RepositoryResourceSnapshot | None = None,
+    activation: ActivationReport | None = None,
 ) -> tuple[str, Path | None]:
     """Resolve ``ref``'s stable, canonical identity (for cycle detection
     across a chain) -- a fully-resolved absolute path for a repo-local or
@@ -668,7 +626,7 @@ def _ref_identity(
     if ref.startswith("global:"):
         return ref, None
     if ref.startswith(_PLUGIN_REF_PREFIX):
-        path = _resolve_plugin_ref_path(ref)
+        path = _resolve_plugin_ref_path(ref, activation=activation)
         return str(path), path
     if ref.startswith("repo:"):
         path = Path((snapshot or RepositoryResourceSnapshot(execution=False)).resolve(ref))
@@ -753,6 +711,9 @@ def resolve_extends(
     data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...] = (),
     snapshot: RepositoryResourceSnapshot | None = None,
     path_origins: dict[str, Path | str] | None = None,
+    activation: ActivationReport | None = None,
+    resolution_context: dict[str, Any] | None = None,
+    expected_context: Mapping | None = None,
 ) -> dict[str, Any]:
     """Expand an ``extends:``-bearing declaration mapping into its fully
     resolved, ordinary ``kind:``-shaped form.
@@ -803,9 +764,14 @@ def resolve_extends(
     When supplied, ``path_origins`` receives each supported field's nearest
     defining directory (a ``Path`` or named repository directory). Filling a
     placeholder does not move its origin; an explicit field override does.
+    A caller may supply its current activation snapshot and collect the actual
+    reference documents in ``resolution_context`` for optimistic source revisions.
+    ``expected_context`` binds every read to that selected closure when supplied.
     """
     resolved, _pending_cwd_origin, origins = _resolve_extends_tracking_cwd_origin(
         data, base_dir=base_dir, _chain=_chain, _snapshot=snapshot,
+        _activation=activation, _resolution_context=resolution_context,
+        _expected_context=expected_context,
     )
     if path_origins is not None:
         path_origins.clear()
@@ -817,6 +783,9 @@ def _resolve_extends_tracking_cwd_origin(
     data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...],
     _snapshot: RepositoryResourceSnapshot | None = None,
     _base_resource: str | None = None,
+    _activation: ActivationReport | None = None,
+    _resolution_context: dict[str, Any] | None = None,
+    _expected_context: Mapping | None = None,
 ) -> tuple[dict[str, Any], Path | str | None, dict[str, Path | str]]:
     """:func:`resolve_extends`'s actual implementation, additionally
     returning the directory a still-unresolved inherited ``spec.cwd``
@@ -858,7 +827,9 @@ def _resolve_extends_tracking_cwd_origin(
     ):
         ref = relative_repository_resource(_base_resource, ref)
     snapshot = _snapshot or RepositoryResourceSnapshot(execution=False)
-    identity, resolved_path = _ref_identity(ref, base_dir=base_dir, snapshot=snapshot)
+    identity, resolved_path = _ref_identity(
+        ref, base_dir=base_dir, snapshot=snapshot, activation=_activation,
+    )
     if identity in _chain:
         chain_display = " -> ".join((*_chain, identity))
         raise RegistrarError(
@@ -870,15 +841,17 @@ def _resolve_extends_tracking_cwd_origin(
             f"extends: reference chain exceeds the maximum depth of "
             f"{_MAX_CHAIN_DEPTH} (chain: {chain_display})"
         )
-    template = (
-        _read_recipe_document(resolved_path, ref=ref)
-        if resolved_path is not None else resolve_recipe_ref(ref, base_dir=base_dir)
+    template = read_resolved_recipe(
+        identity, resolved_path, ref=ref, base_dir=base_dir,
+        expected_context=_expected_context,
     )
     if not isinstance(template, Mapping):
         raise RegistrarError(
             f"extends: recipe {ref!r} resolved to a non-mapping "
             f"document ({type(template).__name__})"
         )
+    if _resolution_context is not None:
+        _resolution_context[identity] = {"reference": ref, "document": dict(template)}
     global_identity_default = ref.startswith("global:") and "worker_identity" in template
     # The next hop's own base directory is only needed if there IS a next
     # hop (this template has its own extends:) or if it carries a relative
@@ -906,6 +879,8 @@ def _resolve_extends_tracking_cwd_origin(
         template, pending_cwd_origin, origins = _resolve_extends_tracking_cwd_origin(
             template, base_dir=next_base_dir, _chain=(*_chain, identity), _snapshot=snapshot,
             _base_resource=next_base_resource,
+            _activation=_activation, _resolution_context=_resolution_context,
+            _expected_context=_expected_context,
         )
     else:
         # Unlike spec.cwd normalization, provenance also applies to high-level

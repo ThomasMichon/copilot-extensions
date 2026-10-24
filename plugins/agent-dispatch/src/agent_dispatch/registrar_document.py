@@ -33,11 +33,12 @@ def _identity_origin_root(origin: Path | str, leaf_root: Path) -> str:
 
 def qualify_supplier_context(
     declaration: ProfileDeclaration, repository: str, root: Path,
+    *, implicit: bool = True, strict_commands: bool = False,
 ) -> ProfileDeclaration:
     """Keep read-only supplier context named until execution admission."""
     from .repository_resources import is_repository_resource
 
-    def qualify(value: str | None, *, implicit: bool = True) -> str | None:
+    def qualify(value: str | None, *, implicit: bool = implicit) -> str | None:
         if is_repository_resource(value):
             return value
         if value is None and not implicit:
@@ -65,9 +66,41 @@ def qualify_supplier_context(
             return f"repo:{repository}:{relative.as_posix()}"
         return value  # An explicit cwd outside the supplier is not its context.
 
+    def qualify_command(command, *, emitter: bool = False, strict: bool = strict_commands):
+        if not isinstance(command, (list, tuple)) or not command or not all(
+            isinstance(part, str) for part in command
+        ):
+            return command
+        from .command_operands import script_operand_index
+
+        roles = command
+        if emitter:
+            from .producers.emitter import _render_command
+
+            roles = _render_command(command, change_ref="{change_ref}")
+        try:
+            dependencies = {0, script_operand_index(roles, strict=strict)}
+        except RegistrarError:
+            if strict:
+                raise
+            # Qualification preserves source fences without admitting a Save.
+            return [qualify(part, implicit=False) for part in command]
+        return [
+            qualify(part, implicit=False) if index in dependencies else part
+            for index, part in enumerate(command)
+        ]
+
     spec = dict(declaration.spec)
     if declaration.kind == "emitter":
-        spec["cwd"] = qualify(spec.get("cwd"))
+        if "cwd" in spec or implicit:
+            spec["cwd"] = qualify(spec.get("cwd"))
+        if "command" in spec:
+            spec["command"] = qualify_command(spec["command"], emitter=True)
+        side_load = spec.get("side_load")
+        if isinstance(side_load, Mapping) and "command" in side_load:
+            spec["side_load"] = {
+                **side_load, "command": qualify_command(side_load["command"], emitter=True),
+            }
         if "worker_identity_cwd" in spec:
             spec["worker_identity_cwd"] = qualify(spec["worker_identity_cwd"])
         loop = spec.get("repository_issue_loop")
@@ -75,12 +108,24 @@ def qualify_supplier_context(
             forge = dict(loop["forge"])
             if "cwd" in forge:
                 forge["cwd"] = qualify(forge["cwd"], implicit=False)
-                spec["repository_issue_loop"] = {**loop, "forge": forge}
+            if "command" in forge:
+                forge["command"] = qualify_command(forge["command"])
+            spec["repository_issue_loop"] = {**loop, "forge": forge}
     elif declaration.kind == "evaluator":
         evaluator = spec.get("evaluator_spec")
         if not isinstance(evaluator, Mapping) or "scripts" not in evaluator:
             return declaration
-        spec["evaluator_spec"] = {**evaluator, "cwd": qualify(evaluator.get("cwd"))}
+        qualified = dict(evaluator)
+        if "cwd" in evaluator or implicit:
+            qualified["cwd"] = qualify(evaluator.get("cwd"))
+        if isinstance(evaluator["scripts"], Mapping):
+            qualified["scripts"] = {
+                name: qualify_command(
+                    command, strict=strict_commands and name == spec.get("evaluator_ref"),
+                )
+                for name, command in evaluator["scripts"].items()
+            }
+        spec["evaluator_spec"] = qualified
     else:
         return declaration
     return replace(declaration, spec=spec)
@@ -92,6 +137,9 @@ def expand_declaration_document(
     directory: Path,
     repo_root: str | Path | None = None,
     allow_plugin_companion: bool = False,
+    activation=None,
+    snapshot=None,
+    expected_context: Mapping | None = None,
 ) -> tuple[ProfileDeclaration, ...]:
     """Validate/expand decoded data without persisting or activating it."""
     from .registrar_discovery import (
@@ -106,8 +154,9 @@ def expand_declaration_document(
     path_origins: dict[str, Path | str] = {}
     if "extends" in data:
         from .repository_resources import RepositoryResourceSnapshot
+        from .registrar_recipe_io import RecipeRevisionError
 
-        snapshot = RepositoryResourceSnapshot(execution=False)
+        snapshot = snapshot or RepositoryResourceSnapshot(execution=False)
         try:
             this_repo_root = this_repo_root.resolve()
             # Check the nearest defining hop for each field: an unrelated
@@ -119,8 +168,12 @@ def expand_declaration_document(
                     field, data.get("extends"),
                     base_dir=this_repo_root, repo_root=this_repo_root,
                     snapshot=snapshot,
+                    activation=activation,
+                    expected_context=expected_context,
                 ):
                     inherited_script_fields.add(field)
+        except RecipeRevisionError:
+            raise
         except (OSError, RuntimeError, ValueError, RegistrarError):
             inherited_script_fields = {
                 field for field in ("command", "cwd") if field not in leaf_forge
@@ -130,6 +183,8 @@ def expand_declaration_document(
         base_dir = Path(repo_root).expanduser() if repo_root is not None else directory
         data = resolve_extends(
             data, base_dir=base_dir, snapshot=snapshot, path_origins=path_origins,
+            activation=activation,
+            expected_context=expected_context,
         )
     if data.get("kind") == "reviewer-loop":
         from .registrar_recipes import _absolutize_emitter_cwd
