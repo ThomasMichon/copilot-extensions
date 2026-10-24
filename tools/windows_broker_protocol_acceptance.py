@@ -39,10 +39,12 @@ def adopt_action(package_root: Path, root: Path, generation: str) -> int:
     if generation not in {"first", "replacement"}:
         raise ValueError("fixture action generation refused")
     imports(package_root)
-    from update_driver.windows_broker import adopt
+    from update_driver.windows_broker import main
 
-    adopt(root, root / "versions" / generation, root=root / "execution")
-    return 0
+    return main([
+        "--runtime-root", str(root), "--slot", str(root / "versions" / generation),
+        "--execution-root", str(root / "execution"),
+    ])
 
 
 def adopt_generation(package_root: Path, root: Path, generation: str):
@@ -55,11 +57,13 @@ def adopt_generation(package_root: Path, root: Path, generation: str):
     from agent_procutil.windows_broker_installation import load
 
     execution = root / "execution"
+    slot = root / "versions" / generation
     request = enqueue(
         RequestSpec("windows-broker-fixture", source=generation, cwd=str(root)),
         runner=TrustedRunner((
-            str(Path(sys.base_prefix) / "python.exe"), "-I", str(Path(__file__).resolve()),
-            "adopt", str(package_root), str(root), generation,
+            str(slot / "Scripts" / "python.exe"), "-I", "-m", "update_driver.windows_broker",
+            "--runtime-root", str(root), "--slot", str(slot),
+            "--execution-root", str(execution),
         ), str(root)),
         root=execution,
     )

@@ -914,3 +914,43 @@ normal-consumer, maintenance, desktop, POSIX, review/release or rollout gates.
   installers, dependency closure, actual maintenance handoff, interactive
   desktop/POSIX qualification and review/release remain open. No shared-host
   Task, installed runtime, service, update or rollout was performed.
+
+Exact-candidate hosted run
+[40085820659](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40085820659)
+passed at `8b1b392f794a693fa9c87b9fe84defc8e1dac77c`. Both actual resident
+cycles reported installed-module discovery under isolated no-site Python,
+survival after all caller Jobs closed, exact delivery, finite broker exit
+and confirmed cleanup. Actual driver adoption, lifecycle, the shared-ancestor
+negative control, both publication-crash recovery boundaries and collection of
+the replaced action passed again. This qualifies the explicit installed client,
+not a switched ordinary launch default or whole consumer-installer integration.
+
+The previously failing aggregate selection was repeated with stop-on-first-
+failure and verbose node reporting under its unchanged 180-second supervisor:
+211 cases passed in 69.75 seconds. The complete contained process-utility suite
+then passed 659 cases with 64 explicit skips in 105.83 seconds under its existing
+300-second bound. These are current passing selections, not a root-cause
+explanation for the earlier timeout/failure or a waiver of a lifetime budget.
+
+Scoped native Linux maintenance run
+[40086630381](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40086630381)
+at the same source passed through the canonical hardened container route:
+Manager 60 passed/25 skipped, Worktrees 108 passed/1 skipped, and the shared
+driver 59 passed. The recorded selectors deliberately exclude most tests;
+this is not the full portable process-library suite, macOS evidence or a new
+Windows registration qualification.
+
+### 2026-10-24 - Fixed installer adoption entry, source only
+
+- Added an installed `update_driver.windows_broker` module entry point with
+  explicit runtime-root, immutable-slot and execution-root arguments. It calls
+  the same custody-requiring adapter; it accepts no command recipe, creates no
+  second lock/queue and prints success only after adoption finishes.
+- The targeted adapter/foundation/probe selection passed 54 contained cases;
+  missing paths, absent witness, exact argument binding and a real driver
+  transaction have focused controls. Changed Python lint passed.
+- The hosted-only fixture now runs the actual installed module entry point
+  with each action slot's interpreter through the default native executor.
+  Its changed exact candidate still needs disposable hosted qualification.
+  Consumer installer wiring and the ordinary launch default remain held;
+  no shared-host installation or rollout occurred.

@@ -580,6 +580,19 @@ disconnecting with an open scope prevents successful witness disposal and
 later admission. No independent mutation lock, installer queue or forced
 recovery is introduced.
 
+An installer running the selected installed interpreter can invoke the same
+adapter across its existing process boundary:
+
+```text
+python -I -m update_driver.windows_broker --runtime-root <installation-root> --slot <immutable-slot> --execution-root <driver-root>
+```
+
+All three paths are explicit. The entry point accepts no command recipe,
+requires the same live inherited witness, and reports `{"adopted": true}` only
+after reconciliation completes. Missing custody, contained execution and an
+invalid installation refuse without provisioning another execution owner.
+This entry point is for owning installers, never an ordinary spawn fallback.
+
 Adoption validates the fixed immutable action paths, recovers pending broker
 publication, loads the prior owned registration and reconciles under that
 custody. It runs outside the runtime publication lease. A crash after selection

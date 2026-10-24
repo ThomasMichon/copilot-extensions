@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -43,3 +45,18 @@ def adopt(runtime_root: Path, slot: Path, *, root: Path | None = None) -> Regist
         broker.reconcile(desired, previous=previous)
         custody.assert_owned()
         return desired
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--runtime-root", required=True, type=Path)
+    parser.add_argument("--slot", required=True, type=Path)
+    parser.add_argument("--execution-root", required=True, type=Path)
+    args = parser.parse_args(argv)
+    adopt(args.runtime_root, args.slot, root=args.execution_root)
+    print(json.dumps({"adopted": True}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
