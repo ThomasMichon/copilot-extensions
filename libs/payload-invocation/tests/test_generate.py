@@ -473,6 +473,24 @@ def test_required_installation_context_uses_fixed_dispatchers(tmp_path: Path) ->
     assert "Resolve-PayloadRuntime" not in powershell
 
 
+def test_dispatch_required_context_keeps_native_catalog_contract() -> None:
+    payload = REPO / "plugins" / "agent-dispatch"
+    data = generator.load_manifest(payload / "payload-invocation.json")
+    assert data["version"] == 2
+    assert data["installationContext"] == "required"
+    assert data["payloadRootEnv"] == "AGENT_DISPATCH_PAYLOAD_ROOT"
+    assert data["payloadDispatcher"] == {
+        "posix": "scripts/runtime-gate.sh", "windows": "scripts/runtime-gate.ps1",
+    }
+    assert data["windowsCatalogShim"] == "cmd"
+    assert data["provisionMode"] == "direct"
+    assert data["powershellPipelineInput"] is False
+    generated = generator.expected_files(payload / "payload-invocation.json")
+    assert "runtime-gate.sh" in generated[payload / "bin" / "agent-dispatch"]
+    assert "runtime-gate.ps1" in generated[payload / "bin" / "agent-dispatch.ps1"]
+    assert "agent-dispatch.cmd" in generated[payload / "scripts" / "emit-command-catalog.ps1"]
+
+
 def test_required_multi_command_dispatchers_export_command_metadata(
     tmp_path: Path,
 ) -> None:

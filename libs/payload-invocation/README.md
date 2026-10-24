@@ -52,6 +52,10 @@ which must preserve legacy behavior for absent/false policy and fail closed
 instead of falling back when namespaced evidence is requested, malformed, or
 blocked.
 
+Dispatch's [command admission](../../plugins/agent-dispatch/README.md#install)
+uses this contract while preserving its separate global upstream-first and
+payload-local provisioning routes and explicit scoped-installer readiness.
+
 ### Test isolation
 
 Copied runtime fixtures materialize the selected consumer's declared dependencies

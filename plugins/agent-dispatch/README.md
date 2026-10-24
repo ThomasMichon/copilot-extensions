@@ -167,6 +167,31 @@ full first-use installation, including the legacy compatibility wrappers and
 eligible local services; this adoption changes command selection, not that
 installer behavior.
 
+Both the catalog command and stamped global/board commands resolve the addressed
+installation through the canonical installation-context helper. A completed
+current or last-known-good runtime remains callable in managed-deployment mode.
+Cold invocation checks publication permission before tracing, status, locks,
+downloads or installer dispatch, and checks it again under the provisioning
+lock. Managed, malformed, foreign and unsupported deployment policies refuse
+without repair or fallback to another installation. Older admission/resolver
+helpers produce an explicit readiness error instead of running an unchecked
+installer.
+
+An active installation cell or explicitly selected custom root uses its own
+healthy runtime, never another root. Cold cell/custom-root provisioning reports
+explicit unsupported readiness: Dispatch's native installer still stages under
+the default legacy home and has not adopted scoped staging/service publication.
+An otherwise permissive policy does not authorize using that legacy installer
+against a cell. Use the owning installation's explicit management path; this
+command-side adoption does not enable a new deployment owner or background
+publisher.
+
+The actual process-boundary portfolio is the explicit T3 suite
+`libs/payload-invocation/tests/test_dispatch_first_use_publication.py`. Run it
+through the repository test runner with `--allow-explicit-tiers`; select
+`not cell`, `cell`, or a narrower `-k` expression to keep each job bounded.
+It is not part of required unit-only PR CI.
+
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: coordinator and
 supervisor services, scheduler/webhook launchers, picker pivots, remote SSH
@@ -240,7 +265,7 @@ the copied sources without widening the caller's trusted roots or relaxing
 dependency seasoning; a missing snapshot helper aborts the build.
 Delayed same-version local stamps reject a superseded snapshot candidate before
 publishing markers or launchers. POSIX
-retains its owning-payload pointer. First use primarily fetches and runs the
+retains its owning-payload pointer. Global compatibility first use primarily fetches and runs the
 **upstream installer** (`services/dispatch/bootstrap.{sh,ps1}` on `main`
 -- the same Copilot-independent entrypoint the standalone package uses)
 rather than relying on the plugin's own already-staged payload; the locally

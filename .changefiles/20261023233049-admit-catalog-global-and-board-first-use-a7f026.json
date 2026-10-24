@@ -1,0 +1,9 @@
+{
+  "comment": "Admit catalog, global and board first-use publication before effects while preserving healthy and exact-source recovery.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

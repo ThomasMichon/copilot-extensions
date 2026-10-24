@@ -61,8 +61,15 @@ _publish_source_redirects() {
 }
 
 _runtime_publication_begin_install() {
+    local support
+    local -a launch_paths=("$INSTALL_DIR/bin/runtime-gate.sh" "$INSTALL_DIR/bin/runtime-gate.ps1")
+    for support in installation-context.sh installation-context.ps1 \
+        guest-environment.sh guest-environment.ps1 json-query.awk; do
+        launch_paths+=("$INSTALL_DIR/bin/installation-context/$support")
+    done
     _runtime_publication_begin \
         "$INSTALL_DIR/bin/resolve-runtime.sh" "$INSTALL_DIR/bin/resolve-runtime.ps1" \
+        "${launch_paths[@]}" \
         "${STUB:-$LOCAL_BIN/agent-dispatch}" "${BOARD_STUB:-$LOCAL_BIN/agent-dispatch-board}" \
         "$INSTALL_DIR/machine" "$INSTALL_DIR/payload-dir" "$INSTALL_DIR/stamped-version" \
         "$INSTALL_DIR/deploy-manifest.json" "$INSTALL_DIR/last-known-good" "$INSTALL_DIR/current-version"
