@@ -94,6 +94,12 @@ launch data through an authenticated one-use channel,
 stages the actual child suspended, and transfers a pinned native process
 handle before resume. Shell interpolation, credential-bearing command lines,
 temporary launch files and wrapper PIDs are not part of this contract.
+An ambient OS Job is not the caller's cleanup boundary. The broker verifies
+membership against the invoking process's current Job, using a complete bounded
+kernel PID-list query and identities pinned by native process handles. It
+refuses partial or failed queries rather than infer escape from missing data.
+Both the authenticated bootstrap and the suspended resident must be outside
+that caller Job before their next protocol step.
 The caller receives the actual daemon's PID and exit/control methods.
 An uncommitted failed launch is reaped before retry; both direct and broker
 failure produce `DaemonSpawnError`, never an apparently successful contained

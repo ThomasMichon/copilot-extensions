@@ -55,6 +55,92 @@ def test_caller_job_query_failure_never_launches(monkeypatch, tmp_path):
     launch.assert_not_called()
 
 
+def _caller_kernel(monkeypatch, members, *, in_job=True, mode="complete"):
+    kernel = Mock()
+    error = [5]
+    kernel.GetCurrentProcess.return_value = -1
+
+    def is_in_job(handle, job, result):
+        assert handle == -1 and job is None
+        result._obj.value = in_job
+        return mode != "query-error"
+
+    def query(job, kind, data, size, returned):
+        assert job is None and kind == 3
+        capacity = (size - 8) // broker.ctypes.sizeof(broker.ctypes.c_size_t)
+        assigned = len(members)
+        count = min(capacity, assigned)
+        if mode == "oversized":
+            assigned = 65537
+        if mode == "partial":
+            assigned += 1
+        broker.ctypes.c_uint32.from_buffer(data, 0).value = assigned
+        broker.ctypes.c_uint32.from_buffer(data, 4).value = count
+        if mode == "invalid":
+            broker.ctypes.c_uint32.from_buffer(data, 4).value = capacity + 1
+            return True
+        values = (broker.ctypes.c_size_t * count).from_buffer(data, 8)
+        values[:] = members[:count]
+        if mode == "read-error":
+            error[0] = 5
+            return False
+        if assigned > capacity:
+            error[0] = 234
+            return False
+        return True
+
+    kernel.IsProcessInJob.side_effect = is_in_job
+    kernel.QueryInformationJobObject.side_effect = query
+    monkeypatch.setattr(broker, "_kernel32", lambda: kernel)
+    monkeypatch.setattr(broker.ctypes, "get_last_error", lambda: error[0], raising=False)
+    monkeypatch.setattr(
+        broker.ctypes, "WinError", lambda code: OSError(code, "native Job query failed"), raising=False,
+    )
+    return kernel
+
+
+@pytest.mark.parametrize("same_job", [False, True])
+def test_caller_membership_distinguishes_ambient_jobs(monkeypatch, same_job):
+    target = Mock(pid=99001)
+    members = [broker.os.getpid()] + ([target.pid] if same_job else [])
+    kernel = _caller_kernel(monkeypatch, members)
+    assert broker._outside_caller_job(target) is not same_job
+    kernel.IsProcessInJob.assert_called_once()
+
+
+def test_caller_without_a_job_has_no_job_cleanup_boundary(monkeypatch):
+    kernel = _caller_kernel(monkeypatch, [], in_job=False)
+    assert broker._outside_caller_job(Mock(pid=99001))
+    kernel.QueryInformationJobObject.assert_not_called()
+
+
+def test_caller_membership_resizes_without_truncating(monkeypatch):
+    monkeypatch.setattr(broker.os, "getpid", lambda: 99999)
+    members = [broker.os.getpid(), *range(1000, 1130)]
+    kernel = _caller_kernel(monkeypatch, members)
+    assert broker._outside_caller_job(Mock(pid=99001))
+    assert kernel.QueryInformationJobObject.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "mode,members,reason",
+    [
+        ("query-error", [], "native Job query"),
+        ("read-error", [], "native Job query"),
+        ("oversized", [], "read budget"),
+        ("partial", [0], "bounded read"),
+        ("invalid", [], "invalid membership"),
+        ("complete", [], "identify the caller"),
+        ("complete", [0], "invalid membership"),
+        ("complete", [broker.os.getpid(), broker.os.getpid()], "invalid membership"),
+    ],
+)
+def test_unknown_caller_membership_refuses_adoption(monkeypatch, mode, members, reason):
+    _caller_kernel(monkeypatch, members, mode=mode)
+    with pytest.raises(OSError, match=reason):
+        broker._outside_caller_job(Mock(pid=99001))
+
+
 def test_denied_breakaway_uses_shared_broker_with_actual_child_contract(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
@@ -166,7 +252,10 @@ def test_expired_deadline_does_not_start_another_wait():
             broker._receive(right, time.monotonic() - 1)
 
 
-def test_wmi_activation_uses_json_stdin_not_shell_interpolation(monkeypatch, tmp_path):
+@pytest.mark.parametrize("contained", [False, True])
+def test_wmi_activation_uses_json_stdin_not_shell_interpolation(monkeypatch, tmp_path, contained):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "contained_test_mode", lambda: contained)
     monkeypatch.setenv("SystemRoot", str(tmp_path))
     run = Mock(return_value=Mock(returncode=0, stdout="123\n"))
     monkeypatch.setattr(subprocess, "run", run)
@@ -189,7 +278,8 @@ def test_wmi_activation_uses_json_stdin_not_shell_interpolation(monkeypatch, tmp
     assert "ProcessStartupInformation" in command[-1]
     assert "EnvironmentVariables" in command[-1]
     assert "CreateFlags" in command[-1]
-    assert payload["creationflags"] == pu.detached_kwargs(breakaway=False).get("creationflags", 0)
+    assert payload["creationflags"] == pu.detached_kwargs(breakaway=False)["creationflags"]
+    assert not payload["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB
 
 
 @pytest.mark.parametrize(
@@ -225,7 +315,7 @@ def broker_channel(monkeypatch):
         return result
 
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
-    monkeypatch.setattr(broker, "_outside_job", Mock(return_value=True))
+    monkeypatch.setattr(broker, "_outside_caller_job", Mock(return_value=True))
     monkeypatch.setattr(broker, "_send", Mock())
     responses = [
         {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 200},
@@ -253,6 +343,40 @@ def test_adopts_actual_child_and_releases_only_bootstrap(monkeypatch, broker_cha
     sent = broker._send.call_args_list
     assert sent[-1].args[1] == {"start": 200}
     assert sent[0].args[1]["env"] == {"A": "B"}
+
+
+@pytest.mark.parametrize("contained", [False, True])
+def test_broker_preserves_resident_creation_flags(
+    monkeypatch, broker_channel, tmp_path, contained,
+):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "contained_test_mode", lambda: contained)
+    _launch(tmp_path)
+    spec = broker._send.call_args_list[0].args[1]
+    assert spec["creationflags"] == pu._CREATE_NO_WINDOW
+
+
+@pytest.mark.parametrize("child_outside_caller_job", [False, True])
+def test_bounded_provider_job_bootstrap_does_not_replace_child_lifetime_check(
+    monkeypatch, broker_channel, tmp_path, child_outside_caller_job,
+):
+    processes, _ = broker_channel
+    checked = []
+
+    def outside_job(process):
+        checked.append(process.pid)
+        return child_outside_caller_job if process.pid == 200 else True
+
+    monkeypatch.setattr(broker, "_outside_caller_job", outside_job)
+    if child_outside_caller_job:
+        assert _launch(tmp_path) is processes[200]
+        assert broker._send.call_args_list[-1].args[1] == {"start": 200}
+    else:
+        with pytest.raises(pu.DaemonSpawnError, match="child-adoption"):
+            _launch(tmp_path)
+        assert all(call.args[1] != {"start": 200} for call in broker._send.call_args_list)
+        processes[200].terminate.assert_called_once()
+    assert checked == [100, 200], "bootstrap and resident must both escape caller custody"
 
 
 @pytest.mark.parametrize("hello", [
@@ -288,7 +412,7 @@ def test_partial_start_reaps_pinned_child_before_releasing_handles(
 ):
     processes, _ = broker_channel
     if failure == "contained":
-        monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
+        monkeypatch.setattr(broker, "_outside_caller_job", lambda process: process.pid != 200)
     elif failure == "confirmation":
         monkeypatch.setattr(broker, "_receive", Mock(side_effect=[
             {"pid": 100, "cookie": "fixture-cookie"}, {"pid": 200}, {"started": 999},
@@ -327,7 +451,7 @@ def test_cleanup_failures_are_normalized_and_do_not_skip_other_cleanup(
         return result
 
     monkeypatch.setattr(broker, "WindowsDaemonProcess", process)
-    monkeypatch.setattr(broker, "_outside_job", lambda process: process.pid != 200)
+    monkeypatch.setattr(broker, "_outside_caller_job", lambda process: process.pid != 200)
     with pytest.raises(pu.DaemonSpawnError) as caught:
         _launch(tmp_path)
     assert caught.value.cleanup_confirmed is (method == "close")
