@@ -265,7 +265,23 @@ def owning_logger(owning_codespaces):
         ).replace("agent_codespaces", "agent_logger").replace(
             "AGENT_CODESPACES", "AGENT_LOGGER",
         ), encoding="utf-8")
+    windows = payload / "scripts/install.ps1"
+    windows.write_text(windows.read_text().replace(
+        "@('provision', 'stamp')", "@('provision', 'stamp', 'install')",
+    ).replace(
+        "$env:UPDATE_DRIVER_WITNESS -or $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+        "$env:UPDATE_DRIVER_WITNESS -or -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE",
+    ), encoding="utf-8")
+    posix = payload / "scripts/install.sh"
+    posix.write_text(posix.read_text().replace(
+        '"$1" == provision || "$1" == stamp', '"$1" == provision || "$1" == stamp || "$1" == install',
+    ).replace(
+        '-z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}"',
+        '-n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}"',
+    ), encoding="utf-8")
     repository = Path(__file__).resolve().parents[3]
+    for name in ("command_binding.py", "command_lifecycle.py"):
+        shutil.copyfile(repository / "libs/payload-invocation" / name, payload / "scripts" / name)
     shutil.copyfile(
         repository / "plugins/agent-logger/payload-invocation.json",
         payload / "payload-invocation.json",

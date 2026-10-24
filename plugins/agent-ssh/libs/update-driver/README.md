@@ -690,11 +690,24 @@ default legacy root. It preserves the six declared command/module pairs,
 required context and native runtime gates without a top-level command/module
 or provision-mode declaration. The fixed adapter supplies no service flags:
 native `provision` constructs the package/runtime and deployment manifest,
-whereas sync/prune task or timer registration belongs to explicit install/update.
+whereas Logger's additional fixed `install` action retains its native sync/prune
+task or timer reconciliation. That action is not admitted for other plugins
+and is distinct from `provision` in request identity/coalescing. No new service
+option, queue or execution owner is introduced. Fatal native registration
+errors remain nonzero durable results; Windows' existing access-denied warning
+retains its successful process exit and unchanged task, not a claim of
+successful registration.
+Logger's fixed adapter holds its existing native command lifecycle against the
+admitted canonical source while executing frozen inputs. Lifecycle helpers are
+required; a per-request staging path never becomes the source reservation's
+identity. Stamp retains deferred-runtime admission.
 The manual `logger-recipes` portfolio exercises native stamp/construction,
 safe installed help consumers, source independence, failed-candidate selection,
-Python-free caller loss/concurrency and no-write controls. No personal sessions
-are processed. Adding these recipes does not migrate Logger's command,
+Python-free caller loss/concurrency and no-write controls. It also executes
+the actual materialized `install` action behind isolated ScheduledTasks and
+`systemctl` adapters, inspecting registration/reuse/reconciliation and fatal
+or tolerated registration outcomes without starting a periodic worker. No
+personal sessions are processed. Adding these recipes does not migrate Logger's command,
 bootstrap or explicit installer publishers, qualify selected snapshots,
 admit cells/custom roots, enroll a periodic worker or authorize host rollout.
 

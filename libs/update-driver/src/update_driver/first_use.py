@@ -34,7 +34,7 @@ LOGGER_COMMANDS = (
     ("session-sync", "agent_logger.sync.engine"),
 )
 PROTOCOL = 1
-INSTALLER_ACTIONS = ("provision", "stamp", "stamp-provision")
+INSTALLER_ACTIONS = ("provision", "stamp", "stamp-provision", "install")
 CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "AGENT_VAULT_HOME", "AGENT_VAULT_INSTALLATION_ID",
@@ -118,6 +118,8 @@ def _inspect(
         raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
     if installer_action == "stamp-provision" and plugin != "agent-ssh":
         raise ProvisionError("stamp-to-selected-snapshot provisioning requires SSH")
+    if installer_action == "install" and plugin != "agent-logger":
+        raise ProvisionError("fixed install action requires Logger")
     prefix = RECIPES[plugin]
     no_self = prefix + "_NO_SELFPROVISION"
     if (
@@ -133,6 +135,8 @@ def _inspect(
     ):
         raise ProvisionError("owning payload does not declare the fixed provision recipe")
     if plugin == "agent-logger":
+        if any(not (scripts / name).is_file() for name in ("command_binding.py", "command_lifecycle.py")):
+            raise ProvisionError("Logger first use requires its canonical lifecycle helpers")
         commands = manifest.get("commands")
         if (
             manifest.get("plugin") != plugin or manifest.get("installerLifecycle") is not True
@@ -366,7 +370,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         code = _run_installer(
             frozen.plugin, runtime_root, admission["project"], environment,
             "stamp" if installer_action == "stamp-provision" else installer_action,
-            client_only=client_only,
+            plugin_id=admission["plugin"], client_only=client_only,
         )
         if code != 0 or installer_action != "stamp-provision":
             return code
@@ -390,6 +394,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         environment["COPILOT_PLUGIN_STAGED_FROM"] = str(snapshot)
         return _run_installer(
             retained.plugin, runtime_root, admission["project"], environment, "provision",
+            plugin_id=admission["plugin"],
         )
 
 
@@ -409,7 +414,7 @@ def _ssh_stamp_hash(payload: Path) -> str:
 
 def _run_installer(
     payload: Path, runtime_root: Path, project: str, environment: dict[str, str],
-    installer_action: str, *, client_only: bool = False,
+    installer_action: str, *, plugin_id: str, client_only: bool = False,
 ) -> int:
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / (
@@ -432,6 +437,16 @@ def _run_installer(
         ]
     else:
         raise ProvisionError("native plugin provision execution is not qualified on this platform")
+    if plugin_id == "agent-logger":
+        argv = [
+            sys.executable, "-I", "-B", "-X", "utf8", str(payload / "scripts/command_binding.py"),
+            "--payload-root", str(payload), "--plugin-id", "agent-logger",
+            "--legacy-root", str(runtime_root),
+            "--source-payload-root", environment["COPILOT_PLUGIN_STAGED_FROM"],
+            "--project-root", project,
+            *(("--deferred-runtime",) if installer_action == "stamp" else ()),
+            "--run-lifecycle", "--", *argv,
+        ]
     # The queue's existing owned process encloses this entire native tree.
     # The installer retains its staging, lifecycle and publication checks.
     return subprocess.call(

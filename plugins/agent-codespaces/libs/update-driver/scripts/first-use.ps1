@@ -9,7 +9,7 @@ param(
     [string]$ExpectedSource,
     [string]$ReceiptLog,
     [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default',
-    [ValidateSet('provision', 'stamp', 'stamp-provision')][string]$InstallerAction = 'provision',
+    [ValidateSet('provision', 'stamp', 'stamp-provision', 'install')][string]$InstallerAction = 'provision',
     [switch]$Wait
 )
 $ErrorActionPreference = 'Stop'
@@ -17,7 +17,7 @@ $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($fals
 $Mode = $Mode.ToLowerInvariant()
 $ServiceMode = $ServiceMode.ToLowerInvariant()
 $InstallerAction = $InstallerAction.ToLowerInvariant()
-if ($InstallerAction -ceq 'stamp' -and $ServiceMode -cne 'default') {
+if ($InstallerAction -cne 'provision' -and $ServiceMode -cne 'default') {
     throw 'Client-only selection requires the provision action.'
 }
 if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
@@ -52,6 +52,16 @@ switch -CaseSensitive ($plugin) {
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
     throw 'Stamp-to-selected-snapshot provisioning requires SSH.'
+}
+if ($InstallerAction -ceq 'install' -and $plugin -cne 'agent-logger') {
+    throw 'Fixed install action requires Logger.'
+}
+if ($plugin -ceq 'agent-logger') {
+    foreach ($helper in @('command_binding.py', 'command_lifecycle.py')) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw 'Logger first use requires its canonical lifecycle helpers.'
+        }
+    }
 }
 if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger')) {
     $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger' }[$plugin]
