@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 
 import pytest
 from single_instance_lease import OperationLock
@@ -471,6 +472,46 @@ def test_initializer_is_once_offthread_and_close_never_joins_it():
     assert writer.join(2)
     assert len(calls) == 1
     assert writer.stats()["abandoned"] == 1
+
+
+def test_unavailable_storage_maintenance_attempts_are_debounced_on_idle_worker(tmp_path):
+    from process_telemetry.buffered_logs import BufferedDiagnosticLog
+    from process_telemetry.diagnostic_logs import DiagnosticLog
+
+    now = datetime.now(timezone.utc)
+    attempts, requests = [], []
+    @contextmanager
+    def unavailable(_path):
+        attempts.append(threading.get_ident())
+        raise PermissionError("synthetic unavailable diagnostics")
+        yield
+
+    store = DiagnosticLog(
+        "fixture", tmp_path / "unavailable", service="agent-bridge",
+        custody=unavailable, clock=lambda: now, create_parent=False,
+        initial_maintenance=False,
+    )
+    original = store.maintain
+    def maintain(**kwargs):
+        requests.append(None)
+        original(**kwargs)
+    store.maintain = maintain
+    owner = BufferedDiagnosticLog(store)
+    try:
+        wait_for(lambda: owner.initialized and len(requests) >= 5)
+        assert len(attempts) == 1
+        assert store.last_error == "PermissionError"
+        now += timedelta(seconds=61)
+        wait_for(lambda: len(attempts) >= 3)  # one retry plus best-effort status append
+        count = len(attempts)
+        for _ in range(10):
+            store.maintain()
+        assert len(attempts) == count
+        store.maintain(force=True)
+        assert len(attempts) == count + 1
+    finally:
+        owner.close()
+        assert owner.writer.join(2)
 
 
 def test_existing_worker_persists_loss_counters_as_ordinary_diagnostic_records(handler):

@@ -195,6 +195,9 @@ class DiagnosticLog(logging.Handler):
             and monotonic - self._last_monotonic < MAINTENANCE_SECONDS
         ):
             return
+        # Unavailable storage must not turn an idle worker tick into an I/O retry.
+        self._last_maintenance = now
+        self._last_monotonic = monotonic
         self.last_error = None
         with self._custody():
             self._abandoned_prunes()
@@ -210,8 +213,6 @@ class DiagnosticLog(logging.Handler):
                 self._expiry.pop(path, None)
             except Exception as error:
                 self._degraded(error)
-        self._last_maintenance = now
-        self._last_monotonic = monotonic
         if self.last_error is None:
             self._warned = False
 

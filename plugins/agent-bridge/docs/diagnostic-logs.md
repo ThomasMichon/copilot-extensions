@@ -71,6 +71,8 @@ The worker debounces maintenance and applies the same exact
 UTC 30-day record-age policy, cutoff equality, future/skew handling, interrupted
 tail isolation, archive pruning and protected unknown timestamps as Dispatch.
 Both active and archived application records are maintained while quiet.
+The debounce includes failed attempts, so unavailable storage is not retried on
+every idle iteration. Explicit owner force retry remains available off-path.
 
 The consumer injects its existing operation lock. Its two-second retry deadline
 is **worker-only**, not a serving-thread lock wait or a hard deadline on kernel

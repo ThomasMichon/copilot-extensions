@@ -84,6 +84,8 @@ unchanged-segment expiry information. It never applies policy to a legacy/native
 handle destination. Owners explicitly schedule startup and quiet maintenance;
 ordinary emission does no history scan. Dispatch's adapter retains its public
 paths, discovery schema and synchronous behavior.
+Maintenance attempts are debounced even when storage is unavailable; only an
+explicit forced retry bypasses that window.
 
 Bridge's optional `BufferedDiagnosticLog` uses the **existing** `BufferedSink`
 writer, not another collector or service. Its producer copies bounded primitives

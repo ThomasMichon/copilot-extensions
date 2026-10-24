@@ -317,3 +317,10 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   if authorized, repair the repository-local credential pin through
   `repos pin-credentials`, then resume normal managed push/review/CI/merge.
   Keep the worktree, source responsibility, #8377 and all broader gates open.
+- 2026-10-24 UTC — Publication recovered through the existing repository-scoped
+  transport without persistent configuration/credential changes or runtime
+  operations. The tested fix and historical blocker journal are now published;
+  the earlier blocker entry is retained as history, not current disposition.
+  Fresh review identified idle maintenance retrying unavailable storage each
+  worker tick. Maintenance now debounces attempts before filesystem work, while
+  preserving explicit force retry and primary operation behavior.
