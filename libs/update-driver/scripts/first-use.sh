@@ -70,6 +70,13 @@ fi
 if [[ "$installer_action" == install && "$plugin" != agent-logger ]]; then
     printf 'Fixed install action requires Logger.\n' >&2; exit 1
 fi
+if [[ "$plugin" == agent-logger ]]; then
+    for helper in command_binding.py command_lifecycle.py; do
+        [[ -f "$payload/scripts/$helper" ]] || {
+            printf 'Logger first use requires its canonical lifecycle helpers.\n' >&2; exit 1;
+        }
+    done
+fi
 if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
     label=SSH; [[ "$plugin" != agent-codespaces ]] || label=CodeSpaces
     [[ "$plugin" != agent-logger ]] || label=Logger

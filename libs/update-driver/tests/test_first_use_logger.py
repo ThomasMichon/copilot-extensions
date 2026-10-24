@@ -60,6 +60,11 @@ def test_logger_fixed_action_keeps_own_context_native_options_and_result(owning_
     assert (admission["plugin"], admission["payload"], admission["runtime_root"], admission["project"]) == (
         "agent-logger", str(payload), str(installation), str(project),
     )
+    if action != "stamp":
+        manifest = json.loads((installation / "deploy-manifest.json").read_text())
+        owner = manifest["commandLifecycle"]["owner"]
+        assert owner["sourceFingerprint"] == admission["source_fingerprint"]
+        assert not owner.get("unattributed") and str(frozen) not in json.dumps(owner)
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -68,7 +73,7 @@ def test_logger_fixed_action_keeps_own_context_native_options_and_result(owning_
     "client-only", "no-self", "pinned", "managed", "malformed", "copy", "custom-root",
     "snapshot", "dispatcher", "dispatcher-array", "module", "provision-mode", "compound",
     "nested", "cell", "lifecycle", "commands-array", "command-module", "command-count",
-    "command-object", "plugin-array", "command",
+    "command-object", "plugin-array", "command", "missing-lifecycle",
 ])
 def test_logger_refusal_precedes_acquisition_queue_and_plugin_writes(
     owning_logger, area, monkeypatch, native, requested_action, reason,
@@ -99,6 +104,8 @@ def test_logger_refusal_precedes_acquisition_queue_and_plugin_writes(
             "owner": module._deployment_owner(resolution, arguments), "managed": True,
         } if reason == "managed" else {"version": 999}
         (installation / "runtime-deployment.json").write_text(json.dumps(policy), encoding="utf-8")
+    elif reason == "missing-lifecycle":
+        (payload / "scripts/command_lifecycle.py").unlink()
     elif reason not in {"client-only", "compound"}:
         path = payload / "payload-invocation.json"
         manifest = json.loads(path.read_text())
@@ -457,6 +464,11 @@ def test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed
                 caller.kill()
                 caller.communicate(timeout=30)
     assert_logger_registration(installation, adapter)
+    manifest = json.loads((installation / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["commandBinding"]["payloadRoot"] == str(payload)
+    assert manifest["commandLifecycle"]["owner"]["sourceFingerprint"] == (
+        manifest["commandBinding"]["sourceFingerprint"]
+    )
     selected = (installation / "current-version").read_text().strip()
     slot = installation / "versions" / selected
     completion = slot / ".install-complete.json"

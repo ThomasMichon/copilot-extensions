@@ -697,6 +697,10 @@ option, queue or execution owner is introduced. Fatal native registration
 errors remain nonzero durable results; Windows' existing access-denied warning
 retains its successful process exit and unchanged task, not a claim of
 successful registration.
+Logger's fixed adapter holds its existing native command lifecycle against the
+admitted canonical source while executing frozen inputs. Lifecycle helpers are
+required; a per-request staging path never becomes the source reservation's
+identity. Stamp retains deferred-runtime admission.
 The manual `logger-recipes` portfolio exercises native stamp/construction,
 safe installed help consumers, source independence, failed-candidate selection,
 Python-free caller loss/concurrency and no-write controls. It also executes

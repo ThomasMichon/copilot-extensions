@@ -56,6 +56,13 @@ if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
 if ($InstallerAction -ceq 'install' -and $plugin -cne 'agent-logger') {
     throw 'Fixed install action requires Logger.'
 }
+if ($plugin -ceq 'agent-logger') {
+    foreach ($helper in @('command_binding.py', 'command_lifecycle.py')) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw 'Logger first use requires its canonical lifecycle helpers.'
+        }
+    }
+}
 if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger')) {
     $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger' }[$plugin]
     $sshDeclaration = @{

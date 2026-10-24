@@ -98,20 +98,11 @@ single-owner, thin-adapter and cross-platform patterns; it changes no standing
 vision. Documentation impact is this bounded plan and parent row; as-is runtime
 documentation changes with implementation, not this proposal.
 
-## Reviewed intent and execution
+## Journal
 
-Proposal #8665 merged as `7681947aeb4e25e9c1e6a6bfbb62116492f5987c`
-at 2026-10-24T20:33:30Z after current-head approval `5639850337` and
-required checks. All review bodies, inline/PR comments and the complete
-conversation inventory were read. The documentation-impact observation was
-addressed in the published description, read back, replied to transparently
-and resolved; no conversation content was deleted or hidden. The revised
-plan explicitly retains Windows' access-denied warning compatibility.
-
-Managed completion reconciled only confirmed merged local commits and retained
-its backup. The complete current ROOT was read after merge; its Active status,
-global Validation, retained families and all incumbent owners remain unchanged.
-Execution begins with only this fixed action and isolated qualification.
+The [dated Logger journal](<journal/2026/10.24 logger-first-use.md#logger-install-action-prerequisite>)
+records reviewed intent, actual qualification and failures. Current scope and
+the completion gate remain above.
 
 ## Implementation and qualification in progress
 
