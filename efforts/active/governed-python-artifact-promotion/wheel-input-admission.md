@@ -154,3 +154,11 @@ size/offset sentinels still require ZIP64 and all three over-budget counts
 refuse. The four derived copies are synchronized, the removed facade reference
 now names complete-profile verification, and 243 component/bootstrap/profile
 checks pass. Fresh final-head native/CI/review gates remain required.
+
+The next review raised an overview-only directory-budget mapping defect despite
+showing no inline issues. Valid wheels with central-directory comments reproduced
+the failure with and without explicit inspector limits. Per-file metadata caps
+now remain independent of directory/aggregate budgets; first-party promotion
+keeps its own stricter bounds. A failing-first final-fact-parsing deadline case
+also closes the direct stdlib return boundary, not just its higher-level callers.
+No approval or budget gate is bypassed by these corrections.

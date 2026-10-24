@@ -241,6 +241,22 @@ def test_invalid_or_exhausted_deadline_refuses_before_open(tmp_path, limits, dea
         )
 
 
+def test_archive_deadline_is_checked_after_final_fact_parsing(wheel_path, limits, monkeypatch):
+    now = [0]
+    monkeypatch.setattr(inspection, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    single = inspection._single
+
+    def expiring_header(metadata, name, **kwargs):
+        value = single(metadata, name, **kwargs)
+        if name == "Requires-Python":
+            now[0] = 2
+        return value
+
+    monkeypatch.setattr(inspection, "_single", expiring_header)
+    with pytest.raises(inspection.WheelError, match="deadline"):
+        inspection.inspect_archive(io.BytesIO(wheel_path.read_bytes()), limits=limits, deadline=1)
+
+
 @pytest.mark.parametrize("name", [
     "../escape", "/absolute", "C:drive", "a\\b", "a//b", "a/./b",
     "a/../b", "other-1.0.dist-info/METADATA", "a\0tail",

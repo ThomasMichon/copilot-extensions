@@ -69,7 +69,7 @@ def _metadata(wheel):
 
 def _encoded(
     wheel, *, metadata=None, wheel_header=None, extra=None, bad_record=False,
-    record_algorithm="sha256",
+    record_algorithm="sha256", member_comment=None,
 ):
     prefix = wheel["filename"].split("-py3-")[0] + ".dist-info/"
     if metadata is None:
@@ -97,7 +97,12 @@ def _encoded(
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         for name, data in files.items():
-            bundle.writestr(name, data)
+            if member_comment is None:
+                bundle.writestr(name, data)
+            else:
+                member = zipfile.ZipInfo(name)
+                member.comment = member_comment
+                bundle.writestr(member, data, compress_type=zipfile.ZIP_DEFLATED)
     return archive.getvalue()
 
 
@@ -237,6 +242,20 @@ def test_per_wheel_archive_limit_bounds_the_initial_digest_pass():
     with pytest.raises(ProfileError):
         _verify(profile, wheels, limits=limits)
     assert stream.read_bytes == limits.max_archive_bytes + 1
+
+
+@pytest.mark.parametrize("explicit_limits", [False, True])
+def test_directory_budget(explicit_limits):
+    profile, wheels = _inputs(mutate={"member_comment": b"x" * 4_000})
+    limits = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
+    options = {"limits": limits} if explicit_limits else {}
+    _verify(profile, wheels, max_metadata_bytes=500, **options)
+    with pytest.raises(ProfileError):
+        _verify(profile, wheels, max_metadata_bytes=1, **options)
+    if explicit_limits:
+        with pytest.raises(ProfileError):
+            _verify(profile, wheels, max_metadata_bytes=500,
+                    limits=replace(limits, max_metadata_bytes=1_000))
 
 @pytest.mark.parametrize("parser", ["parse_tag", "parse_wheel_filename", "Requirement"])
 def test_expiry_during_profile_validation_stops_subsequent_packaging_parsing(monkeypatch, parser):

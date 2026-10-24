@@ -379,6 +379,12 @@ def validate_wheel(
         archive, wheel, expected_generator=wheel["generator"],
         record_algorithms=frozenset({"sha256"}),
         max_archive_bytes=_BUNDLE_LIMIT,
+        limits=WheelLimits(
+            max_archive_bytes=_BUNDLE_LIMIT, max_expanded_bytes=_BUNDLE_LIMIT,
+            max_member_bytes=_BUNDLE_LIMIT, max_metadata_bytes=3 * _MANIFEST_LIMIT,
+            max_members=100_000, max_tags=_WHEEL_TAG_LIMIT,
+            max_metadata_member_bytes=_MANIFEST_LIMIT,
+        ),
         source_dir=source_dir, component=component, candidate_root=candidate_root,
     )
 
@@ -410,7 +416,8 @@ def inspect_wheel(
         deadline = time.monotonic() + 120 if deadline is None else deadline
         limits = limits or WheelLimits(
             max_archive_bytes=max_archive_bytes, max_expanded_bytes=max_unpacked_bytes,
-            max_member_bytes=max_unpacked_bytes, max_metadata_bytes=3 * max_metadata_bytes,
+            max_member_bytes=max_unpacked_bytes,
+            max_metadata_bytes=max(max_archive_bytes, 3 * max_metadata_bytes),
             max_members=100_000, max_tags=_WHEEL_TAG_LIMIT,
             max_metadata_member_bytes=max_metadata_bytes,
         )
@@ -420,7 +427,6 @@ def inspect_wheel(
                 max_archive_bytes=min(limits.max_archive_bytes, max_archive_bytes),
                 max_expanded_bytes=min(limits.max_expanded_bytes, max_unpacked_bytes),
                 max_member_bytes=min(limits.max_member_bytes, max_unpacked_bytes),
-                max_metadata_bytes=min(limits.max_metadata_bytes, 3 * max_metadata_bytes),
                 max_metadata_member_bytes=min(limits.max_metadata_member_bytes, max_metadata_bytes),
             ), deadline=deadline, record_algorithms=record_algorithms,
         )

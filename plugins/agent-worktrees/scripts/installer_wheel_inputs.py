@@ -416,13 +416,15 @@ def inspect_archive(
                 ):
                     raise WheelError("wheel RECORD digest or size mismatch")
                 hashes[name] = source_digest.hexdigest()
-            return WheelFacts(
+            facts = WheelFacts(
                 _single(package, "Name"), _single(package, "Version"),
                 _single(package, "Requires-Python", optional=True),
                 tuple(str(value).strip() for value in package.get_all("Provides-Extra", [])),
                 tuple(str(value).strip() for value in package.get_all("Requires-Dist", [])),
                 tags, MappingProxyType(hashes), prefix, package, wheel, expanded,
             )
+            _check_deadline(deadline)
+            return facts
     except (
         OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError,
         csv.Error, EOFError, zlib.error, OverflowError,

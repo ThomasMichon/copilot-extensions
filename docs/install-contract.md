@@ -3173,6 +3173,10 @@ may additionally supply `WheelLimits` and a shared monotonic `deadline`.
 The initial archive hash uses the smaller of the remaining closure budget and
 the optional per-wheel archive limit; default runtime inspection derives its
 archive cap from the caller's closure budget rather than promotion's cap.
+Per-metadata-file limits do not reduce a separately supplied directory/aggregate
+budget. Without explicit `WheelLimits`, the archive budget bounds the directory
+and the three individual file ceilings bound metadata; first-party promotion
+retains its own stricter directory budget.
 Record validation and its dependency walk share the same deadline and bound
 compressed filename and target tags before calling the packaging parsers.
 Runtime RECORD policy permits SHA-256/384/512, while
