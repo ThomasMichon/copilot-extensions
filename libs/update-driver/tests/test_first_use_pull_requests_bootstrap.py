@@ -107,7 +107,7 @@ def test_actual_bootstrap_deadline_caller_loss_and_healthy_reentry(
         )
 
     previous = set()
-    for count, action in enumerate(("stamp", "provision", "provision"), start=1):
+    for count, action in ((1, "stamp"), (3, "provision")):
         if count == 3:
             project_file = payload / "pyproject.toml"
             project_file.write_text(re.sub(
@@ -152,7 +152,30 @@ def test_actual_bootstrap_deadline_caller_loss_and_healthy_reentry(
         if count == 1:
             assert not (installation / "current-version").exists()
             assert not list((installation / "versions").glob("*/pyvenv.cfg"))
-            continue
+            # Stamping does not write a deployment manifest. As before, the
+            # actual first-use command, not a later hook, builds that runtime.
+            payload_command = payload / "bin" / (
+                "agent-pull-requests.ps1" if os.name == "nt" else "agent-pull-requests"
+            )
+            provision = subprocess.run(
+                command_for(payload_command), env=env, cwd=project, capture_output=True,
+                text=True, timeout=850, **agent_procutil.no_window_kwargs(),
+            )
+            assert provision.returncode == 0 and "usage:" in provision.stdout.lower(), (
+                provision.stdout + provision.stderr + diagnostic()
+            )
+            requests = status(root=root)
+            assert len(requests) == 2 and all(
+                item.state == "completed" and item.exit_code == 0 for item in requests
+            ), diagnostic()
+            first_use = next(item for item in requests if item.id not in previous)
+            assert first_use.spec.argv == ()
+            first_admission = json.loads(first_use.spec.source)
+            assert Path(first_admission["payload"]) == payload
+            assert Path(first_admission["runtime_root"]) == installation
+            assert Path(first_admission["project"]) == project
+            previous.add(first_use.id)
+            count = 2
         selected = (installation / "current-version").read_text().strip()
         if count == 3:
             assert selected == "99.0.0"
