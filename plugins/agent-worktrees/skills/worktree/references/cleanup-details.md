@@ -50,6 +50,9 @@ Unavailable inspection also defers removal; the current cwd reader supports
 Windows and Linux, not macOS. A deferred single-item cleanup reports
 `removed: false`, `skipped: true` and its reason in JSON and text, rather than
 claiming the checkout was removed.
+If the checkout was removed but later branch cleanup fails, the result instead
+reports `removed: true`, `skipped: false`, `ok: false` and retains the warning;
+text output shows the removal and warning rather than claiming a deferral.
 Strict retirement inspection resolves the checkout root and observed cwd paths
 before matching, so symlinked ancestors do not hide a live holder.
 

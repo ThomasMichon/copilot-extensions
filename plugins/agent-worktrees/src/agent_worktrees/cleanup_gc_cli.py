@@ -109,6 +109,9 @@ def _cleanup_one(args: argparse.Namespace) -> int:
         if payload.get("reason"):
             line += f" -- {payload['reason']}"
         print(line)
+        if not payload.get("reason"):
+            for warning in payload.get("warnings", []):
+                output.warn(warning)
     return 0 if payload.get("ok") else 1
 
 
@@ -296,10 +299,11 @@ def _revalidate_cleanup_safety(
         reason: str, bucket: str,
     ) -> RevalidationResult:
         failures, warnings = reap(latest, fresh_info) if reap is not None else (0, [])
+        deferred = bool(failures and latest.worktree_path and Path(latest.worktree_path).exists())
         return RevalidationResult(
-            failures == 0,
-            ("; ".join(warnings) or "checkout retirement deferred") if failures else reason,
-            "retirement-deferred" if failures else bucket,
+            not deferred,
+            ("; ".join(warnings) or "checkout retirement deferred") if deferred else reason,
+            "retirement-deferred" if deferred else bucket,
             latest, fresh_info, failures=failures, warnings=warnings, reaped=reap is not None,
         )
 
