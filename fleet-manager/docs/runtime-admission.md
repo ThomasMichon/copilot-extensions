@@ -121,6 +121,14 @@ still completes fresh authorization; it adds no pagination, replay or wire grant
 Proof evidence stays consumed. Existing
 `revalidate` callers retain their unchanged replacement-handle semantics.
 
+`discard(permit)` withdraws an exact still-retained local handle after a caller
+refuses, cancels or fails a request. It returns false for an already consumed,
+copied or foreign handle and never refunds consumed proof evidence. This is
+capability cleanup, not authorization, completion evidence or a policy/fence
+callback: it remains usable when the current policy source itself is unavailable.
+Malformed non-Permit input refuses. A discarded handle cannot subsequently
+revalidate; another attempt needs fresh identity evidence and authorization.
+
 An authority may explicitly bind a reentrant `fence` at construction. All its
 admission and checkpoint calls then acquire that fence before its internal lock,
 including direct callers outside a reader, with a one-second acquisition bound.

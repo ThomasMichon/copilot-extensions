@@ -357,6 +357,8 @@ class ArcHelmOwner:
                 or not isinstance(live.get("metadata"), dict)):
             raise PlanError("ARC live resource identity is invalid")
         metadata = live["metadata"]
+        if metadata.get("deletionTimestamp") is not None:
+            raise PlanError("ARC live resource is terminating")
         if (metadata.get("name"), metadata.get("namespace")) != (
             settings["release"], settings["namespace"],
         ):
@@ -382,9 +384,10 @@ class ArcHelmOwner:
         Success reports observed Helm convergence only, not listener readiness,
         authentication, workload use, whole-loadout completion or rollout.
         """
-        if not self._lock.acquire(blocking=False):
-            raise PlanError("ARC owner is busy")
+        locked = self._lock.acquire(blocking=False)
         try:
+            if not locked:
+                raise PlanError("ARC owner is busy")
             selected, allocation = self._selected(request)
             deadline = time.monotonic() + selected.to_dict()["outfitting_seconds"]
             permit = self.admission.revalidate(permit, request)
@@ -442,4 +445,9 @@ class ArcHelmOwner:
                           request_digest=request.request_digest, result_ref=digest(evidence))
             return self.journal.reconcile(request, TargetReceipt.from_dict(result))
         finally:
-            self._lock.release()
+            try:
+                if type(permit) is Permit:
+                    self.admission.discard(permit)
+            finally:
+                if locked:
+                    self._lock.release()

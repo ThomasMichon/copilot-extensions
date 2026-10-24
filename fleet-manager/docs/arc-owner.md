@@ -120,7 +120,8 @@ Post-operation `status --show-resources` retrieves live objects from the cluster
 Success additionally requires exactly one matching ARC scale set, its physical
 UID/resource version, admitted forge/group/secret/capacity fields and exact
 fixed-profile runner pod spec. Missing, extra, changed or unavailable owned-spec
-evidence leaves UNKNOWN, even when Helm reports deployed. The adapter does not
+evidence, or a terminating resource, leaves UNKNOWN even when Helm reports deployed.
+The adapter does not
 force-replace resources or silently take broader repair permission.
 This API does not yet provide a live-spec-proven
 no-write optimization. Admission also checks the permit's fleet against the
@@ -134,6 +135,10 @@ a Kubernetes request was undone. An unsettled native cleanup exception is
 retained as `native_failure`; further native operations refuse until its existing
 owner settles it. The parent outfitting budget includes inspection and Helm's
 own possible rollback; an outer timeout remains UNKNOWN, not failed recovery.
+Every exit discards any remaining local permit without refunding proof evidence,
+so a pre-effect source/native refusal cannot occupy an authorization slot until
+its timer expires. This cleanup does not cancel an accepted journal responsibility
+or turn UNKNOWN into permission to replay.
 
 Success requires actual post-operation Helm status, values and live owned ARC
 spec matching the selected desired release. Its canonical `TargetReceipt` means observed Helm

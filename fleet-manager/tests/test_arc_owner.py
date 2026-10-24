@@ -22,7 +22,7 @@ from fleet_manager.loadouts import design_loadout
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import OperationIntent, TargetReceipt
 from fleet_manager.planning import PlanError, canonical, digest
-from fleet_manager.runtime_admission import AdmissionError, OperationGrant
+from fleet_manager.runtime_admission import AdmissionAuthority, AdmissionError, OperationGrant
 from test_loadouts import inputs
 from test_runtime_admission import Harness, actor, policy
 from test_runtime_identity import NOW
@@ -328,6 +328,34 @@ def test_foreign_helm_release_is_never_taken_over(rig):
     assert all(entry[0] != "upgrade" for entry in commands(rig))
 
 
+@pytest.mark.parametrize("failure", ["selection", "preflight", "busy"])
+def test_failed_request_does_not_leave_the_only_authorization_slot_occupied(rig, failure):
+    harness = rig["harness"]
+    harness.owner = AdmissionAuthority(snapshot=harness.snapshot, clock=harness.clock, capacity=1)
+    rig["owner"].admission = harness.owner
+    request = rig["request"]()
+    permit = rig["permit"](request)
+    if failure == "selection":
+        def unavailable():
+            raise PlanError("selected source unavailable")
+        rig["owner"].current = unavailable
+    elif failure == "busy":
+        assert rig["owner"]._lock.acquire(blocking=False)
+    else:
+        (rig["root"] / "release.json").write_text(json.dumps({
+            "name": "example-runners", "namespace": "arc-runners", "version": 1,
+            "info": {"status": "deployed", "description": "foreign-owner"}, "config": {},
+        }))
+    try:
+        with pytest.raises(PlanError):
+            rig["owner"].converge(request, permit)
+    finally:
+        if failure == "busy":
+            rig["owner"]._lock.release()
+    fresh = rig["permit"](request)
+    assert harness.owner.discard(fresh)
+
+
 @pytest.mark.parametrize("drift", ["none", "stored-values", "live-spec", "missing-live-resource"])
 def test_new_admitted_generation_reapplies_without_trusting_stored_helm_values(rig, drift):
     request = rig["request"]()
@@ -406,6 +434,7 @@ def test_live_evidence_checks_all_owned_scope_capacity_and_workload_fields(rig):
     changes = [
         (("metadata", "namespace"), "wrong"),
         (("metadata", "uid"), None),
+        (("metadata", "deletionTimestamp"), "2026-10-24T12:00:00Z"),
         (("spec", "minRunners"), True),
         (("spec", "maxRunners"), 99),
         (("spec", "githubConfigSecret"), "unrelated-secret"),
