@@ -441,8 +441,8 @@ this Python API or by the application-handler merge.
 
 This bounded #8377 continuation realizes the previously recommended additive
 `retained_spool: {directory: ...}` alternative through the existing configuration
-loaders and owned buffer. It supersedes the historical API-only prerequisite
-above only after its own source acceptance. Native/installer #8370, #6812,
+loaders and owned buffer. Accepted source #8577 supersedes the historical
+API-only prerequisite for this explicit mode. Native/installer #8370, #6812,
 captured wire owners, deployment helpers and live state remain outside this slice.
 
 - [x] Reconcile the additive schema with the reviewed convention and existing
@@ -451,7 +451,7 @@ captured wire owners, deployment helpers and live state remain outside this slic
   startup/quiet maintenance, bounded clear/replacement and local discovery.
 - [x] Validate actual loader/CLI/lifetime consumers, exact age, native concurrent
   Unicode rotation, old-path isolation and fail-open behavior on Windows.
-- [ ] Obtain exact-head review, required CI and provider-confirmed merge; journal
+- [x] Obtain exact-head review, required CI and provider-confirmed merge; journal
   the source contract and keep unavailable platform/live acceptance explicit.
 
 ### Adapter journal
@@ -530,3 +530,54 @@ captured wire owners, deployment helpers and live state remain outside this slic
   passes 137 Bridge, 51 focused Dispatch and 70 Manager tests (one optional SDK
   skip), plus install-contract, immutable contracts, docs/module-size and
   whitespace guards. This is source qualification, not deployment evidence.
+- 2026-10-24 UTC — #8577 accepted the configuration adapter at exact head
+  `3bb78fc23efd2b46fdb7a482d9f863d989d46bfa`, approved by review `5638236264`.
+  Required PR gate run `40093958833` and attribution/lockdown run `40093959163`
+  passed; no Medium/High findings remained. The final Low documentation-impact
+  assessment was added to the PR description with guide/library links and its
+  thread resolved. The managed provider confirmed squash merge to `dev` at
+  `455606b297e4b43ecac7cc1b5d296af22a4e41db` at 12:30:13 UTC.
+  Re-read this sub-plan and the parent after merge; resolve only this adapter's
+  source gate, retaining #8377 and the parent as active. No runtime or adopter
+  helper was changed; keep the clean source worktree for integration.
+
+### Accepted configuration handback
+
+The actual additive schema is now accepted in source:
+
+```json
+{"retained_spool": {"directory": "<absolute owner-provisioned base directory>"}}
+```
+
+Substitute an absolute path and preprovision its exclusive `retained` child
+outside source control through the existing owner. Remove legacy `sink`/`spool`
+keys only when deliberately migrating that owner's matched declaration; even
+empty legacy keys conflict. Unknown retained options, relative/empty/non-string
+directories and malformed mixed modes are rejected without echoing their values.
+Other legacy configurations and existing log files remain unchanged.
+
+Bridge and Dispatch select their actual
+`directory/retained/agent-{bridge,dispatch}-telemetry.jsonl` component files and
+UTC-named archives. The existing slot owns one bounded buffer: worker-only
+construction and startup/busy/quiet maintenance, producer-time integer epoch-ms
+defaults only when `ts` is absent, and atomic configured-owner cleanup.
+Validation success is selection/pending, not write health. Missing provisioning
+or worker construction/storage failures are optional/degraded, never primary
+startup failures. Clear is nonjoining; a still-running previous writer refuses a
+replacement until it exits. Embedded owners must explicitly clear their slot;
+the ordinary Bridge daemon command and Dispatch coordinator lifespan supply
+their real cleanup boundaries without editing captured ASGI/wire sources.
+
+Real `agent-bridge logs` and `agent-dispatch logs` expose the configured retained
+inventory and policy from configuration/metadata only, with explicitly unknown
+live health. Discovery creates nothing, imports no custom factory and reads no
+event payload. Source tests include fresh owner-provisioned namespaces and real
+Windows concurrent rotation; Linux/macOS native, full disposable-machine
+installation and live external/adopter lanes remain unqualified.
+
+The integration owner still owes helper/configuration migration, release and
+installed-version proof before selecting this new mode, and actual quiet/running
+readback after authorized activation. Native capture, #8370 installer attempts,
+#6812 progress presentation, lifecycle/bootstrap/session and Fleet/container
+owners remain exactly as transferred above. Configuration source acceptance does
+not complete those logging categories or authorize a rollout.
