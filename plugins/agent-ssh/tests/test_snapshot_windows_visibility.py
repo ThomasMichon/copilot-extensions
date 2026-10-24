@@ -16,6 +16,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.mark.timeout(120)
 def test_windowless_writer_chain_two_cycles_and_timeout(tmp_path):
     import agent_procutil
 
