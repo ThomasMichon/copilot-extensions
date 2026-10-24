@@ -57,6 +57,9 @@ Strict retirement inspection resolves the checkout root and observed cwd paths
 before matching, so symlinked ancestors do not hide a live holder.
 The retirement guard also includes the inspecting process itself, even though
 the legacy general-purpose process enumerator excludes its caller.
+Retaining a checkout does not waive finality checks: PR finalization rechecks
+landed content after holder inspection before marking either a retained or a
+removed checkout finalized.
 
 Open PRs override `finalized` tracking and Git-completed content. The same
 obligation check runs before retiring a missing checkout and before archiving

@@ -174,15 +174,16 @@ class TestPRFinalize(PRWorkflowSetup):
         assert ok is False
         assert (wt_path / "raced_in.txt").exists()
 
+    @pytest.mark.parametrize("held", [False, True])
     def test_finalize_catches_race_commit_landing_during_process_inspection(
-        self, published_pr_repo, monkeypatch,
+        self, published_pr_repo, monkeypatch, held,
     ):
         # #4400 round 15: round 14's re-check ran ONCE, immediately after the
         # finalize lock was acquired -- but further code (record reload,
         # pointer reconciliation, live-session checks, process inspection)
         # still ran AFTER that point and BEFORE the actual destructive
         # removal, leaving a residual window. The re-check must run as the
-        # LAST possible step, immediately before the destructive git
+        # LAST possible step, before retained finalization or the destructive git
         # operation -- proven here by racing a commit during process
         # inspection, later than round 14's check point.
         from agent_worktrees import finalize as fin
@@ -193,17 +194,34 @@ class TestPRFinalize(PRWorkflowSetup):
         rec.pr.state = "merged"
         tracking.save_record(rec)
 
-        def racing_inspection(worktree_path, **kwargs):
-            (wt_path / "raced_in_late.txt").write_text("landed during cleanup\n")
-            git_ops.git("add", "-A", cwd=str(wt_path))
-            git_ops.git("commit", "-m", "late race window commit", cwd=str(wt_path))
-            return []
+        raced = False
 
+        def late_precondition(*args, **kwargs):
+            # Full landing policy has separate coverage; isolate late-check timing with real refs.
+            if not raced:
+                return True, None
+            result = git_ops.git(
+                "merge-base", "--is-ancestor", "HEAD",
+                f"origin/{config.default_repo.default_branch}", cwd=str(wt_path),
+            )
+            assert result.returncode == 1
+            return False, "unlanded race commit"
+
+        def racing_inspection(worktree_path, **kwargs):
+            nonlocal raced
+            (wt_path / "raced_in_late.txt").write_text("landed during cleanup\n")
+            git_ops.git("add", "-A", cwd=str(wt_path), check=True)
+            git_ops.git("commit", "-m", "late race window commit", cwd=str(wt_path), check=True)
+            raced = True
+            return [{"pid": 12345, "name": "holder"}] if held else []
+
+        monkeypatch.setattr(fin, "_pr_finalize_precondition", late_precondition)
         monkeypatch.setattr(fin.procs, "processes_with_cwd_under", racing_inspection)
 
         ok = fin.validate_and_finalize(wid, config)
         assert ok is False
         assert (wt_path / "raced_in_late.txt").exists()
+        assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status != "finalized"
 
     def test_finalize_rechecks_precondition_before_reconciliation(
         self, published_pr_repo, monkeypatch,

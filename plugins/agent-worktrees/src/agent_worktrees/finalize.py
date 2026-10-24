@@ -1643,6 +1643,16 @@ def validate_and_finalize(
             and Path(worktree_path).exists()
             else None
         )
+        # Recheck after inspection for both retained finalization and removal.
+        # External writers can still race this check without a filesystem fence.
+        if pr_mode:
+            err = finalize_open_pr_gate.pr_precondition_recheck(
+                record, repo, worktree_path, anchor,
+                precondition_fn=_pr_finalize_precondition)
+            if err:
+                output.err(err)
+                _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
+                return False
         if not checkout_managed or inside_worktree or has_live_session or process_blocker:
             reason = (
                 "the checkout is owned by an external session host"
@@ -1693,18 +1703,6 @@ def validate_and_finalize(
             )
         else:
             print("Removing worktree...")
-            # PR mode (#4400 rounds 14-16): re-validate as the LAST possible
-            # step before removal -- narrows, but per reviewer feedback can't
-            # fully eliminate, the TOCTOU window absent a write-blocking hook.
-            if pr_mode:
-                err = finalize_open_pr_gate.pr_precondition_recheck(
-                    record, repo, worktree_path, anchor,
-                    precondition_fn=_pr_finalize_precondition)
-                if err:
-                    output.err(err)
-                    _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
-                    return False
-
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
 
