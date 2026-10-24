@@ -712,13 +712,21 @@ typed in-process parameters, preserving JSON probe bytes rather than passing
 them through another PowerShell command-line parser.
 
 SSH's fixed service-less `stamp`/`provision` recipe is separate from adoption of
-its ordinary command, bootstrap and explicit installer publishers. It retains
+its ordinary command and explicit installer publishers. It retains
 SSH's existing snapshot-default manifest and bespoke `runtime-gate` dispatchers;
 it does not rewrite that declaration into Pull Requests' direct-dispatch model.
 Admission requires SSH's exact module, legacy root, payload-root environment and
-native dispatcher declaration, its canonical installed payload and default
-legacy installation. Copied sources, retained snapshots, cells and custom roots
-remain unsupported here. Retained-source qualification under #5379 is separate.
+native dispatcher declaration and default legacy installation. The source is
+its canonical installed payload or exact selected legacy snapshot. Snapshot
+admission uses the existing provenance reader, selected payload/version markers
+and staged-origin validation; it never replaces unavailable retained source
+with today's installed payload. Missing, malformed, unselected or substituted
+receipts and ordinary copied sources refuse before acquisition or queue writes.
+Legacy restamping omits the old receipt from its private candidate and writes
+the candidate's own canonical snapshot identity without modifying the source.
+Cells and custom roots remain unsupported here. The bootstrap independently
+retains its canonical-installed-source publication boundary. Network-backed
+retained-source qualification under #5379 remains separate.
 The recipe projects SSH's own context, keeps value-based no-self-provision
 semantics (an empty value does not disable it), refuses pinned and client-only
 requests, and removes ambient action/dry-run/payload/validated hints before
@@ -881,11 +889,12 @@ with the installed payload unavailable, failed candidate preserving the
 healthy selection, and installed CLI/module origin after both source trees
 are removed. The caller-loss fixture runs with each fixed identity.
 The manual `ssh-recipes` portfolio separately exercises SSH's actual materialized
-stamp and service-less installation, failed-candidate selection preservation and
+stamp and selected-snapshot service-less installation with the installed payload
+unavailable, failed-snapshot candidate selection preservation and
 installed CLI/module origins after source removal on Windows and Linux. Its
 Python-free caller-loss fixture verifies native custody and the ordinary
-nonzero result. These are recipe prerequisites, not ordinary SSH publisher,
-retained-snapshot, namespaced, macOS or operator-host rollout acceptance.
+nonzero result. These are recipe prerequisites, not ordinary SSH command publisher,
+network-backed #5379, namespaced, macOS or operator-host rollout acceptance.
 The hosted-only actual bootstrap case additionally enforces the declared hook
 deadline and output shape, closes its caller Job/group during cold construction,
 and verifies the same stamp operation/result survives. It then qualifies real
@@ -910,7 +919,8 @@ against its unchanged 15-second deadline on native Windows and Linux. The
 packaged foundation comes through the existing source materializer. First
 stamp is Python-free; drift retains the hook's metadata-reader prerequisite
 and exact deployment-manifest source rather than choosing today's payload.
-The fixed native admission refuses unsupported snapshots/copies, publication
+The bootstrap refuses snapshot/copy publishers even though the fixed recipe
+supports selected snapshots. Native admission also refuses publication
 policy, nested custody and helper skew before creating the execution root.
 Caller Job/group loss does not cancel the ordinary queued action. Complete
 receipts/results, installed CLI/distribution/module origin and healthy reentry

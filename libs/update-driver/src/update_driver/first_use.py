@@ -111,12 +111,6 @@ def _inspect(
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
     if plugin == "agent-ssh":
         if (
-            runtime_root != Path.home() / ".agent-ssh"
-            or payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
-            or payload.name != plugin
-        ):
-            raise ProvisionError("SSH first use requires its canonical installed payload and default legacy root")
-        if (
             manifest.get("module") != "agent_ssh"
             or manifest.get("legacyRuntimeRoot") != ".agent-ssh"
             or manifest.get("payloadRootEnv") != "AGENT_SSH_PAYLOAD_ROOT"
@@ -125,12 +119,16 @@ def _inspect(
             }
         ):
             raise ProvisionError("SSH first use requires its declared native runtime gate")
-    if plugin == "agent-pull-requests":
-        installed = payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
+    if plugin in ("agent-pull-requests", "agent-ssh"):
+        label = "SSH" if plugin == "agent-ssh" else "Pull Requests"
+        installed = (
+            payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
+            and (plugin != "agent-ssh" or payload.name == plugin)
+        )
         snapshot = payload.parent == runtime_root / "snapshots"
-        if runtime_root != Path.home() / ".agent-pull-requests" or not (installed or snapshot):
+        if runtime_root != Path.home() / ("." + plugin) or not (installed or snapshot):
             raise ProvisionError(
-                "Pull Requests first use requires its canonical installed payload or selected legacy snapshot"
+                f"{label} first use requires its canonical installed payload or selected legacy snapshot"
             )
         if snapshot:
             receipt_path = _path(payload / "snapshot-provenance.json")
@@ -138,7 +136,7 @@ def _inspect(
             if not isinstance(receipt, dict) or receipt.get("schema") != (
                 "copilot-extensions.legacy-snapshot-source"
             ):
-                raise ProvisionError("Pull Requests first use requires canonical selected snapshot provenance")
+                raise ProvisionError(f"{label} first use requires canonical selected snapshot provenance")
 
     sys.path.insert(0, str(scripts))
     import installer_engine as engine
