@@ -136,8 +136,8 @@ read/write errors fail explicitly before installation. The existing real
 setuptools regression requires private egg-info, unchanged original files and
 an editable .pth targeting the live source. Lightweight controls cover missing
 and authored configuration, percent text, unrelated build options, case-distinct
-data-file keys and failure cleanup. The review's duplicate-key regression
-failed before optionxform=str and passes afterward. The unchanged module-size
+data-file keys and failure cleanup. Case-distinct names are retained without
+case folding or duplicate-key rejection. The unchanged module-size
 guard also passes through the existing companion, not a raised cap.
 
 Complete native policy, cleanup, compile and sync suites passed 380 tests with
