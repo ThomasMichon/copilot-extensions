@@ -785,12 +785,11 @@ class ContractTests(unittest.TestCase):
         self.assertIn('!= private', entry)
         self.assertIn("python3 /opt/trusted-harness/recipe/install.py --runtime", entry)
         pins = [
-            "if ! mountpoint -q /run || [ -L /run ]; then",
-            "for path in /run/systemd /run/systemd/unit-root; do",
-            'if [ -L "$path" ]; then',
-            'install -d -m 755 "$path"',
-            'mount --bind "$path" "$path"',
-            'if ! mountpoint -q "$path"; then',
+            "if ! mountpoint -q /run || [ -L /run ] || [ -L /run/systemd ]; then",
+            "install -d -m 755 /run/systemd",
+            "mount --bind /run/systemd /run/systemd",
+            "if ! mountpoint -q /run/systemd; then",
+            'for path in /home/vscode /workspaces; do',
             "python3 /opt/trusted-harness/recipe/install.py --runtime",
             "exec /lib/systemd/systemd",
         ]

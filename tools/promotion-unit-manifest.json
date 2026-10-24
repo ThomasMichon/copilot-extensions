@@ -1757,16 +1757,16 @@
         "tools/promotion_release_evidence.py": "85e870143e58e673719e7ee34e34cc581c93c2f5d888d74e546fffc18d3f1996",
         "tools/promotion_unit_tests/test_trusted_harness_base.py": "956b4bd9276b8df946511772d3fe83ca5df6bc08d4606f731e8ac7307611b7d0",
         "tools/promotion_unit_tests/test_host_profile.py": "e6bd9d07ef2b1699737e27a86e1883038097ec905170067bea3da6e445645331",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py": "d7f25f050ef8ac1c45538578124af6aed1c92c8cf2ef2683ac2516cc4e48b6aa",
-        ".devcontainer/trusted-harness-base/tests/test_contract.py": "506e51ebe8ed877116b4c0c93ed65d016737b1045c48bdad60d566be7336dd28",
+        "tools/promotion_unit_tests/test_unittest_lifecycle.py": "cfa8f99cdf21cc7d0903f4f291a564285194a549a28eef3e658b44bc37589a6f",
+        ".devcontainer/trusted-harness-base/tests/test_contract.py": "f193ecfa91ba4b24406d38103c1f357367d0229c4d4e036e08f6cb3b9d5deeb4",
         ".devcontainer/trusted-harness-base/build.py": "4d96b40567c1135bf82d117f6b54a41ac88b5ddf6fe6d033835a42e88203966d",
         ".devcontainer/trusted-harness-base/install.py": "5818d4f7a7dad564cb28496b42a3774d4f924afb95f91d65e1d46629bd05c845",
         "fleet-manager/src/fleet_manager/__init__.py": "77743b7e007c45bfd4b89c830ddc8ca3030758f739d3451f6efb7e1f20eca02d",
         "fleet-manager/src/fleet_manager/planning.py": "2f5f85665490121a1a8ffdd9c8d5f0bbdf08fadbeb858dd86035f138f6a6f4f5",
         "fleet-manager/src/fleet_manager/host_profile.py": "e02b6db802aeaf26bd899c7f11b402424e663043661464edf963da5940a35d85",
-        "fleet-manager/src/fleet_manager/trusted_systemd_profile.py": "e136bdc7cb659e3370147afa0ae7fabd84fa3df9bb24192bbd0486ea6ad91aa8",
+        "fleet-manager/src/fleet_manager/trusted_systemd_profile.py": "ff6090d2fb2eaba4c58ca3210a9653803290e92a14f904cb43fb0b0d7905e4ec",
         "fleet-manager/tests/test_host_profile.py": "8ac1c27809fdf08916b04aa06d1c0d9a87e3918a7dd4d35579cd7e75fd4af3dc",
-        "fleet-manager/tests/test_trusted_systemd_profile.py": "b8b9c368bb2d82867a85d5611cef421cbc4b47413fccf00ad4bdff93f9e6fac2"
+        "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_dependency_policy.py",
