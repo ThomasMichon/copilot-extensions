@@ -324,6 +324,13 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   capture/contract/maintenance cohort, two-contract/659-fixture checker,
   install contract and changefile-presence checks pass. Current-head independent
   review remains required; SDK/native and restoration gates remain open.
+- Review measured a new projection performance regression: custody-aware
+  matching scanned unrelated retained history. The real SQLite regression
+  reproduced 140,000 VM steps for an empty inbox with 20,000 unrelated retained
+  rows. An indexable requested/canonical-session prefilter now narrows candidates
+  before exact custody matching; zero-history and 20,000-row controls both stay
+  within the 1,000-step budget. All 173 selected projection/receipt/result/alias
+  cases pass without changing native identity or legacy forwarding semantics.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

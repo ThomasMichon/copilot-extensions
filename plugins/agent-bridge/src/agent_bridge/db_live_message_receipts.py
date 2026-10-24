@@ -57,9 +57,10 @@ class _LiveMessageReceiptsMixin:
         rows = self.execute_read(
             "SELECT id AS message_id, sender, kind, delivery, created_at AS admitted_at, "
             "delivered_at AS sdk_accepted_at FROM live_messages "
-            f"WHERE session_id={MESSAGE_TARGET_SQL} AND consumed_at IS NULL "
+            f"WHERE session_id IN (?, {_CANON}) AND session_id={MESSAGE_TARGET_SQL} "
+            "AND consumed_at IS NULL "
             "AND (delivered_at IS NULL OR consumption_tracked=1) "
             "AND kind NOT LIKE 'control:%' ORDER BY id ASC LIMIT ?",
-            (session_id, session_id, session_id, limit),
+            (session_id, session_id, session_id, session_id, session_id, session_id, limit),
         )
         return [dict(row) for row in rows]

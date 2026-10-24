@@ -134,6 +134,10 @@ def test_http48_capture_actual_observations(
         "original_receipt_status": original_receipt.status_code,
         "successor_retry": client.post(successor_url, json=message).status_code,
         "successor_receipt": client.get(f"{successor_url}/{mid}/receipt").status_code,
+        "original_pending_visible": [
+            item["message_id"] for item in db.inspect_live_inbox(consumer.session_id, 10)
+        ] == [mid],
+        "successor_pending_empty": db.inspect_live_inbox("native-c", 10) == [],
         "new_key_refused": client.post(
             ordinary, json={**message, "idempotency_key": "synthetic-new-operation"},
         ).status_code,

@@ -162,6 +162,8 @@ and pending-input inspection also use the original native target. An original
 URL cannot downgrade a retired enrollment to the successor's legacy queue,
 and the successor cannot recover the predecessor's retained operation key.
 Unassociated legacy rows continue to follow their routing aliases.
+Pending-input inspection first narrows indexed session candidates, so an empty
+inbox does not scan unrelated retained history to apply custody-aware matching.
 Readiness-bound startup, standalone readiness and mode-control admission retain
 that original target too: an alias cannot insert an unsupported control into a
 successor's legacy queue or reach its readiness waiter.
