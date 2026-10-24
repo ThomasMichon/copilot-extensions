@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Native Anchor Custody](active/native-anchor-custody/README.md) | Draft; explicit current-custody claims proposal, no live repair | #4488 bounded claims slice; preserves contributor-owned #6009 and broader lineage/handoff scope |
 | [Bounded Passive Git Observation](active/bounded-passive-git-observation/README.md) | Draft; reviewed R1 deadline/R2 passive fsmonitor proposal, implementation admission pending | #7944/#7945; preserves roster/publication, resident-control/storage and broader #2619/#6086 ownership; no rollout |
 | [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Draft; reviewed shared launch, finite test lifetime and install/update cleanup contract before implementation | #8403; production cutover and existing custody remain authoritative; no rollout |
 | [Worktree Launch Attempt Journal](active/worktree-launch-attempt-journal/README.md) | Draft; reviewed intent before implementation | #8375; protected 90-day prompts, attempt/outcome correlation, selected-machine inspection; preserves #6057 |
