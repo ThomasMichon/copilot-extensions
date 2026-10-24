@@ -231,17 +231,18 @@ evidence; this change does not add it to the admitted unit packet or alter CI.
 
 `tools/construction_qualification.py` is a pure result-admission library, not a
 runner or an active release gate. Its `assess_qualification(expected_plan,
-report)` API requires an independently derived expected plan. The version-one
+report, target_policy=...)` API requires independently derived expected inputs.
+The version-two
 `copilot-extensions.construction-plan` binds the source commit, exact composed
-candidate digest, effective package-policy digest and nonempty environment
+candidate digest, effective package-policy and native-target-policy digests and nonempty environment
 matrix. Each row names its source project, profile, normalized sorted extras,
-exact native OS/interpreter patch/architecture/ABI, and digests of its canonical
+exact native OS/interpreter patch/architecture/ABI/hardware class, and digests of its canonical
 construction and installed-launch specifications. Those opaque specification
 digests bind the existing owners' actions; they are not a new execution format.
 `plan_digest` canonically orders rows without making different profiles,
 constructors, launch actions or native targets interchangeable.
 
-A `copilot-extensions.construction-results` report names that plan digest and
+A version-two `copilot-extensions.construction-results` report names that plan digest and
 one result per row. Every result records the observed native identity, elapsed
 seconds, terminal status and five check records: `construction`,
 `installed_origin`, `installed_launch`, `feed_policy` and `cold_environment`.
@@ -252,15 +253,38 @@ Malformed schemas, duplicate rows, nonfinite/negative durations and invalid
 digests raise `QualificationError`; callers must surface these as failures.
 There is no successful skip or empty-matrix qualification.
 
+The authoritative native-target policy is `tools/construction-targets.json`.
+It requires x64 and ARM64 Windows, Linux and macOS, plus actual Raspberry Pi 5
+hardware running 64-bit Linux/ARM64. Generic Linux ARM64 evidence is not a
+Pi 5 hardware observation. Each environment/profile/extra selection must cover
+every target on every enumerated Python minor; a report with exact coverage of
+a reduced plan still refuses the missing target rows. Native policy digest
+changes, duplicate target/minor coverage and nonstandard interpreter/ABI
+substitutions also refuse qualification.
+
+The qualification floor is Python 3.11; existing package compatibility metadata
+is unchanged. The policy currently enumerates standard GIL-enabled CPython
+3.11 through 3.15, the stable minors listed by the
+[Python Developer's Guide](https://devguide.python.org/versions/) as checked on
+2026-10-23. Future stable minors require a reviewed policy update. The trusted
+plan producer must independently resolve the latest stable patch per minor and
+record each exact version/ABI; that resolver is not implemented here. The
+hardware target follows the
+[Raspberry Pi 5 product specification](https://pip.raspberrypi.com/documents/RP-008348-DS-3-raspberry-pi-5-product-brief.pdf).
+Capacity or compatible-wheel unavailability is failed qualification, not
+authority to trim the policy. WSL observations do not prove native Pi hardware.
+
 **Trust boundary:** matching self-reported hashes do not authenticate a producer
 or prove execution. The future trusted consumer must derive the complete plan
 from authoritative source/profile/platform declarations, bind actual policy and
 candidate inputs, acquire authenticated evidence from the expected producer and
 verify referenced artifacts before calling this library. It must not accept an
-expected plan supplied by the result producer. No complete environment catalog,
+expected plan or native-target policy supplied by the result producer. No complete environment catalog,
 feed resolver, native executor, artifact verifier, CI check, promotion consumer
 or publication authority is introduced here. Existing source-owner inventory
 and installer-readiness declarations alone are not that complete plan.
+Version-one plans/results are not accepted as version-two hardware/policy
+evidence; there is no inferred generic-hardware or target-policy default.
 
 Run `python -m unittest discover -s tools -p test_construction_qualification.py -v`
 for the in-process contract controls. These tests perform no installation,
@@ -268,6 +292,8 @@ network or native-process work and are not yet added to the admitted unit
 packet. Hosted feed, native construction/launch and required negative
 CI/promotion enforcement remain open in the
 [feed-construction effort](efforts/active/feed-construction-release-gate/README.md).
+The full 35-target synthetic matrix and its reduction/Pi-hardware/ABI controls
+are in-process data tests, not 35 native executions.
 
 ## Native file-link prerequisites
 

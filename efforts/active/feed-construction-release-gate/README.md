@@ -74,6 +74,25 @@ masked Actions feed selection. Provider-specific coordinates are intentionally
 not reproduced here. The inventory, execution and evidence design below is
 **agent-recommended**; it must clear review before implementation.
 
+The operator subsequently specified the native targets (verbatim):
+
+> Windows x64/AMR64, Linux x64/ARM64, macOS x64/ARM64, whatever a Raspberry Pi 5 has
+
+The initial Python answer was `3.9+`. After the existing runtime/bootstrap
+minimums were explained, the operator superseded it with (verbatim):
+
+> Oh 3.11+ is fine
+
+Interpretation: normalize the `AMR64` typo to ARM64; qualify x64 and ARM64 on
+Windows, Linux and macOS, plus actual Raspberry Pi 5 hardware running 64-bit
+Linux/ARM64. The qualification policy starts at Python 3.11; this does not
+silently change existing packages' declared compatibility minimums.
+_(Agent-recommended execution detail:)_ cover the latest stable patch of each
+released CPython minor from 3.11 onward using the standard GIL-enabled ABI.
+Prerelease and free-threaded interpreters are not substituted for those rows.
+Unavailable capacity or dependency wheels remain failed qualification, not
+unsupported targets or successful skips.
+
 ## Plan
 
 ### Phase 1 - Review the policy and complete inventory
@@ -171,6 +190,7 @@ cutover is activated by the reviewed documentation.
 | Inventory implementation | #8304 merged the source-owner diagnostic and engine declaration. Every tracked Python project is classified against canonical rosters; complete construction environments and the native/profile matrix are still unqualified. |
 | Checked-in selected-extra constructor | #8393 merged at `e618cb2a44c1129139ffe5b2ae869f5c3c273540`: declared primary-package extras participate in the canonical transaction, admission identity and installed-origin evidence. Local constructor contracts passed with an explicit contention allowance (55 passed; one existing symlink-privilege skip), and the rebased base/profile integration controls passed again. This is not default-budget performance proof or an active gate. |
 | Released selected-extra constructor | The latest observed Main release `bc361f7fa05201e3869eb9021d26d30c85805fc3` does not contain the profile-aware canonical engine. No deployment or running-state qualification is claimed. |
+| Checked-in result admission | #8416 merged at `28906a984304278307a90bf2774f6b34e0b113b0`: pure expected-plan/result binding and exact successful coverage checks. Complete authoritative matrix derivation, producer authentication, artifact verification and execution are not implemented by that library. |
 | Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate is active for this effort. |
 | Released gate | None: the existing release pipeline does not yet enforce this effort's configured-feed construction and first-launch contract. |
 | Installed evidence | Earlier consumer-specific Manager capture/origin results remain bounded observations, not full environment/profile coverage. The launch-maintenance effort separately records current selected-slot observations. |
@@ -551,3 +571,48 @@ cutover is activated by the reviewed documentation.
   No additional native installation or clean-room run is applicable to this
   pure data-contract slice. Actual feed/native execution still belongs to the
   unimplemented producer and complete-plan integration, not this test result.
+
+### 2026-10-23 - Land structural result admission; retain the matrix decision
+
+- #8416 merged at `28906a984304278307a90bf2774f6b34e0b113b0` after an
+  actual current-head automated approval, complete empty feedback/thread reads
+  and successful required source CI, workflow-lockdown and attribution checks.
+  The parent issue remains open. The source worktree was pulled forward through
+  the managed flow; no runtime or controller was updated.
+- The next prerequisite is an authoritative native support/qualification matrix.
+  Existing source owner and OS installer declarations do not decide which
+  interpreter architectures, Python patch versions and ABIs releases promise.
+  A `requires-python` lower bound is not an exact native matrix, and absence of
+  a runner or compatible wheel is not permission to classify a target as
+  unsupported. Resolve this support-policy decision before declaring complete
+  coverage or sizing the required native gate.
+- The #6237/#3336 result-consumer seam also remains unaccepted. No shared CI,
+  trusted-controller, credential or publication-writer edits are authorized by
+  structural result admission alone. The full effort remains Active.
+
+### 2026-10-23 - Resolve native qualification scope and bind target coverage
+
+- The operator resolved the architecture/Python decision recorded in Request:
+  x64 and ARM64 Windows/Linux/macOS, actual Raspberry Pi 5 and Python 3.11+.
+  The Raspberry Pi 5 uses a 64-bit Arm Cortex-A76; its required native target is
+  Linux ARM64 with Pi 5 hardware, not an interchangeable generic ARM64 worker.
+- Added a canonical native-target policy and require complete per-environment/
+  profile/extra coverage against that independently supplied policy. Current
+  stable CPython minors are 3.11 through 3.15 according to the official Python
+  status page checked on this date. The proposed execution detail selects the
+  latest stable patch of each minor with its standard GIL-enabled ABI; the
+  actual patch resolver and native execution remain unimplemented.
+- The pure plan/result contract advances to version two, binding the native
+  policy digest and explicit observed hardware class. Old evidence cannot
+  acquire those fields by inference. Reduced plans, duplicate target/minor
+  rows, generic ARM64 evidence for Pi 5 and other interpreter/ABI substitutions
+  refuse qualification. Existing package Python minimums remain unchanged.
+- Twenty-two focused in-process controls passed, including the complete
+  synthetic 35-target matrix for one declared environment and all prior result
+  contracts. This is not native execution or a complete environment census.
+  Source lint also passed. No feed, machine, runner, controller or installed
+  runtime was configured or changed.
+- Continue with canonical environment/profile/constructor/launch bindings,
+  independent latest-patch resolution and authenticated evidence production.
+  Accepted control integration, actual hosted/native capacity and negative
+  publication/merge enforcement remain open; unavailable rows cannot be skipped.
