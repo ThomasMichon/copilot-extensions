@@ -51,7 +51,10 @@ Use one owning store instance per directory, and close it during owned cleanup.
 `__version__`, CLI version output and store health use the installed
 distribution's metadata, retaining the `-devN` display spelling. A source tree
 without installed metadata reads its own matching `[project]` name and version;
-missing, malformed or ambiguous metadata fails explicitly. Python 3.10 remains
+missing, malformed or ambiguous metadata fails explicitly. The source fallback
+counts bare and simply quoted key declarations before validating their values:
+non-string duplicates cannot be ignored. Escaped or dotted project keys are
+outside this fallback's supported subset and fail explicitly. Python 3.10 remains
 supported without another runtime dependency. Version allocation changes
 package metadata, not imported Python bytes, so promotion can retain exact
 source-unit equivalence.

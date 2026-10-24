@@ -17,13 +17,23 @@ def _resolve_version() -> str:
     projects = re.findall(r"(?ms)^\s*\[project\]\s*\n(.*?)(?=^\s*\[|\Z)", text)
     fields = {}
     if len(projects) == 1:
+        declarations = {"name": [], "version": []}
+        for key, value in re.findall(r"(?m)^[ \t]*([^=\r\n]+)=(.*)$", projects[0]):
+            key = key.strip()
+            if key.startswith("#"):
+                continue
+            if re.fullmatch(r"""[A-Za-z0-9_-]+|"[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+'""", key) is None:
+                raise ValueError("Chat source project version metadata is invalid.")
+            key = key.strip("\"'")
+            if key in declarations:
+                declarations[key].append(value)
         for key in ("name", "version"):
-            matches = re.findall(
-                rf"""(?m)^\s*{key}\s*=\s*(["'])([^"'\r\n]+)\1\s*(?:#.*)?$""",
-                projects[0],
-            )
-            if len(matches) == 1:
-                fields[key] = matches[0][1]
+            if len(declarations[key]) == 1:
+                match = re.fullmatch(
+                    r"""\s*(["'])([^"'\r\n]+)\1\s*(?:#.*)?""", declarations[key][0],
+                )
+                if match:
+                    fields[key] = match[2]
     if fields.get("name") != "agent-chat-service" or re.fullmatch(
         r"\d+\.\d+\.\d+(?:-dev\d+)?", fields.get("version", ""),
     ) is None:

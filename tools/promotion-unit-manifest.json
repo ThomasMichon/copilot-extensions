@@ -1446,7 +1446,7 @@
     "plugins/agent-worktrees/src/agent_worktrees/manager_launcher_ownership.py": "21cb3c0054c7037c4682d035c58ea7bf3f36f0f20dc998a6de4fad5ee6aad38d",
     "plugins/agent-worktrees/src/agent_worktrees/mux_list_result.py": "d6f123741dd943db6bfc38c2f9d736f1cf6e0ad28bcc63644420443c17d7efa2",
     "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "5e38b823528458b382abc842e79e076e754c50aa3c57537a68049c903ab13101",
-    "services/chat/src/agent_chat_service/__init__.py": "e0152c90bd727aa2cf16ade0c290f827e625faf8c13a6a1e351782b1c864fd15",
+    "services/chat/src/agent_chat_service/__init__.py": "815f23a6cab1e9258dc3030c846b356dc7723e2250e98a77c6d0031e48be462d",
     "services/chat/src/agent_chat_service/client.py": "218c66f571cfa5b6fa67b58a880d6ac435f4ef2e72b1d374354606da501e7935",
     "services/chat/src/agent_chat_service/collaboration.py": "5996687f5309db15edf5fe129c8339b6f5067591872a2617bf1da37efb5142eb",
     "services/chat/src/agent_chat_service/store.py": "df3b352718213f0d606c5d96658993268266009398dcc0f7bff7db5df0c559d0",

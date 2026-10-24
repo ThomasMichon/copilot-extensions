@@ -11,19 +11,21 @@ import agent_chat_service as chat
 import agent_chat_service.catalog as catalog
 
 
-@pytest.mark.parametrize(("version", "quote"), [
-    ("0.1.20-dev1", '"'), ("1.2.3", "'"),
+@pytest.mark.parametrize(("version", "quote", "key_quote"), [
+    ("0.1.20-dev1", '"', ""), ("1.2.3", "'", ""),
+    ("0.1.20-dev1", '"', '"'), ("1.2.3", "'", "'"),
 ])
 def test_source_version_reads_only_its_own_project_metadata(
-    tmp_path, monkeypatch, version, quote,
+    tmp_path, monkeypatch, version, quote, key_quote,
 ):
     project = tmp_path / "source"
     package = project / "src/agent_chat_service"
     package.mkdir(parents=True)
     monkeypatch.setattr(chat, "__file__", str(package / "__init__.py"))
     (project / "pyproject.toml").write_text(
-        f"[project]\nname = {quote}agent-chat-service{quote}\n"
-        f"version = {quote}{version}{quote}\n[project.optional-dependencies]\nclient=[]\n",
+        f"[project]\n{key_quote}name{key_quote} = {quote}agent-chat-service{quote}\n"
+        f"{key_quote}version{key_quote} = {quote}{version}{quote}\n"
+        "[project.optional-dependencies]\nclient=[]\n",
         encoding="utf-8",
     )
     def missing(name):
@@ -40,6 +42,14 @@ def test_source_version_reads_only_its_own_project_metadata(
     '[project]\nname = "agent-chat-service"\nversion = "not-a-version"\n',
     '[other]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n',
     '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\nversion = "9.9.9"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\nversion = 42\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n"version" = "9.9.9"\n',
+    "[project]\nname = 'agent-chat-service'\nversion = '0.1.20-dev1'\n'version' = '9.9.9'\n",
+    '[project]\nname = "agent-chat-service"\nname = 42\nversion = "0.1.20-dev1"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n"ver\\u0073ion" = "9.9.9"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n"na\\u006de" = "other"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\nversion.extra = 42\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n\'name\'.extra = "other"\n',
     '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n[project]\nname = "other"\n',
 ])
 def test_source_version_refuses_invalid_metadata_without_installed_fallback(
