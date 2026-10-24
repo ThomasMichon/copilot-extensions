@@ -161,7 +161,7 @@ class ReleaseSelection:
 
 def select_release_profile(
     path: Path, *, repository: str, signer_digest: str, source_digest: str,
-    source_ref: str, release: dict, artifact: dict, target: dict,
+    source_ref: str, release: dict, artifact: dict | None, target: dict,
     component: str, roots: list[str], max_subject_bytes: int,
     backend: str | None = None, retained_backend: str | None = None,
     existing_installation: bool = False, preference: tuple[str, ...] = (),
@@ -171,6 +171,7 @@ def select_release_profile(
     The existing installation authority supplies independently selected producer,
     source, manifest and target facts. Neither the subject nor ambient settings
     may choose those facts. This does not download or admit dependency bytes.
+    An absent artifact cannot match, but never skips subject authentication.
     """
     if source_ref != "refs/heads/main" or signer_digest != source_digest:
         raise ProfileError("release profile approval requires pinned trusted Main")

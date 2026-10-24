@@ -764,6 +764,9 @@ def create_app(
                     waiter_maintenance.start()
                 yield
             finally:
+                from .telemetry import close_configured_retained_sink
+
+                close_configured_retained_sink()
                 await waiter_maintenance.close()
                 queue.set_wake_notifier(None)
                 queue.set_owned_transition_notifier(None)

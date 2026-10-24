@@ -97,7 +97,7 @@ cause nor constitute a live fix.
 
 ## Deliberate retained-spool adoption
 
-The new Python-only `telemetry.make_retained_spool_sink(directory)` is an explicit
+The direct Python `telemetry.make_retained_spool_sink(directory)` is an explicit
 opt-in for an owner-provisioned **new** `directory/retained/` namespace. Existing
 `make_spool_sink`, configured spool paths and the one-write append contract are
 unchanged and unretained. The owner must exclude old/nonparticipating writers,
@@ -124,3 +124,44 @@ lifecycle flow may activate this source. Verify the actual imported process,
 health counters and log readback. Source merge, a payload refresh or an HTTP
 health response alone is not running-state qualification. Linux/macOS and live
 external lanes remain separate where not exercised.
+## Configured retained telemetry
+
+An explicit alternative in the convention-located `telemetry.json` is:
+
+```json
+{"retained_spool": {"directory": "<absolute owner-provisioned base directory>"}}
+```
+
+Substitute an absolute filesystem path. The existing owner must provision a new
+exclusive `directory/retained` first; neither the loader nor producer creates it.
+Do not share this namespace with legacy/nonparticipating writers. The active
+file is `directory/retained/agent-bridge-telemetry.jsonl`; UTC-named archives,
+exact elapsed 30-day retention and record timestamps use the shared policy.
+Missing `ts` becomes integer epoch milliseconds at bounded producer admission,
+before any delayed draining; existing producer fields remain
+unchanged. Unknown/out-of-range timestamps stay retained with degraded evidence.
+
+The retained object accepts exactly `directory` and is mutually exclusive with
+top-level `sink` or `spool`, even empty ones. Relative/empty/non-string paths and
+mixed/unknown retained options are rejected with a content-free warning. Existing
+zero-argument `sink` factories, legacy `spool` paths and failure/fallback behavior
+are unchanged when the new key is absent. No legacy file is adopted or rotated.
+
+The loader selects one existing owned `BufferedSink`. Its worker constructs the
+retained sink, verifies the preprovisioned namespace, and performs startup and
+busy/idle maintenance. `True` means selected/pending, not persisted or healthy.
+Asynchronous initialization failure warns without replacing primary startup;
+the optional buffer reports failed callbacks. Producers never wait on history,
+storage or file custody. Clear/replacement rejects immediately without joining;
+if a previous worker remains alive, replacement fails open instead of creating
+a second one. Cleanup compares current configured ownership and clears it under
+the existing slot configuration lock, never clearing a concurrently selected
+legacy/custom replacement. Retry configuration after that worker exits. The daemon command
+owner closes this configured buffer in its existing `finally`; embedded callers
+must call `clear_telemetry_sink()` at their own lifecycle boundary. No captured
+ASGI/wire owner or health response is changed.
+
+`agent-bridge logs` includes a `telemetry` inventory from configuration and file
+metadata only: active/archive locations, policy, namespace provisioning and
+`write_health: "unknown-from-discovery"`. It never imports a custom factory,
+reads event payloads, creates files or treats configuration as live proof.

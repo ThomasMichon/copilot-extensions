@@ -201,6 +201,16 @@ there is not yet a published runtime-profile subject or a production consumer.
 These controls do not qualify adopting-policy defaults, governed acquisition,
 source fallback or live release approval.
 
+`tools/test_runtime_profile_policy_plan.py` composes the real installation-owned
+policy resolver with that release verifier in the same optional native lane.
+It covers a fresh no-file baseline, explicit/retained backend intent, disabled
+fallback, invalid/foreign/pending owners, and failure-class separation. A fresh
+isolated Python caller can request source fallback without artifact infrastructure.
+Supplied subjects still authenticate when their artifact is absent; malformed,
+ambiguous or unauthenticated subjects never become availability outcomes.
+The result is a frozen policy plan, not source verification, an exact source
+lock, feed admission or permission to bypass a publication hold.
+
 ## Optional Dispatch service replay
 
 `tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py
