@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -163,9 +165,183 @@ def _resolver() -> str:
     assert match is not None
     return match[0]
 
+def _python_resolvers() -> str:
+    source = BOOTSTRAP.read_text(encoding="utf-8")
+    functions = [_resolver()]
+    for name in ("Find-PhysicalBootstrapPython", "Find-BootstrapPython"):
+        match = re.search(rf"^function {name}\b.*?^}}", source, re.M | re.S)
+        assert match is not None
+        functions.append(match[0])
+    return "\n".join(functions)
+
 
 def _quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows Python alias fallback")
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+@pytest.mark.parametrize("lookup_error", [448, 2])
+def test_failed_python_lookup_only_reuses_physical_candidate_for_guard(
+    tmp_path, host_name, lookup_error,
+):
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    uv = tmp_path / "uv.ps1"
+    trace = tmp_path / "trace.txt"
+    uv.write_text(
+        f"Add-Content -LiteralPath {_quote(trace)} -Value ($args -join ' ')\n"
+        "if ($args[1] -eq 'find') {\n"
+        f"  Write-Error 'interpreter query failed (os error {lookup_error})' -ErrorAction Continue\n"
+        "  exit 2\n"
+        "}\n"
+        "exit 3\n",
+        encoding="utf-8",
+    )
+    script = "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+    script += (
+        "function Get-Command { param($Name, $CommandType, [switch]$All, $ErrorAction)\n"
+        f"  [pscustomobject]@{{ Source = {_quote(sys._base_executable)} }}\n"
+        "}\n"
+        f"$selected = Find-BootstrapPython {_quote(uv)}\n"
+        "Write-Output $selected\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    calls = trace.read_text(encoding="utf-8-sig").splitlines()
+    if lookup_error == 448:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert Path(result.stdout.strip()).samefile(sys._base_executable)
+        assert calls == ["python find --no-project >=3.11"]
+    else:
+        assert result.returncode != 0
+        assert "Python acquisition failed" in result.stdout + result.stderr
+        assert calls == ["python find --no-project >=3.11", "python install 3.11"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows interpreter protocol")
+@pytest.mark.parametrize("report", [
+    {"version": [3, 14], "base": False},
+    {"version": [3, 10], "base": True},
+    {"version": [3, 14], "base": "true"},
+    {"version": ["3", "14"], "base": True},
+    {"version": [3, 14], "base": True, "executable": "relative-python.exe"},
+    'not-json',
+])
+def test_physical_python_fallback_rejects_venv_old_version_and_bad_protocol(tmp_path, report):
+    if isinstance(report, dict):
+        report = json.dumps({"executable": sys._base_executable, **report})
+    fake = tmp_path / "python.ps1"
+    fake.write_text(f"Write-Output {_quote(report)}\nexit 0\n", encoding="utf-8")
+    script = "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+    script += (
+        "function Get-Command { param($Name, $CommandType, [switch]$All, $ErrorAction)\n"
+        f"  [pscustomobject]@{{ Source = {_quote(fake)} }}\n"
+        "}\n"
+        "if (Find-PhysicalBootstrapPython) { throw 'Invalid interpreter was accepted' }\n"
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("after_install", [False, True])
+def test_python_lookup_rejects_empty_success(tmp_path, after_install):
+    uv = tmp_path / "uv.ps1"
+    trace = tmp_path / "calls.txt"
+    uv.write_text(
+        f"Add-Content -LiteralPath {_quote(trace)} -Value ($args -join ' ')\n"
+        "if ($args[1] -eq 'install') { Write-Output 'installation progress'; exit 0 }\n"
+        f"if (${str(after_install).lower()} -and @(Get-Content {_quote(trace)}).Count -eq 1) "
+        "{ Write-Error 'No Python found' -ErrorAction Continue; exit 2 }\n"
+        "Write-Output ''; exit 0\n",
+        encoding="utf-8",
+    )
+    script = _python_resolvers() + f"\nFind-BootstrapPython {_quote(uv)}\n"
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode != 0
+    expected = "Python 3.11 or newer" if after_install else "invalid executable"
+    assert expected in result.stdout + result.stderr
+    assert not result.stdout.strip()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard")
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+def test_guarded_python_lookup_reuses_real_physical_python_twice(tmp_path, host_name):
+    import _winapi
+
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    physical = Path(sys._base_executable).resolve(strict=True)
+    linked = tmp_path / "python-link"
+    _winapi.CreateJunction(str(physical.parent), str(linked))
+    logical = linked / physical.name
+    uv = tmp_path / "uv.ps1"
+    uv.write_text(
+        "if ($args[1] -ne 'find') { throw 'Python acquisition was attempted' }\n"
+        "Write-Error 'interpreter query failed (os error 448)' -ErrorAction Continue\n"
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    script = "$ErrorActionPreference = 'Stop'\n" + _python_resolvers() + "\n"
+    script += r"""
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class BootstrapPythonGuard {
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool GetProcessMitigationPolicy(
+        IntPtr process, int policy, out uint flags, UIntPtr size);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    public static extern bool SetProcessMitigationPolicy(int policy, ref uint flags, UIntPtr size);
+}
+'@
+$size = [UIntPtr]::new([uint32]4)
+$before = [uint32]0
+if (-not [BootstrapPythonGuard]::GetProcessMitigationPolicy(
+    [IntPtr](-1), 16, [ref]$before, $size)) { throw 'Cannot inspect caller guard' }
+$requested = [uint32]($before -bor 1)
+if (-not [BootstrapPythonGuard]::SetProcessMitigationPolicy(
+    16, [ref]$requested, $size)) { throw 'Cannot enable isolated caller guard' }
+"""
+    script += (
+        "function Get-Command { param($Name, $CommandType, [switch]$All, $ErrorAction)\n"
+        f"  [pscustomobject]@{{ Source = {_quote(logical)} }}\n"
+        "}\n"
+        f"$logical = {_quote(logical)}\n"
+        f"$expected = {_quote(physical)}\n"
+        "foreach ($cycle in 1..2) {\n"
+        "  $blocked = $false\n"
+        "  try { & $logical --version 2>$null | Out-Null } catch { $blocked = $true }\n"
+        "  if (-not $blocked) { throw 'Logical interpreter was not guarded' }\n"
+        f"  $selected = Find-BootstrapPython {_quote(uv)}\n"
+        "  if ($selected -ine $expected) { throw 'Wrong physical interpreter selected' }\n"
+        "}\n"
+        "$after = [uint32]0\n"
+        "if (-not [BootstrapPythonGuard]::GetProcessMitigationPolicy("
+        "[IntPtr](-1), 16, [ref]$after, $size)) { throw 'Cannot recheck guard' }\n"
+        "if ($after -ne $requested) { throw 'Caller mitigation changed' }\n"
+        "Write-Output 'physical-python-ready'\n"
+    )
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "physical-python-ready"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows RedirectionGuard contract")
