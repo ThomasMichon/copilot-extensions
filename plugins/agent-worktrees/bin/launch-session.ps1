@@ -800,7 +800,6 @@ if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
         $directArgs += @('--project', $script:LaunchProject)
     }
     $directArgs += $CopilotArgs
-    if ($CopilotArgs[0] -eq 'resolve') { $directArgs += '--require-agent-hosting' }
     & $VenvPython @directArgs
     exit $LASTEXITCODE
 }
@@ -815,7 +814,7 @@ $resolveArgs = @('-m', 'agent_worktrees')
 if ($script:LaunchProject) {
     $resolveArgs += @('--project', $script:LaunchProject)
 }
-$resolveArgs += @('resolve', '--require-agent-hosting') + $CopilotArgs
+$resolveArgs += @('resolve') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
 Write-LaunchTrace 'resolve_start'
 

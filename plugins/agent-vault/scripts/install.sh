@@ -475,10 +475,26 @@ _source_version() {
 
 _version_lt() {
     local a="${1//-/.}" b="${2//-/.}"
+    a="${a%%[+.]source.*}"; b="${b%%[+.]source.*}"
     [[ "$a" == "$b" ]] && return 1
-    local lower
-    lower="$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)"
-    [[ "$lower" == "$a" ]]
+    local -a pa pb
+    IFS='.' read -r -a pa <<< "$a"
+    IFS='.' read -r -a pb <<< "$b"
+    local len=${#pa[@]}
+    (( ${#pb[@]} > len )) && len=${#pb[@]}
+    local i ca cb na nb
+    for (( i = 0; i < len; i++ )); do
+        ca="${pa[i]:-}"; cb="${pb[i]:-}"
+        [[ -z "$ca" && -z "$cb" ]] && continue
+        [[ -z "$ca" ]] && return 1
+        [[ -z "$cb" ]] && return 0
+        na="${ca//[!0-9]/}"; nb="${cb//[!0-9]/}"
+        na="${na:-0}"; nb="${nb:-0}"
+        na=$((10#$na)); nb=$((10#$nb))
+        (( na < nb )) && return 0
+        (( na > nb )) && return 1
+    done
+    return 1
 }
 
 _downgrade_guard() {

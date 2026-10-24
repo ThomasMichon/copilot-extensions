@@ -57,6 +57,15 @@ Python and native shell resolvers refuse recovery rather than ordering opaque
 hashes or silently selecting an older plain package slot. Ordinary package-only
 recovery retains its existing version ordering.
 
+Bridge, Dispatch, Index and Vault's POSIX package downgrade guards compare
+numeric release and `devN` components without relying on GNU `sort -V`.
+Dot/hyphen dev spellings compare equally, and a finished release outranks its
+own dev builds. Source-fingerprint suffixes do not order otherwise equal
+packages; full generation selection still follows the identity rules above.
+Index uses the same comparison for active/stamped publication freshness.
+These checks retain genuine package-downgrade refusal; portable comparison
+does not authorize a forced downgrade, source replacement or runtime rollout.
+
 The root `snapshot-provenance.json` installation-cell receipt is published after
 assembly and is validated independently by the cell contract; it is not a runtime
 source-hash input. It must still be an ordinary file. Nested files with that name

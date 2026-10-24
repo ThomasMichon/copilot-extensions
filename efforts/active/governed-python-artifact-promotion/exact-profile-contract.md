@@ -9,7 +9,8 @@ engine application remains
 Release approval adapter implemented in #8568; installation-owned policy intent
 in #8494; repository-only policy/release planning composition in #8586.
 Explicit retained source-graph candidate export merged in #8600.
-Independent source identity/lock binding and admission, real profile publication, consumer
+Independent selected-source/native-target/candidate-lock binding merged in #8705.
+Governed admission, real profile publication, consumer
 admission, deployed engine selection and production rollout remain open.
 
 ## Reconciliation and existing boundaries

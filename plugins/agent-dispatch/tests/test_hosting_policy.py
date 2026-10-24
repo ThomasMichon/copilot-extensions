@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -198,7 +199,7 @@ print('LEGACY LAUNCH REACHED')
 """
 
 
-@pytest.mark.parametrize("receiver", ["bridge", "worktrees", "reclaim"])
+@pytest.mark.parametrize("receiver", ["bridge", "reclaim"])
 def test_mixed_version_owner_refuses_before_any_legacy_launch(monkeypatch, receiver):
     prefix = [sys.executable, "-c", _LEGACY_RECEIVER]
     # An old receiver would accept the same ordinary command without the
@@ -212,10 +213,6 @@ def test_mixed_version_owner_refuses_before_any_legacy_launch(monkeypatch, recei
         monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: prefix)
         monkeypatch.setattr(bridge, "_resolve_agent_record", lambda *a, **kw: {"type": "remote"})
         result = bridge.spawn_worker("task", worker_id="worker", agent="namespace:target")
-    elif receiver == "worktrees":
-        monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: prefix)
-        monkeypatch.setattr(hosting_policy, "require_embodiment_harness", lambda **kw: None)
-        result = embody.spawn_embodied_worker("task", worker_id="worker")
     else:
         result = bridge_reclaim.resume_worktree_and_send(
             "worktree", "seed", exe=prefix, agent="worker", caller="dispatch",
@@ -224,3 +221,59 @@ def test_mixed_version_owner_refuses_before_any_legacy_launch(monkeypatch, recei
     assert result.returncode == 2
     assert "--require-agent-hosting" in result.stderr
     assert "LEGACY LAUNCH REACHED" not in result.stdout
+
+
+def test_old_worktrees_receiver_refuses_internal_admission_without_a_launch_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    prefix = [sys.executable, "-c", _LEGACY_RECEIVER]
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: prefix)
+    monkeypatch.setattr(hosting_policy, "require_execution_harness", lambda **kw: {
+        "version": 1, "repository": str(tmp_path), "expose_agent": None,
+        "sources": [], "denied_by": [], "allowed": True,
+    })
+    with pytest.raises(bridge.BridgeUnavailable, match="agent-policy"):
+        embody.spawn_embodied_worker("task", worker_id="worker")
+
+
+@pytest.mark.parametrize("reply", ["allowed", "incomplete", "different-repository"])
+def test_embodiment_uses_selected_receivers_internal_policy_contract(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reply: str,
+) -> None:
+    policy = {
+        "version": 1, "repository": str(tmp_path), "expose_agent": None,
+        "sources": [], "denied_by": [], "allowed": True,
+    }
+    prefix = ["selected-engine", "--installation", "selected"]
+    calls = []
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: prefix)
+    monkeypatch.setattr(hosting_policy, "require_execution_harness", lambda **kw: policy)
+    monkeypatch.setattr(hosting_policy, "agent_worktrees_launch_prefix",
+                        Mock(side_effect=AssertionError("must use the selected receiver")))
+
+    def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if "agent-policy" in argv:
+            result = (
+                {} if reply == "incomplete"
+                else {**policy, "repository": str(tmp_path / "other")}
+                if reply == "different-repository"
+                else policy
+            )
+            return subprocess.CompletedProcess(argv, 0, json.dumps(result), "")
+        assert argv[len(prefix)] == "embody"
+        return subprocess.CompletedProcess(argv, 0, "{}", "")
+
+    monkeypatch.setattr(hosting_policy.subprocess, "run", run)
+    if reply == "allowed":
+        assert embody.spawn_embodied_worker("task", worker_id="worker").returncode == 0
+        assert len(calls) == 2
+    else:
+        with pytest.raises(bridge.BridgeUnavailable, match="admission"):
+            embody.spawn_embodied_worker("task", worker_id="worker")
+        assert len(calls) == 1
+    assert calls[0] == [
+        *prefix, "agent-policy", "check", "--path", str(tmp_path),
+        "--operation", "dispatch", "--json",
+    ]
+    assert all("--require-agent-hosting" not in argv for argv in calls)

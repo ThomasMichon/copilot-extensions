@@ -59,6 +59,76 @@ Limits initially remain explicit caller inputs, not guessed enabled defaults.
 Measure representative permitted closures before enabling production defaults.
 Do not modify another contributor's open candidate/profile PR to obtain inputs.
 
+## Next acquisition component: exact selected wheels
+
+This realizes the existing acquisition item; it does not authorize a new feed,
+profile authority, resolver or production consumer. Review this concrete
+integration design before implementation.
+
+1. **Start from the existing authority-selected artifact profile.** Its complete
+   wheel names, versions, filenames and hashes are already fixed. The native
+   UV compiler remains the source-mode resolver; do not expand this acquisition
+   client into a dependency resolver, select a different pin or enumerate feed
+   release histories. #8705's source candidate is still not governed-feed
+   admission. Source-mode acquisition and receipt composition remain separate
+   parent gates.
+2. **Capture existing configuration under existing custody.** The existing
+   installation owner and retained UV configuration supply the effective
+   explicitly configured indexes, named-index identities, authentication and
+   applicable seasoning policy. Do not add a second UV configuration reader,
+   trust an implicit public default or reuse the promotion build-tooling
+   exception. This is an authority-invoked operation, not approval inferred
+   from reading incidental environment variables. Fail unsupported effective
+   configuration explicitly rather than silently changing its meaning.
+3. **Keep additional download trust in the existing owned policy.** Configured
+   indexes may serve their own files; a page cannot authorize a different
+   origin. Optional exact HTTPS download origins belong in the existing
+   installation-owned `runtimeProfiles` policy, not a new approval file,
+   global allowlist, mandatory environment variable or public profile.
+   Absent that optional narrowing/extension, only the selected index origin is
+   permitted. No wildcard host, redirect-learned host or public-index escape is
+   admitted. Bind effective acquisition policy to the local evidence/reuse
+   identity without publishing private URLs.
+4. **Use an invocation-local, bounded HTTP client, not a service or proxy.**
+   Fetch only normalized project metadata and the selected wheel from an
+   affirmatively permitted index. Accept standard simple-index HTML/JSON while
+   preserving exact file hash, upload-time/seasoning, Requires-Python and
+   yanked/withdrawn facts. An exact pin does not override a refused file.
+   Reject ambiguous/conflicting entries, unsupported encodings and missing
+   required policy facts before downloading the wheel. Wheel metadata-sidecar
+   hints never replace the existing actual-byte inspector.
+5. **Check every network hop before issuing its request.** The initial link and
+   every redirect must satisfy the selected policy and HTTPS requirement.
+   Preserve native certificate/explicit CA and named-index authentication
+   semantics; never forward index credentials to another origin or include
+   them in argv, diagnostic exceptions or receipts. Unsupported credential/
+   trust-provider configurations defer without a request or an activation.
+   Keep ordinary package-source behavior unchanged until this lane is complete.
+6. **Bound and retain the whole transaction.** Declare positive finite request,
+   redirect, per-project candidate-count, metadata-byte, per-wheel/closure-byte,
+   temporary-storage and shared-deadline limits before the first request.
+   Stream through these inclusive limits, hash actual bytes and retain only
+   invocation-owned partial files beneath the existing private input owner.
+   The result stays live only through complete-profile inspection and the
+   existing immutable constructor. Failure/cancellation cleans partial inputs
+   without touching caller caches or the selected healthy generation.
+7. **Qualify the real consumer seam before enabling it.** Controlled feeds must
+   prove exact-file selection, same-origin success, explicitly permitted
+   redirects, pre-request refusal of untrusted/insecure targets, credential
+   isolation, OS/explicit-CA trust, seasoning/yank refusal and every independent
+   budget. Exercise acquisition into real inspected/offline construction on
+   fresh Windows and available POSIX inputs, including poisoned ambient
+   configuration and failed-build preservation. Choose enabled defaults only
+   after measuring representative closures; explicit test budgets are not
+   production defaults.
+
+No new daemon, egress rule, routing broker or alternate constructor is needed.
+The acquisition mechanism establishes file-policy and byte facts; the existing
+installation owner still selects modes and owns activation, source fallback,
+supplied revocation and unchanged admitted reuse. A missing file can be a typed
+availability outcome. An untrusted source, malformed admission evidence or
+integrity failure cannot become that outcome.
+
 ## Validation and completion
 
 - [x] The bounded archive/file-inspection component and complete-profile byte

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -64,20 +65,115 @@ def test_incomplete_policy_never_authorizes_launch(
         engine_client.require_agent_hosting("/source")
 
 
-def test_old_engine_cannot_downgrade_hosting_check(
-    monkeypatch: pytest.MonkeyPatch,
+def test_launch_planning_needs_no_hosting_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     calls = []
 
     def run(project: str, args: list[str], **kwargs: object) -> dict:
         calls.append(args)
-        raise engine_client.EngineError("unrecognized arguments: --require-agent-hosting")
+        if args[:2] == ["agent-policy", "check"]:
+            return {
+                "version": 1, "repository": str(tmp_path), "expose_agent": None,
+                "sources": [], "denied_by": [], "allowed": True,
+            }
+        raise engine_client.EngineError("Managed agent launch refused: expose_agent: false")
 
     monkeypatch.setattr(engine_client, "run_json", run)
-    with pytest.raises(engine_client.EngineFeatureUnavailable, match="hosting policy"):
+    with pytest.raises(engine_client.EngineError, match="expose_agent: false"):
         engine_client.resolve_launch_plan("demo", base=True)
-    assert len(calls) == 1
-    assert "--require-agent-hosting" in calls[0]
+    assert calls == [
+        ["agent-policy", "check", "--project-root", "--json"],
+        ["resolve", "--json", "--base"],
+    ]
+
+
+@pytest.mark.parametrize("selection", [
+    {"new": True}, {"base": True}, {"worktree_id": "retained"},
+])
+def test_real_legacy_engine_cannot_allocate_before_manager_admission(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, selection: dict,
+) -> None:
+    script = tmp_path / "legacy.py"
+    effects = tmp_path / "effects"
+    probe = tmp_path / "policy-probe"
+    script.write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        "if 'agent-policy' in sys.argv:\n"
+        f" Path({str(probe)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        " raise SystemExit(2)\n"
+        f"Path({str(effects)!r}).write_text('allocated or prepared')\n"
+        f"print(json.dumps({{'action':'exec','work_dir':{str(tmp_path)!r},'cmd':['copilot']}}))\n",
+        encoding="utf-8",
+    )
+    engine_client.set_engine_command(None)
+    monkeypatch.setattr(engine_client, "_INHERITED_ENGINE_COMMAND", None)
+    monkeypatch.delenv(engine_client.ENGINE_ARGV_ENV, raising=False)
+    monkeypatch.delenv(engine_client.ENGINE_CMD_ENV, raising=False)
+    monkeypatch.setattr(engine_client, "installed_engine_command",
+                        lambda: [sys.executable, str(script)])
+    with pytest.raises(engine_client.EngineError):
+        engine_client.resolve_launch_plan("demo", **selection)
+    assert probe.is_file()
+    assert not effects.exists()
+
+
+def test_compatibility_retry_rechecks_owner_before_fallback_resolution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    calls = []
+
+    def request(project: str | None, args: list[str], **kwargs: object) -> dict:
+        calls.append(args)
+        if args[:2] == ["agent-policy", "check"]:
+            if len(calls) > 1:
+                raise engine_client.EngineError("receiver changed; policy unsupported")
+            return {
+                "version": 1, "repository": str(tmp_path), "expose_agent": None,
+                "sources": [], "denied_by": [], "allowed": True,
+            }
+        raise engine_client.EngineError("old resolve: --json requires --worktree-id or --new")
+
+    monkeypatch.setattr(engine_client, "run_json", request)
+    with pytest.raises(engine_client.EngineError, match="receiver changed"):
+        engine_client.resolve_launch_plan("demo", base=True)
+    assert [args[0] for args in calls] == ["agent-policy", "resolve", "agent-policy"]
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_remote_receiver_support_does_not_grant_local_namesake_admission(remote: bool) -> None:
+    from worktree_manager.hosting_admission import require_owner_hosting
+
+    denied = {
+        "version": 1, "code": "repository-agent-exposure-denied",
+        "error": "Managed agent launch refused: expose_agent: false",
+    }
+    if remote:
+        assert require_owner_hosting(
+            "target", None, request=lambda *_args: denied,
+            failure=engine_client.EngineError, support_only=True,
+        ) is None
+    else:
+        with pytest.raises(engine_client.EngineError, match="expose_agent: false"):
+            require_owner_hosting(
+                "target", None, request=lambda *_args: denied,
+                failure=engine_client.EngineError,
+            )
+
+
+@pytest.mark.parametrize("reply", [
+    {}, {"version": True, "code": "repository-agent-exposure-denied", "error": "denied"},
+    {"version": 1, "error": "unknown command"},
+    {"version": 1, "code": "repository-agent-exposure-denied", "error": ""},
+])
+def test_unsupported_engine_does_not_become_remote_launch_support(reply: dict) -> None:
+    from worktree_manager.hosting_admission import require_owner_hosting
+
+    with pytest.raises(engine_client.EngineError):
+        require_owner_hosting(
+            "target", None, request=lambda *_args: reply,
+            failure=engine_client.EngineError, support_only=True,
+        )
 
 
 def test_launch_rechecks_after_planning_before_mux_composition(
@@ -189,5 +285,6 @@ def test_recovery_runtime_is_resolved_before_admission_but_setup_is_not() -> Non
     powershell = (BIN / "launch-session.ps1").read_text(encoding="utf-8")
     assert posix.index('PYTHON="$AW_PY"') < posix.index("\n    run_recovery\n")
     assert powershell.index("$VenvPython = $AwPy") < powershell.index("\n    Invoke-RecoveryLaunch\n")
-    assert "resolve --require-agent-hosting" in posix
-    assert "@('resolve', '--require-agent-hosting')" in powershell
+    assert 'resolve_args+=(resolve "$@")' in posix
+    assert "@('resolve') + $CopilotArgs" in powershell
+    assert "--require-agent-hosting" not in posix + powershell

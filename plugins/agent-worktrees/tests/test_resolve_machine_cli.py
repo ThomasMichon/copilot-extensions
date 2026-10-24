@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import shlex
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -20,6 +21,13 @@ import pytest
 
 from agent_worktrees import config as cfg
 from agent_worktrees import resolve_machine_cli as rmc
+
+
+def _launch_after_owner_check(command: str) -> str:
+    script = shlex.split(command)[-1]
+    assert "agent-policy check --project-root --json" in script
+    assert "--require-agent-hosting" not in script
+    return script.split(" && ", 1)[1]
 
 pytestmark = pytest.mark.guard
 
@@ -162,7 +170,7 @@ def test_emit_remote_plan_for_env_wraps_remote_command_for_posix_target(tmp_path
 
     assert rc == 0
     (plan,) = emit_plan.call_args.args
-    assert plan["remote_command"] == "bash -lc 'example-project --require-agent-hosting'"
+    assert _launch_after_owner_check(plan["remote_command"]) == "example-project"
 
 
 def test_emit_remote_plan_for_env_does_not_wrap_for_windows_target(tmp_path):
@@ -184,7 +192,9 @@ def test_emit_remote_plan_for_env_does_not_wrap_for_windows_target(tmp_path):
     command = plan["remote_command"]
     assert command.startswith("pwsh -NoProfile -EncodedCommand ")
     script = base64.b64decode(command.split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
-    assert script == "& 'example-project' '--require-agent-hosting'; exit $LASTEXITCODE"
+    assert "'agent-policy' 'check' '--project-root'" in script
+    assert script.endswith("& 'example-project'; exit $LASTEXITCODE")
+    assert "--require-agent-hosting" not in script
 
 
 @pytest.mark.parametrize("name", [
@@ -205,9 +215,10 @@ def test_all_picker_matching_paths_share_machine_identities(tmp_path, name):
         assert rmc._try_machine_handoff(config, name) == 0
         assert rmc._emit_remote_plan_for_env(config, name, "Linux") == 0
     handoff, environment = [call.args[0] for call in emit.call_args_list]
+    assert _launch_after_owner_check(handoff["remote_command"]) == "example-project"
     assert handoff == {
         "action": "remote", "ssh_alias": "atlas-linux",
-        "remote_command": "bash -lc 'example-project --require-agent-hosting'",
+        "remote_command": handoff["remote_command"],
         "machine": "atlas-core", "display_name": "Build Box",
     }
     assert environment == {**handoff, "display_name": "Build Box Linux"}
@@ -284,9 +295,11 @@ def test_handoff_uses_only_loader_eligible_environments(tmp_path, name):
          patch.object(rmc.machine_identity, "is_local_machine", return_value=True), \
          patch.object(rmc, "_emit_plan") as emit:
         assert rmc._try_machine_handoff(config, name) == 0
-    assert emit.call_args.args[0] == {
+    emitted = emit.call_args.args[0]
+    assert _launch_after_owner_check(emitted["remote_command"]) == "example-project"
+    assert emitted == {
         "action": "remote", "ssh_alias": "guest-ssh",
-        "remote_command": "bash -lc 'example-project --require-agent-hosting'",
+        "remote_command": emitted["remote_command"],
         "machine": "atlas-core", "display_name": "Build Box",
     }
     assert [env.alias for env in entry.ssh_environments] == ["native-ssh", "guest-ssh"]
@@ -302,7 +315,7 @@ def test_shared_matching_preserves_environment_rejection(tmp_path):
         emit.assert_not_called()
 
 
-def test_real_subprocess_parses_and_serializes_alias_selected_plan(tmp_path):
+def test_real_subprocess_source_inspection_plan_has_no_launch_policy_flags(tmp_path):
     machines = tmp_path / "machines.yaml"
     machines.write_text(
         "machines:\n  atlas-core:\n    alias: friendly\n    display_name: Build Box\n"
@@ -329,7 +342,7 @@ raise SystemExit(rmc._emit_remote_plan_for_env(config, "FRIENDLY", "Linux", ["li
     assert plan == {
         "action": "remote", "ssh_alias": "atlas-linux", "machine": "atlas-core",
         "display_name": "Build Box Linux",
-        "remote_command": "bash -lc 'example-project list --json --require-agent-hosting'",
+        "remote_command": "bash -lc 'example-project list --json'",
     }
 
 

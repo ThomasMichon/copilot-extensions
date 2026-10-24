@@ -420,8 +420,9 @@ aggregate plan timeout. Preparation stages and elapsed-time heartbeats stream
 to the launch terminal; the final plan remains JSON on stdout. Individual
 engine operations keep their own failure bounds, and automation can explicitly
 request a bounded plan call.
-An explicitly bounded SSH prompt plan allows at least 240 seconds for the
-target's 180-second admission call and host overhead; an unbounded preparation
+An explicitly bounded SSH prompt plan allows at least 300 seconds for the
+target's 60-second read-only owner-policy check, 180-second admission call and
+host overhead; an unbounded preparation
 call remains unbounded.
 Captured preparation owns a kill-on-close Job on Windows and a dedicated
 process group on POSIX. A POSIX group owner stays unreaped until the engine's

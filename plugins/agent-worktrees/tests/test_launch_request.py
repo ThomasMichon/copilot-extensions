@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from remote_policy_receiver import accepted_remote_owner as accepted_remote_owner
 
 from agent_worktrees import launch_request as request, launch_seed_state, tracking, tracking_write
 from agent_worktrees import remote_seed_launch
