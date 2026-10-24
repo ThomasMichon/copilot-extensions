@@ -206,6 +206,14 @@ def test_actual_codespaces_bootstrap_native_lifetime_concurrency_and_installed_c
             timeout=deadline, diagnostic=diagnostic, acknowledgement_prefix=ACKNOWLEDGEMENT,
         )
 
+    def assert_admission(item, action):
+        admission = json.loads(item.spec.source)
+        assert admission["plugin"] == "agent-codespaces"
+        assert admission.get("installer_action", "provision") == action
+        assert Path(admission["payload"]) == payload
+        assert Path(admission["runtime_root"]) == installation
+        assert Path(admission["project"]) == project
+
     with owned("cold-first") as first:
         observe(lambda: foundation_status(root=root) is not None, 90, diagnostic)
         operation = foundation_status(root=root).operation_id
@@ -213,6 +221,7 @@ def test_actual_codespaces_bootstrap_native_lifetime_concurrency_and_installed_c
         first.close_caller()
         assert not first.exited(), diagnostic()
         with owned("cold-second") as second:
+            assert not first.exited() and not second.exited(), diagnostic()
             second.close_caller()
 
             def both_completed():
@@ -231,12 +240,7 @@ def test_actual_codespaces_bootstrap_native_lifetime_concurrency_and_installed_c
     ordered = sorted(requests, key=lambda item: item.started_at)
     assert all(left.finished_at <= right.started_at for left, right in zip(ordered, ordered[1:]))
     for item in requests:
-        admission = json.loads(item.spec.source)
-        assert admission["plugin"] == "agent-codespaces"
-        assert admission["installer_action"] == "stamp"
-        assert Path(admission["payload"]) == payload
-        assert Path(admission["runtime_root"]) == installation
-        assert Path(admission["project"]) == project
+        assert_admission(item, "stamp")
     assert not (installation / "current-version").exists()
     assert not list((installation / "versions").glob("*/pyvenv.cfg"))
     count = len(requests)
@@ -264,11 +268,12 @@ def test_actual_codespaces_bootstrap_native_lifetime_concurrency_and_installed_c
 
     set_version("99.0.0")
     with owned("drift") as caller:
+        assert not caller.exited(), diagnostic()
         caller.close_caller()
         observe(lambda: receipt_completed_count(root, count + 1, caller.receipt_log), 850, diagnostic)
         drift = status(ordinary_receipt(caller.receipt_log), root=root)
         assert drift.exit_code == 0, diagnostic()
-        assert json.loads(drift.spec.source).get("installer_action", "provision") == "provision"
+        assert_admission(drift, "provision")
         observe(caller.exited, 60, diagnostic)
     count += 1
     selected = (installation / "current-version").read_text().strip()
@@ -303,6 +308,7 @@ def test_actual_codespaces_bootstrap_native_lifetime_concurrency_and_installed_c
         observe(lambda: receipt_completed_count(root, count + 1, caller.receipt_log), 850, diagnostic)
         failed = status(ordinary_receipt(caller.receipt_log), root=root)
         assert failed.exit_code != 0, diagnostic()
+        assert_admission(failed, "provision")
         observe(caller.exited, 60, diagnostic)
     count += 1
     assert (installation / "current-version").read_text().strip() == selected
