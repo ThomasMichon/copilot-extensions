@@ -20,14 +20,24 @@ def _encoded(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def _legacy_state(area):
-    root = area / "legacy-state"
+def _legacy_rows(database):
+    with sqlite3.connect(database) as db:
+        return db.execute(
+            "SELECT id,identity,spec,runner,state,exit_code,error,created_at,"
+            "started_at,finished_at,boot_id,settled_boot_id,settled_at "
+            "FROM requests ORDER BY id",
+        ).fetchall()
+
+
+def _legacy_state(area, *, state_name="legacy-state", runner_argv=None):
+    root = area / state_name
     root.mkdir()
     database = root / "queue.sqlite3"
     boot = kernel_boot_identity()
     now = time.time()
     runner = {
-        "argv": [sys.executable, "-c", "pass"], "cwd": str(area),
+        "argv": runner_argv if runner_argv is not None else [sys.executable, "-c", "pass"],
+        "cwd": str(area),
         "timeout": 7200, "env": [], "context_keys": [],
     }
     failure = "executor interrupted: RuntimeError; settlement required"
@@ -46,6 +56,8 @@ def _legacy_state(area):
         )
         db.execute("PRAGMA user_version=2")
         for identifier, pending in (("1" * 32, False), ("2" * 32, True)):
+            if runner_argv is not None:
+                runner["argv"] = [*runner_argv, identifier]
             spec = {
                 "backend": "fixture", "argv": ["later"] if pending else [],
                 "project": "", "cwd": "", "source": "", "context": [],
@@ -78,6 +90,56 @@ def test_schema_two_failure_and_pending_history_remain_readonly(area):
     assert pending.state == "pending" and pending.started_at is None
     assert recovery_status(root=root).current_boot_id == boot
     assert database.read_bytes() == before
+    assert kernel_boot_identity() == boot
+
+
+def test_explicit_legacy_repair_preserves_failure_and_executes_only_pending_work(area):
+    from update_driver import recover_for_repair
+    from test_process import collect, worker
+
+    effects = area / "effects"
+    root, database, boot, failure = _legacy_state(
+        area, state_name="state",
+        runner_argv=[
+            sys.executable, "-c",
+            "from pathlib import Path; import sys; "
+            "effects=Path(sys.argv[1]).open('a'); "
+            "effects.write(sys.argv[2]+'\\n'); effects.close()",
+            str(effects),
+        ],
+    )
+    original, pending = status(root=root)
+    history = _legacy_rows(database)
+    before = database.read_bytes()
+    with pytest.raises(DriverError):
+        recover_for_repair(root=root)
+    assert database.read_bytes() == before
+    assert not effects.exists()
+
+    released = recover_for_repair(authorized=True, root=root)
+    assert [row.id for row in released] == [original.id]
+    repaired = status(original.id, root=root)
+    assert repaired.state == original.state == "interrupted"
+    assert repaired.exit_code is original.exit_code is None
+    assert repaired.error == failure
+    assert _legacy_rows(database) == history
+    assert repaired.spec == original.spec and repaired.runner == original.runner
+    assert (repaired.created_at, repaired.started_at, repaired.finished_at, repaired.boot_id) == (
+        original.created_at, original.started_at, original.finished_at, boot,
+    )
+    assert repaired.recovery_authority == "operator_repair"
+    assert repaired.released_at is not None
+    assert repaired.settlement_kind is repaired.settled_at is repaired.settled_boot_id is None
+    assert status(pending.id, root=root) == pending
+    assert not effects.exists(), "queue release ran an installer"
+    assert recover_for_repair(authorized=True, root=root) == ()
+    assert status(original.id, root=root) == repaired
+
+    process = worker(area)
+    collect(process)
+    assert status(pending.id, root=root).exit_code == 0
+    assert effects.read_text().splitlines() == [pending.id], "ambiguous failed work was replayed"
+    assert status(original.id, root=root) == repaired
     assert kernel_boot_identity() == boot
 
 
