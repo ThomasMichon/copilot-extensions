@@ -55,10 +55,13 @@ listener lifecycle, connector supervision or bidirectional SSH proof.
 keys from the same exact snapshot: target inbound and source outbound are
 independent, disabled/offline targets yield no keys, and client-only sources
 can authenticate without an inbound listener. It returns the selected login
-user for the target-local service owner to verify. The installed
+user and admitted host pin for the target-local service owner to verify. The installed
 [`gateway-authorization`](../../plugins/agent-ssh/docs/gateway-transport.md#target-local-login-authorization)
 consumer explicitly converges its dedicated key file, with no global
 authorization-file adoption, service restart or Gateway forwarding grant.
+The optional installed native listener entrypoint verifies that login principal
+and the actual private host key before consuming the authorization file; it
+does not replace the lifecycle owner's endpoint custody or readiness contract.
 
 ## Installed consumer
 

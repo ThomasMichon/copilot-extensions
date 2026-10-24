@@ -58,6 +58,13 @@ It does not edit the user's ordinary key file, enroll a Gateway, fetch a secret,
 start a listener, or create a reconciliation loop. See the
 [native authorization contract](docs/gateway-transport.md#target-local-login-authorization).
 
+The installed `agent_ssh.gateway_sshd` module is the native foreground listener
+entrypoint for an existing target-local lifecycle owner. It verifies the real
+login principal and admitted host pin, consumes that dedicated authorization
+file, and keeps its native child within the owner's process lifetime. It is
+not a new supervisor or complete Gateway setup installer. See
+[native listener integration](docs/gateway-transport.md#native-listener-integration).
+
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates
 both through the emitter, and returns an `agent-fleet.driver-snapshot` schema-v1
