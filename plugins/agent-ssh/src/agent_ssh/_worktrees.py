@@ -63,12 +63,16 @@ def state_root(cwd: Path, own: dict | None) -> tuple[Path | None, str]:
         return None, "unavailable"
     if result.returncode == 126:
         raise ContextRefused("optional Worktrees installation context refused")
-    if result.returncode != 0 or len(result.stdout.encode("utf-8")) > 65536:
+    if result.returncode not in (0, 3) or len(result.stdout.encode("utf-8")) > 65536:
         return None, "error"
     try:
         value = json.loads(result.stdout)
         if not isinstance(value, dict) or type(value.get("requires_external")) is not bool:
             raise ValueError("invalid state-root response")
+        if result.returncode == 3 and not (
+            value["requires_external"] and value.get("bound") is False
+        ):
+            raise ValueError("unexpected state-root failure response")
         if not value["requires_external"]:
             return None, "not-required"
         if value.get("bound") is not True:

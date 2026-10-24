@@ -139,6 +139,7 @@ class FragmentRegistryReport:
     findings: tuple[Finding, ...]
     blocked_aliases: frozenset[str]
     unscoped_blocking: bool = False
+    indeterminate_aliases: frozenset[str] = frozenset()
 
     @property
     def active_aliases(self) -> frozenset[str]:
@@ -966,6 +967,13 @@ def scan_fragment_registry(
         not entry_claims.complete and entry not in entries
         for entry, entry_claims in claims.items()
     )
+    indeterminate_aliases = {
+        alias.casefold()
+        for entry, entry_claims in claims.items()
+        if decisions[entry].status is EntryStatus.INDETERMINATE
+        for alias in entry_claims.aliases
+        if alias.casefold() not in active_aliases
+    }
     snapshot = ScanSnapshot(
         registry=REGISTRY_NAME,
         authority=ScanAuthority.COMPLETE,
@@ -978,6 +986,7 @@ def scan_fragment_registry(
         findings=tuple(findings),
         blocked_aliases=frozenset(blocked_aliases),
         unscoped_blocking=unscoped_blocking,
+        indeterminate_aliases=frozenset(indeterminate_aliases),
     )
 
 

@@ -58,7 +58,12 @@ The output-free session-start writer combines the attributable command catalog
 with a bounded snapshot in the exact session's guidance file. It uses the
 payload's existing runtime with self-provisioning disabled; an absent, older
 or refused runtime produces an explicit unavailable status. Resume replaces
-the prior snapshot. If the combined 4 KiB budget is exceeded, a fitting command
+the prior snapshot. Contributor timeouts retire the owned process group on
+POSIX or strict, non-breakaway Job on Windows, including nested runtimes.
+The Windows writer loads the process primitive from this payload's shipped
+`agent-procutil` dependency (or the canonical in-repository development source),
+not an ambient Python package. It does not install that dependency at launch.
+If the combined 4 KiB budget is exceeded, a fitting command
 catalog is preserved and snapshot omission is explicit. Run the catalog's
 `session-snapshot --json` command for the full current report; use the
 `agent-ssh` skill for diagnosis and route repair, not automatic launch-time repair.

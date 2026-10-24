@@ -77,7 +77,7 @@ def capture(
             fragment = generated.get(alias.casefold())
             if not alias:
                 coverage = "not-declared"
-            elif report.unscoped_blocking:
+            elif report.unscoped_blocking or alias.casefold() in report.indeterminate_aliases:
                 coverage = "indeterminate"
             elif alias.casefold() in report.blocked_aliases:
                 coverage = "refused"

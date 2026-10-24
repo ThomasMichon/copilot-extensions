@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -66,6 +67,18 @@ def test_no_content_replaces_stale_guidance(monkeypatch, tmp_path):
     assert "unavailable" in content
 
 
+def test_failed_snapshot_is_explicit_even_with_available_catalog(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        writer, "_run_contributor",
+        lambda root, stem, *_a, **_kw: "catalog" if stem == "emit-command-catalog" else "",
+    )
+    assert writer.write_session_guidance(
+        {"sessionId": "session-1", "cwd": str(tmp_path)}, home=tmp_path,
+    )
+    content = _target(tmp_path).read_text()
+    assert "catalog" in content and "snapshot contributor failed or timed out" in content
+
+
 def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
     monkeypatch.setattr(
         writer,
@@ -78,14 +91,16 @@ def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
     assert "omitted because" in _target(tmp_path).read_text(encoding="utf-8")
 
 
-def test_combined_budget_preserves_fitting_catalog(monkeypatch, tmp_path):
+@pytest.mark.parametrize("length", [7, 4000, 4096 - len(writer._GUIDANCE_HEADER) - 1])
+def test_combined_budget_preserves_fitting_catalog(monkeypatch, tmp_path, length):
+    catalog = "c" * length
     monkeypatch.setattr(
         writer, "_run_contributor",
-        lambda root, stem, payload, **kwargs: "catalog" if stem == "emit-command-catalog" else "x" * 5000,
+        lambda root, stem, payload, **kwargs: catalog if stem == "emit-command-catalog" else "x" * 5000,
     )
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
     content = _target(tmp_path).read_text()
-    assert "catalog" in content and "SSH snapshot omitted" in content
+    assert catalog in content and "SSH snapshot omitted" in content
     assert len(content.encode()) <= 4096
 
 
@@ -301,6 +316,13 @@ def test_actual_writer_and_cli_replace_snapshot_without_actuation(tmp_path):
     payload_root = tmp_path / "payload"
     scripts = payload_root / "scripts"
     scripts.mkdir(parents=True)
+    if os.name == "nt":
+        dependency = payload_root / "libs" / "agent-procutil" / "src" / "agent_procutil"
+        dependency.mkdir(parents=True)
+        shutil.copyfile(
+            _PLUGIN.parents[1] / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py",
+            dependency / "__init__.py",
+        )
     for name in (
         "write_session_guidance.py", "write-session-guidance.ps1",
         "emit-command-catalog.ps1", "emit-mesh-pointer.ps1",
@@ -377,6 +399,87 @@ def test_actual_writer_and_cli_replace_snapshot_without_actuation(tmp_path):
         "cache": "not-controlled", "tail_qualification": "insufficient-samples",
         "cpu_and_child_spawn_counts": "unmeasured",
     }))
+
+
+@pytest.mark.parametrize("shell_name", ["powershell.exe", "pwsh"])
+def test_powershell_stderr_failure_still_emits_unavailable(tmp_path, shell_name):
+    shell = shutil.which(shell_name)
+    if not shell:
+        pytest.skip("selected PowerShell is unavailable")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    emitter = scripts / "emit-mesh-pointer.ps1"
+    shutil.copyfile(_PLUGIN / "scripts" / emitter.name, emitter)
+    (binary / "agent-ssh.ps1").write_text(
+        "[Console]::Error.WriteLine('runtime refused')\nexit 126\n", encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [shell, "-NoProfile", "-File", str(emitter)],
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert completed.returncode == 0
+    assert "SSH snapshot unavailable" in json.loads(completed.stdout)["additionalContext"]
+
+
+def _pid_running(pid):
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            assert kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+            return code.value == 259
+        finally:
+            kernel.CloseHandle(handle)
+    status = Path("/proc") / str(pid) / "stat"
+    if status.exists() and status.read_text().split(") ", 1)[1].startswith("Z"):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("parent_exits", [False, True])
+def test_contributor_timeout_reaps_real_descendant(tmp_path, monkeypatch, parent_exits):
+    pid_file = tmp_path / "descendant.pid"
+    code = (
+        "import os,subprocess,sys,time\nfrom pathlib import Path\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],"
+        "creationflags=0x08000000 if os.name=='nt' else 0)\n"
+        f"Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        f"{'raise SystemExit(0)' if parent_exits else 'time.sleep(60)'}\n"
+    )
+    monkeypatch.setattr(writer, "_contributor_argv", lambda *_: [sys.executable, "-c", code])
+    monkeypatch.setattr(writer, "_SUBPROCESS_TIMEOUT_S", 2)
+    try:
+        assert writer._run_contributor(
+            _PLUGIN, "emit-mesh-pointer", b"{}", cwd=tmp_path,
+        ) == ""
+        assert pid_file.exists()
+        pid = int(pid_file.read_text())
+        deadline = time.monotonic() + 5
+        while _pid_running(pid) and time.monotonic() < deadline:
+            time.sleep(.05)
+        assert not _pid_running(pid)
+    finally:
+        if pid_file.exists():
+            pid = int(pid_file.read_text())
+            if _pid_running(pid):
+                os.kill(pid, signal.SIGTERM)
 
 
 def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(tmp_path):

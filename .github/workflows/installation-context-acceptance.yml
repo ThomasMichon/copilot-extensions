@@ -123,6 +123,7 @@ jobs:
           python tools/run-plugin-tests.py agent-ssh
           --test-file tests/test_session_snapshot.py
           --test-file tests/test_write_session_guidance.py
+          --test-file tests/test_maintenance_guidance.py
           --test-file tests/test_mesh.py
           --test-file tests/test_mesh_refresh.py
           --test-file tests/test_fragment_registry.py

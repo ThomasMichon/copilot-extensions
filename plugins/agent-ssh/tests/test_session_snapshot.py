@@ -106,6 +106,28 @@ def test_unreadable_registry_retains_indeterminate(tmp_path, monkeypatch):
     assert value["aliases"][0]["profile"] == "indeterminate"
 
 
+@pytest.mark.parametrize("source", ["registry.json", "module.json"])
+@pytest.mark.parametrize("operation", ["stat", "read"])
+def test_unreadable_fragment_source_keeps_known_alias_indeterminate(tmp_path, monkeypatch, source, operation):
+    path = topology(tmp_path / "repo")
+    config_d = fragment(tmp_path)
+    unavailable = tmp_path / source
+    original = Path.lstat if operation == "stat" else fragment_registry._read_text
+
+    def denied(path, *args, **kwargs):
+        if path == unavailable:
+            raise PermissionError("source unavailable")
+        return original(path, *args, **kwargs)
+
+    if operation == "stat":
+        monkeypatch.setattr(Path, "lstat", denied)
+    else:
+        monkeypatch.setattr(fragment_registry, "_read_text", denied)
+    value = session_snapshot.capture(path=path, config_d=config_d)
+    assert value["aliases"][0]["profile"] == "indeterminate"
+    assert any(row["status"] == "indeterminate" for row in value["profiles"]["findings"])
+
+
 def test_external_state_uses_existing_conventional_location(tmp_path, monkeypatch):
     root = tmp_path / "state"
     path = topology(root / ".agent-worktrees")
@@ -211,6 +233,16 @@ def test_present_same_cell_peer_refusal_never_uses_path(tmp_path, monkeypatch):
     monkeypatch.setattr(adapter.subprocess, "run", lambda *_a, **_kw: SimpleNamespace(returncode=126))
     with pytest.raises(adapter.ContextRefused):
         adapter.state_root(tmp_path, {"cellRoot": str(tmp_path), "pluginRoot": str(tmp_path)})
+
+
+@pytest.mark.parametrize("code", [0, 3])
+def test_unbound_worktrees_response_keeps_unbound_status(tmp_path, monkeypatch, code):
+    monkeypatch.setattr(_worktrees, "state_root", _REAL_STATE_ROOT)
+    monkeypatch.setattr(_worktrees.shutil, "which", lambda _: "peer-command")
+    monkeypatch.setattr(_worktrees.subprocess, "run", lambda *_a, **_kw: SimpleNamespace(
+        returncode=code, stdout=json.dumps({"requires_external": True, "bound": False}),
+    ))
+    assert _worktrees.state_root(tmp_path, None) == (None, "unbound")
 
 
 @pytest.mark.parametrize("failure", [
