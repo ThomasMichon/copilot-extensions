@@ -312,6 +312,13 @@ the F1 wire frames and their own cursor, never a point floor as their base.
 Incomplete transactions fail without changing either view. Retained point
 rows absent from an older complete feed remain in their prior relative order
 after that feed's committed order until newer authoritative evidence arrives.
+Complete-roster absence also fences identities never seen locally, and advances
+retained tombstones; a delayed point cannot resurrect an identity omitted by
+a newer complete publication. Equal-cursor snapshots must match the committed
+feed roster and order, independently of newer point overlays. Canonical F1
+`worktree` frames with `phase: current` are supported. Current-quality snapshots
+retain validated stale availability warnings, including at an equal cursor;
+they do not silently relabel last-good rows as healthy.
 
 `_Receipt` is an optional **private intent**, not an F2 response decoder or
 evidence that any owner endpoint exists. A future adapter would have to prove
