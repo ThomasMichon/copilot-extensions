@@ -361,3 +361,7 @@ machine metadata/project enumeration with hosting eligibility.
   authoritative explicit execution paths; the Windows transport assertion
   checks both the outer refusal gate and the nested encoded native-resume
   command. The final Worktrees native admission cohort passes 93 cases.
+- The review correction and native-owner compatibility cohort also passes 275
+  cases on native Windows. Canonical HTTP-47 capture and no-write replay each
+  pass 117 probes against the published correction source. Historical evidence,
+  independent expectations and protocol floors remain unchanged.
