@@ -1,0 +1,9 @@
+{
+  "comment": "Keep retained editable-build egg-info private without rewriting live source configuration.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

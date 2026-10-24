@@ -1,0 +1,9 @@
+{
+  "comment": "Keep retained editable-build egg-info private without rewriting live source configuration.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

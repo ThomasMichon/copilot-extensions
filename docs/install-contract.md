@@ -3045,8 +3045,12 @@ Editable source retention supports static `setuptools.build_meta` projects
 using the repository's `src` layout. Retained metadata selects compatibility
 editable mode and references the original live `src` through a same-volume
 relative package directory; installed imports survive snapshot cleanup and
-observe subsequent source edits. On Windows the private snapshot is a sibling
-of a shallowest admitted project or build-resource root on the editable source
+observe subsequent source edits. Retained `setup.cfg` preserves existing raw
+configuration values while setting `egg_info.egg_base` to the private project
+directory, so build metadata cannot be emitted into the live `src` tree.
+Malformed or unreadable/unwritable retained configuration refuses installation;
+the original configuration is never rewritten. On Windows the private snapshot
+is a sibling of a shallowest admitted project or build-resource root on the editable source
 volume, outside every copied input. A volume-root input with no outside
 temporary location fails explicitly. This avoids long parent-relative paths from an unrelated
 temporary directory; setuptools requires relative package directories.

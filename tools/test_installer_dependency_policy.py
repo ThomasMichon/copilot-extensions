@@ -917,6 +917,7 @@ def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_
 
 
 def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypatch):
+    import configparser
     import subprocess
     import zipfile
 
@@ -931,6 +932,15 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
         '[tool.setuptools.packages.find]\nwhere=["src"]\n',
         encoding="utf-8",
     )
+    configuration = source / "setup.cfg"
+    configuration.write_text(
+        "[metadata]\ndescription = 100%% retained\n"
+        "[egg_info]\ntag_build = .post1\negg_base = src\n",
+        encoding="utf-8",
+    )
+    original_files = {
+        path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()
+    }
     actual = subprocess.run
     retained = []
 
@@ -938,6 +948,11 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
         if "--show-settings" in command:
             return actual(command, **kwargs)
         retained.append(Path(command[command.index("-e") + 1]))
+        config = configparser.ConfigParser(interpolation=None)
+        config.read(retained[-1] / "setup.cfg", encoding="utf-8")
+        assert config["metadata"]["description"] == "100%% retained"
+        assert config["egg_info"]["tag_build"] == ".post1"
+        assert config["egg_info"]["egg_base"] == "."
         result = actual(
             [sys.executable, "-I", "-c",
              "from setuptools.build_meta import build_editable,get_requires_for_build_editable;"
@@ -947,6 +962,8 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
             timeout=30, creationflags=policy._HEADLESS,
         )
         assert result.returncode == 0, result.stdout + result.stderr
+        assert len(list(retained[-1].glob("*.egg-info"))) == 1
+        assert not list(source.rglob("*.egg-info"))
         wheels = list(retained[-1].glob("*.whl"))
         assert len(wheels) == 1, result.stdout + result.stderr
         with zipfile.ZipFile(wheels[0]) as wheel:
@@ -962,6 +979,98 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
     )
     assert built.returncode == 0, built.stdout + built.stderr
     assert len(retained) == 1 and not retained[0].exists()
+    assert {
+        path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()
+    } == original_files
+
+
+@pytest.mark.parametrize("configuration", [
+    None,
+    "[metadata]\ndescription = 100% retained\n",
+    "[metadata]\ndescription = 100% retained\n"
+    "[egg_info]\ntag_build = .fixture\negg_base = src\n",
+])
+def test_retained_editable_metadata_configuration_stays_private(tmp_path, monkeypatch, configuration):
+    import configparser
+
+    source = source_project(tmp_path / "source")
+    manifest = source / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
+        + '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+        encoding="utf-8",
+    )
+    (source / "src").mkdir()
+    original = source / "setup.cfg"
+    if configuration is not None:
+        original.write_text(configuration, encoding="utf-8")
+    retained = []
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            return CompletedProcess(command, 0, settings(), "")
+        retained.append(Path(command[command.index("-e") + 1]))
+        config = configparser.ConfigParser(interpolation=None)
+        config.read(retained[-1] / "setup.cfg", encoding="utf-8")
+        assert config["egg_info"]["egg_base"] == "."
+        if configuration is not None:
+            assert config["metadata"]["description"] == "100% retained"
+        if configuration is not None and "tag_build" in configuration:
+            assert config["egg_info"]["tag_build"] == ".fixture"
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    policy.run_uv_install(
+        "uv", ["--no-config", "-e", str(source)], env=offline_environment(tmp_path),
+        cwd=tmp_path, trusted_source_roots=(source,),
+    )
+    assert len(retained) == 1 and not retained[0].exists()
+    if configuration is None:
+        assert not original.exists()
+    else:
+        assert original.read_text(encoding="utf-8") == configuration
+
+
+@pytest.mark.parametrize("failure", ["malformed", "read", "write"])
+def test_retained_editable_metadata_configuration_failure_refuses(tmp_path, monkeypatch, failure):
+    source = source_project(tmp_path / "source")
+    manifest = source / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
+        + '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+        encoding="utf-8",
+    )
+    (source / "src").mkdir()
+    original = source / "setup.cfg"
+    configuration = "not an INI file\n" if failure == "malformed" else "[metadata]\nname = fixture\n"
+    original.write_text(configuration, encoding="utf-8")
+    opened = Path.open
+    original_native = Path(policy._native_retained_path(original))
+    retained = []
+    calls = []
+
+    def open_config(path, mode="r", *args, **kwargs):
+        if path.name == "setup.cfg" and path not in (original, original_native):
+            retained.append(path.parent)
+            if (failure == "read" and mode == "r") or (failure == "write" and mode == "w"):
+                raise OSError("fixture configuration failure")
+        return opened(path, mode, *args, **kwargs)
+
+    def probe(command, **kwargs):
+        calls.append(command)
+        assert "--show-settings" in command
+        return CompletedProcess(command, 0, settings(), "")
+
+    monkeypatch.setattr(Path, "open", open_config)
+    monkeypatch.setattr(policy.subprocess, "run", probe)
+    with pytest.raises(policy.DependencyPolicyError, match="editable.*metadata"):
+        policy.run_uv_install(
+            "uv", ["--no-config", "-e", str(source)], env=offline_environment(tmp_path),
+            cwd=tmp_path, trusted_source_roots=(source,),
+        )
+    assert len(calls) == 1
+    assert retained and all(not path.exists() for path in retained)
+    assert original.read_text(encoding="utf-8") == configuration
 
 
 def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypatch):
