@@ -1,0 +1,9 @@
+{
+  "comment": "Carry the shared installation-driver fixed SSH command recipe without changing existing recipes.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

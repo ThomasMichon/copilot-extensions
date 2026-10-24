@@ -1,0 +1,9 @@
+{
+  "comment": "Route legacy cold SSH commands through one durable stamp-to-selected-snapshot provision request.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
