@@ -14,14 +14,69 @@ class UnsupportedSeedPrompt(engine_client.EngineError):
     """A seeded request has no supported native launch target or transport."""
 
 
+def require_launch_capabilities(detail: str, *, attempt_id: str | None, staged: bool) -> None:
+    if attempt_id is not None and "unrecognized arguments" in detail and any(
+        flag in detail for flag in ("--require-launch-attempt", "--launch-attempt-id")
+    ):
+        raise engine_client.EngineFeatureUnavailable(
+            "the installed engine cannot retain launch-resolution receipts; "
+            "update agent-worktrees before launching this attempt"
+        )
+    if staged and "unrecognized arguments" in detail and any(
+        flag in detail for flag in ("--stage-launch-seed", "--require-native-seed", "--launch-attempt-id")
+    ):
+        raise engine_client.EngineFeatureUnavailable(
+            "the installed engine predates staged launch-prompt ownership "
+            "with an atomic native-transport fence; "
+            "update agent-worktrees before launching this prompt"
+        )
+
+
 def require_attempt_target(
     attempt_id: str | None, *, target_machine: str | None, seed: str | None,
 ) -> None:
     if attempt_id is not None and (
-        not target_machine or not seed or len(attempt_id) != 32
+        not isinstance(attempt_id, str) or len(attempt_id) != 32
         or any(char not in "0123456789abcdef" for char in attempt_id)
     ):
-        raise engine_client.EngineError("launch attempt identity requires a remote prompted request")
+        raise engine_client.EngineError("invalid launch attempt identity")
+
+
+def require_attempt_plan(plan: dict, attempt_id: str | None) -> None:
+    if attempt_id is None:
+        return
+    receipt = plan.get("launch_attempt_receipt")
+    if (
+        plan.get("launch_attempt_id") != attempt_id
+        or not isinstance(receipt, dict)
+        or type(receipt.get("version")) is not int or receipt["version"] != 1
+        or not isinstance(receipt.get("operation_id"), str)
+        or len(receipt["operation_id"]) != 32
+        or any(char not in "0123456789abcdef" for char in receipt["operation_id"])
+        or not isinstance(receipt.get("phase"), str)
+        or receipt.get("phase") not in {"plan-ready", "forwarded", "remote-admission-returned", "unknown"}
+        or set(receipt) != {"version", "operation_id", "phase"} | {
+            target for source, target in (
+                ("worktree_id", "worktree_id"), ("seed_id", "seed_id"),
+                ("launch_request_id", "request_id"),
+            ) if plan.get(source) is not None
+        }
+        or any(
+            receipt.get(target) != plan.get(source)
+            for source, target in (
+                ("worktree_id", "worktree_id"), ("seed_id", "seed_id"),
+                ("launch_request_id", "request_id"),
+            )
+        )
+        or (plan.get("action") == "exec" and receipt.get("phase") != "plan-ready")
+        or (plan.get("action") == "remote" and receipt.get("phase") != (
+            "remote-admission-returned" if plan.get("launch_request_id") else "forwarded"
+        ))
+    ):
+        raise engine_client.EngineFeatureUnavailable(
+            "the engine omitted a matching launch-resolution receipt; "
+            "inspect the saved attempt before retrying"
+        )
 
 
 def require_remote_seed_plan(

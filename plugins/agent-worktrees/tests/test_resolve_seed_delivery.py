@@ -31,6 +31,8 @@ from agent_worktrees.sessions import LiveVerdict
 
 
 def _stub_launch_plumbing(monkeypatch, config: cfg.Config) -> None:
+    for record in tracking.list_records(cfg.tracking_dir()):
+        Path(record.worktree_path).mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: config.platform)
     # Seed-routing fixtures use synthetic checkout paths; native trust has its own suite.
@@ -713,6 +715,7 @@ def test_planning_never_claims_staged_seed_or_guesses_configured_argv(
         "wt-b", "worktree/wt-b", str(tmp_path / "wt-b"), "demo-repo", "test",
         "windows", tmp_path,
     )
+    (tmp_path / "wt-b").mkdir()
     rc = resolve_cli.cmd_resolve(_args(worktree_id="wt-b", seed=None))
 
     assert rc == 0

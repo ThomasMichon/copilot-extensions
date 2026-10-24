@@ -444,6 +444,7 @@ def cmd_request(args) -> int:
         protocol_options = {
             "command", "json", "launch_request_b64", "launch_request_status",
             "require_agent_hosting", "require_native_seed",
+            "require_launch_attempt",
         }
         if not args.json or any(
             value is not None and value is not False and value != []
@@ -457,6 +458,8 @@ def cmd_request(args) -> int:
         if status_present:
             if getattr(args, "require_native_seed", False):
                 raise ValueError("Native seed capability requires a launch request envelope")
+            if getattr(args, "require_launch_attempt", False):
+                raise ValueError("Launch attempt capability requires a launch request envelope")
             if not args.launch_request_status:
                 raise ValueError("Launch request identity must not be empty")
             request_id = args.launch_request_status
@@ -468,6 +471,12 @@ def cmd_request(args) -> int:
         request_id = request["request_id"]
         if bool(getattr(args, "require_native_seed", False)) != (request["version"] == 2):
             raise ValueError("Native seed capability and launch request protocol must agree")
+        if getattr(args, "require_launch_attempt", False):
+            from .launch_attempt import identity
+
+            identity(request.get("attempt_id"))
+            if request["version"] != 2:
+                raise ValueError("Launch attempt receipts require native request protocol v2")
         config = cfg.load_config()
         # Creation helpers have human-readable output; stdout is this protocol only.
         with contextlib.redirect_stdout(sys.stderr):

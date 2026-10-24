@@ -57,6 +57,8 @@ def remote_selector_args(state: ResolveCommandState) -> list[str]:
         args.append("--require-native-seed")
     if getattr(state.args, "launch_attempt_id", None) is not None:
         args.append("--launch-attempt-id=" + state.args.launch_attempt_id)
+    if getattr(state.args, "require_launch_attempt", False):
+        args.append("--require-launch-attempt")
     return args
 
 

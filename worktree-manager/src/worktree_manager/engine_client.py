@@ -636,7 +636,7 @@ def resolve_launch_plan(
         raise EngineError(
             "resolve requires exactly one of worktree_id, new=True, or base=True"
         )
-    from .seed_launch import require_attempt_target
+    from .seed_launch import require_launch_capabilities, require_attempt_plan, require_attempt_target
     require_attempt_target(launch_attempt_id, target_machine=target_machine, seed=seed)
 
     args = ["resolve", "--json", "--require-agent-hosting"]
@@ -660,7 +660,7 @@ def resolve_launch_plan(
     if seed:
         args += ["--seed", seed]
     if launch_attempt_id is not None:
-        args += ["--launch-attempt-id", launch_attempt_id]
+        args += ["--require-launch-attempt", "--launch-attempt-id", launch_attempt_id]
 
     try:
         obj = run_json(
@@ -674,18 +674,11 @@ def resolve_launch_plan(
         )
     except EngineError as e:
         detail = _engine_error_detail(e)
+        require_launch_capabilities(detail, attempt_id=launch_attempt_id, staged=require_staging)
         if "unrecognized arguments" in detail and "--require-agent-hosting" in detail:
             raise EngineFeatureUnavailable(
                 "the installed engine cannot enforce repository hosting policy; "
                 "update agent-worktrees before launching"
-            ) from e
-        if require_staging and "unrecognized arguments" in detail and any(
-            flag in detail for flag in ("--stage-launch-seed", "--require-native-seed", "--launch-attempt-id")
-        ):
-            raise EngineFeatureUnavailable(
-                "the installed engine predates staged launch-prompt ownership "
-                "with an atomic native-transport fence; "
-                "update agent-worktrees before launching this prompt"
             ) from e
         if (
             bare_resume
@@ -708,7 +701,7 @@ def resolve_launch_plan(
             raise EngineFeatureUnavailable(
                 "the installed engine predates remote Picker launch plans"
             ) from e
-        if base and (
+        if base and launch_attempt_id is None and (
             "--base" in detail
             or "--json requires --worktree-id or --new" in detail
         ):
@@ -726,6 +719,7 @@ def resolve_launch_plan(
     # the shell launcher's own unwrap).
     if isinstance(obj.get("launch"), dict):
         obj = obj["launch"]
+    require_attempt_plan(obj, launch_attempt_id)
     if target_machine and seed:
         from .seed_launch import require_remote_seed_plan
         require_remote_seed_plan(obj, new=new, worktree_id=worktree_id, attempt_id=launch_attempt_id)

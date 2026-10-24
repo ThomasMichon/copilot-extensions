@@ -38,6 +38,13 @@ another product or a change to service-supervision ownership.
 
 ## Coordination
 
+The complete #4015 family below continues through this existing Active ROOT's Plan,
+actual global Validation and Journal under the SAME declared implementation, source,
+adopter and native custodians. Closed source trackers are historical provenance, not
+required live claim tokens. Every incumbent scope, alternative, hold and resource
+obligation remains; this intake grants no implementation, deployment, process action or
+new blanket approval gate.
+
 The complete #4010 retained finite family continues through this existing Active ROOT's
 reviewed Plan, actual global Validation and Journal/open bounded-source process under
 the SAME declared and source-specific custodians. Preserve every incumbent alternative,
@@ -527,7 +534,117 @@ owner or health/recovery gate cannot be preserved, RETAIN #4010. No product/vers
 command, tests/imports/collection/checkers, installer, runtime, service or
 credential/configuration effect occurs here.
 
+<!-- backlog-reconciliation:7556:transfer:4015:to:efforts/active/source-managed-runtime-installs/README.md -->
+
+### Direct all-service payload-to-serving-runtime acceptance from #4015
+
+Receive ALL original functional freshness and seven refined all-consumer requirements
+PLUS all EIGHT direct #4058 Bridge rows DIRECTLY into the EXISTING Active ROOT Plan, its
+own Validation, actual global Validation Plan and continuing Coordination/dated Journal.
+Preserve the full incumbent Plan/Validation, #2822/#4010 health/LKG rows, current
+source/adopter/native/maintenance/driver custodians and every real hold. No
+implementation, rollout or parent completion is declared.
+
+#### Plan
+
+- [ ] P1: Produce an explicit per-applicable-service-family/owner TRIGGER matrix after
+  successful plugin payload refresh: bare plugin update, next-session hook, first use,
+  periodic/explicit updater and selected source-controlled rollout are DISTINCT
+  observations. Include running long-lived service and deferred/disabled/non-applicable
+  roles. Do not silently count a full updater success as bare-update behavior.
+- [ ] P2: Retain functional runtime freshness while explicitly reconciling the old
+  always-rebuild/restart wording through existing owner-approved pin/no-churn/selection
+  policy. Preserve standalone defaults, intentionally pinned or independently sourced
+  runtimes, exact installation/profile/ref/source and unselected engines/services; no
+  auto-enablement or unnecessary unchanged-content churn.
+- [ ] P3: Trace changed ELIGIBLE content through the owning immutable
+  dependency/construction/health/completion/publication transaction to actual selected
+  AND serving generation. A payload/version/skill/catalog label, completed slot,
+  selector, available interpreter or release marker alone is not runtime readiness or
+  service convergence.
+- [ ] P4: Preserve bounded startup and independent non-deployment hooks,
+  single-flight/admission and the one canonical installation execution/maintenance
+  owner. Do not add a heavy foreground hook, second updater, generic timestamp-based
+  reaping or claim expiry; precise stale/pending/failure diagnostics stay visible.
+- [ ] P5: Preserve work-aware canonical activation, private
+  credential/relay/session/source/config custody and exact process/generation identity.
+  Keep listener health, actual accepted handoff, transport result, serving identity and
+  native exit separate; uncertain consequential outcomes cannot be replayed.
+- [ ] P6: Preserve current best-effort compatible handoff and bounded owning-authority
+  cold recovery when contracts are incompatible/refused/hung, INCLUDING permitted old
+  retirement before incoming ready. Do not reinstate universal
+  zero-outage/ACK/compatibility vetoes. Actual candidate/output CLI health, VERIFIED
+  retained previous-good generation and durable recoverable progress remain mandatory;
+  failure uses safe recovery OR proven justified commit-forward, never success-shaped
+  loss.
+- [ ] P7: Make pending/disabled/deferred/stale/failure/current servicing truthful
+  through real command/serving/native evidence and explicit supported skew/readiness
+  outcomes. Installed code, available command, configured role and authorized running
+  instance remain separate.
+- [ ] P8: Retain ALL EIGHT Bridge/#4058 clauses directly: exact trigger;
+  payload-through-immutable-to-serving identity; selected source/pin/role/no-churn;
+  selected canonical servicing/recovery; observable truthful evidence tiers; bounded
+  single-owner startup/privacy; actual
+  changed/unchanged/pinned/long-lived/failure/native trigger-platform-caller matrix;
+  unchanged accepted owner without narrowing the all-service scope.
+- [ ] P9: Preserve ALL broader seven refined #4015 outcomes: per-family supported
+  trigger; exact selected source; real eligible content lifecycle; work/custody-safe
+  activation; bounded hook/single-owner behavior; actual installed/serving/native
+  consumer qualification; explicit supported owner dispositions with no discarded
+  functional freshness.
+- [ ] P10: Keep #4477/#5750/#4022/#5225 Bridge deployment/fallback/native,
+  #5472/#7028/#7029 source/slot/adopter, actual maintenance and #7758 driver holders
+  intact. Keep #4028's independent diagnostic acceptance and custody separate. This
+  intake closes no separate claim, native gate or independent leaf by association.
+
+#### Validation
+
+- [ ] V1: Qualify the supported family/platform/caller trigger matrix through ACTUAL
+  updated payload -> admitted selected runtime -> serving generation -> relevant
+  native-supervisor consumers. Cover long-lived service, changed eligible bytes,
+  pinned/unchanged/disabled/non-applicable roles, failed construction/cutover,
+  pending/deferred/skew and single-flight behavior. Preserve the original
+  all-applicable-family scope without adding every physical host.
+- [ ] V2: Verify candidate/output health, current/LKG advancement, VERIFIED retained
+  good generation and explicit failed/unknown durable recovery/commit-forward under
+  current best-effort policy. A construction test, newer label, health port, happy
+  restart or two-product canary cannot qualify every trigger/family or native adoption.
+- [ ] V3: Exercise Bridge's original inherited trigger/platform/caller and failure
+  matrix separately from generic shared helper/other-plugin proof. Keep
+  request/session/credential custody and actual native tracking; preserve existing
+  5750/4022/5225 implementations and source-specific gates.
+- [ ] V4: Attribute source merge, containing Main, actual selected
+  command/module/distribution, serving identity and authorized adopter/native
+  observations separately. The recent bounded Main Core/Manager repair remains credited
+  at its stated scope, not universal Windows/Bridge/all-consumer evidence.
+- [ ] V5: BEFORE #4015 administrative supersession, obtain a NEW normal reviewed ACTUAL
+  merge containing this COMPLETE direct ROOT Plan/Validation/Coordination/dated Journal
+  and actual global row, then read back CURRENT FULL receiving sections and live
+  custody. Old creation/provider transactions, a child/title link, proposal or
+  successful update is not this receipt. If any functional clause/owner cannot survive,
+  retain #4015.
+
+#### Continuing Coordination and dated Journal
+
+- [ ] C1: Continue through SAME #7028/source/slot, adopter/native/deployment,
+  maintenance and #7758 execution owners, this Active ROOT's reviewed Plan/actual global
+  Validation/dated Journal and eligible OPEN bounded-source claiming. Keep Bridge's
+  separate canonical/fallback/native lanes and #4028's independent diagnostic custody
+  intact. No new source/resource transfer or blanket ACK is created.
+- [ ] C2: Journal the actual new reviewed intake merge/current full readback, delivered
+  Bridge/shared foundations, exact remaining per-family trigger/serving matrix and the
+  next bounded Plan stretch. Preserve every incumbent row/history, keep the effort
+  Active, and perform no update, installer, test, native experiment,
+  service/process/credential or configuration action through this intake.
+
 ## Validation Plan
+
+- [ ] G1: Resolve EVERY directly retained #4015 original/refined all-service and EIGHT
+  #4058 Bridge Plan/Validation/continuing Coordination clause at its original finite
+  family/platform/evidence tier, preserving trigger distinctions, pin/no-churn/role
+  alternatives, actual CLI health, VERIFIED retained-good recovery, same custodians and
+  every independent hold. Administrative coalescence is not bare-update integration,
+  running-service adoption, rollout or unrelated parent completion.
 
 - [ ] Resolve EVERY directly retained4010 Plan/Validation clause above at its original
   finite scope, preserving literal existing-slot acceptance or explicit reviewed
