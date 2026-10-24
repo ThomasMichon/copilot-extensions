@@ -101,7 +101,8 @@ jobs:
           python tools/run-plugin-tests.py agent-logger
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --test-file tests/test_bootstrap_driver.py
-          --test-timeout 60 --timeout 240
+          --test-file tests/test_install_binstub.py
+          --test-timeout 180 --timeout 420
   logger-bootstrap-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-bootstrap'
     name: Logger bootstrap (Windows)
@@ -131,7 +132,8 @@ jobs:
           python tools/run-plugin-tests.py agent-logger
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --test-file tests/test_bootstrap_driver.py
-          --test-timeout 60 --timeout 240
+          --test-file tests/test_install_binstub.py
+          --test-timeout 180 --timeout 420
   bridge-contracts-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-contracts'
     name: Bridge historical source proof (Ubuntu)

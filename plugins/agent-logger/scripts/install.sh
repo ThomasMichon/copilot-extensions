@@ -1258,6 +1258,28 @@ install_package() {
       exit 1
     fi
   fi
+  local lease_dir="${PLUGIN_DIR}/libs/single-instance-lease"
+  if [ ! -f "${lease_dir}/pyproject.toml" ]; then
+    lease_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/single-instance-lease"
+  fi
+  if [ -f "${lease_dir}/pyproject.toml" ]; then
+    local lease_out
+    if ! lease_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --reinstall-package agent-single-instance-lease "${lease_dir}" --quiet); then
+      printf '%s\n' "$lease_out" >&2
+      exit 1
+    fi
+  fi
+  local driver_dir="${PLUGIN_DIR}/libs/update-driver"
+  if [ ! -f "${driver_dir}/pyproject.toml" ]; then
+    driver_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/update-driver"
+  fi
+  if [ -f "${driver_dir}/pyproject.toml" ]; then
+    local driver_out
+    if ! driver_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --reinstall-package agent-update-driver "${driver_dir}" --quiet); then
+      printf '%s\n' "$driver_out" >&2
+      exit 1
+    fi
+  fi
   # plugin_activation's own transitive deps first, then plugin_activation
   # itself (schema v3's registered-project trust gate; module
   # ``plugin_activation``, used by ``repo_trust.py`` for canonical git-remote

@@ -244,7 +244,8 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
     )
     assert initial.returncode == 0, initial.stdout + initial.stderr + diagnostic()
     count += 1
-    assert not registration_effects(adapter)
+    assert all(item["operation"] == "stop" for item in registration_effects(adapter))
+    assert_no_periodic_worker(installation)
 
     def set_version(version):
         project_file = payload / "pyproject.toml"

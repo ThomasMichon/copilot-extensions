@@ -1405,6 +1405,16 @@ function Install-Package {
             Dir = 'agent-procutil'
         },
         @{
+            Name = 'single-instance-lease'
+            Package = 'agent-single-instance-lease'
+            Dir = 'single-instance-lease'
+        },
+        @{
+            Name = 'update-driver'
+            Package = 'agent-update-driver'
+            Dir = 'update-driver'
+        },
+        @{
             Name = 'dropin-registry'
             Package = 'agent-dropin-registry'
             Dir = 'dropin-registry'
