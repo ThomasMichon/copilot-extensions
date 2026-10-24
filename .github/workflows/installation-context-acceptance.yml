@@ -107,16 +107,12 @@ jobs:
     timeout-minutes: 15
     steps: *candidate-profile-steps
 
-  ssh-snapshot-native:
+  ssh-snapshot-native-linux:
     if: ${{ inputs.ssh_snapshot }}
-    name: Read-only SSH snapshot (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Read-only SSH snapshot (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
+    steps: &ssh-snapshot-native-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -135,6 +131,13 @@ jobs:
           python tools/run-plugin-tests.py agent-dispatch
           --test-file tests/test_procutil.py
           -k "ssh_snapshot or (namespaced_sibling_resolution and agent-ssh)"
+
+  ssh-snapshot-native-windows:
+    if: ${{ inputs.ssh_snapshot }}
+    name: Read-only SSH snapshot (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps: *ssh-snapshot-native-steps
 
   watch-owner-native-linux:
     if: ${{ inputs.watch_owner }}
