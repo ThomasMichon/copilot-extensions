@@ -404,21 +404,12 @@ def inspect_wheel(
     prefix = f"{info['name']}-{info['version']}.dist-info/"
     try:
         deadline = time.monotonic() + 120
-        archive.seek(0, os.SEEK_END)
-        if archive.tell() > _BUNDLE_LIMIT:
-            raise PromotionArtifactError("wheel archive limit exceeded")
-        with zipfile.ZipFile(archive) as index:
-            if any(
-                prefix + name not in index.namelist()
-                or index.getinfo(prefix + name).file_size > _MANIFEST_LIMIT
-                for name in ("METADATA", "WHEEL", "RECORD")
-            ):
-                raise PromotionArtifactError("unsafe or incomplete wheel metadata")
         facts = inspect_archive(
             archive, limits=WheelLimits(
                 max_archive_bytes=_BUNDLE_LIMIT, max_expanded_bytes=_BUNDLE_LIMIT,
                 max_member_bytes=_BUNDLE_LIMIT, max_metadata_bytes=3 * _MANIFEST_LIMIT,
                 max_members=100_000, max_tags=_WHEEL_TAG_LIMIT,
+                max_metadata_member_bytes=_MANIFEST_LIMIT,
             ), deadline=deadline,
         )
         wheel_metadata, package_metadata = facts.wheel_metadata, facts.metadata

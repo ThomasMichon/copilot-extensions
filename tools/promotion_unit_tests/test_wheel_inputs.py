@@ -13,7 +13,7 @@ from wheel_input_fixture import wheel_bytes
 
 @pytest.mark.parametrize("kind", ["valid", "record", "metadata", "path", "limit"])
 def test_wheel_bytes_are_inspected_without_running_package_code(kind):
-    limits = inspection.WheelLimits(100_000, 100_000, 20_000, 10_000, 30, 100)
+    limits = inspection.WheelLimits(100_000, 100_000, 20_000, 10_000, 30, 100, 10_000)
     kwargs = {}
     if kind == "record":
         kwargs["record_mutator"] = lambda rows: rows.pop(0)

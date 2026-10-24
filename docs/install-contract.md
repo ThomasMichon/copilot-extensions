@@ -3141,7 +3141,7 @@ acquisition defaults or permission to enable a consumer.
 
 `libs/installer-engine/installer_wheel_inputs.py` is a stdlib-only input
 inspector, vendored with the Python engine. Callers supply explicit positive
-archive, expanded/member, aggregate metadata, member-count and expanded-tag
+archive, expanded/member, individual/aggregate metadata, member-count and expanded-tag
 limits, plus a finite monotonic deadline. It streams the archive digest and every RECORD
 member digest, bounds metadata before parsing, and refuses duplicate/ambiguous
 members, unsafe paths, encryption, links, malformed headers and changed source
@@ -3152,6 +3152,9 @@ source/toolchain identity checks.
 Compressed tags are deduplicated and bounded before Cartesian expansion,
 including the selected filename's tags. Member ancestry uses a deadline-checked
 component trie rather than repeatedly joining every prefix of deep paths.
+ZIP32/ZIP64 preflight bounds actual central-directory entries and directory
+bytes before `ZipFile` allocates an index; the aggregate metadata budget also
+caps that directory. Declared entry counts cannot bypass the actual scan.
 
 The repository-only profile facade compares actual name/version, dist-info
 identity, Python requirement, dependency requirements, extras and compatibility

@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import struct
 import time
 from types import MappingProxyType
 from typing import BinaryIO, Mapping
@@ -32,6 +33,7 @@ class WheelLimits:
     max_metadata_bytes: int
     max_members: int
     max_tags: int
+    max_metadata_member_bytes: int
 
     def __post_init__(self):
         if any(type(value) is not int or value <= 0 for value in vars(self).values()):
@@ -119,16 +121,89 @@ def _read(stream: BinaryIO, *, limit: int, deadline: float) -> bytes:
             raise WheelError("wheel metadata limit exceeded")
 
 
+def preflight_archive(archive: BinaryIO, *, limits: WheelLimits, deadline: float) -> None:
+    """Bound the actual central directory before ZipFile allocates its index."""
+    def read_at(offset: int, size: int) -> bytes:
+        _check_deadline(deadline)
+        if offset < 0:
+            raise WheelError("invalid wheel directory offset")
+        archive.seek(offset)
+        data = archive.read(size)
+        if len(data) != size:
+            raise WheelError("truncated wheel directory")
+        return data
+
+    _check_deadline(deadline)
+    archive.seek(0, os.SEEK_END)
+    size = archive.tell()
+    if size > limits.max_archive_bytes:
+        raise WheelError("wheel archive limit exceeded")
+    tail_size = min(size, 22 + 65535)
+    tail = read_at(size - tail_size, tail_size)
+    index = tail.rfind(b"PK\x05\x06")
+    if index < 0 or len(tail) - index < 22:
+        raise WheelError("missing wheel directory footer")
+    _, disk, start_disk, disk_count, count, directory_size, offset, comment_size = struct.unpack(
+        "<4s4H2LH", tail[index:index + 22],
+    )
+    end = size - tail_size + index
+    if disk or start_disk or disk_count != count or len(tail) - index != 22 + comment_size:
+        raise WheelError("ambiguous or multi-disk wheel directory")
+    sentinel = count == 0xffff or directory_size == 0xffffffff or offset == 0xffffffff
+    locator = read_at(end - 20, 20) if end >= 20 else b""
+    if locator.startswith(b"PK\x06\x07"):
+        _, disk64, record_offset, disks = struct.unpack("<4sLQL", locator)
+        if disk64 or disks != 1 or record_offset + 56 != end - 20:
+            raise WheelError("invalid wheel ZIP64 directory locator")
+        record = struct.unpack("<4sQ2H2L4Q", read_at(record_offset, 56))
+        signature, length, _, _, disk64, start64, disk_count64, count64, size64, offset64 = record
+        if (
+            signature != b"PK\x06\x06" or length != 44 or disk64 or start64
+            or disk_count64 != count64
+            or any(old != maximum and old != new for old, maximum, new in (
+                (count, 0xffff, count64), (directory_size, 0xffffffff, size64),
+                (offset, 0xffffffff, offset64),
+            ))
+        ):
+            raise WheelError("ambiguous wheel ZIP64 directory")
+        count, directory_size, offset, end = count64, size64, offset64, record_offset
+    elif sentinel:
+        raise WheelError("missing wheel ZIP64 directory locator")
+    if count > limits.max_members:
+        raise WheelError("wheel member count limit exceeded")
+    if directory_size > limits.max_metadata_bytes:
+        raise WheelError("wheel directory metadata limit exceeded")
+    if offset + directory_size != end:
+        raise WheelError("invalid wheel directory extent")
+    actual = 0
+    position = offset
+    while position < end:
+        _check_deadline(deadline)
+        if actual >= limits.max_members:
+            raise WheelError("wheel actual member count limit exceeded")
+        if position + 46 > end:
+            raise WheelError("truncated wheel directory entry")
+        header = read_at(position, 46)
+        if header[:4] != b"PK\x01\x02" or struct.unpack_from("<H", header, 34)[0]:
+            raise WheelError("invalid or multi-disk wheel directory entry")
+        lengths = struct.unpack_from("<3H", header, 28)
+        position += 46 + sum(lengths)
+        if position > end:
+            raise WheelError("wheel directory entry exceeds its extent")
+        actual += 1
+    if actual != count:
+        raise WheelError("wheel directory entry count mismatch")
+    _check_deadline(deadline)
+    archive.seek(0)
+
+
 def inspect_archive(
     archive: BinaryIO, *, limits: WheelLimits, deadline: float,
 ) -> WheelFacts:
     """Inspect a held archive without extraction; callers retain source custody."""
     _check_deadline(deadline)
     try:
-        archive.seek(0, os.SEEK_END)
-        if archive.tell() > limits.max_archive_bytes:
-            raise WheelError("wheel archive limit exceeded")
-        archive.seek(0)
+        preflight_archive(archive, limits=limits, deadline=deadline)
         with zipfile.ZipFile(archive) as bundle:
             members = bundle.infolist()
             if len(members) > limits.max_members:
@@ -186,10 +261,11 @@ def inspect_archive(
             metadata = {}
             remaining = limits.max_metadata_bytes
             for name in metadata_names:
-                if bundle.getinfo(name).file_size > remaining:
+                member_limit = min(remaining, limits.max_metadata_member_bytes)
+                if bundle.getinfo(name).file_size > member_limit:
                     raise WheelError("wheel metadata limit exceeded")
                 with bundle.open(name) as stream:
-                    metadata[name] = _read(stream, limit=remaining, deadline=deadline)
+                    metadata[name] = _read(stream, limit=member_limit, deadline=deadline)
                 remaining -= len(metadata[name])
             package = _headers(metadata[prefix + "METADATA"])
             wheel = _headers(metadata[prefix + "WHEEL"])

@@ -7,6 +7,7 @@ import itertools
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 import time
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ def limits():
         max_archive_bytes=100_000, max_expanded_bytes=100_000,
         max_member_bytes=20_000, max_metadata_bytes=10_000, max_members=30,
         max_tags=100,
+        max_metadata_member_bytes=10_000,
     )
 
 
@@ -75,10 +77,63 @@ def test_path_and_handle_identity_agree_after_an_ordinary_overwrite(wheel_path):
 @pytest.mark.parametrize("field,value", [
     ("max_archive_bytes", 10), ("max_expanded_bytes", 10),
     ("max_member_bytes", 10), ("max_metadata_bytes", 10), ("max_members", 2),
+    ("max_metadata_member_bytes", 10),
 ])
 def test_all_limits_are_enforced(wheel_path, limits, field, value):
     with pytest.raises(inspection.WheelError, match="limit"):
         inspect(wheel_path, replace(limits, **{field: value}))
+
+
+def test_actual_directory_count_is_bounded_before_zipfile_allocation(wheel_path, limits, monkeypatch):
+    data = bytearray(wheel_path.read_bytes())
+    end = data.rfind(b"PK\x05\x06")
+    struct.pack_into("<2H", data, end + 8, 0, 0)
+    wheel_path.write_bytes(data)
+    monkeypatch.setattr(inspection.zipfile, "ZipFile", lambda *_: pytest.fail("unbounded ZIP indexing"))
+    with pytest.raises(inspection.WheelError, match="actual member count limit"):
+        inspect(wheel_path, replace(limits, max_members=2))
+
+
+def test_directory_bytes_are_bounded_before_zipfile_allocation(wheel_path, limits, monkeypatch):
+    monkeypatch.setattr(inspection.zipfile, "ZipFile", lambda *_: pytest.fail("unbounded ZIP indexing"))
+    with pytest.raises(inspection.WheelError, match="directory metadata limit"):
+        inspect(wheel_path, replace(limits, max_metadata_bytes=10))
+
+
+def test_directory_preflight_observes_deadline_before_zipfile_allocation(wheel_path, limits, monkeypatch):
+    wheel_path.write_bytes(wheel_bytes(extra={f"extra{index}": b"x" for index in range(20)}))
+    ticks = itertools.count(1)
+    monkeypatch.setattr(inspection.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(inspection.zipfile, "ZipFile", lambda *_: pytest.fail("unbounded ZIP indexing"))
+    with pytest.raises(inspection.WheelError, match="deadline"):
+        inspection.inspect_wheel(
+            wheel_path, sha256="sha256:" + hashlib.sha256(wheel_path.read_bytes()).hexdigest(),
+            limits=limits, deadline=15,
+        )
+
+
+def test_ordinary_zip64_directory_is_inspected(wheel_path, limits):
+    data = wheel_path.read_bytes()
+    end = data.rfind(b"PK\x05\x06")
+    _, _, _, _, count, size, offset, _ = struct.unpack("<4s4H2LH", data[end:end + 22])
+    record = struct.pack("<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0, count, count, size, offset)
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, end, 1)
+    footer = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 0xffff, 0xffff, 0xffffffff, 0xffffffff, 0)
+    wheel_path.write_bytes(data[:end] + record + locator + footer)
+    assert inspect(wheel_path, limits).name == "demo-pkg"
+
+
+def test_zip64_count_limit_precedes_zipfile_allocation(wheel_path, limits, monkeypatch):
+    data = wheel_path.read_bytes()
+    end = data.rfind(b"PK\x05\x06")
+    _, _, _, _, count, size, offset, _ = struct.unpack("<4s4H2LH", data[end:end + 22])
+    record = struct.pack("<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0, count, count, size, offset)
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, end, 1)
+    footer = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 0xffff, 0xffff, 0xffffffff, 0xffffffff, 0)
+    wheel_path.write_bytes(data[:end] + record + locator + footer)
+    monkeypatch.setattr(inspection.zipfile, "ZipFile", lambda *_: pytest.fail("unbounded ZIP indexing"))
+    with pytest.raises(inspection.WheelError, match="member count limit"):
+        inspect(wheel_path, replace(limits, max_members=2))
 
 
 @pytest.mark.parametrize("value", [0, -1, True, float("inf"), 1.5])
@@ -202,7 +257,7 @@ sys.path.insert(0, sys.argv[1])
 from installer_wheel_inputs import WheelLimits, inspect_wheel
 path = pathlib.Path(sys.argv[2])
 facts = inspect_wheel(path, sha256='sha256:' + hashlib.sha256(path.read_bytes()).hexdigest(),
-    limits=WheelLimits(100000, 100000, 20000, 10000, 30, 100), deadline=time.monotonic() + 5)
+    limits=WheelLimits(100000, 100000, 20000, 10000, 30, 100, 10000), deadline=time.monotonic() + 5)
 assert facts.name == 'demo-pkg' and facts.tags == ('py3-none-any',)
 assert 'packaging' not in sys.modules
 """
