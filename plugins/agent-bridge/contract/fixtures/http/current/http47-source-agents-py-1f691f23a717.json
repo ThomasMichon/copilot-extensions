@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http47-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/reattest-src-agent_bridge-routes-agents-py-generation-46.json",
+    "sha256": "e532d2fdfa6896aaa8e9d6c6c8d247d67efb757c2d04c8823f68c4cfe30fbefa"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-owned-cold-drain.json",
+    "sha256": "90380f37b4ffec05ef1fd722a3f532357bc02e8d150ae829ec9609371abcfc09"
+  },
+  "scope": "source bytes unchanged; previous-generation vector preserved, not a new runtime capture",
+  "captured_from": {
+    "commit": "006a01a6b2a887503fae717cd4804306bd5db58c",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 47,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+    "source_git_blob": "e1cd7775e3ac5b39ef66d7c6f4badbf018ac3c51",
+    "source_sha256": "bcdc7ca5f9952f2738d8f890abdb1454671499d3e41d3fd7dd4cca1603873237"
+  }
+}

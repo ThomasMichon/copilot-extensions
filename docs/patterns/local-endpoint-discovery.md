@@ -106,6 +106,13 @@ client computes the path from the service name with no lookup:
 - **Write atomically, on every bind.** Write a temp file in the same dir and
   `rename()` it over the target, so a reader never sees a half-written record.
   Rewrite it each start (the port/PID change); the newest bind wins.
+- **Retain active reader snapshots during replacement.** On Windows, the
+  shared endpoint helper pairs read/write/delete-sharing discovery handles
+  with `FileRenameInfoEx` replacement and POSIX retained-reader semantics.
+  Read sharing alone does not make `os.replace` safe against an open target.
+  An overlapping reader may finish the complete old record; subsequent readers
+  see the replacement. Native errors still fail publication explicitly, without
+  unlinking the old record or retrying service startup. POSIX keeps `os.replace`.
 - **Own the cleanup, tolerate the crash.** Remove the file on graceful shutdown;
   a client must still treat a *present-but-stale* file (dead `pid`, refused
   connection) as "not running," because a crash skips cleanup.

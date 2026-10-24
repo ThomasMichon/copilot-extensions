@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import errno
 import importlib
 import importlib.util
@@ -11,6 +12,7 @@ import sys
 import threading
 from pathlib import Path
 from types import ModuleType
+from typing import BinaryIO, Iterator
 
 import pytest
 
@@ -88,6 +90,109 @@ print("attempting", flush=True)
 module.write_endpoint(sys.argv[2], "tcp", "127.0.0.1:41002", pid=2002)
 print("published", flush=True)
 """
+
+
+def test_reader_allows_independent_publication_and_keeps_its_snapshot(
+    rendezvous: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    readers = [rendezvous.read_endpoint]
+    if hasattr(rendezvous, "read_endpoint_strict"):
+        readers.append(rendezvous.read_endpoint_strict)
+    open_endpoint = rendezvous._open_endpoint
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    for reader in readers:
+        runtime = tmp_path / reader.__name__
+        rendezvous.write_endpoint(runtime, "tcp", "127.0.0.1:41001", pid=1001)
+
+        @contextlib.contextmanager
+        def publish_while_open(path: Path) -> Iterator[BinaryIO]:
+            with open_endpoint(path) as handle:
+                result = subprocess.run(
+                    [sys.executable, "-c", WRITER, rendezvous.__file__, str(runtime)],
+                    input="publish\n", capture_output=True, text=True,
+                    creationflags=flags, timeout=5,
+                )
+                assert result.returncode == 0, result.stderr
+                assert result.stdout.splitlines() == ["ready", "attempting", "published"]
+                yield handle
+
+        with monkeypatch.context() as patch:
+            patch.setattr(rendezvous, "_open_endpoint", publish_while_open)
+            snapshot = reader(runtime)
+        assert snapshot is not None and snapshot.pid == 1001
+        assert snapshot.address == "127.0.0.1:41001"
+        current = reader(runtime)
+        assert current is not None and current.pid == 2002
+        assert current.address == "127.0.0.1:41002"
+
+
+def test_publication_supports_relative_unicode_paths(
+    rendezvous: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runtime = Path("run space-\u03b1")
+    rendezvous.write_endpoint(runtime, "tcp", "127.0.0.1:41001", pid=1001)
+    rendezvous.write_endpoint(runtime, "tcp", "127.0.0.1:41002", pid=2002)
+    current = rendezvous.read_endpoint(runtime)
+    assert current is not None and current.pid == 2002
+
+
+def test_missing_staged_file_preserves_the_advertisement(
+    rendezvous: ModuleType, tmp_path: Path,
+) -> None:
+    endpoint = rendezvous.write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
+    original = endpoint.read_bytes()
+    with pytest.raises(FileNotFoundError):
+        rendezvous._replace_endpoint(tmp_path / "absent", endpoint)
+    assert endpoint.read_bytes() == original
+
+
+def test_publication_failure_is_not_retried_or_hidden(
+    rendezvous: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    endpoint = rendezvous.write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
+    original = endpoint.read_bytes()
+    calls = 0
+
+    def refuse(source: Path, destination: Path) -> None:
+        nonlocal calls
+        calls += 1
+        assert source.is_file() and destination == endpoint
+        raise PermissionError("injected replacement failure")
+
+    monkeypatch.setattr(rendezvous, "_replace_endpoint", refuse)
+    with pytest.raises(PermissionError, match="injected replacement failure"):
+        rendezvous.write_endpoint(tmp_path, "tcp", "127.0.0.1:41002", pid=2002)
+    assert calls == 1
+    assert endpoint.read_bytes() == original
+
+
+@pytest.mark.parametrize("raw", [b"\xff", b"{bad json", b'{"schema":999}'])
+def test_reader_error_classification_is_unchanged(
+    rendezvous: ModuleType, tmp_path: Path, raw: bytes,
+) -> None:
+    endpoint = rendezvous.endpoint_file(tmp_path)
+    assert rendezvous.read_endpoint(tmp_path) is None
+    if hasattr(rendezvous, "read_endpoint_strict"):
+        assert rendezvous.read_endpoint_strict(tmp_path) is None
+    endpoint.write_bytes(raw)
+    assert rendezvous.read_endpoint(tmp_path) is None
+    if hasattr(rendezvous, "read_endpoint_strict"):
+        with pytest.raises(rendezvous.EndpointStateError):
+            rendezvous.read_endpoint_strict(tmp_path)
+
+
+def test_reader_open_failure_keeps_tolerant_and_strict_classification(
+    rendezvous: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    def refuse(path: Path) -> BinaryIO:
+        raise PermissionError("injected read failure")
+
+    monkeypatch.setattr(rendezvous, "_open_endpoint", refuse)
+    assert rendezvous.read_endpoint(tmp_path) is None
+    if hasattr(rendezvous, "read_endpoint_strict"):
+        with pytest.raises(rendezvous.EndpointStateError, match="unreadable endpoint state"):
+            rendezvous.read_endpoint_strict(tmp_path)
 
 
 def test_cleanup_serializes_with_an_independent_publisher(
@@ -290,7 +395,7 @@ def test_unlock_failure_does_not_claim_removal_failed(
 
 
 @pytest.mark.parametrize("source", ["dispatch", "index", "vault"])
-def test_vendored_mutation_helpers_match_the_canonical_source(source: str) -> None:
+def test_vendored_concurrency_helpers_match_the_canonical_source(source: str) -> None:
     def mutation_contract(path: str) -> list[str]:
         tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
         return [
@@ -298,7 +403,9 @@ def test_vendored_mutation_helpers_match_the_canonical_source(source: str) -> No
             for node in tree.body
             if (
                 isinstance(node, ast.FunctionDef)
-                and node.name in ("_endpoint_lock", "clear_endpoint")
+                and node.name in (
+                    "_endpoint_lock", "clear_endpoint", "_open_endpoint", "_replace_endpoint",
+                )
             ) or (
                 isinstance(node, ast.Assign)
                 and any(
@@ -309,5 +416,5 @@ def test_vendored_mutation_helpers_match_the_canonical_source(source: str) -> No
         ]
 
     canonical = mutation_contract(SOURCES["canonical"])
-    assert len(canonical) == 3
+    assert len(canonical) == 5
     assert mutation_contract(SOURCES[source]) == canonical

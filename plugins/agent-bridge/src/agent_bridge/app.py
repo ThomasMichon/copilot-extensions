@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import functools
 import logging
 import sys
 import threading
@@ -17,6 +16,7 @@ from fastapi import FastAPI
 
 from . import telemetry
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
+from .app_supersession import retire_previous_daemon
 from .app_worktree_cache import start_worktree_cache, stop_worktree_cache
 from .config import load_config, load_or_create_auth_token
 from .db import Database
@@ -133,6 +133,7 @@ _SELF_RETIRE_DEFAULT_POLL_S = 30.0
 _SELF_RETIRE_DEFAULT_CONFIRMATIONS = 3
 _SUPERSESSION_DRAIN_TIMEOUT_S = 30.0
 _SUPERSESSION_DRAIN_POLL_S = 0.25
+_HEARTBEAT_INTERVAL_S = 15.0
 
 
 def _self_retire_settings() -> tuple[bool, float, int]:
@@ -192,103 +193,71 @@ async def _retire_previous_daemon(
     *,
     make_client=None,
     drain_timeout: float = _SUPERSESSION_DRAIN_TIMEOUT_S,
+    retirement_timeout: float = 30.0,
+    initial_recovery_task: asyncio.Task | None = None,
 ) -> None:
-    """Drain and gracefully retire the predecessor atomically demoted at start."""
-    from .client import BridgeClient, BridgeClientError, BridgeConnectionError
+    """Retire a predecessor with native exit evidence before owned cold recovery."""
+    await retire_previous_daemon(
+        app, previous, successor, make_client=make_client, drain_timeout=drain_timeout,
+        retirement_timeout=retirement_timeout, initial_recovery_task=initial_recovery_task,
+        recover_owned_cold=_recover_owned_cold, run_in_daemon_thread=_run_in_daemon_thread,
+        drain_poll=_SUPERSESSION_DRAIN_POLL_S, owns_generation=_owns_generation,
+        same_daemon=_same_daemon,
+    )
+
+
+async def _recover_owned_cold(
+    app: FastAPI, successor=None, *, initial_recovery_task: asyncio.Task | None = None,
+    predecessor_exited: bool = False, automatic: bool = False,
+) -> int:
+    """Use the existing active owner and heartbeat, never an unverified predecessor exit."""
     from .config import config_dir
+    from . import cold_outages
     from zdd import routing
-    from zdd.routing import Endpoint
+    import os
+    import sqlite3
 
-    def read_active():
-        table = routing.read_table(config_dir())
-        raw = table.get("active") if isinstance(table, dict) else None
-        return Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+    if getattr(app.state, "shutting_down", False):
+        return 0
+    if initial_recovery_task is None:
+        initial_recovery_task = getattr(app.state, "cold_initial_recovery_task", None)
+    if initial_recovery_task is not None:
+        await asyncio.shield(initial_recovery_task)
+    server = getattr(app.state, "uvicorn_server", None)
+    if getattr(app.state, "shutting_down", False) or getattr(server, "should_exit", False):
+        return 0
+    table = await asyncio.to_thread(routing.read_table, config_dir())
+    raw = table.get("active") if isinstance(table, dict) else None
+    active = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+    if active is None:
+        return 0
+    owned = _owns_generation(active, successor) if successor is not None else (
+        active.pid == os.getpid() and active.port == getattr(app.state, "bound_port", 0)
+    )
+    if not owned:
+        return 0
+    if predecessor_exited:
+        app.state.cold_recovery_ready = True
+    if not getattr(app.state, "cold_recovery_ready", False):
+        expected = getattr(app.state, "cold_predecessor", None)
+        if expected is not None:
+            from zdd import process_exit
 
-    active = await asyncio.to_thread(read_active)
-    if not _owns_generation(active, successor):
-        log.info(
-            "Skipping predecessor retirement because generation %d is no "
-            "longer active", successor.generation,
-        )
-        return
-
-    if make_client is None:
-        make_client = lambda endpoint: BridgeClient(
-            endpoint.base_url,
-            app.state.auth_token,
-            timeout=max(1, int(drain_timeout + 30)),
-            connect_grace=0,
-        )
-    client = make_client(previous)
-
-    async def release_drain(message: str) -> None:
-        try:
-            await _run_in_daemon_thread(client.undrain)
-        except (BridgeClientError, BridgeConnectionError, OSError):
-            log.warning(message, exc_info=True)
-
+            if process_exit.observe_original_exit(expected.pid, expected.process_start_time):
+                app.state.cold_recovery_ready = True
+    if not getattr(app.state, "ready", False):
+        return 0
+    manager = getattr(app.state, "session_manager", None)
+    if manager is None or manager.is_draining:
+        return 0
     try:
-        result = await _run_in_daemon_thread(
-            functools.partial(
-                client.drain,
-                timeout=drain_timeout,
-                poll=_SUPERSESSION_DRAIN_POLL_S,
-                force=False,
-                source="startup-supersession",
-                reason="superseded by a normal daemon start",
-            )
+        return await cold_outages.recover(
+            manager, automatic=automatic,
+            confirmed_only=not getattr(app.state, "cold_recovery_ready", False),
         )
-    except (BridgeClientError, BridgeConnectionError, OSError):
-        log.warning(
-            "Could not drain superseded predecessor at %s; generation "
-            "self-retire remains the backstop",
-            previous.base_url,
-            exc_info=True,
-        )
-        await release_drain(
-            "Failed to release predecessor drain after drain request failure"
-        )
-        return
-
-    if not result.get("drained", False):
-        log.warning(
-            "Superseded predecessor at %s did not reach a safe drain boundary "
-            "within %.0fs; leaving it alive",
-            previous.base_url,
-            drain_timeout,
-        )
-        await release_drain(
-            "Failed to release predecessor drain after drain timeout"
-        )
-        return
-
-    active = await asyncio.to_thread(read_active)
-    if _same_daemon(active, previous):
-        log.warning(
-            "Superseded predecessor became active again while draining; "
-            "releasing its drain gate instead of shutting it down"
-        )
-        await release_drain("Failed to release restored predecessor drain")
-        return
-    if active is None or active.generation < successor.generation:
-        log.warning(
-            "Routing ownership became ambiguous while draining the predecessor; "
-            "releasing its drain gate instead of shutting it down"
-        )
-        await release_drain("Failed to release predecessor drain")
-        return
-
-    try:
-        await _run_in_daemon_thread(client.shutdown)
-    except (BridgeClientError, BridgeConnectionError, OSError):
-        log.warning(
-            "Could not request graceful shutdown of superseded predecessor at %s",
-            previous.base_url,
-            exc_info=True,
-        )
-        await release_drain(
-            "Failed to release predecessor drain after shutdown request failure"
-        )
+    except (OSError, ValueError, RuntimeError, sqlite3.Error):
+        log.exception("Owned cold recovery deferred; retained dispositions remain fenced")
+        return 0
 
 
 async def _start_credential_relay(app: FastAPI, *, start_listener: bool = True):
@@ -398,6 +367,7 @@ async def lifespan(app: FastAPI):
     app.state.resolver = AgentResolver({}, {})
     mgr.set_resolver(app.state.resolver)
     app.state.ready = False
+    app.state.shutting_down = False
     app.state.readiness_error = None
     app.state.readiness_exception = None
     app.state.topology_ready = False
@@ -438,6 +408,8 @@ async def lifespan(app: FastAPI):
                 "Cannot start agent-bridge without publishing its active endpoint"
             ) from exc
 
+    app.state.cold_recovery_ready = previous_endpoint is None
+    app.state.cold_predecessor = None
     # Reattach to any Session Hosts that survived a prior frontend restart
     # (goal 3), instead of leaving those sessions STOPPED. Best-effort and, per
     # its own contract, it MUST NOT block daemon startup -- yet awaiting it here
@@ -452,7 +424,9 @@ async def lifespan(app: FastAPI):
         if getattr(app.state, "passive", False):
             return  # passive: ATTACHing would disconnect the old generation
         try:
-            n = await mgr.reattach_session_hosts()
+            n = await mgr.reattach_session_hosts(
+                recover_cold=previous_endpoint is None,
+            )
             if n:
                 logging.getLogger("agent-bridge").info(
                     "Reattached %d session(s) to surviving Session Hosts", n)
@@ -464,6 +438,7 @@ async def lifespan(app: FastAPI):
                 "Session-Host reattach on startup failed", exc_info=True)
 
     reattach_task = asyncio.create_task(_reattach_session_hosts_bg())
+    app.state.cold_initial_recovery_task = reattach_task
 
     relay_server = None
     relay_start_lock = asyncio.Lock()
@@ -558,6 +533,7 @@ async def lifespan(app: FastAPI):
                     "supersession_drain_timeout",
                     _SUPERSESSION_DRAIN_TIMEOUT_S,
                 ),
+                initial_recovery_task=reattach_task,
             )
         )
 
@@ -608,7 +584,7 @@ async def lifespan(app: FastAPI):
     # the misleading turn-boundary `updated_at`. Cheap; always on.
     async def _heartbeat_loop() -> None:
         while True:
-            await asyncio.sleep(15.0)
+            await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
             try:
                 if await _governance_backoff(
                     governance,
@@ -637,7 +613,11 @@ async def lifespan(app: FastAPI):
                     loop_name="heartbeat loop",
                 ):
                     continue
-                await mgr.recover_disconnected_hosts()
+                await _recover_owned_cold(
+                    app, published_endpoint, automatic=True,
+                )
+                if previous_retire_task is None or previous_retire_task.done():
+                    await mgr.recover_disconnected_hosts()
             except Exception:
                 log.warning("Liveness-driven reattach failed", exc_info=True)
             # Reconcile each host-backed session's reapable state to its
@@ -961,6 +941,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    app.state.shutting_down = True
     # Shutdown: retract our routing-table claim so clients fall back (or follow
     # a successor that already flipped the table). Done first so no new client
     # is routed to us while we tear sessions down.

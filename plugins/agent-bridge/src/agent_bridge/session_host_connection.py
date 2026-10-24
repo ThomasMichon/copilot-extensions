@@ -130,6 +130,10 @@ class _SessionHostConnectionMixin:
                 return bound
 
             spawner.prepare_child = prepare_bound_child
+        from . import cold_outages
+
+        if cold_outages.latest(self._db, session_id) is not None:
+            cold_outages.revalidate_launch(self, session_id)
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a
             # command the agent runs (e.g. an in-session `test-chamber services

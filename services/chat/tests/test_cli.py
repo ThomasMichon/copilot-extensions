@@ -80,6 +80,33 @@ def test_real_cli_provider_http_store_and_independent_forward_read(
         "op": "read", "channel": "room", "codename": "agent-a",
     })
     assert independent["cursor"] == 0 and independent["messages"] == [event]
+    body = json.dumps({
+        "text": "A directed question",
+        "collaboration": {
+            "schema": "agent-chat.collaboration", "version": 1,
+            "kind": "question", "to": ["agent-b"], "evidence": ["artifact:example"],
+        },
+    })
+    rpc_endpoint.state.mode = "drop-post"
+    failed = installed_chat.run([
+        str(installed_chat.interpreter), "-I", "-c",
+        "import contextlib,sys; from agent_chat_service.cli import main; "
+        "output=contextlib.redirect_stderr(sys.stdout); "
+        "output.__enter__(); code=main(sys.argv[1:]); "
+        "output.__exit__(None,None,None); assert code==1",
+        "--config", str(path), "collaborate", "room", "--request-id", "structured-1",
+        "--request-file", "-",
+    ], cwd=tmp_path, input_text=body)
+    assert json.loads(failed)["error"] == "post_unconfirmed"
+    result = installed(path, "collaborate", "room", "--request-id", "structured-1",
+                       "--request-file", "-", text=body)
+    assert result["duplicate"] and result["collaboration"]["to"] == ["agent-b"]
+    pending = installed(other, "inbox", "room")
+    assert pending["entries"][0]["event"] == result["event"]
+    thread = installed(other, "thread", "room", str(result["event"]["id"]))
+    assert thread["entries"][0]["collaboration"] == result["collaboration"]
+    assert installed(path, "status")["pending_posts"] == []
+    assert installed(other, "read", "room")["messages"] == [result["event"]]
     assert rpc_endpoint.state.authenticated == len(rpc_endpoint.state.requests)
 
 
@@ -94,6 +121,14 @@ def test_real_cli_provider_http_store_and_independent_forward_read(
     (["scan", "--request-file", "-"], "scan", [],
      {"epoch": None, "after": [{"channel": "room", "event_id": 0}], "timeout": 0},
      '{"epoch":null,"after":[{"channel":"room","event_id":0}],"timeout":0}'),
+    (["collaborate", "room", "--request-id", "original", "--request-file", "-"],
+     "post", ["room", "question", "original"],
+     {"collaboration": {"schema": "agent-chat.collaboration", "version": 1, "kind": "question"}},
+     '{"text":"question","collaboration":{"schema":"agent-chat.collaboration","version":1,"kind":"question"}}'),
+    (["thread", "room", "12", "--limit", "2"], "thread", ["room", 12], {"limit": 2}, None),
+    (["inbox", "room", "--request-file", "-"], "inbox", ["room"],
+     {"epoch": "0" * 32, "head": 12, "after": 1, "recent_after": 0, "recent_limit": 5},
+     '{"epoch":"' + "0" * 32 + '","head":12,"after":1,"recent_after":0,"recent_limit":5}'),
 ])
 def test_cli_dispatch_preserves_exact_client_controls(args, method, positional, controls, text):
     calls = []

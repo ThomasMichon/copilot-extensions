@@ -63,7 +63,7 @@ write_endpoint(run_dir, "unix", str(sock_path))
 clear_endpoint(run_dir)
 ```
 
-The write is **atomic** (temp file + `os.replace`), so a reader never sees a
+The write is **atomic** (temp file + same-filesystem replacement), so a reader never sees a
 half-written record. Call it on every bind — newest bind wins.
 
 Publication and owner-checked cleanup also share an OS-backed mutation lock
@@ -71,6 +71,14 @@ inside that runtime directory. A predecessor cannot remove a successor's
 advertisement between its final ownership check and unlink. The lock file
 `.endpoint.lock` remains after cleanup so concurrent callers never lock different
 file identities. Readers do not acquire it.
+
+On Windows, readers open the record with read/write/delete sharing, and
+publication uses native `FileRenameInfoEx` with replacement and POSIX retained-reader
+semantics. An active reader therefore cannot prevent an atomic rebind
+publication; its open handle still reads the complete old record while later
+readers discover the replacement. Native publication failures propagate rather
+than retrying or removing the previous record. POSIX retains ordinary file-open
+and `os.replace` behavior.
 
 Lock acquisition is bounded at five seconds. Publication raises on failure;
 best-effort cleanup logs the failure without proceeding to unlink. Cleaning an
@@ -118,4 +126,5 @@ The ownership concurrency contracts exercise the canonical implementation and
 the in-package dispatch, index and vault consumers with real files, threads and
 independent publisher processes. They cover final-check/unlink exclusion,
 bounded contention, stable lock identity and missing-runtime cleanup on native
-Windows and POSIX.
+Windows and POSIX. A paused real reader also overlaps an independent publisher,
+including Vault's strict reader, and checks both old and new complete snapshots.
