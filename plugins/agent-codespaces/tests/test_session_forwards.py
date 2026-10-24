@@ -973,8 +973,16 @@ async def test_remote_probe_codespace_missing_from_listing_is_unknown():
 
 
 async def test_remote_probe_maps_tmux_exit_codes():
-    # 255 is an SSH transport failure: retried once, then reported unknown.
-    manager = _Manager([0, 1, 255, 255])
+    manager = _Manager([])
+
+    async def execute(name, command, timeout=None):
+        manager.commands.append(command)
+        return types.SimpleNamespace(
+            exit_code=0,
+            stdout="ACMUX1\t0\tpresent\nACMUX1\t1\tgone\nACMUX1\t2\tunknown\nACMUX1\tDONE\t3\n",
+        )
+
+    manager.exec_command = execute
 
     async def opener(name):
         return manager
@@ -982,18 +990,9 @@ async def test_remote_probe_maps_tmux_exit_codes():
     probe = sf.make_remote_mux_probe(
         list_codespaces=lambda: [_cs("cs-1", "Available")], open_manager=opener,
     )
-    import ssh_manager.manager as _sm
-
-    async def _no_sleep(s):
-        return None
-
-    _real_sleep, _sm.asyncio.sleep = _sm.asyncio.sleep, _no_sleep
-    try:
-        got = await probe("cs-1", ["wt-a", "wt-b", "wt-c"])
-    finally:
-        _sm.asyncio.sleep = _real_sleep
+    got = await probe("cs-1", ["wt-a", "wt-b", "wt-c"])
     assert got == {"wt-a": True, "wt-b": False, "wt-c": None}
-    assert len(manager.commands) == 4
+    assert len(manager.commands) == 1
     assert "has-session -t" in manager.commands[0] and "=wt-a" in manager.commands[0]
     assert manager.disconnected
 

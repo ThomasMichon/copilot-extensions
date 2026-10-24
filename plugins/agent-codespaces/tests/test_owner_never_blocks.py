@@ -148,12 +148,10 @@ async def test_a_local_forward_counts_only_as_requested(store):
 
 
 async def test_the_default_probe_opener_resolves_its_account_off_the_loop(monkeypatch):
-    """``_open_codespace`` (the mux and bridge probes' default opener) looks up
-    the CodeSpace's account and builds its source -- both may run ``gh`` -- in
-    a worker thread."""
+    """Account, credential and config IO stay off-loop; construction is pure."""
     import ssh_manager
 
-    from agent_codespaces import codespace_config, lifecycle
+    from agent_codespaces import codespace_config, lifecycle, owner_inventory
 
     threads: list[threading.Thread] = []
 
@@ -162,18 +160,27 @@ async def test_the_default_probe_opener_resolves_its_account_off_the_loop(monkey
         return "acct"
 
     class Source:
-        def __init__(self, cs, *, account=None):
+        def __init__(self, cs, *, account=None, token=None):
+            assert threading.current_thread() is threading.main_thread()
+            assert token == "synthetic"
+
+        def get_ssh_config(self):
             threads.append(threading.current_thread())
+
+    def credential(account):
+        threads.append(threading.current_thread())
+        return "synthetic"
 
     class Manager:
         async def ensure_connected(self, *a):
             return None
 
     monkeypatch.setattr(lifecycle, "account_for_codespace", account)
+    monkeypatch.setattr(owner_inventory, "credential", credential)
     monkeypatch.setattr(codespace_config, "CodespaceSource", Source)
     monkeypatch.setattr(ssh_manager, "ConnectionManager", Manager)
     await sf._open_codespace("cs")
-    assert len(threads) == 2 and all(t is not threading.main_thread() for t in threads)
+    assert len(threads) == 3 and all(t is not threading.main_thread() for t in threads)
 
 
 # -- the Owner -----------------------------------------------------------------
