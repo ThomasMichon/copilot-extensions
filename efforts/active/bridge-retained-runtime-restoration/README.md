@@ -252,6 +252,11 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   this helper yet. Durable current consumer-incarnation enrollment and actual
   poll/final-admission/outcome wiring remain the next Phase 1b stretch.
   No Plan or Validation Plan completion is inferred from this prerequisite.
+- Source review found that a preexisting legacy transfer could already be part
+  of a ready baseline. The real transferred-root regression reproduced it;
+  binding now consumes the existing legacy entrypoint owner's mutation
+  decision. All 34 governance cases pass, including legacy refusal and an
+  unaffected namespaced installation. Current-head review remains required.
 
 ### 2026-10-24 - Consumer trust and recovery refinement merged
 - #8515 merged as `ba25d5f5d58cdc02736cce67da42a39a72737076` after

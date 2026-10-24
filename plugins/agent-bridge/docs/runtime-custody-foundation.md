@@ -31,6 +31,9 @@ or change installed authentication. Missing/foreign/stale installation evidence
 refuses rather than accepting a client-selected identity or path. Isolated
 legacy and namespaced installation controls exercise this helper; they do not
 qualify a running installation or native consumer.
+Legacy mode also requires the existing entrypoint owner's mutation decision:
+a transfer tombstone already present before the loop baseline cannot confer
+ownership of the transferred root. An unaffected namespaced root remains usable.
 
 Local storage schema 28 requires the custody tables, nullable associations,
 ordinary turn-admission columns and canonical guards. The existing writable

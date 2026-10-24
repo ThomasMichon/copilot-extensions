@@ -154,7 +154,7 @@ class LoopGovernance:
                 namespace = module.validate_namespace_receipt(
                     context["namespaceReceipt"], helper["durable_home"],
                 )
-                mode = module.resolve_installation_mode(
+                mode = module.probe_legacy_entrypoint(
                     context=helper["context"], durable_home=helper["durable_home"],
                     expected_marketplace_id=helper["marketplace_id"],
                     expected_plugin_id=helper["plugin_id"],
@@ -162,6 +162,7 @@ class LoopGovernance:
                 )
                 if (
                     mode["status"] != "ready"
+                    or (mode["actualMode"] == "legacy" and not mode["allowMutation"])
                     or context["state"] != "active"
                     or namespace["receipt"]["state"] != "active"
                     or mode["actualMode"] != before["actualMode"]

@@ -212,3 +212,61 @@ def test_generation_change_during_resolution_cannot_publish_binding(
         governance.runtime_installation(tmp_db)
     assert governance._installation is None
     assert tmp_db.execute_read("SELECT * FROM bridge_runtime_epoch") == []
+
+
+def test_preexisting_legacy_transfer_does_not_become_ownership_from_a_new_baseline(
+    installation: dict[str, Any], tmp_db: Database,
+) -> None:
+    home = installation["home"]
+    durable = home / ".copilot-extensions"
+    destination = installation_context.stamp_context(
+        payload_root=PAYLOAD, plugin_id="agent-bridge",
+        source_descriptor={"kind": "github", "repo": "example/other-extensions"},
+        durable_home=durable, copilot_home=home / ".copilot",
+        payload_version="1.0.0", payload_origin="explicit",
+        expected_namespace_generation=0, expected_install_generation=0,
+        environment={"HOME": str(home)},
+    )
+    namespaced = installation["root"] == Path(installation["context"]["pluginRoot"])
+    (durable / "installation-mode.json").write_text(
+        json.dumps({
+            "schema": installation_context.POLICY_SCHEMA, "version": 1,
+            "installationMode": {
+                "enabled": namespaced,
+                "marketplaces": {destination["marketplaceId"]: {"enabled": True}},
+            },
+        }), encoding="utf-8",
+    )
+    activation = installation_context.compare_and_swap_activation(
+        context=destination["installReceipt"], durable_home=durable,
+        expected_marketplace_id=destination["marketplaceId"], expected_plugin_id="agent-bridge",
+        expected_namespace_generation=destination["namespaceGeneration"],
+        expected_install_generation=destination["generation"], expected_activation_generation=0,
+        activation_mode="namespaced", activation_state="active", legacy_disposition="retained-inert",
+        legacy_root=home / ".agent-bridge",
+        legacy_probe={"declared": True, "result": "absent", "checkedAt": None},
+    )
+    assert activation["status"] == "ready"
+    activation_path = Path(destination["pluginRoot"]) / "installation-activation.json"
+    active = json.loads(activation_path.read_text(encoding="utf-8"))
+    (home / ".agent-bridge" / ".installation-ownership.json").write_text(
+        json.dumps({
+            "schema": installation_context.TOMBSTONE_SCHEMA, "version": 1,
+            "marketplaceId": destination["marketplaceId"], "pluginId": "agent-bridge",
+            "environment": active["environment"],
+            "activation": {"path": str(activation_path), "generation": active["generation"]},
+            "transferredAt": active["updatedAt"],
+        }), encoding="utf-8",
+    )
+    governance = LoopGovernance()
+    # A current loop baseline alone is not a legacy mutation-ownership grant.
+    verdict = governance.recheck("after-existing-transfer")
+    assert verdict["status"] == "ready"
+    assert verdict["legacy"]["disposition"] == "owned-by-other-cell"
+    if namespaced:
+        assert governance.runtime_installation(tmp_db).runtime_root == str(installation["root"])
+    else:
+        assert verdict["actualMode"] == "legacy"
+        with pytest.raises(RuntimeCustodyError, match="does not own"):
+            governance.runtime_installation(tmp_db)
+    assert tmp_db.execute_read("SELECT * FROM bridge_runtime_epoch") == []
