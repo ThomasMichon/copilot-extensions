@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import ast
 import hashlib
 import importlib.util
 import io
@@ -308,6 +309,9 @@ class ContractTests(unittest.TestCase):
     def test_runtime_identity_and_auth_boundary(self):
         entry = self.files["entrypoint.sh"].decode()
         self.assertIn("mountpoint -q", entry)
+        self.assertIn('[ "$$" != 1 ]', entry)
+        self.assertIn('findmnt -n -o PROPAGATION /', entry)
+        self.assertIn('!= private', entry)
         self.assertIn("python3 /opt/trusted-harness/recipe/install.py --runtime", entry)
         self.assertNotIn("chown -R", entry)
         self.assertNotIn("rm -rf", entry)
@@ -315,6 +319,16 @@ class ContractTests(unittest.TestCase):
         for setting in ("PermitRootLogin no", "PasswordAuthentication no", "AllowUsers vscode"):
             self.assertIn(setting, ssh)
         self.assertIn("from build import validate_age", self.files["install.py"].decode())
+        calls = [
+            tuple(arg.value for arg in node.args if isinstance(arg, ast.Constant))
+            for node in ast.walk(ast.parse(self.files["install.py"]))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "run"
+        ]
+        self.assertIn(
+            ("systemctl", "mask", "apt-daily.service", "apt-daily.timer",
+             "apt-daily-upgrade.service", "apt-daily-upgrade.timer"),
+            calls,
+        )
 
 
 class RuntimePersistenceTests(unittest.TestCase):

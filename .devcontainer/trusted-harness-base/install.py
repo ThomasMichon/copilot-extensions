@@ -193,7 +193,7 @@ def main() -> None:
     ):
         if version not in run(*command):
             raise ValueError("Unexpected tool version: " + command[0])
-    for tool in ("git", "gh", "tmux", "ssh", "sshd", "systemctl"):
+    for tool in ("git", "gh", "tmux", "ssh", "sshd", "systemctl", "mount", "mountpoint", "findmnt"):
         if not shutil.which(tool):
             raise ValueError("Missing required tool: " + tool)
     (build / "os-packages.txt").write_text(run("dpkg-query", "-W"))
@@ -214,6 +214,8 @@ def main() -> None:
     reference.unlink(missing_ok=True)
     reference.symlink_to(machine)
     run("systemctl", "enable", "ssh.service")
+    run("systemctl", "mask", "apt-daily.service", "apt-daily.timer",
+        "apt-daily-upgrade.service", "apt-daily-upgrade.timer")
     run("apt-get", "clean")
 
 

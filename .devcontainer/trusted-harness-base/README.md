@@ -69,6 +69,12 @@ base's inherited Node tooling. Existing home shell customizations can alter
 effective tools: record actual runtime versions during integration. Replacement
 preserves data/identity, **not live processes**; drain before Komodo replacement.
 
+Initialization refuses a non-PID-1 launch or an initially non-private root mount.
+Systemd's later namespace-local propagation changes do not authorize host-shared
+mounts. Image-root APT update services/timers are masked: root package changes
+come from the admitted image build/update path, while explicit compatible
+home-runtime updates retain their own owners.
+
 ## Approved local build interface
 
 Python 3.11+ and an already-available Docker CLI with Buildx are required.
@@ -238,3 +244,14 @@ the declared capability profile. Systemd/user-DBus service readiness is therefor
 **not qualified on that host profile**. The deployment owner must admit and
 prove a suitable confined cgroup profile; do not silently add privileged mode,
 unconfined security profiles or host cgroup binds to turn this into a pass.
+
+The explicit `fleet_manager.host_profile` bootstrap is the owning candidate
+for the fixed `fleet-manager-trusted-systemd-v1` enforcing profile. A consuming
+controller must independently admit that host operation, inspect its status on
+the selected engine host, and launch with
+`--security-opt apparmor=fleet-manager-trusted-systemd-v1` and the private
+cgroup namespace. Image startup never installs host policy. The initial policy
+grants the existing cgroup remount and pinned systemd namespace/credential
+operations at fixed runtime paths, not arbitrary filesystems or bind mappings;
+parser-only validation is not native service qualification. See the
+[host bootstrap contract](../../fleet-manager/docs/host-profiles.md).

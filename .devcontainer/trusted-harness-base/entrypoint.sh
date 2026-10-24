@@ -1,9 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
-if [ "$(id -u)" != 0 ] || [ "$#" != 1 ] || [ "$1" != /lib/systemd/systemd ]; then
+if [ "$(id -u)" != 0 ] || [ "$$" != 1 ] || [ "$#" != 1 ] || [ "$1" != /lib/systemd/systemd ]; then
     echo "Use root PID 1 with /lib/systemd/systemd; agent sessions use vscode." >&2
     exit 64
+fi
+if [ "$(findmnt -n -o PROPAGATION /)" != private ]; then
+    echo "Initial mount propagation must be private before systemd starts." >&2
+    exit 65
 fi
 for path in /home/vscode /workspaces; do
     if ! mountpoint -q "$path"; then
