@@ -484,23 +484,26 @@ def _resolve_known_session(
             file=sys.stderr,
         )
         sys.exit(core._SEND_BUSY_EXIT)
-    from .session_start_cli import _prepare_sender_preference
+    if not agent:
+        print(
+            f"[FAIL] Session {session_id} has no agent recorded; cannot create a "
+            "replacement. The existing session is retained.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    from .session_start_cli import _prepare_caller_context, _prepare_sender_preference
 
-    sender_preference = _prepare_sender_preference(client, agent) if agent else None
+    sender_preference = _prepare_sender_preference(client, agent)
+    caller_context = _prepare_caller_context(client, agent, caller_id)
     print(f"[>] --force: ending busy session {session_id} to take over...")
     try:
         client.end_session(session_id)
     except Exception:
         pass
-    if agent:
-        return core._start_agent_session(
-            client, agent, force=False, sender_preference=sender_preference, caller_id=caller_id,
-        )
-    print(
-        f"[FAIL] Session {session_id} ended; no agent recorded -- re-send to the agent name to start a fresh session.",
-        file=sys.stderr,
+    return core._start_agent_session(
+        client, agent, force=False, sender_preference=sender_preference,
+        caller_id=caller_context.caller_id, caller_context=caller_context,
     )
-    sys.exit(1)
 
 
 def _resolve_target(

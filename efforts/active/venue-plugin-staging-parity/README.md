@@ -385,6 +385,12 @@ or a reason to create a daemon.
   their registry records from a real committed source checkpoint, reproducing
   the output without writes and retaining the registry's existing indentation.
 - The final complete guard tier passes 391 tests with nine expected skips.
+- Review follow-up separates typed consumption of the unmodified HTTP-45
+  response from the current producer advertisement. Forced replacement also
+  preflights qualified remote ownership and capability before ending the
+  incumbent, retaining the captured caller facts for creation and retries.
+  Missing/malformed ownership, unsupported capability, a missing replacement
+  agent, and cross-request caller-context reuse all refuse without ending it.
 - Publication, authorized rollout, deployed local acceptance, the remaining
   headed/SSH/privileged lanes, and the blocked trusted-container proof remain
   open.
