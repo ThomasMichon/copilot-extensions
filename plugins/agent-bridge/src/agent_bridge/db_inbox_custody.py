@@ -22,16 +22,7 @@ class _InboxCustodyMixin:
     def _inbox_admission(
         self, conn: sqlite3.Connection, identity: str, admission: RuntimeAdmission,
     ) -> None:
-        if type(admission) is not RuntimeAdmission or admission.installation != identity:
-            raise RuntimeCustodyError("Inbox admission belongs to another installation")
-        state = self._runtime_epoch(conn, identity)
-        if state.state != "open" or state.epoch != admission.epoch:
-            raise RuntimeCustodyError("Inbox effects require the original open epoch")
-        if conn.execute(
-            "SELECT 1 FROM bridge_runtime_producers WHERE id=? AND installation=? AND epoch=?",
-            (admission.producer, identity, admission.epoch),
-        ).fetchone() is None:
-            raise RuntimeCustodyError("Inbox producer is not enrolled")
+        self._runtime_admission(conn, identity, admission, cohort="Inbox")
 
     @staticmethod
     def _registered_inbox_consumer(

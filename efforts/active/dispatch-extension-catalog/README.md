@@ -130,11 +130,14 @@ implementation and validation choices remain proposed means.
 
 ### Phase 3 - Shared configuration and extension contracts
 
-- [ ] Expose sufficient machine-readable inputs and prerequisites for clients
+- [x] Expose sufficient machine-readable inputs and prerequisites for clients
   to instantiate offered emitter, evaluator and pool templates; retain an
-  advanced declaration path where appropriate.
-- [ ] Reuse stable local-instance identity, optimistic revisions, Save-only,
-  publication, activation consent and partial-failure receipts.
+  advanced declaration path where appropriate. PR #8363 supplies the bounded
+  provider-fragment Save contract; unsupported source contexts refuse explicitly.
+- [x] Reuse stable local-instance identity, optimistic revisions, Save-only,
+  publication, activation consent and partial-failure receipts. PR #8363
+  reuses the existing lifecycle without changing built-in identities or
+  authorizing consumer activation.
 - [ ] Specify a process-neutral task/charter contract for selecting an execution
   role, acquiring external instructions and reporting progress/results under
   existing completion and review rules.
@@ -193,6 +196,12 @@ implementation and validation choices remain proposed means.
 
 All items below are **agent-recommended acceptance checks** for execution.
 
+- [x] Prove the bounded provider-fragment catalog-to-Save boundary with selected
+  closure binding, immutable sources, opaque output arguments, static dependency
+  inspection, independent named execution admission and ordinary pointer
+  discovery compatibility. PR #8363 includes isolated first-touch CLI and real
+  emitter/side-load/evaluator consumers; this does not close broader client,
+  migration, mapped-source, promotion or installed acceptance below.
 - [ ] Enumerate built-in, enabled/disabled plugin, repository and local fixtures;
   verify qualified identities, stable revisions, source applicability,
   inheritance and precedence against registrar authority.
@@ -487,6 +496,29 @@ and first-touch/restart evidence, normal review/CI/release and separately
 authorized installed proof remain distinct obligations.
 
 ## Journal
+
+### 2026-10-24 - Bounded provider instantiation source merged
+
+- PR #8363 merged as `d6d8ecc532673d18af48a50d9c6f6cbe1232d118`.
+  Exact-head Copilot Comment reported no open issues; every thread was resolved
+  and required CI passed before ordinary authorized Maintainer completion.
+- Qualified provider rows now offer the existing Save form and lifecycle.
+  Every materialization/forge-provenance read binds to the selected physical
+  recipe closure. Output/data arguments remain opaque for supported command
+  roles; dependency inspection does not execute providers. Ordinary pointer
+  qualification remains distinct from strict Save admission.
+- The final revision/resource/materialization/evaluator packet passed
+  305 tests with three platform-specific skips. Earlier coupled packets
+  covered recipe resolution, discovery, instance lifecycle and path origins;
+  counts overlap. Scoped F/E9 lint and all 13 touched module ceilings passed.
+  Real first-touch CLI and native subprocess fixtures used isolated state.
+  Installer clean-room was not repeated because installation did not change;
+  another local native OS, live providers and installed/fleet rollout were not
+  exercised or authorized. Required source CI remains separate evidence.
+- Supported source-level instantiation is complete, not this parent effort.
+  Retain consumer action/metadata adoption, external runner/mapped-record
+  journeys, migration, semantic parity, promotion and authorized installed proof.
+  No producer/task effects or runtime update were performed.
 
 ### 2026-10-16 - Draft prepared
 
