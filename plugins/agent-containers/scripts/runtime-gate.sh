@@ -31,12 +31,32 @@ json_get() {
     LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v "query_path=$2" <<<"$1"
 }
 
+json_type() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" <<<"$1"
+}
+
+legacy_invocation_allowed() {
+    [[ "$(json_get "$1" status)" == ready &&
+       "$(json_get "$1" actualMode)" == legacy &&
+       "$(json_get "$1" desiredMode)" == legacy ]] ||
+    [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
+       "$(json_get "$1" status)" == provenance-blocked &&
+       "$(json_type "$1" "$(json_path policy enabled)")" == boolean &&
+       "$(json_get "$1" "$(json_path policy enabled)")" == false &&
+       -z "$(json_get "$1" "$(json_path legacy tombstone)")" &&
+       "$(json_get "$1" "$(json_path legacy disposition)")" == active ]]
+}
+
 resolve_runtime() {
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    local AGENT_RT_RESOLVE_TRACE_MODE="${1:-ready}"
     # shellcheck source=/dev/null
-    . "$RUNTIME_RESOLVER"
+    if ! . "$RUNTIME_RESOLVER"; then
+        printf '[agent-containers] runtime resolver failed; update the owning installation.\n' >&2
+        exit 126
+    fi
 }
 
 run_runtime() {
@@ -54,6 +74,10 @@ run_runtime() {
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&
    -f "$INSTALLER" ]] || {
     printf '[agent-containers] installation-context runtime support is unavailable.\n' >&2
+    exit 126
+}
+grep -Fq '# Trace contract: normal/read-only/ready-v1' "$RUNTIME_RESOLVER" || {
+    printf '[agent-containers] read-only runtime resolver is unavailable; update the owning installation.\n' >&2
     exit 126
 }
 
@@ -86,25 +110,13 @@ fi
 RESOLUTION_STATUS="$(json_get "$RESOLUTION" "$(json_path status)" 2>/dev/null || true)"
 RESOLUTION_REASON="$(json_get "$RESOLUTION" "$(json_path reason)" 2>/dev/null || true)"
 ACTUAL_MODE="$(json_get "$RESOLUTION" "$(json_path actualMode)" 2>/dev/null || true)"
-DESIRED_MODE="$(json_get "$RESOLUTION" "$(json_path desiredMode)" 2>/dev/null || true)"
 INSTALL_GENERATION="$(json_get "$RESOLUTION" "$(json_path installGeneration)" 2>/dev/null || true)"
-POLICY_ENABLED="$(json_get "$RESOLUTION" "$(json_path policy enabled)" 2>/dev/null || true)"
-LEGACY_TOMBSTONE="$(json_get "$RESOLUTION" "$(json_path legacy tombstone)" 2>/dev/null || true)"
-LEGACY_DISPOSITION="$(json_get "$RESOLUTION" "$(json_path legacy disposition)" 2>/dev/null || true)"
 
-if [[ "$RESOLUTION_STATUS" == ready &&
-      "$ACTUAL_MODE" == legacy &&
-      "$DESIRED_MODE" == legacy ]]; then
+if legacy_invocation_allowed "$RESOLUTION"; then
     if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         printf '[agent-containers] requested installation context is not active.\n' >&2
         exit 126
     fi
-elif [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
-        "$RESOLUTION_STATUS" == provenance-blocked &&
-        "$POLICY_ENABLED" == false &&
-        -z "$LEGACY_TOMBSTONE" &&
-        "$LEGACY_DISPOSITION" == active ]]; then
-    :
 elif [[ ( "$RESOLUTION_STATUS" == ready &&
           "$RESOLUTION_REASON" == namespaced-active ) ||
         "$RESOLUTION_STATUS" == deactivation-required ]] &&
@@ -132,7 +144,8 @@ elif [[ ( "$RESOLUTION_STATUS" == ready &&
     VALIDATED_INSTALL_GENERATION="$(
         json_get "$VALIDATION" "$(json_path generation)" 2>/dev/null || true
     )"
-    [[ "$VALIDATED_INSTALL_GENERATION" == "$INSTALL_GENERATION" ]] || {
+    [[ "$VALIDATED_INSTALL_GENERATION" == "$INSTALL_GENERATION" &&
+       "$(json_get "$VALIDATION" "$(json_path pluginRoot)")" == "$RUNTIME_ROOT" ]] || {
         printf '[agent-containers] installation context generation does not match governance.\n' >&2
         exit 126
     }
@@ -141,6 +154,14 @@ else
         "${RESOLUTION_STATUS:-invalid}" "${RESOLUTION_REASON:-invalid}" >&2
     exit 126
 fi
+
+if [[ -z "$CONTEXT" ]]; then
+    RUNTIME_ROOT="$(json_get "$RESOLUTION" "$(json_path legacy root)")"
+fi
+[[ "$RUNTIME_ROOT" == /* ]] || {
+    printf '[agent-containers] installation context is missing the canonical runtime root.\n' >&2
+    exit 126
+}
 
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
@@ -152,10 +173,67 @@ if [[ -n "${AGENT_CONTAINERS_NO_SELFPROVISION:-}" ]]; then
     exit 1
 fi
 
+assert_runtime_publication() {
+    local -a arguments=(
+        probe-plugin-publication --payload-root "$PAYLOAD_ROOT"
+        --plugin-id agent-containers --legacy-root "$RUNTIME_ROOT"
+    )
+    local probe="" rc=0 root_path
+    root_path="$(json_path legacy root)"
+    if [[ -n "$CONTEXT" ]]; then
+        arguments+=(--context "$CONTEXT" --durable-home "$VALIDATION_DURABLE_HOME")
+        root_path=runtimeRoot
+    fi
+    probe="$(bash "$MODE_RUNNER" "${arguments[@]}")" || rc=$?
+    if [[ "$rc" != 0 ||
+          "$(json_type "$probe" "$(json_path deployment allowPluginPublication)")" != boolean ||
+          "$(json_get "$probe" "$(json_path deployment allowPluginPublication)")" != true ||
+          "$(json_get "$probe" "$root_path")" != "$RUNTIME_ROOT" ||
+          "$(json_get "$probe" "$(json_path deployment path)")" != "$RUNTIME_ROOT/runtime-deployment.json" ]]; then
+        printf '[agent-containers] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' "$probe" >&2
+        exit 3
+    fi
+    if [[ -n "$CONTEXT" ]]; then
+        if [[ "$(json_get "$probe" status)" != ready &&
+              "$(json_get "$probe" status)" != deactivation-required ]] ||
+           [[ "$(json_get "$probe" actualMode)" != namespaced ||
+              "$(json_get "$probe" context)" != "$CONTEXT" ||
+              "$(json_get "$probe" installGeneration)" != "$INSTALL_GENERATION" ]]; then
+            printf '[agent-containers] Runtime publication refused: %s Decision no longer admits the validated installation context.\n' "$probe" >&2
+            exit 3
+        fi
+    else
+        if ! legacy_invocation_allowed "$probe"; then
+            printf '[agent-containers] Runtime publication refused: %s Use explicit installation management to migrate this runtime.\n' "$probe" >&2
+            exit 3
+        fi
+        probe="$(bash "$MODE_RUNNER" probe-legacy --payload-root "$PAYLOAD_ROOT" \
+            --plugin-id agent-containers --legacy-root "$RUNTIME_ROOT")" || rc=$?
+        if [[ "$rc" != 0 ||
+              "$(json_type "$probe" allowMutation)" != boolean ||
+              "$(json_get "$probe" allowMutation)" != true ||
+              "$(json_get "$probe" "$(json_path legacy root)")" != "$RUNTIME_ROOT" ]] ||
+           ! legacy_invocation_allowed "$probe"; then
+            printf '[agent-containers] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' "$probe" >&2
+            exit 3
+        fi
+    fi
+}
+assert_runtime_publication
+resolve_runtime normal
+if [[ -n "$AGENT_RT_PY" ]]; then
+    run_runtime "$@"
+fi
+
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
 _lock_link=""
+_reap_owned=0
 _unlock_provision() {
+    if [[ "$_reap_owned" == 1 ]]; then
+        _reap_owned=0
+        rmdir "$_reap_mutex" 2>/dev/null || true
+    fi
     if [[ -n "$_lock_link" ]]; then
         _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
         [[ "$_owner" == "$$" ]] && rm -f "$_lock_link"
@@ -165,42 +243,70 @@ _unlock_provision() {
         exec 9>&-
     fi
 }
+trap '_unlock_provision' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
     exec 9>"$RUNTIME_ROOT/.provision.lock"
     flock 9
 else
     _lock_link="$RUNTIME_ROOT/.provision.lock.pid"
+    _reap_mutex="$RUNTIME_ROOT/.provision.reap.mutex"
+    _reap_waits=0
     until ln -s "$$" "$_lock_link" 2>/dev/null; do
         _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
         case "$_owner" in
             *[!0-9]*|"") _live=0 ;;
             *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
         esac
-        if [[ -z "$_owner" ]]; then
-            # The link vanished after the failed `ln -s` (or is not a
-            # symlink): never unlink then -- a live lock could be created
-            # between the read and the unlink. Just retry.
-            sleep 0.1
-        elif [[ "$_live" == 0 && "$(readlink "$_lock_link" 2>/dev/null || true)" == "$_owner" ]]; then
-            rm -f "$_lock_link"
-        else
+        if [[ "$_live" == 1 ]]; then
             sleep 1
+            continue
         fi
+        # Serialize stale-link revalidation/removal with the canonical shim.
+        if ! mkdir "$_reap_mutex" 2>/dev/null; then
+            if [[ "$_reap_waits" -ge 30 ]]; then
+                printf '[agent-containers] provisioning reaper mutex is unavailable: %s; retry or repair it through explicit installation management.\n' \
+                    "$_reap_mutex" >&2
+                exit 126
+            fi
+            _reap_waits=$((_reap_waits + 1))
+            sleep 1
+            continue
+        fi
+        _reap_owned=1
+        _reap_waits=0
+        _owner2="$(readlink "$_lock_link" 2>/dev/null || true)"
+        if [[ -n "$_owner2" && "$_owner2" == "$_owner" ]]; then
+            case "$_owner2" in
+                *[!0-9]*) rm -f -- "$_lock_link" ;;
+                *) kill -0 "$_owner2" 2>/dev/null || rm -f -- "$_lock_link" ;;
+            esac
+        fi
+        _reap_owned=0
+        rmdir "$_reap_mutex" 2>/dev/null || true
     done
 fi
-trap '_unlock_provision' EXIT INT TERM
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     _unlock_provision
     trap - EXIT INT TERM
     run_runtime "$@"
 fi
+assert_runtime_publication
 printf '%s\n' '[agent-containers] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.' >&2
 printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' \
     'agent-containers' "$STATUS_PATH" >&2
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
 
 set +e
+export AGENT_CONTAINERS_HOME="$RUNTIME_ROOT"
+export AGENT_CONTAINERS_STATE_DIR="$RUNTIME_ROOT"
+if [[ -n "$CONTEXT" ]]; then
+    export COPILOT_EXTENSIONS_CONTEXT="$CONTEXT"
+else
+    unset COPILOT_EXTENSIONS_CONTEXT
+fi
 bash "$INSTALLER" provision --install-dir "$RUNTIME_ROOT" >&2
 PROVISION_EXIT=$?
 set -e

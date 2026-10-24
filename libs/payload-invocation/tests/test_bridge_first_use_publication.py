@@ -37,7 +37,7 @@ def _selected_cell(fixture: dict, environment: dict) -> tuple[Path, dict]:
     primitive.compare_and_swap_activation(
         context=cell["installReceipt"],
         expected_marketplace_id=cell["marketplaceId"],
-        expected_plugin_id="agent-bridge",
+        expected_plugin_id=fixture["arguments"]["plugin_id"],
         expected_namespace_generation=cell["namespaceGeneration"],
         expected_install_generation=cell["generation"],
         expected_activation_generation=0,
