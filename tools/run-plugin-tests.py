@@ -572,6 +572,7 @@ def run_plugin(
         [(group, None) for group in groups]
         if selection is not None else _test_group_plan(name, groups)
     )
+    partitioned_plan = any(selector is not None for _, selector in plan)
     if not _has_suite(name) and selection is None:
         print(f"[SKIP] {name}: no test suite")
         return 0
@@ -692,7 +693,7 @@ def run_plugin(
                 failed_assertions = True
                 continue
             if returncode == 5 and (guards or kexpr) and (
-                not test_files or partition_selector is not None
+                not test_files or partitioned_plan
             ):
                 continue
             if returncode != 0:

@@ -3214,8 +3214,9 @@ Each group retains the default 300-second ceiling, remaining plugin time
 still caps every group within the default 900-second aggregate, and the
 30-second runner request, existing pytest markers and 45-second native fixture
 subprocess deadlines are unchanged. An unexpectedly empty unfiltered partition
-fails. Filtered empty partitions may be traversed, but cannot turn an entirely
-empty explicit-file selection into success; only the existing non-explicit
+fails. Filtered empty groups throughout an automatically partitioned plan may
+be traversed, including other files preceding the installer partitions, but
+cannot turn an entirely empty explicit-file selection into success; only the existing non-explicit
 guard-only empty-suite convention remains a skip.
 
 Within these automatic Codespaces partitions, pytest assertion exit `1` is sticky:
