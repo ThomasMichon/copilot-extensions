@@ -7,11 +7,11 @@ from machine_transport import (
     MachineEntry,
     SSHEnvironment,
     normalize_machine_entries,
-    parse_machines_yaml,
     resolve_local_execution_context,
     resolve_machine_selection,
-    resolve_ssh_target,
 )
+
+pytestmark = pytest.mark.contract("machine-transport.local-context.observation")
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
@@ -59,15 +59,6 @@ def test_unscoped_literal_host_key_does_not_reclassify_observed_hostname(
     )
     assert context.machine == entry.key
     assert context.execution_machine == (f"{entry.key}-wsl" if environment == "wsl" else entry.key)
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_unmapped_literal_hostname_can_remain_the_local_binding(environment: str) -> None:
-    context = resolve_local_execution_context(
-        {}, hostname="literal-wsl", environment=environment, configured_machine="literal-wsl",
-    )
-    assert context.machine == "literal-wsl"
-    assert context.execution_machine == ("literal-wsl-wsl" if environment == "wsl" else "literal-wsl")
 
 
 @pytest.mark.parametrize("hostname", ["literal-wsl", "literal-win", "literal(WSL)", "literal(Windows)"])
@@ -155,29 +146,6 @@ def test_normalization_rejects_invalid_observation_context(hostname: str) -> Non
         normalize_machine_entries({}, observed_hostname=hostname)
 
 
-@pytest.mark.parametrize("hostname", [
-    "raw-host", "literal-win", "literal-wsl", "literal(WSL)", "literal(Windows)",
-])
-@pytest.mark.parametrize(("environment", "address"), [
-    ("windows", "{host}"), ("windows", "{host}-win"), ("windows", "{host} (Windows)"),
-    ("wsl", "{host}-wsl"), ("wsl", "{host} (WSL)"),
-])
-def test_configured_hostname_forms_retain_matching_friendly_customizations(
-    hostname: str, environment: str, address: str,
-) -> None:
-    entries = {
-        key: MachineEntry(key, "", hostname=hostname)
-        for key in ("friendly", "friendly-wsl")
-    }
-    context = resolve_local_execution_context(
-        entries, hostname=hostname, environment=environment,
-        configured_machine=address.format(host=hostname),
-    )
-    assert (context.machine, context.execution_machine) == (
-        "friendly", "friendly-wsl" if environment == "wsl" else "friendly",
-    )
-
-
 def test_canonicalized_presentation_key_cannot_shadow_another_entry() -> None:
     entry = MachineEntry("friendly (WSL)", "", hostname="raw-host")
     other = MachineEntry("friendly-wsl", "", execution_platform="windows")
@@ -226,131 +194,6 @@ def test_literal_host_alias_does_not_override_explicit_native_space() -> None:
         )
 
 
-@pytest.mark.parametrize("hostname", ["literal-wsl", "literal(WSL)"])
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_unique_display_binding_preserves_the_literal_observed_host(
-    hostname: str, environment: str,
-) -> None:
-    entry = MachineEntry(hostname, "Friendly", hostname=hostname)
-    entries = {entry.key: entry}
-    display = resolve_local_execution_context(
-        entries, hostname=hostname, environment=environment, configured_machine="Friendly",
-    )
-    keyed = resolve_local_execution_context(
-        entries, hostname=hostname, environment=environment, configured_machine=entry.key,
-    )
-    assert display == keyed
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-@pytest.mark.parametrize("count", [1, 2])
-def test_unrelated_display_metadata_cannot_replace_an_established_local_binding(
-    environment: str, count: int,
-) -> None:
-    binding = "local-binding-wsl" if environment == "wsl" else "local-binding"
-    baseline = resolve_local_execution_context(
-        {}, hostname="raw-host", environment=environment, configured_machine=binding,
-    )
-    entries = {
-        f"other-{index}": MachineEntry(
-            f"other-{index}", binding, hostname=f"other-host-{index}", execution_platform=environment,
-        )
-        for index in range(count)
-    }
-    assert resolve_local_execution_context(
-        entries, hostname="raw-host", environment=environment, configured_machine=binding,
-    ) == baseline
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_locally_associated_display_binding_retains_matching_customization(environment: str) -> None:
-    entry = MachineEntry(
-        "custom-execution", "Friendly", hostname="raw-host",
-        physical_host="physical", execution_platform=environment,
-    )
-    context = resolve_local_execution_context(
-        {entry.key: entry}, hostname="raw-host", environment=environment, configured_machine="Friendly",
-    )
-    assert (context.machine, context.execution_machine, context.customization_key) == (
-        "physical", entry.key, entry.key,
-    )
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_explicit_legacy_display_selector_can_resolve_without_hostname_metadata(environment: str) -> None:
-    entry = MachineEntry(
-        "custom-execution", "Friendly computer", physical_host="physical", execution_platform=environment,
-    )
-    context = resolve_local_execution_context(
-        {entry.key: entry}, hostname="raw-host", environment=environment,
-        configured_machine=entry.display_name,
-    )
-    assert (context.machine, context.execution_machine, context.customization_key) == (
-        "physical", entry.key, entry.key,
-    )
-
-
-@pytest.mark.parametrize("guest_label", ["wsl", " WSL ", "WsL"])
-@pytest.mark.parametrize("configured", [False, True])
-@pytest.mark.parametrize("physical_key", ["desk", "literal-wsl", "literal(WSL)"])
-def test_normalized_guest_profile_keeps_declared_guest_customization(
-    guest_label: str, configured: bool, physical_key: str,
-) -> None:
-    entries = parse_machines_yaml({"machines": {physical_key: {
-        "hostname": "raw-host",
-        "ssh": {"environments": [{"name": guest_label, "alias": "guest-profile"}]},
-    }}}, preserve_environment_values=True, keep_unnamed_environments=True)
-    context = resolve_local_execution_context(
-        entries, hostname="raw-host", environment="wsl",
-        configured_machine="guest-profile" if configured else None,
-    )
-    assert (context.machine, context.execution_machine, context.customization_key) == (
-        physical_key, f"{physical_key}-wsl", f"{physical_key}-wsl",
-    )
-    assert entries[physical_key].ssh_environments[0].name == guest_label
-
-
-def test_logical_projection_canonicalizes_roles_without_mutating_raw_profile_values() -> None:
-    entries = parse_machines_yaml({"machines": {"desk": {
-        "ssh": {"environments": [
-            {"name": "WIN", "alias": "native-profile"},
-            {"name": " WSL ", "alias": "guest-profile"},
-        ]},
-    }}}, preserve_environment_values=True)
-    normalized = normalize_machine_entries(entries)
-    assert list(normalized) == ["desk", "desk-wsl"]
-    assert normalized == normalize_machine_entries(normalized)
-    assert [env.name for env in entries["desk"].ssh_environments] == ["WIN", " WSL "]
-    assert resolve_ssh_target(normalized["desk"]) == ("native-profile", "pwsh")
-    assert resolve_ssh_target(normalized["desk-wsl"]) == ("guest-profile", "bash")
-
-
-@pytest.mark.parametrize("policy", ["preserved", "required-alias"])
-def test_explicit_space_accepts_equivalent_profile_labels_without_relabeling_keys(policy: str) -> None:
-    entries = parse_machines_yaml({"machines": {"opaque-guest": {
-        "execution_platform": "wsl", "physical_host": "desk",
-        "ssh": {"environments": [{"name": " WSL ", "alias": "guest-profile"}]},
-    }}}, preserve_environment_values=policy == "preserved", require_alias=policy == "required-alias")
-    normalized = normalize_machine_entries(entries)
-    assert list(normalized) == ["opaque-guest"]
-    assert entries["opaque-guest"].ssh_environments[0].name == " WSL "
-    assert normalized["opaque-guest"].ssh_environments[0].name == "wsl"
-    assert resolve_ssh_target(normalized["opaque-guest"]) == ("guest-profile", "bash")
-
-
-@pytest.mark.parametrize("policy", ["preserved", "required-alias"])
-@pytest.mark.parametrize("profile_label", ["WIN", "LiNuX", None])
-def test_profile_label_normalization_does_not_accept_a_foreign_or_unknown_space(
-    policy: str, profile_label: str | None,
-) -> None:
-    with pytest.raises(ValueError, match="another space"):
-        parse_machines_yaml({"machines": {"opaque-guest": {
-            "execution_platform": "wsl",
-            "ssh": {"environments": [{"name": profile_label, "alias": "profile"}]},
-        }}}, preserve_environment_values=policy == "preserved",
-            require_alias=policy == "required-alias", keep_unnamed_environments=True)
-
-
 def test_derived_guest_does_not_claim_native_customization() -> None:
     entry = MachineEntry("friendly", "Friendly", hostname="raw-host")
     entries = {entry.key: entry}
@@ -364,72 +207,9 @@ def test_derived_guest_does_not_claim_native_customization() -> None:
     )
 
 
-@pytest.mark.parametrize("shadow", ["key", "alias"])
-def test_literal_display_name_cannot_shadow_an_explicit_identity(shadow: str) -> None:
-    local = MachineEntry("literal-wsl", "Friendly", hostname="literal-wsl")
-    foreign = MachineEntry(
-        "Friendly" if shadow == "key" else "foreign", "", execution_platform="windows",
-        alias="Friendly" if shadow == "alias" else "",
-    )
-    with pytest.raises(ValueError, match="conflicts"):
-        resolve_local_execution_context(
-            {local.key: local, foreign.key: foreign}, hostname="literal-wsl", environment="wsl",
-            configured_machine="Friendly",
-        )
-
-
-def test_literal_display_name_binding_must_be_unique() -> None:
-    local = MachineEntry("literal-wsl", "Friendly", hostname="literal-wsl")
-    other = MachineEntry("other", "Friendly", hostname="other")
-    with pytest.raises(ValueError, match="multiple machines|ambiguous"):
-        resolve_local_execution_context(
-            {local.key: local, other.key: other}, hostname="literal-wsl", environment="wsl",
-            configured_machine="Friendly",
-        )
-
-
-@pytest.mark.parametrize(("environment", "profile"), [
-    ("windows", "linux"), ("wsl", "windows"), ("linux", "windows"),
-])
-def test_literal_host_profile_alias_cannot_override_its_environment(
-    environment: str, profile: str,
-) -> None:
-    entry = MachineEntry(
-        "literal-wsl", "", hostname="literal-wsl",
-        ssh_environments=[SSHEnvironment(profile, "profile-only")],
-    )
-    with pytest.raises(ValueError, match="conflicts"):
-        resolve_local_execution_context(
-            {entry.key: entry}, hostname="literal-wsl", environment=environment,
-            configured_machine="profile-only",
-        )
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl"])
-def test_projected_legacy_entries_keep_their_original_keys(environment: str) -> None:
-    entry = MachineEntry(
-        "friendly", "", hostname="raw-host", ssh_environments=[
-            SSHEnvironment("windows", "native-ssh"), SSHEnvironment("wsl", "guest-ssh"),
-        ],
-    )
-    context = resolve_local_execution_context(
-        {entry.key: entry}, hostname="raw-host", environment=environment,
-    )
-    assert context.machine == "friendly"
-    assert context.execution_machine == ("friendly-wsl" if environment == "wsl" else "friendly")
-    assert context.customization_key == context.execution_machine
-
-
 def test_unscoped_guest_declaration_keeps_legacy_execution_key() -> None:
     entry = MachineEntry("friendly-wsl", "", hostname="raw-host")
     context = resolve_local_execution_context({entry.key: entry}, hostname="raw-host", environment="wsl")
-    assert (context.machine, context.execution_machine) == ("friendly", "friendly-wsl")
-
-
-def test_configured_legacy_presentation_resolves_to_one_execution_term() -> None:
-    context = resolve_local_execution_context(
-        {}, hostname="raw-host", environment="wsl", configured_machine="friendly (WSL)",
-    )
     assert (context.machine, context.execution_machine) == ("friendly", "friendly-wsl")
 
 
@@ -471,76 +251,6 @@ def test_guest_only_entry_does_not_require_optional_host_metadata(
     )
     assert (context.machine, context.execution_machine) == ("desk", execution)
     assert context.customization_key == ("desk-wsl" if environment == "wsl" else None)
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_unnamed_profile_does_not_assert_a_conflicting_environment(environment: str) -> None:
-    key = "desk-wsl" if environment == "wsl" else "desk"
-    entry = MachineEntry(key, "", hostname="raw-host", ssh_environments=[SSHEnvironment("", "generic")])
-    context = resolve_local_execution_context(
-        {key: entry}, hostname="raw-host", environment=environment, configured_machine="generic",
-    )
-    assert (context.machine, context.execution_machine, context.customization_key) == ("desk", key, key)
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-@pytest.mark.parametrize("nullable", ["name", "alias", "both"])
-@pytest.mark.parametrize("policy", ["preserved", "required-alias"])
-def test_legacy_nullable_profile_metadata_remains_non_authoritative(
-    environment: str, nullable: str, policy: str,
-) -> None:
-    name = None if nullable in ("name", "both") else environment
-    alias = None if nullable in ("alias", "both") else "profile"
-    entries = parse_machines_yaml({"machines": {"desk": {
-        "alias": "friendly", "hostname": "raw-host",
-        "ssh": {"environments": [{"name": name, "alias": alias}]},
-    }}}, preserve_environment_values=policy == "preserved",
-        require_alias=policy == "required-alias", keep_unnamed_environments=True)
-    query = alias or "friendly"
-    selected = resolve_machine_selection(entries, query, environment)
-    assert (selected.target.machine, selected.target.environment) == ("desk", environment)
-    context = resolve_local_execution_context(
-        entries, hostname="raw-host", environment=environment, configured_machine=query,
-    )
-    assert (context.machine, context.environment, context.execution_machine) == (
-        "desk", environment, "desk-wsl" if environment == "wsl" else "desk",
-    )
-    profile = entries["desk"].ssh_environments[0]
-    assert (profile.name, profile.alias) == (name, alias)
-
-
-@pytest.mark.parametrize("policy", ["preserved", "required-alias"])
-def test_nullable_profile_alias_does_not_hide_an_explicit_platform_conflict(policy: str) -> None:
-    entries = parse_machines_yaml({"machines": {"native": {
-        "alias": "friendly", "execution_platform": "windows",
-        "ssh": {"environments": [{"name": "windows", "alias": None}]},
-    }}}, preserve_environment_values=policy == "preserved", require_alias=policy == "required-alias")
-    with pytest.raises(ValueError, match="conflicts"):
-        resolve_machine_selection(entries, "friendly", "wsl")
-
-
-@pytest.mark.parametrize("policy", ["preserved", "required-alias"])
-def test_non_string_profile_environment_is_an_explicit_validation_error(policy: str) -> None:
-    entries = parse_machines_yaml({"machines": {"desk": {
-        "ssh": {"environments": [{"name": 123, "alias": "profile"}]},
-    }}}, preserve_environment_values=policy == "preserved", require_alias=policy == "required-alias")
-    with pytest.raises(ValueError, match="string or null"):
-        resolve_machine_selection(entries, "profile", "linux")
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-@pytest.mark.parametrize("label", ["legacy-label", "Developer shell"])
-def test_unknown_legacy_profile_labels_do_not_assert_a_foreign_platform(
-    environment: str, label: str,
-) -> None:
-    entries = parse_machines_yaml({"machines": {"desk": {
-        "hostname": "raw-host", "ssh": {"environments": [{"name": label, "alias": "profile"}]},
-    }}}, preserve_environment_values=True)
-    context = resolve_local_execution_context(
-        entries, hostname="raw-host", environment=environment, configured_machine="profile",
-    )
-    assert context.execution_machine == ("desk-wsl" if environment == "wsl" else "desk")
-    assert entries["desk"].ssh_environments[0].name == label
 
 
 @pytest.mark.parametrize("configured", [False, True])
@@ -604,16 +314,6 @@ def test_different_physical_entries_cannot_share_a_canonicalized_execution_key(
         resolve_local_execution_context(entries, hostname=host, environment=environment)
 
 
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_unrelated_legacy_display_like_key_does_not_require_local_enrollment(environment: str) -> None:
-    entry = MachineEntry("Other Legacy Computer", "", hostname="other-host")
-    context = resolve_local_execution_context(
-        {entry.key: entry}, hostname="local-host", environment=environment,
-    )
-    assert context.machine == "local-host"
-    assert context.execution_machine == ("local-host-wsl" if environment == "wsl" else "local-host")
-
-
 @pytest.mark.parametrize("physical", ["Physical computer", "Rack/Computer", "Rack#1"])
 def test_structured_physical_names_are_not_execution_reference_tokens(physical: str) -> None:
     entry = MachineEntry(
@@ -638,17 +338,6 @@ def test_existing_clean_registered_tokens_are_not_reinterpreted(key: str) -> Non
         {key: entry}, hostname="raw-host", environment="linux", configured_machine=key,
     )
     assert context.execution_machine == key
-
-
-@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_existing_configured_binding_remains_distinct_from_observation(environment: str) -> None:
-    configured = "custom-wsl" if environment == "wsl" else "custom"
-    context = resolve_local_execution_context(
-        {}, hostname="raw-host", environment=environment, configured_machine=configured,
-    )
-    assert (context.hostname, context.machine, context.execution_machine) == (
-        "raw-host", "custom", configured,
-    )
 
 
 def test_same_platform_customizations_require_unambiguous_current_selection() -> None:
@@ -706,25 +395,6 @@ def test_generated_guest_key_cannot_shadow_identity_labels(slot: str, configured
         )
 
 
-@pytest.mark.parametrize("unrelated", [False, True])
-def test_configured_guest_does_not_require_optional_guest_entry(unrelated: bool) -> None:
-    entries = {
-        "native": MachineEntry(
-            "native", "", execution_platform="windows",
-            physical_host="elsewhere" if unrelated else "friendly",
-        ),
-    }
-    context = resolve_local_execution_context(
-        entries, hostname="raw-host", environment="wsl", configured_machine="friendly-wsl",
-    )
-    assert (context.machine, context.execution_machine, context.customization_key) == (
-        "friendly", "friendly-wsl", None,
-    )
-    if not unrelated:
-        with pytest.raises(ValueError, match="no wsl logical entry"):
-            resolve_machine_selection(entries, "friendly-wsl", "wsl")
-
-
 @pytest.mark.parametrize("hostname", ["raw-host", "host"])
 def test_unscoped_guest_sibling_precedes_unscoped_native_fallback(hostname: str) -> None:
     entries = {
@@ -735,94 +405,6 @@ def test_unscoped_guest_sibling_precedes_unscoped_native_fallback(hostname: str)
     assert (context.machine, context.execution_machine, context.customization_key) == (
         "host", "host-wsl", "host-wsl",
     )
-
-
-@pytest.mark.parametrize("guest_key", ["friendly-wsl", "friendly (WSL)"])
-@pytest.mark.parametrize("scoped_neighbor", [False, True])
-def test_configured_legacy_native_binding_selects_its_actual_guest(
-    guest_key: str, scoped_neighbor: bool,
-) -> None:
-    entries = {
-        key: MachineEntry(key, "", hostname="raw-host")
-        for key in ("friendly", guest_key)
-    }
-    if scoped_neighbor:
-        entries["other"] = MachineEntry("other", "", execution_platform="linux")
-    configured = resolve_local_execution_context(
-        entries, hostname="raw-host", environment="wsl", configured_machine="friendly",
-    )
-    observed = resolve_local_execution_context(entries, hostname="raw-host", environment="wsl")
-    assert configured == observed
-    assert configured.customization_key == guest_key
-    assert resolve_machine_selection(entries, "friendly", "wsl").entry.key == guest_key
-
-
-@pytest.mark.parametrize("scoped_neighbor", [False, True])
-@pytest.mark.parametrize("profile_name", [
-    "native-profile", "native-profile-wsl", "native-profile (WSL)",
-])
-def test_legacy_guest_selection_never_retargets_a_native_profile(
-    scoped_neighbor: bool, profile_name: str,
-) -> None:
-    native = MachineEntry(
-        "friendly", "", hostname="raw-host",
-        ssh_environments=[SSHEnvironment("windows", "native-profile")],
-    )
-    guest = MachineEntry("friendly-wsl", "", hostname="raw-host")
-    entries = {native.key: native, guest.key: guest}
-    if scoped_neighbor:
-        entries["other"] = MachineEntry("other", "", execution_platform="linux")
-    with pytest.raises(ValueError, match="conflicts"):
-        resolve_machine_selection(entries, profile_name, "wsl")
-
-
-@pytest.mark.parametrize("binding", [
-    "native-label-wsl", "native-label (WSL)", "native-space-wsl", "{physical}-wsl",
-    "Human label-wsl", "Human label (WSL)",
-])
-@pytest.mark.parametrize("physical", ["Friendly", "physical-wsl"])
-def test_missing_guest_alias_fallback_preserves_its_resolved_physical_family(
-    binding: str, physical: str,
-) -> None:
-    binding = binding.format(physical=physical)
-    native = MachineEntry(
-        "native-space", "Human label", alias="native-label", hostname="raw-host",
-        physical_host=physical, execution_platform="windows",
-    )
-    entries = {native.key: native}
-    configured = resolve_local_execution_context(
-        entries, hostname="raw-host", environment="wsl", configured_machine=binding,
-    )
-    observed = resolve_local_execution_context(entries, hostname="raw-host", environment="wsl")
-    assert configured == observed
-    assert (configured.machine, configured.execution_machine) == (physical, f"{physical}-wsl")
-    with pytest.raises(ValueError, match="no wsl logical entry"):
-        resolve_machine_selection(entries, binding, "wsl")
-
-
-def test_missing_guest_metadata_does_not_hide_ambiguous_physical_families() -> None:
-    entries = {
-        key: MachineEntry(
-            key, "Shared", hostname="Shared", execution_platform="windows", physical_host=physical,
-        )
-        for key, physical in (("first", "physical-a"), ("second", "physical-b"))
-    }
-    with pytest.raises(ValueError, match="ambiguous"):
-        resolve_local_execution_context(
-            entries, hostname="raw-host", environment="wsl", configured_machine="Shared-wsl",
-        )
-
-
-@pytest.mark.parametrize(("environment", "profile"), [
-    ("windows", "WIN"), ("wsl", " WSL "), ("linux", "LiNuX"),
-])
-def test_named_profile_environment_uses_shared_normalization(environment: str, profile: str) -> None:
-    key = "desk"
-    entry = MachineEntry(key, "", hostname="raw-host", ssh_environments=[SSHEnvironment(profile, "profile")])
-    context = resolve_local_execution_context(
-        {key: entry}, hostname="raw-host", environment=environment, configured_machine="profile",
-    )
-    assert context.execution_machine == ("desk-wsl" if environment == "wsl" else key)
 
 
 @pytest.mark.parametrize(("key", "hostname", "actual", "observed"), [

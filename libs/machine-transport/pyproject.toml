@@ -50,3 +50,4 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["contract(name): behavioral contract attribution"]
