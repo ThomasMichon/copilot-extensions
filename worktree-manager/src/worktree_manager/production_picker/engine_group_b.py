@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from time import monotonic
+
 from .. import engine_client
 
 
@@ -15,7 +17,8 @@ def _run_group_b_json_verb(
     try:
         return engine_client.run_json(project, args, timeout=timeout)
     except engine_client.EngineError as error:
-        detail = engine_client._engine_error_detail(error).casefold()
+        detail = engine_client._engine_error_detail(error).strip().casefold()
+        detail = detail.splitlines()[-1] if detail else ""
         unsupported = (
             ("invalid choice" in detail and verb_name in detail)
             or ("unrecognized arguments" in detail and verb_name in detail)
@@ -33,12 +36,27 @@ def picker_bootstrap(
     *,
     timeout: int = engine_client._DEFAULT_TIMEOUT,
 ) -> dict:
-    return _run_group_b_json_verb(
-        project,
-        ["picker-bootstrap", "--json"],
-        verb_name="picker-bootstrap",
-        timeout=timeout,
-    )
+    started = monotonic()
+    try:
+        return _run_group_b_json_verb(
+            project,
+            ["picker-bootstrap", "--json", "--project-config"],
+            verb_name="picker-bootstrap",
+            timeout=timeout,
+        )
+    except engine_client.EngineError as error:
+        detail = engine_client._engine_error_detail(error).strip().casefold()
+        if not detail.endswith("unrecognized arguments: --project-config"):
+            raise
+        remaining = timeout - (monotonic() - started)
+        if remaining <= 0:
+            raise
+        return _run_group_b_json_verb(
+            project,
+            ["picker-bootstrap", "--json"],
+            verb_name="picker-bootstrap",
+            timeout=remaining,
+        )
 
 
 def repair_stale_anchor(

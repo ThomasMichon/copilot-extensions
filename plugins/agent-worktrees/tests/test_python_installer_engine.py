@@ -210,6 +210,63 @@ def test_freeze_closes_transitive_external_paths_without_editing_source(engine, 
     assert engine.freeze_inputs(plugin, tmp_path / "changed").payload_hash != frozen.payload_hash
 
 
+@pytest.mark.parametrize("extras", [
+    ["server"], "server", ("",), ("server,store",), ("../server",),
+    ("server", "SERVER"), ("unknown",),
+])
+def test_candidate_refuses_invalid_extra_selection_before_writing(engine, tmp_path, extras):
+    plugin = _package(tmp_path / "plugin", "example")
+    with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write('[project.optional-dependencies]\nserver=[]\n')
+    root = tmp_path / "runtime"
+    with pytest.raises(ValueError, match="extras"):
+        with engine.numbered_candidate(
+            root, "1.0.0", plugin=plugin, uv=tmp_path / "unused-uv",
+            base_python=tmp_path / "unused-python", health_module="example_module", extras=extras,
+        ):
+            pytest.fail("invalid extras cannot admit a candidate")
+    assert not root.exists()
+
+
+def test_extra_selection_normalizes_order_and_refuses_ambiguous_declarations(engine, tmp_path):
+    plugin = _package(tmp_path / "plugin", "example")
+    manifest = plugin / "pyproject.toml"
+    with manifest.open("a", encoding="utf-8") as stream:
+        stream.write('[project.optional-dependencies]\nserver=[]\nstdio_mcp=[]\n')
+    assert engine._selected_extras(plugin, ("STDIO.MCP", "SERVER")) == ("server", "stdio-mcp")
+    assert engine._selected_extras(plugin, ("STDIO..__MCP",)) == ("stdio-mcp",)
+    with manifest.open("a", encoding="utf-8") as stream:
+        stream.write('stdio-mcp=[]\n')
+    with pytest.raises(ValueError, match="ambiguous"):
+        engine._selected_extras(plugin, ("server",))
+
+
+def test_dev_candidate_refuses_nonbase_profiles_before_writing(engine, tmp_path):
+    plugin = _package(tmp_path / "plugin", "example")
+    with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write('[project.optional-dependencies]\nserver=[]\n')
+    root = tmp_path / "runtime"
+    with pytest.raises(ValueError, match="immutable numbered"):
+        with engine.dev_candidate(
+            root, owner="profile-test", plugin=plugin, uv=tmp_path / "unused-uv",
+            base_python=tmp_path / "unused-python", health_module="example_module",
+            extras=("server",),
+        ):
+            pytest.fail("mutable slots cannot acquire a non-base profile")
+    assert not root.exists()
+
+
+def test_construction_identity_preserves_base_and_binds_selected_extras(engine, tmp_path):
+    plugin = _package(tmp_path / "plugin", "example")
+    files = engine._source_files((plugin,))
+    base = engine._construction_hash(files, ())
+    server = engine._construction_hash(files, ("server",))
+    assert base == engine.runtime.fingerprint_source(files)
+    assert len({base, server, engine._construction_hash(files, ("server", "store"))}) == 3
+    (plugin / "src" / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+    assert engine._construction_hash(files, ("server",)) != server
+
+
 def test_freeze_identity_survives_relocation_and_ignores_build_outputs(engine, tmp_path):
     plugin = _package(tmp_path / "one" / "plugin", "example")
     (plugin / "build").mkdir()
@@ -531,6 +588,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     info=f"{name}-{version}.dist-info"
     metadata=f"Metadata-Version: 2.1\\nName: {project['name']}\\nVersion: {version}\\n"
     metadata+="".join(f"Requires-Dist: {dependency}\\n" for dependency in project.get("dependencies",[]))
+    for extra,requirements in project.get("optional-dependencies",{}).items():
+        metadata+=f"Provides-Extra: {extra}\\n"
+        metadata+="".join(f"Requires-Dist: {dependency}; extra == '{extra}'\\n" for dependency in requirements)
     with zipfile.ZipFile(pathlib.Path(wheel_directory)/wheel,"w") as archive:
         for source in (root/"src").rglob("*.py"):
             archive.write(source,str(source.relative_to(root/"src")).replace("\\\\","/"))
@@ -577,6 +637,104 @@ def build_inputs(tmp_path, monkeypatch):
     monkeypatch.setenv("UV_NO_INDEX", "1")
     monkeypatch.setenv("UV_NO_CACHE", "1")
     return repo / "plugin", Path(uv)
+
+
+@pytest.fixture
+def profile_inputs(build_inputs):
+    plugin, uv = build_inputs
+    with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(
+            '[project.optional-dependencies]\nserver=[]\nstore=[]\n'
+            'missing=["unavailable-profile-dependency==1.0"]\n',
+        )
+    return plugin, uv
+
+
+@pytest.mark.timeout(120)
+def test_selected_extras_use_retained_uv_and_cannot_reuse_another_profile(
+    engine, tmp_path, profile_inputs, monkeypatch,
+):
+    from contextlib import contextmanager
+
+    plugin, uv = profile_inputs
+    root = tmp_path / "runtime"
+    retain = engine.retain_uv_install
+    transactions = []
+
+    @contextmanager
+    def trace(*args, **kwargs):
+        with retain(*args, **kwargs) as transaction:
+            transactions.append(transaction)
+            yield transaction
+
+    monkeypatch.setattr(engine, "retain_uv_install", trace)
+    arguments = dict(
+        plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module",
+    )
+    with engine.numbered_candidate(
+        root, "1.0.0+host", extras=("STORE", "SERVER"), **arguments,
+    ) as built:
+        assert not built.reused and built.extras == ("server", "store")
+        assert engine.runtime.is_complete(root, "1.0.0+host", expect_hash=built.payload_hash)
+        assert len(transactions) == 1
+        target = str(transactions[0].sources[plugin]) + "[server,store]"
+        assert target in transactions[0].argv
+        evidence = built.slot / ".runtime-input-origins.json"
+        receipt = json.loads(evidence.read_text(encoding="utf-8"))
+        assert receipt["extras"] == ["server", "store"]
+        assert receipt["packages"]["example"] == built.frozen_plugin.as_uri()
+        assert built.payload_hash == engine._construction_hash(
+            engine._source_files(engine._package_roots(plugin)), built.extras,
+        )
+    assert not built.frozen_plugin.exists()
+
+    def refuse_construction(*args, **kwargs):
+        pytest.fail("completed profile reuse must not construct")
+
+    monkeypatch.setattr(engine.runtime, "construction_lease", refuse_construction)
+    arguments.update(uv=tmp_path / "absent-uv", base_python=tmp_path / "absent-python")
+    with engine.numbered_candidate(
+        root, "1.0.0+host", extras=("server", "store"), **arguments,
+    ) as reused:
+        assert reused.reused and reused.extras == built.extras
+    for extras in ((), ("server",), ("store",)):
+        with pytest.raises(RuntimeError, match="different content"):
+            with engine.numbered_candidate(root, "1.0.0+host", extras=extras, **arguments):
+                pytest.fail("another profile cannot reuse the same immutable slot")
+    assert len(transactions) == 1
+    receipt["extras"] = []
+    evidence.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(engine.HealthRepairRequired, match="selected dependency profile"):
+        with engine.numbered_candidate(
+            root, "1.0.0+host", extras=("server", "store"), **arguments,
+        ):
+            pytest.fail("profile evidence must be checked on healthy reuse")
+
+
+@pytest.mark.timeout(120)
+def test_selected_extra_dependency_failure_cannot_complete_or_activate(
+    engine, tmp_path, profile_inputs,
+):
+    plugin, uv = profile_inputs
+    root = tmp_path / "runtime"
+    arguments = dict(
+        plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module",
+    )
+    with engine.numbered_candidate(root, "1.0.0", **arguments) as base:
+        assert not base.extras
+        assert base.payload_hash == engine.runtime.fingerprint_source(
+            engine._source_files(engine._package_roots(plugin)),
+        )
+        assert "extras" not in json.loads(
+            (base.slot / ".runtime-input-origins.json").read_text(encoding="utf-8"),
+        )
+    (root / "current-version").write_text("1.0.0\n", encoding="utf-8")
+    with pytest.raises(subprocess.CalledProcessError):
+        with engine.numbered_candidate(root, "1.0.0+missing", extras=("missing",), **arguments):
+            pytest.fail("unavailable selected dependency cannot produce a ready candidate")
+    assert not engine.runtime.is_complete(root, "1.0.0+missing")
+    assert (root / "current-version").read_text(encoding="utf-8") == "1.0.0\n"
+    assert not list((root / ".installer-inputs").iterdir())
 
 
 def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change(
@@ -932,7 +1090,8 @@ def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
     monkeypatch.setattr(engine, "_child", failed)
     with pytest.raises(type(failure)) as caught:
         engine._verify_installed(
-            None, tmp_path, tmp_path / "python", "example", 0, 1, require_frozen_origin=False,
+            engine.FrozenInputs(tmp_path, (), "unused"),
+            tmp_path, tmp_path / "python", "example", 0, 1, require_frozen_origin=False,
         )
     assert caught.value is failure
 

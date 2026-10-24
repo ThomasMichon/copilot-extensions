@@ -3,6 +3,7 @@
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
 - [2026-10-23](<journal/2026/10.23 runtime-installs.md>)
+- [2026-10-23 - Vault bootstrap publication](<journal/2026/10.23 vault-bootstrap.md>)
 - [2026-10-22](<journal/2026/10.22 runtime-installs.md>)
 - [2026-10-21](<journal/2026/10.21 runtime-installs.md>)
 - [2026-10-20](<journal/2026/10.20 runtime-installs.md>)

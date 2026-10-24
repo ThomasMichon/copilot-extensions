@@ -67,6 +67,7 @@ composition; content integrity does not reduce to trusting a source marker.
 | Operator + driving agent | Design, build tooling, drive phases | `copilot-extensions` worktree on this machine |
 | Baseline prevention driver | Historical Phase 8 proposal/evidence; remaining activation transferred to the canonical campaign | #6430 / main-owned-workflow-control Phase 5 |
 | Regression admission contributor | First bounded contributor-regression unit cohort; existing broad periodic ownership retained | Managed source `chugging-wrench`; #3336 |
+| Stamped-candidate contributor | Bounded Phase 9c ordering and coverage-provenance correction; other campaign and control owners retained | Managed source `faded-washer`; #8390 |
 
 _Expand this table if/when work is split across additional participants
 (e.g. a dedicated worktree for the CI pipeline vs. one for CONTRIBUTING/AGENTS.md
@@ -109,6 +110,16 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-23 stamping, testing and coverage direction (verbatim):**
+
+> We need to enforce an ordering between version-stamping and testing. It probably makes most sense to test on vendored-and-stamped code, which basically acts as the "release candidate". Of course, doing so risks mangling code-coverage collection, unless we carefully source-map it back to original dev code.
+
+**Scope:** Phase 9c below proposes the composed-candidate execution boundary and
+development-coverage attribution for #8390. It preserves the unit-only policy,
+existing test budgets, development-owned release identity, and separately
+governed Main activation. It does not revive the superseded full/native draft
+profile or transfer other participants' unfinished work.
 
 **2026-10-21 captured regression-led capacity request (verbatim):**
 
@@ -908,6 +919,15 @@ periodic corpus and broader tournament ownership remain intact.)_
       then verify an ordinary promotion reuses the exact expanded unit proof
       and remains under thirty minutes through publication, merge and tag.
 
+### Phase 9c - Stamped-candidate tests and development coverage
+
+_(Agent-recommended realization of the 2026-10-23 operator direction.
+Participant: Stamped-candidate contributor; bounded tracker: #8390.)_
+
+- [ ] Review this ordering and coverage amendment before runtime/helper changes.
+- [ ] Execute the [bounded ordering and coverage plan](promotion-burndown.md#stamped-candidate-ordering-and-coverage),
+      retaining other Phase 9 and independently governed control owners.
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
@@ -1109,6 +1129,13 @@ test witnesses run periodically and cannot hold promotion.
       queue/execution timing and periodic integration failures separately.
       Periodic failures remain attributable but cannot silently regrow the gate.
 
+### Phase 9c validation
+
+- [ ] Resolve the [ordering, mapping and mutation regressions](promotion-burndown.md#stamped-candidate-validation),
+      without weakening the admitted unit/effect/time contract.
+- [ ] Verify the containing qualified release and coverage readback within the
+      existing cadence gate before completing this bounded slice.
+
 ## Proposal
 
 Phase 9 extends the existing source marker, generator, artifact identity and
@@ -1129,6 +1156,21 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-23 - Composed-candidate ordering amendment
+
+Captured the operator's complete stamping/testing and source-map direction
+verbatim above. #8390 exposes the concrete seam: source units admit an earlier
+Python version assignment while release composition changes that assignment
+before candidate qualification. The proposed correction tests the frozen
+vendored-and-stamped composition rather than weakening source-byte comparison.
+
+Phase 9c and the release vision now distinguish actual candidate execution
+from its attributable development-coverage projection. Existing composition,
+positive-unit admission, packet verification and governed control owners are
+the integration points; this is not a second release pipeline or revival of
+the superseded full/native profile. Plan review precedes implementation and
+separate Main activation; no release, activation or completion is claimed.
 
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as

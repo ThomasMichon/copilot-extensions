@@ -1531,6 +1531,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  update [--wait|--detach|--supervised-debug]  submit and observe a durable suite update")
         print("  update --request-status ID [--json]        read a durable request without installing")
         print("  update --recovery-status|--recover-after-restart [--json]  inspect/settle interrupted work")
+        print("  update --recover-for-repair [--json]  authorize queue release without cleanup proof; no install")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")

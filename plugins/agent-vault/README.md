@@ -21,15 +21,27 @@ diagnostics do not imply request acceptance. Missing/incompatible packaged
 support and cold namespaced or unsupported-platform calls require explicit
 repair/management rather than a foreground fallback. Managed-publication,
 pinned-read and no-self-provision refusals remain in force.
-Bootstrap reconciliation hooks and explicit installer entry points have not
-adopted this driver. Service-enabled provisioning remains the command default;
-the change does not enroll maintenance or replace service supervision.
+The legacy session bootstrap uses that same owner for its first stamp and
+version-drift provisioning, without a separate installer PID/reaping guard.
+It returns only `{}` and a diagnostic launch acknowledgement within its hook
+budget, not installation readiness or durable acceptance. The global binstub
+appears after queued stamping; the payload-local catalog command is available
+while that work is pending. Healthy, cell-scoped and killswitch-paused hooks
+remain no-ops; no-self-provision and pinned reads explicitly defer publication.
+Missing/older driver support refuses without an inline installer.
+The POSIX hook retains its existing metadata-Python prerequisite and no-Python
+no-op; the payload command still supports true Python-free genesis. Cold
+bootstrap requires the qualified Windows or Linux native driver, not stock
+legacy Bash/macOS. The independent session-guidance writer is unchanged.
+Explicit installer entry points remain separate, unadopted callers.
+Service-enabled provisioning remains the command and drift default; this does
+not enroll maintenance or replace service supervision.
 The native qualification portfolio is documented in `libs/update-driver/README.md`.
 
 ## Setup in one pass
 
 1. **Enable the plugin payload** through Copilot's plugin mechanism (or work from a local checkout of this repo).
-2. **Install or stamp the runtime.** The plugin has a session-start bootstrap hook that performs a cheap `stamp` when the runtime is missing; the stamped binstub self-provisions the full venv on first use. To do it explicitly from a checkout:
+2. **Install or stamp the runtime.** The session-start bootstrap queues a publication-only `stamp` when the runtime is missing; the stamped binstub queues full provisioning on first use. Neither action runs its installer in the hook/calling command. To use the separate explicit management entry point from a checkout:
 
    ```powershell
    pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install

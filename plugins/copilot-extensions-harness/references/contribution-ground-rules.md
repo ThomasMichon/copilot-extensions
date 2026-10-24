@@ -22,7 +22,8 @@ Use the **canonical-public / private-elaboration** model:
   **one-way** to the public artifact and carries only the additional private
   deployment/evidence context (topology, credentials, adoption rationale).
   Public artifacts never point to or name a private repository, machine,
-  account, or record identifier.
+  account, or record identifier, except for the standard `Copilot-Session`
+  commit trailer allowed below.
 - A concern that cannot be stated or validated without private context stays
   private until a generic reproduction or contract can be extracted from it.
 
@@ -80,6 +81,12 @@ useful to a stranger without exposing a private system:
 - **Rationale.** State the generalized "what" and "why it's useful upstream."
   The organization-specific "why we need it" belongs in the private
   elaboration, not here.
+
+**Commit-provenance exception:** the standard `Copilot-Session: <session-id>`
+trailer is allowed in public commits. Keep it when supplied by the runtime or
+operator; do not request its removal merely because it is a session ID. This
+does not permit private session content, paths, links, other identifiers, or
+raw session fields in source-attribution comments.
 
 When in doubt, write the artifact as if you were an unaffiliated open-source
 contributor with no access to any private system — because to every other

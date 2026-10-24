@@ -9,7 +9,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
-from acp.exceptions import RequestError
 from pydantic import BaseModel, Field, field_validator
 
 from .spawn_target import REQUEST_OVERRIDES_KEY, SpawnTarget
@@ -127,6 +126,8 @@ async def lifecycle_rpc(client: Any, method: Any, **params: Any) -> Any:
     if context is None:
         return await client._lifecycle_rpc(method, **params)
     _require_capability(client)
+    from acp.exceptions import RequestError
+
     try:
         result = await client._lifecycle_rpc(
             method, **params, **{META_KEY: context.model_dump(mode="json")},
@@ -158,6 +159,8 @@ def read_context(metadata: dict[str, Any], agent: str | None) -> PrivilegedConte
     """Validate only our namespace, keeping unrelated ACP metadata additive."""
     if META_KEY not in metadata:
         return None
+    from acp.exceptions import RequestError
+
     from . import elevated
 
     try:
