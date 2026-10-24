@@ -7,6 +7,29 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Chat container image qualification
+
+`chat-container-qualification.yml` runs a disposable Linux Docker proof for
+Chat-path pull requests, or manually with an immutable `candidate_ref` and an
+explicit digest-pinned `python_base`. The checked-in default is a seasoned
+qualification fixture, not an admitted release base. The source SHA and actual
+image/base/platform are recorded; no image is pushed or deployment selected.
+
+After the existing standalone runner prepares its declared tooling, the lane
+runs `tools/qualify_chat_container.py --python-base <digest-pinned-base>` from
+that prepared interpreter. It constructs a dedicated offline wheel/lock context,
+starts non-root with read-only application content and explicit fixture limits,
+then exercises retained-only startup refusal, explicit storage creation,
+authenticated health, independent participants, competing-writer refusal,
+SIGTERM and retained restart/deduplication. Resources have unique fixture names
+and are removed on exit.
+
+Native Python tests and `tools/test_chat_container_image.py` cover host and
+recipe contracts but do not substitute for this image proof. The lane does not
+qualify Gateway connectivity, Komodo application, cross-host storage fencing,
+production capacity or release admission. See
+[`services/chat/container/README.md`](services/chat/container/README.md).
+
 ## Optional historical Bridge source proof
 
 The manual `installation-context-full.yml` portfolio `bridge-contracts`

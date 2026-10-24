@@ -257,10 +257,103 @@ class _UnixServer(_Server):
     address_family = getattr(socket, "AF_UNIX", socket.AF_INET)
 
 
+def _private_directory(path):
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or (
+        getattr(info, "st_file_attributes", 0) & 0x400
+    ) or os.name != "nt" and info.st_mode & 0o077:
+        raise HostError("host_data_directory_invalid")
+
+
+def _authorization(config):
+    token, info = _read_regular(_absolute(config["token_file"]), 1026)
+    token = token.strip(b"\r\n")
+    if (
+        not 32 <= len(token) <= 1024
+        or any(byte < 33 or byte > 126 for byte in token)
+        or os.name != "nt" and info.st_mode & 0o077
+    ):
+        raise HostError("host_token_file_invalid")
+    prefix = b"Bear" + b"er "
+    return prefix + token
+
+
+def initialize_storage(config):
+    """Explicit first creation only; a failed/partial or existing volume is not adopted."""
+    try:
+        from single_instance_lease import AlreadyRunningError, SingleInstance
+    except ImportError:
+        raise HostError("host_service_dependencies_missing") from None
+
+    config = _validate_config(config)
+    directory = _absolute(config["data_dir"])
+    _private_directory(directory)
+    lease = SingleInstance(str(directory), service="agent-chat")
+    try:
+        lease.acquire()
+    except AlreadyRunningError:
+        raise HostError("host_already_running") from None
+    try:
+        if any(path != lease.lock_path for path in directory.iterdir()):
+            raise HostError("host_storage_not_empty")
+        store = ChatStore(directory, config["installation_id"])
+        try:
+            return store.health()
+        finally:
+            store.close()
+    finally:
+        lease.release()
+
+
+def probe_health(config, run_dir):
+    """Query the authenticated application, never opening its live database."""
+    from .client import ClientError
+    from .transport import _local_connection
+
+    config = _validate_config(config)
+    authorization = _authorization(config).decode("ascii")
+    connection = None
+    timer = None
+    try:
+        connection = _local_connection(str(_absolute(run_dir)), 1)
+        connection.connect()
+        sock = connection.sock
+
+        def expire():
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            sock.close()
+
+        timer = threading.Timer(2, expire)
+        timer.start()
+        connection.request("GET", "/health", headers={"Authorization": authorization})
+        response = connection.getresponse()
+        value = strict_json(response.read(4097), max_bytes=4096)
+        if (
+            response.status != 200 or response.getheader("Content-Type") != "application/json"
+            or not isinstance(value, dict) or value.get("status") != "ok"
+            or value.get("service") != "chat" or value.get("accepting") is not True
+            or type(value.get("schema")) is not int or value["schema"] != 1
+            or value.get("installation_id") != config["installation_id"]
+        ):
+            raise HostError("host_unready")
+        return value
+    except (ClientError, ChatError, OSError, http.client.HTTPException):
+        raise HostError("host_unready") from None
+    finally:
+        if timer is not None:
+            timer.cancel()
+            timer.join()
+        if connection is not None:
+            connection.close()
+
+
 class HostedChat:
     """One explicitly owned store and local endpoint, with caller-controlled lifetime."""
 
-    def __init__(self, config):
+    def __init__(self, config, *, run_dir=None, require_existing_storage=False):
         config = _validate_config(config)
         try:
             from endpoint_rendezvous import clear_endpoint, write_endpoint
@@ -274,22 +367,11 @@ class HostedChat:
         self._socket_path = None
         self._socket_identity = None
         self.data_dir = _absolute(config["data_dir"])
-        token, info = _read_regular(_absolute(config["token_file"]), 1026)
-        token = token.strip(b"\r\n")
-        if (
-            not 32 <= len(token) <= 1024
-            or any(byte < 33 or byte > 126 for byte in token)
-            or os.name != "nt" and info.st_mode & 0o077
-        ):
-            raise HostError("host_token_file_invalid")
-        prefix = b"Bear" + b"er "
-        authorization = prefix + token
-        self.data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self.data_dir.is_symlink() or (
-            os.name != "nt" and self.data_dir.stat().st_mode & 0o077
-        ):
-            raise HostError("host_data_directory_invalid")
-        self.run_dir = self.data_dir / "run"
+        authorization = _authorization(config)
+        if not require_existing_storage:
+            self.data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _private_directory(self.data_dir)
+        self.run_dir = self.data_dir / "run" if run_dir is None else _absolute(run_dir)
         self.run_dir.mkdir(mode=0o700, exist_ok=True)
         if self.run_dir.is_symlink() or (
             os.name != "nt" and self.run_dir.stat().st_mode & 0o077
@@ -301,7 +383,9 @@ class HostedChat:
         except AlreadyRunningError:
             raise HostError("host_already_running") from None
         try:
-            self.store = ChatStore(self.data_dir, config["installation_id"])
+            self.store = ChatStore(
+                self.data_dir, config["installation_id"], create=not require_existing_storage,
+            )
             if os.name == "nt":
                 self.server = _Server(("127.0.0.1", 0), self.store, authorization)
                 self.transport = "tcp"
@@ -369,14 +453,30 @@ class HostedChat:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
+    parser.add_argument("--run-dir", help="Explicit disposable endpoint directory.")
+    parser.add_argument("--require-existing-storage", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--initialize-storage", action="store_true")
+    mode.add_argument("--health", action="store_true")
     args = parser.parse_args(argv)
     stop = threading.Event()
     previous = {}
     try:
+        config = load_config(args.config)
+        if args.initialize_storage:
+            print(json.dumps(initialize_storage(config)), flush=True)
+            return 0
+        if args.health:
+            print(json.dumps(probe_health(
+                config, args.run_dir or str(_absolute(config["data_dir"]) / "run"),
+            )), flush=True)
+            return 0
         for name in ("SIGINT", "SIGTERM"):
             sig = getattr(signal, name)
             previous[sig] = signal.signal(sig, lambda *_: stop.set())
-        with HostedChat(load_config(args.config)) as host:
+        with HostedChat(
+            config, run_dir=args.run_dir, require_existing_storage=args.require_existing_storage,
+        ) as host:
             print(json.dumps({
                 "schema": "agent-chat.host-ready", "version": 1,
                 "transport": host.transport, "endpoint": host.endpoint,

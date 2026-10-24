@@ -130,6 +130,9 @@ test_local_endpoint_refusal_is_bounded_without_network_or_fallback
 test_local_endpoint_real_unix_client_uses_the_published_host
 """,
     "test_hosting.py": """
+test_explicit_storage_initialization_and_separate_run_state
+test_retained_storage_refuses_replacement_without_creating_history
+test_authenticated_health_probes_serving_identity_and_drain_without_store_open
 test_two_participants_auth_read_progress_and_restart
 test_real_singleton_refuses_second_host_before_store_open
 test_held_wait_drain_and_health_keep_independent_requests_responsive
@@ -207,6 +210,7 @@ EXPECTED = {
 
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
+    "test_hosting.py::test_retained_storage_refuses_replacement_without_creating_history": 6,
     "test_setup.py::test_same_bytes_foreign_replacement_is_never_withdrawn": 3,
     "test_setup.py::test_failure_retains_old_selection_and_explicitly_settles_recovery": 2,
     "test_setup.py::test_persisted_context_must_match_the_journaled_baseline": 3,
