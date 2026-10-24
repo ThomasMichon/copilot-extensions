@@ -110,6 +110,15 @@ Phase 2+ scope is broken into concrete, assignable pieces.
 This participant does not take ownership of the remaining daemon phases,
 singleton transitions, central fleet exporter, or other pivots.
 
+## Coordination
+
+The direct retained #4120 acceptance continues through this SAME existing Active ROOT's
+Plan, own and actual global Validation, and Journal under the incumbent domain, source,
+native and resource custodians. Every prior phase, alternative, hold and responsibility
+remains. Administrative supersession retires only duplicate tracking; a closed source is
+historical provenance, not a required live claim token. This intake grants no
+implementation, rollout, process action, reassignment or new blanket approval gate.
+
 ## Context
 
 ### How this was found
@@ -958,7 +967,111 @@ within the already-requested Phase 6d.3 real-consumer acceptance.
 - [ ] Journal the result and return the remaining parent acceptance to #3761;
       completing this narrow repair does not complete the whole effort.
 
+<!-- backlog-reconciliation:7556:transfer:4120:to:efforts/active/agent-worktrees-authoritative-daemon/README.md -->
+
+### Direct retained #4120 acceptance: canonical PR state and precomputed Picker consumption
+
+Append this COMPLETE unchecked intake without removing or rewriting any incumbent ROOT
+Plan, completed delivery, Validation, Participants, Coordination, dependencies or
+append-only Journal. This is finite PR-state tracker consolidation, NOT capability
+completion, source reassignment or rollout. Preserve the original and full current
+refinement: https://github.com/ThomasMichon/copilot-extensions/issues/4120 and
+https://github.com/ThomasMichon/copilot-extensions/issues/4120#issuecomment-6320365714 .
+
+#### Plan
+
+- [ ] P1. Establish one authoritative PR-state meaning across the relevant
+  tracking/serialization/read/write surfaces. Classify each apparent duplicate as
+  canonical history, compatibility accessor, materialized current projection or
+  genuinely competing authority BEFORE migration. Preserve legitimate multiple-PR
+  history, active-PR selection, publication/branch/source identity and compatibility; do
+  not delete lineage to force a literal single scalar.
+- [ ] P2. Route the original relevant create/open/terminal/reconcile/interrupted PR
+  lifecycle updates through the existing owning guarded transaction. Bind updates to the
+  actual current publication identity, merge provider observations onto fresh state
+  under the existing lock, publish atomically and preserve concurrent unrelated changes.
+  Unknown/unavailable provider evidence cannot fabricate terminal success or release
+  review/PR/resource custody.
+- [ ] P3. Reconcile legacy fields and all original relevant writers/readers into that
+  single interpretation without a second PR-status store/service. Preserve the owner's
+  schema-bounded current projection, per-fact revision/freshness/readiness,
+  current-versus-advisory semantics, logged same-code fallback and ambiguous-write
+  safety. Compatibility/history access is not a rival ordinary-status authority.
+- [ ] P4. Wire the ACTUAL Picker source/loader and PR formatter to owner-precomputed PR
+  state without per-worktree provider/query-time process spawning or rival render-time
+  computation. Preserve supported legacy compatibility, explicit owner reconciliation
+  and user-requested lifecycle actions as separate paths, not hidden render work. Credit
+  the existing formatter and resident/held-feed delivery rather than reopening them as
+  wholly absent.
+- [ ] P5. Preserve every current ROOT/source/PR/review/claim/native/resource owner and
+  hold. Keep the streaming-recovery participant's bounded lane, #6086 exact-selection
+  reservation and adjacent efforts unchanged. This finite source does not require all
+  daemon phases, every pivot, all hosts or unrelated lifecycle redesign to complete.
+- [ ] P6. Journal exact source/containing-release/installed-consumer acceptance
+  separately. Deliver this COMPLETE direct intake and the actual global Validation entry
+  below through a NEW ordinary reviewed PR, obtain actual merge, then read back the
+  WHOLE current ROOT before superseding #4120. Old plan creation, title/link/child/Draft
+  or existing projection source is not intake delivery; missing clause/custody means
+  retain.
+
+#### Validation
+
+- [ ] V1. Verify the real canonical PR representation, active selection, legitimate
+  multi-PR history, compatibility fields and current materialized view across the
+  original supported consumers. Demonstrate one authority rather than merely removing
+  similarly named fields.
+- [ ] V2. Exercise the original relevant PR lifecycle and provider reconciliation
+  writers, including concurrent foreground updates, partial/interrupted publication,
+  numberless/stale legacy state and provider unknown/error. Assert fresh identity-bound
+  atomic updates, preserved unrelated fields and truthful source/review/claim
+  obligations, not only a single successful locked write.
+- [ ] V3. Verify legacy/current read and write compatibility, current projection
+  publication and owner generation/freshness/readiness, with uncertain post-send writes
+  not silently replayed or transformed into direct competing authority.
+- [ ] V4. Through actual Picker source/loader/PR rendering, verify supplied precomputed
+  state is consumed and ordinary row formatting/refresh does not spawn per-worktree
+  provider processes or independently recompute PR status. Test/update the existing
+  accepted consumer contract rather than add a competing poller/materializer.
+- [ ] V5. Preserve current, advisory, stale, unknown and unavailable distinctions plus
+  owner-directed explicit reconciliation. A cheap snapshot or fetched row cannot grant
+  PR mutation, review completion, claim release or cleanup authority. Record exact
+  source, release, installed/native subject and evidence limits where applicable.
+- [ ] V6. Verify all P1-P6, V1-V6 and C1-C3, the actual global Validation entry, and the
+  entire incumbent ROOT remain directly present after NEW reviewed actual merge and
+  WHOLE current readback. Resolve only this finite original at its accepted bounds;
+  unrelated whole-parent/all-host/native-program completion is not a new gate.
+
+#### Continuing Coordination
+
+- [ ] C1. The existing authoritative-daemon/write-path driver retains integration/PR
+  stewardship. Current PR publication/provider owners retain their facts and
+  review/claim custody; current Manager/streaming participants retain only their
+  admitted consumer/recovery lanes. No claimant, source, resource or native owner is
+  transferred by this text.
+- [ ] C2. Preserve all current ROOT Plan/Validation/Journal, completed phases, open
+  implementation/review/native holds, #3761 and #6086 coordination and existing related
+  reservations. New actual assignment or textual hold before publication must be
+  preserved/reconciled by its owner, never expired from age, inactivity or an empty
+  assignee field.
+- [ ] C3. The integration owner obtains NEW normal reviewed actual intake merge and
+  WHOLE current readback before source supersession. Product acceptance stays unchecked
+  here; no new blanket ACK is added and no original source-specific consent or evidence
+  tier is weakened. Missing any direct clause/global validation/custody keeps #4120
+  OPEN.
+
+Public delivery foundations:
+https://github.com/ThomasMichon/copilot-extensions/pull/3170 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6448 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6595 .
+
 ## Validation Plan
+
+- [ ] Complete EVERY directly retained #4120 P1-P6, V1-V6 and C1-C3 clause above at its
+  original finite scope/evidence tiers, preserving incumbent Plan/Validation/Journal,
+  compatible PR history/current semantics and all owners/claims/holds. Tracker
+  consolidation is not implementation or installed/native acceptance; NEW normally
+  reviewed actual merge and WHOLE current ROOT readback precede source supersession.
+
 
 - [ ] Meet the coupled [O(state-schema) validation](../per-worktree-activity-state/schema-bounded-read-contract.md#validation-plan)
       while ledger, history, graph and fleet cardinalities grow independently.
@@ -1002,6 +1115,8 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+- [2026-10-24 - Direct retained acceptance from #4120](<journal/2026/10.24 backlog-intake-85-86.md>)
 
 ### 2026-10-15 - Phase 6d.3a plan reviewed; client repair acceptance in progress
 
