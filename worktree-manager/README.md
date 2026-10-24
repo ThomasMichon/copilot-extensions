@@ -54,10 +54,15 @@ uv run python -m worktree_manager setup --apply # actually provision + drive the
 ```
 
 `doctor` is read-only; `setup` is **dry-run by default** and only changes the
-machine with `--apply`. Provisioning is restart-aware (it tells you to restart
-your shell after a PATH change) and idempotent (re-running heals a partial
-install). The core install is never reimplemented — the Worktree Manager locates and
-calls agent-worktrees' own `install.{ps1,sh}`.
+machine with `--apply`. Apply rechecks prerequisites after provisioning and
+continues in the same invocation when they are available. Failed provisioning
+or unresolved prerequisites stop before the core installer; a PATH-changing
+install that still leaves a gap requests a shell restart. Re-running is
+idempotent and can heal a partial install. The core install is never
+reimplemented — the Worktree Manager locates and calls agent-worktrees' own
+`install.{ps1,sh}`. A failed core installer remains a failure even when an
+installed-state marker is present; setup success is not a full authentication
+or repository-adoption verdict.
 
 The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
 selects Python 3.11 or newer without running project resolution, then the engine

@@ -88,6 +88,44 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### N-UTF8-AUTHORITY explicit native registration-child encoding
+
+This settles only `tests/test_pr_authority.py:1`, header
+`@@ -178,8 +178,9 @@ installer.register_project(sys.argv[3], 'unused', 'main')`,
+full original hunk SHA256
+`ced29797ff226876b8b363b25d308053b2c041a46775694805553132fb7b0f30`.
+The prior native disposition below already names actual #7823 merge
+`ecd9213ba1fb353a6eda1bd0ef7bdfd75bbca41a`; this entry supplies its exact
+census-key accounting, not another implementation claim.
+
+That merge retains the immutable source's `-X utf8` child argument and
+explicit UTF-8 pipe decoding. Its complete concurrent-registration test
+matches accepted comparison `9bf6ac7aaaa1eff79ecda7e6e525ce78444b1fdc`
+by AST. Relative to the immutable source, it additionally sets parent
+`PYTHONUTF8=0` and asserts `sys.flags.utf8_mode == 1` inside each real child,
+proving the command-line override rather than inheriting an enabling
+environment. The two delayed registry transactions must still preserve
+both project entries, with the original native child timeout and hidden
+process flags.
+
+Current repository policy exposed two separately owned fixture failures
+when registration received the nonexistent literal directory `unused`.
+Actual #8549 merge `7da3ef4155ed51456a444587d862956ebaedaf48`
+repairs the registry-guard and concurrent-registration consumers with
+fresh private repository directories, passing the absolute path to both
+existing child interpreters. This preserves real policy admission, not a
+mock or bypass. It does not change the UTF-8 assertions or production
+registration behavior; no whole-function equality with #7823 is claimed
+after that repair.
+
+The corrected complete authority module passes 39 cases in 33.54 pytest
+seconds, 48.03 seconds including preparation and cleanup. All four existing
+adoption-veto boundaries also pass, 24.83 seconds inclusive. Both runs use
+exactly two contained native Windows workers with unchanged marks,
+deadlines and resource bounds. This is functional evidence only. No new
+runtime/test edit, normal-group or repeated complete-plugin qualification
+is included in this key admission. Other residuals remain open.
+
 ### B-REPLAY-OBSERVE existing fresh range and raw-message assertions
 
 This settles only these four original keys; the historical candidate table's

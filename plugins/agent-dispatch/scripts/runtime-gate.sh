@@ -204,8 +204,13 @@ resolve_runtime normal
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
 LOCK_LINK=""
+REAP_OWNED=0
 BOOT_FILE=""
 unlock() {
+    if [[ "$REAP_OWNED" == 1 ]]; then
+        REAP_OWNED=0
+        rmdir "$REAP_MUTEX" 2>/dev/null || true
+    fi
     if [[ -n "$LOCK_LINK" ]]; then
         [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" != "$$" ]] || rm -f -- "$LOCK_LINK"
         LOCK_LINK=""
@@ -218,12 +223,16 @@ cleanup() {
     [[ -z "$BOOT_FILE" ]] || rm -f -- "$BOOT_FILE"
     unlock
 }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
     exec 9>"$RUNTIME_ROOT/.provision.lock"
     flock 9
 else
     LOCK_LINK="$RUNTIME_ROOT/.provision.lock.pid"
     REAP_MUTEX="$RUNTIME_ROOT/.provision.reap.mutex"
+    REAP_WAITS=0
     until ln -s "$$" "$LOCK_LINK" 2>/dev/null; do
         owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
         case "$owner" in
@@ -237,9 +246,17 @@ else
         # Match the canonical payload shim: serialize stale revalidation and
         # removal so another reaper cannot replace the link between them.
         if ! mkdir "$REAP_MUTEX" 2>/dev/null; then
+            if [[ "$REAP_WAITS" -ge 30 ]]; then
+                printf '[agent-dispatch] provisioning reaper mutex is unavailable: %s; retry or repair it through explicit installation management.\n' \
+                    "$REAP_MUTEX" >&2
+                exit 126
+            fi
+            REAP_WAITS=$((REAP_WAITS + 1))
             sleep 1
             continue
         fi
+        REAP_OWNED=1
+        REAP_WAITS=0
         owner2="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
         if [[ -n "$owner2" && "$owner2" == "$owner" ]]; then
             case "$owner2" in
@@ -247,12 +264,12 @@ else
                 *) kill -0 "$owner2" 2>/dev/null || rm -f -- "$LOCK_LINK" ;;
             esac
         fi
+        REAP_OWNED=0
         rmdir "$REAP_MUTEX" 2>/dev/null || true
     done
 fi
-trap cleanup EXIT
 resolve_runtime
-[[ -z "$AGENT_RT_PY" ]] || { unlock; trap - EXIT; run_runtime "$@"; }
+[[ -z "$AGENT_RT_PY" ]] || { unlock; trap - EXIT INT TERM; run_runtime "$@"; }
 assert_publication
 select_provision_source
 printf '[agent-dispatch] runtime not provisioned -- provisioning on first use (may take ~30-120s). Do not kill; extend your timeout.\n' >&2
@@ -290,7 +307,7 @@ fi
 resolve_runtime
 if [[ "$rc" == 0 && -n "$AGENT_RT_PY" ]]; then
     printf 'ready %s\n' "$(date -u +%FT%TZ)" > "$STATUS_PATH"
-    unlock; trap - EXIT
+    unlock; trap - EXIT INT TERM
     run_runtime "$@"
 fi
 [[ "$rc" != 0 ]] || rc=1

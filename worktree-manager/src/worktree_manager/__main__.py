@@ -22,7 +22,6 @@ from pathlib import Path
 
 from . import __version__
 from .catalog import load_catalog
-from .core_install import core_status, install_command, install_core
 from .engine_client import (
     EngineError,
     accept_inherited_engine_command,
@@ -35,10 +34,6 @@ from .harness_state import (
     user_enabled_plugins,
 )
 from .model import Model, build_model, coverage, effective_prereqs
-from .prereqs import detect_baseline, missing
-from .provision import apply as provision_apply
-from .provision import plan as provision_plan
-from .provision import restart_needed
 from .relocated_launch import _relocated_launch_script, _run_relocated_mux_launch
 from .self_install import self_install
 from .self_install import status as self_status
@@ -1300,70 +1295,6 @@ def _run_launch(req) -> int:
         return 1
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
-def _cmd_setup(rest: list[str]) -> int:
-    do_apply = "--apply" in rest
-    statuses = detect_baseline()
-    gaps = missing(statuses)
-    actions = provision_plan(gaps)
-    core = core_status()
-
-    print()
-    print(f"  {_BANNER} — setup {'(APPLY)' if do_apply else '(plan / dry-run)'}")
-    print()
-    if not actions:
-        print("  prerequisites: all satisfied — nothing to provision.")
-    else:
-        print("  prerequisites to provision (in order):")
-        for a in actions:
-            tag = "manual" if a.manual else a.method
-            print(f"    - {a.name}  [{tag}]"
-                  f"{'  (restart after)' if a.changes_path else ''}")
-            if a.command:
-                print(f"        $ {a.command}")
-            if a.note:
-                print(f"        {a.note}")
-    results = provision_apply(actions, dry_run=not do_apply)
-    manual = [r for r in results if r.skipped_reason == "manual"]
-
-    print()
-    print("  agent-worktrees core:")
-    cmd = install_command()
-    if core.installed:
-        print("    ✓ already installed (idempotent — nothing to do).")
-    elif cmd is None:
-        print("    ! the real installer needs a copilot-extensions checkout;")
-        print("      run `worktree-manager setup` from (or after adopting) a checkout.")
-    else:
-        print(f"    state: {core.state} → drive the harness's own installer:")
-        print(f"        $ {' '.join(cmd)}")
-    core_res = install_core(dry_run=not do_apply)
-    if do_apply and core_res.ran:
-        print(f"    installer exit code: {core_res.returncode}")
-        # Refresh: the `core` snapshot above predates the install we just ran, so
-        # basing the summary/exit code on it would report failure on a successful
-        # first-time install (it would only "pass" on a second run).
-        core = core_status()
-        if core.installed:
-            print("    ✓ core install complete.")
-        else:
-            print(f"    ! core still {core.state} after install — see output above.")
-
-    print()
-    if not do_apply:
-        print("  (plan only — nothing was changed. Re-run with --apply to execute.)")
-    else:
-        if restart_needed(results):
-            print("  ⟳ PATH changed — RESTART your shell (or open a new one) before")
-            print("    continuing so the newly-installed tools are found.")
-        if manual:
-            names = ", ".join(r.action.name for r in manual)
-            print(f"  ! manual prerequisites still needed: {names} — install them, then re-run.")
-    print()
-    # Non-zero while anything remains to be done.
-    done = not gaps and core.installed
-    return 0 if done else 1
-
-
 def _cmd_self_install(rest: list[str]) -> int:
     do_apply = "--apply" in rest
     st = self_status()
@@ -1597,7 +1528,9 @@ def main(argv: list[str] | None = None) -> int:
 
         return doctor_cli.cmd_doctor(args[1:])
     if args and args[0] == "setup":
-        return _cmd_setup(args[1:])
+        from .setup_cli import cmd_setup
+
+        return cmd_setup(args[1:], banner=_BANNER)
     if args and args[0] == "self-install":
         return _cmd_self_install(args[1:])
     if args and args[0] == "source":

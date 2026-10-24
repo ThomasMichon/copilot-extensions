@@ -36,7 +36,7 @@ placement is an explicit requirement; no option is a mandatory core dependency.
 | Deployment owner | Sequential adapter and fresh-environment proofs | Separate managed upstream worktree after plan review |
 | Runner loadout participant | Vision-first #7192 template, placement and declaration-to-managed-owner flow; existing release/lifecycle/authentication owners retained | Existing #7192 coordination and separate managed upstream worktree |
 | Trusted base-image participant | Bounded #8352 image recipe, contract, docs and tests; no controller or credential ownership | Separate managed upstream worktree; campaign owner integrates |
-| Diagnostic logging contributor | Bounded #8377 Dispatch application-handler, discovery and retention source slice; no installer/native capture or deployment ownership | Managed source worktree `spinning-sprocket` |
+| Diagnostic logging contributor | Bounded #8377 shared Bridge/Dispatch application logging, discovery and retention source; no installer/native capture or deployment ownership | Managed source worktree `spinning-sprocket` |
 | Adopter | Capacity, inventory, trust and live activation approval | Provider-specific downstream flow |
 
 ## Coordination
@@ -64,6 +64,10 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   CI; the [logging sub-plan](logging-conventions.md) records its exact merge,
   validation and transferred remaining interfaces. None of the broad logging
   amendment's checkboxes is closed by that partial source delivery.
+  The continuation reuses its policy in the existing shared library and adopts
+  Bridge application logging with bounded producer work; native capture and
+  installer/lifecycle/deployment owners remain separate. Its source validation
+  and acceptance are tracked in the same logging sub-plan, not a competing effort.
 - **Trusted image slice:** #8352 owns the bounded
   [trusted harness container plan](trusted-harness-containers.md) under #6030.
   Its proposed `.devcontainer/trusted-harness-base/` reservation does not transfer

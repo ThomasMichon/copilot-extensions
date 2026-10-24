@@ -240,7 +240,12 @@ fi
 mkdir -p "$RUNTIME_ROOT"
 STATUS_PATH="$RUNTIME_ROOT/.provision-status"
 _lock_link=""
+_reap_owned=0
 _unlock_provision() {
+    if [[ "$_reap_owned" == 1 ]]; then
+        _reap_owned=0
+        rmdir "$_reap_mutex" 2>/dev/null || true
+    fi
     if [[ -n "$_lock_link" ]]; then
         _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
         [[ "$_owner" == "$$" ]] && rm -f "$_lock_link"
@@ -250,30 +255,51 @@ _unlock_provision() {
         exec 9>&-
     fi
 }
+trap '_unlock_provision' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
     exec 9>"$RUNTIME_ROOT/.provision.lock"
     flock 9
 else
     _lock_link="$RUNTIME_ROOT/.provision.lock.pid"
+    _reap_mutex="$RUNTIME_ROOT/.provision.reap.mutex"
+    _reap_waits=0
     until ln -s "$$" "$_lock_link" 2>/dev/null; do
         _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
         case "$_owner" in
             *[!0-9]*|"") _live=0 ;;
             *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
         esac
-        if [[ -z "$_owner" ]]; then
-            # The link vanished after the failed `ln -s` (or is not a
-            # symlink): never unlink then -- a live lock could be created
-            # between the read and the unlink. Just retry.
-            sleep 0.1
-        elif [[ "$_live" == 0 && "$(readlink "$_lock_link" 2>/dev/null || true)" == "$_owner" ]]; then
-            rm -f "$_lock_link"
-        else
+        if [[ "$_live" == 1 ]]; then
             sleep 1
+            continue
         fi
+        # Match the canonical shim: keep competing stale reapers from
+        # replacing the owner between revalidation and removal.
+        if ! mkdir "$_reap_mutex" 2>/dev/null; then
+            if [[ "$_reap_waits" -ge 30 ]]; then
+                printf '[agent-bridge] provisioning reaper mutex is unavailable: %s; retry or repair it through explicit installation management.\n' \
+                    "$_reap_mutex" >&2
+                exit 126
+            fi
+            _reap_waits=$((_reap_waits + 1))
+            sleep 1
+            continue
+        fi
+        _reap_owned=1
+        _reap_waits=0
+        _owner2="$(readlink "$_lock_link" 2>/dev/null || true)"
+        if [[ -n "$_owner2" && "$_owner2" == "$_owner" ]]; then
+            case "$_owner2" in
+                *[!0-9]*) rm -f -- "$_lock_link" ;;
+                *) kill -0 "$_owner2" 2>/dev/null || rm -f -- "$_lock_link" ;;
+            esac
+        fi
+        _reap_owned=0
+        rmdir "$_reap_mutex" 2>/dev/null || true
     done
 fi
-trap '_unlock_provision' EXIT INT TERM
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     _unlock_provision
