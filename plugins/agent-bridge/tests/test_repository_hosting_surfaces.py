@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,7 +18,7 @@ from agent_bridge.client import BridgeClientError
 from agent_bridge.models import SessionStatus
 from agent_bridge.remote_operations import CarrierRequestRouter
 from agent_bridge.routes import ui_tasks
-from agent_bridge.session_manager import Session
+from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
 from test_repository_hosting_policy import deny, local_scope as _local_scope, repo as _repo
 from test_workspace_creation import creation_rig as _creation_rig, rig as _rig
@@ -126,7 +128,7 @@ def test_cli_denial_precedes_reservation_and_mux(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_live_message_delivery_remains_usable_after_repository_denial(
-    repo: Path, session_manager, monkeypatch: pytest.MonkeyPatch,
+    repo: Path, session_manager: SessionManager, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = Session("live", "live", SpawnTarget(cwd=str(repo)), "source")
     session.status = SessionStatus.IDLE
@@ -158,3 +160,72 @@ async def test_carrier_receiver_refusal_never_submits_seed_or_destroys_session()
         })
     client.submit_prompt.assert_not_called()
     client.end_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["implicit", "native"])
+@pytest.mark.parametrize("initial_stop", [False, True])
+async def test_completed_stop_during_outer_resume_admission_retains_authority(
+    repo: Path, session_manager: SessionManager, monkeypatch: pytest.MonkeyPatch,
+    entry: str, initial_stop: bool,
+) -> None:
+    from agent_bridge import hosting_policy, worktree_native_resume
+    from agent_bridge.acquisition_store import AcquisitionStore
+    from agent_bridge.cold_outages import ColdRecoveryStoppedError
+
+    manager = session_manager
+    session = Session(
+        "retained", "retained",
+        SpawnTarget(type="ssh", host="remote", cwd=str(repo), project="source"),
+        "source",
+    )
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "native-conversation"
+    manager._sessions[session.session_id] = session
+    manager.db.create_session(
+        session.session_id, session.name, "source", str(repo), "ssh",
+        "stopped", time.time(), acp_session_id=session.acp_session_id,
+    )
+    monkeypatch.setattr(manager, "_notify_host_reapable", AsyncMock())
+    if initial_stop:
+        await manager.stop_session(session.session_id, force=True)
+    previous = manager.db.get_session(session.session_id)["cold_recovery_stop_token"]
+    store = AcquisitionStore(manager.db)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def admit(*_args: Any, **_kwargs: Any) -> None:
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(hosting_policy, "require_target_hosting", admit)
+    resume = AsyncMock(side_effect=AssertionError("superseded operation attempted recovery"))
+    monkeypatch.setattr(manager, "resume_session", resume)
+    head = AsyncMock(side_effect=AssertionError("superseded operation read launch result"))
+    operation = (
+        manager.submit_prompt(session.session_id, "retained task")
+        if entry == "implicit" else worktree_native_resume._load_acp(
+            manager, manager.db, store, session,
+            "workspace", session.acp_session_id, "delivery", head,
+        )
+    )
+    pending = asyncio.create_task(operation)
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        await manager.stop_session(session.session_id, force=True)
+        stopped = manager.db.get_session(session.session_id)
+        token = stopped["cold_recovery_stop_token"]
+        assert token and token != previous
+        assert session._stop_requested is False
+        release.set()
+        with pytest.raises(ColdRecoveryStoppedError, match="stop superseded"):
+            await pending
+        assert manager.db.get_session(session.session_id) == stopped
+        assert manager.db.execute_read("SELECT * FROM turns") == []
+        assert manager.db.execute_read("SELECT * FROM acquisition_launch_gates") == []
+        assert session.status == SessionStatus.STOPPED
+        assert session.background_recovery_enabled is False
+        resume.assert_not_awaited()
+        head.assert_not_awaited()
+    finally:
+        release.set()
+        await asyncio.gather(pending, return_exceptions=True)

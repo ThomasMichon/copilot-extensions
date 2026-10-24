@@ -345,9 +345,9 @@ async def _load_acp(
     head: Callable[[], Awaitable[dict[str, Any]]],
 ) -> SessionInfo:
     from .routes.sessions import _session_info
-    from .hosting_policy import require_target_hosting
+    from .hosting_policy import require_session_hosting
 
-    await require_target_hosting(session.target, operation="native resume")
+    await require_session_hosting(manager, session, operation="native resume")
     _claim_gate(db, store, worktree_id, delivery, "acp", session.session_id, native)
     if not db.reserve_worktree_ownership(worktree_id, session.session_id, now=time.time()):
         raise _refuse("live_holder", "Could not acquire native workspace ownership")

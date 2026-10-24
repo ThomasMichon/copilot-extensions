@@ -350,3 +350,14 @@ machine metadata/project enumeration with hosting eligibility.
 - Phases 1 and 2 are source-complete, not merged/released/installed claims.
   The repository marker, contribution/review acceptance under it, release and
   separately authorized live adoption/reconciliation remain the next gates.
+- Provider review identified two outer resume admission reads that preceded
+  capture of the retained session's stop generation. Implicit prompt recovery
+  and native worktree loading now use the same pre-await session fence before
+  status changes, acquisition gates or downstream recovery. Four deterministic
+  controls complete a newer stop during admission, with and without an older
+  stop token, and prove the newer authority and dormant state remain intact.
+- The coupled hosting/native-owner/cold-stop cohort passes 307 disconnected
+  cases. Native-owner fixtures now provide actual existing workspaces and
+  authoritative explicit execution paths; the Windows transport assertion
+  checks both the outer refusal gate and the nested encoded native-resume
+  command. The final Worktrees native admission cohort passes 93 cases.

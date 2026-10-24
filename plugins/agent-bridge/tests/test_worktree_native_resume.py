@@ -30,6 +30,7 @@ pytestmark = pytest.mark.contract("agent_bridge.worktree_native_resume")
 
 @pytest.fixture
 def boundary(tmp_path, monkeypatch):
+    (tmp_path / "workspace").mkdir()
     db = Database(tmp_path / "bridge.db")
     manager = SessionManager(db)
     entry = wt._WorktreeEntry(
@@ -447,7 +448,10 @@ def test_runtime_native_admission_preserves_remote_acp_target_serialization():
 @pytest.mark.asyncio
 async def test_imported_native_origin_survives_restart_without_recreate(boundary, monkeypatch):
     imported = boundary.manager.import_native_session(
-        SpawnTarget(type="local", project="example-project", cwd=boundary.entry.path, worktree_id="wt-example"),
+        SpawnTarget(
+            type="local", project="example-project", cwd=boundary.entry.path,
+            worktree_id="wt-example", explicit_cwd=True,
+        ),
         "native-original", agent_name="example",
     )
     manager = SessionManager(boundary.db)
@@ -802,7 +806,10 @@ def test_windows_ssh_native_resume_keeps_encoded_owner_transport():
     command = _build_remote_cmd(target)
     assert command.startswith("pwsh -NoProfile")
     decoded = base64.b64decode(command.split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
-    assert "--native-resume-session" in decoded and "native-original" in decoded
+    assert "'agent-policy' 'check'" in decoded
+    assert decoded.index("$LASTEXITCODE -ne 0") < decoded.index("pwsh -NoProfile")
+    owner = base64.b64decode(decoded.split("-EncodedCommand ", 1)[1]).decode("utf-16-le")
+    assert "--native-resume-session" in owner and "native-original" in owner
     assert "exec copilot" not in decoded
     assert "native_resume_id" not in target.to_json()
 
@@ -872,7 +879,8 @@ async def test_worktree_reconciles_dead_retained_host_in_both_modes(
 ):
     session = boundary.manager.import_native_session(
         SpawnTarget(type="local", project="example-project", cwd=boundary.entry.path,
-                    worktree_id="wt-example"), "native-original", agent_name="example",
+                    worktree_id="wt-example", explicit_cwd=True),
+        "native-original", agent_name="example",
     )
     session.status = SessionStatus.RUNNING
     _dead_local_host(boundary, session, monkeypatch, connected)
