@@ -7,6 +7,20 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional candidate dependency profiles
+
+`python tools/run-plugin-tests.py agent-worktrees --test-file
+tests/test_python_installer_engine.py` covers the canonical candidate engine,
+including explicit declared extras. Its offline synthetic packages exercise real
+UV construction, installed-origin health, immutable profile reuse and refusal of
+an unavailable extra dependency before completion. They also retain the original
+base fingerprint and preserve an existing active selector on failure. These are
+on-demand construction controls, not additions to the eligible-unit packet.
+They do not prove a production extra graph, hosted feed access, a native support
+matrix or required release enforcement. The
+[feed-construction effort](efforts/active/feed-construction-release-gate/README.md)
+retains those open acceptance gates.
+
 ## Optional Dispatch service replay
 
 `tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py

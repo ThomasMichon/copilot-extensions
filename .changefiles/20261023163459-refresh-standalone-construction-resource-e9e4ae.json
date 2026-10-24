@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh standalone construction resources for selected extras",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

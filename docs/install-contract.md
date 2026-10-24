@@ -3211,6 +3211,20 @@ venv/package writers, even when construction tools are absent. Unfinished
 builders recheck under the canonical OS lease; completed content drift or
 invalid evidence refuses instead of rewriting a published slot.
 
+An explicitly selected `extras` tuple on `numbered_candidate()` installs only
+declared optional groups on the primary package, inside that same retained UV
+transaction. Names are normalized and ordered; unknown, duplicate and mutable
+selections refuse before runtime writes. Non-base admission fingerprints bind
+both the complete source fingerprint and the selected extras. An empty selection
+retains the existing source-only identity and origin-receipt compatibility.
+Changing selection cannot reuse or rewrite another completed profile under the
+same slot name. The installed-origin receipt records non-base selections and is
+checked again on reuse, even after frozen inputs have been retired.
+The caller still owns the distinct slot name, profile-specific health/launch
+contract and lifecycle; this seam does not select a machine's desired profile,
+activate a runtime, provision sibling environments or qualify a native platform.
+Mutable `dev_candidate()` does not accept non-base profiles.
+
 Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline
 after every owned writer has settled. Process creation is distinguished by
