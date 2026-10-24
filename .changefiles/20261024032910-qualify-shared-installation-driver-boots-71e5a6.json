@@ -1,0 +1,17 @@
+{
+  "comment": "Qualify shared installation-driver bootstrap custody and receipt consumers without changing their runtime contracts.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
