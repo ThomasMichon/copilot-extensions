@@ -318,6 +318,16 @@ def test_independent_row_field_and_utf8_limits_and_explicit_larger_budget(limits
         store._decode(store._encode_text(many, larger).encode(), limits)
 
 
+def test_row_limit_is_independent_of_account_header_count():
+    budget = store.Limits(10000, 1, 4096)
+    first = snapshot()
+    result = store.apply_account_observation(
+        first, observation(account="b", rows=()), limits=budget,
+    )
+    assert len(result.accounts) == 2 and sum(len(item.rows) for item in result.accounts) == 1
+    assert store._decode(store._encode_text(result, budget).encode(), budget) == result
+
+
 def test_serialization_stops_at_total_cap_without_materializing_document(monkeypatch):
     value = snapshot(accounts=(observation(rows=tuple(row(f"v{i}") for i in range(100))),))
     budget = store.Limits(2048, 1000000, 4096)

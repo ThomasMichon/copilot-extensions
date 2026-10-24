@@ -319,9 +319,12 @@ defers to the next due wave, with no hidden per-venue refresh.
   Freshness returns status labels/reasons only, never control authority.
 - Initial unit run had three fixture tuple/list representation failures;
   corrected the fixture to represent JSON arrays, without relaxing the codec.
-  Final targeted selection: **91 passed**. Ruff F/E9, install contract, source
+  A follow-up corrected account-header counting so the venue-row limit is
+  independent of account count; header/whole-output work remains byte-bounded.
+  Final targeted selection: **92 passed**. Ruff F/E9, install contract, source
   module-size and documentation-consistency guards pass. Fresh independent
-  source review found no significant issues.
+  source review and the named limit-correction follow-up found no significant
+  issues.
 - No actual OS lock/multiprocess/crash/Windows-sharing fixture, native
   performance sample, provider call or production activation ran. F1's native
   slot and all previous S3/performance/consumer gates remain separate.

@@ -213,7 +213,7 @@ def _validate(snapshot, limits):
     # Every encoded observation requires at least one byte, even if a caller
     # supplies an enormous row limit with a tiny byte limit.
     bound = min(limits.max_rows, limits.max_bytes)
-    if len(snapshot.accounts) > bound or sum(len(item.rows) for item in snapshot.accounts) > bound:
+    if len(snapshot.accounts) > limits.max_bytes or sum(len(item.rows) for item in snapshot.accounts) > bound:
         raise InventoryLimitError("row_limit")
     remaining = limits.max_bytes
     for value in _scalars(snapshot):
@@ -306,7 +306,7 @@ def _from_document(document, limits):
     accounts = root["accounts"]
     if type(accounts) is not list:
         raise InventoryError("invalid_accounts")
-    if len(accounts) > min(limits.max_rows, limits.max_bytes):
+    if len(accounts) > limits.max_bytes:
         raise InventoryLimitError("row_limit")
     converted = []
     total = 0
