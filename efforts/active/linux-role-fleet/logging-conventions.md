@@ -287,3 +287,8 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   counters are ordinary `diagnostic_buffer_callbacks` records, not a wire observer,
   new status registry, timer or task. This supersedes the earlier heartbeat-hook
   candidate without weakening any captured source binding.
+- 2026-10-24 UTC — Re-review's queued-maintenance starvation observation is
+  covered by the final owned worker-iteration seam: maintenance is not a droppable
+  queue offer and runs after normal batches as well as while idle. A regression
+  fills the queue, proves the explicit maintenance offer is dropped, then verifies
+  old records still expire while all 128 admitted new records are retained.

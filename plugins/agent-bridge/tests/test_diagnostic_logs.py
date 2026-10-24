@@ -20,8 +20,8 @@ from single_instance_lease import OperationLock
 from agent_bridge import diagnostic_logs as logs, telemetry
 
 
-def wait_for(predicate):
-    deadline = time.monotonic() + 4
+def wait_for(predicate, timeout=4):
+    deadline = time.monotonic() + timeout
     while not predicate():
         assert time.monotonic() < deadline, "owned diagnostic writer did not finish"
         time.sleep(0.01)
@@ -207,6 +207,47 @@ def test_expired_history_and_rotation_are_worker_only(handler, monkeypatch):
     assert len([event for event in events if "diagnostic_buffer_callbacks" not in event]) == 8
     assert any("diagnostic_buffer_callbacks" in event for event in events)
     assert len(handler.store._files()) >= 2
+
+
+def test_full_queue_cannot_starve_owned_retention_while_logging_continues(handler, monkeypatch):
+    handler.handle(record("old-before-pressure"))
+    wait_for(lambda: handler.writer.stats()["delivered"] >= 1)
+    entered, release, status_written = threading.Event(), threading.Event(), threading.Event()
+    original = handler.store.write_event
+
+    def write(event):
+        if event["message"] == "blocked callback":
+            entered.set()
+            assert release.wait(3)
+        original(event)
+        if "diagnostic_buffer_callbacks" in event:
+            status_written.set()
+
+    monkeypatch.setattr(handler.store, "write_event", write)
+    handler.handle(record("blocked callback"))
+    assert entered.wait(1)
+    now = datetime.now(timezone.utc) + timedelta(days=31)
+    handler.store.clock = lambda: now
+    try:
+        for index in range(128):
+            item = record("new-pressure-%d", index)
+            item.created = now.timestamp()
+            handler.handle(item)
+        before = handler.writer.stats()["full"]
+        handler.maintain()  # deliberately dropped: no heartbeat/offer can save this pass
+        assert handler.writer.stats()["full"] == before + 1
+        accepted = handler.writer.stats()["accepted"]
+    finally:
+        release.set()
+    try:
+        wait_for(lambda: handler.writer.stats()["delivered"] >= accepted
+                 and status_written.is_set(), timeout=10)
+    except AssertionError as error:
+        raise AssertionError(handler.stats()) from error
+    events = [json.loads(line) for path in handler.store._files()
+              for line in path.read_text(encoding="utf-8").splitlines()]
+    assert all(event["message"] != "old-before-pressure" for event in events)
+    assert len([event for event in events if event["message"].startswith("new-pressure-")]) == 128
 
 
 def test_existing_buffer_mutex_is_nonblocking_and_nonprimitive_arguments_have_placeholders(handler):
