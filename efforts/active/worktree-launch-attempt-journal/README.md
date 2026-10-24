@@ -88,13 +88,17 @@ The following decomposition and detailed evidence rules are agent-recommended.
 
 ### Phase 2 -- Durable intent before effects
 
-- [ ] Add a shared quick append path using existing private-state protections
+- [x] Implement the protected, versioned storage foundation independently of
+  launch/replay authority; reviewed storage scope merged in #8505.
+- [ ] Wire the shared append path using existing private-state protections
   and transaction conventions. Persist action, exact submitted prompt/options,
   project, selected venue and attempt ID before dismissal or allocation.
   The protected storage foundation is implemented; confirmation wiring and its
   responsive durability wait remain pending.
 - [ ] Cover empty prompts, rejected unsupported choices and cancellation without
   treating draft text or cancellation as accepted launch intent.
+- [ ] Represent confirmed refusals with unresolved target locality truthfully;
+  never coerce an unknown target into a local or remote metadata claim.
 - [ ] Record failures explicitly. If required intent persistence fails, preserve
   the dialog/draft and refuse mutation rather than silently dropping the audit.
 - [ ] Keep audit history separate from daemon-owned pending intent; retain
@@ -270,3 +274,55 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   input recovery. A 1002-event regression checks exact two-page coverage and
   retained input; invalid/unbounded page arguments refuse. The focused storage
   portfolio passes 56 cases with four platform/privilege skips.
+
+### 2026-10-24 -- Foundation merged; confirmation integration next
+
+- Storage-only #8505 merged as `3f93390187a00e538f5ae69f3ecef466015924ee`
+  after the final head received approval with no unresolved findings, all review
+  threads were resolved and every required CI/attribution/workflow check passed.
+- The source worktree is pulled forward onto the actual merged foundation.
+  The protected append/read/expiry API is available, but no production caller
+  uses it yet; this is not a delivered prompt-loss repair or retention feature.
+- Next, wire responsive pre-effect confirmation across the inventoried Manager
+  entry surfaces, preserving drafts and refusing effects on persistence failure.
+  Keep legacy-history expiry, target/native receipt correlation, negotiated SSH
+  admission, selected-machine inspection and installed acceptance gates open.
+
+### 2026-10-24 -- Responsive confirmation implementation prepared for review
+
+- Added a shared saving modal using the existing Inbox/background-worker path.
+  Exact original text, options, project and selected venue commit before the
+  original composer dismisses or launch effects begin. Failure preserves the
+  draft; an identical failed save reuses its identity on explicit retry, while
+  separate successfully confirmed actions receive separate attempt IDs.
+- Wired New/cold Resume, ordinary Open/Resume/Bare Resume/Restore, new-window,
+  compact Picker, task Open before embodiment and provider Open for targets
+  whose locality is already resolved. Manager decisions and launch requests
+  carry the ID; no engine/native consumption evidence is inferred.
+- Unsupported prompt/option confirmations retain a refusal without submitting
+  or dismissing. Cancelled drafts record nothing. Unresolved-locality refusals
+  still precede persistence: the current storage contract requires a boolean.
+  Their truthful representation remains an explicit Phase 2 follow-up.
+- The affected Picker/composer/runner/task portfolio passes 489 cases with four
+  platform/privilege skips. Updated legacy test doubles to supply the actual
+  maintenance-decision mixin and explicitly fake/assert AHP hosting admission,
+  rather than accidentally reaching a missing engine in routing-only tests.
+- Native Windows and POSIX controls both pass: terminate the actual composer
+  process before save or after commit but before dismissal, then use an
+  independent reader and prove no launch effect occurred. With storage delayed
+  by 200ms, 20 confirmation-handler samples per platform remain below the
+  100ms acknowledgement budget. Windows p95 is about 2.69ms (maximum 20.84ms);
+  POSIX p95 is about 1.05ms (maximum 8.60ms). These are handler measurements,
+  not physical-key latency or sufficient high-percentile tail qualification.
+- The POSIX leaf controls ran against byte-checked source copies on a native
+  filesystem with fresh, offline-installed test dependencies. A partially
+  prepared cross-filesystem test environment first lacked packages and then
+  exceeded its bounded lane deadline; neither attempt counts as a passing
+  full POSIX suite. Owned test processes and disposable native files were
+  removed. No installed Manager/runtime rollout occurred.
+- Ruff and the 13-plugin installation contract pass. A clean current-source
+  snapshot passes documentation consistency; the checkout-wide scan cannot
+  traverse an ignored cross-platform test-venv link on Windows.
+- Legacy history copies, comprehensive outcome correlation, selected-machine
+  readers/sweeps, negotiated SSH prompts and installed acceptance stay open.
+  This implementation is not yet merged and is not parent-effort completion.

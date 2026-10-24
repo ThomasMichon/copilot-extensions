@@ -112,9 +112,11 @@ def open_worktree_cli_headed(screen, rec, *, no_mux: bool = False, ahp: bool = F
         screen._decide(decision)
         return
     opts = dict(decision.get("options") or {})
+    opts["new_window"] = True
+    decision["options"] = opts
     project = context.project()
 
-    def _work():
+    def _work(attempt_id):
         request = LaunchRequest(
             project=project,
             worktree_id=str(wt_id),
@@ -123,6 +125,7 @@ def open_worktree_cli_headed(screen, rec, *, no_mux: bool = False, ahp: bool = F
             no_mux=bool(opts.get("no_mux")),
             ahp=bool(opts.get("ahp")),
             new_window=True,
+            attempt_id=attempt_id,
         )
         try:
             with _capture_stdout_for_this_thread() as buf:
@@ -138,4 +141,16 @@ def open_worktree_cli_headed(screen, rec, *, no_mux: bool = False, ahp: bool = F
             else f"Launch in new window failed · {detail or 'unknown error'}"
         )
 
-    screen._run_bg("Launch in new window", _work, _done)
+    def launch(confirmed):
+        screen._run_bg(
+            "Launch in new window", lambda: _work(confirmed.get("attempt_id")), _done,
+        )
+
+    if getattr(screen, "real_ops", False):
+        from ...launch_confirmation import confirm_before_effect
+
+        confirm_before_effect(
+            screen, project, decision, surface="new-window", saved=launch,
+        )
+    else:
+        launch({})

@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from textual.app import App, ComposeResult
 from textual.events import Key
@@ -157,6 +157,7 @@ class LaunchRequest:
     environment: str | None = None
     seed_prompt: str | None = None
     new_window: bool = False
+    attempt_id: str | None = None
 
 
 def _state_cell(w: Worktree) -> str:
@@ -667,17 +668,28 @@ class WorktreeManagerApp(App):
             self._set_status("pivot actions are not available in this parity slice.")
             return
         if mode == "new":
-            self.pending_launch = LaunchRequest(
+            request = LaunchRequest(
                 project=self._project, worktree_id=None, mode="new")
+        else:
+            w = self._selected_worktree()
+            if w is None:
+                self._set_status("no worktree selected — move the cursor to a row first.")
+                return
+            request = LaunchRequest(
+                project=self._project, worktree_id=w.id, mode=mode, title=w.title)
+
+        from .launch_confirmation import confirm_before_effect
+
+        def saved(decision):
+            self.pending_launch = replace(request, attempt_id=decision["attempt_id"])
             self.exit()
-            return
-        w = self._selected_worktree()
-        if w is None:
-            self._set_status("no worktree selected — move the cursor to a row first.")
-            return
-        self.pending_launch = LaunchRequest(
-            project=self._project, worktree_id=w.id, mode=mode, title=w.title)
-        self.exit()
+
+        confirm_before_effect(
+            self, self._project, {
+                "action": mode, "worktree_id": request.worktree_id,
+                "title": request.title, "is_local": True,
+            }, surface="compact-picker", saved=saved,
+        )
 
     def _set_status(self, text: str) -> None:
         self._last_status = text
