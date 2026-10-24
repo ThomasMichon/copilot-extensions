@@ -323,7 +323,7 @@ def machine_identity_names(
 
 
 def normalize_machine_entries(
-    entries: Mapping[str, MachineEntry],
+    entries: Mapping[str, MachineEntry], *, observed_hostname: str | None = None,
 ) -> dict[str, MachineEntry]:
     """Project legacy Windows/WSL hosts into independently addressable machines.
 
@@ -331,7 +331,13 @@ def normalize_machine_entries(
     execution-space keys and SSH aliases are never rewritten. A legacy WSL
     declaration supplies the Windows association; other mixed platforms, duplicate
     profiles, and generated-key/alias collisions require explicit topology repair.
+    ``observed_hostname`` is an optional literal OS observation for contextual
+    hostname-label validation, never a requested target or ownership grant.
     """
+    if observed_hostname is not None and (
+        not isinstance(observed_hostname, str) or not observed_hostname.strip()
+    ):
+        raise ValueError("observed hostname must be a nonempty string")
     result: dict[str, MachineEntry] = {}
 
     def add(entry: MachineEntry) -> None:
@@ -379,7 +385,18 @@ def normalize_machine_entries(
 
     owners: dict[str, str] = {}
     for entry in result.values():
-        for name in machine_identity_names(entry):
+        literal = (
+            observed_hostname is not None and not entry.execution_platform
+            and entry.hostname.casefold() == observed_hostname.casefold()
+        )
+        names = machine_identity_names(entry, include_metadata=not literal)
+        if literal:
+            guest = (
+                entry.key.casefold() != observed_hostname.casefold()
+                and split_machine_environment(entry.key).environment == "wsl"
+            )
+            names += (f"{entry.hostname}-wsl" if guest else entry.hostname,)
+        for name in names:
             prior = owners.setdefault(name.casefold(), entry.key)
             if prior != entry.key:
                 raise AmbiguousMachineError(

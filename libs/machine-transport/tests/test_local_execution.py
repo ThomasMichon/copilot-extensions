@@ -6,6 +6,7 @@ from machine_transport import (
     IdentityError,
     MachineEntry,
     SSHEnvironment,
+    normalize_machine_entries,
     resolve_local_execution_context,
     resolve_machine_selection,
 )
@@ -65,6 +66,112 @@ def test_unmapped_literal_hostname_can_remain_the_local_binding(environment: str
     )
     assert context.machine == "literal-wsl"
     assert context.execution_machine == ("literal-wsl-wsl" if environment == "wsl" else "literal-wsl")
+
+
+@pytest.mark.parametrize("hostname", ["literal-wsl", "literal-win"])
+@pytest.mark.parametrize("environment", ["windows", "wsl"])
+@pytest.mark.parametrize("configured", [False, True])
+def test_literal_native_and_guest_siblings_keep_the_observed_physical_name(
+    hostname: str, environment: str, configured: bool,
+) -> None:
+    execution = f"{hostname}-wsl" if environment == "wsl" else hostname
+    entries = {
+        key: MachineEntry(key, "", hostname=hostname)
+        for key in (hostname, f"{hostname}-wsl")
+    }
+    before = dict(entries)
+    context = resolve_local_execution_context(
+        entries, hostname=hostname, environment=environment,
+        configured_machine=execution if configured else None,
+    )
+    assert (context.machine, context.execution_machine, context.customization_key) == (
+        hostname, execution, execution,
+    )
+    assert entries == before
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl"])
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("spaced", [False, True])
+def test_legacy_presentation_registry_keys_produce_one_term_execution_names(
+    environment: str, configured: bool, spaced: bool,
+) -> None:
+    label = "WSL" if environment == "wsl" else "Windows"
+    key = f"friendly{' ' if spaced else ''}({label})"
+    entry = MachineEntry(key, "", hostname="raw-host")
+    context = resolve_local_execution_context(
+        {key: entry}, hostname="raw-host", environment=environment,
+        configured_machine=key if configured else None,
+    )
+    assert context.machine == "friendly"
+    assert context.execution_machine == ("friendly-wsl" if environment == "wsl" else "friendly")
+    assert context.customization_key == key
+
+
+def test_literal_hostname_projection_still_rejects_genuine_alias_collision() -> None:
+    entries = {
+        "literal-win": MachineEntry("literal-win", "", hostname="literal-win", alias="shared"),
+        "literal-win-wsl": MachineEntry("literal-win-wsl", "", hostname="literal-win", alias="shared"),
+    }
+    with pytest.raises(ValueError, match="ambiguous"):
+        resolve_local_execution_context(entries, hostname="literal-win", environment="wsl")
+
+
+@pytest.mark.parametrize("hostname", ["literal-win", "literal-wsl"])
+def test_literal_observation_is_an_opt_in_normalization_context(hostname: str) -> None:
+    entries = {
+        key: MachineEntry(key, "", hostname=hostname)
+        for key in (hostname, f"{hostname}-wsl")
+    }
+    with pytest.raises(ValueError):
+        normalize_machine_entries(entries)
+    normalized = normalize_machine_entries(entries, observed_hostname=hostname)
+    assert normalized == entries
+    assert all(entry.hostname == hostname for entry in normalized.values())
+
+
+@pytest.mark.parametrize("hostname", ["", " "])
+def test_normalization_rejects_invalid_observation_context(hostname: str) -> None:
+    with pytest.raises(ValueError, match="observed hostname"):
+        normalize_machine_entries({}, observed_hostname=hostname)
+
+
+@pytest.mark.parametrize("hostname", ["raw-host", "literal-win", "literal-wsl"])
+@pytest.mark.parametrize(("environment", "address"), [
+    ("windows", "{host}"), ("windows", "{host}-win"), ("windows", "{host} (Windows)"),
+    ("wsl", "{host}-wsl"), ("wsl", "{host} (WSL)"),
+])
+def test_configured_hostname_forms_retain_matching_friendly_customizations(
+    hostname: str, environment: str, address: str,
+) -> None:
+    entries = {
+        key: MachineEntry(key, "", hostname=hostname)
+        for key in ("friendly", "friendly-wsl")
+    }
+    context = resolve_local_execution_context(
+        entries, hostname=hostname, environment=environment,
+        configured_machine=address.format(host=hostname),
+    )
+    assert (context.machine, context.execution_machine) == (
+        "friendly", "friendly-wsl" if environment == "wsl" else "friendly",
+    )
+
+
+def test_canonicalized_presentation_key_cannot_shadow_another_entry() -> None:
+    entry = MachineEntry("friendly (WSL)", "", hostname="raw-host")
+    other = MachineEntry("friendly-wsl", "", execution_platform="windows")
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(
+            {entry.key: entry, other.key: other}, hostname="raw-host", environment="wsl",
+        )
+
+
+def test_explicit_canonical_key_is_not_presentation_syntax() -> None:
+    entry = MachineEntry("friendly(WSL)", "", execution_platform="linux", hostname="raw-host")
+    context = resolve_local_execution_context(
+        {entry.key: entry}, hostname="raw-host", environment="linux",
+    )
+    assert context.execution_machine == entry.key
 
 
 @pytest.mark.parametrize(("environment", "slot"), [

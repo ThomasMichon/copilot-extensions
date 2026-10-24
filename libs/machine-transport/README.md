@@ -112,6 +112,12 @@ Aliases of a literal observed host retain the same naming facts; an explicit
 profile/environment conflict is still a refusal. Actual-platform entries take precedence over
 unscoped native fallbacks, and a selected entry keeps its registry key rather
 than regenerating it from aliases or physical metadata.
+Legacy parenthesized presentation keys are projected to one-term execution
+names while retaining their original `customization_key`; explicit canonical
+keys are not reformatted. Contextual normalization receives the literal observed
+hostname so native/guest sibling labels cannot trim it before selection.
+Ordinary `normalize_machine_entries(entries)` behavior is unchanged; the
+optional `observed_hostname` keyword is current-OS context, not target authority.
 
 Consumers must separately prove the receiving project, namespace, ledger and
 retained allocation before writing or replaying. New naming facts do not

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .execution_identity import IdentityError
 from .machine_environment import normalize_environment, split_machine_environment
@@ -63,6 +63,14 @@ def _context(
     registry: Mapping[str, MachineEntry], observed: str, physical: str,
     platform: str, execution: str, customization_key: str | None,
 ) -> LocalExecutionContext:
+    selected = registry.get(customization_key) if customization_key is not None else None
+    presentation = (
+        selected is not None and not selected.execution_platform
+        and execution == selected.key and "(" in execution
+        and bool(split_machine_environment(execution).environment)
+    )
+    if presentation:
+        execution = split_machine_environment(execution, platform).logical_machine
     collision = next((
         entry for entry in registry.values()
         if execution.casefold() in {
@@ -71,7 +79,7 @@ def _context(
     ), None)
     if collision is not None and (
         collision.key != customization_key
-        or collision.key.casefold() != execution.casefold()
+        or (collision.key.casefold() != execution.casefold() and not presentation)
         or collision.execution_platform not in ("", platform)
     ):
         raise IdentityError(f"local execution identity {execution!r} conflicts with a registered machine")
@@ -81,14 +89,24 @@ def _context(
     )
 
 
-def _literal_binding(registry: Mapping[str, MachineEntry], configured: str, observed: str) -> bool:
+def _literal_binding(
+    registry: Mapping[str, MachineEntry], configured: str, observed: str, platform: str,
+) -> bool:
     direct = [
         entry for entry in registry.values()
         if configured.casefold() in {
             name.casefold() for name in machine_identity_names(entry, include_metadata=False)
         }
     ]
-    return (not direct and configured.casefold() == observed.casefold()) or (
+    if not direct:
+        if configured.casefold() == observed.casefold():
+            return True
+        parsed = split_machine_environment(configured)
+        if parsed.machine.casefold() == observed.casefold():
+            if parsed.environment and parsed.environment != platform:
+                raise IdentityError("configured machine conflicts with the current execution environment")
+            return True
+    return (
         len(direct) == 1 and direct[0].key.casefold() == observed.casefold()
         and not direct[0].execution_platform and not _platform(direct[0], observed)
     )
@@ -113,7 +131,7 @@ def resolve_local_execution_context(
     platform = normalize_environment(environment)
     if platform not in ("windows", "wsl", "linux"):
         raise IdentityError("local execution environment must be windows, wsl or linux")
-    registry = normalize_machine_entries(entries)
+    registry = normalize_machine_entries(entries, observed_hostname=observed)
     if configured_machine is not None:
         if not isinstance(configured_machine, str) or not configured_machine.strip():
             raise IdentityError("configured machine must be a nonempty string")
@@ -123,11 +141,21 @@ def resolve_local_execution_context(
             for entry in registry.values() for profile in entry.ssh_environments
         ):
             raise IdentityError("configured SSH profile conflicts with the current execution environment")
-        if _literal_binding(registry, configured, observed):
+        if _literal_binding(registry, configured, observed, platform):
             configured_machine = None
     if configured_machine is not None:
+        # Literal current-host metadata has already been resolved above; do not
+        # feed that OS observation back through target-shaped suffix inference.
+        literal_observation = observed.casefold().endswith(("-win", "-wsl"))
+        target_registry = {
+            key: replace(entry, hostname="") if (
+                literal_observation
+                and entry.hostname.casefold() == observed.casefold()
+            ) else entry
+            for key, entry in registry.items()
+        }
         try:
-            selected = resolve_machine_selection(registry, configured, platform)
+            selected = resolve_machine_selection(target_registry, configured, platform)
         except MissingExecutionSpaceError:
             # This binding is already local; a missing customization is not
             # enrollment authority. Explicit key/platform conflicts still raise.
