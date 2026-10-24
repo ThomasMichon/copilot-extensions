@@ -96,8 +96,9 @@ def _single(metadata: Message, name: str, *, optional: bool = False) -> str:
 
 
 def _headers(data: bytes) -> Message:
-    message = Parser(policy=policy.default).parsestr(data.decode("utf-8"))
-    if message.defects or any(value.defects for value in message.values()):
+    # Core metadata uses compat32; default silently decodes RFC 2047 words.
+    message = Parser(policy=policy.compat32).parsestr(data.decode("utf-8"))
+    if message.defects:
         raise WheelError("malformed wheel metadata headers")
     return message
 
@@ -204,6 +205,10 @@ def _member_chunks(
     limit: int, deadline: float,
 ):
     _check_deadline(deadline)
+    archive.seek(0, os.SEEK_END)
+    archive_size = archive.tell()
+    if not 0 <= member.header_offset <= archive_size - 30:
+        raise WheelError("wheel local-header offset is outside the archive")
     # ZipFile checks local names and overlap, but ZipExtFile can truncate output
     # to a forged file_size before reaching the actual DEFLATE end marker.
     with bundle.open(member):
@@ -214,7 +219,10 @@ def _member_chunks(
         raise WheelError("invalid wheel local header")
     if struct.unpack_from("<H", header, 8)[0] != member.compress_type:
         raise WheelError("ambiguous wheel compression")
-    archive.seek(member.header_offset + 30 + sum(struct.unpack_from("<2H", header, 26)))
+    start = member.header_offset + 30 + sum(struct.unpack_from("<2H", header, 26))
+    if start > archive_size or member.compress_size > archive_size - start:
+        raise WheelError("wheel compressed member extent is outside the archive")
+    archive.seek(start)
     if member.compress_type == zipfile.ZIP_STORED and member.compress_size != member.file_size:
         raise WheelError("wheel stored member size mismatch")
     decoder = zlib.decompressobj(-15) if member.compress_type == zipfile.ZIP_DEFLATED else None
@@ -307,7 +315,7 @@ def inspect_archive(
                     if None in node:
                         raise WheelError("ambiguous wheel file/directory members")
                     node = node.setdefault(part.casefold(), {})
-                    if part.endswith(".dist-info"):
+                    if part.casefold().endswith(".dist-info"):
                         if index != 0:
                             raise WheelError("ambiguous wheel dist-info")
                         prefixes.add(part + "/")
@@ -407,7 +415,7 @@ def inspect_archive(
             )
     except (
         OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError,
-        csv.Error, EOFError, zlib.error,
+        csv.Error, EOFError, zlib.error, OverflowError,
     ) as exc:
         raise WheelError(f"invalid wheel archive: {exc}") from exc
 

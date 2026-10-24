@@ -376,6 +376,7 @@ jobs:
           tools/test_promotion_python_artifacts.py::test_trusted_wheel_validation_reads_real_metadata_and_members
           tools/test_promotion_python_artifacts.py::test_bundle_rejects_unsafe_wheels
           tools/test_promotion_python_artifacts.py::test_trusted_validate_cli_does_not_import_candidate_code
+          tools/test_promotion_python_artifacts.py::test_encoded_runtime_metadata_is_a_structured_refusal
 
   wheel-inputs-windows:
     if: ${{ inputs.wheel_inputs }}

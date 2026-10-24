@@ -3153,6 +3153,10 @@ declared-size truncation, checking full length, CRC and end-of-stream before
 metadata parsing or hash acceptance. Trailing-dot/space path components refuse
 as Windows aliases; decompression failures remain structured integrity errors.
 On Windows, reserved device names and invalid filename characters also refuse.
+Metadata-directory suffixes are checked case-insensitively, and local-header
+offsets are bounded before a member is opened. Header parsing follows PyPA's
+[core metadata `compat32` convention](https://packaging.python.org/en/latest/specifications/core-metadata/),
+preserving raw dependency fields rather than decoding email encoded words.
 
 Compressed tags are deduplicated and bounded before Cartesian expansion,
 including the selected filename's tags. Member ancestry uses a deadline-checked

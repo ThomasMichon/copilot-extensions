@@ -90,7 +90,7 @@ retains all acquisition, platform, fallback, retention and rollout obligations.
 
 The shared stdlib archive verifier and repository-only semantic profile facade
 are implemented without enabling a consumer. Targeted native wheel/profile/
-promotion selectors pass (168 tests), and installer-contract controls pass.
+promotion selectors pass (174 tests), and installer-contract controls pass.
 The full regression cohort passed 362 cases; its one digest-order diagnostic
 was corrected and 97 focused retests pass. Five synthetic
 wheel controls pass inside the actual no-actor collector. A real native Windows

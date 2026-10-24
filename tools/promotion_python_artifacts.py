@@ -24,7 +24,7 @@ from artifact_source_build import (
 from standalone_python_artifacts import COMPONENTS, artifact_label, project_key
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
-from installer_wheel_inputs import WheelError, WheelLimits, bounded_tag, inspect_archive
+from installer_wheel_inputs import WheelLimits, bounded_tag, inspect_archive
 
 try:
     import tomllib

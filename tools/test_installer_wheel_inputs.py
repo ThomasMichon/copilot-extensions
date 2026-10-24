@@ -126,6 +126,41 @@ def test_ordinary_zip64_directory_is_inspected(wheel_path, limits):
     assert inspect(wheel_path, limits).name == "demo-pkg"
 
 
+@pytest.mark.parametrize("offset", [2**63, 2**64 - 1])
+def test_zip64_local_offset_is_bounded_before_member_open(wheel_path, limits, monkeypatch, offset):
+    target = "demo_pkg/__init__.py"
+    output = io.BytesIO()
+    with zipfile.ZipFile(wheel_path) as source, zipfile.ZipFile(output, "w") as destination:
+        for member in source.infolist():
+            replacement = zipfile.ZipInfo(member.filename)
+            replacement.compress_type = zipfile.ZIP_DEFLATED
+            if member.filename == target:
+                replacement.extra = struct.pack("<HHQ", 1, 8, offset)
+            destination.writestr(replacement, source.read(member))
+    data = bytearray(output.getvalue())
+    end = data.rfind(b"PK\x05\x06")
+    position = struct.unpack_from("<L", data, end + 16)[0]
+    while data[position:position + 4] == b"PK\x01\x02":
+        lengths = struct.unpack_from("<3H", data, position + 28)
+        if data[position + 46:position + 46 + lengths[0]] == target.encode():
+            struct.pack_into("<L", data, position + 42, 0xffffffff)
+            break
+        position += 46 + sum(lengths)
+    else:
+        pytest.fail("fixture member not found")
+    wheel_path.write_bytes(data)
+    original = inspection.zipfile.ZipFile.open
+
+    def guarded_open(bundle, member, *args, **kwargs):
+        if getattr(member, "filename", member) == target:
+            pytest.fail("unbounded local-header seek")
+        return original(bundle, member, *args, **kwargs)
+
+    monkeypatch.setattr(inspection.zipfile.ZipFile, "open", guarded_open)
+    with pytest.raises(inspection.WheelError, match="offset"):
+        inspect(wheel_path, limits)
+
+
 def test_zip64_count_limit_precedes_zipfile_allocation(wheel_path, limits, monkeypatch):
     data = wheel_path.read_bytes()
     end = data.rfind(b"PK\x05\x06")
@@ -157,6 +192,7 @@ def test_invalid_or_exhausted_deadline_refuses_before_open(tmp_path, limits, dea
 @pytest.mark.parametrize("name", [
     "../escape", "/absolute", "C:drive", "a\\b", "a//b", "a/./b",
     "a/../b", "other-1.0.dist-info/METADATA", "a\0tail",
+    "shadow-9.0.DIST-INFO/METADATA", "nested/shadow-9.0.Dist-Info/METADATA",
     "demo_pkg/__init__.py.", "demo_pkg/__init__.py ",
     "demo_pkg./module.py", "demo_pkg /module.py", "trailing//",
 ])
@@ -541,3 +577,19 @@ def test_repeated_compressed_alternatives_are_deduplicated_before_parsing(wheel_
     assert runtime_profile.inspect_profile_wheel(
         wheel_path, selected_record(wheel_path), limits=limits, deadline=time.monotonic() + 10,
     ).name == "demo-pkg"
+
+
+def test_email_encoded_words_cannot_silently_change_dependency_metadata(wheel_path, limits):
+    record = selected_record(wheel_path)
+    with zipfile.ZipFile(wheel_path) as archive:
+        metadata = archive.read(PREFIX + "METADATA")
+    original = b"helper>=2; extra == 'fast'"
+    encoded = b"=?utf-8?b?" + base64.b64encode(original) + b"?="
+    metadata = metadata.replace(b"Requires-Dist: " + original, b"Requires-Dist: " + encoded)
+    wheel_path.write_bytes(wheel_bytes(metadata=metadata))
+    record["sha256"] = "sha256:" + hashlib.sha256(wheel_path.read_bytes()).hexdigest()
+    assert inspect(wheel_path, limits).requires_dist == (encoded.decode("ascii"),)
+    with pytest.raises(runtime_profile.ProfileError):
+        runtime_profile.inspect_profile_wheel(
+            wheel_path, record, limits=limits, deadline=time.monotonic() + 10,
+        )
