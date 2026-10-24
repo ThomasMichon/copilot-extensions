@@ -113,8 +113,10 @@ _exec_copilot_backend copilot.exe
     assert json.loads(output.read_text(encoding="utf-8-sig")) == expected
 
 
-def test_real_daemon_and_backend_keep_two_exact_handoffs_separate(tmp_path):
+@pytest.mark.parametrize("interruption", [None, "seed-claimed", "process-spawned", "finish"])
+def test_real_daemon_and_backend_keep_two_exact_handoffs_separate(tmp_path, interruption):
     script = textwrap.dedent(_SETUP + """
+interruption = sys.argv[2] or None
 server = tracking_write.start_server(tracking_write.compute)
 server.start()
 endpoint = tracking_write.rendezvous_fields(server)
@@ -126,15 +128,29 @@ def dispatch(verb, args, **kwargs):
 launch_seed_state._dispatch = dispatch
 tracking_write.run_direct = lambda *a, **kw: sys.exit("unexpected direct fallback")
 correlation = launch_execution.Correlation("a" * 32, "b" * 32)
+append = launch_execution.Execution.append
+def interrupted_append(self, phase, **details):
+    append(self, phase, **details)
+    if phase == interruption:
+        raise KeyboardInterrupt()
+launch_execution.Execution.append = interrupted_append
+finish = launch_seed_state.finish
+def interrupted_finish(*args, **kwargs):
+    result = finish(*args, **kwargs)
+    if interruption == "finish":
+        raise KeyboardInterrupt()
+    return result
+launch_seed_state.finish = interrupted_finish
 try:
     for kind in ("new", "resume"):
         seed = launch_seed_state.stage(path, kind=kind, text="synthetic quoted ' turn " + kind)
-        code = "import sys,time; assert sys.argv[1:]==['--interactive'," + repr(seed.text) + "]; time.sleep(.15); sys.exit(7)"
+        child_exit = 0 if interruption else 7
+        code = "import sys,time; assert sys.argv[1:]==['--interactive'," + repr(seed.text) + "]; time.sleep(.15); sys.exit(" + str(child_exit) + ")"
         result = launch_seed_exec.launch(
             path, [sys.executable, "-c", code], invoke=True,
             seed_id=seed.seed_id, correlation=correlation,
         )
-        assert result == 7 and launch_seed_state.peek(path) is None
+        assert result == (3 if interruption else 7) and launch_seed_state.peek(path) is None
     files = list((path.parent / "launch-attempts" / correlation.attempt_id).glob("*.execution.json"))
     assert len(files) == 2
     histories = [launch_execution.read(path.parent, correlation.attempt_id, file.name.split(".")[0]) for file in files]
@@ -146,7 +162,10 @@ try:
         process = history["events"][2]["details"]
         assert process["pid"] != os.getpid()
         assert process["process_start_time"] and process["boundary"] == "backend-command"
-        assert history["events"][-1]["details"]["exit_code"] == 7
+        outcome = history["events"][-1]["details"]
+        assert outcome["exit_code"] == (3 if interruption == "finish" else child_exit)
+        assert outcome["process_exit_code"] == child_exit
+        assert outcome["receipt_uncertain"] == (interruption in {"seed-claimed", "process-spawned"})
         assert "synthetic quoted" not in json.dumps(history)
         pids.append(process["pid"])
     assert len(set(pids)) == 2
@@ -155,7 +174,7 @@ finally:
     server.close()
 """)
     result = subprocess.run(
-        [sys.executable, "-c", script, str(tmp_path)],
+        [sys.executable, "-c", script, str(tmp_path), interruption or ""],
         capture_output=True, text=True, timeout=30, **_FLAGS,
     )
     assert result.returncode == 0, result.stdout + result.stderr

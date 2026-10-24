@@ -178,6 +178,10 @@ and its creation nonce when available. Initial persistence precedes seed claim,
 setup or process execution. Initial failure refuses the command. An unconfirmed
 post-effect observation is reported, but never repeats a spawn or skips the
 existing seed-settlement and process-wait ownership.
+An interrupted post-effect receipt write or process-identity probe is likewise
+unconfirmed, not permission to unwind past an already-started child. Interrupted
+seed settlement retains its existing uncertainty fence while child waiting
+continues.
 
 `seed-claimed` records only the saved seed and handoff IDs: ownership was taken,
 not necessarily delivered. A later proven spawn failure can restore that seed.

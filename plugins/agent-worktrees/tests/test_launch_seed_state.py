@@ -385,7 +385,8 @@ def test_legacy_new_seed_migrates_without_two_owners(tmp_path):
     assert state.pending(path) == seed
 
 
-def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkeypatch, capsys, interrupted):
     path = _record(tmp_path)
     seed = state.stage(path, kind="resume", text="next turn")
     calls = []
@@ -400,7 +401,9 @@ def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkey
     monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
     monkeypatch.setattr(
         state, "finish",
-        lambda *a, **k: (_ for _ in ()).throw(tracking_write.AmbiguousWriteOutcome("late ack")),
+        lambda *a, **k: (_ for _ in ()).throw(
+            KeyboardInterrupt() if interrupted else tracking_write.AmbiguousWriteOutcome("late ack"),
+        ),
     )
     assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == 3
     assert state.peek(path).text == seed.text and state.peek(path).handoff_id

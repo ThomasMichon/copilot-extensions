@@ -201,7 +201,7 @@ class Execution:
     def observed(self, phase: str, **details) -> None:
         try:
             self.append(phase, **details)
-        except _ERRORS:
+        except (*_ERRORS, KeyboardInterrupt):
             self.failed = True
             print("Launch execution receipt is unconfirmed; do not automatically retry.", file=sys.stderr)
 
@@ -211,8 +211,14 @@ class Execution:
         )
 
     def spawned(self, pid: int, *, invoke: bool) -> None:
+        try:
+            birth = locks.process_start_time(pid)
+        except KeyboardInterrupt:
+            birth = None
+            self.failed = True
+            print("Launch process identity is unconfirmed; retaining child wait ownership.", file=sys.stderr)
         self.observed(
-            "process-spawned", pid=pid, process_start_time=locks.process_start_time(pid),
+            "process-spawned", pid=pid, process_start_time=birth,
             boundary="backend-command" if invoke else "launcher-command",
         )
 

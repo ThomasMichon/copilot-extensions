@@ -103,24 +103,49 @@ def test_initial_failure_prevents_seed_claim_and_spawn(record, monkeypatch, caps
 
 
 @pytest.mark.parametrize("failed_phase", ["seed-claimed", "process-spawned", "execution-returned"])
+@pytest.mark.parametrize("interrupted", [False, True])
 def test_lost_observation_does_not_repeat_spawn_or_skip_seed_settlement(
-    record, monkeypatch, failed_phase, capsys,
+    record, monkeypatch, failed_phase, interrupted, capsys,
 ):
     seed = seeds.stage(record, kind="resume", text="exactly one argv handoff")
     append = audit.Execution.append
     calls = []
+    waits = []
     def observe(self, phase, **details):
         if phase == failed_phase:
+            if interrupted:
+                raise KeyboardInterrupt()
             raise tracking_write.AmbiguousWriteOutcome("private diagnostic")
         return append(self, phase, **details)
     monkeypatch.setattr(audit.Execution, "append", observe)
-    _backend(monkeypatch, lambda argv, **k: calls.append(argv) or SimpleNamespace(pid=os.getpid(), wait=lambda: 0))
+    _backend(monkeypatch, lambda argv, **k: calls.append(argv) or SimpleNamespace(
+        pid=os.getpid(), wait=lambda: waits.append(True) or 0,
+    ))
     assert launcher.launch(
         record, ["copilot"], invoke=True, seed_id=seed.seed_id, correlation=_correlation(),
     ) == 3
-    assert len(calls) == 1 and seeds.peek(record) is None
+    assert len(calls) == len(waits) == 1 and seeds.peek(record) is None
     error = capsys.readouterr().err
     assert "unconfirmed" in error and "private diagnostic" not in error
+
+
+def test_interrupted_process_identity_probe_retains_settlement_and_wait(record, monkeypatch):
+    seed = seeds.stage(record, kind="new", text="synthetic handoff")
+    waits = []
+    _backend(monkeypatch, lambda *a, **k: SimpleNamespace(
+        pid=os.getpid(), wait=lambda: waits.append(True) or 0,
+    ))
+    monkeypatch.setattr(
+        audit.locks, "process_start_time", lambda *a: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+    correlation = _correlation()
+    assert launcher.launch(
+        record, ["copilot"], invoke=True, seed_id=seed.seed_id, correlation=correlation,
+    ) == 3
+    assert waits == [True] and seeds.peek(record) is None
+    saved, = _history(record, correlation)
+    assert saved["events"][-1]["details"]["process_exit_code"] == 0
+    assert saved["events"][2]["details"]["process_start_time"] is None
 
 
 def test_failed_spawn_retains_seed_and_records_no_process(record, monkeypatch):

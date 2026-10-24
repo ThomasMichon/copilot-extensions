@@ -306,7 +306,7 @@ def _launch(
     if receipt:
         try:
             launch_seed_state.finish(record_path, receipt)
-        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, KeyboardInterrupt) as exc:
             cleanup_failed = True
             print(
                 f"Copilot started, but staged-seed cleanup is unconfirmed: {exc}. "
