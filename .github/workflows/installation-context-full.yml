@@ -81,6 +81,7 @@ jobs:
           --test-file tests/test_bootstrap_repair_recovery.py
           --test-timeout 120 --timeout 240
       - name: Qualify actual immutable foundation construction and custody
+        # Reap and clean each module's private runtimes within the existing storage cap.
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_foundation_inputs.py
@@ -96,7 +97,7 @@ jobs:
           --test-file tests/test_source_removal.py
           --test-file tests/test_first_use.py
           --test-file tests/test_first_use_native.py
-          --test-timeout 300 --timeout 600
+          --max-files-per-sub-suite 1 --test-timeout 300 --timeout 600
       - name: Qualify Python-free Linux genesis and retained upgrade
         run: >-
           python tools/run-plugin-tests.py update-driver
@@ -105,7 +106,7 @@ jobs:
           --test-file tests/test_first_use_vault.py
           --test-file tests/test_first_use_vault_command.py
           --test-file tests/test_first_use_vault_bootstrap.py
-          --test-timeout 900 --timeout 1080
+          --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1080
       - name: Qualify Vault bootstrap routing and publication admission
         run: >-
           python tools/run-plugin-tests.py agent-vault
@@ -156,6 +157,7 @@ jobs:
           --test-file tests/test_bootstrap_repair_recovery.py
           --test-timeout 120 --timeout 240
       - name: Qualify actual immutable foundation construction and custody
+        # Reap and clean each module's private runtimes within the existing storage cap.
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_foundation_inputs.py
@@ -175,7 +177,7 @@ jobs:
           --test-file tests/test_first_use_vault.py
           --test-file tests/test_first_use_vault_command.py
           --test-file tests/test_first_use_vault_bootstrap.py
-          --test-timeout 1200 --timeout 1380
+          --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
       - name: Qualify Vault bootstrap routing and publication admission
         run: >-
           python tools/run-plugin-tests.py agent-vault
