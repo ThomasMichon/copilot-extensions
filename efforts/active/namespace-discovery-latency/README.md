@@ -125,6 +125,15 @@ follow-up below through reviewed source changes. Reuse this canonical effort;
 retain the unchanged eight-second requirement, process isolation and existing
 release, installation and lifetime ownership.
 
+Subsequent operator selection, captured verbatim:
+
+> design-reviewed-selector
+
+**Selection summary:** Develop a reviewed trusted-bootstrap contract,
+coordinating with its existing owner. This selects design work rather than
+silently trusting PATH or an unadmitted runtime; it does not grant shared
+implementation ownership or installed rollout.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -178,6 +187,9 @@ release, installation and lifetime ownership.
 - [ ] Execute that follow-up in independently reviewable source slices:
   omit unused state-root preferences first, then qualify the canonical
   fresh-process evaluator selection without weakening bootstrap admission.
+- [ ] Review the [independent Windows bootstrap contract](trusted-bootstrap.md)
+  and agree its shared implementation scope with #6812 before changing the
+  evaluator or shared selector.
 - [ ] Requalify the remaining installed reader latency after a reviewed
   state-root follow-up, preserving complete discovery within eight seconds.
 - [ ] Retain release/rollout responsibility explicitly. Apply a local rollout
@@ -227,6 +239,84 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Independent bootstrap contract proposed
+
+- After the preference-only native cohort failed, the operator explicitly
+  selected developing a reviewed selector contract rather than waiting with
+  the evaluator implicitly blocked.
+- The proposal uses existing Windows CPython registration for data-only
+  discovery and requires independent local executable/publisher admission
+  before any candidate runs. It proposes no new interpreter registry, path
+  cache, runtime-self-validation, on-read download or larger deadline.
+- Existing native PowerShell evaluation remains the preselected fallback when
+  no suitable independent bootstrap exists. Once evaluation starts, refusal
+  stays terminal. The canonical SDK retains every source/cell/policy and
+  generation check in a fresh process.
+- The #6812 owner was contacted for an existing selector or concrete overlap.
+  Shared implementation requires an explicit bounded owner assignment; this
+  design does not pre-patch the installer's existing selection helper.
+- The linked design has its own review and native qualification gates,
+  including the selector's real cold cost. It is not implementation or
+  evidence that the unchanged eight-second objective now passes.
+
+### 2026-10-24 - Preference-only native qualification remains over budget
+
+- Rebuilt the merged source through the canonical native developer installer
+  in a new isolated profile. Construction completed in 324.594 seconds with
+  no stderr, no predecessor and a no-op monitor transition. The source head
+  remained `db4e11c90438a51eaaa6a52c47a20eac53f418f3`.
+- Both executing config and context-handler files are frozen under the private
+  runtime and match the recorded source hashes. The complete state-root JSON
+  equals the installed reader's result. Shared installed selector and
+  deployment-manifest hashes remain unchanged.
+- Complete provider runs took 6.531, 6.765 and 8.844 seconds, each returning
+  the actual empty container inventory without stderr. The third run fails
+  the unchanged eight-second contract. The cohort stopped there; no fourth
+  or fifth cold run, Bridge cohort, average-based pass or installed rollout
+  is credited.
+- The preference slice is a reviewed, landed optimization, not a completed
+  native repair. The separate evaluator remains unimplemented pending an
+  independently trusted pre-admission bootstrap selector. The bounded
+  dependency question is retained with the existing #6812 owner in
+  comment `6380217728`; no shared helper or SDK is pre-patched.
+- Removing imports only from `context_cli` would not remove the same eagerly
+  imported config/session/publication dependencies from `__main__`. Its
+  composition roots are already covered by other contributors' open work;
+  do not fork or silently supersede that work. A broader command-root change
+  needs concrete owner coordination and its own reviewed scope.
+- The next stretch is the owned bootstrap-contract dependency, followed by
+  a reviewed consumer implementation and newly rebuilt native qualification.
+  Source publication, required CI, release/control adoption, native discovery
+  and authorized running-state acceptance remain separate gates. This effort
+  stays Active.
+
+### 2026-10-24 - Preference-read slice reviewed and merged
+
+- #8476 merged to Dev as
+  `08b0820621c49f1e8e386f5fd86c9df4ae39c266`. Copilot approved
+  the actual head `a233f771c07c907a44fc83fa4cc98d1ecef2e26b`
+  in review `5636927916`; the full review, inline comments and complete
+  thread inventory contain no unresolved findings.
+- Required CI `40064478395` and lockdown/attribution
+  `40064478513` passed. The managed merge omitted only the
+  provider-confirmed extra CODEOWNER vote, not required CI or feedback.
+  Provider readback confirmed the merge; the accepted source was pulled
+  forward after clean-head, merged-ancestor and file-equality checks.
+- The published-head effect-free eight-node handler proof passed in
+  2.891 seconds with no effects and contextual coverage. The real four-child
+  CLI smoke passed bound/unbound JSON/text results through the canonical
+  synthetic registry writer. Configuration/profile coverage and complete
+  Linux CI are distinct from full installed provider/Bridge timing.
+- The preference slice is merged, not deployed. Rebuild the isolated native
+  fixture before measuring it. Bootstrap evaluation remains source-only:
+  the reached dispatchers validate with native PowerShell before resolving
+  their runtime; installer PATH/launcher probes execute a candidate before
+  establishing independent evaluator authority. Do not repurpose those
+  probes or an unadmitted selected runtime as its own validator.
+- The effort remains Active. Native headroom, first-touch/failure controls,
+  qualified release/control adoption and authorized installed consumption
+  remain open under their existing owners.
 
 ### 2026-10-24 - Narrow state-root preference read implemented
 

@@ -66,6 +66,10 @@ launch/ownership patterns. It does not introduce another SDK or state resolver.
 - [ ] If no existing contract safely supplies that interpreter, keep the
   evaluator slice unimplemented until the missing contract is reviewed.
   Continue the independent preference-read slice rather than weakening a gate.
+  The preference slice is now merged; its native cohort still exceeds the
+  deadline. The operator selected the separately reviewed
+  [independent bootstrap contract](trusted-bootstrap.md) as the next design
+  slice, coordinated with #6812 before shared implementation.
 
 ### 2. Narrow the state-root preference read
 
@@ -83,7 +87,7 @@ launch/ownership patterns. It does not introduce another SDK or state resolver.
 - [x] Add focused regressions, directly related documentation and a Worktrees
   changefile. Prove equal complete results and absence of the unused preference
   read, rather than only mocking a faster elapsed time.
-- [ ] Obtain current-head review, required CI and a real merge before recording
+- [x] Obtain current-head review, required CI and a real merge before recording
   the slice complete.
 
 ### 3. Qualify a lighter canonical evaluator in a fresh process
