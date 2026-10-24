@@ -1,10 +1,10 @@
 # Trusted harness containers
 
 Parent: [Linux role fleet](README.md), #6030.
-Initial image slice: #8352. **Status: proposed plan; no image or runtime delivered.**
-The campaign owner retains integration and publication. Implementation starts
-only after this plan clears review and merges, followed by explicit execution
-authorization. A merged plan does not authorize live provisioning or rollout.
+Initial image slice: #8352. **Status: implementation candidate; native validation open.**
+The plan merged in #8358 and execution was explicitly authorized. The campaign
+owner retains integration and publication. Source and offline tests do not prove
+a built image, native readiness, live provisioning or rollout.
 
 ## Guiding intent and request
 
@@ -138,11 +138,19 @@ and the repository's dependency-age audit for declarations; the audit alone
 does not prove subsequent installation admission or cover every image layer.
 
 The existing CI-repair recipe accepts `COPILOT_VERSION` but does not establish
-the complete locked, seasoned image contract. No concrete Copilot/npm, OS
-snapshot or full-image lock is selected by this plan. Implementation must locate
-admissible existing pins/helpers and prove their exact artifact age/integrity,
-or report missing release evidence as a blocker before installation. Do not
-invent a lock or weaken seasoning to make the build pass.
+the complete locked, seasoned image contract. The implementation candidate's
+[image documentation](../../../.devcontainer/trusted-harness-base/README.md)
+and `dependencies.lock.json` now select exact artifact pins and source evidence.
+The candidate deliberately fixes Linux amd64, `vscode` UID/GID 1000,
+`/home/vscode`, `/workspaces` and a local OCI archive instead of implementing
+arbitrary layout/platform choices. Do not weaken seasoning to make a build pass.
+
+The build owner must separately admit a running, single-node, resource-bounded
+Buildx worker. The wrapper verifies actual CPU/memory/swap bounds and selects
+that exact builder, never the default daemon worker. It neither provisions a
+builder nor changes existing service containers. Bounded CLI cancellation
+preserves uncertain remote outcomes for owner reconciliation; cleanup stays
+limited to owned artifacts/resources.
 
 No interactive login, auth pump, secret build argument, token-bearing build
 secret or copied credential cache enters a build. Approved source/dependency
@@ -187,11 +195,11 @@ Systemd runtime is disposable with the image.
 ## Phased plan and gates
 
 1. **Reviewed contract — image participant; campaign owner integrates.**
-   - [ ] Merge this bounded plan and confirm explicit implementation authorization.
+   - [x] Merge this bounded plan and confirm explicit implementation authorization.
    - [ ] Agree build inputs/outputs and exact image reservation with adjacent
      source owners; disagreements remain blocking for the affected seam only.
 2. **Standalone image — #8352 image participant.**
-   - [ ] Implement only the reserved recipe/schema/build adapter/docs/tests.
+   - [x] Implement only the reserved recipe/schema/build adapter/docs/tests.
    - [ ] Prove secret-free build, dependency admissibility, fresh-home startup,
      existing-home preservation, real tooling and supported init/SSH/tmux behavior.
    - [ ] Record missing release or platform evidence explicitly. An offline
@@ -268,7 +276,7 @@ The following implementation details are **agent-recommended**:
 
 ### Documentation validation
 
-For this plan-only delta, from repository root:
+For effort documentation changes, from repository root:
 
 ```text
 python tools/check-effort-vision-structure.py efforts/active/linux-role-fleet/README.md
@@ -276,9 +284,8 @@ git diff --check
 ```
 
 Also check all relative Markdown links in this child and its parent integration
-anchors. No build, package installation or live provider test belongs to this
-planning stage. No behavior/as-is docs or visions require changes yet.
-Future implementation uses focused offline tests first; dependency declarations
+anchors. The initial plan stage performed no build, package installation or live
+provider test. Implementation uses focused offline tests first; dependency declarations
 also run `python tools/check-dependency-age.py`. Image builds, clean-room/native
 and live validations run only after the execution and venue gates above.
 
@@ -287,3 +294,50 @@ and live validations run only after the execution and venue gates above.
 - 2026-10-23: Drafted the #8352 bounded image plan within #6030. Source
   reservations and build interface are proposed; no implementation, build,
   deployment, new credential producer or adjacent-owner transfer is claimed.
+- 2026-10-23: After #8358 merged and execution authorization, authored the
+  reserved image candidate and its standalone builder/schema, fixed-layout
+  runtime contract, artifact lock and focused offline tests. Public metadata
+  identifies the immutable base, official Node/Copilot/uv checksums and frozen
+  Debian Release/package-index hashes; no authentication or package installation
+  was used to obtain that evidence. Native image build, runtime preservation,
+  admitted worker preparation, adapter/auth and Picker/tmux integration remain
+  open. No adjacent owner, publisher or deployment authority was transferred.
+- 2026-10-23: Candidate validation: 16 focused offline tests pass, including
+  actual CLI/subprocess boundaries, timeout termination, bounded-builder
+  admission/refusal and OCI layer integrity. Ruff F/E9, native Bash syntax,
+  JSON/AST/link checks and effort structure pass. Official Node, Copilot and
+  uv archives were read in memory; complete byte hashes and extraction layouts
+  match the lock. No image was built here. The separately qualified native
+  builder lane still requires its owner to prepare an admitted resource-bounded
+  worker and run the published candidate without changing unrelated services.
+- 2026-10-23: Corrected the candidate's machine-ID projection, persistent-state
+  admission, same-daemon builder binding and pre-launch recovery receipt.
+  Canonical identity remains in home; `/etc/machine-id` is a public-readable
+  regular projection for DBus/user-systemd even with a 0700 home. Foreign,
+  linked or partial persistent identity is refused rather than adopted or
+  rotated. A bounded read-only native preflight independently confirmed the
+  selected base's `vscode` UID/GID 1000, home, Bash, Python 3.12.11 and Git 2.50.1.
+  That evidence proves base assumptions only; derived-image SSH/systemd and
+  unprivileged machine-ID readback remain native validation gates.
+  The corrected candidate passes 26 focused tests, Ruff F/E9, both Bash syntax
+  checks and AST/JSON/link/public-source checks; no native build or rollout is
+  claimed by those offline results.
+- 2026-10-24: The published #8385 candidate passed an actual bounded native
+  OCI build. Manifest:
+  `sha256:1ef40cdd019db10d972897d650cbd6bf150f130ef82383c171904a14bf341dcb`;
+  config:
+  `sha256:a14166084c93fd2672af7e2528c0776d0df29e0bfb6c5a2c514603a630936fca`.
+  Native import verified the descriptor, configuration and rootfs; Docker's
+  containerd store addressed the manifest rather than the config ID.
+  The fixed tools ran successfully, and two disposable containers preserved
+  identity bytes with a 0700 home while both `vscode` and `messagebus` read the
+  public projected ID. A thin consumer built from the verified local OCI layout
+  without a registry, credentials or deployment action.
+- 2026-10-24: Native systemd boot remains blocked on the tested Docker 29.1.3
+  cgroup-v2/default-AppArmor/seccomp host profile: cgroup remount and fresh mount
+  were refused under the declared trusted capabilities. No privileged mode,
+  unconfined profile or host cgroup bind was added. Carry this as a deployment
+  profile admission/qualification gate, not a synthetic service-ready result.
+  The standalone suite now has 27 cases; 24 eligible cases are registered with
+  the existing required-CI runner. Native CI caught CRLF-versus-LF source
+  admission hashes; regenerate those bindings against committed LF bytes.

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep parser custody and named-volume trusted-base operational language",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
