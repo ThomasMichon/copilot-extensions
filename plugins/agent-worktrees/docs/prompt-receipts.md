@@ -61,6 +61,11 @@ fixture-owned seams, not live services. The fixture allows only the harness's
 exact Node invocation; producer, backend and observation helper launches fail.
 It checks a registered non-head subject, an exact pending candidate, and an
 actual legacy rewrite that removes trusted subject fields.
+The registered first-message callback also runs through the real socket path:
+it must return before socket I/O, settle within the unchanged whole-observation
+budget and launch no helpers. Additional controls exercise four retained
+in-flight operations with no fifth admission/queue, the 8 KiB request boundary,
+oversized responses after commit, and the exact uncertain-identity fence.
 
 Run it through `tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
 --test-file tests/native/test_resident_prompt_receipt_integration.py`, with

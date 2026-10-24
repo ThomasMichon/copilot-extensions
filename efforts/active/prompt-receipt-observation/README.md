@@ -389,3 +389,69 @@ new authority or ownership behavior requires a separate proposal.
   publication/review/CI/merge remain open. The retained fixture/evidence
   publication refusal is unchanged. `RESIDENT_RECEIPT_CONTRACT` stays absent;
   no source or installed readiness/rollout is claimed.
+
+### Full admitted source-gate execution and retained timing failure
+
+- Reconciled the retained consumer head without resetting or rewriting it,
+  reread the complete merged producer diff and source completion result, and
+  resumed the same task normally. The immutable merged provider/producer
+  fixture and unpublished consumer were preserved.
+- Ran the requested complete actual ControlServer/backend/Node selector first.
+  The old import/setup failures are gone: **28 cases passed, one failed**.
+  The host sample was 100% CPU. The storage-failure case exhausted observation
+  time before receipt admission, returning unavailable in 1,905.14 ms with
+  zero backend calls/effects; it therefore never exercised its intended failed
+  fsync assertion. This is a retained pre-admission timing/qualification
+  failure, not a passing storage test or a measured >2-second overrun. No
+  deadline, workload or assertion was relaxed and no blind full retry followed.
+- Added explicit actual-server controls for four retained in-flight requests,
+  refusal of a fifth with zero queue, exact uncertain-identity query fencing,
+  8,192/8,193-byte request frames and oversized post-commit responses. Added
+  one-second/earlier-caller pre-effect clock controls. All six new selectors
+  passed: max in-flight four, zero helpers, no fifth backend entry, no repeated
+  uncertain mutation, and full settlement before fixture teardown.
+- A combined trace/deadline/backend run passed 62 of 63 cases; the new
+  pre-effect clock unit test inadvertently entered the real 100 ms lock using
+  a different clock, allowing host scheduling to fail it before the intended
+  fake-clock assertion. Isolated that unit's lock seam while preserving its
+  exact 100 ms admission and 1,000 ms/earlier-caller assertions. Both corrected
+  unit selectors pass. Real lock behavior remains covered separately.
+- Fresh focused Node core/timeouts/scheduler/socket run: **131 passed**,
+  including disposal uncertainty, source/incarnation fencing, frame limits
+  and zero-helper observation. Stalled observation measured 1,906.31 ms.
+  These tests do not erase the actual-server selector failure above.
+- Final owned windowless run: **four passed** (two receipt cycles, delayed
+  fsync/drain and post-admission cancellation). The Pythonw parent observer
+  collected 638 samples across 25 owned processes, with zero visible owned
+  windows, zero owned foreground transitions and no surviving owned processes.
+  It measured 1,923.25 ms for the stalled observation. The monitor now checks
+  actual process exit state rather than treating a retained dead process
+  object as live; previous failed reports remain untouched.
+- Extended the real merged registration/candidate cases through the actual
+  registered `user.message` callback and resident socket consumer, rather
+  than inferring that composition from scheduler unit tests. Both pass.
+  Pending-candidate callback: 1.236 ms, full observation 139.01 ms.
+  Registered non-head callback: 0.6922 ms, full observation 266.95 ms.
+  Each callback returned before any socket I/O; each attempt used exactly
+  two sockets and zero helpers. The selected-installation/catalog inputs and
+  SDK event shell remain isolated fixtures, not installed-host evidence.
+- Raw results are retained in `.resident-integration-validation/`:
+  `host-load-before-full-native-1700.log`,
+  `run-full-native-merged-provider-producer-1700.log`,
+  `run-admitted-capacity-frame-pre-effect-gates-1700.log`,
+  `run-trace-deadline-resident-backend-gates-1700.log`,
+  `run-pre-effect-clock-only-unit-fix-1700.log`,
+  `run-node-core-scheduler-socket-gates-1700.log`,
+  `windowless-1700-final.log`, `windowless-1700-final-report.json` and
+  `run-real-registered-callback-consumer-gates-1700.log`.
+- Current native selector has 33 cases. Its complete qualification remains
+  red until the retained pre-admission timing case clears in a suitable
+  environment with unchanged bounds. Source readiness is not advertised:
+  `RESIDENT_RECEIPT_CONTRACT` remains absent. Complete startup/catalog/SDK-host,
+  Linux/macOS/native and installed qualification are not waived. Source
+  publication/review/CI/merge remain open; retained untracked material also
+  still blocks ordinary publication. No rollout or campaign completion.
+- Final touched Python lint, unchanged PR-scoped module-size guard and
+  headless-launch source guard pass. The current source draft was rechecked:
+  #8026 remains open/draft at `fb6d1592e103de14826e700207c9606b18b07960`.
+  Source publication was not advanced past the failed qualification gate.

@@ -188,6 +188,22 @@ def test_expired_admission_has_no_effect(store):
     assert not (store / "logs").exists()
 
 
+@pytest.mark.parametrize("caller_budget", [0.05, 2.0])
+def test_pre_effect_budget_is_one_second_or_earlier_caller_deadline(store, monkeypatch, caller_budget):
+    clock = [time.monotonic()]
+
+    @contextmanager
+    def delayed_admission(path, **kwargs):
+        assert kwargs["deadline"] <= clock[0] + receipt.MAX_LOCK_SECONDS
+        clock[0] += min(caller_budget, 1.0) + 0.001
+        yield
+
+    monkeypatch.setattr(receipt, "_append_lock", delayed_admission)
+    monkeypatch.setattr(receipt, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    assert invoke(record=True, deadline=clock[0] + caller_budget)["reason"] == "pre-effect-timeout"
+    assert not handoff_trace.trace_path("project", "worktree").exists()
+
+
 @pytest.mark.parametrize("nonce", ["", None, "bad\nnonce"])
 def test_missing_or_invalid_incarnation_never_records(store, nonce):
     assert invoke(record=True, nonce=nonce)["status"] == "unavailable"

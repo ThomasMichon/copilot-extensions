@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -74,7 +75,9 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
     fsync = os.fsync
     hold_sync, release_sync = threading.Event(), threading.Event()
     state = SimpleNamespace(drop_reply=False, delay_sync=False, hold_sync=hold_sync,
-                            release_sync=release_sync, counts=counts, cancel_path=None)
+                            release_sync=release_sync, counts=counts, cancel_path=None,
+                            hold_backend=False, release_backend=threading.Event(),
+                            oversized_reply=False)
     popen = subprocess.Popen
     driver = Path(__file__).with_name("receipt_node_driver.mjs")
 
@@ -107,6 +110,8 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
     def backend(*args, **kwargs):
         counts["maxActive"] = max(counts["maxActive"], runtime.active_count())
         counts["record" if kwargs["record"] else "query"] += 1
+        if state.hold_backend:
+            assert state.release_backend.wait(8), "fixture backend was not released"
         return handoff_prompt_receipt.resident_prompt_receipt(*args, **kwargs)
 
     runtime = adapter.ReceiptControl(lambda: dict(owner), backend=backend)
@@ -129,6 +134,8 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         if state.drop_reply and payload.get("operation") == "record":
             current.socket.shutdown(2)
             current.socket.close()
+        if state.oversized_reply:
+            result["padding"] = "x" * 8192
         return result
 
     server = control.ControlServer(handle, token="fixture-token")
@@ -164,7 +171,7 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         "```json\n" + json.dumps(catalog) + "\n```\n", encoding="utf-8",
     )
     def observe(*, pending=None, locator="task:native-fixture", concurrent=0,
-                cancel_before=False, cancel_on_fsync=False):
+                cancel_before=False, cancel_on_fsync=False, distinct=False, callback=False):
         request_file = tmp_path / "node-request.json"
         state.cancel_path = tmp_path / "cancel-after-admission" if cancel_on_fsync else None
         if state.cancel_path is not None:
@@ -172,6 +179,8 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         request_file.write_text(json.dumps({
             "sessionDir": str(session_dir), "sessionId": sid,
             "locator": locator, "pending": pending or {}, "concurrent": concurrent,
+            "distinct": distinct,
+            "callback": callback,
             "cancelBefore": cancel_before,
             **({"cancelFile": str(state.cancel_path)} if state.cancel_path is not None else {}),
         }), encoding="utf-8")
@@ -184,6 +193,7 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         print(json.dumps({
             "observation": value["status"], "reason": value.get("reason"),
             "elapsedMs": value["elapsedMs"], "helperCalls": value["helperCalls"],
+            "socketCalls": value["socketCalls"], "callbackMs": value.get("callbackMs"),
             "active": runtime.active_count(), "counts": dict(counts),
         }), flush=True)
         assert value["helperCalls"] == 0
@@ -201,12 +211,14 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
     state.token_path = token_path
     state.session_dir = session_dir
     state.owner = owner
+    state.port = server.port
     threads_before = {thread.ident for thread in threading.enumerate()}
     server.start()
     try:
         yield state
     finally:
         release_sync.set()
+        state.release_backend.set()
         runtime.close_admission()
         server.close()
         runtime.wait_idle()
@@ -262,7 +274,10 @@ def test_exact_pending_successor_is_supported_without_head_promotion(resident):
         state="pending", opened_at="2026-01-02", candidate=resident.subject["sessionId"],
     )]
     tracking.save_record(resident.record, resident.record_path)
-    assert resident.observe()["status"] == "logged"
+    observed = resident.observe(callback=True)
+    assert observed["status"] == "logged"
+    assert observed["callbackBeforeIO"] is True and observed["callbackMs"] < 100
+    assert observed["socketCalls"] == 2
     assert tracking.load_record(resident.record_path).head_session == "different-head"
 
 
@@ -489,7 +504,10 @@ def test_actual_registration_producer_composes_with_resident_and_node(registrati
     assert projected["creationNonce"] == current.creation_nonce
     assert projected["sessionId"] == resident.subject["sessionId"]
     assert tracking._load_record_uncached(resident.record_path).resolved_head_session == "different-head"
-    assert resident.observe()["status"] == "logged"
+    observed = resident.observe(callback=True)
+    assert observed["status"] == "logged"
+    assert observed["callbackBeforeIO"] is True and observed["callbackMs"] < 100
+    assert observed["socketCalls"] == 2
     assert resident.counts["record"] == 1 and resident.counts["helpers"] == 0
 
 
@@ -519,3 +537,55 @@ def test_actual_subject_writer_projects_pending_candidate_and_omits_legacy(resid
     assert "creationNonce" not in legacy and "project" not in legacy
     assert resident.observe()["status"] == "unavailable"
     assert resident.counts["record"] == 1
+
+
+def test_four_inflight_zero_queue_and_uncertain_identity_fence(resident):
+    resident.hold_backend = True
+    batch = resident.observe(concurrent=4, distinct=True)
+    assert all(result["status"] == "unknown" for result in batch["results"])
+    assert resident.runtime.active_count() == resident.counts["maxActive"] == 4
+    assert resident.counts["record"] == 4
+    assert resident.observe(locator="task:fifth")["status"] == "unknown"
+    assert resident.counts["record"] == resident.runtime.active_count() == 4
+    first = batch["results"][0]
+    assert resident.observe(locator="task:native-fixture-0", pending=first["pending"])["status"] == "unknown"
+    assert resident.counts["query"] == 0
+    resident.runtime.close_admission()
+    assert resident.runtime.active_count() == 4
+    resident.release_backend.set()
+    resident.runtime.wait_idle()
+    assert resident.runtime.active_count() == 0 and resident.counts["record"] == 4
+    assert resident.counts["fsync"] == 0
+
+
+@pytest.mark.parametrize("frame_size", [8192, 8193])
+def test_actual_server_receipt_request_frame_boundary(resident, frame_size):
+    payload = {
+        "contractVersion": 1, "operation": "record",
+        "subject": {**resident.subject, "locator": "task:frame"},
+        "expectedOwner": resident.owner, "remainingMs": 1000,
+    }
+    data = json.dumps({
+        "version": 1, "token": "fixture-token",
+        "action": "handoff-prompt-receipt", "payload": payload,
+    }).encode("utf-8")
+    data += b" " * (frame_size - len(data) - 1) + b"\n"
+    assert len(data) == frame_size
+    with socket.create_connection(("127.0.0.1", resident.port), timeout=2) as peer:
+        peer.sendall(data)
+        with peer.makefile("rb") as response:
+            raw = response.readline(8193)
+    assert len(raw) <= 8192
+    result = json.loads(raw)["result"]
+    assert result["status"] == ("received" if frame_size == 8192 else "unavailable")
+    assert resident.counts["record"] == resident.counts["fsync"] == (frame_size == 8192)
+
+
+def test_oversized_real_server_reply_retains_exact_commit_for_reconciliation(resident):
+    resident.oversized_reply = True
+    first = resident.observe()
+    assert first["status"] == "unknown" and resident.counts["fsync"] == 1
+    resident.oversized_reply = False
+    assert resident.observe(pending=first["pending"])["status"] == "logged"
+    assert resident.counts["record"] == resident.counts["query"] == 1
+    assert len(handoff_trace.read_trace(resident.record.repo, resident.record.worktree_id)) == 1
