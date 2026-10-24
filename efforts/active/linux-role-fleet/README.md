@@ -168,8 +168,10 @@ for #6240/#6424/#6241 and #6681 ownership. Its decomposition and validation
 are **agent-recommended**. Existing client, Gateway/SSH, trusted-image and
 credential-provider work stays with its current owners.
 
-- [ ] Land the loadout/Gateway vision and this implementation amendment
+- [x] Land the loadout/Gateway vision and this implementation amendment
   through ordinary review before changing runtime behavior.
+  #8434 merged after exact-head Copilot approval and required CI; this closes
+  reviewed intent only, not runner provisioning or live fleet acceptance.
 - [ ] Implement contributed template/slot composition and capacity-aware
   named-machine runner allocations, preserving custom registrar state.
 - [ ] Connect the committed desired composition to controller-owned source
@@ -427,6 +429,12 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #8434 merged the capacity-grid loadout child vision, complete confirmed
+  Gateway outfitting intent and linked #7192 realization plan. Exact-head
+  review and required checks passed. Re-read this parent Plan and Validation
+  Plan after merge, pulled the same worktree forward, and resumed the
+  declaration-to-managed-owner implementation. Existing live pools, routing,
+  credentials, capacity and all other parent gates remain unchanged.
 - Logging audit requested under #8377: existing append-only, size-rotated and
   daily-backup-count writers do not establish universal age-based retention.
   #8370's installer-attempt implementation and #6812's formatter remain with
