@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from . import activity, config as cfg, disposition_history, git_ops, handoff_trace
-from . import permissions, procs, sessions, tracking
+from . import permissions, procs, tracking
 from .retirement_safety import retirement_blocker, same_pair
 
 
@@ -68,21 +68,12 @@ def _reap_locked(
         return 0, warnings
 
     if rec.worktree_path and Path(rec.worktree_path).exists():
-        # Windows cwd handles must be released before directory removal.
-        sessions.kill_tmux_session(rec.worktree_id)
-        try:
-            killed = procs.terminate_processes_under(rec.worktree_path)
-        except Exception:
-            killed = []
-        if killed:
-            names = ", ".join(f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
-            if names:
-                warnings.append(f"Terminated lingering process(es): {names}")
-            activity.log_event(
-                "worktree_procs_terminated",
-                worktree_id=rec.worktree_id,
-                count=sum(1 for k in killed if k["killed"]),
-            )
+        process_blocker = procs.checkout_retirement_blocker(rec.worktree_path)
+        if process_blocker:
+            return 1, [
+                f"Cannot retire {rec.worktree_id}: {process_blocker}. "
+                "Cleanup deferred; settle process use with its owner before retrying."
+            ]
 
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):
             warnings.append("Could not remove worktree via git -- forcing directory removal.")
