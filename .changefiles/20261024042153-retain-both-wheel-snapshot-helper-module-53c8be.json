@@ -1,0 +1,9 @@
+{
+  "comment": "Retain both wheel snapshot helper modules in the installed lifecycle bootstrap so isolated installer publication and reuse can load their full import closure.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
