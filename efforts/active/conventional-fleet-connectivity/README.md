@@ -20,6 +20,7 @@ require a second topology registration, duplicate agent roster, or blind repair.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Plan owner | Proposal, integration and subsequent serial PR stewardship | Managed upstream worktree and #7206 |
+| Session guidance implementer | Read-only source/profile snapshot and exact-session delivery under #7527 | Separate managed upstream worktree and #7527 |
 | Operator | Plan review and explicit actuation/rollout authorization | Proposal PR |
 
 ## Coordination
@@ -29,6 +30,12 @@ require a second topology registration, duplicate agent roster, or blind repair.
 - **Host (owns PRs):** Plan owner; implementation slice ownership is assigned
   through #7206 before edits, not inferred from this proposal.
 - **Delegates:** None assigned. This proposal does not reserve peer-owned code.
+- **Session guidance slice:** #7527 owns the read-only snapshot and writer in a
+  separate worktree. It may consume the existing source contract but does not
+  take profile refresh, provider mapping, Bridge discovery or identity-migration
+  ownership. Plan #7530 and source implementation #8440 are merged. Remaining
+  release observation and separately authorized rollout stay with the Plan owner
+  under #7206; this does not transfer any other participant's implementation.
 - **Handoff:** Resume this canonical README and the issue, then claim one slice.
 - **Confirmed boundary:** The configuration-consolidation owner retains
   canonical source/configuration consolidation and per-environment bindings;
@@ -122,6 +129,37 @@ context redacted; no private transcript is published or linked:
   already-authorized maintenance action. Retain report-first diagnostics, durable
   source provenance and atomic fragment publication on validation failure.
 
+### Session snapshot - Declared topology and this client's profiles
+
+Additional operator direction, captured without downstream-specific identifiers:
+
+> We would expect SSH guidance to be dyanmically computed as session-guidance by
+> the agent-ssh addon, given the machines config and the generated ssh profiles on
+> the current machine.
+
+Execution structure below is agent-recommended:
+
+- [x] Review and merge this additive plan before implementing #7527 (#7530).
+- [x] Add a read-only snapshot using the existing topology parser and managed
+  fragment classifier. Resolve the caller's conventional source and, when the
+  authoritative optional Worktrees peer declares an external state root, compose
+  its topology without guessing private binding paths or redefining source
+  priority. Preserve selected-source errors and same-installation peer refusal.
+- [x] Distinguish declared aliases/readiness, generated fragment coverage and
+  provenance, and unknown connectivity. Missing generated coverage must not mean
+  a host is down; a file on disk must not imply an active effective route.
+- [x] Deliver a bounded, fresh exact-session snapshot through the existing
+  writer, preserving the command catalog and atomic replacement. Reuse the
+  payload's no-self-provision boundary: absent runtimes or optional peers remain
+  explicit unavailable evidence, not implicit setup or another installation.
+- [x] Prove no network probes, OpenSSH `Match exec`, profile generation, service
+  startup or configuration writes occur during snapshot production. Use
+  non-executing fragment validation; retain stale and indeterminate evidence.
+- [x] Deferred to `#7206`: Update SSH operating guidance and record source merge,
+  release and any separately authorized rollout without claiming the wider
+  campaign complete. Guidance and source merge are complete; the Plan owner
+  retains release observation and separately authorized rollout.
+
 ### Phase 3 - Derive Bridge discovery without a second roster
 - [ ] Discover conventional repository topology on cold start when no explicit
   profile controls the scope, deriving configured targets without writing user
@@ -144,6 +182,12 @@ context redacted; no private transcript is published or linked:
 
 ## Validation Plan
 
+- [x] Session snapshot fixtures cover caller and external-state topology,
+  absent/refused optional peers, local managed-profile coverage, stale and
+  indeterminate sources, hostile configuration strings, output budgets and
+  resume replacement. Exercise the actual writer/CLI boundary in isolated homes
+  and assert it neither probes nor self-provisions; report unsupported runtime
+  availability explicitly.
 - [ ] Native isolated source-to-profile proof on Linux and Windows, with WSL
   environment coverage: use synthetic topology, redirected home/config/install
   roots, actual emitter and `ssh -G`; prove alias/user/port/key-path/proxy choices
@@ -196,3 +240,47 @@ execution structure for the requested outcome, not authorization to implement.
   state-root composition, Bridge cold-start discovery and rollout gates remain
   open. No schema, provider inventory or configuration authority is introduced
   by this slice.
+
+### 2026-10-21 - Proposed exact-session snapshot slice
+
+- Claimed #7527 after checking existing SSH work. The requested snapshot is
+  complementary to #5973's identity migration and #4224's live-probe repair.
+- Proposed consuming the reviewed conventional-source contract and this
+  client's generated fragments without activating transports or changing
+  profiles. This amendment does not claim runtime implementation or rollout.
+
+### 2026-10-24 - Session snapshot plan accepted
+
+- #7530 merged at `6feef3baeea32ea111e34d2e4f799510035aaa6f` after exact-head
+  approval and passing required checks. Only the additive plan-review gate is
+  complete; no runtime, profile, service or configuration change was performed.
+- Re-read this complete effort after merge. Snapshot implementation and its
+  isolated writer/CLI validation remain open under #7527; the wider campaign
+  and separately authorized rollout remain open.
+
+### 2026-10-24 - Session snapshot source completed
+
+- #8440 merged to `dev` at `75424b8bb1ad0b5e8607c396bd874db1296762b1`,
+  following exact-head approval with no open issues and all seven review
+  threads resolved. Required PR CI
+  [40063825166](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40063825166)
+  and isolated Linux/Windows acceptance
+  [40063902400](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40063902400)
+  passed at the reviewed source head.
+- The read-only command and exact-session writer preserve caller source
+  precedence, same-cell refusal, local profile provenance and I/O uncertainty.
+  They distinguish generated evidence from effective routing or connectivity.
+  Fresh/resumed delivery preserves a fitting command catalog and performs no
+  probes, profile generation, configuration writes or runtime provisioning.
+- Local validation included 138 passing snapshot/writer/caller-owned-process
+  tests, seven unsupported-platform skips, and two passing real same-cell
+  controls. Follow-up report extraction passed 71 focused report/snapshot tests.
+  Native acceptance additionally exercised `pythonw.exe` delivery, two writer
+  cycles, nested-resolver/contributor timeout cleanup and zero observed visible
+  windows or foreground transitions. Module-size, source AST, hook hygiene,
+  install-contract, generated-copy and fatal-lint checks passed.
+- Source/operating-guidance responsibility under #7527 is complete. The effort
+  remains Active: the Plan owner retains #7206's source/provider convergence,
+  Bridge discovery, broader acceptance and release/rollout work. No installed
+  update or production rollout was performed. Promotion status is not inferred
+  from a `dev` merge; full-roster startup-budget qualification remains with #7935.

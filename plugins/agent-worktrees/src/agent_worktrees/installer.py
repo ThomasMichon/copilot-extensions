@@ -23,8 +23,9 @@ import sys
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from . import config as cfg
 from . import launch_wrapper_assets as lwa
@@ -1500,6 +1501,34 @@ def write_projects_registry(registry: dict, path: Path | None = None) -> None:
     write_registry(path, "\n".join(lines) + "\n")
 
 
+def require_project_hosting(project: str, repo_dir: Path | str | None = None) -> None:
+    from . import agent_policy, repos
+    from repository_policy import RepositoryPolicyError
+
+    target = repo_dir
+    if target is None:
+        entry = repos.find_repo(project)
+        target = entry.local_path() if entry is not None else None
+    if not target:
+        raise RepositoryPolicyError(
+            f"Cannot establish repository policy for project {project}; provide --repo-dir"
+        )
+    agent_policy.require(target, operation="project adoption")
+
+
+def _hosting_admitted(function: Callable[..., None]) -> Callable[..., None]:
+    @wraps(function)
+    def admitted(
+        project: str, repo_dir: Path | str | None = None,
+        *args: object, **kwargs: object,
+    ) -> None:
+        if not is_reserved_project_command(project):
+            require_project_hosting(project, repo_dir)
+        return function(project, repo_dir, *args, **kwargs)
+    return admitted
+
+
+@_hosting_admitted
 @pr_authority.registry_transaction
 def register_project(
     project: str,
@@ -1572,6 +1601,7 @@ def register_project(
             "skipping projects.yaml registration")
         return
 
+    require_project_hosting(project, repo_dir)
     registry = read_projects_registry()
     if is_windows:
         collision = next(

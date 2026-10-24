@@ -125,10 +125,9 @@ class RepoEntry:
     # :func:`resolve_copilot_account` / :func:`copilot_account_for` and
     # ThomasMichon/copilot-extensions#3296.
     copilot_account: str = ""
-    # Whether this repo backs a same-machine agent in agent-bridge. Defaults
-    # ON for worktree/singleton repos (you adopt them to work in them); OFF for
-    # reference repos (read-only). `register`/`add --no-agent` forces it off.
-    agent: bool = True
+    # Registry agent discovery is opt-in, independently of editing class.
+    # A direct repository policy check remains permissive unless vetoed.
+    agent: bool = False
     # Audience-exposure tier ("private"/"internal"/"public") -- see
     # ``VALID_VISIBILITY`` above. Empty string means unset; resolve a
     # fail-safe default via ``identifier_blocklist.resolve_visibility_rank``
@@ -258,6 +257,12 @@ def resolve_registered_repo(name: str) -> tuple[RepoEntry, Path]:
             f"repository {name!r} is not registered; use repos add or repos clone "
             "through the repository owner's acquisition/adoption flow"
         )
+    return entry, registered_entry_root(entry)
+
+
+def registered_entry_root(entry: RepoEntry) -> Path:
+    """Resolve an already-read registry entry without another registry read."""
+    name = entry.name
     raw = entry.local_path()
     if not raw:
         raise RepositoryResolutionError(
@@ -280,7 +285,7 @@ def resolve_registered_repo(name: str) -> tuple[RepoEntry, Path]:
             f"repository {name!r} registered local root is unavailable: {exc}; "
             "use its standard repos clone/adoption flow, not fallback discovery"
         ) from exc
-    return entry, root
+    return root
 
 
 def inrepo_declared_default_branch(path: str) -> str:
@@ -783,7 +788,7 @@ def add_repo(
             tags=list(tags) if tags else [],
             contributing=contributing,
             account=account,
-            agent=agent if agent is not None else (normalized_class != "reference"),
+            agent=agent if agent is not None else False,
             visibility=normalize_visibility(visibility),
             paths={plat: path},
         )

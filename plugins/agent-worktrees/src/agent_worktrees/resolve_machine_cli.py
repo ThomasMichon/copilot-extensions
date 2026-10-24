@@ -9,7 +9,7 @@ from machine_transport import default_shell_for_env_name as _default_shell_for_e
 from machine_transport import find_machine_entry
 from machine_transport import normalize_environment, resolve_machine_selection
 from machine_transport import resolve_ssh_target as _resolve_ssh_target
-from machine_transport import wrap_remote_command as _wrap_remote_command
+from machine_transport import wrap_remote_command as _wrap_remote_command  # noqa: F401 -- compatibility re-export
 
 from . import config as cfg
 from . import machine_identity, output
@@ -164,11 +164,12 @@ def _in_ssh_session() -> bool:
 
 
 def _remote_launch_command(shell: str, project: str, args: list[str] | None) -> str:
-    if not args:
-        return _wrap_remote_command(shell, project)
     from .remote_seed_launch import shell_command
 
-    return shell_command(shell, [project, *args])
+    options = list(args or [])
+    if "--require-agent-hosting" not in options:
+        options.append("--require-agent-hosting")
+    return shell_command(shell, [project, *options])
 
 
 def _emit_remote_plan_for_env(

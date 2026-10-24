@@ -64,7 +64,7 @@ def creation_rig(rig, monkeypatch, tmp_path):
 
     monkeypatch.setattr(workspace_creation, "worktree_command", command)
     rig.row = row
-    rig.target = SpawnTarget(type="local", project="test-project")
+    rig.target = SpawnTarget(type="local", project="test-project", cwd=str(tmp_path))
     return rig
 
 

@@ -89,7 +89,7 @@ Proposed v2 snapshot envelope:
   "contract_version": 2,
   "project": "sample",
   "projection": {
-    "schema_version": 2,
+    "schema_version": 1,
     "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "revision": 11,
     "roster_count": 1000,
@@ -151,9 +151,18 @@ current semantic rows and observation metadata.
 Mixed versions: v1 reconstructs its provenance timestamps from the same
 observation store. V2 parsers stage semantic and observation changes together.
 Unknown v2 frames fail explicitly, not silently. Keep v1 projection advisory
-reads working through an explicit schema migration/reader adapter; migration
-must be transactional and reversible by choosing the previous runtime, or
-older readers must fail visibly rather than accepting corrupted state.
+reads and older supported elected writers usable: F1 retains the schema-1
+row/head/index tables and adds generation/revision-qualified observation tables.
+An older writer's complete publication wins over stale extension metadata.
+Wire version 2 is not a schema migration or an elected-writer incarnation.
+An unavoidable incompatible migration requires separate admission.
+
+F1's real-producer test also identified `closure.computed_at` as derived
+observation metadata. It moves to the bounded optional
+`observations[].derivations.closure` object with an observation revision;
+closure facts stay semantic. Activity and lifecycle timestamps remain semantic.
+The exact implemented F1 shape is documented in
+`plugins/agent-worktrees/docs/engine-picker-contract.md`.
 
 ## F2: targeted owner observation and publication receipts
 

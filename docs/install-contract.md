@@ -1249,8 +1249,16 @@ installers are not dependencies of that repair.
 The fresh Manager then repairs the core through its
 supported, source-policy/ownership-admitted installer before running its normal
 whole-suite `update` orchestration, without fetching a second Manager source.
-An admitted partial shared installation provisions its missing runtime bin
-before updating. An explicit cell retains its canonical context, actual runtime
+For an admitted partial shared installation, Manager requests the native
+update's private missing-runtime opt-in instead of running separate provision
+and update lifecycles. The opt-in requires an explicit legacy root and an
+existing lifecycle ticket; the ordinary ownership and publication-policy checks
+still run before staging and before mutation. It retains the Git prerequisite,
+creates only an ordinary missing runtime bin, and continues through the existing
+full update body. A substituted file or reparse point is refused. Ordinary
+update without the opt-in still refuses an absent runtime bin, and Manager
+rejects an exit-zero repair that leaves it absent.
+An explicit cell retains its canonical context, actual runtime
 root and publication custody throughout repair; invalid or changed cell
 ownership never falls back to the shared root.
 The same applies when current activation selects that cell automatically:
@@ -2016,7 +2024,16 @@ Fix — the **`install-contract:v4 self-stage`** prologue (byte-identical, at ea
 installer entry): when running from the marketplace payload, copy the **whole**
 payload into a **unique per-invocation** dir `~/.<name>/.install-stage/<ts>-<pid>/`
 and **re-exec from there**. The singleton payload is then touched only for the fast
-copy, never the whole (possibly-wedged) install. Guards:
+copy, never the whole (possibly-wedged) install. PowerShell copies ordinary files
+through the native .NET file API rather than paying provider overhead per file.
+The complete tree is retained, including hidden entries, empty directories and
+bytecode; reparse points retain `Copy-Item` semantics. Copy errors still reach
+the existing staging failure path. PowerShell 5.1 and 7 use the same helper.
+The byte-identical `payload-copy` block follows required output initialization
+and precedes contextual staging. Worktrees also uses it for its structured
+payload copy, without changing context selection, canonical-library handling,
+staging paths or watchdog ownership.
+Guards:
 - `COPILOT_PLUGIN_INSTALL_STAGED=1` prevents a re-exec loop; the stage path (not under
   `installed-plugins`) is authoritative. An inherited staging flag from another
   installer cannot suppress staging when the actual script still resides in the
@@ -2328,13 +2345,17 @@ the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
 success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call in unadopted wrappers.
-Vault's cold primary and payload commands instead submit to the packaged
+Vault's cold primary/payload commands and legacy session bootstrap instead submit to the packaged
 installation driver's canonical queue before taking any outer provisioning
 lock. They retain the inner canonical installer lock, publication admission,
 source identity and default service recipe. Healthy invocation bypasses driver
 work; missing support and unsupported cold namespaced/platform paths refuse
-without a legacy foreground fallback. Bootstrap hooks and explicit installer
-entry points are separate, unadopted callers. The
+without a legacy foreground fallback. Vault's hook selects only canonical
+stamp or provision, retains its healthy/non-deployment no-ops and emits only
+`{}` plus a diagnostic launch acknowledgement, not a completion receipt.
+It neither holds nor reaps the old PID-based reconciliation guard.
+Other bootstrap hooks and explicit installer entry points remain separate,
+unadopted callers. The
 [driver contract](../libs/update-driver/README.md#fixed-first-use-handoff-and-vault-command-adoption)
 owns the native waiter, receipt/result and qualification boundaries.
 
@@ -3024,8 +3045,12 @@ Editable source retention supports static `setuptools.build_meta` projects
 using the repository's `src` layout. Retained metadata selects compatibility
 editable mode and references the original live `src` through a same-volume
 relative package directory; installed imports survive snapshot cleanup and
-observe subsequent source edits. On Windows the private snapshot is a sibling
-of a shallowest admitted project or build-resource root on the editable source
+observe subsequent source edits. Retained `setup.cfg` preserves existing raw
+configuration values while setting `egg_info.egg_base` to the private project
+directory, so build metadata cannot be emitted into the live `src` tree.
+Malformed or unreadable/unwritable retained configuration refuses installation;
+the original configuration is never rewritten. On Windows the private snapshot
+is a sibling of a shallowest admitted project or build-resource root on the editable source
 volume, outside every copied input. A volume-root input with no outside
 temporary location fails explicitly. This avoids long parent-relative paths from an unrelated
 temporary directory; setuptools requires relative package directories.
@@ -3078,15 +3103,169 @@ by an installer. Its [reviewed contract](../efforts/active/governed-python-artif
 defines the schema and explicit boundary: canonical whole-record identities,
 release/target/mode compatibility, complete asserted wheel metadata graphs
 with extras/markers, and externally supplied whole-record approval references.
-It does not authenticate approvals, verify a source release, inspect/download
-wheels, detect hardware, resolve dependencies or activate a generation.
+Record validation/selection does not authenticate approvals, verify a source
+release, download wheels, detect hardware, resolve dependencies or activate a
+generation. `runtime_profile_wheels.verify_profile_wheels` separately checks
+the complete retained wheel set against the exact record, as described below.
 
 Actual consumers still need adapters from the existing installation authority
 and verified release/configuration channels, followed by admitted byte/metadata
 checks and immutable construction. Candidate release-input generation is a
 separate concern (#6941); neither constraints nor this inert record prove an
-approved, available CPU/accelerator closure. The current constructors and their
-retained slots remain unchanged by this preparation seam.
+approved, available CPU/accelerator closure. No production caller is enabled by
+these preparation and inspection APIs.
+
+The installation-context Python `resolve_runtime_profile_policy` API and
+`runtime-profile-policy` CLI now resolve configuration intent through the
+existing installation owner. No profile/approval file is required for the
+CPU-first, artifact-preferred, governed-source-permitted baseline. Optional
+`runtimeProfiles` settings in the existing owner-bound deployment policy can
+disable source fallback or explicitly select a capability. Retained capability
+and explicit unprofiled migration remain distinct. See the
+[library contract](../libs/installation-context/README.md) for fields and
+readiness/refusal behavior. Its owner/effective-policy digest is an invalidation
+input, not whole-record approval, source-byte authentication, a feed permission
+or an admission receipt. Explicit profile settings therefore hold ordinary
+publication until a profile-aware lifecycle enforces them; a valid configuration
+cannot silently be ignored by an older construction path.
+This includes explicit management admission and borrowing an existing custody
+ticket; managed-only publication without profile settings is unchanged. Pending
+installation-mode activation never yields profile intent for the legacy root,
+even when the underlying mode resolver reports readiness.
+Native constructors do not yet consume this new API;
+the actual closure, authority composition and constructor acceptance stay open.
+
+`tools/runtime_profile_wheels.py` adds repository-only actual-byte verification,
+not an approval adapter. `verify_profile_wheels` requires the complete exact
+filename-to-binary-stream set, caller-supplied total archive/unpacked byte
+budgets and a per-metadata-file budget. It compares every archive's SHA-256 and
+actual Requires-Python, Provides-Extra and Requires-Dist with the validated
+record. The shared wheel inspector checks distribution/version/tag identity,
+safe members and each RECORD entry without extracting or executing code.
+Runtime RECORD entries support SHA-256, SHA-384 and SHA-512; weak/unsupported
+algorithms refuse, while archive locks remain SHA-256. Distribution aliases and
+runtime versions compare by normalized identity. First-party promotion retains
+its locked generator, exact version spelling and SHA-256 RECORD policy.
+The shared filename grammar lives in the static-admission module so byte
+inspection never imports builder/feed machinery. A third-party wheel's
+generator is not an approval source.
+
+Streams remain caller-owned and must remain immutable under retained custody
+through subsequent construction. Verification detects changed bytes during its
+own inspection, but produces no admission/reuse receipt and grants no trust to
+a path, feed, release or record. The caller still owes authenticated approval,
+source/feed/seasoning/revocation evidence, real device eligibility and the
+installation-authority integration. Explicit test budgets are not production
+acquisition defaults or permission to enable a consumer.
+
+### Closed inspected-wheel construction
+
+`runtime_profile_wheels.profile_wheel_inputs` composes the same complete-profile
+verification with `WheelInstallInputs`, inert construction data containing the
+whole canonical profile binding and actual inspected distribution versions.
+The caller retains the existing `WheelSnapshot` context through installed
+health. This is not an approval token: the existing authority still owes
+authenticated release/profile/feed/target admission before invoking a consumer.
+No production installer selects this mode automatically.
+
+On Windows, original and retained wheel handles allow shared reads but deny
+writers and deletion for their held lifetime, including extended-length paths.
+NTFS read-access updates can advance handle change time, so that timestamp is
+not treated as a byte revision under this native read guard. Path/handle
+identity, birth time, size, mtime and full SHA-256 custody checks still apply;
+non-Windows change-time checks remain in place. Original handles close after
+the complete set is copied; retained handles close before owned cleanup.
+
+The Python engine's explicit `numbered_candidate(wheel_inputs=...)` path uses
+the same `_candidate` and `_construct` owners, independent venv creation,
+construction/retention leases, owned children, installed health and completion
+boundary as source construction. It retains the source graph for bootstrap
+process ownership and validates the existing extras/local-package selection.
+It does not introduce another allocator, mutable venv, cutover or fallback.
+Mutable dev construction refuses this mode.
+
+The canonical dependency-policy owner projects only the complete retained
+wheel set into a private hash-required requirements file. Named local wheel
+URLs carry the exact SHA-256 fragment as well as `--hash`. UV runs offline,
+without indexes, ambient UV/PIP/Python configuration, caches, dependency
+resolution, source discovery, interpreter downloads or build backends, using
+copy link mode and the exact candidate interpreter. Ordinary source policy
+continues to reject `--no-deps`; there is no blanket seasoning exemption.
+The policy owner resolves a caller-relative UV path or selected command name
+to an absolute executable before changing to the retained working directory.
+
+The existing `.runtime-input-origins.json` uses schema version 2 for this path
+(source receipts remain version 1). It binds the full profile/lock, mode,
+release, source-or-artifact, target and policy data, actual distribution
+versions and SHA-256-qualified origins. UV currently records local wheel hash
+fragments in `direct_url.json` URLs with empty `archive_info`; installed health
+requires that exact hash-qualified origin and rejects conflicting archive hash
+fields. It also requires the exact complete installed distribution set, with no
+unexpected or duplicate distribution. Receipt/binding/origin/version changes
+refuse reuse. The health child reads that existing owned receipt and compares
+its canonical wheel evidence with a parent-supplied SHA-256 binding; fresh
+origin maps have their own parent binding. Complete profiles/maps never enter
+argv, so valid large closures do not hit native command-line size limits.
+These bindings check consistency, not authority. Source content plus the whole
+wheel binding enters the existing
+immutable construction identity, so a changed policy, target or profile cannot
+reuse a numbered identity. A new retained copy of unchanged cached bytes can
+reuse a healthy runtime without a feed request or reconstruction.
+
+This component does not authenticate a profile, acquire/cache wheels, select
+hardware, admit a feed, supply production budgets or choose verified-source
+fallback. Missing or rejected inputs never trigger an automatic source or
+public-index fallback. Those authority/acquisition and consumer-enabling
+contracts remain required.
+
+### Bounded wheel inspection
+
+`libs/installer-engine/installer_wheel_inputs.py` is a stdlib-only input
+inspector, vendored with the Python engine. Callers supply explicit positive
+archive, expanded/member, individual/aggregate metadata, member-count and expanded-tag
+limits, plus a finite monotonic deadline. It streams the archive digest and every RECORD
+member digest, bounds metadata before parsing, and refuses duplicate/ambiguous
+members, unsafe paths, encryption, links, malformed headers and changed source
+files. It neither extracts package contents nor runs package code or a backend.
+Promotion uses the same archive verifier while preserving its additional
+source/toolchain identity checks.
+Stored and raw DEFLATE streams are consumed independently of `ZipExtFile`'s
+declared-size truncation, checking full length, CRC and end-of-stream before
+metadata parsing or hash acceptance. Trailing-dot/space path components refuse
+as Windows aliases; decompression failures remain structured integrity errors.
+On Windows, reserved device names and invalid filename characters also refuse.
+Metadata-directory suffixes are checked case-insensitively, and local-header
+offsets are bounded before a member is opened. Header parsing follows PyPA's
+[core metadata `compat32` convention](https://packaging.python.org/en/latest/specifications/core-metadata/),
+preserving raw dependency fields rather than decoding email encoded words.
+
+Compressed tags are deduplicated and bounded before Cartesian expansion,
+including the selected filename's tags. Member ancestry uses a deadline-checked
+component trie rather than repeatedly joining every prefix of deep paths.
+ZIP32/ZIP64 preflight bounds actual central-directory entries and directory
+bytes before `ZipFile` allocates an index; the aggregate metadata budget also
+caps that directory. Declared entry counts cannot bypass the actual scan.
+
+The complete-profile verifier above uses this bounded core through the shared
+promotion inspector, not a separate per-wheel semantic facade. Its existing
+byte budgets retain their total-closure and per-metadata-file meanings; callers
+may additionally supply `WheelLimits` and a shared monotonic `deadline`.
+The initial archive hash uses the smaller of the remaining closure budget and
+the optional per-wheel archive limit; default runtime inspection derives its
+archive cap from the caller's closure budget rather than promotion's cap.
+Per-metadata-file limits do not reduce a separately supplied directory/aggregate
+budget. Without explicit `WheelLimits`, the archive budget bounds the directory
+and the three individual file ceilings bound metadata; first-party promotion
+retains its own stricter directory budget.
+Record validation and its dependency walk share the same deadline and bound
+compressed filename and target tags before calling the packaging parsers.
+Runtime RECORD policy permits SHA-256/384/512, while
+source-binding member facts always retain SHA-256 and first-party promotion
+still requires SHA-256 RECORD entries. Neither facts nor a matching digest
+authenticate the profile, admit a feed or authorize cached input. A successful
+inspection is not a retained snapshot: construction must still own immutable
+input custody and obtain authenticated selection/acquisition evidence. No
+installer selects or activates this preparation API automatically.
 
 ### Shared engine delivery
 
@@ -3179,6 +3358,12 @@ health. It verifies the copied file coverage and content against the admitted
 source identity, and records the transaction's actual non-editable installation
 origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
 source-copy utility for packaging fixtures, not the construction path.
+Within that transaction, path-replacement forms and their ordered matcher are
+prepared once rather than rebuilt for each metadata scalar. Overlapping local
+package roots share verification only for the same original/retained file pair;
+every distinct pair still compares both content hashes and contributes its
+original-source hash. Neither result survives the transaction or replaces the
+construction owner's source-identity and fingerprint checks.
 The bootstrap requires Python 3.11 or newer.
 The POSIX guardian observes its direct child without reaping it until the
 owned process group is settled. Python 3.11/3.12 on macOS lack `os.waitid`;
@@ -3196,6 +3381,29 @@ invalid explicit selection is refused rather than silently replaced. Discovery
 never installs Python or changes PATH. Interpreter paths cross the native-output boundary as
 ASCII-safe JSON strings, preserving non-ASCII paths without changing the host's
 console or pipeline encoding.
+The payload-only admission CLI and its interpreter probes use `-I -S -B`:
+they need only the standard library and explicitly loaded payload helpers,
+not site-package initialization. This does not change candidate construction
+or installed-runtime interpreter startup.
+
+When a Worktrees caller explicitly supplies its existing interpreter
+(`-BootstrapPython` on Windows or `--runtime-publication-python` for Bash),
+early context reads use the payload-owned canonical Python validator in
+isolated, no-site UTF-8 mode. Windows reuses the existing hidden-process reader and
+retains diagnostic stderr and the actual exit; empty output is not turned
+into a blank output record. Its consecutive initial validate and status
+queries run through one finite payload-local transport process. That process
+calls the same canonical SDK CLI actions with their original arguments,
+preserves each raw JSON response, and stops on the first failed query. It
+does not cache a decision, introduce another authorizer, or combine reads
+across staging or construction. Publication and later revalidation remain
+fresh calls at their existing boundaries.
+The same validate, status, publication and
+governance-revalidation checks remain at their original boundaries, with
+their original arguments. Without the hint, POSIX retains the Python-free
+Bash reader and Windows retains the native PowerShell reader. This selects
+an existing read adapter, not a different installation owner, construction
+interpreter, publication lease or recovery authority; it never installs Python.
 
 Canonical admission uses the requested package root as its working directory.
 Relative package/configuration relationships are retained without accumulating
@@ -3210,6 +3418,51 @@ context. Exact reuse never obtains exclusive construction ownership or invokes
 venv/package writers, even when construction tools are absent. Unfinished
 builders recheck under the canonical OS lease; completed content drift or
 invalid evidence refuses instead of rewriting a published slot.
+
+An explicitly selected `extras` tuple on `numbered_candidate()` installs only
+declared optional groups on the primary package, inside that same retained UV
+transaction. Names are normalized and ordered; unknown, duplicate and mutable
+selections refuse before runtime writes. Non-base admission fingerprints bind
+both the complete source fingerprint and the selected extras. An empty selection
+retains the existing source-only identity and origin-receipt compatibility.
+Changing selection cannot reuse or rewrite another completed profile under the
+same slot name. The installed-origin receipt records non-base selections and is
+checked again on reuse, even after frozen inputs have been retired.
+The caller still owns the distinct slot name, profile-specific health/launch
+contract and lifecycle; this seam does not select a machine's desired profile,
+activate a runtime, provision sibling environments or qualify a native platform.
+Mutable `dev_candidate()` does not accept non-base profiles.
+
+For an independently declared role, `numbered_candidate(local_packages=(...),
+extras=(...))` additionally selects the exact local distribution closure to
+install. Names are normalized and must belong to the admitted source graph;
+the primary distribution is always included. The caller supplies every required
+transitive local distribution, not paths or replacement project metadata.
+UV remains the dependency resolver: an incomplete closure fails resolution,
+rather than fetching an omitted first-party distribution from a registry.
+Installer-owned contradictory constraints forbid those omitted names, including
+prereleases. Selected roots alone supply runtime requirements and package
+operands; unselected roots do not contribute unconditional dependencies.
+The retained dependency-policy owner creates these generated constraints
+through `retain_uv_install(excluded_local_packages=(...))`, snapshots and
+audits them before execution, and keeps them outside the caller-relative
+source-layout anchor. Deep source paths therefore do not become deeper
+retained backend working directories merely because a role excludes packages.
+This does not modify `pyproject.toml`, infer a machine role or duplicate a
+PEP 508 resolver.
+
+The complete local source graph is still validated, snapshotted and fingerprinted
+under the canonical retained transaction, including build/ownership helpers and
+unused roles. The selected extras and local names additionally bind candidate
+identity and installed-origin evidence. Fresh and reused health require selected
+non-editable installed origins and refuse any omitted local distribution that
+is actually present. `ReadyCandidate.local_packages` reports the normalized
+selection. An explicit empty tuple selects only the primary distribution;
+`None` preserves the existing all-local-input behavior and its identity/receipt
+compatibility. Mutable `dev_candidate()` refuses explicit local selections.
+The caller owns the named role, distinct immutable slot, role-specific health
+and ordinary publication/removal lifecycle; this construction seam does not
+make an installer, service supervisor or selected command catalog by itself.
 
 Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline

@@ -47,7 +47,17 @@ def prepare_dependencies(
     test could still open a socket during that import, with network
     reach, before this pass's own disconnect ever runs. ``--prepare-only``
     never imports a single test file."""
-    prep_passthrough, _ = rewrite_selection(passthrough, canonicalize, None)
+    selected, _ = rewrite_selection(passthrough, canonicalize, None)
+    prep_passthrough: list[str] = []
+    iterator = iter(selected)
+    for argument in iterator:
+        name, equal, value = argument.partition("=")
+        if canonicalize(name) != "--test-file":
+            prep_passthrough.append(argument)
+            continue
+        path = value if equal else next(iterator, "")
+        if not path or (not equal and path.startswith("-")):
+            raise ValueError("--test-file requires a path")
     if not any(
         canonicalize(arg.partition("=")[0]) == "--prepare-only"
         for arg in prep_passthrough

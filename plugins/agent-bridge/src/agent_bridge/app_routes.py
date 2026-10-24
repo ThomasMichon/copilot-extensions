@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from repository_policy import AgentHostingError
 
 from . import __version__, worktree_native_resume
 from .auth import BearerAuthMiddleware
@@ -26,6 +28,13 @@ def configure_serving_app(
         lifespan=lifespan,
     )
     app.state.config = cfg
+
+    @app.exception_handler(AgentHostingError)
+    async def hosting_refused(_request: Request, exc: AgentHostingError) -> JSONResponse:
+        return JSONResponse(
+            status_code=409, content={"detail": {"code": exc.code, "message": str(exc)}},
+        )
+
     # Websocket transport bypasses the HTTP auth middleware.
     app.state.auth_token = auth_token
     app.state.auth_custody = auth_custody if auth_custody is not None else AuthCustody()

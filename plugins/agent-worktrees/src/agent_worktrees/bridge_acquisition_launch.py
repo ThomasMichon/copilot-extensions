@@ -16,6 +16,25 @@ from . import finalize, launch_admission, output, sessions
 from .session_liveness import session_liveness
 
 
+def intent_error(args: argparse.Namespace, raw_id: str | None) -> str | None:
+    """Reject incompatible acquisition intent before resolving or preparing it."""
+    if getattr(args, "require_native_admission", False) and getattr(args, "bridge_acquisition", None) in {None, "fresh"}:
+        return "Native admission requires an exact existing conversation"
+    if (
+        getattr(args, "require_plugin_preparation", False) or getattr(args, "bridge_plugin_request", None)
+    ) and not getattr(args, "bridge_acquisition", None):
+        return "Plugin preparation requires typed Bridge acquisition"
+    if getattr(args, "bridge_acquisition", None) and (not raw_id or getattr(args, "seed", None) or getattr(args, "copilot_args", None)):
+        return "bridge acquisition requires an explicit worktree and no seed/passthrough args"
+    return None
+
+
+def apply_bridge_scope(env: dict[str, str], args: argparse.Namespace) -> None:
+    scope = getattr(args, "bridge_scope_id", None)
+    if scope:
+        env["AGENT_BRIDGE_SCOPE_ID"] = scope
+
+
 def add_arguments(
     parser: argparse.ArgumentParser, intent_group: argparse._ActionsContainer,
 ) -> None:
@@ -115,6 +134,9 @@ def preparation_failure(worktree_id: str, work_dir: str, error: Exception) -> di
 @contextmanager
 def launch_fence(repo, record_path: Path):
     """Order lifecycle and per-worktree native admission around real mux start."""
+    from . import agent_policy
+
+    agent_policy.require_record(record_path)
     lifecycle = finalize.FinalizeLock(
         Path(repo.worktree_root) / ".finalize.lock", timeout=300, stale_after=3600,
     )
@@ -122,6 +144,7 @@ def launch_fence(repo, record_path: Path):
         lifecycle.acquire()
     try:
         with launch_admission.guard(record_path):
+            agent_policy.require_record(record_path)
             yield
     finally:
         lifecycle.release()

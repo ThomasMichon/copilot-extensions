@@ -89,6 +89,9 @@ not arrive:
    `finalize` (or any "mark concluded, keep inspectable" command) must not
    also own killing a companion process. Give the reap its own trigger (hook
    + poll), decoupled from whether the unit is ever finalized at all.
+   Checkout cleanup likewise defers when a live process holds a cwd beneath
+   the checkout; cwd containment is evidence of use, not process ownership.
+   It must not kill a mux session or unrelated process to make removal succeed.
 
 ## Rationale
 

@@ -177,6 +177,11 @@ def execute(arguments, *, bootstrap=False):
         and status["reason"] == "activation-required"
     ):
         raise PermissionError("Runtime not provisioned (AGENT_PULL_REQUESTS_NO_SELFPROVISION set)")
+    if not bootstrap and status["reason"] == "activation-required":
+        raise PermissionError(
+            "Cold namespaced provisioning requires a qualified installation driver; "
+            "use explicit installation management"
+        )
     version = adapter.management_version()
     activate_fresh(api, status, durable, profile, probe, version=version)
     status, durable, _, _ = discover(api)
@@ -189,6 +194,11 @@ def execute(arguments, *, bootstrap=False):
         if not bootstrap and "AGENT_PULL_REQUESTS_NO_SELFPROVISION" in os.environ:
             raise PermissionError(
                 "Runtime not provisioned (AGENT_PULL_REQUESTS_NO_SELFPROVISION set)"
+            )
+        if not bootstrap:
+            raise PermissionError(
+                "Cold namespaced provisioning requires a qualified installation driver; "
+                "use explicit installation management"
             )
         result = subprocess.run([  # noqa: S603 -- exact owning payload's installer, argv only
             sys.executable, "-I", str(PAYLOAD / "scripts" / "cell_install.py"), "install",

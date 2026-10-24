@@ -13,6 +13,7 @@ from . import config as cfg
 from . import output
 from . import git_ops, list_cache, profile_assignment, reclaim, sessions, tracking
 from . import status_monitor_runtime
+from .list_arguments import add_parsers as add_parsers
 
 
 def _core():
@@ -58,108 +59,6 @@ def _worktree_to_dict(*args, **kwargs):
 
 def resolve_worktree_id_by_codename(*args, **kwargs):
     return _core().resolve_worktree_id_by_codename(*args, **kwargs)
-
-
-def add_parsers(sub) -> None:
-    p = sub.add_parser("list", help="List worktrees from tracking records")
-    p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
-    p.add_argument(
-        "--current", action="store_true",
-        help="Read the resident current-roster contract; never scan or recompute in the caller.",
-    )
-    p.add_argument(
-        "--mux-details",
-        action="store_true",
-        help="Include mux session attached/detached status (JSON only)",
-    )
-    p.add_argument(
-        "--tracking-status",
-        default="all",
-        choices=["active", "complete", "finalized", "orphaned", "archived", "all"],
-        help="Filter by tracking status (default: all). 'archived' also needs --all.",
-    )
-    p.add_argument(
-        "--all",
-        action="store_true",
-        help="Include worktrees whose directories no longer exist on disk",
-    )
-    p.add_argument(
-        "--include-other-platforms",
-        action="store_true",
-        help="Include worktrees from other platforms (e.g. Windows when on Linux)",
-    )
-    p.add_argument(
-        "--classify",
-        action="store_true",
-        help="Include git state classification (state/ahead/behind/"
-        "dirty; JSON only). Slower: ~5 git calls per worktree.",
-    )
-    p.add_argument(
-        "--cache-only",
-        action="store_true",
-        help="Cache-only fast paint (picker-cache-first-paint, "
-        "dotfiles#948): build JSON rows from ONLY the cached "
-        "session-render fields in each tracking record -- no "
-        "events.jsonl scan or git classification. With --mux-details, "
-        "include one live mux-session enumeration. "
-        "Never-populated worktrees render Unknown. "
-        "Used by the Picker's SSH fast phase; a --classify "
-        "populate later fills + writes the cache back.",
-    )
-    p.add_argument(
-        "--profile-assignment-history",
-        action="store_true",
-        help="Include bounded profile_assignments history and the latest "
-        "assignment in each JSON worktree row. Ordinary and cache-polled "
-        "rows include only current_profile_assignment.",
-    )
-    p.add_argument(
-        "--stream",
-        action="store_true",
-        help="Emit newline-delimited JSON with a complete current-roster "
-        "begin/worktree/done publication barrier. Implies --json. "
-        "Use --follow for held incremental updates.",
-    )
-    p.add_argument(
-        "--follow",
-        action="store_true",
-        help="Hold a daemon-owned current-roster feed until cancelled; "
-        "emit an atomic snapshot, incremental commits, and cutover notices. "
-        "Implies --current and --stream; requires worktrees-feed-v1.",
-    )
-    p.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Bypass the coalescing result cache (list-coalescing, "
-        "cx#918) and force a live scan, refreshing the cache. "
-        "Use when exactness matters; normal polling reads a "
-        "short-TTL cache so concurrent/repeated calls coalesce "
-        "onto one scan (tune via AGENT_WORKTREES_LIST_CACHE_TTL, "
-        "0 disables).",
-    )
-    p.add_argument("--worktree-id", help="Restrict the listing to one exact or unique-suffix ID")
-    p.add_argument(
-        "--codename",
-        default=None,
-        help="Restrict the listing to the worktree with this codename "
-        "(alternative to --worktree-id)",
-    )
-    p.add_argument(
-        "--refresh",
-        action="store_true",
-        help="Before listing one --worktree-id, repair its missing "
-        "session registry and refresh bound/mux liveness",
-    )
-    p.add_argument(
-        "--glance",
-        action="store_true",
-        help="Compact, agent-digestible 'at a glance' digest of "
-        "ACTIVE worktrees: one line each (id, disposition age, "
-        "title -- summary), ranked by recency, with "
-        "no-disposition worktrees named rather than hidden. For "
-        "situational awareness / sub-agent consumption -- far "
-        "cheaper to read than --json.",
-    )
 
 
 def _cmd_list_stream(args: argparse.Namespace, records) -> int:

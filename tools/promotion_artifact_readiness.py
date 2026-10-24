@@ -7,6 +7,7 @@ from pathlib import Path
 
 import publish_python_artifacts as publisher
 from promotion_python_artifacts import INDEX_NAME, PromotionArtifactError
+from promotion_release_evidence import MAX_EVIDENCE_ASSETS, supplementary_evidence_asset
 
 
 def _expected(directory: Path, index: dict) -> dict[str, str]:
@@ -32,7 +33,9 @@ def _read_release(repository: str, tag: str) -> dict | None:
     return release
 
 
-def _assets(repository: str, release: dict, expected: dict[str, str]) -> dict[str, dict]:
+def _assets(
+    repository: str, release: dict, expected: dict[str, str], *, pending_evidence: str = "",
+) -> dict[str, dict]:
     result = publisher._gh(
         ["api", "--paginate", "--slurp",
          f"repos/{repository}/releases/{release['id']}/assets?per_page=100"],
@@ -42,10 +45,25 @@ def _assets(repository: str, release: dict, expected: dict[str, str]) -> dict[st
         pages = json.loads(publisher._check(result))
         if not isinstance(pages, list) or not all(isinstance(page, list) for page in pages):
             raise ValueError("invalid asset pages")
-        assets = {}
+        assets, seen, evidence_count = {}, set(), 0
+        if pending_evidence and pending_evidence not in expected:
+            raise ValueError("pending evidence has no expected digest")
         for page in pages:
             for asset in page:
                 name = asset["name"]
+                if not isinstance(name, str) or name in seen:
+                    raise ValueError("duplicate or invalid asset name")
+                seen.add(name)
+                if name.startswith("promotion-unit-evidence-"):
+                    if not supplementary_evidence_asset(
+                        asset, str(release["tag_name"]).removeprefix("python-artifacts-"),
+                    ):
+                        raise ValueError("invalid supplementary evidence asset")
+                    evidence_count += 1
+                    if evidence_count > MAX_EVIDENCE_ASSETS:
+                        raise ValueError("too many supplementary evidence assets")
+                    if name not in expected:
+                        continue
                 if (
                     name not in expected or name in assets
                     or asset.get("digest") != f"sha256:{expected[name]}"
@@ -54,6 +72,8 @@ def _assets(repository: str, release: dict, expected: dict[str, str]) -> dict[st
                 ):
                     raise ValueError("unexpected, incomplete or conflicting immutable asset")
                 assets[name] = asset
+        if pending_evidence and pending_evidence not in seen and evidence_count == MAX_EVIDENCE_ASSETS:
+            raise ValueError("supplementary evidence capacity is exhausted")
         return assets
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise PromotionArtifactError(f"{release['tag_name']}: invalid readiness assets: {exc}") from exc

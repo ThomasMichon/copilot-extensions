@@ -96,6 +96,29 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+# === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
+function Copy-InstallerStageDirectory {
+    param([string]$Source, [string]$Destination)
+    # Retain provider semantics for links; ordinary payload files use native copying.
+    if ([IO.File]::GetAttributes($Source) -band [IO.FileAttributes]::ReparsePoint) {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+        return
+    }
+    [void][IO.Directory]::CreateDirectory($Destination)
+    foreach ($file in [IO.Directory]::EnumerateFiles($Source)) {
+        $target = [IO.Path]::Combine($Destination, [IO.Path]::GetFileName($file))
+        if ([IO.File]::GetAttributes($file) -band [IO.FileAttributes]::ReparsePoint) {
+            Copy-Item -LiteralPath $file -Destination $target -Force
+        } else {
+            [IO.File]::Copy($file, $target, $true)
+        }
+    }
+    foreach ($directory in [IO.Directory]::EnumerateDirectories($Source)) {
+        Copy-InstallerStageDirectory $directory ([IO.Path]::Combine($Destination, [IO.Path]::GetFileName($directory)))
+    }
+}
+# === end install-contract:v4 payload-copy ===
+
 if ($RequireGracefulCutover -and ($Action -ne 'update' -or $NoService)) {
     throw '-RequireGracefulCutover requires update without -NoService'
 }
@@ -195,8 +218,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__selfStageRoot = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") '.install-stage'
                 $__selfStageDir = Join-Path $__selfStageRoot ((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID")
                 New-Item -ItemType Directory -Force -Path $__selfStageDir | Out-Null
-                Copy-Item -LiteralPath $__selfStagePayload -Destination $__selfStageDir -Recurse -Force
                 $__selfStagedPayload = Join-Path $__selfStageDir (Split-Path -Leaf $__selfStagePayload)
+                Copy-InstallerStageDirectory $__selfStagePayload $__selfStagedPayload
                 $__selfStagedEntry = Join-Path (Join-Path $__selfStagedPayload 'scripts') (Split-Path -Leaf $PSCommandPath)
                 # Best-effort reap of prior stage dirs; NEVER touch a live one.
                 # Only remove a sibling whose owner pid (the <ts>-<pid> suffix) is
@@ -1536,103 +1559,30 @@ function Deploy-SelfProvisioningBinstub {
     # (uniform-runtime-resolution, #765).
     $binDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh',
+    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh', 'runtime-gate.ps1', 'runtime-gate.sh',
             'delegated-waiter-callback.ps1', 'delegated-waiter-callback.sh')) {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
+    }
+    $contextDir = Join-Path $binDir 'installation-context'
+    [void][IO.Directory]::CreateDirectory($contextDir)
+    foreach ($r in @('installation-context.ps1', 'installation-context.sh',
+        'guest-environment.ps1', 'guest-environment.sh', 'json-query.awk')) {
+        Copy-Item -LiteralPath (Join-Path (Join-Path $PSScriptRoot 'installation-context') $r) `
+            -Destination (Join-Path $contextDir $r) -Force
     }
 
     $ps1Path = Join-Path $LocalBin 'agent-dispatch.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
-$_root = Join-Path $env:USERPROFILE '.agent-dispatch'
-$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-function _Resolve-Py {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
-    return $AgentRtPy
-}
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_dispatch @args; exit $LASTEXITCODE }
-if ($env:AGENT_DISPATCH_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).'); exit 1 }
-[Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-dispatch eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-# Primary path (agent-dispatch-standalone-container Phase 4): fetch and run the
-# UPSTREAM installer via the STABLE public-install-surface proxy
-# (install/dispatch/bootstrap.ps1 -- see
-# docs/patterns/standalone-service-layout.md), which itself resolves to
-# whatever the real standalone bootstrap currently is, rather than relying
-# on this plugin's own already-staged payload. This is a deliberate
-# transition toward a single installer source of truth; the locally stamped
-# snapshot below remains only as an offline/network-restricted fallback and
-# is expected to be dropped once this path is validated.
-# AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to the fallback (e.g. an
-# air-gapped host).
-$_provisioned = $false
-$_sourcePinned = $false
-$_sourceVersion = ''
-$_sourceMarkerPresent = $false
-$_sourcePayload = ''
-try { $_sourcePayload = [IO.File]::ReadAllText((Join-Path $_root 'payload-dir')).Trim() } catch [IO.FileNotFoundException] {}
-foreach ($_marker in @('stamped-version', 'current-version', 'last-known-good')) {
-    try {
-        $_selected = [IO.File]::ReadAllText((Join-Path $_root $_marker)).Trim()
-        if ($_selected -match '[+.]source\.') {
-            $_sourceMarkerPresent = $true
-            $_expectedSnapshot = Join-Path (Join-Path $_root 'snapshots') $_selected
-            if ([string]::Equals($_sourcePayload, $_expectedSnapshot, [StringComparison]::OrdinalIgnoreCase)) {
-                $_sourcePinned = $true; $_sourceVersion = $_selected; break
-            }
-        }
-    } catch [IO.FileNotFoundException] {}
-}
-if ($_sourceMarkerPresent -and -not $_sourcePinned) {
-    [Console]::Error.WriteLine('Selected source snapshot is unavailable; refusing a different provisioning source.')
-    exit 126
-}
-if (-not $_sourcePinned) {
-    $_sourceSlots = @(Get-ChildItem -LiteralPath (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '[+.]source\.' })
-    if ($_sourceSlots.Count -gt 0) {
-        [Console]::Error.WriteLine('Source runtime recovery requires an exact source selector; refusing upstream provisioning.')
-        exit 126
-    }
-}
-if (-not $_sourcePinned -and -not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
-    $_bootUrl = 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.ps1'
-    $_bootFile = Join-Path ([IO.Path]::GetTempPath()) "agent-dispatch-bootstrap-$PID.ps1"
-    try {
-        [Console]::Error.WriteLine('[agent-dispatch] fetching upstream installer (install/dispatch/bootstrap.ps1, main)...')
-        Invoke-WebRequest -Uri $_bootUrl -UseBasicParsing -TimeoutSec 20 -OutFile $_bootFile
-        & $_exe -NoProfile -ExecutionPolicy Bypass -File $_bootFile provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-        if ($LASTEXITCODE -eq 0) { $_provisioned = $true }
-    } catch {
-        [Console]::Error.WriteLine("[agent-dispatch] upstream installer fetch/run failed ($($_.Exception.Message)); falling back to the locally stamped snapshot.")
-    } finally {
-        Remove-Item -LiteralPath $_bootFile -Force -ErrorAction SilentlyContinue
-    }
-}
-if (-not $_provisioned) {
-    $_snap = ''
-    try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-    if ($_sourcePinned) {
-        $_expectedSnapshot = Join-Path (Join-Path $_root 'snapshots') $_sourceVersion
-        if (-not [string]::Equals($_snap, $_expectedSnapshot, [StringComparison]::OrdinalIgnoreCase)) {
-            [Console]::Error.WriteLine('Selected source snapshot is unavailable; refusing a different provisioning source.')
-            exit 126
-        }
-    }
-    $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-    if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-dispatch] cannot self-provision: no upstream installer reachable (set AGENT_DISPATCH_PROVISION_OFFLINE=1 to skip that attempt) and no local snapshot installer found. Re-enable the plugin, then retry.'); exit 127 }
-    & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-}
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_dispatch @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-dispatch] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
-exit 1
+$env:AGENT_DISPATCH_COMMAND_MODULE = 'agent_dispatch'
+$env:AGENT_DISPATCH_PAYLOAD_ROOT = '@PAYLOAD_ROOT@'
+& (Join-Path '@INSTALL_DIR@' 'bin\runtime-gate.ps1') @args
+exit $LASTEXITCODE
 '@
+    $ps1Content = $ps1Content.Replace('@INSTALL_DIR@', $InstallDir.Replace("'", "''"))
+    $publisher = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $ps1Content = $ps1Content.Replace('@PAYLOAD_ROOT@', $publisher.Replace("'", "''"))
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
     $stubPath = Join-Path $LocalBin 'agent-dispatch.cmd'
@@ -1642,7 +1592,7 @@ exit 1
 @echo off
 setlocal
 set "PYTHONUTF8=1"
-set "_PS1=%USERPROFILE%\.local\bin\agent-dispatch.ps1"
+set "_PS1=%~dp0agent-dispatch.ps1"
 if not exist "%_PS1%" (echo [agent-dispatch] binstub not found: %_PS1%>&2 & exit /b 127)
 set "_PSHOST="
 for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"
@@ -1651,22 +1601,14 @@ if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0
 exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+    $boardPs1Path = Join-Path $LocalBin 'agent-dispatch-board.ps1'
+    [System.IO.File]::WriteAllText(
+        $boardPs1Path,
+        $ps1Content.Replace("AGENT_DISPATCH_COMMAND_MODULE = 'agent_dispatch'", "AGENT_DISPATCH_COMMAND_MODULE = 'agent_dispatch.board_cli'"),
+        $utf8NoBom
+    )
     $boardStubPath = Join-Path $LocalBin 'agent-dispatch-board.cmd'
-    $boardStubContent = @'
-@echo off
-setlocal
-set "PYTHONUTF8=1"
-set "_ROOT=%USERPROFILE%\.agent-dispatch"
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-if exist "%_PY%" (
-  "%_PY%" -m agent_dispatch.board_cli %*
-  exit /b %ERRORLEVEL%
-)
-agent-dispatch inbox %* --board
-exit /b %ERRORLEVEL%
-'@
+    $boardStubContent = $stubContent.Replace('%~dp0agent-dispatch.ps1', '%~dp0agent-dispatch-board.ps1')
     [System.IO.File]::WriteAllText($boardStubPath, $boardStubContent, $utf8NoBom)
     Write-Ok "Binstub: $stubPath (self-provisioning)"
     Write-Ok "Fast board binstub: $boardStubPath"
@@ -4319,7 +4261,7 @@ function Invoke-Uninstall {
 
     foreach ($n in @(
         'agent-dispatch.cmd', 'agent-dispatch.ps1', 'agent-dispatch',
-        'agent-dispatch-board.cmd'
+        'agent-dispatch-board.cmd', 'agent-dispatch-board.ps1'
     )) {
         $p = Join-Path $LocalBin $n
         if (Test-Path $p) {

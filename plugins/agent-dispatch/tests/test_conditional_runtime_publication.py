@@ -428,6 +428,9 @@ def test_actual_legacy_stamp_keeps_python_free_publication(tmp_path: Path) -> No
     shutil.copy2(engine, scripts / "installer-engine.sh")
     source_helper = Path(__file__).parents[1] / "scripts/source-runtime.sh"
     shutil.copy2(source_helper, scripts / source_helper.name)
+    for name in ("resolve-runtime.sh", "resolve-runtime.ps1", "runtime-gate.sh", "runtime-gate.ps1"):
+        shutil.copy2(fixture.SCRIPTS / name, scripts / name)
+    shutil.copytree(fixture.SCRIPTS / "installation-context", scripts / "installation-context")
     entry = scripts / "install.sh"
     text = fixture.script("sh").replace(
         "_initialize_source_runtime\ncase",
@@ -464,4 +467,6 @@ exit 77
     assert "forbidden-python" not in result.stderr
     root = Path(env["HOME"]) / ".agent-dispatch"
     assert (root / "stamped-version").read_text() == fixture.PACKAGE
+    assert (root / "bin/runtime-gate.sh").is_file()
+    assert (root / "bin/installation-context/installation-context.sh").is_file()
     assert not list(root.rglob("*.publication.*"))

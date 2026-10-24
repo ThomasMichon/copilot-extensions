@@ -1227,6 +1227,9 @@ def _ssh_session(
     * ``settle_on_disconnect=False`` keeps the borrowing worktree's claim
       obligation active at disconnect (the launched work keeps running).
     """
+    from .hosting_policy import admit_stdio_launch
+
+    admit_stdio_launch(args)
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
     from .gh_account import credential_account_for_codespace
@@ -1474,6 +1477,7 @@ def _ssh_session(
             await _provision_relay_helpers(manager, args.name)
 
         cs_plugin_dirs: list[str] = []
+        launch_context: dict = {}
         if minimal_provision:
             tracker.started(
                 ConnectStage.TARGET_BINSTUB,
@@ -1520,8 +1524,13 @@ def _ssh_session(
                     worktree_id=getattr(args, "plugin_worktree_id", None),
                     repo_roots=getattr(args, "plugin_roots", []),
                     prelude=relay_env, relay_port=None if args.no_relay else relay_port,
-                    **({"prepared_context": args.plugin_prepared_context}
-                       if getattr(args, "plugin_prepared_context", None) is not None else {}),
+                    live_attachment=getattr(args, "hosting_live_attachment", False),
+                    hosting_required=bool(args.stdio or remote_cmd_builder is not None),
+                    prepared_context=(
+                        args.plugin_prepared_context
+                        if getattr(args, "plugin_prepared_context", None) is not None
+                        else launch_context
+                    ),
                 )
 
             tracker.reached(ConnectStage.TARGET_BINSTUB)
@@ -1566,6 +1575,16 @@ def _ssh_session(
         remote_cmd = _finalize_remote_cmd(plugin_dirs)
 
         if args.stdio and remote_cmd:
+            from .hosting_policy import require_guest_hosting
+
+            repository = _lookup_codespace_repo(args.name)
+            requested = getattr(args, "repo", None)
+            prepared = getattr(args, "plugin_prepared_context", None) or launch_context
+            workspace = prepared.get("workspace") or (
+                config.workspace_folder_for_request(repository, requested)[0]
+                if requested else config.resolved_workspace_folder_for(repository)
+            )
+            await require_guest_hosting(manager, args.name, workspace)
             # #111: a fresh CodeSpace can ship copilot's loader stub without its
             # platform binary, so `copilot --acp` dies at LAUNCH_ACP ("Connection
             # closed"). Verify + self-repair (public-npm reinstall) up front.
@@ -1999,19 +2018,28 @@ async def _register_codespace_plugins(
     sources=(), worktree_id: str | None = None, repo_roots=(),
     prelude: str = "", relay_port: int | None = None,
     prepared_context: dict | None = None,
+    live_attachment: bool = False,
+    hosting_required: bool = True,
 ) -> list[str]:
     """Install/copy all selections, then register locally before either launch."""
     from .plugin_preparation import prepare_plugins
 
     validate_context()
-    repo = repo or _lookup_codespace_repo(name)
-    workspace = workspace or config.resolved_workspace_folder_for(repo)
+    host_repository = _lookup_codespace_repo(name)
+    workspace = workspace or (
+        config.workspace_folder_for_request(host_repository, repo)[0]
+        if repo and repo != host_repository
+        else config.resolved_workspace_folder_for(repo or host_repository)
+    )
+    repo = repo or host_repository
     if not workspace:
         raise RuntimeError("Plugin preparation requires the execution checkout")
     return await prepare_plugins(
         manager, name, repo, config, workspace, sources, worktree_id=worktree_id,
         repo_roots=repo_roots,
         prelude=prelude, relay_port=relay_port,
+        live_attachment=live_attachment,
+        hosting_required=hosting_required,
         **({"prepared_context": prepared_context} if prepared_context is not None else {}),
     )
 

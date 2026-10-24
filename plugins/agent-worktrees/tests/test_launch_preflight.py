@@ -75,7 +75,10 @@ def test_launch_preflight_uses_active_project_for_config_root(
     monkeypatch.setattr(m.state_root_mod, "resolve_config_root", resolve)
     args = argparse.Namespace(recovery=False)
 
-    preflight = m._preflight_launch(config, args, str(tmp_path / "future-worktree"))
+    preflight = m._preflight_launch(
+        config, args, str(tmp_path / "future-worktree"),
+        allocation_source=config.default_repo.anchor,
+    )
 
     assert preflight.error is None
     assert captured["project"] == "control-project"
@@ -161,12 +164,15 @@ def test_create_preflight_failure_has_zero_mutations_and_no_traceback(
     capfd,
     json_output,
 ):
+    """Seeded creation prepares authoring; plain source allocation does not."""
     config = _config(tmp_path)
     monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
     _forbid_create_mutations(monkeypatch)
 
-    rc = m.cmd_create(_create_args(json_output=json_output))
+    args = _create_args(json_output=json_output)
+    args.seed = "New authoring intent requiring launch preparation"
+    rc = m.cmd_create(args)
 
     captured = capfd.readouterr()
     assert rc == 1
@@ -339,6 +345,7 @@ def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
         platform=config.platform,
         worktree_path=str(tmp_path / "worktrees" / "wt-1"),
     )
+    (tmp_path / "worktrees" / "wt-1").mkdir(parents=True)
     monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda _value: "wt-1")
@@ -382,6 +389,7 @@ def test_interactive_resume_preflight_failure_precedes_all_mutations(
         worktree_path=str(tmp_path / "worktrees" / "wt-1"),
         branch="worktree/wt-1",
     )
+    (tmp_path / "worktrees" / "wt-1").mkdir(parents=True)
     monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
     monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda _record: None)
 

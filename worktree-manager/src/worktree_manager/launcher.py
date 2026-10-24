@@ -200,6 +200,14 @@ def launch(
     want_mux: bool = True,
 ) -> int:
     """Compose then execute a launch plan (the Picker's launch/resume action)."""
+    if plan.action == "exec":
+        from . import engine_client
+
+        try:
+            engine_client.require_agent_hosting(str(plan.raw.get("status_path") or plan.work_dir))
+        except engine_client.EngineError as error:
+            print(f"error: repository hosting admission refused: {error}")
+            return 1
     return execute(compose_launch(plan, capability, want_mux=want_mux))
 
 

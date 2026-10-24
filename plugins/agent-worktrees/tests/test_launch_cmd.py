@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from launch_policy_workspace import synthetic_workspace_policy as synthetic_workspace_policy
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
@@ -606,6 +607,7 @@ def test_namespaced_launch_uses_direct_fallback_without_legacy_launcher(
         "example",
         "resolve",
         "--no-mux",
+        "--require-agent-hosting",
     ]
     assert child["argv"] == ["copilot", "chat"]
     assert child["cwd"] == str(tmp_path / "worktrees" / "wt1")
@@ -1027,6 +1029,7 @@ def test_cmd_launch_passes_active_project_explicitly(monkeypatch, tmp_path):
         "dotfiles",
         "resolve",
         "--no-mux",
+        "--require-agent-hosting",
     ]
     assert "WORKTREE_PROJECT" not in os.environ
 
@@ -2476,6 +2479,7 @@ def test_cmd_launch_direct_fallback_runs_post_exit_and_preserves_env(
         "example",
         "resolve",
         "--no-mux",
+        "--require-agent-hosting",
     ]
     post_exit_argv = runs[1][0]
     assert post_exit_argv == [

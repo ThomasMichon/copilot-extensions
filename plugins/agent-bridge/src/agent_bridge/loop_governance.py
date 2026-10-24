@@ -10,10 +10,14 @@ import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .config import _load_installation_context
 from .install_paths import install_dir, legacy_install_dir
+from .runtime_custody import RuntimeCustodyError, RuntimeInstallation
+
+if TYPE_CHECKING:
+    from .db import Database
 
 PLUGIN_ID = "agent-bridge"
 _CONTEXT_ENV = "COPILOT_EXTENSIONS_CONTEXT"
@@ -36,6 +40,18 @@ def _durable_home_from_context(context_path: str) -> Path:
         raise ValueError("installation context receipt layout is invalid") from exc
 
 
+def _deployment_payload_root(root: Path) -> Path:
+    manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8"))
+    source = manifest.get("source") if isinstance(manifest, dict) else None
+    value = source.get("path") if isinstance(source, dict) else None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("deploy manifest source.path is missing")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        raise ValueError("deploy manifest source.path must be absolute")
+    return path.resolve(strict=True)
+
+
 def _load_governance_module() -> dict[str, Any] | None:
     try:
         raw_context = os.environ.get(_CONTEXT_ENV, "").strip()
@@ -53,13 +69,7 @@ def _load_governance_module() -> dict[str, Any] | None:
         ):
             raise ValueError("installation context omitted marketplace or receipt identity")
         root = install_dir().expanduser()
-        manifest_path = root / "deploy-manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        source = manifest.get("source")
-        payload_root_value = source.get("path") if isinstance(source, dict) else None
-        if not isinstance(payload_root_value, str) or not payload_root_value.strip():
-            raise ValueError("deploy manifest source.path is missing")
-        payload_root = Path(payload_root_value).expanduser().resolve(strict=True)
+        payload_root = _deployment_payload_root(root)
         script = payload_root / "scripts" / "installation-context" / "installation_context.py"
         if not script.is_file():
             raise FileNotFoundError(script)
@@ -88,6 +98,8 @@ def _load_governance_module() -> dict[str, Any] | None:
             "plugin_id": PLUGIN_ID,
             "legacy_root": str(legacy_install_dir()),
             "durable_home": str(_durable_home_from_context(context_path)),
+            "payload_root": str(payload_root),
+            "runtime_root": str(root.resolve(strict=True)),
         }
     except Exception as exc:
         return {
@@ -105,15 +117,89 @@ class LoopGovernance:
     def __init__(self, helper: Any | None = None) -> None:
         self._helper = _load_governance_module() if helper is None else helper
         self._baseline: dict[str, Any] | None = None
+        self._installation: RuntimeInstallation | None = None
         self.state: dict[str, Any] | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def set_recheck_fn(self, fn: Callable[[str], dict[str, Any]] | None) -> None:
         """Override the installed helper (tests)."""
         with self._lock:
             self._helper = fn
             self._baseline = None
+            self._installation = None
             self.state = None
+
+    def runtime_installation(self, database: Database) -> RuntimeInstallation:
+        """Bind custody observations to this daemon's installation and open DB.
+
+        Resolution is read-only. It neither initializes an epoch nor enrolls a
+        producer, authenticates a consumer or establishes SDK/native custody.
+        """
+        with self._lock:
+            helper = self._helper
+            if not isinstance(helper, dict) or "error" in helper:
+                raise RuntimeCustodyError("Installation governance is unavailable for inbox custody")
+            try:
+                before = self.recheck("inbox-installation:before")
+                if before is None or before.get("status") != "ready":
+                    raise RuntimeCustodyError("Inbox installation governance is not current")
+                module = helper["module"]
+                context = module.validate_context_receipt(
+                    helper["context"], helper["durable_home"],
+                    expected_marketplace_id=helper["marketplace_id"],
+                    expected_plugin_id=helper["plugin_id"],
+                    expected_payload_root=helper["payload_root"],
+                    environment={},
+                )
+                namespace = module.validate_namespace_receipt(
+                    context["namespaceReceipt"], helper["durable_home"],
+                )
+                mode = module.probe_legacy_entrypoint(
+                    context=helper["context"], durable_home=helper["durable_home"],
+                    expected_marketplace_id=helper["marketplace_id"],
+                    expected_plugin_id=helper["plugin_id"],
+                    legacy_root=helper["legacy_root"], environment=os.environ,
+                )
+                if (
+                    mode["status"] != "ready"
+                    or (mode["actualMode"] == "legacy" and not mode["allowMutation"])
+                    or context["state"] != "active"
+                    or namespace["receipt"]["state"] != "active"
+                    or mode["actualMode"] != before["actualMode"]
+                    or (mode["context"] is not None
+                        and mode["context"] != context["installReceipt"])
+                    or context["namespaceGeneration"] != before["namespaceGeneration"]
+                    or context["generation"] != before["installGeneration"]
+                    or not isinstance(mode["runtimeRoot"], str)
+                    or Path(mode["runtimeRoot"]).resolve(strict=True)
+                    != Path(helper["runtime_root"]).resolve(strict=True)
+                    or install_dir().resolve(strict=True)
+                    != Path(helper["runtime_root"]).resolve(strict=True)
+                    or _deployment_payload_root(Path(helper["runtime_root"]))
+                    != Path(helper["payload_root"])
+                ):
+                    raise RuntimeCustodyError("Inbox installation does not own this daemon runtime")
+                installation = RuntimeInstallation(
+                    identity=context["installReceipt"],
+                    source_fingerprint=context["sourceFingerprint"],
+                    runtime_root=helper["runtime_root"],
+                    database=str(database.db_path.absolute()),
+                )
+                after = self.recheck("inbox-installation:after")
+                if (
+                    after is None or after.get("status") != "ready"
+                    or _deployment_payload_root(Path(helper["runtime_root"]))
+                    != Path(helper["payload_root"])
+                ):
+                    raise RuntimeCustodyError("Inbox installation changed during resolution")
+                if self._installation is not None and self._installation != installation:
+                    raise RuntimeCustodyError("Inbox installation or database binding changed")
+                self._installation = installation
+                return installation
+            except (OSError, ValueError) as exc:
+                if isinstance(exc, RuntimeCustodyError):
+                    raise
+                raise RuntimeCustodyError(f"Inbox installation resolution failed: {exc}") from exc
 
     def recheck(self, checkpoint: str) -> dict[str, Any] | None:
         """Return the current governance verdict for ``checkpoint``."""

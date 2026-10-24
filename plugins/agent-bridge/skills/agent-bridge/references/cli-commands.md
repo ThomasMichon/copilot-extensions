@@ -129,6 +129,16 @@ and
 is a new one started. Output streams in real-time: response text, thought
 blocks, and tool call summaries.
 
+`--caller` overrides that affinity key for both named-agent session selection
+and creation, as well as prompt delivery and its cursor. Ordinary `create`
+also records the selected caller before launching the child. A usable caller
+checkout can supply controller-local plugin selection through the existing
+preparation rules; the key does not override qualified ownership or target-local
+plugin choices. Omitting the flag retains current-worktree discovery.
+Forced replacement validates sender preferences and remote ownership/capability
+before ending the incumbent, then reuses those caller facts for creation.
+A refused preflight or missing replacement agent leaves the incumbent intact.
+
 > **There is no `send --new`.** It was removed because it silently reused a
 > pre-existing (often stopped, stale) session instead of creating a fresh one.
 > To force a brand-new session, use the payload-local `create` operation below.
@@ -325,7 +335,7 @@ be discarded (or the cancel signature *persists* across sends). See the
 <agent-bridge catalog argv[0]> status <session-id>
 <agent-bridge catalog argv[0]> status <session-id> --steps 5   # also show the last 5 collapsed steps
 # Exact full SessionInfo JSON (native/worktree/project/path and readiness facts).
-# Unlike compact status and resume acknowledgements, this is a full identity read.
+# Unlike compact status, this reads the full identity without resuming it.
 <agent-bridge catalog argv[0]> status <session-id> --full
 
 # Wait for a running session's current turn
@@ -384,6 +394,13 @@ be discarded (or the cancel signature *persists* across sends). See the
 <agent-bridge catalog argv[0]> resume <session-id|worktree-handle|repo-or-agent>
 <agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --cli
 ```
+
+With global `--json`, resume preserves the server's complete session response,
+including its actual session/native identity, project/path, state and liveness
+metadata. The CLI adds its `verb` and, for singleton aliases, `requested_target`;
+missing legacy identity/status fields retain their existing CLI fallbacks.
+Returned null, false and zero values are preserved, not converted into readiness.
+Human-readable output and resume admission/refusal behavior are unchanged.
 
 The client requires HTTP protocol 40 and uses
 `POST /api/v1/worktrees/{id}/resume/{mode}` (`mode`: `acp` or `cli`). The mode-qualified route is

@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-pull-requests"
-version = "0.3.64-dev1"
+version = "0.3.65-dev1"
 description = "Cross-repository pull-request CLI with agent-worktrees-mediated GitHub auth."
 readme = "README.md"
 license = "MIT"
@@ -20,9 +20,11 @@ dependencies = [
     "agent-procutil",
     "agent-single-instance-lease",
     "agent-zdd",
+    "agent-update-driver",
 ]
 
 [tool.uv.sources]
+agent-update-driver = { path = "libs/update-driver" }
 # Shared coalescing/rendezvous daemon primitive (module
 # ``work_coalescing_singleton``) -- resolved live from its canonical path so
 # this plugin never vendors its own copy.

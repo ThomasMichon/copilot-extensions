@@ -420,6 +420,39 @@ def _launch_cli_mode_session(
     embody_bin: str = "agent-worktrees",
     run: Any = None,
 ) -> dict[str, Any]:
+    from repository_policy import AgentHostingError
+    from agent_procutil import no_window_kwargs
+
+    from .hosting_policy import policy_check_args, validate_policy_result
+
+    runner = run or subprocess.run
+    recorded = runner(
+        [embody_bin, "record", "--worktree-id", worktree_id, "--json"],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    try:
+        record = json.loads(recorded.stdout)
+        row = record.get("worktree") if isinstance(record, dict) else None
+        if (
+            recorded.returncode != 0 or not isinstance(row, dict)
+            or row.get("id") != worktree_id
+            or not isinstance(row.get("path"), str) or not row["path"]
+        ):
+            raise AgentHostingError("CLI embodiment cannot establish the actual execution workspace")
+        checked = runner(
+            [embody_bin, *policy_check_args(row["path"], operation="CLI embodiment")],
+            capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+        )
+        if checked.returncode != 0:
+            raise AgentHostingError(
+                "CLI embodiment refused by repository hosting policy: "
+                + (checked.stderr or checked.stdout or "receiver check unavailable").strip()
+            )
+        validate_policy_result(json.loads(checked.stdout))
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise AgentHostingError(
+            "CLI embodiment requires an owner supporting version-1 repository hosting checks"
+        ) from exc
     reservation = client.create_cli_mode_reservation(worktree_id, ttl_seconds=ttl_seconds)
     argv = [
         embody_bin,
@@ -435,7 +468,6 @@ def _launch_cli_mode_session(
         argv += ["--driver", driver]
     if seed:
         argv += ["--seed", seed]
-    runner = run or subprocess.run
     try:
         result = runner(argv, capture_output=True, text=True)
     except BaseException:  # an interrupt too: release, then re-raise

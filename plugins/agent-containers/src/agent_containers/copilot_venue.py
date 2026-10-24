@@ -187,6 +187,14 @@ def cmd_copilot(
     identity = args.worktree_id or (
         f"anchor-{os.path.basename(target.workspace_folder.rstrip('/')) or args.name}"
     )
+    from venue_copilot import live_session_for
+    from .hosting_policy import require_container_hosting
+
+    rejoining = (live_session_for(f"{identity}@{args.name}") or {}).get("status") == "live"
+    args.hosting_live_attachment = rejoining
+    require_container_hosting(
+        target, worktree_id=args.worktree_id, live_attachment=rejoining,
+    )
 
     from ssh_manager import TargetBusyError, TargetLock
 

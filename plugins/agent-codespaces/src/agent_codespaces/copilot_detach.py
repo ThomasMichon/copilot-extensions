@@ -52,6 +52,7 @@ from venue_copilot import (
 
 from .model_launch import model_copilot_args
 from . import copilot_detach_startup
+from .copilot_detach_startup import ssh_namespace as _ssh_namespace
 from venue_copilot.resume_claim import resume_target, settle_resumed_claim
 from venue_copilot.supervisor import with_supervisor
 
@@ -419,27 +420,6 @@ def _local_forwards_ready(
     return ready
 
 
-def _ssh_namespace(args: argparse.Namespace, remote_cmd: str, *, timeout: float) -> argparse.Namespace:
-    return argparse.Namespace(
-        name=args.name,
-        stdio=False,
-        remote_cmd=remote_cmd,
-        timeout=timeout,
-        connect_timeout=None,
-        no_provision=False,
-        no_relay=False,
-        auth_cache_warmup=True,
-        repo=None,
-        effort=getattr(args, "effort", None),
-        session_id=None,
-        stage_plugins=list(getattr(args, "stage_plugins", []) or []),
-        plugin_roots=list(getattr(args, "plugin_roots", []) or []),
-        skip_plugin_preparation=bool(getattr(args, "stop", False)),
-        force=getattr(args, "force", False),
-        force_claim=getattr(args, "force_claim", False),
-    )
-
-
 def _commands(plan: dict[str, Any], session_id: str, effort: str | None = None) -> dict[str, str]:
     cs = plan["codespace"]
     # Attach and stop connect, so they must name the same claim owner the
@@ -544,13 +524,16 @@ def cmd_detach(
                 file=sys.stderr,
             )
 
-    # A rejoin of a running worker launches nothing, so it isn't the launch
-    # policy's to refuse; should the "rejoin" create a session after all, the
-    # policy is asked then (below) and a refused one is stopped.
-    import venue_copilot as _vc
+    # A live attachment preserves custody. The receiving embody command must
+    # recheck repository policy if the child exits before the request arrives.
+    from .hosting_policy import admit_detached_launch
 
-    rejoining = (_vc.live_session_for(plan["scope_id"]) or {}).get("status") == "live"
-    claim_rc = claim_or_exit_code(args, launch_policy=not rejoining)
+    recovering = owner.get_pending_delivery(args.name, plan["tenant"]) is not None
+    try:
+        rejoining = False if recovering else admit_detached_launch(args, plan)
+    except (RuntimeError, OSError) as exc:
+        return _fail(str(exc), plan)
+    claim_rc = claim_or_exit_code(args, launch_policy=not (rejoining or recovering))
     if claim_rc is not None:
         return claim_rc
     daemon_port = resolve_daemon_port()
@@ -578,6 +561,11 @@ def cmd_detach(
             remote=_remote, release_cli_mode=release_cli_mode, busy_exit=_BUSY_EXIT,
             await_forward=await_owner_bridge_forward, bridge_path_ok=_bridge_path_ok,
         )
+    if recovering:
+        try:
+            rejoining = admit_detached_launch(args, plan)
+        except (RuntimeError, OSError) as exc:
+            return _fail(str(exc), plan)
     prior_forwards = dict(getattr(held, "reverse_forwards", None) or {})
     prior_local = dict(getattr(held, "local_forwards", None) or {})
     prior_assigned_local = dict(getattr(held, "assigned_local_forwards", None) or {})
@@ -651,6 +639,7 @@ def cmd_detach(
                 ssh_args = _ssh_namespace(args, "agent-worktrees embody", timeout=launch_timeout)
                 ssh_args.plugin_worktree_id = getattr(args, "worktree_id", None)
                 ssh_args.plugin_prepared_context = captured["prepared_context"]
+                ssh_args.hosting_live_attachment = rejoining
                 rc = ssh_session(
                     ssh_args,
                     remote_cmd_builder=builder, result_sink=sink, settle_on_disconnect=False,
@@ -709,11 +698,11 @@ def cmd_detach(
             plan["mux_session"] = actual_mux
             plan["venue"]["mux_session_name"] = actual_mux
             owner.hold(args.name, plan["tenant"], daemon_port=daemon_port, mux_session=actual_mux)
-        if created and rejoining:  # the worker stopped meanwhile: this was a launch after all
+        if created and rejoining:
             from .launch_policy import refused_exit_code
 
             refused = refused_exit_code(args.name)
-            if refused is not None:  # ok stays False: cleanup stops the session it really started
+            if refused is not None:
                 print(json.dumps({"ok": False, "error": "launch refused by the host launch policy", **plan}, indent=2))
                 return refused
         from venue_copilot.refs import deferred_seed

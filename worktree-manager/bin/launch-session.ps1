@@ -23,11 +23,12 @@ $ErrorActionPreference = 'Stop'
 # Setup log — per-launch log file with PID disambiguation
 # ---------------------------------------------------------------------------
 $script:SetupLogDir = Join-Path $env:TEMP 'worktree-setup-logs'
-if (-not (Test-Path $script:SetupLogDir)) {
-    try { New-Item -ItemType Directory -Path $script:SetupLogDir -Force | Out-Null } catch {}
-}
 $script:SetupLog = Join-Path $script:SetupLogDir "setup-$PID.log"
-$env:WORKTREE_SETUP_LOG = $script:SetupLog
+$env:WORKTREE_SETUP_LOG = $null
+$script:LaunchAdmitted = $false
+$script:LaunchPolicyPath = $null
+$script:PendingSetupLogs = [Collections.Generic.List[string]]::new()
+$script:PendingLaunchEvents = [Collections.Generic.List[string]]::new()
 
 # ---------------------------------------------------------------------------
 # Launch-flow correlation id -- minted once per launcher run and threaded
@@ -83,6 +84,10 @@ function Write-SetupLog {
         [string]$Scope = 'launch', [string]$State = '', [switch]$Completed
     )
     $lines = @(Format-SetupLine $Message $Level -Seconds $Seconds -Scope $Scope -State $State -Completed:$Completed)
+    if (-not $script:LaunchAdmitted) {
+        foreach ($line in $lines) { $script:PendingSetupLogs.Add($line) }
+        return
+    }
     try { Add-Content -LiteralPath $script:SetupLog -Value $lines -Encoding utf8 -ErrorAction SilentlyContinue } catch {}
 }
 
@@ -90,6 +95,10 @@ function Write-LaunchTrace {
     param([string]$Event)
     $path = $env:AGENT_WORKTREES_LAUNCH_TRACE
     if (-not $path -or $path -match '^(?i:0|false|no|off)$') { return }
+    if (-not $script:LaunchAdmitted) {
+        $script:PendingLaunchEvents.Add($Event)
+        return
+    }
     try {
         $record = [ordered]@{
             timestamp = [DateTime]::UtcNow.ToString('o')
@@ -143,22 +152,77 @@ function Write-PlanDiagnostics {
     }
 }
 
-# Write header and create a "latest" copy for easy access
-try {
-    $header = @(
-        "# Worktree Manager — session launch log"
-        "# Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fffzzz')"
-        "# PID: $PID"
-        "# Host: $env:COMPUTERNAME"
-        ""
-    ) -join "`n"
-    Set-Content -LiteralPath $script:SetupLog -Value $header -Encoding utf8 -ErrorAction SilentlyContinue
-    # Prune old logs (keep last 10)
-    Get-ChildItem $script:SetupLogDir -Filter 'setup-*.log' |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -Skip 10 |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-} catch {}
+function Initialize-LaunchDiagnostics {
+    if ($script:LaunchAdmitted) { return }
+    $script:LaunchAdmitted = $true
+    $env:WORKTREE_SETUP_LOG = $script:SetupLog
+    try {
+        New-Item -ItemType Directory -Path $script:SetupLogDir -Force | Out-Null
+        $header = @(
+            "# Worktree Manager — session launch log"
+            "# Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fffzzz')"
+            "# PID: $PID"
+            "# Host: $env:COMPUTERNAME"
+            ""
+        ) -join "`n"
+        Set-Content -LiteralPath $script:SetupLog -Value $header -Encoding utf8 -ErrorAction SilentlyContinue
+        Get-ChildItem $script:SetupLogDir -Filter 'setup-*.log' |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -Skip 10 |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+        Add-Content -LiteralPath $script:SetupLog -Value $script:PendingSetupLogs.ToArray() -Encoding utf8
+    } catch {}
+    $script:PendingSetupLogs.Clear()
+    foreach ($eventName in $script:PendingLaunchEvents) { Write-LaunchTrace $eventName }
+    $script:PendingLaunchEvents.Clear()
+}
+
+function Assert-LaunchTarget {
+    param([string]$Path, [string]$Operation = 'launch')
+    if (-not $Path -or -not [IO.Path]::IsPathRooted($Path)) {
+        [Console]::Error.WriteLine('ERROR: Launch admission requires an absolute execution workspace.')
+        exit 3
+    }
+    $answer = @(& $VenvPython -m agent_worktrees agent-policy check --path $Path --operation $Operation --json)
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine(($answer -join "`n"))
+        exit 3
+    }
+    ($answer -join "`n") | & $VenvPython -c @'
+import json,sys
+from pathlib import Path
+from repository_policy import validate_hosting_result
+try:
+    if not Path(sys.argv[1]).is_absolute():
+        raise ValueError("Launch admission requires an absolute execution workspace")
+    validate_hosting_result(json.load(sys.stdin))
+except ValueError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(3)
+'@ $Path
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine('ERROR: Repository hosting owner returned unusable admission.')
+        exit 3
+    }
+    $script:LaunchPolicyPath = $Path
+}
+
+function Assert-RefreshTarget {
+    $target = if ($plan.status_path) { [string]$plan.status_path } else { [string]$plan.work_dir }
+    if ($target) {
+        Assert-LaunchTarget -Path $target -Operation refresh
+        return
+    }
+    $query = @('-m', 'agent_worktrees')
+    if ($script:LaunchProject) { $query += @('--project', $script:LaunchProject) }
+    $query += @('get', 'repo-dir')
+    $target = @(& $VenvPython @query)
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("ERROR: Cannot resolve the refresh project's execution workspace.")
+        exit 3
+    }
+    Assert-LaunchTarget -Path ($target -join "`n") -Operation refresh
+}
 
 # ---------------------------------------------------------------------------
 # Crash detector -- a top-level trap so an otherwise-unhandled terminating
@@ -184,7 +248,7 @@ trap {
     } elseif ((Get-Variable -Name plan -Scope Script -ErrorAction SilentlyContinue) -and $script:plan.worktree_id) {
         $script:plan.worktree_id
     } else { $null }
-    if ($worktreeId -and (Get-Command Write-AwMuxFailure -ErrorAction SilentlyContinue)) {
+    if ($script:LaunchAdmitted -and $worktreeId -and (Get-Command Write-AwMuxFailure -ErrorAction SilentlyContinue)) {
         try {
             Write-AwMuxFailure -Reason 'unhandled_exception' -ExitCode 70 -Fields @(
                 "message=$($errorMessage -replace '[\r\n]+', ' ')"
@@ -200,7 +264,11 @@ trap {
     Write-Host ''
     Write-Host "Worktree launcher crashed unexpectedly: $errorMessage" -ForegroundColor Red
     Write-Host $recoveryHint -ForegroundColor Yellow
-    Write-Host "Details logged to: $script:SetupLog" -ForegroundColor DarkGray
+    if ($script:LaunchAdmitted) {
+        Write-Host "Details logged to: $script:SetupLog" -ForegroundColor DarkGray
+    } else {
+        Write-Host 'No launch diagnostics were persisted before repository admission.' -ForegroundColor DarkGray
+    }
     exit 70
 }
 
@@ -279,7 +347,7 @@ if ($CopilotPassthrough -contains '--stdio') {
 }
 
 # Recovery fast-path: skip resolve/picker, launch directly in anchor repo
-if ($RecoveryMode) {
+function Invoke-RecoveryLaunch {
     Write-SetupLog 'Recovery fast-path — bypassing worktree resolution'
     # Explicit project config takes precedence over unrelated ambient CWD.
     $candidates = @()
@@ -317,6 +385,8 @@ if ($RecoveryMode) {
         [Console]::Error.WriteLine('ERROR: Cannot find a recovery setup script in the project anchor, Git root, or current directory.')
         exit 1
     }
+    Assert-LaunchTarget -Path $anchor -Operation recovery
+    Initialize-LaunchDiagnostics
     Write-SetupLog "Recovery: launching $setupScript in $anchor"
     Set-Location $anchor
     $setupArgs = @('-Recovery') + $CopilotArgs
@@ -450,6 +520,10 @@ if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
 $env:PYTHONPATH = Join-Path $RuntimeDir 'lib'
 $env:PYTHONHOME = $null
 
+if ($RecoveryMode) {
+    Invoke-RecoveryLaunch
+}
+
 # Append a high-level lifecycle event to the persistent Tier-A activity log,
 # at parity with launch-session.sh's activity_log(). Best-effort and fully
 # detached -- a diagnostic write must never block or fail the launch (the
@@ -461,7 +535,7 @@ function Write-ActivityLog {
         [string]$WorktreeId,
         [string[]]$Fields
     )
-    if ([string]::IsNullOrWhiteSpace($WorktreeId)) { return }
+    if (-not $script:LaunchAdmitted -or [string]::IsNullOrWhiteSpace($WorktreeId)) { return }
     # Re-resolve before use: this can fire long after the interactive Copilot
     # session ends (post psmux-attach), and the runtime may have been
     # upgraded/pruned to a different version dir in the meantime, leaving the
@@ -529,8 +603,8 @@ $script:UpdateApplied = $false
 $script:StageJob = $null
 
 # ── Optional maintenance: submit by default, join only in blocking mode ──
-# The Picker runs from the installed runtime venv, so the slow marketplace
-# download is STAGED in the background while the Picker is open, then the
+# The Picker runs from the installed runtime venv, so marketplace download
+# starts only after target admission and Picker exit, then the
 # apply (installer -> runtime, pre-launch, reconcile) runs at the JOIN only
 # with WORKTREE_BLOCKING_INSTALL; ordinary launches submit one driver request.
 # The blocking join follows Picker exit and precedes handoff. The launcher script
@@ -541,6 +615,8 @@ function Start-UpdateStage {
     # Spawn the background stage (marketplace download + fingerprint + plan).
     # Runs headless in a job so it never writes to the Picker's console.
     if ($noUpdate -or -not $env:WORKTREE_BLOCKING_INSTALL) { return $null }
+    if (-not $script:LaunchAdmitted) { throw 'Launch maintenance requires target admission' }
+    Assert-LaunchTarget -Path $script:LaunchPolicyPath -Operation maintenance
     try {
         Write-SetupLog 'Starting background update stage (stage-update)'
         return Start-Job -Name 'aw-stage-update' -ScriptBlock {
@@ -606,6 +682,8 @@ function Invoke-UpdateApply {
     # its body at most once per launch.
     param($StageJob, [switch]$WithReconcile, [switch]$ShowStatus)
     if ($script:UpdateApplied) { return }
+    if (-not $script:LaunchAdmitted) { throw 'Launch maintenance requires target admission' }
+    Assert-LaunchTarget -Path $script:LaunchPolicyPath -Operation maintenance
     $script:UpdateApplied = $true
 
     # Enable console status echo for interactive launches (the caller passes
@@ -705,7 +783,7 @@ function Invoke-UpdateApply {
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
 $DirectCommands = @(
-    'services', 'repos', 'knowledge', 'agent-worktrees',
+    'agent-policy', 'services', 'repos', 'knowledge', 'agent-worktrees',
     'resolve', 'post-exit', 'finalize', 'push-changes', 'mark-complete',
     'execution-leg',
     'status', 'list', 'create', 'cleanup', 'validate', 'install',
@@ -716,23 +794,18 @@ $DirectCommands = @(
 )
 if ($CopilotArgs.Count -gt 0 -and $CopilotArgs[0] -in $DirectCommands) {
     Write-SetupLog "Direct dispatch: $($CopilotArgs[0]) (bypassing resolve)"
-    # Direct commands retain update-only optional maintenance. Only explicit
-    # blocking mode joins it before dispatch.
-    Invoke-UpdateApply -StageJob (Start-UpdateStage)
+    # Inspection/source commands get no implicit launch maintenance or diagnostics.
     $directArgs = @('-m', 'agent_worktrees')
-    if ($script:LaunchProject) {
+    if ($script:LaunchProject -and $CopilotArgs[0] -ne 'agent-policy') {
         $directArgs += @('--project', $script:LaunchProject)
     }
     $directArgs += $CopilotArgs
+    if ($CopilotArgs[0] -eq 'resolve') { $directArgs += '--require-agent-hosting' }
     & $VenvPython @directArgs
     exit $LASTEXITCODE
 }
 
-# ── Background update stage (#1430) ──────────────────────────────────────
-# In explicit blocking mode, start acquisition while the Picker is open. It is
-# joined and applied (installer + pre-launch + reconcile) after resolve returns
-# an exec plan, before the psmux handoff -- see Invoke-UpdateApply below.
-$script:StageJob = Start-UpdateStage
+# Optional maintenance starts only after the resolved target passes admission.
 
 # ── Resolve launch plan via Python ────────────────────────────────────────
 # Python resolve writes JSON to stdout and UI (picker) to stderr.
@@ -742,7 +815,7 @@ $resolveArgs = @('-m', 'agent_worktrees')
 if ($script:LaunchProject) {
     $resolveArgs += @('--project', $script:LaunchProject)
 }
-$resolveArgs += @('resolve') + $CopilotArgs
+$resolveArgs += @('resolve', '--require-agent-hosting') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
 Write-LaunchTrace 'resolve_start'
 
@@ -803,6 +876,13 @@ try {
     $argvText.Dispose()
 }
 
+if ($plan.action -eq 'exec') {
+    if ($plan.project) { $script:LaunchProject = [string]$plan.project }
+    $policyPath = if ($plan.status_path) { [string]$plan.status_path } else { [string]$plan.work_dir }
+    Assert-LaunchTarget -Path $policyPath
+    Initialize-LaunchDiagnostics
+}
+
 # Feed the crash-detector trap a stable, cheap worktree-id reference so it
 # can record/hint accurately even if it fires deep in the create/attach flow
 # below, without depending on $plan still being reachable at trap time.
@@ -819,7 +899,7 @@ if ($plan.worktree_id) { $script:LaunchWorktreeId = [string]$plan.worktree_id }
 # later subprocess call in this run could become a reap target. Best-effort
 # -- a failure here only widens the pre-existing race back to today's
 # behavior, never blocks or fails the launch.
-if ($script:LaunchWorktreeId -and $VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
+if ($plan.action -eq 'exec' -and $script:LaunchWorktreeId -and $VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
     try {
         & $VenvPython -m agent_worktrees register-launch `
             --worktree-id $script:LaunchWorktreeId --pid $PID `
@@ -866,6 +946,9 @@ if ($plan.action -eq 'remote') {
 # here (venv now free), then re-exec the (now-updated) launcher to reopen the
 # picker on the new version.
 if ($plan.action -eq 'refresh') {
+    Assert-RefreshTarget
+    Initialize-LaunchDiagnostics
+    $script:StageJob = Start-UpdateStage
     Write-SetupLog 'Picker refresh -- running full update and relaunching'
     # The explicit "Update available" -> enter gesture runs the SAME
     # comprehensive update as the `update` command (every registered plugin
@@ -1012,11 +1095,14 @@ if ($joiningLiveSession) {
         $script:StageJob = $null
     }
 } else {
+    $script:StageJob = Start-UpdateStage
     Invoke-UpdateApply -StageJob $script:StageJob -WithReconcile -ShowStatus
 }
 
 # ── Execute the launch plan ──────────────────────────────────────────────
 
+$policyPath = if ($plan.status_path) { [string]$plan.status_path } else { [string]$plan.work_dir }
+Assert-LaunchTarget -Path $policyPath
 Set-Location $plan.work_dir
 
 # Compose the paired private knowledge repo's plugin settings into the harness

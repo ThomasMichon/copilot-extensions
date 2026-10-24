@@ -10,17 +10,17 @@ import re
 import stat
 import zipfile
 
-from promotion_unit_contract import admit_manifest, decode_json, manifest_digest
+from promotion_unit_contract import MAX_PACKET_FILE_BYTES, admit_manifest, decode_json, manifest_digest
 
 SCHEMA = "copilot-extensions.candidate-qualification"
 UNIT_PROFILE = "source-units-v2"
+CANDIDATE_UNIT_PROFILE = "candidate-units-v3"
 LEGACY_PROFILE = "legacy-ci-v1"
 UNIT_JOB = "Eligible source units with coverage"
 UNIT_UPLOAD_STEP = "Upload promotion unit evidence"
 UNIT_ARTIFACT = "promotion-unit-evidence"
 WORKFLOW = ".github/workflows/validate-and-promote.yml"
 PACKET_FILES = ("unit-manifest.json", "unit-proof.json", "coverage.json")
-MAX_PACKET_FILE_BYTES = 16 * 1024 * 1024
 MAX_PACKET_BYTES = len(PACKET_FILES) * MAX_PACKET_FILE_BYTES
 MAX_ARCHIVE_BYTES = MAX_PACKET_BYTES + 64 * 1024
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -99,15 +99,21 @@ def input_equivalence(source_root: Path, candidate_root: Path, manifest: dict) -
     return canonical_digest(sources)
 
 
-def packet_binding(directory: Path, *, source_sha: str, manifest: dict, source_root: Path) -> dict:
+def packet_binding(
+    directory: Path, *, source_sha: str, manifest: dict, source_root: Path,
+    development_root: Path | None = None,
+) -> dict:
     try:
         from promotion_unit_packet import verify_packet
     except ModuleNotFoundError as exc:
         raise UnitQualificationError("the source-unit packet verifier is unavailable") from exc
     before = {name: regular_bytes(directory, name) for name in PACKET_FILES}
-    verified = verify_packet(
-        directory, expected_source_sha=source_sha, expected_manifest=manifest, source_root=source_root,
+    arguments = dict(
+        expected_source_sha=source_sha, expected_manifest=manifest, source_root=source_root,
     )
+    if development_root is not None:
+        arguments["development_root"] = development_root
+    verified = verify_packet(directory, **arguments)
     fields = {
         "profile", "source_sha", "manifest_sha256", "manifest_file_sha256",
         "proof_sha256", "coverage_sha256", "packet_sha256", "manifest", "proof",

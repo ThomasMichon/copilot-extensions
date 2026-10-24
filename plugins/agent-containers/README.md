@@ -44,6 +44,22 @@ warns with its exit code but does not prevent CLI installation.
 
 ## Dispatch-only restricted workers
 
+Managed agent launch checks repository hosting eligibility inside the actual
+guest checkout, using the selected physical container instance. This includes
+ACP, trusted Session Host preparation, attached launch, and restricted task
+receivers. Guest ACP commands recheck at execution; an explicit prepared
+worktree is checked instead of its anchor. Required receivers must support
+`agent-worktrees agent-policy check --path <checkout> --operation launch --json`;
+unsupported receivers refuse without a weaker launch fallback.
+
+`dispatch-check-hosting <name> --expected-container-id <id>` is the read-only
+preflight for restricted supervisors, before binding or credential projection.
+Source allocation and inspection remain available. A genuine live attachment
+preserves custody; if a detached rejoin instead needs a replacement, the
+receiving Worktrees launch boundary checks fresh policy before creating it.
+The shared [repository-policy library](../../libs/repository-policy/README.md)
+owns configuration and precedence.
+
 An image-backed restricted fleet can opt into `dispatch_only: true`. This is a
 creation-time policy, not an advisory borrow: ordinary `exec`, provider SSH and
 unqualified bridge launches are refused. Existing ordinary restricted fleets

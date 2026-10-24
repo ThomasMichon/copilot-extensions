@@ -309,11 +309,6 @@ class CodespaceResolver:
         checkout_command = config.checkout_provision_command_for(
             cs.repository, requested_repo=repo, repo_remote=repo_remote,
         )
-        spawn_cmd = _build_spawn_command(
-            cs.name,
-            acp_command,
-            stage_plugins=stage,
-        )
         if repo is not None:
             log.info(
                 "codespace:%s -- cross-repo request repo=%s (remote=%s)",
@@ -325,12 +320,16 @@ class CodespaceResolver:
                 "codespace:%s -- staging %d related-repo plugin(s): %s",
                 cs.name, len(stage), [selection_spec(value) for value in stage],
             )
-        log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
         workspace_folder = (
             config.workspace_folder_for_request(cs.repository, repo)[0]
             if repo is not None
             else config.resolved_workspace_folder_for(cs.repository)
         )
+        from .hosting_policy import guarded_launch
+
+        acp_command = guarded_launch(acp_command, workspace_folder, provision=checkout_command)
+        spawn_cmd = _build_spawn_command(cs.name, acp_command, stage_plugins=stage)
+        log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
 
         return {
             "type": "command",

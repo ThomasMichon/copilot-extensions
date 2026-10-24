@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import importlib
 import json
 import os
@@ -61,6 +62,61 @@ def test_preference_authority_capture_replays_terminal_and_host(capture_tool) ->
     frame["proof"]["nonce"] = "wrong"
     events, accepted = asyncio.run(capture_tool.host_probe(a, host, frame, expected))
     assert not accepted and "consent" not in events
+
+
+@pytest.mark.parametrize("indent", [1, 2, None])
+@pytest.mark.parametrize("representation", ["inline", "chunked"])
+def test_preference_authority_capture_accepts_legacy_json_layouts(
+    capture_tool, monkeypatch: pytest.MonkeyPatch, indent: int | None, representation: str,
+) -> None:
+    root = capture_tool.REPO
+    original = copy.deepcopy(capture_tool.registry_codec.load(root).materialized)
+    for contract in original["contracts"]:
+        contract["provenance"] = contract["provenance"][:3]
+    index = copy.deepcopy(original)
+    metadata = {}
+    if representation == "chunked":
+        index["schema_version"] = 2
+        for contract in index["contracts"]:
+            chunk = capture_tool.registry_codec.encode({
+                "schema": capture_tool.registry_codec.CHUNK_SCHEMA, "schema_version": 1,
+                "contract": contract["id"], "record_offset": 0,
+                "provenance": contract["provenance"],
+            })
+            sha256 = hashlib.sha256(chunk).hexdigest()
+            path = f"{capture_tool.registry_codec.PROVENANCE}{contract['id']}/{sha256}.json"
+            metadata[path] = chunk.decode()
+            contract["provenance_chunks"] = [{
+                "contract": contract["id"], "path": path, "sha256": sha256,
+                "record_count": len(contract["provenance"]),
+            }]
+            contract["provenance"] = []
+    metadata[capture_tool.REGISTRY] = json.dumps(index, indent=indent) + "\n"
+
+    def committed(_commit: str, path: str) -> str:
+        return metadata[path] if path in metadata else (root / path).read_text(encoding="utf-8")
+
+    monkeypatch.setattr(capture_tool, "committed", committed)
+    monkeypatch.setattr(capture_tool, "unchanged", lambda *_args: None)
+    monkeypatch.setattr(capture_tool.evidence, "ensure_commit_available", lambda _commit: True)
+    monkeypatch.setattr(capture_tool.evidence, "plugin_version_at", lambda _commit: "1.0.0")
+    monkeypatch.setattr(capture_tool.evidence, "git_blob", lambda *_args: "b" * 40)
+    monkeypatch.setattr(
+        capture_tool.evidence, "git_file_sha256",
+        lambda _commit, path: hashlib.sha256(committed("", path).encode()).hexdigest(),
+    )
+
+    output = capture_tool.capture("a" * 40)
+
+    raw = json.loads(output[capture_tool.REGISTRY])
+    assert output[capture_tool.REGISTRY].encode() == capture_tool.registry_codec.encode(raw)
+    registry = capture_tool.registry_codec.load(
+        root, read=lambda path: (output[path] if path in output else metadata[path]).encode(),
+    ).materialized
+    assert registry["contracts"][0] == original["contracts"][0]
+    assert set(output) == {capture_tool.REGISTRY, *(
+        capture_tool.CURRENT + name for name in capture_tool.FILES
+    )}
 
 
 def test_preference_authority_capture_without_home_environment(

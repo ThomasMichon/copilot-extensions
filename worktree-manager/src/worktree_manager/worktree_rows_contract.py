@@ -7,6 +7,7 @@ import math
 
 from worktree_identity import parse_machine_identity
 
+from . import worktree_observation_contract as observations
 _HISTORICAL_FIELDS = frozenset(
     {
         "resources",
@@ -21,6 +22,15 @@ _HISTORICAL_FIELDS = frozenset(
         "claims_graph",
     }
 )
+_RECEIVER_FIELDS = frozenset({
+    "_projection", "_availability", "_observations", "_observation_derivations",
+})
+
+
+def publication_wire_rows(rows: list[dict]) -> list[dict]:
+    """Remove local metadata only from previously admitted publication rows."""
+    return [{key: value for key, value in row.items() if key not in _RECEIVER_FIELDS}
+            for row in rows]
 
 
 def _bounded(value, depth: int = 0) -> None:
@@ -56,11 +66,18 @@ def parse_current_rows(obj: dict, *, complete: bool = True) -> list[dict]:
         raise TypeError("engine returned a non-object current-roster envelope")
     if (
         type(obj.get("contract_version")) is not int
-        or obj["contract_version"] != 1
+        or obj["contract_version"] not in (1, 2)
         or obj.get("ok") is not True
     ):
         raise ValueError("engine lacks a usable worktrees-current-v1 contract; update and retry")
     rows, head = obj.get("worktrees"), obj.get("projection")
+    if obj["contract_version"] == 2 and (
+        not isinstance(obj.get("project"), str) or not obj["project"]
+        or len(obj["project"].encode("utf-8")) > 256
+        or obj["project"] in {".", ".."}
+        or any(c in obj["project"] for c in ("/", "\\", "\x00"))
+    ):
+        raise ValueError("engine returned invalid observation project")
     if not isinstance(rows, list) or not isinstance(head, dict):
         raise TypeError("engine omitted the current-roster publication")
     generation, revision = head.get("generation"), head.get("revision")
@@ -102,6 +119,9 @@ def parse_current_rows(obj: dict, *, complete: bool = True) -> list[dict]:
         raise ValueError("engine returned unlabeled advisory rows")
     result = []
     identities = set()
+    facts = observations.validate_rows(
+        rows, obj.get("observations"), revision, complete=complete,
+    ) if obj["contract_version"] == 2 else {}
     for row in rows:
         if (
             not isinstance(row, dict)
@@ -120,6 +140,9 @@ def parse_current_rows(obj: dict, *, complete: bool = True) -> list[dict]:
                 **row,
                 "_projection": dict(head),
                 "_availability": dict(availability) if isinstance(availability, dict) else None,
+                **({"_observations": facts[row["id"]]["facts"],
+                    "_observation_derivations": facts[row["id"]].get("derivations", {})}
+                   if row["id"] in facts else {}),
             }
         )
     return result
@@ -133,6 +156,7 @@ class CurrentSnapshot:
         self._rows: list[dict] = []
         self._identities: set[str] = set()
         self._complete = False
+        self._observations: dict = {}
 
     def receive(self, frame: dict) -> list[dict] | None:
         if not isinstance(frame, dict):
@@ -154,6 +178,13 @@ class CurrentSnapshot:
             raise ValueError("current-roster stream has no open publication barrier")
         if frame.get("projection") != self._begin["projection"]:
             raise ValueError("current-roster stream mixed publication generations or revisions")
+        if kind == "observation" and self._begin["contract_version"] == 2:
+            item = frame.get("observation")
+            observations.validate_observation(item, self._begin["projection"]["revision"])
+            if item["id"] not in self._identities or item["id"] in self._observations:
+                raise ValueError("duplicate or unknown observation identity")
+            self._observations[item["id"]] = item
+            return None
         if kind == "worktree":
             rows = parse_current_rows(
                 {
@@ -173,5 +204,10 @@ class CurrentSnapshot:
             return None
         if kind != "done" or len(self._rows) != self._begin["selected_count"]:
             raise ValueError("current-roster stream did not complete its publication")
+        if self._begin["contract_version"] == 2:
+            self._rows = parse_current_rows({
+                **self._begin, "ok": True, "worktrees": publication_wire_rows(self._rows),
+                "observations": list(self._observations.values()),
+            })
         self._complete = True
         return self._rows

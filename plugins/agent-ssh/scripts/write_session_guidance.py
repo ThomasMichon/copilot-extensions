@@ -7,10 +7,12 @@ ordered output is atomically written to the exact session's guidance file.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -89,7 +91,8 @@ def _run_contributor(
     if require_cwd and cwd is None:
         return ""
     try:
-        completed = subprocess.run(
+        completed = _run_owned_contributor(
+            root,
             argv,
             input=payload,
             capture_output=True,
@@ -97,12 +100,63 @@ def _run_contributor(
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
             cwd=cwd,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, RuntimeError, subprocess.SubprocessError):
         return ""
     if completed.returncode != 0:
         return ""
     return _additional_context(completed.stdout)
+
+
+def _run_owned_contributor(root: Path, argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """Own descendants through the timeout, without requiring an installed runtime."""
+    timeout = kwargs.pop("timeout")
+    payload = kwargs.pop("input")
+    kwargs.pop("capture_output")
+    kwargs.pop("check")
+    job = None
+    if os.name == "nt":
+        source = root / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py"
+        if not source.is_file() and root.parent.name == "plugins":
+            source = root.parents[1] / "libs" / "agent-procutil" / "src" / "agent_procutil" / "__init__.py"
+        spec = importlib.util.spec_from_file_location("_ssh_guidance_procutil", source)
+        if spec is None or spec.loader is None:
+            raise OSError("payload process ownership primitive unavailable")
+        owner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(owner)
+        process, job = owner.spawn_sync_in_kill_on_close_job(
+            argv, require_job=True, allow_breakaway=False,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs,
+        )
+    else:
+        process = subprocess.Popen(
+            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True, **kwargs,
+        )
+    try:
+        try:
+            stdout, stderr = process.communicate(payload, timeout=timeout)
+        except BaseException:
+            if job is not None:
+                job.terminate_and_wait(2.0)
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            process.communicate(timeout=2.0)
+            raise
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    finally:
+        if job is not None and job.handle:
+            try:
+                job.terminate_and_wait(2.0)
+            finally:
+                job.close()
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
 
 
 def _is_link_or_reparse(path: Path) -> bool:
@@ -128,18 +182,18 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
     root = _plugin_root()
     raw_payload = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     cwd = _validated_payload_cwd(raw_payload)
+    catalog = _run_contributor(root, "emit-command-catalog", raw_payload, cwd=cwd)
+    snapshot = _run_contributor(
+        root, "emit-mesh-pointer", raw_payload, cwd=cwd, require_cwd=True,
+    )
+    if cwd is not None and not snapshot:
+        snapshot = (
+            "## SSH snapshot unavailable\n\nThe snapshot contributor failed or timed out. "
+            "No current snapshot evidence was delivered. Use the agent-ssh skill for inspection."
+        )
     contexts = [
         context
-        for context in (
-            _run_contributor(root, "emit-command-catalog", raw_payload, cwd=cwd),
-            _run_contributor(
-                root,
-                "emit-mesh-pointer",
-                raw_payload,
-                cwd=cwd,
-                require_cwd=True,
-            ),
-        )
+        for context in (catalog, snapshot)
         if context
     ]
     if contexts:
@@ -151,7 +205,8 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
             "guidance as unavailable for this session-start invocation.\n"
         )
     if contexts and len(content.encode("utf-8")) > _GUIDANCE_MAX_BYTES:
-        content = (
+        catalog_only = "# SSH snapshot omitted\n\n" + catalog + "\n"
+        content = catalog_only if catalog and len(catalog_only.encode("utf-8")) <= _GUIDANCE_MAX_BYTES else (
             _GUIDANCE_HEADER
             + "Current agent-ssh session guidance was omitted because it "
             "exceeded the bounded file budget. Treat guidance as unavailable "

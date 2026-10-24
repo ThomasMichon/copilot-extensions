@@ -43,7 +43,10 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path, config: cf
     monkeypatch.setattr(
         m, "_prepare_worktree_source", lambda *_a, **_k: SimpleNamespace(start_point="HEAD"),
     )
-    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        m.git_ops, "create_worktree",
+        lambda _anchor, path, *_a, **_k: Path(path).mkdir(parents=True, exist_ok=True),
+    )
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
     monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *_a: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)

@@ -11,12 +11,13 @@ import pytest
 
 from agent_dispatch import bridge, ordinary_bridge
 from agent_dispatch.queue import TaskError, TaskQueue
+from tests._hosting_owner import admission_owner as admission_owner
 
 pytestmark = pytest.mark.contract("agent_dispatch.ordinary_bridge")
 
 
 @pytest.fixture
-def startup(tmp_path, monkeypatch):
+def startup(tmp_path, monkeypatch, admission_owner):
     queue = TaskQueue(tmp_path / "tasks.db")
     task = queue.create(title="Assigned work", repo="example")
     reservation, _ = queue.reserve_spawn(task.id, reserved_by="supervisor", driver="ordinary-bridge")
@@ -231,8 +232,8 @@ def test_interrupted_send_retries_retained_handle_without_create(startup, monkey
     ordinary_bridge.start(task, client=client, agent="local", project="example",
                           charter="reviewer", prompt="assigned task")
     assert [call[0] for call in calls] == [
-        "create", "store", "store", "receipt", "store",
-        "status", "resume", "status", "store", "send",
+        "create", "store", "store", "receipt", "status",
+        "store", "resume", "status", "store", "send",
     ]
 
 
@@ -688,7 +689,7 @@ def test_retained_idle_agent_sends_without_invalid_strict_resume(startup, monkey
     monkeypatch.setattr(ordinary_bridge.subprocess, "run", idle)
     ordinary_bridge.start(task, client=client, agent="local", project="example",
                           charter="reviewer", prompt="assigned task")
-    assert [call[0] for call in calls] == ["receipt", "store", "status", "store", "send"]
+    assert [call[0] for call in calls] == ["receipt", "status", "store", "store", "send"]
     assert queue.get_reservation(task["spawn_reservation_key"]).session_handle == "local-body:bridge-a"
 
 

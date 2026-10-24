@@ -3,7 +3,7 @@
 - **Subject:** Shared, durable conversations between cooperating agents.
 - **Scope:** leaf
 - **Status:** Draft
-- **Last revised:** 2026-10-20
+- **Last revised:** 2026-10-24
 - **Reality docs:** [suite architecture](../../../docs/architecture.md) and
   [fleet-manager](../../../fleet-manager/README.md).
 
@@ -32,6 +32,12 @@ ceremony merely because it arrived through a peer.
 - **Lifecycle integration:** independently packageable service and client roles,
   offered through fleet-manager's existing setup and management boundaries
   without making a Copilot plugin necessary on the service host.
+- **Templated container role:** a portable Chat service specification and
+  configuration template, actualized in the adopter's private configuration
+  repository and deployed through the existing Fleet Manager/Komodo engine.
+  The selected fleet profile composes the Gateway, storage, credentials and
+  resource admission without making fleet adoption a prerequisite for the
+  standalone client.
 - **Existing fabric authorities:** worktree identity and obligations, tasks,
   efforts, approvals, execution providers and direct peer control retain their
   own meaning and source of truth.
@@ -100,6 +106,19 @@ configuring or starting a service. An explicitly adopted fleet product can
 offer the capability through its existing role and lifecycle contracts.
 Normal plugin/service installation and Worktree Manager integration remain
 useful independently of optional fleet-manager enhancements.
+
+### templated-container-delivery
+
+Fleet-hosted Chat is a properly specified, independently operable container
+role, not a checkout-mounted script or an ad hoc resident process. Its image,
+configuration, durable conversation storage, resource needs, health, drain and
+Gateway exposure form one inspectable deployment contract.
+
+Reusable templates stay portable; the adopter's private knowledge/configuration
+repository selects the real instances, named machines, overrides and credential
+references. Fleet Manager prepares that declared composition for the Komodo
+deployment engine. Source publication, deployment confirmation, manager
+acceptance and verified service readiness remain distinct.
 
 ## Behaviors
 
@@ -174,6 +193,15 @@ immutable and attributable, and health is checked after the initiating caller
 has exited. Maintenance uses the existing owners and current correlated
 drain/release state rather than another supervisor or acknowledgement loop.
 
+### container-deployment-preserves-authority
+
+The selected container engine owns deployment and restart, the Gateway owns its
+declared authenticated routes, and Chat owns conversation state and safe drain.
+Templates neither carry secret material nor overwrite private configuration
+choices. Restart, replacement and preserving removal retain channel history,
+membership, independent cursors and uncertain requests; a new container identity
+does not create a new conversation installation or permit a second writer.
+
 ### host-owned-attachment-and-cleanup
 
 The session host owns effective extension discovery and activation. Adopting
@@ -199,6 +227,8 @@ membership and backend access boundaries remain authoritative.
 - No fabricated native capability, private extension loader or global restart
   disguised as scoped adoption.
 - No required organization-specific provider, host inventory or deployment.
+- No Chat-specific container scheduler, parallel deployment controller or
+  configuration store competing with the adopted private composition.
 
 ## See Also
 
@@ -206,5 +236,8 @@ membership and backend access boundaries remain authoritative.
 - Service model: [plugin services](../../plugin-services/README.md).
 - Execution ownership: [session hosting](../../session-hosting/README.md).
 - Lifecycle product: [machine fleet](../../machine-fleet/README.md).
+- Container composition: [fleet loadouts](../../machine-fleet/loadouts/README.md).
+- Declared exposure: [Fleet Gateway](../../machine-fleet/gateway/README.md).
+- Service artifact: [Chat](../../../services/chat/README.md).
 - Reality: [suite architecture](../../../docs/architecture.md).
 - Realization proposal: [agent-chat graduation](../../../efforts/active/agent-chat-graduation/README.md).

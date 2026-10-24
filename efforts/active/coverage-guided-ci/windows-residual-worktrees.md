@@ -88,6 +88,149 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-RECOVERY-FAULT existing binary-transport fault injection
+
+This settles only these three original keys, not the separately partitioned
+imports/accumulator in `MX-IMPERFECT` or recovered/backed fixture ownership:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_recovery.py:4` | `442749b50c5226648718ca9632931afa0c6fc6f046929e4e2ae1392ccc2c0ecf` |
+| `tests/test_pr_recovery_imperfect_evidence.py:3` | `092a07413ebf4f619e133b03747d5c070806a2ad31759430030edca0c8eb0c59` |
+| `tests/test_pr_recovery_imperfect_evidence.py:4` | `42bbd46f07add3f3d6bbdb638966282846362fdb9076215a1c6332a289153a64` |
+
+Actual merged #7898 commit `74dfe1d06ab9085648d5444c270d937de1650fa0`
+already contains these adapters. The complete backup-failure and unusable-
+checkpoint test functions match the immutable source by AST in accepted
+comparison `5127a36d82ca00163ea9232740ee2c0f44e563f4`. The backup-failure
+function also matches the actual merge completely. The unusable-checkpoint
+function differs from that merge only in its later, separately owned fixture
+signature and initial unpack; its fault branches and remaining body match.
+
+Backup failure is injected at the actual `_git_bytes` `update-ref`
+transaction boundary; sync must refuse before moving HEAD or writing a
+checkpoint. Encoding failure intercepts exactly the NUL-framed `cat-file`
+batch request containing the retained local commit reference and requires
+one probe. The separate spawn-failure branch remains intact. Preview still
+reports unusable optional evidence without inventing consent, preserves the
+saved/expected heads, and writes no audit before confirmation. A confirmed
+rewrite retains the published recovery commit, records the truthful audit
+and preserves the checkpoint bytes.
+
+The complete imperfect-evidence module and native backup-failure regression
+pass all 16 cases with exactly two contained Windows workers: 144.61 pytest
+seconds, 167.66 seconds including preparation and cleanup. Existing item
+marks and containment bounds are unchanged. This is focused functional
+evidence only, not a normal-group or repeated complete-plugin timing result.
+No runtime/test edit is needed; other residual keys and the Windows
+qualification obligation remain open.
+
+### B-PUBSTUB existing transport-preserving scenario labels
+
+This settles only these six original keys; their headers and dispositions
+in the census below remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_break_glass.py:1` | `12af3ab7448260054e7f3e9c28cea67a5c41ca509236ea7555b066d6315dd827` |
+| `tests/test_pr_break_glass.py:2` | `4286283f0def863ba0691b24f04c7dd6e68d60aa941606656f115cbd0a7b53c9` |
+| `tests/test_pr_break_glass.py:4` | `9a79c77f23d3871bf9b8fadff4464d0f39c66be4ed9da585f5ece6b892e13cc7` |
+| `tests/test_pr_custom_head.py:1` | `e4b49a73473e5c3396b80962afca6aaaf0690338b3942a8d60c44ed1d7bfd36c` |
+| `tests/test_pr_custom_head.py:2` | `fb488e13c0bc76276c61a3c51a76e4534edfca835c0d33df598552f17ecac2f5` |
+| `tests/test_pr_custom_head.py:3` | `6342b54cc4ecda26670b67950e5e0fcc8374f125802e9b6fcd7e5666fa7bf71c` |
+
+Actual merged #7886 commit `c1ca9083463d0b0b7bad22cc401c37ab3e462b78`
+already contains the adapter and all six consumers/import changes. The
+complete `_stub_remote_target`, `_recovered_pr`, Azure recovery-preview
+test and public custom-head rewrite test have identical ASTs in that merge,
+the immutable source and accepted comparison
+`ed488d7dfce78da4ac10f1bcbae23415960725fe`. `_attested` matches the merge
+exactly; its intentional difference from the immutable source is the remote
+selector `None` instead of `"origin"`, labeling all valid scenario remotes.
+This is not a claim of literal whole-file equivalence.
+
+The shared helper wraps the real fresh `_remote_snapshot`, replacing only
+the scenario slug and optional identity after a valid transport result.
+It retains invalid results unchanged. The real-Git adapter regression
+introduces a conflicting push URL and requires both destination fields to
+become empty, proving scenario labels cannot hide transport disagreement.
+The recovery and custom-head consumers retain actual Git publications,
+confirmation/refusal paths, tracking and remote-head checks. No old
+`push_slug`/`push_identity` stub replaces those snapshot reads.
+
+The complete remote-evidence and custom-head modules plus both Azure
+preview variants and real confirmed-recovery regression pass 23 native
+Windows cases: 141.83 pytest seconds, 152.12 preparation/cleanup-inclusive
+seconds, exactly two contained workers with existing marks and bounds.
+This is focused functional evidence, not a normal-group or full-plugin
+timing result. No runtime/test edit is needed. The mixed helper hunk,
+other publication/recovery keys and repeated complete same-head Windows
+qualification remain separately owned and open.
+
+### B-PUB-REWRITE existing fresh destination refusal
+
+This settles only `tests/test_pr_rewrite.py:7`, header
+`@@ -272,6 +272,37 @@ def test_explicit_rewrite_preserves_hook_rejection_and_dry_run(pr_repo, capsys):`,
+full hunk SHA256
+`dba58dd3f182a5480b1b34b59de0265a2f3c2bc72bf4aa23f4f567068b91ad04`.
+The complete `test_explicit_rewrite_uses_one_fresh_destination_snapshot`
+function has identical ASTs in the immutable source, actual merged #7886
+commit `c1ca9083463d0b0b7bad22cc401c37ab3e462b78`, and accepted comparison
+`3f93390187a00e538f5ae69f3ecef466015924ee`.
+
+The regression wraps the real `_remote_snapshot` and changes an actual
+local Git remote between target selection and the rewrite's later check.
+The first dry-run requires exactly two equal snapshots. The next invocation
+requires two fresh snapshots with unequal destination identities and the
+explicit destination-changed refusal. Tracking bytes and the recorded PR
+head in both original and repointed bare repositories must remain unchanged.
+The existing P implementation and B-REBASED fixture provide the separately
+owned dependencies; no cached authority or test double replaces those reads.
+
+The exact regression passes with two native Windows workers, retaining all
+existing marks and containment bounds: 37.72 seconds pytest, 46.91 seconds
+including preparation and cleanup. This is single-key functional evidence,
+not a normal-group timing result. The attempted complete rewrite module
+reached its unchanged 240-second wall limit after 36 passing cases and
+returned exit 124 at 244.55 seconds including preparation and cleanup.
+That attempt does not qualify the module; the #5682 timing obligation stays
+open, and no unchanged retry or increased limit is authorized by this entry.
+
+No runtime or test edit is needed. This admits one historical semantic key,
+not another fixture/publication residual or the still-open repeated complete
+same-head native Windows qualification.
+
+### B-PUB-DEADLINE existing NUL absence and configured bounds
+
+This settles only `tests/test_publication_deadline.py:1`, header
+`@@ -117,8 +117,12 @@ def test_verified_rebase_retains_configured_bound(monkeypatch):`,
+full hunk SHA256
+`7d5e82b9d533802e6bd0569e161ef47c3987ff95d2a7aee877ee45f0501157fe`.
+The complete `test_verified_rebase_retains_configured_bound` function has
+identical ASTs in the immutable source, actual merged #7886 commit
+`c1ca9083463d0b0b7bad22cc401c37ab3e462b78`, and accepted comparison
+`e38e62981c410de3041215d1a6eafc24a1aff18e`.
+
+The Git double recognizes the NUL-framed `config --null --get-regexp`
+absence query with exit 1 and empty stdout/stderr, rather than returning a
+URL as malformed configuration evidence. Other reads retain their scenario
+URL. The test still exercises ordinary-push refusal followed by a separately
+verified push, requires the original `old` lease, checks both attempts retain
+the configured 300-second bound and requires the verified source head in
+the result. This is compatibility with P's fresh transport evidence, not a
+new timeout value, authority cache or permissive configuration fallback.
+
+The complete current publication-deadline module passes all 27 cases in
+97.83 seconds preparation/cleanup inclusive, with exactly two native workers
+and unchanged item marks, watchdog and process/memory/temp bounds. Its real
+snapshot/refspec publications, client hook markers, publication/finalization
+lock budgets, auth retry, invalid values, maximum usable subprocess bound
+and fractional diagnostic assertions remain intact.
+
+No runtime or test edit is needed. This is one historical-key semantic
+disposition, not settlement of another publication/rewrite fixture or
+normal-group/repeated complete same-head performance qualification.
+
 ### B-INCONCLUSIVE retains five independently collected native refusals
 
 This settles only `tests/test_finalize_precondition.py:4`, header

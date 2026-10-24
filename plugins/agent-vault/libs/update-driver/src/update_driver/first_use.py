@@ -17,8 +17,11 @@ from . import core
 from .participant import ENVIRONMENT_KEY, borrowed_custody, participant_environment
 
 
-# Fixed Vault lifecycle actions only; no caller-supplied installer argv.
-PLUGIN = "agent-vault"
+# Fixed owning lifecycle actions only; no caller-supplied installer argv.
+RECIPES = {
+    "agent-vault": "AGENT_VAULT",
+    "agent-pull-requests": "AGENT_PULL_REQUESTS",
+}
 PROTOCOL = 1
 INSTALLER_ACTIONS = ("provision", "stamp")
 CONTEXT_KEYS = (
@@ -26,6 +29,11 @@ CONTEXT_KEYS = (
     "AGENT_VAULT_HOME", "AGENT_VAULT_INSTALLATION_ID",
     "AGENT_VAULT_NO_SELFPROVISION", "AGENT_VAULT_PINNED_CONTEXT",
     "AGENT_VAULT_ALLOW_DOWNGRADE",
+)
+PULL_REQUESTS_CONTEXT_KEYS = (
+    "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "AGENT_PULL_REQUESTS_HOME", "AGENT_PULL_REQUESTS_INSTALLATION_ID",
+    "AGENT_PULL_REQUESTS_NO_SELFPROVISION", "AGENT_PULL_REQUESTS_PINNED_CONTEXT",
 )
 
 
@@ -49,7 +57,9 @@ def _environment(payload: Path) -> dict[str, str]:
     for key in (
         "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
         "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "UPDATE_DRIVER_WITNESS",
-        "AGENT_VAULT_VALIDATED_CONTEXT",
+        "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
+        "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
+        "AGENT_PULL_REQUESTS_INSTALL_DIR",
     ):
         result.pop(key, None)
     return result
@@ -70,22 +80,39 @@ def _inspect(
     if not helper.is_file() or not (scripts / "installer_engine.py").is_file():
         raise ProvisionError("owning payload requires complete materialized installation helpers")
     manifest = json.loads((payload / "payload-invocation.json").read_text(encoding="utf-8"))
-    plugin = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
+    plugin = json.loads((payload / "plugin.json").read_text(encoding="utf-8")).get("name")
+    if not isinstance(plugin, str) or plugin not in RECIPES:
+        raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
+    prefix = RECIPES[plugin]
+    no_self = prefix + "_NO_SELFPROVISION"
     if (
-        plugin.get("name") != PLUGIN
-        or manifest.get("schema") != "copilot-extensions.payload-invocation"
+        manifest.get("schema") != "copilot-extensions.payload-invocation"
         or type(manifest.get("version")) is not int or manifest["version"] != 2
-        or manifest.get("command") != PLUGIN
+        or manifest.get("command") != plugin
         or manifest.get("installationContext") != "required"
         or manifest.get("provisionMode") != "direct"
         or manifest.get("installer", "install") != "install"
-        or manifest.get("noSelfProvisionEnv") != "AGENT_VAULT_NO_SELFPROVISION"
+        or manifest.get("noSelfProvisionEnv") != no_self
     ):
         raise ProvisionError("owning payload does not declare the fixed provision recipe")
-    if os.environ.get("AGENT_VAULT_NO_SELFPROVISION"):
+    if os.environ.get(no_self) or (plugin == "agent-pull-requests" and no_self in os.environ):
         raise ProvisionError("owning plugin self-provisioning is disabled")
-    if "AGENT_VAULT_PINNED_CONTEXT" in os.environ:
+    if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
+    if plugin == "agent-pull-requests":
+        installed = payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
+        snapshot = payload.parent == runtime_root / "snapshots"
+        if runtime_root != Path.home() / ".agent-pull-requests" or not (installed or snapshot):
+            raise ProvisionError(
+                "Pull Requests first use requires its canonical installed payload or selected legacy snapshot"
+            )
+        if snapshot:
+            receipt_path = _path(payload / "snapshot-provenance.json")
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if not isinstance(receipt, dict) or receipt.get("schema") != (
+                "copilot-extensions.legacy-snapshot-source"
+            ):
+                raise ProvisionError("Pull Requests first use requires canonical selected snapshot provenance")
 
     sys.path.insert(0, str(scripts))
     import installer_engine as engine
@@ -102,7 +129,7 @@ def _inspect(
     spec.loader.exec_module(primitive)
     environment = _environment(payload)
     arguments = dict(
-        payload_root=payload, plugin_id=PLUGIN, legacy_root=runtime_root,
+        payload_root=payload, plugin_id=plugin, legacy_root=runtime_root,
         project_root=project, environment=environment,
     )
     source = primitive.resolve_payload_source(
@@ -121,7 +148,7 @@ def _inspect(
         raise ProvisionError("owning source changed during provision admission")
     return {
         "schema": "copilot-extensions.owning-plugin-provision", "version": PROTOCOL,
-        "plugin": PLUGIN, "payload": str(payload), "runtime_root": str(runtime_root),
+        "plugin": plugin, "payload": str(payload), "runtime_root": str(runtime_root),
         "project": str(project), "input_hash": digest,
         "source": source["source"], "source_fingerprint": source["sourceFingerprint"],
         "marketplace_id": source["marketplaceId"],
@@ -178,6 +205,8 @@ def enqueue(
         if execution_root.is_relative_to(installation) or installation.is_relative_to(execution_root):
             raise ProvisionError("execution root must be separate from owning payload and installation")
     admission = inspect(payload, runtime_root, project, installer_action=installer_action)
+    if client_only and admission["plugin"] != "agent-vault":
+        raise ProvisionError("client-only selection is unsupported by the owning installer")
     if expected_source is not None and admission["source_fingerprint"] != expected_source:
         raise ProvisionError("owning source differs from native first-use admission")
     encoded = json.dumps(admission, sort_keys=True, separators=(",", ":"))
@@ -187,7 +216,10 @@ def enqueue(
             *(("--client-only",) if client_only else ()),
         ],
     )
-    context = {key: os.environ[key] for key in CONTEXT_KEYS if key in os.environ}
+    context_keys = (
+        CONTEXT_KEYS if admission["plugin"] == "agent-vault" else PULL_REQUESTS_CONTEXT_KEYS
+    )
+    context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
     return core.enqueue(
         core.RequestSpec(
@@ -200,7 +232,7 @@ def enqueue(
             context=tuple(context.items()),
         ),
         runner=core.TrustedRunner(
-            argv, str(project), env=tuple(imports.items()), context_keys=CONTEXT_KEYS,
+            argv, str(project), env=tuple(imports.items()), context_keys=context_keys,
         ),
         root=root, coalesce_running=True,
     )
@@ -214,8 +246,10 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         payload = Path(admission["payload"])
         runtime_root = Path(admission["runtime_root"])
         installer_action = admission.get("installer_action", "provision")
-        if client_only and installer_action != "provision":
-            raise ProvisionError("client-only selection requires the provision action")
+        if client_only and (
+            installer_action != "provision" or admission["plugin"] != "agent-vault"
+        ):
+            raise ProvisionError("client-only selection requires the Vault provision action")
         current = _inspect(
             payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
         )
@@ -226,9 +260,16 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
 
         # Reuse the canonical complete-input copier under this request's custody.
         # Keep these files: native publication may retain a source path into them.
-        inputs = _path(root / "provision-inputs")
-        inputs.mkdir(mode=0o700, exist_ok=True)
-        frozen = engine.freeze_inputs(payload, inputs / custody.request_id)
+        inputs = _path(
+            runtime_root / ".install-stage" if admission["plugin"] == "agent-pull-requests"
+            else root / "provision-inputs"
+        )
+        inputs.mkdir(mode=0o700, parents=True, exist_ok=True)
+        destination = inputs / custody.request_id
+        if admission["plugin"] == "agent-pull-requests":
+            # Keep legacy staging reapers off this live, queue-owned native tree.
+            destination = inputs / f"{custody.request_id}-{os.getpid()}" / admission["plugin"]
+        frozen = engine.freeze_inputs(payload, destination)
         if frozen.payload_hash != admission["input_hash"] or _inspect(
             payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
         ) != admission:

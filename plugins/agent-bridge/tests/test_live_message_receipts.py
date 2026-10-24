@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sqlite3
 import time
 
@@ -267,16 +268,18 @@ def test_receipt_survives_database_reopen_and_v25_migration(tmp_path):
 @pytest.mark.parametrize("old_version", [25, 26])
 def test_migration_preserves_legacy_acceptance_without_inventing_pending_consumption(tmp_path, old_version):
     path = tmp_path / "legacy.db"
-    db = Database(path)
     now = time.time()
-    db.register_live_session(
-        "live-1", machine=None, cwd=None, worktree_id="wt-1", repo=None,
-        branch=None, pid=None, role=None, now=now,
-    )
-    legacy = db.enqueue_live_message("live-1", "peer", "old input", now)
-    db.ack_live_messages("live-1", [legacy], now)
-    db.close()
     with sqlite3.connect(path) as conn:
+        frozen = Path(__file__).with_name("fixtures") / "pre-custody-schema27.sql"
+        conn.executescript(frozen.read_text(encoding="utf-8"))
+        conn.execute(
+            "INSERT INTO live_sessions (session_id,worktree_id,registered_at,updated_at) "
+            "VALUES ('live-1','wt-1',?,?)", (now, now),
+        )
+        legacy = conn.execute(
+            "INSERT INTO live_messages (session_id,sender,body,created_at,delivered_at) "
+            "VALUES ('live-1','peer','old input',?,?)", (now, now),
+        ).lastrowid
         conn.execute("ALTER TABLE live_messages DROP COLUMN consumption_tracked")
         if old_version == 25:
             conn.execute("ALTER TABLE live_messages DROP COLUMN consumed_at")

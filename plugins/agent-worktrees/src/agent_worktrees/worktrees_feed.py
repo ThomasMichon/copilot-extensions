@@ -23,16 +23,24 @@ def publication_frames(result: dict, previous: dict | None = None):
     current = {row["id"]: row for row in rows}
     yield {
         "type": "begin" if previous is None else "update",
-        "contract_version": CONTRACT_VERSION,
+        "contract_version": result.get("contract_version", CONTRACT_VERSION),
         "projection": head,
         "cursor": head["revision"],
         "base_cursor": None if previous is None else previous["projection"]["revision"],
         "availability": result.get("availability"),
         "selected_count": len(rows),
+        **({"project": result["project"]} if result.get("contract_version") == 2 else {}),
     }
     for row in rows:
         if old.get(row["id"]) != row:
             yield {"type": "worktree", "phase": "current", "wt": row, "projection": head}
+    if result.get("contract_version") == 2:
+        old_observations = {} if previous is None else {
+            item["id"]: item for item in previous["observations"]
+        }
+        for item in result["observations"]:
+            if old_observations.get(item["id"]) != item:
+                yield {"type": "observation", "observation": item, "projection": head}
     for wid in old.keys() - current.keys():
         yield {"type": "delete", "id": wid, "projection": head}
     if previous is not None:

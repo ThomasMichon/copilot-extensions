@@ -30,6 +30,7 @@ and does not permit third-party dependency bytes in published artifact sets.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | _(unassigned)_ | Design, spike, and phased implementation | a dedicated `copilot-extensions` worktree |
+| Consumer coordinator | Wheel-byte validation and shared-installer consumer integration | Managed contribution worktree; #4876 |
 
 ## Coordination
 
@@ -235,6 +236,15 @@ refusals and the installation authority's explicit path selection.
 
 ### Phase 3 - Verified consumption with correct fallback
 
+- [x] Provide the bounded shared wheel-inspection component and complete-set
+      actual-byte verification (#8419). Inspection facts do not authenticate
+      approval, enable a consumer or replace retained-construction evidence.
+- [x] Retain exact wheel-byte snapshots under the existing private input owner
+      with explicit count, archive/closure/storage and deadline bounds (#8523).
+      Custody evidence alone does not authenticate acquisition or approve reuse.
+- [ ] Implement the reviewed [wheel-input admission slice](wheel-input-admission.md):
+      compare actual wheel bytes with the exact selected record before retained
+      construction, then integrate owned reuse evidence without creating approval.
 - [ ] Teach installers (via the shared installer engine, not a parallel
       mechanism) to locate, verify, and consume a matching artifact set,
       falling back explicitly to the existing client-side source-build/venv
@@ -641,6 +651,62 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Exact-set snapshot component merged; constructor remains open
+
+- #8523 merged as `1c386200bd4297e0bb5321d43185e485f75777bd`.
+  The shared helper retains ordinary unlinked inputs as read-only exact copies
+  and streams under the existing private temporary-input owner. It shares one
+  deadline and explicit count, per-archive, closure-byte and temporary-storage
+  limits; snapshot verification composes with the complete-profile verifier.
+- Thirty native snapshot controls cover inclusive limits, replacement, mutation
+  across the set, growth/read/write failures, final-EOF deadline, cancellation,
+  caller-input preservation and actual isolated `-I -S` bootstrap. The combined
+  local snapshot/archive/profile/bootstrap/source-binding cohort passed 289
+  cases, with one POSIX-only installer case skipped on Windows.
+- Final-head review approved with no findings or threads, required CI passed,
+  and all four Linux/Windows inspection and real-built/offline artifact jobs
+  passed. The first CI refusal for incomplete shared-consumer release metadata
+  was corrected with changefiles and a fresh green run, not bypassed.
+- The next stretch integrates an explicit closed wheel mode through the existing
+  canonical transaction, constructor, installed-origin receipt and health/
+  completion owner. Ordinary source-policy checks remain intact; no arbitrary
+  record/hash or callback becomes profile/feed approval. Authenticated adapters,
+  acquisition, actual offline construction/reuse, source fallback, retention and
+  rollout remain open. This effort stays Active and the worktree is retained.
+
+### 2026-10-24 - Bounded inspection component merged; retained assembly next
+
+- #8419 merged as `90663eab5b44d2d63032fa8a0ac95cf016ce8d6d`.
+  Its shared stdlib archive verifier is synchronized across all five Python
+  consumers. The existing complete-profile API retains exact complete sets,
+  actual metadata, closure budgets, strong runtime RECORD hashes and strict
+  first-party promotion policy; no production profile consumer was enabled.
+- On the reviewed final head, required CI passed all 1,414 selected cases and
+  all four Linux/Windows inspection and real-built/offline artifact jobs passed.
+  The admitted coverage report is 16,547,830 bytes under the unchanged
+  16,777,216-byte cap. Redundant test labels were reduced with all prior cases,
+  bodies and assertions retained; the final-EOF regression adds one case.
+- The next owned stretch retains the exact selected inputs under explicit
+  count/total-byte/storage/deadline budgets, then composes closed offline UV
+  assembly and mode/profile/policy/source/artifact receipts through the existing
+  constructor and retention owner. Ordinary source-policy refusal of
+  `--no-deps` must not be bypassed to obtain an offline transaction.
+  Authenticated approval/acquisition, reuse/revocation, source fallback,
+  native/fresh construction, retention and authorized rollout remain open.
+  The effort stays Active; neither this component nor its merge is completion.
+
+### 2026-10-24 - Shared-installer wheel-input continuation
+
+- Resumed the retained consumer scope after the publication milestone.
+  The shared constructor now supplies frozen source inputs, retained UV
+  execution, candidate health and construction/retention custody; it does not
+  yet realize the selected runtime profile from inspected wheel bytes.
+- The [bounded consumer sub-plan](wheel-input-admission.md) precedes its
+  implementation. It preserves existing authority/profile and candidate-input
+  owners and keeps byte consistency distinct from permission, source fallback
+  and service activation. No new runtime loader, global cache or rollout is
+  enabled by this proposal. The parent effort remains Active.
 
 ### 2026-10-15 - Historical implementation, freshness and publication receipts
 

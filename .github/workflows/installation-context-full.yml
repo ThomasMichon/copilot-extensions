@@ -11,14 +11,75 @@ on:
         options:
           - context
           - foundation
+          - pull-requests-commands
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  pull-requests-command-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-commands'
+    name: Pull Requests commands (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual cold commands, refusal, caller loss and healthy dispatch
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_pull_requests_command.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify healthy namespaced dispatch and unsupported cold cells
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_cell_invocation.py
+          -k "dispatch_preserves or command_cannot"
+          --test-timeout 60 --timeout 180
+  pull-requests-command-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-commands'
+    name: Pull Requests commands (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual cold commands, refusal, caller loss and healthy dispatch
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_pull_requests_command.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify healthy namespaced dispatch and unsupported cold cells
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_cell_invocation.py
+          -k "dispatch_preserves or command_cannot"
+          --test-timeout 60 --timeout 180
   exhaustive:
-    if: github.event_name != 'workflow_dispatch' || inputs.portfolio != 'foundation'
+    if: github.event_name != 'workflow_dispatch' || inputs.portfolio == 'context'
     name: exhaustive adapters
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -66,7 +127,22 @@ jobs:
           python -m pytest -q libs/single-instance-lease/tests/test_operation.py libs/single-instance-lease/tests/test_native_operation_linux.py
           python -m pytest -q libs/agent-procutil/tests/test_native_child.py libs/agent-procutil/tests/test_caller_owned.py libs/agent-procutil/tests/test_caller_owned_native.py
           python -m pytest -q libs/agent-procutil/tests/test_native_owned_shell.py libs/agent-procutil/tests/test_native_daemon_shell.py
+      - name: Qualify same-boot queue settlement and legacy compatibility
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_settlement.py
+          --test-file tests/test_recovery.py
+          --test-file tests/test_operator_recovery.py
+          --test-file tests/test_process.py
+          --test-file tests/test_settled_failure_process.py
+          --test-file tests/test_legacy_record_readback.py
+      - name: Qualify older-client source-bootstrap repair entry
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/test_bootstrap_repair_recovery.py
+          --test-timeout 120 --timeout 240
       - name: Qualify actual immutable foundation construction and custody
+        # Reap and clean each module's private runtimes within the existing storage cap.
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_foundation_inputs.py
@@ -82,7 +158,7 @@ jobs:
           --test-file tests/test_source_removal.py
           --test-file tests/test_first_use.py
           --test-file tests/test_first_use_native.py
-          --test-timeout 300 --timeout 600
+          --max-files-per-sub-suite 1 --test-timeout 300 --timeout 600
       - name: Qualify Python-free Linux genesis and retained upgrade
         run: >-
           python tools/run-plugin-tests.py update-driver
@@ -90,7 +166,37 @@ jobs:
           --test-file tests/test_first_use_genesis.py
           --test-file tests/test_first_use_vault.py
           --test-file tests/test_first_use_vault_command.py
-          --test-timeout 900 --timeout 1080
+          --test-file tests/test_first_use_vault_bootstrap.py
+          --test-file tests/test_first_use_pull_requests.py
+          --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1080
+      - name: Qualify isolated Pull Requests CLI health before completion
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_legacy_cli_health.py
+          --test-timeout 60 --timeout 180
+      - name: Qualify selected snapshot staging and ordinary-copy refusal
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-explicit-tiers --allow-host-state --test-file tests/test_cell_invocation.py
+          -k "native_staged_snapshot or legacy_staging_reentry or frozen_input"
+          --test-timeout 60 --timeout 300
+      - name: Qualify Vault bootstrap routing and publication admission
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_payload_invocation.py
+          --test-timeout 120 --timeout 360
+      - name: Qualify actual bootstrap policy and retained snapshot consumers
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_publication.py
+          --test-file tests/test_command_binding.py
+          --test-file tests/test_bridge_first_use_publication.py
+          -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
+          --allow-explicit-tiers --test-timeout 120 --timeout 540
   foundation-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
     name: foundation construction (Windows)
@@ -111,7 +217,22 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Qualify same-boot queue settlement and legacy compatibility
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_settlement.py
+          --test-file tests/test_recovery.py
+          --test-file tests/test_operator_recovery.py
+          --test-file tests/test_process.py
+          --test-file tests/test_settled_failure_process.py
+          --test-file tests/test_legacy_record_readback.py
+      - name: Qualify older-client source-bootstrap repair entry
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/test_bootstrap_repair_recovery.py
+          --test-timeout 120 --timeout 240
       - name: Qualify actual immutable foundation construction and custody
+        # Reap and clean each module's private runtimes within the existing storage cap.
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_foundation_inputs.py
@@ -127,7 +248,41 @@ jobs:
           --test-file tests/test_source_removal.py
           --test-file tests/test_first_use.py
           --test-file tests/test_first_use_native.py
+          --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
+      - name: Qualify Python-free Windows genesis and actual Vault bootstrap
+        run: >-
+          python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_genesis.py
           --test-file tests/test_first_use_vault.py
           --test-file tests/test_first_use_vault_command.py
-          --test-timeout 1200 --timeout 1380
+          --test-file tests/test_first_use_vault_bootstrap.py
+          --test-file tests/test_first_use_pull_requests.py
+          --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
+      - name: Qualify isolated Pull Requests CLI health before completion
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_legacy_cli_health.py
+          --test-timeout 60 --timeout 180
+      - name: Qualify selected snapshot staging and ordinary-copy refusal
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-explicit-tiers --allow-host-state --test-file tests/test_cell_invocation.py
+          -k "native_staged_snapshot or legacy_staging_reentry or frozen_input"
+          --test-timeout 60 --timeout 300
+      - name: Qualify Vault bootstrap routing and publication admission
+        run: >-
+          python tools/run-plugin-tests.py agent-vault
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_payload_invocation.py
+          --test-timeout 120 --timeout 360
+      - name: Qualify actual bootstrap policy and retained snapshot consumers
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bootstrap_publication.py
+          --test-file tests/test_command_binding.py
+          --test-file tests/test_bridge_first_use_publication.py
+          -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
+          --allow-explicit-tiers --test-timeout 120 --timeout 540

@@ -112,6 +112,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
 # under its line-count cap -- see tools/agent_bridge_contract_git.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent_bridge_contract_git as _eg  # noqa: E402
+import agent_bridge_contract_registry as _registry  # noqa: E402
 
 _sha256_bytes = _eg.sha256_bytes
 _git = _eg.git
@@ -125,10 +126,12 @@ _integer_constant_at = _eg.integer_constant_at
 
 def _load_json(path: Path, errors: list[str], label: str) -> Any | None:
     try:
+        if path == REGISTRY_PATH:
+            return _registry.decode(_registry.read_file(REPO, _registry.REGISTRY))
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         errors.append(f"{label}: missing file {path.relative_to(REPO).as_posix()}")
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:
         errors.append(f"{label}: cannot read valid JSON: {exc}")
     return None
 
@@ -224,13 +227,9 @@ def _validate_schema(errors: list[str]) -> None:
     required = schema.get("required")
     if required != ["schema_version", "contracts", "deferred_contracts"]:
         errors.append("schema: top-level required fields are not the canonical ordered set")
-    version = (
-        schema.get("properties", {})
-        .get("schema_version", {})
-        .get("const")
-    )
-    if version != 1:
-        errors.append("schema: schema_version const must be 1")
+    versions = schema.get("properties", {}).get("schema_version", {}).get("enum")
+    if versions != [1, 2]:
+        errors.append("schema: schema_version enum must be [1, 2]")
     properties = schema.get("properties")
     if not isinstance(properties, dict) or set(properties) != {
         "schema_version",
@@ -285,7 +284,11 @@ def _validate_schema(errors: list[str]) -> None:
                 "previous_absent_reason",
             },
         ),
-        "contract": (_CONTRACT_KEYS, _CONTRACT_KEYS),
+        "contract": (_CONTRACT_KEYS, _CONTRACT_KEYS | {"provenance_chunks"}),
+        "provenanceChunk": (
+            {"contract", "path", "sha256", "record_count"},
+            {"contract", "path", "sha256", "record_count"},
+        ),
         "deferredContract": (
             {"id", "owner", "classification", "tracked_issue", "reason"},
             _DEFERRED_KEYS,
@@ -729,6 +732,9 @@ def _validate_contract(
             if isinstance(data, dict):
                 loaded[fixture["path"]] = (fixture["sha256"], data)
         validate_families(fixtures, loaded, errors)
+        if current >= 47:
+            from bridge_http47_validation import validate_http47
+            validate_http47(REPO, {"contracts": [contract]}, loaded, errors)
 
     missing_generations = sorted(evidence_generations - fixture_generations)
     if missing_generations:
@@ -876,8 +882,14 @@ def check(base_ref: str | None = None) -> tuple[int, list[str], int, int]:
         "registry",
     ):
         return 1, sorted(set(errors)), 0, 0
-    if registry["schema_version"] != 1:
-        errors.append("registry.schema_version: only version 1 is supported")
+    if type(registry["schema_version"]) is not int or registry["schema_version"] not in (1, 2):
+        errors.append("registry.schema_version: only versions 1 and 2 are supported")
+    elif registry["schema_version"] == 2:
+        try:
+            registry = _registry.load(REPO).materialized
+        except (OSError, ValueError) as exc:
+            errors.append(f"registry provenance: {exc}")
+            return 1, sorted(set(errors)), 0, 0
 
     ids: set[str] = set()
     authorities: set[str] = set()
@@ -887,6 +899,17 @@ def check(base_ref: str | None = None) -> tuple[int, list[str], int, int]:
     if not isinstance(contracts, list) or not contracts:
         errors.append("registry.contracts: must be a non-empty array")
         contracts = []
+    _eg.prefetch_sources(
+        (row["commit"], row["source_path"], row["source_git_blob"])
+        for contract in contracts if isinstance(contract, dict)
+        for row in (
+            contract["provenance"] if isinstance(contract.get("provenance"), list) else []
+        ) if isinstance(row, dict)
+        and isinstance(row.get("commit"), str) and _GIT_OBJECT_RE.fullmatch(row["commit"])
+        and isinstance(row.get("source_path"), str) and row["source_path"]
+        and isinstance(row.get("source_git_blob"), str)
+        and _GIT_OBJECT_RE.fullmatch(row["source_git_blob"])
+    )
     for index, contract in enumerate(contracts):
         count, _ = _validate_contract(
             contract, index, errors, ids, authorities, source_paths

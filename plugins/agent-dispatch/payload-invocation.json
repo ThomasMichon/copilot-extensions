@@ -1,12 +1,18 @@
 {
   "schema": "copilot-extensions.payload-invocation",
-  "version": 1,
+  "version": 2,
   "command": "agent-dispatch",
   "module": "agent_dispatch",
-  "runtimeRoot": ".agent-dispatch",
+  "legacyRuntimeRoot": ".agent-dispatch",
+  "installationContext": "required",
   "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
   "purpose": "Coordinate queued agent work and task lifecycles",
   "installer": "install",
   "windowsCatalogShim": "cmd",
-  "provisionMode": "direct"
+  "provisionMode": "direct",
+  "payloadRootEnv": "AGENT_DISPATCH_PAYLOAD_ROOT",
+  "payloadDispatcher": {
+    "posix": "scripts/runtime-gate.sh",
+    "windows": "scripts/runtime-gate.ps1"
+  }
 }

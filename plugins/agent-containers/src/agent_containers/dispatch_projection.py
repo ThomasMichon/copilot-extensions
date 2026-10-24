@@ -659,6 +659,9 @@ def _launch_task(args, run_stdio) -> int:
     target = resolve_live_exec_target(args.name, dispatch_binding_id=binding_id)
     if target.container_id != expected_id:
         raise RuntimeError("Container physical identity changed before task launch")
+    from .hosting_policy import guarded_launch, require_container_hosting
+
+    require_container_hosting(target)
     with session_admission(
         args.name, dispatch_container_id=expected_id, dispatch_binding_id=binding_id,
     ) as admission:
@@ -667,6 +670,7 @@ def _launch_task(args, run_stdio) -> int:
         )
         if target.container_id != expected_id:
             raise RuntimeError("Container physical identity changed after task admission")
+        require_container_hosting(target)
         binding = verify_binding(expected_id, binding_id)
         inspected = inspect_container(expected_id)
         worker_admission = _reserve_worker_admission(
@@ -679,9 +683,9 @@ def _launch_task(args, run_stdio) -> int:
             raise ProviderAdmissionError("Restricted worker guest admission is busy or superseded")
         command = build_spawn_command(
             target, binding,
-            _append_copilot_args(
+            guarded_launch(_append_copilot_args(
                 target.acp_command, resolve_extra_copilot_args(getattr(args, "copilot_args", None)),
-            ), worker_admission=worker_admission, executables=executables,
+            ), target.workspace_folder), worker_admission=worker_admission, executables=executables,
         )
         env = os.environ.copy()
         if args.stdio:
@@ -690,11 +694,31 @@ def _launch_task(args, run_stdio) -> int:
 
 
 def add_subparsers(sub) -> None:
+    parser = sub.add_parser(
+        "dispatch-check-hosting", help="Read-only repository hosting admission for a physical worker",
+    )
+    parser.add_argument("name")
+    parser.add_argument("--expected-container-id", required=True)
+    parser.set_defaults(func=_check_hosting)
     for command, action in (("dispatch-prepare", prepare), ("dispatch-project", project)):
         parser = sub.add_parser(command, help="Apply a trusted task projection from bounded JSON stdin")
         parser.add_argument("name")
         parser.add_argument("--expected-container-id", required=True)
         parser.set_defaults(func=lambda args, action=action: _command(args, action))
+
+
+def _check_hosting(args) -> int:
+    from .hosting_policy import require_container_hosting
+    from .resolver import resolve_live_exec_target
+
+    target = resolve_live_exec_target(args.name, dispatch_management=True)
+    if target.container_id != args.expected_container_id:
+        raise RuntimeError("Container physical identity changed before hosting admission")
+    require_container_hosting(target)
+    print(json.dumps({
+        "version": 1, "allowed": True, "container_id": target.container_id, "checked": True,
+    }))
+    return 0
 
 
 def add_exec_subparser(sub) -> None:

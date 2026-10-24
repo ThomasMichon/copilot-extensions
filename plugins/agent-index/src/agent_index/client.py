@@ -19,6 +19,7 @@ class AgentIndexClient:
         installation_id: str | None = None,
         instance_token: str | None = None,
         transaction_token: str | None = None,
+        read_headers: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -29,6 +30,7 @@ class AgentIndexClient:
         )
         self.instance_token = instance_token
         self.transaction_token = transaction_token
+        self.read_headers = read_headers
 
     def _request(
         self,
@@ -42,8 +44,17 @@ class AgentIndexClient:
             if params is not None
             else None
         )
-        with httpx.Client(timeout=self.timeout) as client:
+        if self.read_headers is not None and (
+            method != "GET" or path not in {"/health", "/status", "/search", "/similar", "/clusters"}
+        ):
+            raise RuntimeError("authenticated HTTP read clients cannot perform lifecycle operations")
+        options = (
+            {"trust_env": False, "follow_redirects": False}
+            if self.read_headers is not None else {}
+        )
+        with httpx.Client(timeout=self.timeout, **options) as client:
             headers = {"X-Agent-Index-Installation-Id": self.installation_id}
+            headers.update(self.read_headers or {})
             if self.instance_token is not None:
                 headers["X-Agent-Index-Instance-Token"] = self.instance_token
             if self.transaction_token is not None:
@@ -63,6 +74,9 @@ class AgentIndexClient:
 
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/health")
+
+    def status(self) -> dict[str, Any]:
+        return self._request("GET", "/status")
 
     def search(
         self,

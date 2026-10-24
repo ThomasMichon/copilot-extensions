@@ -103,7 +103,10 @@ def apply_claim_add(args: dict) -> dict:
         # the earlier finalize's `release_all_resources` cascade let go --
         # reopening restores the worktree to `active`, never those resources.
         released_by_finalize = list(record.last_finalize_released) if reopened else []
-        tracking.save_record(record, yaml_path)
+        try:
+            tracking.save_record(record, yaml_path)
+        except ValueError as exc:
+            return {"error": "rejected", "message": str(exc)}
 
     activity.log_event(
         "claim_added",
@@ -143,6 +146,11 @@ def apply_claim_release(args: dict) -> dict:
             return {"error": "not_found"}
         if match.has_producer:
             return {"error": "rejected", "message": "producer claims require verified close or accepted handoff"}
+        from . import paired_claims
+        try:
+            paired_claims.require_clearable(record, ref)
+        except ValueError as exc:
+            return {"error": "rejected", "message": str(exc)}
         reservation = tracking.claim_handoff_reservation(record, match)
         if reservation:
             return {
@@ -159,7 +167,10 @@ def apply_claim_release(args: dict) -> dict:
         else:
             match.state = "released"
             action = "released"
-        tracking.save_record(record, yaml_path)
+        try:
+            tracking.save_record(record, yaml_path)
+        except ValueError as exc:
+            return {"error": "rejected", "message": str(exc)}
 
     activity.log_event(
         "claim_released", worktree_id=worktree_id, kind=kind, ref=ref, action=action
@@ -230,10 +241,16 @@ def apply_claim_settle(args: dict) -> dict:
                     f"{reservation}; accept, decline, or cancel it first"
                 ),
             }
-        settled = tracking.settle_resource_claim(record, ref, disposition, save=False)
+        try:
+            settled = tracking.settle_resource_claim(record, ref, disposition, save=False)
+        except ValueError as exc:
+            return {"error": "rejected", "message": str(exc)}
         if settled is None:
             return {"error": "not_found"}
-        tracking.save_record(record, yaml_path)
+        try:
+            tracking.save_record(record, yaml_path)
+        except ValueError as exc:
+            return {"error": "rejected", "message": str(exc)}
 
     activity.log_event(
         "claim_settled", worktree_id=worktree_id, kind=settled.kind, ref=ref,
@@ -247,6 +264,6 @@ def apply_claim_settle(args: dict) -> dict:
     return {"ok": True, "kind": settled.kind, "disposition": disposition}
 
 
-tracking_write.register_verb("claim_add", apply_claim_add, version=3)
-tracking_write.register_verb("claim_release", apply_claim_release, version=3)
-tracking_write.register_verb("claim_settle", apply_claim_settle, version=3)
+tracking_write.register_verb("claim_add", apply_claim_add, version=4)
+tracking_write.register_verb("claim_release", apply_claim_release, version=4)
+tracking_write.register_verb("claim_settle", apply_claim_settle, version=4)

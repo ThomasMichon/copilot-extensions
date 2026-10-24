@@ -23,6 +23,7 @@ from agent_procutil import (
 )
 import httpx
 
+from . import http_auth
 from .client import AgentIndexClient
 from .config import (
     Config,
@@ -500,6 +501,9 @@ def _status_payload() -> dict[str, Any]:
             "index": {"chunks": None, "available": None, "unreachable": True},
         }
     try:
+        authenticated = http_auth.status_payload(url, role)
+        if authenticated is not None:
+            return authenticated
         expected_installation = _expected_installation_id()
         route = _routing_endpoint_for_url(url)
         if expected_installation and route is None:
@@ -1181,9 +1185,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         role, _indexer = transport.plan_route()
         if role == "client":
             url = client_url()
-            if not url:
-                raise RuntimeError("configured client endpoint is unavailable")
-            payload = AgentIndexClient(url).search(
+            payload = http_auth.read_client(url, client_factory=AgentIndexClient).search(
                 args.query,
                 limit=args.limit,
                 source=args.source,
@@ -1226,9 +1228,7 @@ def cmd_similar(args: argparse.Namespace) -> int:
         role, _indexer = transport.plan_route()
         if role == "client":
             url = client_url()
-            if not url:
-                raise RuntimeError("configured client endpoint is unavailable")
-            payload = AgentIndexClient(url).similar(
+            payload = http_auth.read_client(url, client_factory=AgentIndexClient).similar(
                 args.chunk_id,
                 limit=args.limit,
                 source=args.source,
@@ -1253,9 +1253,7 @@ def cmd_clusters(args: argparse.Namespace) -> int:
         role, _indexer = transport.plan_route()
         if role == "client":
             url = client_url()
-            if not url:
-                raise RuntimeError("configured client endpoint is unavailable")
-            payload = AgentIndexClient(url).clusters(
+            payload = http_auth.read_client(url, client_factory=AgentIndexClient).clusters(
                 source=args.source,
                 bucket=args.bucket,
                 model=args.model,
