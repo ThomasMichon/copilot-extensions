@@ -276,6 +276,9 @@ def run_installer(
         raise ValueError("installer output_fd and log are mutually exclusive")
     if require_tree_exit and os.name != "nt":
         raise ValueError("confirmed process-tree exit requires a Windows Job")
+    from update_driver import participant_environment
+
+    env = {**env, **participant_environment()}
     try:
         strict = {"require_tree_exit": True} if require_tree_exit else {}
         if output_fd is None:

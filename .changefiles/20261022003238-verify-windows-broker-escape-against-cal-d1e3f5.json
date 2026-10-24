@@ -1,5 +1,5 @@
 {
-  "comment": "Correct Windows retirement and CPU sample custody; add an explicitly adopted finite native-pipe launch broker with crash-surviving generation retention and driver-owned foundation and pre-publication Manager adoption for isolated qualification.",
+  "comment": "Correct Windows retirement and CPU sample custody; add an explicitly adopted finite native-pipe launch broker with crash-surviving generation retention and driver-owned foundation, Manager and Worktrees adoption, including fixed native installation custody before publication for isolated qualification.",
   "changes": [
     {
       "plugin": "agent-bridge",

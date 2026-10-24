@@ -44,7 +44,8 @@ def admission(tmp_path: Path):
         "# === command-lifecycle: admission before staging ===\n", 1,
     )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
     program = (
-        "param([string]$BootstrapPython='')\n"
+        "param([string]$BootstrapPython='',[string]$ProjectName='',[string]$Owner='',"
+        "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime)\n"
         "Set-StrictMode -Version Latest\n"
         "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
         "$Action='update'\n$InstallDir=Join-Path $env:USERPROFILE 'never-created'\n"
@@ -82,17 +83,26 @@ def admission(tmp_path: Path):
     return tmp_path, script, home, receipt, old
 
 
-def _run(admission, host: str, candidates: dict, explicit: Path | None = None):
+def _run(
+    admission, host: str, candidates: dict, explicit: Path | None = None,
+    *, native_driver: bool = False, participant: bool = False,
+):
     root, script, home, receipt, _ = admission
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("COPILOT_", "AGENT_", "PYTHON"))
     }
     environment.update(
+        COPILOT_EXTENSIONS_TEST_CONTAINED="0" if native_driver else "1",
         HOME=str(home), USERPROFILE=str(home),
         APPDATA=str(home / "appdata"), LOCALAPPDATA=str(home / "localappdata"),
         TEST_CANDIDATES=json.dumps(candidates), TEST_RECEIPT=str(receipt),
+        TEST_DRIVER_RECEIPT=str(home / "driver.json"),
     )
+    if participant:
+        environment["AGENT_WORKTREES_NATIVE_INSTALLATION"] = "1"
+    if native_driver:
+        environment["COPILOT_PLUGIN_STAGED_FROM"] = str(root / "original-payload")
     result = subprocess.run(
         [host, "-NoLogo", "-NoProfile", "-File", str(script),
          *(["-BootstrapPython", str(explicit)] if explicit else [])],
@@ -101,6 +111,37 @@ def _run(admission, host: str, candidates: dict, explicit: Path | None = None):
     )
     assert not (home / "never-created").exists()
     return result, json.loads(receipt.read_text()) if receipt.exists() else None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("contextual", [False, True])
+@pytest.mark.parametrize("participant", [False, True])
+def test_driver_precedes_legacy_or_contextual_publication(
+    admission, host, contextual, participant,
+):
+    _root, script, home, _receipt, _old = admission
+    (script.parent / "runtime_install_driver.py").write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        "Path(os.environ['TEST_DRIVER_RECEIPT']).write_text(json.dumps({"
+        "'arguments':sys.argv[1:],'staged':os.environ.get('COPILOT_PLUGIN_STAGED_FROM')}))\n",
+        encoding="utf-8",
+    )
+    if contextual:
+        script.write_text(
+            script.read_text(encoding="utf-8").replace("$ContextualInstall=$false", "$ContextualInstall=$true"),
+            encoding="utf-8",
+        )
+    result, binding = _run(
+        admission, host, {}, explicit=Path(sys.executable),
+        native_driver=True, participant=participant,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    driver = json.loads((home / "driver.json").read_text())
+    assert ("--check-native" in driver["arguments"]) is participant
+    assert driver["arguments"][driver["arguments"].index("--action") + 1] == "update"
+    assert (binding is not None) is (participant and not contextual)
+    assert driver["staged"] == (str(admission[0] / "original-payload") if contextual else None)
 
 
 @pytest.mark.parametrize("host", HOSTS)

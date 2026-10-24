@@ -1003,3 +1003,77 @@ integration, default migration or host rollout.
   cold Manager construction, normal launch-default migration, desktop,
   maintenance, review/CI, promotion and authorized rollout remain open.
   No shared-host Task, service, runtime, launcher or enrollment was changed.
+
+Exact-candidate hosted run
+[40091138033](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40091138033)
+passed at `02cb0126913baccd08e268e3ed51d728ed4e2e65`. The recorded
+`manager_installer_adoption` control is true: first adoption used the actual
+Manager adapter, its private ordinary default execution root, the real native
+executor and the target slot's installed adoption CLI. Both installed-client
+resident cycles again proved all caller Jobs closed, exact delivery, finite
+broker exit and actual cleanup. The shared-ancestor negative, lifecycle,
+publisher-death recovery at both boundaries, durable generation retention,
+old-action removal and final owned cleanup all passed.
+This qualifies the Manager adoption adapter, not full cold Manager construction
+or its live maintenance/desktop consumers; the draft and remaining gates stay open.
+
+### 2026-10-24 - Worktrees native installation and pre-publication adoption
+
+- The canonical installer runner now re-exports its scoped execution witness.
+  Worktrees' Windows native construction joins that owner before any legacy
+  command lifecycle or namespaced publication lease. Cold explicit installation
+  submits a fixed native recipe to the same finite driver, not a new queue,
+  lock or ordinary daemon-launch fallback. A native reentry marker requires a
+  fresh authenticated witness check before continuing. Safe request context
+  is retained; live publication/authentication tickets are not journaled.
+- Both construction and installed settlement retain that owner, forward it to
+  the installed candidate and adopt the broker before helper publication,
+  Manager recovery or status-monitor activation. The candidate remains retained
+  throughout, outside the runtime selector-publication lease. Application
+  rollback preserves independent durable broker ownership. Mutable dev slots
+  are not registered as actions; the ordinary launch default is unchanged.
+- The real source-closure control exposed Worktrees' old local ZDD mapping
+  conflicting with the driver's canonical transitive ZDD edge. Worktrees now
+  uses the same canonical source, with ordinary release materialization.
+  The actual Manager-return control also exposed a source-only fixture relying
+  on parent `PYTHONPATH`, which the Manager intentionally clears. Each fixture
+  hop now supplies its fixed source graph, without weakening production
+  environment isolation, and asserts the actual request outcome.
+- The focused Windows selection passed 103 cases with two explicit skips in
+  109.60 seconds under the unchanged 180-second bound. It includes a real
+  default native-driver execution into a copied no-install PowerShell fixture,
+  live-witness reentry, both Manager-return cycles with the native window
+  observer, raw/scoped handoffs, exact request checks and retained adoption
+  before publication. Earlier fixture failures were corrected, not waived.
+  A broader selection exhausted that same bound; its remaining surfaces are
+  being isolated rather than increasing the budget or treating the timeout as
+  passing evidence.
+- The hosted-only protocol fixture now performs first adoption through the
+  actual Worktrees adapter, then repeats through Manager. Shared-host guards cover
+  its new entry before imports or mutation. Exact-candidate hosted execution
+  is pending; neither these controls nor this source change authorizes host
+  rollout, normal-default migration, or completion of the parent effort.
+
+The remaining publication/rollback selection passed 102 cases with five skips
+in 137.72 seconds except the isolated-import dependency guard: the process-only
+test environment lacked Worktrees' declared `machine-transport`. The canonical
+Worktrees runner then prepared its declared graph and passed all 11 dependency
+guards, including that exact isolated child. No import-isolation policy was
+weakened. The final custody/mode/native-entry selection passed 79 cases with
+two skips in 82.47 seconds; three full native construction cases were explicitly
+outside that focused selection. Each bounded group retained the original
+180-second limit, resolving the earlier combined portfolio timeout without a
+budget waiver.
+
+The installed Windows `dev-release` entry now uses the existing JSON driver
+boundary before its newly protected internal API. Its adapter preserves real
+JSON-envelope capture as well as human output; six focused final controls
+passed after self-review corrected the distinction between `sys.stdout` and
+the canonical real-stdout JSON channel. Cold admission refuses an already-held
+publication ticket before enqueue, and direct APIs acquire custody before
+governance or allocation. The source-bootstrap child environment does not
+import uninstalled driver dependencies on POSIX or contained first construction.
+Install-contract regeneration changed only Worktrees' native human-output
+declaration; all 13 installer contracts, changed Python lint and whitespace
+checks passed. Full cold consumer construction and external/desktop qualification
+remain open.

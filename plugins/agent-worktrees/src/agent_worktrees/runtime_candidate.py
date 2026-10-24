@@ -18,6 +18,7 @@ from packaging.version import Version
 _LIFECYCLE_FILES = (
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py",
+    "runtime_install_driver.py",
     "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_dependency_config.py", "registry_root.py", "command_binding.py", "command_lifecycle.py",
 )

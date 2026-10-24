@@ -6,6 +6,14 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+repository = Path(__file__).resolve().parents[4]
+# The real Manager drops parent Python overrides. This source-only fixture
+# supplies its own fixed graph on every hop, as an installed runtime would.
+sys.path[:0] = [
+    str(repository / "plugins" / "agent-worktrees" / "src"),
+    *(str(path) for path in sorted((repository / "libs").glob("*/src"))),
+]
+
 import update_driver
 from agent_worktrees import __main__ as engine
 from agent_worktrees import front_door_cli, update_cli

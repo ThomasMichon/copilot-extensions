@@ -182,7 +182,7 @@ if ($Action -eq 'publish-runtime-helpers' -and (
     throw 'Helper publication requires its existing admitted lifecycle.'
 }
 # === command-lifecycle: admission before staging ===
-if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
+if ($Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
     $admissionProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT -and
         $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
         $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
@@ -225,7 +225,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         (($PSScriptRoot -replace '\\', '/') -notmatch '/\.copilot/installed-plugins/')) {
         $env:COPILOT_PLUGIN_STAGED_FROM
     } else { $admissionPayload }
-    if (-not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+    if (-not $ContextualInstall -and -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
         $env:COPILOT_PLUGIN_STAGED_FROM = $null
     }
     $admissionPython = $null
@@ -278,43 +278,70 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         }
     }
     if (-not $admissionPython) { throw 'Attributable runtime admission requires an existing Python 3.10+ executable.' }
-    $admissionArgs = @(
-        '-I', '-S', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
-        '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
-        '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource,
-        '--project-root', $admissionProject
-    )
-    $admissionOperation = if ($Action -eq 'uninstall') { 'teardown' } else { 'publish' }
-    if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
-        & $admissionPython @admissionArgs --check-lifecycle --lifecycle-operation $admissionOperation
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } else {
-        $admissionForward = @()
-        foreach ($key in $PSBoundParameters.Keys) {
-            $value = $PSBoundParameters[$key]
-            if ($value -is [System.Management.Automation.SwitchParameter]) {
-                if ($value.IsPresent) { $admissionForward += "-$key" }
-            } else {
-                $admissionForward += "-$key"
-                $admissionForward += [string]$value
-            }
-        }
-        if ($Action -eq 'stamp') { $admissionArgs += '--deferred-runtime' }
-        elseif ($Action -eq 'uninstall') { $admissionArgs += '--teardown' }
-        if ($Action -in @('install', 'update')) {
-            $admissionArgs += @('--human-operation', $Action.ToLowerInvariant())
-        }
-        $admissionPreviousErrorAction = $ErrorActionPreference
+    if ($Action -in @('install', 'update', 'provision', 'repair', 'dev', 'dev-release') -and
+        $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1') {
+        $driverArguments = @(
+            '-I', '-S', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\runtime_install_driver.py'),
+            '--payload', $admissionPayload, '--root', $InstallDir,
+            '--shell', (Get-Process -Id $PID).Path, '--action', $Action.ToLowerInvariant()
+        )
+        if ($ProjectName) { $driverArguments += @('--project-name', $ProjectName) }
+        if ($BootstrapPython) { $driverArguments += @('--bootstrap-python', $BootstrapPython) }
+        if ($Owner) { $driverArguments += @('--owner', $Owner) }
+        if ($Force) { $driverArguments += '--force' }
+        if ($ZeroDowntime) { $driverArguments += '--zero-downtime' }
+        if ($ProvisionMissingRuntime) { $driverArguments += '--provision-missing-runtime' }
+        $driverParticipant = $env:AGENT_WORKTREES_NATIVE_INSTALLATION -eq '1'
+        if ($driverParticipant) { $driverArguments += '--check-native' }
+        $driverPreviousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            & $admissionPython @admissionArgs --run-lifecycle -- `
-                (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
-                -File $PSCommandPath @admissionForward
-            $admissionExitCode = $LASTEXITCODE
+            & $admissionPython @driverArguments
+            $driverExitCode = $LASTEXITCODE
         } finally {
-            $ErrorActionPreference = $admissionPreviousErrorAction
+            $ErrorActionPreference = $driverPreviousErrorAction
         }
-        exit $admissionExitCode
+        if (-not $driverParticipant -or $driverExitCode -ne 0) { exit $driverExitCode }
+    }
+    if (-not $ContextualInstall) {
+        $admissionArgs = @(
+            '-I', '-S', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
+            '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
+            '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource,
+            '--project-root', $admissionProject
+        )
+        $admissionOperation = if ($Action -eq 'uninstall') { 'teardown' } else { 'publish' }
+        if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+            & $admissionPython @admissionArgs --check-lifecycle --lifecycle-operation $admissionOperation
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } else {
+            $admissionForward = @()
+            foreach ($key in $PSBoundParameters.Keys) {
+                $value = $PSBoundParameters[$key]
+                if ($value -is [System.Management.Automation.SwitchParameter]) {
+                    if ($value.IsPresent) { $admissionForward += "-$key" }
+                } else {
+                    $admissionForward += "-$key"
+                    $admissionForward += [string]$value
+                }
+            }
+            if ($Action -eq 'stamp') { $admissionArgs += '--deferred-runtime' }
+            elseif ($Action -eq 'uninstall') { $admissionArgs += '--teardown' }
+            if ($Action -in @('install', 'update')) {
+                $admissionArgs += @('--human-operation', $Action.ToLowerInvariant())
+            }
+            $admissionPreviousErrorAction = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                & $admissionPython @admissionArgs --run-lifecycle -- `
+                    (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
+                    -File $PSCommandPath @admissionForward
+                $admissionExitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $admissionPreviousErrorAction
+            }
+            exit $admissionExitCode
+        }
     }
 }
 # === end command-lifecycle: admission before staging ===

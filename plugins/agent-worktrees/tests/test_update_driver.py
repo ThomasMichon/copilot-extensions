@@ -100,6 +100,7 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
     from contextlib import nullcontext
     from pathlib import Path
     from agent_procutil.owned_process import run_owned
+    import update_driver
 
     home = tmp_path / "home"
     home.mkdir()
@@ -142,6 +143,10 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
                 logs = home / ".copilot-extensions" / "update-driver"
                 pytest.fail(f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}: {error}")
             assert result.returncode == 0, result.stderr
+            rows = update_driver.status(root=home / ".copilot-extensions" / "update-driver")
+            assert rows and all(row.state == "completed" and row.exit_code == 0 for row in rows), [
+                (row.state, row.exit_code, row.error, row.log_path.read_text()) for row in rows
+            ]
     if windows is not None:
         assert windows.surfaced == {}, windows.surfaced
         assert windows.focus_changes == {}, windows.focus_changes

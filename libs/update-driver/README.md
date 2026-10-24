@@ -614,6 +614,17 @@ join their owner. Ordinary `ensure_worker` failure still never falls back to
 foreground execution. Other consumer installers and the normal daemon-launch
 default remain separate migration and qualification gates.
 
+The Windows Worktrees installer similarly adopts a retained numbered candidate
+before helper publication, recovery or monitor activation. Its explicit native
+entry takes driver custody before legacy or namespaced publication leases; a
+cold caller submits only the fixed installation recipe to the same finite
+executor. A reentry marker selects a live-witness check, never authorizes
+mutation by itself. Scoped installer children re-export the current witness;
+source-only fixtures reconstruct their own import graph after the Manager
+intentionally strips parent Python overrides. Mutable development slots are
+not broker actions. Full construction, live maintenance and desktop consumers
+remain distinct qualification obligations.
+
 `tests/test_native_participant.py` exercises the real stock-PowerShell owner
 against unchanged Python participants: simultaneous joins, consumed environment,
 kernel-lock contention, forged/mismatched and malformed/oversized messages,
