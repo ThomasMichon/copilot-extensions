@@ -367,6 +367,11 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   including the retained-row negative control. Refreshed committed-source
   evidence and independent review remain required. The earlier approval is not
   used for these additional changes.
+- Committed refinement `019bf810e360b7b219f7467f85de4d121afe7893`
+  passes actual write/no-write capture with 78 outputs and both prepared-index
+  observations. The 124-case current capture/contract/maintenance cohort,
+  two-contract/660-fixture checker and all changed-module/install/documentation/
+  changefile guards pass. Fresh independent exact-head review remains owed.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

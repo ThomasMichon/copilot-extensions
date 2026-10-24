@@ -24,6 +24,7 @@
       "changed_keyed_input": 409,
       "consumer_schema": {
         "history_index": true,
+        "retained_history_index": true,
         "version": 32
       },
       "duplicate_outcome": {
@@ -114,6 +115,7 @@
       "changed_keyed_input": 409,
       "consumer_schema": {
         "history_index": true,
+        "retained_history_index": true,
         "version": 32
       },
       "duplicate_outcome": {
@@ -1020,8 +1022,8 @@
       "sha256": "e900f12a8fa567d75e872ee4cd818865ee83c4cab5448d68be61725847bf87c4"
     },
     "plugins/agent-bridge/contract/inputs/http48/retained-inbox.json": {
-      "blob": "cb8fbd062d23a027487a6e3e50e64c0d57a3265b",
-      "sha256": "d9d726da4a8107081a7ffdf32675c3cf9fd50f58287d8c2b1fa677942c0a3724"
+      "blob": "256f2fa4756dacfdd96be6893e9d9d2b952388a1",
+      "sha256": "5ed34c6037b8037b106bdfb1e2b180e6eced7d35517079e95fbc8005538b2307"
     },
     "plugins/agent-bridge/contract/provenance.schema.json": {
       "blob": "a109ef5c7dfe3b9cbb80456101731365dff094dd",
@@ -1568,8 +1570,8 @@
       "sha256": "ca22b2f2fe182558a91e05c0ae87f108b77fcb0a7d100da1e7695e6912fba644"
     },
     "plugins/agent-bridge/src/agent_bridge/db_schema.py": {
-      "blob": "a233f2e016e0625bf116cd99dc37d5527c48316a",
-      "sha256": "a924f45acf5f6a58a336f1f1237230ac31d75ef66cd2f6b278bc9bcd950c6744"
+      "blob": "522b3e8eab873dd3b3b9c2a93b0fde60ae48e77d",
+      "sha256": "fae776b9c5c43a6132748cbd74f5d84209d194891d2811f857bfdd10e0f6973f"
     },
     "plugins/agent-bridge/src/agent_bridge/db_sessions.py": {
       "blob": "fef31df28ddfb4c343496c97ac68c11c4fc743c8",
@@ -1620,8 +1622,8 @@
       "sha256": "c29bad0dc0af5938dcd364018c8c05cb857114be01022dfe47aeb696ab0739fb"
     },
     "plugins/agent-bridge/src/agent_bridge/inbox_consumer_schema.py": {
-      "blob": "a68c02d188663a7fa682dd965ea312890f6fc6b2",
-      "sha256": "21af281ec367acc37d4cb57a85707102d61dc47948b3d723d31f40c27fad8bd7"
+      "blob": "61880aabb073529c7c9ea97e5ebabedaf575c9b7",
+      "sha256": "3607798d167d5d86587477ce80793061f845a1be4df2dbbebb4d59fda06b710c"
     },
     "plugins/agent-bridge/src/agent_bridge/inbox_custody.py": {
       "blob": "7bcf3a0440a4ea3395ce21af2be1b31de31e3df0",
@@ -2484,8 +2486,8 @@
       "sha256": "c04f8bd5df6d6e69eb35413bc4e99db347ef571030f91e09b188bdd4d1f3c51e"
     },
     "plugins/agent-bridge/tests/test_http48_capture_probes.py": {
-      "blob": "c4ec6cc93c7a9db95ccc676645c820d643240932",
-      "sha256": "b5aa662496891307f6a92b617589231a09bcb5207b3fc22e20f5bb1e85787987"
+      "blob": "3f9f09791b7c757f138623efc7d01353b069b205",
+      "sha256": "ec7ace5ff1aefa20374432dcfc24ecca483690055583dfc81209f545b677b4b2"
     },
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py": {
       "blob": "942cf585e13d20435822296e0681c9b76b77f8c4",
@@ -3596,7 +3598,7 @@
       "sha256": "ed58b3876bcf48c89e6d327b8d5550246f626f79e68b7b77812eaf0fe606c122"
     }
   },
-  "execution_closure_sha256": "917fa1eb0ff257f203774237c220d826c2955dbcd7795f4f63b7f639b7cae449",
+  "execution_closure_sha256": "b1b7f7d665ff95704e918003d725ff64f810132f3266fbd2e426a834a5645b47",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -3622,13 +3624,13 @@
     "plugins/agent-bridge/scripts/installation-context/_installation_context_source.py",
     "plugins/agent-bridge/scripts/installation-context/installation_context.py"
   ],
-  "input_sha256": "d9d726da4a8107081a7ffdf32675c3cf9fd50f58287d8c2b1fa677942c0a3724",
+  "input_sha256": "5ed34c6037b8037b106bdfb1e2b180e6eced7d35517079e95fbc8005538b2307",
   "checked_probes": {
     "test_http48_capture_actual_observations": 2
   },
   "scope": "actual local ASGI/SQLite adapter and ordinary producer; not SDK or native qualification",
   "captured_from": {
-    "commit": "329b9319c6cd3f3c4caf97a33caecd36e5d22ce8",
+    "commit": "019bf810e360b7b219f7467f85de4d121afe7893",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 48,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
