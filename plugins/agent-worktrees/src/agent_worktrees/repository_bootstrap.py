@@ -19,13 +19,12 @@ from .repos_registry_transaction import registry_lock
 
 
 def _terminal() -> bool:
-    return bool(sys.stdin is not None and sys.stdin.isatty()
-                and sys.stdout is not None and sys.stdout.isatty())
+    return protocol._terminal()
 
 
 def _selection(url: str, target: str | None, *, ask: bool) -> tuple[str, Path]:
     canonical = protocol.https_url(url)
-    name = urlsplit(canonical).path.rsplit("/", 1)[-1]
+    name = urlsplit(canonical).path.rsplit("/", 1)[-1].removesuffix(".git")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
         raise protocol.SetupError("Repository name cannot be used as a registry key.")
     if target is None:
@@ -41,6 +40,8 @@ def _selection(url: str, target: str | None, *, ask: bool) -> tuple[str, Path]:
     # Check existing ancestors without creating a target or following an escape.
     existing = path
     while not existing.exists() and not existing.is_symlink():
+        if existing.parent == existing:
+            raise protocol.SetupError("Repository target has no reachable filesystem ancestor.")
         existing = existing.parent
     protocol._plain(existing)
     return name, path
@@ -113,9 +114,13 @@ def _credential_args(url: str, account: str, *, cwd: Path) -> list[str]:
             "ambient authentication was not attempted.",
         )
     return [
+        "-c", "credential.helper=",
+        "-c", f"credential.helper={helpers[0]}",
         "-c", f"credential.{url}.username={account}",
         "-c", "credential.gitHubAccountFiltering=true",
         "-c", "credential.useHttpPath=true",
+        "-c", "http.extraHeader=",
+        "-c", f"http.{url}.extraHeader=",
     ]
 
 
@@ -136,7 +141,7 @@ def _clone(url: str, path: Path, credential_args: list[str]) -> None:
     completed = subprocess.run(
         ["git", *credential_args, "-c", "core.hooksPath=" + os.devnull,
          "clone", "--", url, str(path)],
-        cwd=path.parent, env=environment, **no_window_kwargs(),
+        cwd=path.parent, env=environment, **protocol._stdio_kwargs(),
     )
     if completed.returncode:
         raise protocol.SetupError(

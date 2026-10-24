@@ -20,6 +20,8 @@ is invented or persisted.
 ## Acquisition and ownership
 
 Version 1 accepts credential-free HTTPS URLs with no query or fragment.
+Transport paths, including a `.git` suffix, are preserved; suffix removal
+is only registry-name inference, not a generic remote-identity alias.
 Local/SSH transports, foreign remotes, conflicting registrations, source changes,
 symlink/reparse traversal and linked/bare checkouts are refused. Git URL rewrites
 to a different remote are refused before acquisition. Existing managed
@@ -32,8 +34,10 @@ itself adopt a project.
 Git uses its configured credential owner with inherited stdio and no fixed
 authentication deadline. It does not receive a copied token or change global
 authentication. Explicit account selection is currently qualified only for
-GitHub.com with a single `manager`/`manager-core` GCM helper and GCM account
-filtering; unsupported explicit-account routes refuse rather than fall back
+GitHub.com with a qualified `manager`/`manager-core` GCM helper and GCM account
+filtering. Call-scoped resets isolate that helper and clear inherited HTTP
+headers for the selected URL without changing persisted Git configuration;
+unsupported explicit-account routes refuse rather than fall back
 to an ambient identity. Other credential-owner routes with no configured
 explicit account retain Git's own authentication behavior.
 
@@ -80,6 +84,8 @@ PowerShell receives `-RequestFile <path>`; Bash receives
 `--request-file <path>`. The selected runtime must already be available.
 Execution uses the selected checkout as cwd with inherited stdio. No command
 string evaluation, arbitrary extra arguments or interpreter installation occurs.
+Native Windows attended calls retain their actual console for Git, the setup
+entry and its descendants; redirected/background calls remain windowless.
 Each invocation gets fresh caller-owned temporary communication files:
 
 ```json

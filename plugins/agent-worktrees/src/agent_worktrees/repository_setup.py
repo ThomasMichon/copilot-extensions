@@ -50,8 +50,6 @@ def https_url(value: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", host):
         raise SetupError("Repository URL requires a valid DNS host.")
     path = parsed.path.rstrip("/")
-    if path.endswith(".git"):
-        path = path[:-4]
     if not path.strip("/") or any(p in (".", "..", "") for p in path.split("/")[1:]):
         raise SetupError("Repository URL has an invalid path.")
     authority = host.lower() + (f":{port}" if port not in (None, 443) else "")
@@ -124,7 +122,7 @@ def _tracked(path: Path, relative: str) -> Path:
     _plain(file)
     if not file.is_file():
         raise SetupError("Setup entry must be a regular file.")
-    entry = _git(path, "ls-files", "--stage", "--", relative)
+    entry = _git(path, "--literal-pathspecs", "ls-files", "--stage", "--", relative)
     if not entry.startswith(("100644 ", "100755 ")) or "\n" in entry:
         raise SetupError("Setup entry must be tracked as a regular file.")
     return file
@@ -218,12 +216,31 @@ def _interpreter(runtime: str) -> str:
     raise SetupError(f"Required {runtime} runtime is unavailable; no interpreter was installed.")
 
 
+def _terminal() -> bool:
+    if (
+        sys.stdin is not None and sys.stdin.isatty()
+        and sys.stdout is not None and sys.stdout.isatty()
+    ):
+        if os.name != "nt":
+            return True
+        import ctypes
+
+        # NUL can report isatty() without a console to inherit.
+        if ctypes.windll.kernel32.GetConsoleCP():
+            return True
+    return False
+
+
+def _stdio_kwargs() -> dict:
+    return {} if _terminal() else no_window_kwargs()
+
+
 def _call(setup: Setup, mode: str) -> Outcome:
     setup.verify()
     executable = _interpreter(setup.runtime)
     prefix = "repository-setup-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-")
     with tempfile.TemporaryDirectory(prefix=prefix) as temporary:
-        directory = Path(temporary)
+        directory = Path(temporary).resolve(strict=True)
         request = directory / "request.json"
         result = directory / "result.json"
         request.write_text(json.dumps({
@@ -242,13 +259,13 @@ def _call(setup: Setup, mode: str) -> Outcome:
         # Inherit handles: a credential owner may need the actual caller terminal.
         environment = repository_identity_env()
         environment["GIT_TERMINAL_PROMPT"] = os.environ.get(
-            "GIT_TERMINAL_PROMPT", "1" if sys.stdin is not None and sys.stdin.isatty() else "0",
+            "GIT_TERMINAL_PROMPT", "1" if _terminal() else "0",
         )
         for variable in ("BASH_ENV", "ENV"):
             environment.pop(variable, None)
         completed = subprocess.run(
             argv, cwd=setup.source.path, env=environment,
-            **no_window_kwargs(),
+            **_stdio_kwargs(),
         )
         if completed.returncode:
             return Outcome("failed", f"Repository {mode} exited with status {completed.returncode}.")

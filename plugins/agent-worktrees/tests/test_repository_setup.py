@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import runpy
 import shlex
 import shutil
 import subprocess
@@ -66,16 +68,17 @@ def test_rejects_unsupported_urls(url: str) -> None:
 
 def test_url_identity_is_canonical() -> None:
     assert setup.https_url("https://EXAMPLE.invalid:443/team/sample.git/") == (
-        "https://example.invalid/team/sample"
+        "https://example.invalid/team/sample.git"
     )
     assert setup.https_url("https://example.invalid:8443/a") == "https://example.invalid:8443/a"
+    assert setup.https_url(URL) != setup.https_url(URL.removesuffix(".git"))
 
 
 def test_inspect_is_read_only_and_revision_bound(source: Path) -> None:
     before = git(source, "status", "--porcelain")
     selected = setup.inspect(source, URL)
     assert selected.source.commit == git(source, "rev-parse", "HEAD")
-    assert selected.source.url == "https://example.invalid/team/sample"
+    assert selected.source.url == URL
     selected.verify()
     assert git(source, "status", "--porcelain") == before == ""
     (source / "setup.ps1").write_text("changed", encoding="utf-8")
@@ -83,11 +86,13 @@ def test_inspect_is_read_only_and_revision_bound(source: Path) -> None:
         selected.verify()
 
 
-@pytest.mark.parametrize("kind", ["foreign", "untracked", "modified", "linked", "nested"])
+@pytest.mark.parametrize("kind", ["foreign", "transport-path", "untracked", "modified", "linked", "nested"])
 def test_preserves_unqualified_source(source: Path, kind: str) -> None:
     selected = source
     if kind == "foreign":
         git(source, "remote", "set-url", "origin", "https://example.invalid/other/sample")
+    elif kind == "transport-path":
+        git(source, "remote", "set-url", "origin", URL.removesuffix(".git"))
     elif kind == "untracked":
         (source / "precious.txt").write_text("preserve", encoding="utf-8")
     elif kind == "modified":
@@ -136,6 +141,28 @@ def test_cannot_hide_modified_entry_in_index_flags(source: Path, flag: str) -> N
         setup.inspect(source, URL)
 
 
+def test_ignored_pathspec_cannot_impersonate_tracked_script(source: Path) -> None:
+    declaration = json.loads((source / setup.DECLARATION).read_text())
+    declaration["entrypoints"]["windows"]["script"] = "setu[p].ps1"
+    (source / setup.DECLARATION).write_text(json.dumps(declaration), encoding="utf-8")
+    (source / ".gitignore").write_text("setu[[]p].ps1\n", encoding="utf-8")
+    commit(source)
+    ignored = source / "setu[p].ps1"
+    ignored.write_text("throw 'Untracked entry executed'\n", encoding="utf-8")
+    assert git(source, "status", "--porcelain") == ""
+    with pytest.raises(setup.SetupError, match="tracked as a regular file"):
+        setup.inspect(source, URL)
+
+
+def test_tracked_glob_characters_are_literal_entries(source: Path) -> None:
+    (source / "setu[p].ps1").write_text("param([string]$RequestFile)\n", encoding="utf-8")
+    declaration = json.loads((source / setup.DECLARATION).read_text())
+    declaration["entrypoints"]["windows"]["script"] = "setu[p].ps1"
+    (source / setup.DECLARATION).write_text(json.dumps(declaration), encoding="utf-8")
+    commit(source)
+    assert setup._tracked(source, "setu[p].ps1") == source / "setu[p].ps1"
+
+
 def consumer(source: Path, body: str) -> setup.Setup:
     """Native Windows coverage; POSIX uses the equivalent argv/file consumer."""
     if sys.platform == "win32":
@@ -167,6 +194,110 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
     outcome = setup.run(selected, apply=True, trusted=True)
     assert outcome.status == "ready"
     assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
+
+
+def test_real_consumer_accepts_caller_scratch_linked_ancestor(source: Path, monkeypatch) -> None:
+    selected = consumer(source, """
+[IO.File]::WriteAllText($r.result_file, '{"version":1,"status":"ready","message":"Owner checked"}')
+""")
+    physical = source.parent / "physical-scratch"
+    physical.mkdir()
+    logical = source.parent / "logical-scratch"
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(physical), str(logical))
+    else:
+        logical.symlink_to(physical, target_is_directory=True)
+    monkeypatch.setattr(setup.tempfile, "tempdir", str(logical))
+    assert setup.run(selected, apply=False, trusted=True).status == "ready"
+    assert not list(physical.iterdir())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native inherited Windows console")
+def test_native_attended_clone_and_setup_preserve_console(source: Path, tmp_path: Path) -> None:
+    python = getattr(sys, "_base_executable", sys.executable).replace("'", "''")
+    probe = (
+        "import ctypes,json; p=(ctypes.c_ulong*64)(); "
+        "n=ctypes.windll.kernel32.GetConsoleProcessList(p,64); "
+        "assert 0<n<=64; print(json.dumps(list(p)[:n]))"
+    )
+    consumer(source, f"""
+$members = & '{python}' -I -S -c '{probe}'
+if ($LASTEXITCODE -ne 0) {{ throw 'Setup descendant lost console' }}
+[IO.File]::WriteAllText($state, [string]$members)
+[IO.File]::WriteAllText($r.result_file, '{{"version":1,"status":"ready","message":"Console retained"}}')
+""")
+    driver = tmp_path / "attended.py"
+    driver.write_text("""
+import ctypes, json, msvcrt, os, pathlib, subprocess, sys
+sys.stderr = open(pathlib.Path(sys.argv[3]).with_suffix('.error'), 'w')
+sys.path[:0] = json.loads(pathlib.Path(sys.argv[1]).read_text())
+from agent_worktrees import repository_bootstrap as bootstrap, repository_setup as setup
+root, result = map(pathlib.Path, sys.argv[2:])
+sys.stdin = open('CONIN$', 'r')
+sys.stdout = open('CONOUT$', 'w')
+set_handle = ctypes.windll.kernel32.SetStdHandle
+set_handle.argtypes = [ctypes.c_ulong, ctypes.c_void_p]
+assert set_handle(-10, msvcrt.get_osfhandle(sys.stdin.fileno()))
+assert set_handle(-11, msvcrt.get_osfhandle(sys.stdout.fileno()))
+cp = ctypes.windll.kernel32.GetConsoleCP()
+assert cp and setup._terminal()
+original = subprocess.run
+native_python = getattr(sys, '_base_executable', sys.executable)
+probe = ('import ctypes,json; p=(ctypes.c_ulong*64)(); '
+         'n=ctypes.windll.kernel32.GetConsoleProcessList(p,64); '
+         'assert 0<n<=64; print(json.dumps(list(p)[:n]))')
+control = original([native_python, '-I', '-S', '-c', probe],
+                   capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+assert control.returncode == 0, control.stderr
+assert os.getpid() not in json.loads(control.stdout)
+clone_result = result.with_suffix('.clone')
+def run(argv, **kwargs):
+    if 'clone' in argv:
+        assert 'stdin' not in kwargs and 'stdout' not in kwargs
+        assert not kwargs.get('creationflags', 0) & subprocess.CREATE_NO_WINDOW
+        argv = [native_python, '-I', '-S', '-c', probe +
+                '; import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('
+                'json.dumps(list(p)[:n]))', str(clone_result)]
+    return original(argv, **kwargs)
+bootstrap.subprocess.run = run
+bootstrap._clone('https://example.invalid/team/sample.git', root.parent / 'clone', [])
+assert os.getpid() in json.loads(clone_result.read_text())
+outcome = setup.run(setup.inspect(root, 'https://example.invalid/team/sample.git'),
+                    apply=False, trusted=True)
+assert outcome.status == 'ready', outcome
+assert os.getpid() in json.loads((root.parent / 'state.txt').read_text())
+result.write_text(json.dumps({'console': cp, 'clone': True, 'setup': True}))
+""", encoding="utf-8")
+    result = tmp_path / "attended.json"
+    paths = tmp_path / "paths.json"
+    paths.write_text(json.dumps(sys.path), encoding="utf-8")
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    observer = runpy.run_path(str(
+        Path(__file__).resolve().parents[3] / "libs" / "agent-procutil" / "tests"
+        / "test_spawn_daemon_windows_integration.py"
+    ))
+    with observer["_WindowObserver"](*observer["_configure_win32"]()) as windows:
+        process = subprocess.run(
+            [sys.executable, str(driver), str(paths), str(source), str(result)],
+            capture_output=True, text=True, timeout=120, startupinfo=startup,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+        )
+    assert windows.surfaced == {} and windows.focus_changes == {}
+    error = result.with_suffix(".error")
+    diagnostics = error.read_text() if error.exists() else process.stdout + process.stderr
+    assert process.returncode == 0, diagnostics
+    assert result.is_file(), diagnostics
+    evidence = json.loads(result.read_text())
+    assert evidence["console"] and evidence["clone"] and evidence["setup"]
+
+
+def test_redirected_launch_remains_headless(monkeypatch) -> None:
+    monkeypatch.setattr(setup, "_terminal", lambda: False)
+    assert setup._stdio_kwargs() == no_window_kwargs()
 
 
 @pytest.mark.parametrize("status", ["waiting", "refused", "failed", "ready"])

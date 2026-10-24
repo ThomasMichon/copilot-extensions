@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import shlex
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -109,7 +110,75 @@ def test_explicit_gcm_route_contains_no_token_and_preserves_global_settings(tmp_
     assert f"credential.{selected}.username=selected-login" in args
     assert "credential.gitHubAccountFiltering=true" in args
     assert len(calls) == 1 and "--get-urlmatch" in calls[0][0]
-    assert not any("token" in a or "extraheader" in a for a in args)
+    assert "credential.helper=" in args and "credential.helper=manager" in args
+    assert f"http.{selected}.extraHeader=" in args
+    assert not any("token" in a for a in args)
+
+
+def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> None:
+    selected = "https://github.com/example/sample.git"
+    config = tmp_path / "isolated.gitconfig"
+    helper_bin = tmp_path / "helpers"
+    helper_bin.mkdir()
+    ambient = tmp_path / "ambient.py"
+    ambient.write_text(
+        "import pathlib\npathlib.Path(__file__).with_suffix('.called').write_text('unsafe')\n",
+        encoding="utf-8",
+    )
+    owner = tmp_path / "owner.py"
+    owner.write_text(
+        "import pathlib,sys\n"
+        "if sys.argv[-1] == 'get':\n"
+        "    request=sys.stdin.read()\n"
+        "    pathlib.Path(__file__).with_suffix('.called').write_text(request)\n"
+        "    print('username=selected-login\\npassword=fixture-value\\n')\n",
+        encoding="utf-8",
+    )
+    shim = helper_bin / "git-credential-manager"
+    shim.write_text(
+        "#!/bin/sh\nexec " + shlex.quote(sys.executable) + " " + shlex.quote(str(owner)) + ' "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    git(tmp_path, "config", "--file", str(config), "credential.helper",
+        "!" + shlex.quote(sys.executable) + " " + shlex.quote(str(ambient)))
+    git(tmp_path, "config", "--file", str(config), f"credential.{selected}.helper", "manager")
+    for key in ("http.extraHeader", f"http.{selected}.extraHeader"):
+        git(tmp_path, "config", "--file", str(config), key, "Authorization: fixture-only")
+    before = config.read_bytes()
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_EXEC_PATH", str(helper_bin))
+    args = bootstrap._credential_args(selected, "selected-login", cwd=tmp_path)
+    headers = git(tmp_path, *args, "config", "--get-urlmatch", "http.extraHeader", selected)
+    assert headers == ""
+    credential = subprocess.run(
+        ["git", *args, "credential", "fill"], cwd=tmp_path,
+        input=f"url={selected}\n\n", text=True, capture_output=True, timeout=30,
+        env=bootstrap._acquisition_environment(), **no_window_kwargs(),
+    )
+    assert credential.returncode == 0, credential.stderr
+    assert "username=selected-login" in credential.stdout
+    assert "password=fixture-value" in credential.stdout
+    assert "username=selected-login" in owner.with_suffix(".called").read_text()
+    assert not ambient.with_suffix(".called").exists()
+    assert config.read_bytes() == before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native unavailable Windows drive")
+@pytest.mark.parametrize("apply", [False, True])
+def test_unreachable_drive_refuses_before_any_effect(tmp_path, monkeypatch, apply) -> None:
+    unavailable = next(
+        (Path(f"{letter}:\\") for letter in "ZYXWVUTSRQPONMLKJIHGFED"
+         if not Path(f"{letter}:\\").exists()),
+        None,
+    )
+    if unavailable is None:
+        pytest.skip("No unavailable drive for the native refusal")
+    monkeypatch.setattr(bootstrap, "acquire", lambda *a: pytest.fail("unreachable target acquired"))
+    assert bootstrap.command([
+        URL, "--target", str(unavailable / "source"), *(["--apply"] if apply else []),
+    ]) == 1
 
 
 def test_clone_failure_preserves_partial_target_and_does_not_register(tmp_path, registry, monkeypatch) -> None:

@@ -134,7 +134,10 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
         assert observed == {"challenge": True, "authenticated": True}
         assert helper.with_suffix(".called").read_text() == "get"
         assert git(target, "rev-parse", "HEAD") == git(source, "rev-parse", "HEAD")
-        assert repos.read_registry(strict=True).repos["sample"].local_path() == str(target)
+        registered = repos.read_registry(strict=True).repos["sample"]
+        assert registered.local_path() == str(target)
+        assert registered.remote == url
+        assert git(target, "remote", "get-url", "origin") == registered.remote
         assert (tmp_path / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
         assert config.read_bytes() == before
     finally:
