@@ -55,6 +55,8 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The directly retained #5921 finite clean-room verdict-completeness family continues through this SAME Active ROOT's Phase4 payload/harness/tools wave and Phase7 migration-intake/domain-Plan acceptance, its actual global Validation and append-only Journal. Existing primary maintainer, clean-room rig/reducer/script, audit/source/cohort/native/periodic-failure and release/control custodians retain their exact scopes; OPEN #1303 and every incumbent inheritance/hold remain. #5922/#8511 and #4312/#688/#1475 remain independent. This is tracking acceptance only, not implementation, execution, source/resource reassignment, a new generic ACK or a parent-completion waiver.
+
 The direct retained #4123 acceptance continues through this SAME existing Active ROOT's
 Plan, own and actual global Validation, and Journal under the incumbent domain, source,
 native and resource custodians. Every prior phase, alternative, hold and responsibility
@@ -229,6 +231,38 @@ suites first.
   observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
+
+#### Finite clean-room verdict completeness retained from #5921
+
+<!-- backlog-reconciliation:7556:transfer:5921:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+This finite case enters the existing Phase4 payload/harness/tools wave through Phase7 migration-intake and domain-Plan review. It preserves the ORIGINAL #5921 source/API contract; this checklist is not a new test programme, a reducer implementation or execution authority.
+
+##### Direct unchecked Plan
+
+- [ ] L5921-P1: Map the ACTUAL documented clean-room scenario-report -> verdict -> consuming setup/publish path and required report evidence. Preserve scenario/version/phase, counters, environment, jams/results and any judgment/completeness fields as appropriate to that EXISTING protocol. Parsed file existence is not completion; do not invent a new universal report schema or a new provider API.
+- [ ] L5921-P2: Make the actual Python reducer validate supported version/schema, object/field shapes and required completed/judged evidence BEFORE deriving ok/counters/exit. Malformed, incomplete, unsupported or unjudged reports, including a parsed empty object, stay explicit NON-PASS. Missing scenario/counters/evidence must not be replaced with blank or zero values that manufacture success.
+- [ ] L5921-P3: Apply the SAME evidence-complete/non-pass contract to the actual Python-less fallback and its real callers. No absent grep match or missing counter may default to a zero-failure PASS. Preserve its supported dependency-light operation, explicit diagnostics and legitimate control behavior rather than merely fixing the Python arm.
+- [ ] L5921-P4: Preserve legitimate success/failure/usage and classified/degraded jam outcomes and their correct documented structured results/0-1-2 exits. At the ACTUAL consuming scenario-then-verdict boundary, missing stage/report/judgment or incomplete upstream outcome cannot be hidden by a final reducer command. Keep literal-mode separation and no self-healing; zero inferred failures is not evidence of success. Programmatic Tier P does not acquire an unrequested agent/Tier E judgment requirement.
+- [ ] L5921-P5: Provide source-safe, bounded actionable diagnostics and deterministic missing-field, wrong-shape and valid-control coverage through the ACTUAL reducers and documented report/caller seam, not a mock that bypasses construction/reduction. Preserve original finite source/API acceptance without a live box, driven model, real downstream distribution, native fleet or all-host trial.
+- [ ] L5921-P6: Keep recorded documentation-only #5931 and the completed source-reconciliation sweep credited only at their actual scope; they are not reducer implementation receipts. Preserve current unit eligibility/effect/resource rules and separate owning clean-room/script contracts. Do not absorb independent #5922/#8511 or #4312/#688/#1475 into this finite case or claim any was fixed by intake.
+
+##### Local Validation
+
+- [ ] L5921-V1: Use deterministic fixtures covering absent/malformed/unsupported/incomplete reports, empty object, missing required fields, wrong top-level/field/counter shapes and explicitly unjudged/missing-stage evidence. Require explicit non-pass from the actual Python reducer and real report consumer; no absent-evidence success.
+- [ ] L5921-V2: Retain genuine complete success, failure, usage and classified/degraded-jam controls with correct structured ok/counters and documented exits. Preserve literal-mode semantics and safe diagnostics. Do not impose a new universal positive passed-count threshold, agent judgment on a declared programmatic report, or leak report contents/secrets merely to diagnose a refused report.
+- [ ] L5921-V3: Exercise the actual Python-less reduction path against equivalent complete/incomplete/wrong-shape/control fixtures. A Python-only pass or successful JSON parse cannot stand in for this fallback; use the least expensive faithful bounded existing lane without host changes or a fresh platform programme.
+- [ ] L5921-V4: Check the documented scenario/report/verdict caller shape and final consuming status: a missing or incomplete report, failed required stage or unjudged result is never replaced by a final inferred-zero-failures green. Preserve valid control/jam outcomes and separate primary failure from diagnostic/reducer failure; no real installer/model/distribution is needed.
+- [ ] L5921-V5: Record exact source, owning test/caller boundary, chosen protocol requirements, actual outcomes and any unavailable case when the separately authorized implementation owner qualifies this finite family. Source inspection, documentation merge or a generic runner is not executed reducer/caller proof. Preserve current budgets/effects and all incumbent portfolio/native/periodic owners; no test/import/reducer execution occurs during this intake.
+
+##### Continuing Coordination and receiving gate
+
+- [ ] L5921-C1: Continue through the SAME Active ROOT primary maintainer, existing clean-room rig/reducer/script custodians, live #1303 and existing migration-intake/serial-wave boundaries. Preserve all incumbent Plan/actual global Validation/Participants/Coordination, completed rows, issue-body inheritances and full inline/linked historical Journal; no implementation assignment or resource/source claim transfer is made by this proposal.
+- [ ] L5921-C2: Keep #5922 and #8511 independent, and retain #4312's paired setup/judged evaluation, #688 Tier-E and #1475 WinGet acceptance with their owners. A missing-report defect is not permission to rerun a rig, widen native gates, change admission/CI policy or declare the portfolio Done. No old hold is released by age, silence or an empty assignee.
+- [ ] L5921-C3: BEFORE administrative #5921 supersession, obtain a NEW normally reviewed ACTUAL merge delivering ALL this direct local Plan, local Validation, ACTUAL level-two ROOT global Validation entry, continuing Coordination and dated Journal. Then FULLY read back the CURRENT whole ROOT and ALL linked historical journals plus current source/#1303 member-author/state/lock/assignees/eligible discussion/actual claims. Old effort creation, old unrelated intake, a title/link/child-only note or this artifact is not receipt. If any clause, tier, current custody, Active fit or complete delivery is uncertain, RETAIN #5921.
+
+Sources: https://github.com/ThomasMichon/copilot-extensions/issues/5921 and https://github.com/ThomasMichon/copilot-extensions/issues/5921#issuecomment-6331529524 . Existing OPEN #1303 remains the live portfolio coordination token.
+
 
 ### Phase 5 — Tiered developer and review workflows
 
@@ -678,6 +712,8 @@ custody.
 
 ## Validation Plan
 
+- [ ] G5921: Resolve EVERY direct #5921 P1-P6, V1-V5 and C1-C3 clause in the Phase4 finite clean-room verdict family at its ORIGINAL source/API consumer tier: actual Python AND Python-less version/schema/evidence-complete reduction and real caller shape, explicit malformed/incomplete/unjudged NON-PASS, correct valid control/classified-jam results/exits, literal-mode separation and source-safe diagnostics. Preserve all incumbent Plan/Validation, OPEN #1303, same owners and independent #5922/#8511/#4312/#688/#1475 gates. Administrative intake is not a reducer fix or executed evidence; no live box/model/all-host/native programme or unrelated whole-portfolio prerequisite is added, and this does not waive the ROOT's own whole completion gate.
+
 - [ ] Resolve EVERY directly retained #4123 fixture-origin Plan/local Validation clause
   above, preserving original finalizer-OR-autouse/framework alternatives, same
   custodians, ownership/foreign-target safety, setup/pass/failure/interruption/residual
@@ -741,6 +777,13 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+### 2026-10-24 - Direct retained clean-room verdict acceptance from #5921
+
+- Plan the complete finite #5921 report/Python/Python-less/consuming-caller acceptance directly in this existing Phase4 ROOT Plan, local Validation, actual global Validation and continuing Coordination. Preserve every incumbent byte/checked row, original alternative/evidence tier, live #1303 claim and entire inline/linked historical Journal.
+- Keep #5922 without-base composition and #8511 concurrent artifact ownership independent; #4312 paired setup AND judged evaluation, #688 Tier-E and #1475 WinGet keep their owners and gates. Documentation-only historical receipts are not reducer implementation or a live consumer PASS.
+- This is proposed tracker intake only. NEW normal review, ACTUAL merge and FULL CURRENT receiving/root/history/source coordination readback must precede #5921 administrative supersession. Record that real receiving identity/readback only after it exists; no test, import, reducer, rig, model, installer, provider, runtime or resource operation was performed or authorized here.
+- The effort remains Active. Existing owners continue the next genuinely unfinished domain Plan item through their separately admitted lane; this finite source/API contract neither depends on unrelated whole-programme completion nor waives it.
 
 - [2026-10-24 - Direct retained acceptance from #4123](<journal/2026/10.24 backlog-intake-85-86.md>)
 
