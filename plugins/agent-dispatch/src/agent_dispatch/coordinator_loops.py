@@ -422,7 +422,10 @@ async def _gc_loop(
     run_supervised_cycle: Callable[..., Any] = _run_supervised_cycle,
     governance_backoff: Callable[..., Any] = _governance_backoff,
 ) -> None:
-    """Periodically garbage-collect tasks by **liveness**."""
+    """Maintain diagnostics; garbage-collect tasks only when interval is enabled."""
+    from .diagnostic_logs import MAINTENANCE_SECONDS, maintain_file_logging
+
+    gc_enabled = bool(interval and interval > 0)
     # The reviewer-deadline reconcile below is a second, independent unit of
     # work piggybacked onto this same loop iteration. It must NOT share
     # ``health`` (the publicly reported ``liveness_gc`` entry): reusing one
@@ -437,7 +440,10 @@ async def _gc_loop(
         name="liveness_gc.reviewer_deadline", base_interval=health.base_interval
     )
     while True:
-        await asyncio.sleep(health.current_interval)
+        await asyncio.sleep(health.current_interval if gc_enabled else MAINTENANCE_SECONDS)
+        await asyncio.to_thread(maintain_file_logging)
+        if not gc_enabled:
+            continue
         if await governance_backoff(
             governance,
             "iteration-boundary:liveness-gc",

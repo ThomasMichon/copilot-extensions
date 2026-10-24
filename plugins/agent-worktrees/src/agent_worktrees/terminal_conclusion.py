@@ -9,12 +9,13 @@ and re-checks liveness plus its idle grace before removing anything.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import os
 from pathlib import Path
 from typing import Any
 
 from . import config as cfg
-from . import finalize, git_ops, sessions, tracking
+from . import finalize, git_ops, paired_claims, sessions, tracking
 from . import terminal_pair_progress
 
 DISPOSABLE_CLI_POLICY = "disposable-cli"
@@ -186,7 +187,13 @@ def _preservation_reason(
         return "pending-handoff"
     if record.follow_up or record.active_effort is not None:
         return "follow-up"
-    if record.live_resources or record.owner_ref:
+    held = [
+        claim for claim in record.live_resources
+        if not (pair_clear and claim.kind == "worktree"
+                and claim.ref == paired_claims.paired_ref(record) and claim.is_at_rest
+                and not claim.handoff_bundle)
+    ]
+    if held or record.owner_ref:
         return "outstanding-obligations"
     if record.is_paired and not pair_clear:
         return "outstanding-obligations"
@@ -195,7 +202,9 @@ def _preservation_reason(
     return None
 
 
-def _sibling_preservation_reason(sibling: tracking.WorktreeRecord) -> str | None:
+def _sibling_preservation_reason(
+    sibling: tracking.WorktreeRecord, record: tracking.WorktreeRecord,
+) -> str | None:
     """Preservation gate for the RECIPROCAL sibling of a dispatch-owned
     pair concluding together (see :func:`_dispatch_pair_clearance`).
     Deliberately narrower than :func:`_preservation_reason`: the sibling
@@ -208,7 +217,14 @@ def _sibling_preservation_reason(sibling: tracking.WorktreeRecord) -> str | None
         return "pair-sibling-pending-handoff"
     if sibling.follow_up or sibling.active_effort is not None:
         return "pair-sibling-follow-up"
-    if sibling.live_resources or sibling.owner_ref:
+    creator_link = (
+        record.pair_role == "harness" and sibling.status == "finalized"
+        and sibling.owner_ref == tracking.format_claim_ref(
+            record.execution_machine, record.repo, record.worktree_id,
+        )
+        and _pair_progress_valid(record, sibling, sibling.yaml_path)
+    )
+    if sibling.live_resources or (sibling.owner_ref and not creator_link):
         return "pair-sibling-outstanding-obligations"
     if sibling.has_live_pr():
         return "pair-sibling-open-pull-request"
@@ -219,6 +235,8 @@ def _sibling_preservation_reason(sibling: tracking.WorktreeRecord) -> str | None
         # Marking the sibling bridge/complete without concluding that
         # session first would silently strand it.
         return "pair-sibling-active-lifecycle-head"
+    if sibling.status != "finalized":
+        return "pair-sibling-not-finalized"
     return None
 
 
@@ -440,7 +458,7 @@ def _dispatch_pair_clearance(
     sibling, _sibling_path = resolved
     if _session_is_live(sibling):
         return False, "pair-sibling-live"
-    if reason := _sibling_preservation_reason(sibling):
+    if reason := _sibling_preservation_reason(sibling, record):
         return False, reason
     if reason := _sibling_ancestry_reason(sibling):
         return False, reason
@@ -487,7 +505,7 @@ def _conclude_pair_sibling(
                 return {"action": "skipped", "reason": "pair-sibling-identity-mismatch"}
             if live_reason := _session_is_live(sibling):
                 return {"action": "skipped", "reason": live_reason}
-            if reason := _sibling_preservation_reason(sibling):
+            if reason := _sibling_preservation_reason(sibling, record):
                 return {"action": "skipped", "reason": reason}
             if reason := _sibling_ancestry_reason(sibling):
                 return {"action": "skipped", "reason": reason}
@@ -507,7 +525,8 @@ def _conclude_pair_sibling(
             sibling.kind = "bridge"
             sibling.owner = record.owner
             sibling.origin = "delegate"
-            tracking.update_status(sibling, "complete", save=False)
+            if sibling.status != "finalized":
+                tracking.update_status(sibling, "complete", save=False)
             tracking.save_record(sibling, sibling_path)
             terminal_pair_progress.publish(record, sibling, sibling_path, primary_path=primary_path)
             # Discharge the pairing link -- see the docstring above.
@@ -811,7 +830,7 @@ def conclude_disposable_worktree(
             record_path,
             timeout=3,
             require_sidecar=True,
-        ):
+        ), ExitStack() as pair_fence:
             record = tracking.load_record(record_path)
             if record.worktree_id != record_path.stem:
                 raise RuntimeError(
@@ -834,6 +853,12 @@ def conclude_disposable_worktree(
                 record, reservation_key=reservation_key, owner=owner
             ):
                 _release_dispatch_session_claims(record, session_id=session_id)
+            if record.is_paired and policy == DISPATCH_ATTEMPT_POLICY:
+                try:
+                    pair_fence.enter_context(paired_claims.lifecycle_guard(record))
+                except ValueError:
+                    result.update(action="skipped", reason="pair-sibling-lifecycle-changing")
+                    return result
             pair_clear, pair_block_reason = _dispatch_pair_clearance(
                 record, policy=policy, reservation_key=reservation_key, owner=owner,
             )
@@ -843,6 +868,8 @@ def conclude_disposable_worktree(
             if reason := _preservation_reason(record, policy=policy, pair_clear=pair_clear):
                 result.update(action="skipped", reason=reason)
                 return result
+            if pair_clear and (ref := paired_claims.paired_ref(record)):
+                tracking.release_resource_claim(record, ref, save=False)
             session_result, _session_changed = _save_session_conclusion(
                 record,
                 record_path,

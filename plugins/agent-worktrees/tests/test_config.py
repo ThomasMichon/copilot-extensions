@@ -1107,10 +1107,11 @@ class TestCachedLoadConfigScope:
         with cfg.cached_load_config_scope():
             cfg.load_config(cfgfile)
             cfg.load_config(cfgfile, include_control_plane_related_pr=False)
+            cfg.load_config(cfgfile, include_knowledge_preferences=False)
             cfg.load_config(cfgfile, project="other")
-        # Three distinct signatures -> three real loads, none reused across
+        # Four distinct signatures -> four real loads, none reused across
         # differently-parameterized calls.
-        assert len(calls) == 3
+        assert len(calls) == 4
 
     def test_scope_does_not_leak_across_scopes(self, tmp_path, monkeypatch):
         anchor = tmp_path / "ext"
@@ -2231,6 +2232,124 @@ class TestKnowledgeConfigOverlay:
         assert policy.armed is True
         assert policy.name == "portable-policy"
         assert policy.profiles == ("p1", "p2")
+
+    @pytest.mark.parametrize("narrow_first", [False, True])
+    def test_preference_opt_out_preserves_binding_and_policy(
+        self, tmp_path, monkeypatch, narrow_first
+    ):
+        h = self._mk_harness(tmp_path, stateless=True)
+        k = self._mk_knowledge(
+            tmp_path,
+            "headless: true\nauto_fast_forward: false\n"
+            "copilot_profiles:\n  - name: portable\n",
+        )
+        self._registry(monkeypatch, harness=h, knowledge=k)
+        mfile = tmp_path / "machine.yaml"
+        mfile.write_text(
+            "repo_name: harness\nmachine: m\nplatform: wsl\n"
+            "knowledge_repo: knowledge\n"
+            f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
+            encoding="utf-8",
+        )
+        reads = []
+        original = cfg._load_inrepo_config
+
+        def read(anchor, **kwargs):
+            reads.append(str(anchor))
+            return original(anchor, **kwargs)
+
+        monkeypatch.setattr(cfg, "_load_inrepo_config", read)
+        configs = {}
+        with cfg.cached_load_config_scope():
+            for include in (not narrow_first, narrow_first):
+                reads.clear()
+                configs[include] = cfg.load_config(
+                    mfile,
+                    include_control_plane_related_pr=False,
+                    include_knowledge_preferences=include,
+                )
+                assert str(h) in reads
+                assert (str(k) in reads) is include
+            assert cfg.load_config(
+                mfile, include_control_plane_related_pr=False
+            ) is configs[True]
+            assert cfg.load_config(
+                mfile,
+                include_control_plane_related_pr=False,
+                include_knowledge_preferences=False,
+            ) is configs[False]
+        full, narrow = configs[True], configs[False]
+        assert full.knowledge_repo == narrow.knowledge_repo == "knowledge"
+        assert full.repos == narrow.repos
+        assert narrow.default_repo.stateless is True
+        assert narrow.default_repo.pr.enabled is True
+        assert full.headless is True
+        assert narrow.headless is False
+        assert full.auto_fast_forward is False
+        assert narrow.auto_fast_forward is True
+        assert [profile.name for profile in full.copilot_profiles] == ["portable"]
+        assert narrow.copilot_profiles == []
+
+    @pytest.mark.parametrize(
+        "scenario",
+        [
+            "bound", "unbound", "unregistered", "explicit", "explicit-missing",
+            "self-hosted", "no-machine-config",
+        ],
+    )
+    @pytest.mark.parametrize("json_out", [False, True], ids=["plain", "json"])
+    def test_state_root_full_and_narrow_config_have_identical_results(
+        self, tmp_path, monkeypatch, capsys, scenario, json_out
+    ):
+        import json
+
+        from agent_worktrees import context_cli, repos, state_root
+
+        h = self._mk_harness(tmp_path, stateless=scenario != "self-hosted")
+        k = self._mk_knowledge(tmp_path, "headless: true\n")
+        registered = {"harness": h}
+        if scenario != "unregistered":
+            registered["knowledge"] = k
+        self._registry(monkeypatch, **registered)
+        monkeypatch.setattr(repos, "get_srcroot", lambda plat=None: str(tmp_path / "absent"))
+        monkeypatch.setattr(state_root, "_git_toplevel", lambda cwd: str(h))
+        mfile = tmp_path / "machine.yaml"
+        if scenario != "no-machine-config":
+            binding = "" if scenario == "unbound" else "knowledge_repo: knowledge\n"
+            mfile.write_text(
+                "repo_name: harness\nmachine: m\nplatform: wsl\n"
+                f"{binding}repos:\n  harness:\n    anchor: {h}\n",
+                encoding="utf-8",
+            )
+        monkeypatch.setattr(cfg, "default_config_path", lambda: mfile)
+        monkeypatch.setattr(cfg, "_project_name_safe", lambda: "harness")
+        override = {
+            "explicit": "knowledge", "explicit-missing": "missing",
+        }.get(scenario)
+        full = cfg.load_config(mfile, include_control_plane_related_pr=False)
+        narrow = cfg.load_config(
+            mfile,
+            include_control_plane_related_pr=False,
+            include_knowledge_preferences=False,
+        )
+        expected = state_root.resolve_state_root(full, repo_override=override)
+        assert state_root.resolve_state_root(
+            narrow, repo_override=override
+        ).as_dict() == expected.as_dict()
+        assert bool(expected.path) is (
+            scenario in {"bound", "explicit", "self-hosted"}
+        )
+        args = ["--json"] if json_out else []
+        if override:
+            args.extend(["--repo", override])
+        assert context_cli.cmd_state_root_dispatch(args) == (0 if expected.path else 3)
+        output = capsys.readouterr()
+        if json_out:
+            assert json.loads(output.out) == expected.as_dict()
+            assert output.err == ""
+        else:
+            assert output.out == (expected.path + "\n" if expected.path else "")
+            assert output.err == (expected.error + "\n" if expected.error else "")
 
     def test_machine_local_wins_over_overlay(self, tmp_path, monkeypatch):
         h = self._mk_harness(tmp_path, stateless=True)

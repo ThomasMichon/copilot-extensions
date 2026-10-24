@@ -116,7 +116,7 @@ def test_native_jobs_do_not_reenter_required_unit_only_ci(retired_job: str) -> N
     units = workflow["jobs"]["unit-tests"]
     execution = next(step for step in units["steps"] if step.get("id") == "units")
     assert execution["if"] == "steps.impact.outputs.run == 'true'"
-    assert "tools/run-promotion-unit-tests.py" in execution["run"]
+    assert "tools/ci_pr_unit_reuse.py" in execution["run"]
     assert not execution.get("continue-on-error", False)
 
 
@@ -199,6 +199,32 @@ def test_derived_native_diagnostics_are_not_a_required_smoke_fallback() -> None:
     assert "tools/run-standalone-tests.py" not in commands
 
 
+@pytest.mark.parametrize("platform,runner", [
+    ("linux", "ubuntu-latest"), ("windows", "windows-latest"),
+])
+def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform, runner) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert trigger["workflow_dispatch"]["inputs"]["candidate_profiles"]["default"] is False
+    name = f"candidate-profiles-{platform}"
+    job = workflow["jobs"][name]
+    assert job["if"] == "${{ inputs.candidate_profiles }}"
+    assert job["runs-on"] == runner
+    assert job["timeout-minutes"] == 15
+    assert "strategy" not in job
+    execution = job["steps"][-1]
+    assert "--test-file tests/test_python_installer_engine.py" in execution["run"]
+    for selector in ("local_role", "local_package", "role_health", "selected_extras"):
+        assert selector in execution["run"]
+    assert not execution.get("continue-on-error", False)
+    for diagnostics in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
+        assert "!inputs.candidate_profiles" in workflow["jobs"][diagnostics]["if"]
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    assert name not in required["jobs"]
+
+
 def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
@@ -208,6 +234,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert set(inputs) == {
         "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
+        "candidate_profiles",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -223,12 +250,13 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-service-linux", "pr-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
+        "candidate-profiles-linux", "candidate-profiles-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
         assert job["if"] == (
             "${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service "
-            "&& !inputs.pr_artifacts && !inputs.dependency_compile }}"
+            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4

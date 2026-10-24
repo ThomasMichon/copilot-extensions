@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http47-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/ordinary-native-shared-routes-prompts-generation-46.json",
+    "sha256": "74b8797af84c515661266abc2cc04f3fcbd59e0bfebd0c6084a04e56045f701b"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-owned-cold-drain.json",
+    "sha256": "90380f37b4ffec05ef1fd722a3f532357bc02e8d150ae829ec9609371abcfc09"
+  },
+  "scope": "source bytes unchanged; previous-generation vector preserved, not a new runtime capture",
+  "captured_from": {
+    "commit": "006a01a6b2a887503fae717cd4804306bd5db58c",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 47,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+    "source_git_blob": "4d5a40d53b8846ad584765f7d3561d8441efe490",
+    "source_sha256": "0c893b3958ee7e8b76533cf742bace46db24c61bd1f02065db57acba88a4b55b"
+  }
+}

@@ -20,9 +20,70 @@ def test_picker_bootstrap_reads_group_b_contract(monkeypatch):
         "cwd": "/state/dotfiles",
         "default_live": False,
     }
-    monkeypatch.setattr(engine_client, "run_json", lambda *args, **kwargs: payload)
+    calls = []
+    monkeypatch.setattr(
+        engine_client, "run_json",
+        lambda project, args, **kwargs: calls.append((project, args)) or payload,
+    )
 
     assert engine_group_b.picker_bootstrap("dotfiles") == payload
+    assert calls == [("dotfiles", ["picker-bootstrap", "--json", "--project-config"])]
+
+
+def test_picker_bootstrap_older_engine_compatibility(monkeypatch):
+    calls = []
+    timeouts = []
+    clock = iter([10.0, 17.0])
+    monkeypatch.setattr(engine_group_b, "monotonic", lambda: next(clock))
+    payload = {"project": "example", "project_config": {"config_dir": "/state"}}
+
+    def read(project, args, **kwargs):
+        calls.append(args)
+        timeouts.append(kwargs["timeout"])
+        if "--project-config" in args:
+            raise engine_client.EngineError(
+                "engine failed (exit 2): usage: engine picker-bootstrap\n"
+                "engine: error: unrecognized arguments: --project-config"
+            )
+        return payload
+
+    monkeypatch.setattr(engine_client, "run_json", read)
+    assert engine_group_b.picker_bootstrap("example", timeout=30) == payload
+    assert calls == [
+        ["picker-bootstrap", "--json", "--project-config"], ["picker-bootstrap", "--json"],
+    ]
+    assert timeouts == [30, 23]
+
+
+def test_picker_bootstrap_compatibility_cannot_extend_deadline(monkeypatch):
+    clock = iter([10.0, 40.0])
+    monkeypatch.setattr(engine_group_b, "monotonic", lambda: next(clock))
+    calls = []
+
+    def read(project, args, **kwargs):
+        calls.append(args)
+        raise engine_client.EngineError("unrecognized arguments: --project-config")
+
+    monkeypatch.setattr(engine_client, "run_json", read)
+    with pytest.raises(engine_client.EngineError, match="unrecognized arguments"):
+        engine_group_b.picker_bootstrap("example", timeout=30)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("detail", [
+    "configuration refused", "timed out", "unrecognized arguments: --other",
+])
+def test_picker_bootstrap_never_retries_operational_failures(monkeypatch, detail):
+    calls = []
+
+    def read(project, args, **kwargs):
+        calls.append(args)
+        raise engine_client.EngineError(detail)
+
+    monkeypatch.setattr(engine_client, "run_json", read)
+    with pytest.raises(engine_client.EngineError, match=detail):
+        engine_group_b.picker_bootstrap("example")
+    assert len(calls) == 1
 
 
 def test_picker_bootstrap_classifies_unsupported_engine(monkeypatch):
