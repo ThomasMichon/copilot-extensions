@@ -102,7 +102,7 @@ class GitSource:
             settled = Event()
             try:
                 result = self.run(
-                    [str(self.git), "-c", "protocol.ext.allow=never",
+                    [str(self.git), "--no-replace-objects", "-c", "protocol.ext.allow=never",
                      "-c", f"core.hooksPath={os.devnull}", "-c", "gc.auto=0",
                      "-c", "maintenance.auto=false", *arguments],
                     cwd=str(self.checkout), env=environment, timeout=remaining,

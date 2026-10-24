@@ -60,7 +60,9 @@ The controller verifies the remote, fetches that selected published ref into
 `refs/fleet-manager/<source>`, resolves the immutable commit and reads only an
 ordinary `100644` JSON blob. It does not check out files, execute templates,
 run repository hooks, fetch submodules or start Git maintenance. Dirty local
-files are not configuration inputs. Git environment overrides are removed;
+files and local Git replacement objects are not configuration inputs: every
+invocation disables replacement refs, preserving the reported commit's actual
+content. Git environment overrides are removed;
 interactive prompts are disabled. Embedded HTTP credentials, URL passwords,
 query strings and fragments refuse. The normal adopted Git credential/SSH/TLS
 owner remains responsible for authentication; no token is accepted in a
@@ -148,6 +150,12 @@ bound to the same generation/digest. A proposal change mid-read refuses.
 Cold range access validates the full encoded plan once; subsequent pages copy
 only their range, without re-encoding the full plan on the Gateway event loop.
 The maximum 4-MiB plan needs 256 pages, not 256 full-plan validations.
+The client paces a download below the existing Gateway control/public request
+rates without changing those limits. Only a pre-dispatch challenge 429 can
+repeat a read-only page admission, at most three attempts for the same selected
+generation, digest and offset. Authentication failures, network/unknown outcomes
+and stale selections are not retried; refresh/confirmation are never replayed
+by this mechanism. Persistent admission pressure remains an explicit failure.
 Notifications contain only bounded proposal identity/status, not raw configuration.
 Foreign/expired cursors refuse; a new producer generation requires resync.
 
@@ -163,10 +171,15 @@ cannot enroll or replace it.
 `test_loadout_preparation.py` exercises actual Git publication, controller
 fetch, dirty-file exclusion, remote/mode refusal, disabled transaction hooks,
 durable restart, exact decision/repeat/CAS, expiry and plan corruption.
+Published-content controls include local blob replacement and fixture execution
+with inherited repository/index/config overrides, without touching the selected
+external paths.
 Cross-fleet controls cover every composition/config projection, persisted
 readback/confirmation and matching foreign source/inventory through the real
 Gateway. Exact-limit paging and real settled native-output refusal controls
-cover bounded work and recoverable source failure.
+cover bounded work and recoverable source failure. The large client control
+uses the actual Gateway budget functions with a fast deterministic clock;
+separate real TLS controls preserve 429 before credentials or dispatch.
 `test_loadout_gateway.py` carries that real Git source through actual TLS/PoP/
 WebSocket transport and the thin client, including chunked inspection, scoped
 notification/replay, confirmation, changed inventory/source, current-policy

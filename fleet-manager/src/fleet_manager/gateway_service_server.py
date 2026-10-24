@@ -15,7 +15,7 @@ from typing import Any
 from aiohttp import HttpVersion11, WSMsgType, web
 
 from .gateway_service_channel import (
-    DEADLINE, FRAME_BYTES, GLOBAL_REQUESTS, REQUEST_HEADERS, RESPONSE_BYTES,
+    CONTROL_BURST, CONTROL_RATE, DEADLINE, FRAME_BYTES, GLOBAL_REQUESTS, REQUEST_HEADERS, RESPONSE_BYTES,
     BODY_BYTES,
     Channel, Pending, REQUEST_BURST, REQUEST_RATE, ServerSocket, TransportError, ValueFreeLogger,
     binary, check, headers, close_socket, encode_frame, no_store_response,
@@ -69,7 +69,7 @@ class ServiceRuntime:
         self.unverified = 0
         self.active = 0
         self.pending = 0
-        self.budget, self.sampled = 32.0, time.monotonic()
+        self.budget, self.sampled = float(CONTROL_BURST), time.monotonic()
         self.request_budget, self.request_sampled = float(REQUEST_BURST), time.monotonic()
         self.stopping = False
         self.last_error: str | None = None
@@ -94,7 +94,7 @@ class ServiceRuntime:
 
     def control_budget(self) -> None:
         now = time.monotonic()
-        self.budget = min(32, self.budget + (now - self.sampled) * 16)
+        self.budget = min(CONTROL_BURST, self.budget + (now - self.sampled) * CONTROL_RATE)
         self.sampled = now
         check(self.budget >= 1, "control-rate-limit", 429)
         self.budget -= 1

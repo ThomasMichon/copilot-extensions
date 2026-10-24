@@ -27,7 +27,9 @@ def repositories(tmp_path, monkeypatch):
     git = Path(shutil.which("git")).absolute()
     publisher, controller = tmp_path / "publisher", tmp_path / "controller"
     publisher.mkdir()
-    environment = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.upper().startswith("GIT_")}
+    environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
 
     def run(*arguments, cwd=publisher):
         result = run_caller_owned(
@@ -83,6 +85,40 @@ def test_real_published_pull_ignores_unpublished_client_changes_and_retains_comm
     assert source.pull(deadline=time.monotonic() + 15).document() == changed
     assert (rig["controller"] / "config.json").read_text() == '{"unpublished":"not selected"}'
     assert "publisher" not in str(snapshot.provenance())
+
+
+def test_local_replacement_blob_cannot_substitute_unpublished_configuration(repositories):
+    rig = repositories
+    controller = rig["controller"]
+    selected = rig["run"]("rev-parse", rig["commit"] + ":config.json", cwd=controller)
+    unpublished = {**rig["config"], "revision": "unpublished"}
+    (controller / "unpublished.json").write_bytes(canonical(unpublished))
+    replacement = rig["run"]("hash-object", "-w", "unpublished.json", cwd=controller)
+    rig["run"]("replace", selected, replacement, cwd=controller)
+    assert rig["run"]("cat-file", "blob", selected, cwd=controller) == canonical(unpublished).decode()
+    snapshot = rig["source"]().pull(deadline=time.monotonic() + 15)
+    assert snapshot.commit == rig["commit"] and snapshot.document() == rig["config"]
+
+
+def test_fixture_git_commands_ignore_inherited_external_repository_selection(tmp_path, monkeypatch, request):
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / "sentinel"
+    sentinel.write_bytes(b"unchanged")
+    for name, value in {
+        "GIT_DIR": str(external / "selected.git"),
+        "GIT_WORK_TREE": str(external / "work"),
+        "GIT_INDEX_FILE": str(external / "selected.index"),
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "user.name",
+        "GIT_CONFIG_VALUE_0": "Inherited identity",
+    }.items():
+        monkeypatch.setenv(name, value)
+    rig = request.getfixturevalue("repositories")
+    assert sorted(path.name for path in external.iterdir()) == ["sentinel"]
+    assert sentinel.read_bytes() == b"unchanged"
+    assert rig["run"]("show", "-s", "--format=%an", "HEAD") == "Example"
+    assert rig["source"]().pull(deadline=time.monotonic() + 15).document() == rig["config"]
 
 
 @pytest.mark.parametrize("change", [
@@ -251,22 +287,31 @@ def test_persisted_foreign_plan_cannot_be_inspected_or_confirmed(tmp_path):
         assert connection.execute("SELECT decision FROM proposal").fetchone() == (None,)
 
 
-def test_exact_maximum_plan_pages_validate_full_content_once_and_refuse_stale_selection(tmp_path, monkeypatch):
-    import hashlib
-
-    from fleet_manager import loadout_preparation
-    from fleet_manager.loadout_preparation import PLAN_CHUNK, InvalidPlanRange
+def maximum_plan(*, fleet="example"):
     from fleet_manager.loadouts import design_loadout
     from fleet_manager.planning import MAX_PLAN_BYTES
 
-    plan = design_loadout(*inputs(), now=150)
+    values = inputs()
+    values[0]["fleet_id"] = values[1]["fleet_id"] = fleet
+    plan = design_loadout(*values, now=150)
     plan["range_test_payload"] = ["x" * 65536] * 63
     plan["range_test_tail"] = ""
     plan["digest"] = digest({key: value for key, value in plan.items() if key != "digest"}, output=True)
     plan["range_test_tail"] = "y" * (MAX_PLAN_BYTES - len(canonical(plan, output=True)))
     plan["digest"] = digest({key: value for key, value in plan.items() if key != "digest"}, output=True)
+    assert len(canonical(plan, output=True)) == MAX_PLAN_BYTES
+    return plan
+
+
+def test_exact_maximum_plan_pages_validate_full_content_once_and_refuse_stale_selection(tmp_path, monkeypatch):
+    import hashlib
+
+    from fleet_manager import loadout_preparation
+    from fleet_manager.loadout_preparation import PLAN_CHUNK, InvalidPlanRange
+    from fleet_manager.planning import MAX_PLAN_BYTES
+
+    plan = maximum_plan()
     encoded = canonical(plan, output=True)
-    assert len(encoded) == MAX_PLAN_BYTES
     selected = candidate(plan)
     path = tmp_path / "large-proposal.sqlite"
     store = PreparationStore(path, fleet="example", installation="controller-1")

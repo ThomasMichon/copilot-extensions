@@ -3,7 +3,9 @@
 import asyncio
 import json
 import ssl
+import time
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 from aiohttp import web
@@ -77,6 +79,33 @@ def test_authority_withdrawal_and_recovery_is_a_new_request(tmp_path):
             await rig.update()
             assert (await client.request("GET", "/api")).status == 200
             assert len(rig.backends[0].requests) == 2
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_challenge_quota_preserves_429_before_credentials_or_dispatch(tmp_path, monkeypatch, method):
+    from fleet_manager import gateway_service_server
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            await rig.connect()
+            current = time.monotonic()
+            monkeypatch.setattr(gateway_service_server, "time", SimpleNamespace(
+                monotonic=lambda: current, time=time.time,
+            ))
+            rig.state.budget, rig.state.sampled = 0, current
+            credentials = []
+
+            async def access():
+                credentials.append(True)
+                return rig.access("caller-a", 3)
+
+            client = caller(rig, access_token_callback=access)
+            with pytest.raises(TransportError) as raised:
+                await client.request(method, "/api", body=b"not-dispatched")
+            assert raised.value.code == "gateway-challenge-refused"
+            assert raised.value.status == 429 and client._active == 0
+            assert not credentials and not rig.backends[0].requests
     asyncio.run(scenario())
 
 

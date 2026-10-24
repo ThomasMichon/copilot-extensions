@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from fleet_manager.gateway_service_caller import ServiceCaller
+from fleet_manager.gateway_service_caller import ServiceCaller, ServiceResponse as CallerResponse
 from fleet_manager.loadout_gateway import (
     PLAN_CHUNK, PreparedLoadoutClient, PreparedLoadoutService, ReviewScope, _settled,
 )
@@ -351,4 +351,103 @@ def test_settled_native_output_overflow_is_blocked_inspectable_and_recoverable(t
             assert recovered["candidate"]["status"] == "prepared"
             assert recovered["generation"] > blocked["generation"]
             assert controller.repository_failure is None and len(failed) == 1
+    asyncio.run(scenario())
+
+
+def test_maximum_client_download_obeys_real_gateway_budgets_and_recovers_read_admission(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from fleet_manager import gateway_service_server, loadout_gateway
+    from fleet_manager.gateway_service_channel import CONTROL_RATE, REQUEST_RATE, TransportError
+    from fleet_manager.gateway_service_server import ServiceRuntime
+    from gateway_service_transport_fixtures import Rig
+    from test_loadout_preparation import candidate, maximum_plan
+
+    async def scenario():
+        clock = SimpleNamespace(value=0.0)
+        pause = asyncio.sleep
+
+        async def advance(delay):
+            clock.value += delay
+            await pause(0)
+
+        monkeypatch.setattr(loadout_gateway, "monotonic", lambda: clock.value)
+        monkeypatch.setattr(loadout_gateway, "sleep", advance)
+        monkeypatch.setattr(gateway_service_server, "time", SimpleNamespace(
+            monotonic=lambda: clock.value, time=time.time,
+        ))
+        rig = Rig(tmp_path)
+        runtime = ServiceRuntime(rig.h.owner, rig.listener, 0.05)
+        runtime.budget = 0
+        plan = maximum_plan(fleet="fleet-a")
+        store = PreparationStore(tmp_path / "large.sqlite", fleet="fleet-a", installation="preparation-a")
+        selected = {**candidate(plan), "fleet": "fleet-a", "installation": "preparation-a"}
+        current = store.publish(selected, plan, expected=0, now=150)
+        attempts, accepted, refused = [], [], []
+
+        class BudgetCaller:
+            async def request(self, method, target, *, body=b""):
+                assert method == "GET" and body == b""
+                attempts.append(target)
+                try:
+                    runtime.control_budget()
+                except TransportError as error:
+                    assert error.code == "control-rate-limit"
+                    refused.append(True)
+                    raise TransportError("gateway-challenge-refused", 429) from None
+                runtime.admit_request()
+                parts = target.split("/")
+                assert parts[:3] == ["", "api", "plan"]
+                assert parts[3:5] == [str(current["generation"]), current["digest"]]
+                encoded = store.read_plan_range(
+                    generation=int(parts[3]), selected_digest=parts[4], offset=int(parts[5]),
+                )
+                accepted.append(clock.value)
+                return CallerResponse(200, (), encoded)
+
+        thin = PreparedLoadoutClient(BudgetCaller(), prefix="/api")
+        assert await thin.plan(PreparedLoadoutService._summary(current)) == plan
+        assert len(accepted) == 256 and len(attempts) == 257 and len(refused) == 1
+        interval = 2 / min(CONTROL_RATE, REQUEST_RATE)
+        assert all(right - left >= interval - 1e-9 for left, right in zip(accepted, accepted[1:]))
+        assert clock.value <= (len(accepted) + 4) * interval
+        assert not rig.tasks and not rig.connectors
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("code,status,expected", [
+    ("gateway-challenge-refused", 429, 3),
+    ("gateway-challenge-refused", 401, 1),
+    ("gateway-timeout", 502, 1),
+    ("outcome-unknown", 502, 1),
+])
+def test_page_read_admission_recovery_is_bounded_and_never_retries_other_failures(monkeypatch, code, status, expected):
+    from types import SimpleNamespace
+
+    from fleet_manager import loadout_gateway
+    from fleet_manager.gateway_service_channel import TransportError
+
+    async def scenario():
+        clock = SimpleNamespace(value=0.0)
+        attempts = []
+        failure = TransportError(code, status)
+
+        async def advance(delay):
+            clock.value += delay
+
+        class RefusedCaller:
+            async def request(self, method, target, *, body=b""):
+                attempts.append((method, target, body))
+                raise failure
+
+        monkeypatch.setattr(loadout_gateway, "monotonic", lambda: clock.value)
+        monkeypatch.setattr(loadout_gateway, "sleep", advance)
+        thin = PreparedLoadoutClient(RefusedCaller(), prefix="/api")
+        with pytest.raises(TransportError) as raised:
+            await thin.plan({
+                "generation": 1, "digest": "1" * 64,
+                "candidate": {"plan_bytes": 1, "plan_digest": "2" * 64},
+            })
+        assert raised.value is failure and len(attempts) == expected
+        assert len(set(attempts)) == 1 and attempts[0][0] == "GET" and attempts[0][2] == b""
     asyncio.run(scenario())

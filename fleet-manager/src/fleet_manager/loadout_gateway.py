@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from asyncio import sleep
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 import hashlib
@@ -10,7 +11,9 @@ import json
 import logging
 import subprocess
 import time
+from time import monotonic
 
+from .gateway_service_channel import CONTROL_RATE, REQUEST_RATE, TransportError
 from .gateway_service_handler import CallerContext, HandlerBinding, ServiceRequest, ServiceResponse
 from .loadout_preparation import (
     PLAN_CHUNK, InvalidPlanRange, PreparationStore, PreparedPlanChanged,
@@ -385,10 +388,25 @@ class PreparedLoadoutClient:
         size = candidate["plan_bytes"]
         integer(size, "prepared plan bytes", minimum=1, maximum=MAX_PLAN_BYTES)
         raw = bytearray()
+        interval = 2 / min(CONTROL_RATE, REQUEST_RATE)
+        next_request, refusals = monotonic(), 0
         while len(raw) < size:
-            chunk = await self._request(
-                "GET", f"/plan/{prepared['generation']}/{prepared['digest']}/{len(raw)}",
-            )
+            delay = next_request - monotonic()
+            if delay > 0:
+                await sleep(delay)
+            next_request = monotonic() + interval
+            try:
+                chunk = await self._request(
+                    "GET", f"/plan/{prepared['generation']}/{prepared['digest']}/{len(raw)}",
+                )
+            except TransportError as error:
+                if (error.code != "gateway-challenge-refused" or error.status != 429
+                        or refusals >= 2):
+                    raise
+                refusals += 1
+                next_request = monotonic() + interval * 2**refusals
+                continue
+            refusals = 0
             if len(chunk) != min(PLAN_CHUNK, size - len(raw)):
                 raise PlanError("Gateway prepared plan range is invalid")
             raw.extend(chunk)
