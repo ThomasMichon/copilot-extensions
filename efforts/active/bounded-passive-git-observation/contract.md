@@ -160,7 +160,7 @@ process-discovery calls on each classification are prohibited.
 
 | Slice | Proposed hunks/tests | Ownership boundary |
 |-------|----------------------|--------------------|
-| P0 | This effort folder only | Plan author; no shared index rewrite or plugin changefile needed |
+| P0 | This effort folder and one discoverability row in `efforts/README.md` | Plan author; no unrelated index rewrite or plugin changefile needed |
 | R1a | `A/git_ops.py`: first helper, classifier handler/closure, remaining-budget `_g`; `A/status_bar_cli.py`: default and both segment prefixes; `A/push_timeout.py`: opt-in deadline/drain; `T/test_git_ops.py`, `T/test_status_segment.py` | Admit helper API/containment owner before edit; retain unbounded general Git/push defaults |
 | R1b | `A/__main__.py`: `_monitor_sweep` served and warm-project blocks; `A/status_monitor_cli.py`: only connecting the existing admission/snapshot seam if needed; `T/test_status_monitor.py`, proposed `T/native/test_git_observation_deadline.py` | Shared monitor hunks require coordinator + publication/control owners' admission; `A/worktrees_producer.py` gather/commit change remains publication-owner work |
 | R2 | `A/git_ops.py`: status argv hunk only, after R1a; `T/test_git_ops.py`, `T/test_session_catalog.py`, proposed `T/native/test_passive_fsmonitor_cycle.py` | No session/config lifetime implementation or cleanup-policy takeover |

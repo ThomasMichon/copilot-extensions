@@ -96,7 +96,7 @@ or additional operator authorization.
 ### P0 — Reviewed proposal only
 - [x] Confirm the two mechanisms against bounded current source and tests.
 - [x] Specify separate R1/R2 contracts, exclusions and test-tier obligations.
-- [ ] Address a fresh independent review and land the docs-only plan through
+- [x] Address a fresh independent review and land the docs-only plan through
   source review and required CI.
 - [ ] Return exact plan/head/claims to the integration coordinator; obtain
   independent admission before any functional edit.
@@ -154,3 +154,7 @@ status reads over a new session-lifetime configuration policy.
   saturation; this is a qualification limitation, not a new benchmark.
 - Fresh independent source-grounded Sol review returned PASS for the three
   plan files only; this is not functional implementation admission.
+- Plan #8372 merged after current-head source Copilot approval and required
+  green CI. Its two Low findings prompted a discoverability-row follow-up
+  and repair of a multiline PR-description transport loss. No contract,
+  implementation or rollout authority was expanded.
