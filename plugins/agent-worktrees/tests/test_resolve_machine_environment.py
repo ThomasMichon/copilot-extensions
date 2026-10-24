@@ -53,6 +53,7 @@ def test_remote_selector_preserves_resume_actions() -> None:
     ))
     assert resolve_cli._remote_selector_args(state) == [
         "--worktree-id", "example-worktree", "--bare-resume", "--restore", "--no-mux", "--dry-run",
+        "--require-agent-hosting",
     ]
 
 
