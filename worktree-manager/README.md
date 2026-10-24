@@ -129,9 +129,10 @@ completion custody. Redirected diagnostics must reach the durable request log,
 not disappear behind an exit code.
 
 The **One-line bootstrap** below remains the fresh-install entry, not a required
-manual migration step for an adopted Manager. Do not rewrite a deployed launcher,
-install application dependencies into ambient Python, or use update bypass flags
-to force recovery.
+manual migration step for an adopted Manager. Its explicit
+[queue-release mode](#older-client-queue-release) is separate from installation.
+Do not rewrite a deployed launcher or install application dependencies into
+ambient Python to force recovery.
 
 Bootstrap-owned human progress goes to stderr with UTC correlation time and
 explicit running, warning or failed state. PowerShell uses its in-process
@@ -650,6 +651,50 @@ install with `worktree-manager self-install` (dry-run) / `--apply`, and see it i
 `~/.agent-worktrees/control-plane-providers.d/worktree-manager.json`, so a bare
 project binstub discovers this Manager through the generic control-plane-provider
 registry rather than a literal `worktree-manager` PATH probe.
+
+### Older-client queue release
+
+An older installed Manager or Worktrees command may not understand
+`update --recover-for-repair`. An explicitly authorized operator can instead
+use an intact, trusted newer source's recovery-only entry. With Python 3.11+
+already available, from that source root:
+
+```bash
+python3 -I -S -B -X utf8 worktree-manager/scripts/runtime_install.py --recover-for-repair --json
+```
+
+On Windows, use the corresponding `python.exe` invocation. This entry imports
+only that Manager payload's declared local update-driver dependency closure,
+including materialized release payloads. It does not import the installed
+application, require its cooperation, construct Manager, publish selectors or
+commands, start services, or run pending work.
+
+The paired native bootstrap also accepts this mode:
+
+```bash
+bash worktree-manager/bootstrap.sh --recover-for-repair --json
+```
+
+```powershell
+& .\worktree-manager\bootstrap.ps1 --recover-for-repair --json
+```
+
+These bootstrap commands fetch the configured source into a private temporary
+directory, not the Manager installer's shared staging directory, and remove
+that temporary source after the recovery child finishes, including on failure.
+The ordinary bootstrap prerequisite policy still applies. `--json` is optional;
+no installation options or application command may accompany recovery.
+`WORKTREE_MANAGER_ROOT` selects bootstrap source configuration, not a different
+queue: recovery addresses the executing user's canonical installation queue.
+
+The [driver's explicit repair contract](../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+owns authorization, failed-history preservation and refusal semantics. JSON
+reports `cleanup_confirmed: false` and the actual released records, never a
+successful installation. A current execution owner, malformed queue or separately
+fenced native foundation still refuses this bounded entry. Release neither
+retires a live installer nor replays its failed request; request the intended
+ordinary installation separately after release. Full bounded takeover and
+selected-runtime readiness remain distinct from this operation.
 
 ### Slot completeness and recovery
 

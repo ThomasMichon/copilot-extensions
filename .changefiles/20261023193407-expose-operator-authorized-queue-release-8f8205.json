@@ -1,0 +1,9 @@
+{
+  "comment": "Expose operator-authorized queue release through an intact source bootstrap without installing Manager",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

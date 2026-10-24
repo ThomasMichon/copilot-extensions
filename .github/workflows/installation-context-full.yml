@@ -75,6 +75,11 @@ jobs:
           --test-file tests/test_process.py
           --test-file tests/test_settled_failure_process.py
           --test-file tests/test_legacy_record_readback.py
+      - name: Qualify older-client source-bootstrap repair entry
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/test_bootstrap_repair_recovery.py
+          --test-timeout 120 --timeout 240
       - name: Qualify actual immutable foundation construction and custody
         run: >-
           python tools/run-plugin-tests.py update-driver
@@ -129,6 +134,11 @@ jobs:
           --test-file tests/test_process.py
           --test-file tests/test_settled_failure_process.py
           --test-file tests/test_legacy_record_readback.py
+      - name: Qualify older-client source-bootstrap repair entry
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/test_bootstrap_repair_recovery.py
+          --test-timeout 120 --timeout 240
       - name: Qualify actual immutable foundation construction and custody
         run: >-
           python tools/run-plugin-tests.py update-driver
