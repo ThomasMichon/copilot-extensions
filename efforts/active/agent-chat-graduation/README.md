@@ -243,12 +243,16 @@ requirements.
   over existing Chat state before dependent implementation, preserving the
   coordinated client/service/plugin extension points.
   Reviewed contract #8134 merged as
-  `85942fd63be8c298ba880bf0d42b5a5747f15c24`; implementation and qualification
-  below remain open.
-- [ ] Implement and qualify optional structured posts and non-consuming
+  `85942fd63be8c298ba880bf0d42b5a5747f15c24`; its portable implementation
+  subsequently merged in #8159. Broader native and lifecycle gates remain open.
+- [x] Implement and qualify optional structured posts and non-consuming
   thread/inbox projections through the existing store and installed client.
   Pending reply attention must outlive an ambient window without becoming a
   task queue, native inbox assignment or another delivery authority.
+  #8159 qualified the current Windows source/installed-artifact slice and
+  required Linux source units. Current native Linux, genuine multi-machine
+  use, assignment, attachment and managed adoption remain in the parent
+  Validation Plan; they are not inferred from this source completion.
 
 #### Retained conduct and ingress integration
 
@@ -360,7 +364,7 @@ an independent SDK version or live native qualification.
 | Recipient inbox and eligible sources | The client accepts explicit actor/channel controls; Bridge `inspect_live_inbox` projects direct-message receipts | No examined client API supplies authoritative Chat recipient/source assignment. The client/service writer coordinates that versioned assignment and its isolation/rebind errors with the existing local service/Bridge owner. A direct-message receipt projection is not this API. |
 | Shared notification intake | Bounded Chat `scan` v1; Bridge remote-event multiplexing and protocol13 `remote/events` | Remote runtime events do not subscribe to the conversation store. The service writer and existing host/Bridge owner must publish the Chat-feed registration, generation, finite callback, cancellation and quiescence binding. No per-session Python helper or continuous Node polling is an acceptable substitute. |
 | Native admission and completion | SDK `session.send`, primary final-ID semantics and optional `originatingMessageId`; bounded queue/event-log observations | Exact own primary correlation is usable. Unknown or non-primary admission remains held until its native host supplies authoritative reconciliation; queue absence, unrelated idle and expired history do not supply it. |
-| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with eight checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
+| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with nine checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
 | Resident cost | The native host's ordinary extension process is the baseline | Existing service/host multiplexing owns shared listening. Measure increasing recipients, bounded callback time/bytes, zero quiet/self/irrelevant/reconnect-only model turns and exact deregistration separately from that baseline. |
 
 Repository API homes are `services/chat/src/agent_chat_service/`,
@@ -379,6 +383,59 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-24 - Portable collaboration merged; full graduation stays active
+
+- #8159 actually merged to `dev` as
+  `bc6fec54992c80293170c867be37775ab1dc6f9f` at00:18:37Z, from qualified
+  `c902cdaa25bf95a3cc839d6a717326fb3ec7976b`. Current-head Copilot review
+  `5635745409` approved with no open findings, every review thread was resolved
+  and required Linux source-unit/guard CI passed. Managed completion used the
+  repository-authorized Maintainer exception for the additional CODEOWNER
+  vote; no CI gate was bypassed.
+- Re-read the complete parent Plan and Validation Plan after merge. Resolve
+  only the portable collaboration implementation item. Native assignment,
+  shared feed/multiplexing, governed selection/setup, lifecycle, migration,
+  current platform qualification and genuine multi-machine adoption remain
+  open with their existing owners. The effort and #7238 stay Active.
+- The same immutable candidate passed both unchanged native Windows lanes:
+  acceptance361 passes, two specifically allowed POSIX skips and33 full-only
+  deselections in95.79 seconds under120; full394 passes and the same skips
+  in129.46 seconds under600. Both complete396-node maps have identical
+  membership digest
+  `74ef7d3dd3f75955377d23a4e729adb8d01b1cf10c9b6847bd7e35d718c6670d`,
+  without missing, unexpected, rejected or duplicate calls. All326 original
+  cases remain;70 are additive. Eighteen pure metadata/control units stay in
+  the existing admitted packet, not an expanded native CI matrix.
+- Review-driven regressions close the lock-held query class for unrelated,
+  pending and settled histories. Each indexed inbox branch and their merge
+  bound candidate examination before retirement. An empty scan page can
+  continue within its captured head without skipping an omitted pending entry;
+  exact returned counts and SDK progress guards preserve that contract.
+  Answered, resolved and superseded100-to5000 histories satisfy the unchanged
+  1000-instruction growth bound. The publication-race control injects only
+  after a successful real read, so stale existence checks cannot bypass it;
+  normal/fault cases keep actual child identity, crash and five-second bounds.
+- #8271's canonical Windows discovery repair pairs shared reads with native
+  retained-reader replacement and synchronizes the three intentional consumer
+  mirrors. Its131 native library contracts and the actual source-removed host
+  crash/rebind case pass. PID/strict parsing, mutation locks, record shape and
+  POSIX replacement remain unchanged; #5903/#5904 are separate.
+- Validation tiers retain real CLI/provider/HTTP, independent installed
+  participants, source-removed fresh core/client/service artifacts and actual
+  caller death before observer cleanup. No installer/bootstrap changed, so a
+  separate full-machine clean-room rig was not run. The configured local
+  Docker engine refused connection; no service was started and no native
+  Linux result is claimed. Actual model wake, external deployment and managed
+  adoption were not exercised or authorized. Earlier failed/stale-snapshot
+  diagnostics do not substitute for this final candidate.
+- Next bounded stretch _(agent-recommended)_: inspect the current workspace,
+  Bridge and lifecycle owners' published selection/setup and assignment/feed
+  seams, then claim the smallest supported Chat-owned consumer continuation.
+  Do not invent a missing host API, duplicate an installer or take neighboring
+  source. Keep current native Linux qualification explicit with its existing
+  owner rather than letting an unavailable local lane block unrelated
+  supported manual/client work. No runtime rollout is implied.
 
 ### 2026-10-23 - Bound each pending branch before lookahead merge
 
