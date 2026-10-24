@@ -209,6 +209,31 @@ def retained_source_layout(
     return anchors, mirror
 
 
+def retained_source_remapper(paths, mirror):
+    replacements = {}
+    for path in sorted(paths, key=lambda item: len(str(item)), reverse=True):
+        retained_path = mirror(path)
+        for before, after in (
+            (path.as_uri(), retained_path.as_uri()),
+            (str(path), str(retained_path)),
+            (path.as_posix(), retained_path.as_posix()),
+            (json.dumps(str(path))[1:-1], json.dumps(str(retained_path))[1:-1]),
+        ):
+            replacements[before] = after
+    pattern = re.compile("|".join(re.escape(before) for before in replacements)) if replacements else None
+
+    def remap(value):
+        if isinstance(value, list):
+            return [remap(item) for item in value]
+        if isinstance(value, dict):
+            return {key: remap(item) for key, item in value.items()}
+        if not isinstance(value, str) or pattern is None:
+            return value
+        return pattern.sub(lambda match: replacements[match[0]], value)
+
+    return remap
+
+
 def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_type):
     pairs = dict(argument_pairs(arguments))
     if "--no-config" in pairs or environment.get("UV_NO_CONFIG", "").lower() in ("1", "true"):

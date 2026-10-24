@@ -757,29 +757,7 @@ def _retain_uv_install(
             argument_pairs=_argument_pairs, file_options=_FILE_OPTIONS,
             toml=_toml, config_inputs=_config_inputs, generated_constraints=_generated_constraints,
         )
-
-        def remap(value):
-            if isinstance(value, list):
-                return [remap(item) for item in value]
-            if isinstance(value, dict):
-                return {key: remap(item) for key, item in value.items()}
-            if not isinstance(value, str):
-                return value
-            replacements = {}
-            for path in sorted(projects | files, key=lambda item: len(str(item)), reverse=True):
-                for before, after in (
-                    (path.as_uri(), mirror(path).as_uri()),
-                    (str(path), str(mirror(path))),
-                    (path.as_posix(), mirror(path).as_posix()),
-                    (json.dumps(str(path))[1:-1], json.dumps(str(mirror(path)))[1:-1]),
-                ):
-                    replacements[before] = after
-            if not replacements:
-                return value
-            return re.sub(
-                "|".join(re.escape(before) for before in replacements),
-                lambda match: replacements[match[0]], value,
-            )
+        remap = _configuration.retained_source_remapper(projects | files, mirror)
 
         for project in sorted(projects, key=lambda path: len(path.parts)):
             destination = mirror(project)
@@ -796,15 +774,21 @@ def _retain_uv_install(
             shutil.copytree(_native_retained_path(resource), _native_retained_path(mirror(resource)), dirs_exist_ok=True,
                             copy_function=_copy_retained_file)
         source_hashes = {}
+        verified_pairs = set()
         for project in projects:
             destination = Path(_native_retained_path(mirror(project)))
             for path in destination.rglob("*"):
                 if path.is_file():
                     original_path = project / path.relative_to(destination)
+                    # Preserve exact names even where Path equality folds case.
+                    pair = (str(original_path), str(path))
+                    if pair in verified_pairs:
+                        continue
                     retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
                     if hashlib.sha256(Path(_native_retained_path(original_path)).read_bytes()).hexdigest() != retained_hash:
                         raise DependencyPolicyError("source content changed while retaining UV inputs")
                     source_hashes[original_path] = retained_hash
+                    verified_pairs.add(pair)
         for project in projects:
             manifest = mirror(project) / "pyproject.toml"
             original_data = _toml(manifest)

@@ -757,30 +757,7 @@ def _retain_uv_install(
             argument_pairs=_argument_pairs, file_options=_FILE_OPTIONS,
             toml=_toml, config_inputs=_config_inputs, generated_constraints=_generated_constraints,
         )
-        replacements = {}
-        for path in sorted(projects | files, key=lambda item: len(str(item)), reverse=True):
-            retained_path = mirror(path)
-            for before, after in (
-                (path.as_uri(), retained_path.as_uri()),
-                (str(path), str(retained_path)),
-                (path.as_posix(), retained_path.as_posix()),
-                (json.dumps(str(path))[1:-1], json.dumps(str(retained_path))[1:-1]),
-            ):
-                replacements[before] = after
-        replacement_pattern = (
-            re.compile("|".join(re.escape(before) for before in replacements)) if replacements else None
-        )
-
-        def remap(value):
-            if isinstance(value, list):
-                return [remap(item) for item in value]
-            if isinstance(value, dict):
-                return {key: remap(item) for key, item in value.items()}
-            if not isinstance(value, str):
-                return value
-            if replacement_pattern is None:
-                return value
-            return replacement_pattern.sub(lambda match: replacements[match[0]], value)
+        remap = _configuration.retained_source_remapper(projects | files, mirror)
 
         for project in sorted(projects, key=lambda path: len(path.parts)):
             destination = mirror(project)
