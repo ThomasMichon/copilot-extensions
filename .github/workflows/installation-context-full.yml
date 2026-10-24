@@ -51,9 +51,11 @@ jobs:
           --test-file tests/test_bootstrap_admission_windows.py
           --test-timeout 60 --timeout 180
       - name: Qualify retained namespaced admission and exact hook response
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
         run: >-
           python tools/run-plugin-tests.py agent-pull-requests
-          --test-file tests/test_cell_invocation.py
+          --allow-explicit-tiers --allow-host-state --test-file tests/test_cell_invocation.py
           -k "session_start_never or bootstrap_admission_always"
           --test-timeout 60 --timeout 180
   pull-requests-bootstrap-windows:
@@ -88,9 +90,11 @@ jobs:
           --test-file tests/test_bootstrap_admission_windows.py
           --test-timeout 60 --timeout 180
       - name: Qualify retained namespaced admission and exact hook response
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
         run: >-
           python tools/run-plugin-tests.py agent-pull-requests
-          --test-file tests/test_cell_invocation.py
+          --allow-explicit-tiers --allow-host-state --test-file tests/test_cell_invocation.py
           -k "session_start_never or bootstrap_admission_always"
           --test-timeout 60 --timeout 180
   pull-requests-command-linux:
