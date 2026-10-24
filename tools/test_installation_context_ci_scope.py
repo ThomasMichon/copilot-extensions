@@ -236,6 +236,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
         "candidate_profiles", "ssh_snapshot", "wheel_inputs",
         "guardian_followthrough", "guardian_ref",
+        "runtime_profiles",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -255,6 +256,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
         "wheel-inputs-linux", "wheel-inputs-windows",
         "guardian-followthrough-macos",
+        "runtime-profile-policy-linux", "runtime-profile-policy-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
@@ -262,7 +264,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "${{ !inputs.guardian_followthrough && !inputs.watch_owner "
             "&& !inputs.dispatch_delegation && !inputs.pr_service "
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
-            "&& !inputs.ssh_snapshot && !inputs.wheel_inputs }}"
+            "&& !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
