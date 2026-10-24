@@ -1037,7 +1037,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     shopt -s dotglob nullglob
     for entry in "$PLUGIN_DIR"/*; do
         case "${entry##*/}" in
-            .git|__pycache__|.pytest_cache|.venv|tests)
+            .git|__pycache__|.pytest_cache|.venv|tests|snapshot-provenance.json)
                 [[ -n "$SOURCE_RUNTIME_IDENTITY" ]] || continue ;;
         esac
         if ! cp -a "$entry" "$SNAPSHOT_TMP/"; then

@@ -81,7 +81,7 @@ def _make_fake_plugin(root: Path) -> Path:
     """The fake 'source' plugin dir agent-ssh's manifest points at: its own
     pyproject.toml (the 'current' payload version) plus a harmless stub
     installer -- never invoke the REAL install.sh from a test."""
-    plugin_dir = root / "plugin"
+    plugin_dir = root / "home" / ".copilot" / "installed-plugins" / "fixture-market" / "agent-ssh"
     scripts_dir = plugin_dir / "scripts"
     scripts_dir.mkdir(parents=True)
     (plugin_dir / "pyproject.toml").write_text('version = "1.0.1"\n', encoding="utf-8")

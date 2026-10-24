@@ -329,7 +329,7 @@ transaction execution from the existing recurring-maintenance assignment.
   preparation may use the already-qualified fixed recipe; it does not credit
   unadopted command publishers. Retained-source #5379, primary/payload commands,
   explicit installers and namespaced/custom-root publication remain separate.
-- [ ] **Agent-recommended bounded source handoff:** qualify SSH's exact
+- [x] **Agent-recommended bounded source handoff:** qualify SSH's exact
   selected legacy snapshot through the same fixed native recipe and canonical
   staged-origin reader before adopting its ordinary primary command. Retain
   SSH's actual snapshot provenance, payload selection/version and complete
@@ -343,6 +343,21 @@ transaction execution from the existing recurring-maintenance assignment.
   rather than incidentally admitting a new bootstrap publisher. Ordinary
   primary/payload commands, explicit installers, custom roots/cells, rollout
   and the separately bounded network-backed #5379 acceptance remain open.
+- [ ] **Agent-recommended bounded publisher adoption:** route SSH's actual
+  generated legacy primary and payload cold commands through the packaged
+  foundation and canonical queue before cold trace/status or outer provision
+  locks. Preserve the existing stamp-to-selected-snapshot/provision semantics,
+  exact owning source/root/project, native staging, service-less options and
+  original command arguments/exit outcomes. A primary command delegates to its
+  exact selected snapshot's qualified dispatcher, never today's unrelated
+  installed payload. Keep healthy dispatch unchanged; refuse managed,
+  no-self-provision, pinned, nested, missing/skewed driver or unsupported cold
+  custom-root/cell publication before state writes, without a foreground or
+  recursive fallback. Qualify actual materialized commands, Python-free first
+  use, caller loss/concurrency, source independence, failed-candidate
+  preservation and no-write controls on native Windows/Linux. This does not
+  reopen the qualified bootstrap, adopt explicit installers, exercise remote
+  SSH, authorize rollout or close the separate network-backed #5379 gate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

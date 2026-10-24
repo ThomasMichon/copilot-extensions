@@ -83,6 +83,10 @@ if [[ "$(uname -s)" != Linux ]] || (( BASH_VERSINFO[0] < 4 ||
     (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 2) )); then
   refuse 'this native installation driver requires qualified Linux Bash, not the stock legacy shell.'
 fi
+if [[ "$(dirname -- "$(dirname -- "$PluginDir")")" != "$HOME/.copilot/installed-plugins" ||
+    "$(basename -- "$PluginDir")" != agent-ssh ]]; then
+  refuse 'SSH bootstrap publication requires its canonical installed payload.'
+fi
 first_use="$PluginDir/libs/update-driver/scripts/first-use.sh"
 if [[ ! -f "$first_use" ]] ||
     ! grep -Fq '# Installation driver lifecycle contract: vault-stamp-v1' "$first_use"; then

@@ -48,12 +48,6 @@ switch -CaseSensitive ($plugin) {
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($plugin -ceq 'agent-ssh') {
-    if ($RuntimeRoot -ine (Join-Path $env:USERPROFILE '.agent-ssh') -or
-        [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ine
-            (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
-        [IO.Path]::GetFileName($Payload) -cne 'agent-ssh') {
-        throw 'SSH first use requires its canonical installed payload and default legacy root.'
-    }
     $sshDeclaration = @{
         module = 'agent_ssh'; legacyRuntimeRoot = '.agent-ssh'
         payloadRootEnv = 'AGENT_SSH_PAYLOAD_ROOT'
@@ -73,20 +67,22 @@ if ($plugin -ceq 'agent-ssh') {
         throw 'SSH first use requires its declared native runtime gate.'
     }
 }
-if ($plugin -ceq 'agent-pull-requests') {
+if ($plugin -cin @('agent-pull-requests', 'agent-ssh')) {
+    $label = if ($plugin -ceq 'agent-ssh') { 'SSH' } else { 'Pull Requests' }
     $installed = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
-        (Join-Path $env:USERPROFILE '.copilot\installed-plugins')
+        (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
+        ($plugin -cne 'agent-ssh' -or [IO.Path]::GetFileName($Payload) -ceq $plugin)
     $snapshot = [IO.Path]::GetDirectoryName($Payload) -ieq (Join-Path $RuntimeRoot 'snapshots')
-    if ($RuntimeRoot -ine (Join-Path $env:USERPROFILE '.agent-pull-requests') -or
+    if ($RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
         -not ($installed -or $snapshot)) {
-        throw 'Pull Requests first use requires its canonical installed payload or selected legacy snapshot.'
+        throw "$label first use requires its canonical installed payload or selected legacy snapshot."
     }
     if ($snapshot) {
         $receiptPath = Join-Path $Payload 'snapshot-provenance.json'
         $null = [CopilotExtensions.NativeFoundationState]::CheckPath($receiptPath, $false, $false)
         $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
         if ($receipt.schema -cne 'copilot-extensions.legacy-snapshot-source') {
-            throw 'Pull Requests first use requires canonical selected snapshot provenance.'
+            throw "$label first use requires canonical selected snapshot provenance."
         }
     }
 }

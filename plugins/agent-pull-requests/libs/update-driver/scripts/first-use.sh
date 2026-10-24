@@ -62,11 +62,6 @@ case "$plugin" in
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
 if [[ "$plugin" == agent-ssh ]]; then
-    [[ "$runtime" == "$HOME/.agent-ssh" &&
-        "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
-        "$(basename -- "$payload")" == agent-ssh ]] || {
-        printf 'SSH first use requires its canonical installed payload and default legacy root.\n' >&2; exit 1;
-    }
     [[ "$(query "$manifest" module)" == agent_ssh &&
         "$(query "$manifest" legacyRuntimeRoot)" == .agent-ssh &&
         "$(query "$manifest" payloadRootEnv)" == AGENT_SSH_PAYLOAD_ROOT &&
@@ -77,18 +72,20 @@ if [[ "$plugin" == agent-ssh ]]; then
         printf 'SSH first use requires its declared native runtime gate.\n' >&2; exit 1;
     }
 fi
-if [[ "$plugin" == agent-pull-requests ]]; then
-    [[ "$runtime" == "$HOME/.agent-pull-requests" && (
-        "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" ||
+if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh ]]; then
+    label='Pull Requests'; [[ "$plugin" != agent-ssh ]] || label=SSH
+    [[ "$runtime" == "$HOME/.$plugin" && (
+        ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
+          ( "$plugin" != agent-ssh || "$(basename -- "$payload")" == "$plugin" ) ) ||
         "$(dirname -- "$payload")" == "$runtime/snapshots" ) ]] || {
-        printf 'Pull Requests first use requires its canonical installed payload or selected legacy snapshot.\n' >&2
+        printf '%s first use requires its canonical installed payload or selected legacy snapshot.\n' "$label" >&2
         exit 1
     }
     if [[ "$(dirname -- "$payload")" == "$runtime/snapshots" ]]; then
         _native_foundation_plain "$payload/snapshot-provenance.json" file
         receipt="$(cat -- "$payload/snapshot-provenance.json")"
         [[ "$(query "$receipt" schema)" == copilot-extensions.legacy-snapshot-source ]] || {
-            printf 'Pull Requests first use requires canonical selected snapshot provenance.\n' >&2; exit 1;
+            printf '%s first use requires canonical selected snapshot provenance.\n' "$label" >&2; exit 1;
         }
     fi
 fi

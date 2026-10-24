@@ -77,6 +77,11 @@ try {
     }
     $name = ([IO.File]::ReadAllText((Join-Path $PluginDir 'plugin.json')) | ConvertFrom-Json).name
     if ($name -isnot [string] -or $name -cne 'agent-ssh') { throw 'The selected payload is not Agent SSH.' }
+    if ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($PluginDir)) -ine
+            (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
+        [IO.Path]::GetFileName($PluginDir) -cne 'agent-ssh') {
+        throw 'SSH bootstrap publication requires its canonical installed payload.'
+    }
     $location = Get-Location
     if ($location.Provider.Name -cne 'FileSystem') { throw 'Bootstrap requires a filesystem project location.' }
     $project = $location.ProviderPath

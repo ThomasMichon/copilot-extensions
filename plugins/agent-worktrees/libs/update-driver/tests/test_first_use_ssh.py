@@ -132,11 +132,13 @@ def test_ssh_refusal_precedes_acquisition_queue_and_plugin_writes(
 
 
 @pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+@pytest.mark.parametrize("owning_fixture", ["owning_ssh", "selected_ssh_snapshot"])
 def test_ssh_native_admission_reaches_exact_source_check_without_writes(
-    owning_ssh, area, installer_action,
+    request, area, installer_action, owning_fixture,
 ):
-    payload, installation, project = owning_ssh
+    payload, installation, project = request.getfixturevalue(owning_fixture)
     root = area / "cold"
+    before = {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()}
     command = native_command(root, payload, installation, project)
     command += (
         ["-Mode", "owner", "-ExpectedSource", "sha256:" + "0" * 64,
@@ -149,7 +151,133 @@ def test_ssh_native_admission_reaches_exact_source_check_without_writes(
     )
     assert result.returncode != 0
     assert "Owning source changed after native first-use admission" in result.stderr, result.stderr
-    assert not root.exists() and not installation.exists()
+    assert not root.exists()
+    assert {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()} == before
+
+
+@pytest.fixture
+def selected_ssh_snapshot(owning_ssh):
+    payload, installation, project = owning_ssh
+    captured = primitive(payload).resolve_context(
+        payload_root=payload, plugin_id="agent-ssh", project_root=project,
+    )
+    snapshot = installation / "snapshots" / "1.0.0-retained"
+    shutil.copytree(payload, snapshot)
+    (snapshot / "snapshot-provenance.json").write_text(json.dumps({
+        "schema": "copilot-extensions.legacy-snapshot-source", "version": 2,
+        "snapshotId": snapshot.name, "payloadVersion": "1.0.0", "resolution": captured,
+    }), encoding="utf-8")
+    (installation / "payload-dir").write_text(str(snapshot), encoding="utf-8")
+    (installation / "stamped-version").write_text("1.0.0", encoding="utf-8")
+    payload.rename(payload.with_name("unavailable-installed-payload"))
+    return snapshot, installation, project
+
+
+@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+def test_ssh_selected_snapshot_keeps_exact_owning_source(
+    selected_ssh_snapshot, area, installer_action,
+):
+    payload, installation, project = selected_ssh_snapshot
+    root = area / "queue"
+    admission = provision.inspect(payload, installation, project, installer_action=installer_action)
+    request = provision.enqueue(
+        payload, installation, project, root=root, installer_action=installer_action,
+    )
+    assert json.loads(request.spec.source) == admission
+    assert admission["payload"] == str(payload)
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "completed" and result.exit_code == 7, result.log_path.read_text()
+    frozen = Path((installation / "source-path").read_text().strip()).parent
+    assert frozen.name == "agent-ssh"
+    assert frozen.parent.parent == installation / ".install-stage"
+    assert (frozen / "snapshot-provenance.json").read_bytes() == (
+        payload / "snapshot-provenance.json"
+    ).read_bytes()
+    assert (installation / "client-only").read_text().strip() == "0"
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("reason", [
+    "unselected", "stamped", "identity", "fingerprint", "missing", "malformed",
+    "ordinary-copy", "no-self", "pinned", "nested", "managed",
+])
+def test_ssh_snapshot_refusal_precedes_acquisition_and_queue(
+    selected_ssh_snapshot, area, monkeypatch, native, reason,
+):
+    payload, installation, project = selected_ssh_snapshot
+    receipt = payload / "snapshot-provenance.json"
+    document = json.loads(receipt.read_text())
+    if reason == "unselected":
+        (installation / "payload-dir").write_text(str(payload.with_name("other")), encoding="utf-8")
+    elif reason == "stamped":
+        (installation / "stamped-version").write_text("9.9.9", encoding="utf-8")
+    elif reason in {"identity", "fingerprint"}:
+        if reason == "identity":
+            document["snapshotId"] = "other"
+        else:
+            document["resolution"]["sourceFingerprint"] = "sha256:" + "0" * 64
+        receipt.write_text(json.dumps(document), encoding="utf-8")
+    elif reason == "missing":
+        receipt.unlink()
+    elif reason == "malformed":
+        receipt.write_text("{", encoding="utf-8")
+    elif reason == "ordinary-copy":
+        copied = area / "ordinary-copy"
+        shutil.copytree(payload, copied)
+        payload = copied
+    elif reason in {"no-self", "pinned", "nested"}:
+        monkeypatch.setenv({
+            "no-self": "AGENT_SSH_NO_SELFPROVISION",
+            "pinned": "AGENT_SSH_PINNED_CONTEXT",
+            "nested": "UPDATE_DRIVER_WITNESS",
+        }[reason], "foreign")
+    elif reason == "managed":
+        module = primitive(payload)
+        arguments = dict(
+            payload_root=payload, plugin_id="agent-ssh",
+            legacy_root=installation, project_root=project,
+        )
+        resolution = module.resolve_installation_mode(**arguments)
+        (installation / "runtime-deployment.json").write_text(json.dumps({
+            "schema": module.RUNTIME_DEPLOYMENT_SCHEMA, "version": 1,
+            "owner": module._deployment_owner(resolution, arguments), "managed": True,
+        }), encoding="utf-8")
+    root = area / "cold"
+    before = {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()}
+    source = {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()}
+    if native:
+        result = subprocess.run(
+            native_command(root, payload, installation, project),
+            env=dict(os.environ), cwd=project, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+        )
+        assert result.returncode != 0, result.stdout + result.stderr
+    else:
+        with pytest.raises(provision.ProvisionError):
+            provision.enqueue(payload, installation, project, root=root)
+    assert not root.exists()
+    assert {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()} == before
+    assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == source
+
+
+@pytest.mark.parametrize("change", ["reselected", "substituted", "unavailable"])
+def test_ssh_snapshot_change_does_not_replace_queued_input(selected_ssh_snapshot, area, change):
+    payload, installation, project = selected_ssh_snapshot
+    root = area / "queue"
+    request = provision.enqueue(payload, installation, project, root=root)
+    if change == "reselected":
+        (installation / "payload-dir").write_text(str(payload.with_name("newer")), encoding="utf-8")
+    elif change == "substituted":
+        (payload / "scripts" / "install.ps1").write_text("exit 99\n", encoding="utf-8")
+    else:
+        payload.rename(payload.with_name("unavailable-snapshot"))
+    with pytest.raises(ParticipantError):
+        drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "interrupted" and result.exit_code is None
+    assert not (installation / "executed").exists()
+    assert not (installation / ".install-stage").exists()
 
 
 def test_ssh_empty_no_self_control_keeps_value_semantics(owning_ssh, monkeypatch):
@@ -215,6 +343,19 @@ def test_actual_ssh_materialized_stamp_preserves_source_and_defers_runtime(
     assert not (installation / "current-version").exists()
     assert not list((installation / "versions").glob("*/pyvenv.cfg"))
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == before
+    payload.rename(payload.with_name("unavailable-installed-payload"))
+    receipt = (pointer / "snapshot-provenance.json").read_bytes()
+    retained = provision.enqueue(pointer, installation, project, root=root, installer_action="stamp")
+    drain(root=root)
+    result = status(retained.id, root=root)
+    assert result.state == "completed" and result.exit_code == 0, result.log_path.read_text()
+    assert json.loads(result.spec.source)["payload"] == str(pointer)
+    assert (pointer / "snapshot-provenance.json").read_bytes() == receipt
+    selected = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    assert provision.inspect(selected, installation, project)["source_fingerprint"] == (
+        json.loads(request.spec.source)["source_fingerprint"]
+    )
+    assert not (installation / "current-version").exists()
 
 
 @native_genesis
@@ -247,8 +388,8 @@ def test_actual_ssh_cold_provision_preserves_selection_and_source_independence(
             for path in root.rglob("*.log")
         )
 
-    def run_request(action):
-        command = native_command(root, payload, installation, project, source=source)
+    def run_request(action, owning_source=payload):
+        command = native_command(root, owning_source, installation, project, source=source)
         command += (
             ["-Wait", "-InstallerAction", action] if os.name == "nt"
             else ["--wait", "--installer-action", action]
@@ -258,14 +399,21 @@ def test_actual_ssh_cold_provision_preserves_selection_and_source_independence(
             capture_output=True, text=True, encoding="utf-8", timeout=900, **no_window_kwargs(),
         )
 
-    for action in ("stamp", "provision"):
-        result = run_request(action)
-        assert result.returncode == 0, result.stdout + result.stderr + diagnostic()
+    stamp = run_request("stamp")
+    assert stamp.returncode == 0, stamp.stdout + stamp.stderr + diagnostic()
+    snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    receipt = (snapshot / "snapshot-provenance.json").read_bytes()
+    removed = payload.rename(payload.with_name("unavailable-installed-payload"))
+    installed = run_request("provision", snapshot)
+    assert installed.returncode == 0, installed.stdout + installed.stderr + diagnostic()
+    assert (snapshot / "snapshot-provenance.json").read_bytes() == receipt
+    removed.rename(payload)
     requests = status(root=root)
     assert len(requests) == 2 and all(
         item.state == "completed" and item.exit_code == 0 for item in requests
     ), diagnostic()
     assert {json.loads(item.spec.source)["plugin"] for item in requests} == {"agent-ssh"}
+    assert {json.loads(item.spec.source)["payload"] for item in requests} == {str(payload), str(snapshot)}
     assert {item.spec.argv for item in requests} == {(), ("--installer-action", "stamp")}
     version = (installation / "current-version").read_text().strip()
     slot = installation / "versions" / version
@@ -283,15 +431,21 @@ def test_actual_ssh_cold_provision_preserves_selection_and_source_independence(
     (payload / "src" / "agent_ssh" / "__init__.py").write_text(
         'raise RuntimeError("fixture failed installed SSH candidate")\n', encoding="utf-8",
     )
-    failed = run_request("provision")
+    failed_stamp = run_request("stamp")
+    assert failed_stamp.returncode == 0, failed_stamp.stdout + failed_stamp.stderr + diagnostic()
+    failed_snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    payload.rename(payload.with_name("removed-ssh"))
+    failed = run_request("provision", failed_snapshot)
     assert failed.returncode != 0, failed.stdout + failed.stderr + diagnostic()
     requests = status(root=root)
-    assert len(requests) == 3 and requests[-1].state == "completed"
+    assert len(requests) == 4 and requests[-1].state == "completed"
     assert requests[-1].exit_code != 0, diagnostic()
+    assert json.loads(requests[-1].spec.source)["payload"] == str(failed_snapshot)
+    failure_log = requests[-1].log_path.read_text(errors="replace")
+    assert "Fresh runtime slot failed its health gate (versions/99.0.0)" in failure_log, diagnostic()
     assert (installation / "current-version").read_text().strip() == version
     assert completion.read_bytes() == complete
     assert not (installation / "versions" / "99.0.0" / ".install-complete.json").exists()
-    payload.rename(payload.with_name("removed-ssh"))
     inputs.rename(area / "removed-foundation-source")
     command = installation.parent / ".local" / "bin" / (
         "agent-ssh.ps1" if os.name == "nt" else "agent-ssh"
@@ -318,4 +472,4 @@ def test_actual_ssh_cold_provision_preserves_selection_and_source_independence(
     distribution = json.loads(origin.stdout)
     assert Path(distribution["origin"]).is_relative_to(slot)
     assert dispatch.stdout.strip() == "agent-ssh " + distribution["version"]
-    assert len(status(root=root)) == 3 and completion.read_bytes() == complete
+    assert len(status(root=root)) == 4 and completion.read_bytes() == complete

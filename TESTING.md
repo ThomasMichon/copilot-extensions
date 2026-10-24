@@ -102,10 +102,12 @@ The manual `installation-context-full.yml` portfolio `ssh-recipes` runs only
 the fixed SSH stamp/provision prerequisite on fresh Windows and Linux runners.
 It uses the existing isolated runner, canonical materializer, native foundation
 and ordinary queue. The packet covers no-write admission refusals, actual
-service-less installation, failed-candidate preservation, source-independent
+service-less installation from its exact selected legacy snapshot with the
+installed payload unavailable, failed-snapshot candidate preservation, source-independent
 installed CLI/module origin and caller Job/group loss during Python-free cold
-acquisition. It does not adopt ordinary command/bootstrap publishers, exercise
-remote SSH, qualify retained snapshots or cells, or enroll the operator host.
+acquisition. Bootstrap controls additionally refuse snapshot/copy publication.
+It does not adopt ordinary command publishers, exercise remote SSH, qualify
+network-backed retained-source #5379 or cells, or enroll the operator host.
 Run the non-download subset locally with `tools/run-plugin-tests.py update-driver
 --test-file tests/test_first_use_ssh.py`; the native cold cases require their
 existing explicit Windows/Linux genesis opt-ins.
