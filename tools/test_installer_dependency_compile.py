@@ -299,6 +299,42 @@ def test_source_compile_refuses_effective_disabled_source_mappings(tmp_path, mon
             pytest.fail("disabled source mappings reached export")
 
 
+@pytest.mark.parametrize("context", ["argument", "environment", "ambient"])
+@pytest.mark.parametrize("input_kind", ["registry", "recursive", "project"])
+def test_source_compile_refuses_context_only_local_mappings(tmp_path, monkeypatch, context, input_kind):
+    source_project(tmp_path / "child", name="fixture-child")
+    project = source_project(
+        tmp_path / "context", dependencies='"fixture-child"',
+        sources='fixture-child={path="../child"}',
+    )
+    operand = tmp_path / "input.in"
+    operand.write_text("fixture-child==2.0\n", encoding="utf-8")
+    if input_kind == "recursive":
+        root = tmp_path / "root.in"
+        root.write_text("-r input.in\n", encoding="utf-8")
+        operand = root
+    elif input_kind == "project":
+        operand = source_project(
+            tmp_path / "input-project", name="fixture-root", dependencies='"fixture-child==2.0"',
+        ) / "pyproject.toml"
+    arguments = [str(operand)]
+    environment = {}
+    cwd = tmp_path
+    if context == "argument":
+        arguments += ["--project", str(project)]
+    elif context == "environment":
+        environment["UV_PROJECT"] = str(project)
+    else:
+        cwd = project
+    monkeypatch.setattr(policy.subprocess, "run", lambda *args, **options: pytest.fail("context mappings reached UV"))
+    with pytest.raises(policy.DependencyPolicyError, match="context-only"):
+        with policy.retain_uv_source_compile(
+            "fixture-uv", arguments, env=environment, cwd=cwd,
+            trusted_source_roots=(tmp_path,), now=NOW,
+        ):
+            pytest.fail("context-only mapping suppressed a required registry pin")
+
+
 @pytest.mark.parametrize("kind", [
     "direct-marker", "direct-extra", "recursive-marker", "recursive-extra",
     "mapped-marker", "mapped-extra", "nested-unselected",

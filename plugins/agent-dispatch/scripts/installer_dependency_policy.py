@@ -470,6 +470,7 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
             _check_project(project_path, roots, seen)
         elif "file:" in value.lower():
             raise DependencyPolicyError("local file reference in an unsupported option")
+    compiled_projects = set(seen)
     if project_directory:
         manifest = base / project_directory / "pyproject.toml"
         if manifest.is_file():
@@ -507,6 +508,8 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
                 if not isinstance(requirement, str):
                     raise DependencyPolicyError("configured dependency declaration is unsupported")
                 _check_requirement(requirement, base, roots, seen)
+    if operation == "source-compile" and (project_directory or seen - compiled_projects):
+        raise DependencyPolicyError("source lock export cannot use context-only project mappings")
     for variable in ("UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE"):
         if environment.get(variable):
             for path in environment[variable].split():
@@ -529,8 +532,7 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
 def _compile_arguments(arguments, environment, cwd, roots, operation):
     return _configuration.source_compile_arguments(
         arguments, environment, cwd, roots, operation, source_inputs=_source_inputs,
-        toml=_toml, identity=_identity, argument_pairs=_argument_pairs,
-        error_type=DependencyPolicyError,
+        toml=_toml, identity=_identity, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
     )
 
 

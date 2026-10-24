@@ -725,7 +725,13 @@ win grows with build complexity.
   documentation, feed-neutrality, lint and diff guards pass. The unchanged
   required packet passes all 1497 units without observed effects in 216.672
   seconds at `cfffe6ca4eb359e5f3921fd199f9f1e08a5ef6d8`. Repaired published-head
-  CI, native qualification and fresh review remain open.
+  CI and both Linux/Windows compile lanes passed. The next review found
+  configuration-only project mappings could still omit an actual registry pin.
+  The follow-up rejects explicit project contexts and ambient projects outside
+  compiled inputs, with nine argument/environment/ambient regressions across
+  direct, recursive and metadata inputs (80 compiler controls pass).
+  Rebased onto current development while preserving its newly admitted unit
+  entries. Final post-repair validation and review remain open.
   The parent Plan and Validation Plan remain open.
 
 ### 2026-10-24 - Policy/release planner merged; exact source lock next

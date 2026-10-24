@@ -3031,7 +3031,10 @@ UV still resolves local dependencies' transitive requirements. Effective
 omissions must match exactly, source mappings cannot be disabled, and ambiguous
 identities, direct local directory requirements (including inactive markers or
 unselected extras), conditional/alternative local mappings, mappings used only
-by optional or conditional branches, local artifacts and remote sources refuse.
+by optional or conditional branches, context-only project mappings, local
+artifacts and remote sources refuse. Source mode refuses explicit `--project`/
+`UV_PROJECT` contexts; discovered configuration cannot add projects outside the
+compiled input graph.
 Editables remain private metadata inputs, never references back
 to live code. Ordinary compile exports keep their directory-dependency refusal.
 The caller independently verifies the selected source, retains the transaction
