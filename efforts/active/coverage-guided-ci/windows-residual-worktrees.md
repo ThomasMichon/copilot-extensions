@@ -88,6 +88,43 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-BACKED-TYPES existing recovered and backed tuple contracts
+
+This settles only `tests/test_pr_recovery_advanced_head.py:2`, header
+`@@ -20,7 +22,8 @@ pytestmark = [`, full original hunk SHA256
+`e44ed090d48bf6d3ef11e99d5d65644331d7f97ca2fbba61cef15f524d63d509`.
+The original census header, hash and `MX-BACKED-TYPES` disposition remain
+unchanged.
+
+The six-field `RecoveredPR = tuple[Config, str, Path, Path, str, str]`
+belongs to B-RECOVERED, actual #7904 merge
+`f18c945017e9d2533a448b817ce976756118255d`. The seven-field
+`BackedPR = tuple[Config, str, Path, Path, str, str, str]` belongs to
+B-BACKED, actual #7918 merge
+`59ca4d10403d517063528539e3b9e8a9ef173178`. Each alias occurs exactly
+once and matches its actual merge and the immutable source by AST at
+comparison `6f2fb93448`. These are test fixture tuple shapes, not new
+runtime evidence types or a combined fixture implementation.
+
+The four-field `PrRepo = tuple[Config, str, Path, Path]` remains as in
+the historical base and both actual merges. Its deletion from the
+historical hunk is not applied: the existing public `backed_publication`
+helper still accepts that four-field input and returns seven fields.
+The separately admitted fixture contracts preserve that compatibility;
+removing its alias would leave a live annotation unresolved.
+
+Four native consumer variants pass: the recovered six-field preview,
+both backed-copy base variants and the routine-recovery
+`after-reconciliation` case that actually invokes the four-field public
+helper. They retain no-effect/refusal, private evidence/copy isolation
+and real lost-ack publication assertions: 141.40 pytest seconds,
+176.50 seconds including preparation and cleanup, exactly two contained
+Windows workers and all original marks, deadlines and resource bounds.
+This focused functional selection does not qualify the known timed-out
+routine-recovery normal group or the repeated complete same-head plugin.
+No code/test edit is needed; other residuals and parent qualification
+remain open.
+
 ### MX-PROVIDER existing record setup and assertions retain separate ownership
 
 This settles only these three original keys, with their census headers,
