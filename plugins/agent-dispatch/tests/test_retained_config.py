@@ -44,6 +44,9 @@ def test_actual_config_loader_and_real_lifespan_cleanup(configured, tmp_path):
         time.sleep(0.01)
     active = directory / "retained" / "agent-dispatch-telemetry.jsonl"
     assert json.loads(active.read_text(encoding="utf-8")) == event
+    path.write_text(json.dumps({"retained_spool": {}, "sink": "private:factory"}))
+    assert not telemetry.load_sink_from_config(path)
+    assert slot.sink is writer
     app = create_app(
         TaskQueue(tmp_path / "tasks.db"), sweep_interval=0, wake_interval=0,
         verification_interval=0, enable_mcp=False,

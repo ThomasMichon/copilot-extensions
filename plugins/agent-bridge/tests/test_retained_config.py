@@ -156,8 +156,8 @@ def test_startup_and_quiet_iteration_expire_exact_age(tmp_path, monkeypatch):
     now = datetime(2026, 10, 24, tzinfo=timezone(timedelta(hours=7)))
     cutoff = int((now - timedelta(days=30)).timestamp() * 1000)
     active = directory / "retained" / "agent-bridge-telemetry.jsonl"
-    active.write_text("".join(json.dumps({"ts": cutoff + delta, "id": delta}) + "\n"
-                              for delta in (-1, 0, 1)), encoding="utf-8")
+    active.write_bytes("".join(json.dumps({"ts": cutoff + delta, "id": delta}) + "\n"
+                               for delta in (-1, 0, 1)).encode("utf-8"))
     archive = active.with_name(
         "agent-bridge-telemetry.20260101T000000000000Z-" + "a" * 32 + ".jsonl"
     )
@@ -167,11 +167,14 @@ def test_startup_and_quiet_iteration_expire_exact_age(tmp_path, monkeypatch):
         custody=diagnostic_logs.operation_custody, clock=lambda: now,
     ))
     assert telemetry.load_sink_from_config(path)
-    wait_for(lambda: len(rows(directory)) == 2)
+    expected = "".join(json.dumps({"ts": cutoff + delta, "id": delta}) + "\n"
+                       for delta in (0, 1))
+    wait_for(lambda: active.stat().st_size == len(expected.encode("utf-8")))
     assert [event["id"] for event in rows(directory)] == [0, 1]
     assert not archive.exists()
     now += timedelta(seconds=61)
-    wait_for(lambda: rows(directory) == [])
+    wait_for(lambda: active.stat().st_size == 0)
+    assert rows(directory) == []
 
 
 def test_real_cli_discovery_is_read_only_and_never_imports_custom_factory(tmp_path, monkeypatch):
@@ -201,6 +204,9 @@ def test_real_daemon_owner_clears_only_configured_buffer(tmp_path, monkeypatch):
     def primary(*_args, **_kwargs):
         assert telemetry.load_sink_from_config(path)
         writers.append(telemetry._slot.sink)
+        path.write_text(json.dumps({"retained_spool": {}, "sink": "private:factory"}))
+        assert not telemetry.load_sink_from_config(path)
+        assert telemetry._slot.sink is writers[0]
         raise ValueError("primary")
     monkeypatch.setattr(service_start_cli, "_run_start", primary)
     with pytest.raises(ValueError, match="primary"):

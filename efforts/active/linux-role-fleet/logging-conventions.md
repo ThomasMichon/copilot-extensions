@@ -485,3 +485,16 @@ captured wire owners, deployment helpers and live state remain outside this slic
   untouched. Linux/macOS native, disposable-machine installation and live external
   lanes are not exercised by this source-only Windows slice; no rollout or helper
   integration is claimed.
+- 2026-10-24 UTC — #8577 review identified that a rejected retained reload could
+  discard the still-active writer's cleanup reference. Both loaders now publish
+  that reference only after successful selection. Actual daemon/coordinator
+  regressions perform valid selection, rejected mixed-mode reload and owner
+  shutdown, proving the original buffer still closes.
+- 2026-10-24 UTC — Revalidation exposed a Windows sharing race in the existing
+  quiet-prune observer: continuously opening the payload could deny the atomic
+  replacement it was awaiting. That test now polls file-size metadata and reads
+  the payload only after pruning completes. Retention, retry and all timeout
+  values remain unchanged; this is not a native capture adapter or rollout.
+  The seeded byte-size observer uses explicit UTF-8/LF, avoiding platform text
+  newline translation. Corrected full native portfolios pass again: 133 Bridge
+  and 190 Dispatch tests; touched-code Ruff F/E9 and whitespace checks pass.
