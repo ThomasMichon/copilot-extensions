@@ -695,6 +695,11 @@ fenced native foundation still refuses this bounded entry. Release neither
 retires a live installer nor replays its failed request; request the intended
 ordinary installation separately after release. Full bounded takeover and
 selected-runtime readiness remain distinct from this operation.
+Recovery can migrate the queue to schema 4. Subsequent inspection and installation
+must use a current, schema-4-capable driver; an older schema-2-only client still
+cannot read that queue. Queue release does not upgrade that client. Use the
+operator-selected supported source for the subsequent installer, not an implicit
+source switch, and verify actual installed readiness separately.
 
 ### Slot completeness and recovery
 
