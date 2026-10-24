@@ -319,6 +319,8 @@ class ArcHelmOwner:
             deadline = time.monotonic() + selected.to_dict()["outfitting_seconds"]
             permit = self.admission.revalidate(permit, request)
             value = selected.to_dict()
+            if permit.fleet != value["fleet"]:
+                raise PlanError("ARC permit fleet differs from selected deployment")
             resource = digest({
                 "cluster": value["references"]["cluster"],
                 "namespace": value["settings"]["namespace"], "release": value["settings"]["release"],
@@ -327,7 +329,7 @@ class ArcHelmOwner:
             if prior.to_dict()["status"] != "accepted":
                 self.admission.complete(permit, request)
                 return prior
-            observed = self._inspect(selected, deadline=deadline)
+            self._inspect(selected, deadline=deadline)
             values = self._values(selected, allocation)
             owner = "fleet-manager:" + digest({
                 key: value[key] for key in ("fleet", "installation", "target", "allocation")
@@ -335,10 +337,6 @@ class ArcHelmOwner:
             description = owner + ":" + digest({
                 "chart": value["chart_sha256"], "values": digest(values),
             })
-            unchanged = (
-                observed is not None and observed[0]["info"]["status"] == "deployed"
-                and observed[0]["info"]["description"] == description and observed[1] == values
-            )
             with TemporaryDirectory(prefix="fleet-arc-", dir=self.tooling.directory) as temporary:
                 chart = Path(temporary) / "gha-runner-scale-set.tgz"
                 chart.write_bytes(selected.chart)
@@ -348,17 +346,16 @@ class ArcHelmOwner:
                     self.admission.complete(permit, request)
                     return self.journal.inspect(request)
                 self.admission.complete(permit, request)
-                if not unchanged:
-                    remaining = math.floor(deadline - time.monotonic())
-                    if remaining <= 0:
-                        raise PlanError("ARC convergence deadline exceeded before effect")
-                    self._helm([
-                        "upgrade", value["settings"]["release"], str(chart), "--install",
-                        "--namespace", value["settings"]["namespace"], "--reset-values",
-                        "--no-hooks", "--skip-crds", "--atomic", "--wait",
-                        "--timeout", f"{remaining}s", "--description", description,
-                        "--values", "-", "--output", "json",
-                    ], deadline=deadline, input_text=canonical(values).decode())
+                remaining = math.floor(deadline - time.monotonic())
+                if remaining <= 0:
+                    raise PlanError("ARC convergence deadline exceeded before effect")
+                self._helm([
+                    "upgrade", value["settings"]["release"], str(chart), "--install",
+                    "--namespace", value["settings"]["namespace"], "--reset-values",
+                    "--no-hooks", "--skip-crds", "--atomic", "--wait",
+                    "--timeout", f"{remaining}s", "--description", description,
+                    "--values", "-", "--output", "json",
+                ], deadline=deadline, input_text=canonical(values).decode())
                 after = self._inspect(selected, deadline=deadline)
                 if (after is None or after[0]["info"]["status"] != "deployed"
                         or after[0]["info"]["description"] != description or after[1] != values):

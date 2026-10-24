@@ -95,10 +95,13 @@ namespace creation, remote chart reference, dependency update or force flag
 exists. Plugin/ambient Helm and Kubernetes environment selectors are removed.
 
 The ownership marker binds the selected chart and generated values, rather than
-the incidental proposal generation. An unchanged deployed release is observed
-without another Helm mutation; material value drift or a changed selected chart
-requires a new, separately admitted operation. A repeated original operation
-returns its retained receipt without any native call.
+the incidental proposal generation. A repeated original operation returns its
+retained receipt without any native call. A newly admitted generation always
+reapplies through Helm, even if stored release values match: Helm history is
+not live-resource evidence, so deleted or manually patched ARC resources cannot
+justify skipping convergence. This API does not yet provide a live-spec-proven
+no-write optimization. Admission also checks the permit's fleet against the
+selected fleet before journal custody or native work.
 
 UNKNOWN is persisted before the external attempt and the permit is consumed at
 dispatch. Timeout, cancellation, lost reply, native refusal or absent matching
@@ -120,7 +123,7 @@ receipts are not a current health probe.
 `test_arc_owner.py` uses the real identity verifier/admission authority,
 preparation store and node journal plus actual contained native processes
 implementing a synthetic Helm protocol. It covers exact grant binding,
-revocation, no takeover, no-op/repeat, observed value drift, lost replies,
+revocation, fleet isolation, no takeover, exact repeat, stored/live-resource drift, lost replies,
 restart and UNKNOWN custody. This is process-boundary/component evidence,
 not a real Helm deployment or live-cluster proof.
 

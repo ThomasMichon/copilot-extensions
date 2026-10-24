@@ -36,6 +36,7 @@ root = Path.cwd()
 with (root / "commands.jsonl").open("a") as out:
     out.write(json.dumps(args) + "\n")
 state = root / "release.json"
+live = root / "live-resource.json"
 def option(name):
     return args[args.index(name) + 1]
 if args[0] == "list":
@@ -58,6 +59,7 @@ elif args[0] == "upgrade":
         "config": values,
     }
     state.write_text(json.dumps(value))
+    live.write_text(json.dumps(values))
     if (root / "lost-reply").exists():
         raise SystemExit(7)
     print("{}")
@@ -142,7 +144,7 @@ def rig(tmp_path, monkeypatch, keys):
     def permit(intent):
         return harness.admit(intent)
 
-    harness.current = policy(enrollments=(actor(operations=(
+    harness.current = policy(fleet="example", enrollments=(actor(operations=(
         OperationGrant("runner.converge", "worker-a", 1, request().request_digest),
     )),))
     return {
@@ -200,7 +202,7 @@ def test_lost_native_reply_survives_restart_and_new_operation_cannot_take_custod
     assert rig["owner"].converge(request, rig["permit"](request)).to_dict()["status"] == "unknown"
     assert len(commands(rig)) == count
     other = rig["request"]("new-operation")
-    rig["harness"].current = policy(revision=2, enrollments=(actor(operations=(
+    rig["harness"].current = policy(fleet="example", revision=2, enrollments=(actor(operations=(
         OperationGrant("runner.converge", "worker-a", 1, other.request_digest),
     )),))
     with pytest.raises(PlanError, match="unsettled"):
@@ -218,7 +220,7 @@ def test_mismatched_or_expired_current_owner_inputs_refuse_before_native_work(ri
     with pytest.raises(PlanError):
         rig["selected"][0] = ArcDeployment.from_dict(value, chart=rig["chart"])
         request = rig["request"]()
-        rig["harness"].current = policy(enrollments=(actor(operations=(
+        rig["harness"].current = policy(fleet="example", enrollments=(actor(operations=(
             OperationGrant("runner.converge", "worker-a", 1, request.request_digest),
         )),))
         rig["owner"].converge(request, rig["permit"](request))
@@ -227,7 +229,7 @@ def test_mismatched_or_expired_current_owner_inputs_refuse_before_native_work(ri
 
 def test_exact_preparation_review_is_not_a_deployment_permit(rig):
     request = rig["request"]()
-    rig["harness"].current = policy(revision=2, enrollments=(actor(operations=()),))
+    rig["harness"].current = policy(fleet="example", revision=2, enrollments=(actor(operations=()),))
     with pytest.raises(AdmissionError, match="forbidden"):
         rig["permit"](request)
     assert commands(rig) == []
@@ -261,7 +263,7 @@ def test_policy_revocation_at_effect_boundary_prevents_mutation(rig):
         nonlocal calls
         calls += 1
         if calls == 2:
-            rig["harness"].current = policy(revision=2, enrollments=(actor(operations=()),))
+            rig["harness"].current = policy(fleet="example", revision=2, enrollments=(actor(operations=()),))
         return original()
 
     rig["owner"].current = current
@@ -282,15 +284,22 @@ def test_foreign_helm_release_is_never_taken_over(rig):
     assert all(entry[0] != "upgrade" for entry in commands(rig))
 
 
-@pytest.mark.parametrize("drift", [False, True])
-def test_new_preparation_preserves_unchanged_release_or_repairs_observed_values(rig, drift):
+@pytest.mark.parametrize("drift", ["none", "stored-values", "live-spec", "missing-live-resource"])
+def test_new_admitted_generation_reapplies_without_trusting_stored_helm_values(rig, drift):
     request = rig["request"]()
     rig["owner"].converge(request, rig["permit"](request))
-    if drift:
-        path = rig["root"] / "release.json"
+    live = rig["root"] / "live-resource.json"
+    original = live.read_bytes()
+    if drift in ("stored-values", "live-spec"):
+        path = rig["root"] / ("release.json" if drift == "stored-values" else "live-resource.json")
         observed = json.loads(path.read_text())
-        observed["config"]["maxRunners"] = 99
+        if drift == "stored-values":
+            observed["config"]["maxRunners"] = 99
+        else:
+            observed["maxRunners"] = 99
         path.write_text(json.dumps(observed))
+    elif drift == "missing-live-resource":
+        live.unlink()
     store = rig["store"]
     old = store.read()
     candidate = {**old["candidate"], "sources": {"config": {"revision": "new-published-source"}}}
@@ -301,12 +310,27 @@ def test_new_preparation_preserves_unchanged_release_or_repairs_observed_values(
     selected = {**rig["value"], "generation": 2, "preparation": proposal["digest"]}
     rig["selected"][0] = ArcDeployment.from_dict(selected, chart=rig["chart"])
     next_request = rig["request"]("next", generation=2)
-    rig["harness"].current = policy(revision=2, enrollments=(actor(operations=(
+    rig["harness"].current = policy(fleet="example", revision=2, enrollments=(actor(operations=(
         OperationGrant("runner.converge", "worker-a", 2, next_request.request_digest),
     )),))
     result = rig["owner"].converge(next_request, rig["permit"](next_request))
     assert result.to_dict()["status"] == "succeeded"
-    assert len([entry for entry in commands(rig) if entry[0] == "upgrade"]) == (2 if drift else 1)
+    assert len([entry for entry in commands(rig) if entry[0] == "upgrade"]) == 2
+    assert live.read_bytes() == original
+
+
+def test_foreign_fleet_permit_refuses_before_journal_custody_or_native_work(rig):
+    request = rig["request"]()
+    rig["harness"].current = policy(fleet="another-fleet", enrollments=(actor(operations=(
+        OperationGrant("runner.converge", "worker-a", 1, request.request_digest),
+    )),))
+    permit = rig["permit"](request)
+    with pytest.raises(PlanError, match="permit fleet"):
+        rig["owner"].converge(request, permit)
+    assert rig["journal"].inspect(request) is None
+    assert commands(rig) == []
+    with sqlite3.connect(rig["journal"].path) as connection:
+        assert connection.execute("SELECT count(*) FROM external_owners").fetchone()[0] == 0
 
 
 def test_generation_migration_and_unsettled_resource_ownership(rig):
