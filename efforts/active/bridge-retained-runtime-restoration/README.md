@@ -401,6 +401,13 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   passes 199. The live contribution base still advertises 48, so 49 is not
   reused from an independently landed capability. Fresh review and required CI
   remain owed for the resulting evidence head.
+- Required CI then identified one more release consumer in its advanced merge
+  tree: `agent-ssh` now references the shared update driver through its editable
+  source, unlike this worktree's older dependency graph. The literal failure
+  was missing changefile coverage, not a capture or runtime failure. Add its
+  patch entry for the already-regenerated canonical helper; do not weaken the
+  guard or infer that the local consumer graph equals the CI merge tree.
+  Fresh required CI and exact-head review remain owed.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

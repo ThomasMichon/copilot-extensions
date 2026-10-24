@@ -1,0 +1,9 @@
+{
+  "comment": "Propagate the canonical shared update-driver installer process helper refresh to the SSH runtime consumer",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
