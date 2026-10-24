@@ -350,7 +350,7 @@ transaction execution from the existing recurring-maintenance assignment.
   rather than incidentally admitting a new bootstrap publisher. Ordinary
   primary/payload commands, explicit installers, custom roots/cells, rollout
   and the separately bounded network-backed #5379 acceptance remain open.
-- [ ] **Agent-recommended bounded publisher adoption:** route SSH's actual
+- [x] **Agent-recommended bounded publisher adoption:** route SSH's actual
   generated legacy primary and payload cold commands through the packaged
   foundation and canonical queue before cold trace/status or outer provision
   locks. Preserve the existing stamp-to-selected-snapshot/provision semantics,
@@ -365,6 +365,21 @@ transaction execution from the existing recurring-maintenance assignment.
   preservation and no-write controls on native Windows/Linux. This does not
   reopen the qualified bootstrap, adopt explicit installers, exercise remote
   SSH, authorize rollout or close the separate network-backed #5379 gate.
+- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify CodeSpaces'
+  fixed legacy `stamp` and `provision` recipes through the same native
+  foundation, canonical queue and frozen-input owner before changing any
+  ordinary CodeSpaces publisher. Admit only its canonical installed payload
+  and default legacy root; preserve its snapshot-default declaration,
+  required context, staging, dependency closure and own publication/no-self/
+  pinned controls. Use its actual native options, not Vault's service flags.
+  Qualify config-derived Connection Owner enabled/disabled/unknown behavior
+  in isolated native fixtures without modifying host registrations or
+  connecting to a CodeSpace. Prove actual materialized stamp/construction,
+  installed command/module/distribution identity, failed-candidate selection
+  preservation, caller loss and no-write refusals on Windows/Linux.
+  Selected-snapshot acceptance, compound stamp/provision, command/bootstrap/
+  explicit-installer adoption, cells/custom roots, live service deployment and
+  the existing #6909 snapshot-qualification ownership remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
