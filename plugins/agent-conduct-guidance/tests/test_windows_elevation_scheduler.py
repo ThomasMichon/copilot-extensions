@@ -9,6 +9,7 @@ import os
 import subprocess
 import threading
 import time
+import warnings
 
 import pytest
 
@@ -54,10 +55,15 @@ def clean_probe_tasks(tmp_path):
         result = run_ps(
             "-Command",
             "$s = New-Object -ComObject Schedule.Service; $s.Connect(); $f = $s.GetFolder('\\'); "
-            f"$task = @($f.GetTasks(0) | Where-Object Name -eq {quote(data['taskName'])}); "
+            f"$task = @($f.GetTasks(1) | Where-Object Name -eq {quote(data['taskName'])}); "
             "if ($task.Count) { "
             "if ($task[0].Definition.Principal.RunLevel -ne 0) { throw 'Probe task privilege changed' }; "
-            "$task[0].Stop(0); $until = [DateTime]::UtcNow.AddSeconds(3); "
+            "$name = $task[0].Definition.Principal.UserId; "
+            "$owner = if ($name.StartsWith('S-1-')) { $name } else { "
+            "[Security.Principal.NTAccount]::new($name).Translate([Security.Principal.SecurityIdentifier]).Value }; "
+            f"if ($owner -ne {quote(data['ownerSid'])}) {{ throw 'Probe task owner changed' }}; "
+            "if ($task[0].GetInstances(0).Count) { $task[0].Stop(0) }; "
+            "$until = [DateTime]::UtcNow.AddSeconds(3); "
             "while ($task[0].GetInstances(0).Count -and [DateTime]::UtcNow -lt $until) { Start-Sleep -Milliseconds 50 }; "
             "if ($task[0].GetInstances(0).Count) { throw 'Probe task cleanup unconfirmed' }; "
             f"$f.DeleteTask({quote(data['taskName'])}, 0) }}",
@@ -87,6 +93,7 @@ def private_directory(tmp_path):
 def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_directory, clean_probe_tasks, cycle):
     log = private_directory / f"interactive-{cycle}.log"
     baseline, foreground = snapshot_windows()
+    assert baseline, "Visible-window observation is unavailable to this caller"
     stop = threading.Event()
     observations = []
 
@@ -128,16 +135,26 @@ def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_dire
     check = run_ps(
         "-Command",
         "$s = New-Object -ComObject Schedule.Service; $s.Connect(); "
-        f"$found = @($s.GetFolder('\\').GetTasks(0) | Where-Object Name -eq {quote(receipt['taskName'])}); "
+        f"$found = @($s.GetFolder('\\').GetTasks(1) | Where-Object Name -eq {quote(receipt['taskName'])}); "
         "if ($found.Count) { throw 'Owned probe task remained registered' }",
     )
     assert check.returncode == 0, check.stderr
+    resumed = run_ps("-File", str(INVOKE), "-WaitFor", str(request))
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert json.loads(resumed.stdout)["runId"] == run_id
     console_classes = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"}
     assert not [
         (hwnd, kind) for windows, _ in observations
         for hwnd, kind in windows.items()
         if hwnd not in baseline and kind in console_classes
     ], "An unexpected visible console appeared during the opt-in isolated probe"
-    assert all(active == foreground for _, active in observations), (
-        "Foreground changed during the opt-in probe; run on a quiescent desktop"
-    )
+    if foreground:
+        assert all(active == foreground for _, active in observations), (
+            "Foreground changed during the opt-in probe; run on a quiescent desktop"
+        )
+    else:
+        warnings.warn(
+            "Foreground is unobservable to this caller; this run does not qualify focus behavior. "
+            "Use an interactive observer or an operator witness.",
+            RuntimeWarning,
+        )

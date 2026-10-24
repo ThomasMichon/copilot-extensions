@@ -1771,6 +1771,12 @@ bounded cycles use private directories, real limited interactive tasks and the
 harmless probe. They observe visible console windows and foreground transitions,
 require matching `probe` receipts and verify exact task cleanup. They never
 request UAC and do not qualify administrator execution.
+Foreground qualification requires a non-null observable foreground window.
+A headless caller can enumerate visible windows yet receive a null foreground
+even when the operator confirms an unlocked desktop. Such a run emits an
+explicit unavailable-observation warning: it does not prove zero focus changes.
+Use an observer with access to the interactive foreground or obtain a literal
+operator witness of the two harmless cycles before claiming that dimension.
 The native fixture gives its real child PowerShell ten seconds and the complete
 command twenty-five seconds. A five-second fixture child bound expired in the
 combined native run; the separate two-second owned-Job deadline

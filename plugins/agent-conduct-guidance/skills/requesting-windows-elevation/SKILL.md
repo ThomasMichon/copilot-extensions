@@ -31,6 +31,11 @@ administrator relay. See Microsoft's
 [task security contexts](https://learn.microsoft.com/en-us/windows/win32/taskschd/security-contexts-for-running-tasks)
 and [RunEx session selection](https://learn.microsoft.com/en-us/windows/win32/taskschd/registeredtask-runex).
 
+An elevated token proves execution, not that a dialog was visible. Already
+elevated callers and OS policy can change prompt behavior. To qualify the UAC
+desktop path, obtain the operator's confirmation that they saw and approved
+the dialog; never weaken policy merely to force one to appear.
+
 ## Procedure
 
 1. **Prepare.** Windows and PowerShell 7.2+ are required; fail explicitly if
@@ -51,6 +56,8 @@ and [RunEx session selection](https://learn.microsoft.com/en-us/windows/win32/ta
    The helper prints its exact `request.json` and log paths. Read progress from
    that log if necessary; do not launch a second request while the first is
    pending. After an interruption, use `-WaitFor` with that same request.
+   If the operation already completed and its task was removed, resumed waiting
+   reads the matching completed receipt without creating another task or prompt.
 5. **Interpret and verify.** Require the matching `AGENT_ELEVATION_END` run ID,
    an actual payload exit code of zero and `elevated: true` for administrator
    success. Task registration, scheduler exit zero, a created log or a `probe`

@@ -268,3 +268,20 @@ def test_expired_request_cannot_start_payload_after_late_consent(tmp_path):
     assert "deadline expired before payload admission" in text
     assert "must-not-run" not in text
     assert not (tmp_path / "worker-started.json").exists()
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Windows resumed-wait controls")
+def test_missing_task_without_terminal_is_not_completed(tmp_path):
+    request = tmp_path / "missing-request.json"
+    log = tmp_path / "missing.log"
+    log.write_text("begin\n", encoding="utf-8")
+    command = (
+        "$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+        "$id = [guid]::NewGuid().ToString('N'); "
+        f"@{{schema=1;ownerSid=$sid;runId=$id;taskName=('AgentConduct-Elevation-'+$id);logPath={quote(log)}}} "
+        f"| ConvertTo-Json | Set-Content -LiteralPath {quote(request)} -Encoding utf8; "
+        f"& {quote(INVOKE)} -WaitFor {quote(request)}; exit $LASTEXITCODE"
+    )
+    result = run_ps("-Command", command)
+    assert result.returncode != 0
+    assert "missing without its matching terminal result" in result.stderr

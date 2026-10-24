@@ -102,7 +102,15 @@ if ($PSCmdlet.ParameterSetName -eq 'Start') {
         $request.taskName -cne "AgentConduct-Elevation-$($request.runId)") {
         throw 'Cannot resume a foreign or malformed elevation request.'
     }
-    $task = $folder.GetTask($request.taskName)
+    $registered = @($folder.GetTasks(1) | Where-Object Name -CEQ $request.taskName)
+    if ($registered.Count -eq 0) {
+        $terminal = Read-ElevationTerminal $request.logPath $request.runId
+        if (-not $terminal) { throw 'Elevation task is missing without its matching terminal result; retain the request and log.' }
+        $terminal | ConvertTo-Json -Compress
+        exit $terminal.exitCode
+    }
+    if ($registered.Count -ne 1) { throw 'Ambiguous elevation task identity.' }
+    $task = $registered[0]
 }
 
 while ($true) {
