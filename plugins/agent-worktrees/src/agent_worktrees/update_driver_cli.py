@@ -59,6 +59,7 @@ def _report(request, as_json: bool = False) -> None:
         "request_id": request.id, "state": request.state, "exit_code": request.exit_code,
         "error": request.error, "log_path": str(request.log_path),
         "settled_at": getattr(request, "settled_at", None),
+        "settlement_kind": getattr(request, "settlement_kind", None),
     }
     if as_json:
         print(json.dumps(data))

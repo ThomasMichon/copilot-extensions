@@ -85,6 +85,43 @@ def test_two_process_workers_have_no_transaction_overlap(area):
     assert all(wait(request.id, root=root, timeout=1).exit_code == 0 for request in requests)
 
 
+def test_same_boot_native_timeout_retains_failure_but_allows_later_execution(area):
+    from update_driver import kernel_boot_identity, recovery_status
+
+    root = area / "state"
+    before = kernel_boot_identity()
+    started = area / "timed-out-product"
+    request = enqueue(
+        RequestSpec("fixture"),
+        runner=TrustedRunner(
+            (sys.executable, "-c",
+             "import pathlib,sys,time; pathlib.Path(sys.argv[1]).write_text('started'); time.sleep(60)",
+             str(started)), str(area), timeout=3,
+        ),
+        root=root,
+    )
+    process = worker(area)
+    try:
+        out, err = process.communicate(timeout=15)
+        assert process.returncode != 0, (out, err)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+    assert started.read_text() == "started"
+    failed = wait(request.id, root=root, timeout=1)
+    assert failed.state == "interrupted" and failed.exit_code is None
+    assert failed.settlement_kind == "native_scope"
+    assert failed.boot_id == failed.settled_boot_id == before
+    assert failed.settled_at is not None and "TimeoutExpired" in failed.error
+    assert recovery_status(root=root).refused == ()
+    subsequent = enqueue(RequestSpec("fixture", source="next"), runner=runner(area), root=root)
+    collect(worker(area))
+    assert wait(subsequent.id, root=root, timeout=1).exit_code == 0
+    assert status(request.id, root=root) == failed
+    assert kernel_boot_identity() == before
+
+
 def test_each_queued_scope_is_applied_before_product_routing(area, monkeypatch):
     import json
 
