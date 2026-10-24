@@ -2,15 +2,15 @@
   "evidence_family": "http47-shared-owned-fixture-v1",
   "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-owned-cold-drain.json",
-    "sha256": "2e7e4ad9cb27448b3dd210acd7697b258616b18708c35c478bb7e9e186ba1aeb"
+    "sha256": "21ea2edadc61f93210c4909b364d0d2e071a9f98964a0993aa3f6fd09d753a94"
   },
   "scope": "shared observations exercised by the named probe portfolio, not an independent capture",
   "captured_from": {
-    "commit": "cc79ac2f812f89c005b8b71ae3f14c18e6d6350b",
+    "commit": "80046c7d31b282cecfd8debcc849d3aee7da9c22",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/session_cold_drain.py",
-    "source_git_blob": "5df7d431f17e55283a860b4d0e6a10e00a4cbf65",
-    "source_sha256": "d03b9d7749031cd7945f5ba507f4969e7c9d939ca018bd558cb7b99f2b7c32a4"
+    "source_git_blob": "dd2470cc7a98bf3b7dac49e6c08841a397a3b06b",
+    "source_sha256": "5bc98cf565276bbadcb8c729d6cbfc433446036919756f70fa23a04033cbf237"
   }
 }
