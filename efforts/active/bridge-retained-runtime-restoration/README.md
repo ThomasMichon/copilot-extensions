@@ -301,8 +301,13 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   while legacy rows retain alias forwarding. Internal unqualified controls
   also retain the original enrollment refusal. The corrected enrollment test
   requires an empty successor inbox and the complete unchanged original row.
-  All 312 selected producer/enrollment/receipt/legacy cases pass. Fresh source
-  evidence and independent review remain required.
+  All 312 selected producer/enrollment/receipt/legacy cases pass. Actual
+  write/no-write capture from source
+  `1c8c09755d0d1a0dcb4a4cabe539032320485d3c` records 77 outputs, including
+  active-alias receipt recovery and successor/new-key refusal. The complete
+  current capture/contract/maintenance cohort passes 124 cases; two contracts
+  and 659 fixtures pass the canonical checker. Independent review remains
+  required; no runtime or parent gate is inferred.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the
