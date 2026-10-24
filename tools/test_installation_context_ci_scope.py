@@ -311,28 +311,30 @@ def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None
     assert workflow["jobs"]["exhaustive"]["if"] == (
         "github.event_name != 'workflow_dispatch' || inputs.portfolio == 'context'"
     )
-    job = workflow["jobs"]["pull-requests-commands"]
-    assert job["if"] == (
-        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-commands'"
-    )
-    assert job["timeout-minutes"] == 25
-    assert job["strategy"] == {
-        "fail-fast": False, "matrix": {"os": ["ubuntu-latest", "windows-latest"]},
-    }
-    steps = [step["run"] for step in job["steps"] if "run" in step]
-    assert len(steps) == 2
-    assert steps[0].split() == [
-        "python", "tools/run-plugin-tests.py", "update-driver",
-        "--test-file", "tests/test_first_use_pull_requests_command.py",
-        "--test-timeout", "900", "--timeout", "1080",
-    ]
-    assert steps[1].split() == [
-        "python", "tools/run-plugin-tests.py", "agent-pull-requests",
-        "--test-file", "tests/test_cell_invocation.py",
-        "-k", '"dispatch_preserves', "or", 'command_cannot"',
-        "--test-timeout", "60", "--timeout", "180",
-    ]
-    assert not job.get("continue-on-error")
+    for name, runner in (
+        ("pull-requests-command-linux", "ubuntu-latest"),
+        ("pull-requests-command-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-commands'"
+        )
+        assert job["timeout-minutes"] == 25
+        assert job["runs-on"] == runner and not job.get("strategy")
+        steps = [step["run"] for step in job["steps"] if "run" in step]
+        assert len(steps) == 2
+        assert steps[0].split() == [
+            "python", "tools/run-plugin-tests.py", "update-driver",
+            "--test-file", "tests/test_first_use_pull_requests_command.py",
+            "--test-timeout", "900", "--timeout", "1080",
+        ]
+        assert steps[1].split() == [
+            "python", "tools/run-plugin-tests.py", "agent-pull-requests",
+            "--test-file", "tests/test_cell_invocation.py",
+            "-k", '"dispatch_preserves', "or", 'command_cannot"',
+            "--test-timeout", "60", "--timeout", "180",
+        ]
+        assert not job.get("continue-on-error")
 
 
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
