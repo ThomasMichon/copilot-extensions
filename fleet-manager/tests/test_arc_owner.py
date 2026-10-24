@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from fleet_manager.arc_owner import ArcDeployment, ArcHelmOwner, ArcTooling
+from fleet_manager.arc_owner import ArcDeployment, ArcHelmOwner, ArcTooling, MAX_HELM_DEPTH
 from fleet_manager.loadout_preparation import PreparationStore
 from fleet_manager.loadouts import design_loadout
 from fleet_manager.node_journal import NodeJournal
@@ -178,12 +178,14 @@ def commands(rig):
 
 def test_live_status_envelope_has_explicit_byte_depth_and_duplicate_key_bounds():
     value = "leaf"
-    for _ in range(14):
+    for _ in range(MAX_HELM_DEPTH):
         value = {"nested": value}
     assert ArcHelmOwner._json(json.dumps(value)) == value
     for raw in (
         json.dumps({"extra": {"extra": value}}),
         '{"repeated":1,"repeated":2}',
+        '{"nonfinite":NaN}',
+        json.dumps([0] * 4097),
         " " * (1024 * 1024 + 1),
     ):
         with pytest.raises(PlanError):
@@ -376,6 +378,20 @@ def test_live_evidence_checks_all_owned_scope_capacity_and_workload_fields(rig):
     selected = rig["selected"][0]
     status = rig["owner"]._inspect(selected, deadline=time.monotonic() + 10)[0]
     values = rig["owner"]._values(selected, rig["allocation"])
+    metadata = status["info"]["resources"]["v1alpha1/AutoscalingRunnerSet"][0]["metadata"]
+    metadata["managedFields"] = [{
+        "manager": "helm", "operation": "Update", "apiVersion": "actions.github.com/v1alpha1",
+        "fieldsType": "FieldsV1", "fieldsV1": {
+            "f:spec": {"f:template": {"f:spec": {"f:containers": {
+                'k:{"name":"runner"}': {"f:resources": {"f:limits": {
+                    "f:ephemeral-storage": {}, "f:memory": {},
+                }}},
+            }}}},
+        },
+    }]
+    decoded = ArcHelmOwner._json(json.dumps(status))
+    assert decoded == status
+    assert rig["owner"]._live_resource(decoded, selected, values)["uid"] == "actual-resource"
     changes = [
         (("metadata", "namespace"), "wrong"),
         (("metadata", "uid"), None),

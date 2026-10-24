@@ -29,6 +29,9 @@ _REFERENCE_FIELDS = (
     "artifact_ref", "configuration_ref", "credential_ref", "forge_scope_ref",
     "runner_group_ref", "trust_policy_ref", "toolchain_ref", "cluster",
 )
+MAX_HELM_DEPTH = 64
+MAX_HELM_ITEMS = 4096
+MAX_HELM_NODES = 65536
 
 
 def _hash(value):
@@ -224,7 +227,7 @@ class ArcHelmOwner:
                 "ephemeral-storage": str(slots[prefix + "disk_bytes"]),
             }
         return {
-            "githubConfigUrl": settings["github_url"],
+            "githubConfigUrl": settings["github_url"].rstrip("/"),
             "githubConfigSecret": settings["credential_secret"],
             "runnerGroup": settings["runner_group"], "runnerScaleSetName": settings["release"],
             "minRunners": slots["min_runners"], "maxRunners": slots["max_runners"],
@@ -316,9 +319,21 @@ class ArcHelmOwner:
             raise PlanError("ARC native JSON exceeds its byte bound")
         try:
             value = json.loads(raw, object_pairs_hook=_pairs)
-            canonical(value, output=True)
         except (ValueError, UnicodeError, RecursionError):
             raise PlanError("ARC native JSON is invalid or exceeds its structural bounds") from None
+        pending, remaining = [(value, 0)], MAX_HELM_NODES
+        while pending:
+            node, depth = pending.pop()
+            remaining -= 1
+            if depth > MAX_HELM_DEPTH or remaining < 0:
+                raise PlanError("ARC native JSON exceeds its depth or work bound")
+            if isinstance(node, (dict, list)):
+                if len(node) > MAX_HELM_ITEMS:
+                    raise PlanError("ARC native JSON collection exceeds its bound")
+                children = node.values() if isinstance(node, dict) else node
+                pending.extend((child, depth + 1) for child in children)
+            elif type(node) is float and not math.isfinite(node):
+                raise PlanError("ARC native JSON contains a nonfinite value")
         return value
 
     @staticmethod

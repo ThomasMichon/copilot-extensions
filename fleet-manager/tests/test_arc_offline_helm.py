@@ -15,7 +15,8 @@ from test_runtime_identity import keys as keys
 
 
 @pytest.mark.skipif(not os.environ.get("FLEET_ARC_TEST_HELM"), reason="explicit offline Helm lane")
-def test_real_official_chart_consumes_typed_owner_values(rig):
+@pytest.mark.parametrize("trailing_slash", [False, True])
+def test_real_official_chart_consumes_typed_owner_values(rig, trailing_slash):
     from agent_procutil.owned_process import run_caller_owned
 
     helm = Path(os.environ["FLEET_ARC_TEST_HELM"])
@@ -24,8 +25,12 @@ def test_real_official_chart_consumes_typed_owner_values(rig):
     assert helm.is_absolute() and helm.is_file() and chart.is_absolute() and chart.is_file()
     content = chart.read_bytes()
     assert hashlib.sha256(content).hexdigest() == expected
-    selected = ArcDeployment.from_dict({**rig["value"], "chart_sha256": expected}, chart=content)
+    value = {**rig["value"], "chart_sha256": expected}
+    if trailing_slash:
+        value["settings"] = {**value["settings"], "github_url": value["settings"]["github_url"] + "/"}
+    selected = ArcDeployment.from_dict(value, chart=content)
     values = rig["owner"]._values(selected, rig["allocation"])
+    assert values["githubConfigUrl"] == "https://github.com/example/repository"
     environment = {key: value for key, value in os.environ.items()
                    if not key.upper().startswith(("HELM_", "KUBE"))}
     environment["HELM_NO_PLUGINS"] = "1"
@@ -42,6 +47,7 @@ def test_real_official_chart_consumes_typed_owner_values(rig):
     assert re.search(r'maxRunners:\s*2\b', rendered)
     assert re.search(r'minRunners:\s*0\b', rendered)
     assert "githubConfigSecret: existing-app" in rendered
+    assert re.search(r"githubConfigUrl:\s*https://github.com/example/repository\s*\n", rendered)
     assert "kubernetes.io/hostname: node-a" in rendered
     assert "kubernetes.io/arch: amd64" in rendered
     assert "ephemeral-storage:" in rendered and "allowPrivilegeEscalation: false" in rendered

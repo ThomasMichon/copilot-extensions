@@ -171,6 +171,16 @@ The latest execution request is:
 
 > Make sure the vision upstream accounts for this. Then, see if you can wire in a flow for this into the grand system, building out the pieces needed to make GitHub Actions Runners for copilot-extensions configurable via fleet-manager
 
+The operator subsequently prioritized adoption of the existing runner pool:
+
+> Let's focus on getting the ARC runners formally "adopted" by out fleet-manager and Gateway controller system, so nothing interferes with them. Then we can cease manual tweaks and leverage a formal kubernetes-style control plane for them.
+
+This prioritizes durable existing-pool adoption and controller ownership before
+further manual tuning or graphical presentation. It does not select another pool,
+replace ARC's pod lifecycle, or turn a session/task lease into permanent service
+ownership. The [adoption-first sequence](runner-loadouts.md#adoption-first-priority)
+retains the existing release, provider, custody, credential and activation gates.
+
 The [runner-loadout realization plan](runner-loadouts.md) extends this
 existing campaign and #7192; it is not a second controller or a replacement
 for #6240/#6424/#6241 and #6681 ownership. Its decomposition and validation
@@ -193,6 +203,10 @@ credential-provider work stays with its current owners.
   admission and managed-owner execution remain open; review is not a grant.
 - [ ] Carry the typed runner declaration through the real supported deployment
   owner with complete support closure, bounded outcomes and no raw command API.
+- [ ] Formally adopt the existing runner pool into durable fleet/controller
+  ownership, prove noninterference and session-independent reconciliation, then
+  retire manual tweaks and the temporary agent-held protection through the
+  existing ownership flow.
 - [ ] Prove real convergence, update/failure recovery, drain/removal and one
   authorized job; planner-only acceptance cannot close this amendment.
 

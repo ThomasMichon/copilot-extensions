@@ -94,6 +94,15 @@ stdin and contain only a secret **name**, never its content. No takeover,
 namespace creation, remote chart reference, dependency update or force flag
 exists. Plugin/ambient Helm and Kubernetes environment selectors are removed.
 
+Native Helm JSON has its own bounded reader: 1 MiB per response, 64 nesting
+levels, 4096 entries per collection and 65536 total value nodes, with duplicate
+keys and nonfinite numbers refused. Kubernetes `managedFields` metadata can be
+deeper than a planner document; it is not silently discarded or constrained by
+the planner's unrelated depth limit. These transport bounds do not relax the
+exact owned ARC spec comparison. The selected forge URL is normalized by removing
+trailing slashes before generating values, matching the official chart's scope
+representation.
+
 The ownership marker binds the selected chart and generated values, rather than
 the incidental proposal generation. A repeated original operation returns its
 retained receipt without any native call. A newly admitted generation always
