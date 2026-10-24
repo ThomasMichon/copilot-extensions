@@ -773,6 +773,9 @@ def processes_with_cwd_under(
 def checkout_retirement_blocker(root: str) -> str | None:
     """Keep unavailable cwd discovery distinct from a supported empty result."""
     try:
+        root = os.path.realpath(root, strict=True)
+        if _is_under(os.path.realpath(os.getcwd()), root):
+            return f"live process still uses the checkout: current process({os.getpid()})"
         holders = processes_with_cwd_under(root, require_available=True)
     except OSError as exc:
         return f"cwd inspection unavailable: {exc}; checkout removal deferred"

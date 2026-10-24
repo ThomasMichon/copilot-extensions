@@ -1,6 +1,7 @@
 """Failed physical reap never revokes trust from a retained checkout."""
 
 from dataclasses import replace
+import os
 import subprocess
 import sys
 import time
@@ -30,6 +31,27 @@ def test_strict_holder_inspection_resolves_symlinked_checkout_root(tmp_path, mon
     )
     holders = procs.processes_with_cwd_under(str(alias / "checkout"), require_available=True)
     assert holders == [{"pid": 12345, "name": "holder"}]
+
+
+def test_cleanup_preserves_its_own_live_working_directory(tmp_path, monkeypatch, sample_record):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    record = replace(sample_record, worktree_path=str(checkout))
+    monkeypatch.setattr(cleanup_reap, "retirement_blocker", lambda record: None)
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(cleanup_reap.procs, "processes_with_cwd_under", lambda *a, **k: [])
+
+    def unexpected_removal(*args, **kwargs):
+        pytest.fail("Cleanup must preserve its own live cwd")
+
+    monkeypatch.setattr(cleanup_reap.git_ops, "remove_worktree", unexpected_removal)
+    failures, warnings = cleanup_reap._reap_locked(
+        record, SimpleNamespace(state=SimpleNamespace(value="completed")),
+        SimpleNamespace(anchor=str(tmp_path / "anchor")), tmp_path,
+    )
+    assert failures == 1
+    assert any(str(os.getpid()) in warning for warning in warnings)
+    assert checkout.exists()
 
 
 @pytest.mark.parametrize("removed", [False, True])

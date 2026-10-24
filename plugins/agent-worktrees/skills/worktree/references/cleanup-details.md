@@ -55,6 +55,8 @@ reports `removed: true`, `skipped: false`, `ok: false` and retains the warning;
 text output shows the removal and warning rather than claiming a deferral.
 Strict retirement inspection resolves the checkout root and observed cwd paths
 before matching, so symlinked ancestors do not hide a live holder.
+The retirement guard also includes the inspecting process itself, even though
+the legacy general-purpose process enumerator excludes its caller.
 
 Open PRs override `finalized` tracking and Git-completed content. The same
 obligation check runs before retiring a missing checkout and before archiving
