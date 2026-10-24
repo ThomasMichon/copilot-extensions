@@ -88,6 +88,43 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-RECOVERY-FAULT existing binary-transport fault injection
+
+This settles only these three original keys, not the separately partitioned
+imports/accumulator in `MX-IMPERFECT` or recovered/backed fixture ownership:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_recovery.py:4` | `442749b50c5226648718ca9632931afa0c6fc6f046929e4e2ae1392ccc2c0ecf` |
+| `tests/test_pr_recovery_imperfect_evidence.py:3` | `092a07413ebf4f619e133b03747d5c070806a2ad31759430030edca0c8eb0c59` |
+| `tests/test_pr_recovery_imperfect_evidence.py:4` | `42bbd46f07add3f3d6bbdb638966282846362fdb9076215a1c6332a289153a64` |
+
+Actual merged #7898 commit `74dfe1d06ab9085648d5444c270d937de1650fa0`
+already contains these adapters. The complete backup-failure and unusable-
+checkpoint test functions match the immutable source by AST in accepted
+comparison `5127a36d82ca00163ea9232740ee2c0f44e563f4`. The backup-failure
+function also matches the actual merge completely. The unusable-checkpoint
+function differs from that merge only in its later, separately owned fixture
+signature and initial unpack; its fault branches and remaining body match.
+
+Backup failure is injected at the actual `_git_bytes` `update-ref`
+transaction boundary; sync must refuse before moving HEAD or writing a
+checkpoint. Encoding failure intercepts exactly the NUL-framed `cat-file`
+batch request containing the retained local commit reference and requires
+one probe. The separate spawn-failure branch remains intact. Preview still
+reports unusable optional evidence without inventing consent, preserves the
+saved/expected heads, and writes no audit before confirmation. A confirmed
+rewrite retains the published recovery commit, records the truthful audit
+and preserves the checkpoint bytes.
+
+The complete imperfect-evidence module and native backup-failure regression
+pass all 16 cases with exactly two contained Windows workers: 144.61 pytest
+seconds, 167.66 seconds including preparation and cleanup. Existing item
+marks and containment bounds are unchanged. This is focused functional
+evidence only, not a normal-group or repeated complete-plugin timing result.
+No runtime/test edit is needed; other residual keys and the Windows
+qualification obligation remain open.
+
 ### B-PUBSTUB existing transport-preserving scenario labels
 
 This settles only these six original keys; their headers and dispositions
