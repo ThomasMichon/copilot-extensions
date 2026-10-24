@@ -9,8 +9,8 @@
   concurrency, and compatible atomic heartbeat generation fencing.
 - **Current contract:** [selected admission, full publication](selected-authority-contract.md),
   explicitly selected by the user and reviewed/merged in #8278.
-- **Current blocker:** review the successor durable-inventory/push-assisted
-  freshness plan and select its storage/grace/action/publication contracts.
+- **Current blocker:** the successor plan is reviewed and merged; record its
+  storage/grace/action/publication decisions and exact implementation admission.
   The additive candidate seam has narrow explicit user authorization, not an
   owner release. The previous multi-mux cost conflict is historical analysis,
   not the new representative profile's ceiling. No cache/push algorithm is
@@ -260,6 +260,29 @@ defers to the next due wave, with no hidden per-venue refresh.
   Returned those exact contracts as plan prerequisites, not permission to
   edit other owners or deploy a new remote stack. No existing agent was
   contacted or inspected.
+
+### 2026-10-23 — Successor plan merged after current-head review
+
+- #8418 merged at `4a6d2d31aa9837ec63268ebd1fbeea70fa41f536`. The current
+  published head `9bc98296892784fe1a4d6c252c02ae64d23aef3e` received a genuine
+  provider Approve with no open issues, the artifact-integrity thread was
+  resolved, and all required checks passed. The normal authorized Maintainer
+  completion profile was used; no CI or native-qualification waiver.
+- Fixed the actual review finding for both profile artifacts: manifest hashes
+  and byte lengths now describe UTF-8/LF repository blobs rather than CRLF
+  capture terminators. Verified committed bytes and normalized checkouts;
+  observation records were not rewritten and no timing fixture was rerun.
+- Re-read the effort after merge and pulled the retained implementation forward
+  onto the approved plan with a committed backup. Resolved only the adjacent
+  effort-index replay context (retaining other efforts' current rows) and the
+  already-reviewed LF metadata. Product source, tests and evidence bytes match
+  the saved source checkpoint; no reset, stash, force push or ref deletion.
+- Plan review/publication is complete, not the S3 objective. Storage and
+  freshness/action/publication decisions, exact discovery/SSH/ACP seam
+  admission, functional implementation and source/native qualification remain.
+  Plan publication does not select the pending policy or expand source
+  ownership. #8143 remains draft at its previous
+  published head with its authority-fanout review finding still open.
 
 ## Reproduction and remaining cells
 

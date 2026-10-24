@@ -109,8 +109,10 @@ authorized runtime behavior.
   ACP ownership seams; retain narrow candidate API authorization separately.
 - [x] Characterize revised Mux profiles without changing functional algorithms;
   preserve original raw stress evidence and mark ACP/full mixed cost unavailable.
-- [ ] Review the [amendment](inventory-freshness-plan.md), record storage/grace/
-  action-publication decisions, and obtain exact source-owner seam admission.
+- [x] Review and merge the [amendment](inventory-freshness-plan.md) through
+  current-head review, resolved feedback and required CI (#8418).
+- [ ] Record storage/grace/action-publication decisions and obtain exact
+  source-owner seam admission before functional changes.
 - [ ] Implement only after those gates; qualify real cache-hit/push/due/stale/
   disconnected cases and independent ACP/Mux routes before source completion.
 
