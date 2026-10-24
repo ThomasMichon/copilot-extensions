@@ -647,6 +647,24 @@ class RetainedUVInstall(NamedTuple):
 
 
 @contextmanager
+def retain_closed_wheel_install(
+    uv: str, snapshot, *, python: Path, env: dict[str, str] | None = None,
+):
+    """Project an already-inspected complete wheel set, never approve it.
+
+    The caller owns profile/feed/target admission and the snapshot context through
+    installed health. This mode accepts no resolver arguments or source inputs;
+    ordinary source installation retains its separate seasoning preflight.
+    """
+    with _configuration.retain_closed_wheels(
+        uv, snapshot, python=python, env=env,
+        captured_environment=_captured_environment, select_uv=_select_uv_executable,
+        transaction_type=RetainedUVInstall, error_type=DependencyPolicyError,
+    ) as transaction:
+        yield transaction
+
+
+@contextmanager
 def retain_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,

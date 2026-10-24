@@ -35,7 +35,7 @@ def case(tmp_path: Path):
     return publication.CopyPublication(root, workspace, bindings), before
 
 
-@pytest.mark.parametrize("settlement", ["keep", "rollback"])
+@pytest.mark.parametrize("settlement", ["keep", "retain", "rollback"])
 def test_real_contender_cannot_publish_until_actual_settlement(tmp_path, settlement):
     transaction, before = case(tmp_path)
     transaction.publish()
@@ -70,6 +70,82 @@ print("settled",flush=True)
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=5)
+
+
+def test_retained_settlement_supports_recovery_without_live_publication(tmp_path):
+    transaction, before = case(tmp_path)
+    transaction.publish()
+    context, receipts, expected = transaction.context, transaction.receipts, transaction.expected
+    targets = list(before)
+    retained = [context, *receipts, *transaction.backups]
+    states = {path: publication.state_path(path) for path in retained}
+    transaction.retain()
+    assert transaction._custody is None
+    del transaction
+    assert {path: publication.state_path(path) for path in retained} == states
+    publication.check_owned(context, receipts, targets, expected)
+    publication.recover_owned(
+        context, receipts, targets, context.parent / "later-recovery.jsonl", expected,
+    )
+    assert {path: path.read_bytes() for path in targets} == before
+
+
+def test_retained_proofs_survive_the_real_producer_process(tmp_path):
+    transaction, before = case(tmp_path)
+    script = """
+import hashlib,json,pathlib,sys
+sys.path.insert(0,sys.argv[1])
+import versioned_runtime_publication as p
+root,workspace,sources=map(pathlib.Path,sys.argv[2:5])
+targets=list(map(pathlib.Path,json.loads(sys.argv[5])))
+bindings=[p.CopyBinding(sources/str(i),target,
+    hashlib.sha256((sources/str(i)).read_bytes()).hexdigest())
+    for i,target in enumerate(targets)]
+p.CopyPublication(root,workspace,bindings).publish().retain()
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(LIBRARY),
+         str(transaction.root), str(transaction.workspace),
+         str(transaction.bindings[0].source.parent), json.dumps(list(map(str, before)))],
+        capture_output=True, text=True, timeout=30, creationflags=HEADLESS,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    publication.check_owned(
+        transaction.context, transaction.receipts, list(before), transaction.expected,
+    )
+    publication.recover_owned(
+        transaction.context, transaction.receipts, list(before),
+        transaction.workspace / "after-exit.jsonl", transaction.expected,
+    )
+    assert {path: path.read_bytes() for path in before} == before
+
+
+@pytest.mark.parametrize("damage", ["target", "backup", "context", "receipt"])
+def test_retained_settlement_refuses_drift_without_releasing_custody(tmp_path, damage):
+    transaction, _before = case(tmp_path)
+    transaction.publish()
+    path = {
+        "target": transaction.bindings[0].target,
+        "backup": next(iter(transaction.backups)),
+        "context": transaction.context,
+        "receipt": transaction.receipts[0],
+    }[damage]
+    path.write_bytes(b"foreign bytes")
+    with pytest.raises(publication.PublicationProofError):
+        transaction.retain()
+    assert transaction._custody is not None
+    assert path.read_bytes() == b"foreign bytes"
+    transaction._release()
+
+
+def test_retained_settlement_requires_a_successful_unsettled_copy(tmp_path):
+    transaction, _before = case(tmp_path)
+    with pytest.raises(publication.PublicationProofError, match="successful publication"):
+        transaction.retain()
+    transaction.publish()
+    transaction.retain()
+    with pytest.raises(publication.PublicationProofError, match="custody is not held"):
+        transaction.retain()
 
 
 @pytest.mark.parametrize("fault", ["partial-stage", "post-rename", "source-set"])

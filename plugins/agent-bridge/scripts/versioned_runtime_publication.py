@@ -716,6 +716,18 @@ class CopyPublication:
                 + ", ".join(map(str, foreign)) + f"; {self.workspace}"
             )
 
+    def retain(self) -> None:
+        """Settle a successful copy while retaining its durable recovery proofs."""
+        if not self.published:
+            raise PublicationProofError("Only a successful publication can retain its proofs")
+        self.verify()
+        for path, before in self.backups.items():
+            if state_path(path) != before:
+                raise PublicationProofError(f"Backup changed before retained settlement: {path}")
+        root, entries = read_context(self.context)
+        _proofs(self.receipts, root, entries, self.expected)
+        self._release()
+
     def keep(self) -> None:
         """Metadata cleanup is not a new mutable-source postcommit gate."""
         try:
