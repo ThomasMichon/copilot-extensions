@@ -272,6 +272,11 @@ state for the current project. `state-root --pair` is stricter: it resolves the
 task-specific sibling of the current tracked worktree and exits `3` when no
 pair is available.
 
+The unpaired state-root read keeps the normal layered binding configuration
+without composing foreign-repository PR overlays. It does not enumerate enabled
+plugins to answer a state-location query; publication commands retain their
+normal PR-policy resolution.
+
 From a registered repository anchor, `--pair` exits `3` because the anchor does
 not identify one task-specific writable sibling. Its JSON result contains
 `"paired": false`, `"error": "current directory is not a tracked worktree"`,

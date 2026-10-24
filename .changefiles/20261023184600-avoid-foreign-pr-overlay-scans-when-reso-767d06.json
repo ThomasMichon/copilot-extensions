@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid foreign PR-overlay scans when resolving the state root for native namespace readers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

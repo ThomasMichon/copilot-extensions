@@ -1,6 +1,14 @@
 {
   "profile": "copilot-extensions.promotion-units/v1",
   "nodes": [
+    "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_read_preserves_response_without_pr_overlays[json-bound]",
+    "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_read_preserves_response_without_pr_overlays[plain-bound]",
+    "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_read_preserves_response_without_pr_overlays[repo-override]",
+    "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_read_preserves_response_without_pr_overlays[json-unbound]",
+    "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_read_preserves_response_without_pr_overlays[plain-unbound]",
+    "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_conduct_preserves_pair_and_launch_context",
+    "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_keeps_config_refusal_visible",
+    "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_pair_keeps_its_existing_dispatch",
     "tools/promotion_unit_tests/test_chat_collaboration.py::test_metadata_normalization_preserves_input_and_plain_text_is_not_promoted",
     "tools/promotion_unit_tests/test_chat_collaboration.py::test_invalid_metadata_is_a_pure_refusal[version]",
     "tools/promotion_unit_tests/test_chat_collaboration.py::test_invalid_metadata_is_a_pure_refusal[kind]",
@@ -1151,6 +1159,8 @@
     "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_context_fingerprints_identify_changes_without_disclosing_values"
   ],
   "sources": {
+    "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "845eb566c3174c4d2be2eda4c7bf42d48b49327afdd6a6d5eae8d1a6d65172ff",
+    "tools/promotion_unit_tests/test_state_root_read.py": "d6a76e3af9ac42c30240a94d29543a0c57f0f75a503a36e1a2a94ec0958fe228",
     "tools/artifact_source_build.py": "bd7079c5ac69199305b5aa949976ccf184e3cb6ffcf068521f17cd53cbc0e508",
     "tools/standalone_python_artifacts.py": "f0be60291f3d4987bc8bc8cfab6f8e7edb877d6991da92bdad22d9e6ce04b598",
     "tools/standalone_consumers.py": "168987556a18f4820f1b4869d090306827b2587e93b392eebe25ef497db5e910",
@@ -1264,6 +1274,7 @@
     "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py": "c70d0292e9b3bc97b994bec51fe4de06fac2e2e075c27e169224705d49348c59"
   },
   "coverage_targets": [
+    "plugins/agent-worktrees/src/agent_worktrees/context_cli.py",
     "tools/artifact_source_build.py",
     "tools/standalone_python_artifacts.py",
     "services/chat/src/agent_chat_service/store.py",
