@@ -177,6 +177,12 @@ fit an existing archetype.
       remain raw and the cross-repository inherited relative command/cwd refusal
       remains a safety mitigation, not proof of safe relative-script execution
       or completion of every retained #4959 clause.
+- [x] Preserve the selected recipe closure through bounded provider-template
+      materialization. PR #8363 binds each expansion/provenance read to the
+      selected physical identities and decoded documents, preserving named
+      supplier admission and refusing unsupported relative-script contexts.
+      This adds no loop engine and does not resolve #5174 or the consumer's
+      deferred live acceptance.
 
 ### Phase 2 — `script` backlog provider (first script-path-hook realization)
 - [x] Add a `script` forge provider for `repository_issue_loop`
@@ -454,6 +460,12 @@ https://github.com/ThomasMichon/copilot-extensions/pull/4962 .
       a `script`-provider `repository_issue_loop` extension with zero
       bespoke command-emitter code — confirmed with that consumer's own
       effort, not assumed here.
+- [x] Exercise provider materialization through the existing CLI/instance and
+      recipe authorities, including differing repository roots, transient
+      closure changes, static dependency inspection, opaque output paths and
+      unchanged ordinary pointer discovery. PR #8363's final affected packet
+      passed 305 tests with three platform-specific skips; other coupled
+      packets overlap. Promotion and authorized installed proof remain separate.
 
 ## Proposal
 
@@ -462,6 +474,27 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-24 - Selected-closure materialization source merged
+
+- PR #8363 merged as `d6d8ecc532673d18af48a50d9c6f6cbe1232d118`
+  after current-head no-open-finding review, resolved threads and required
+  green CI. Materialization reuses recursive `extends`, activation, registrar
+  expansion and the existing local-instance authority rather than a new engine.
+- Selected physical recipe identities and decoded documents bind every
+  materialization/forge-provenance read. Defining directories and named source
+  admission survive supported relocation; unknown or unsupported contexts
+  refuse without executing provider code. Ordinary pointer qualification is
+  not strict Save-time grammar admission.
+- Final affected validation: 305 passed, three platform-specific skips,
+  focused F/E9 lint and unchanged module ceilings. Coupled recipe/discovery
+  and instance tests also passed; counts overlap. Isolated first-touch CLI
+  and real native command consumers were exercised. No installer changed,
+  and no live provider, second local native OS or installed/fleet rollout
+  lane was exercised or authorized.
+- This effort stays Active. #5174, the retained #2570 clauses, optional
+  concrete hook needs and motivating-consumer acceptance keep their owners
+  and unfinished gates. Source merge is not promotion or deployment.
 
 ### 2026-10-23 - Supported path-origin follow-up merged
 

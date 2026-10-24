@@ -157,8 +157,8 @@ def test_v32_preparation_adds_only_recovery_index_and_preserves_all_rows(inbox):
     assert db.execute_read("SELECT version FROM schema_version")[0][0] == 32
     prepared = Database(db.db_path)
     try:
-        assert SCHEMA_VERSION == 33
-        assert prepared.execute_read("SELECT version FROM schema_version")[0][0] == 33
+        assert SCHEMA_VERSION >= 33
+        assert prepared.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         assert [dict(row) for row in prepared.execute_read("SELECT * FROM live_messages")] == before
         assert [dict(row) for row in prepared.execute_read("SELECT * FROM bridge_inbox_consumers")] == consumers
         assert prepared.inspect_live_handoff_recovery(consumer.session_id, limit=1)["messages"]

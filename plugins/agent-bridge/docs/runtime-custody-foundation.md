@@ -71,6 +71,18 @@ Terminal status or a completed turn alone cannot establish native settlement.
 Ordinary unassociated writes/deletion remain unchanged while admission is open
 or the installation has never been bound.
 
+## Internal original-turn native handoffs
+
+Schema 34 extends the existing turn owner with
+[original native handoffs](native-turn-custody.md). Explicit internal admission
+retains a handoff in the transaction inserting a new turn, including queued and
+keyed paths. Incomplete historical rows cannot acquire one retrospectively.
+An observational prepare/read, one-shot begin and original outcome report
+preserve distinct native acceptance, consumption and unknown state across
+closure and reopen. Actual native consumer enrollment and transport wiring are
+not implemented by these DB primitives; complete runtime qualification remains
+false.
+
 ## Internal inbox handoff owner
 
 Schema 30 adds custody fields to the existing `live_messages` rows. The writable

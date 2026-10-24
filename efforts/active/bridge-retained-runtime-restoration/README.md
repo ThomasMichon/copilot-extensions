@@ -134,6 +134,9 @@ require their own review and qualification.
       complete runtime custody.
 - [ ] Fence keyed creation, start/resume, queued/native sends, inbox/control
       handoffs, wake/redrive and host/lifecycle mutations at their effect owners.
+      The [original-turn DB foundation](../../../plugins/agent-bridge/docs/native-turn-custody.md)
+      retains internal atomic handoffs and one-shot/outcome state; actual native
+      enrollment and transport effect-boundary wiring remain separate.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -248,6 +251,64 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Original-turn native handoff DB foundation
+- Schema 34 adds immutable handoff and separate started/accepted/consumed/unknown
+  observations to the existing original turn, with prepared storage validation
+  and full-durability mutation. Explicit internal turn admission retains the
+  handoff in the same transaction as direct/keyed insertion or queued-row
+  consumption; ordinary defaults stay unqualified.
+- A focused negative control caught retrospective enrollment of an associated
+  incomplete turn that might already have been sent. It fails before the
+  correction. Handoffs now originate only with new turn insertion; observation
+  and keyed retry cannot upgrade old history, and SQL guards enforce that rule.
+- Original metadata, input and keyed receipts survive closure, native-context
+  replacement, process exit and unknown outcomes. The final DB primitive is
+  invocation-only; current DB context checks do not replace actual transport
+  custody or establish native acceptance.
+- The bounded combined selection passes 357 controls, including real SQLite
+  begin/closure ordering, original consumer/input negatives, normal/adopted full
+  commits, passive refusal, frozen legacy migration and one real child exit
+  after final DB admission. No native SDK/ACP conversation is invoked.
+- Both current HTTP-50 receiver fixture modes exposed the expected storage
+  metadata change from 33 to 34, with all thirteen other observation groups
+  unchanged. The current input now names 34 explicitly; actual write/no-write
+  captures from committed source `1f2d7b6582d3032d40d361b3b36398fe86646e0b`
+  execute both installation modes and reproduce 77 outputs. The existing owner
+  refreshes only its current HTTP-50 packets; archived packets and complete
+  prior provenance remain preserved. Two contracts and 814 fixtures pass the
+  canonical checker. The closure includes all three new native-turn modules,
+  but the observations remain ASGI/SQLite evidence, not actual native proof.
+- Publication encountered only a compact-registry conflict with three disjoint
+  upstream source-record updates. Preserve both sets through a strict
+  three-way merge and retain the pre-rebase source backup. Native source/test
+  bodies remain unchanged. Actual write/no-write capture is repeated against
+  reconciled source `4a84dc2ba95185a43663895bcda46c05bb213285`, not relabeled
+  from the earlier capture: both installation modes execute and reproduce 74
+  outputs after the upstream nonsemantic classifications. The expanded coupled
+  receiver/native-DB portfolio passes 433 controls with verified containment
+  cleanup; current HTTP floors and native qualification limits are unchanged.
+- Normal source review and merge remain owed. Actual SessionManager/native
+  transport enrollment and wiring, other producer cohorts, cross-owner closure,
+  target compatibility, native/platform qualification, restoration and running
+  adoption remain open; no full Plan/Validation Plan checkbox closes here.
+
+### 2026-10-24 - Creation/turn durability prerequisite merged
+- #8695 merged as `89c5f0ffef012a5573f461e3896072ab3b46e100` at
+  14:40:29 PDT after current-head Copilot approval `5640129914` on
+  `a1c7bf2732131f2485fd45552c100f026477d4fb`, no open findings and
+  passing required checks. The earlier source-coverage failure was repaired
+  without changing historical fixtures or weakening the guard.
+- Reread the complete Plan and Validation Plan. This closes only the retained
+  session/turn commit-policy prerequisite, not native effect-owner mediation,
+  Phase 1, full custody, native qualification, restoration or adoption.
+  Guarded post-merge source reconciliation retained the reviewed tip and
+  verified zero post-merge commits before advancing the owned source venue.
+- Next extend the original turn's native handoff/one-shot final admission and
+  outcome representation through its existing DB/native owners. Preserve
+  unknown acceptance across interruption and keep unrelated producer cohorts
+  explicitly unqualified. No new ledger, conversation, live experiment or
+  deployment follows from this source merge.
 
 ### 2026-10-24 - Retained creation/turn durability prerequisite
 - The existing session and turn owners still committed explicitly associated
