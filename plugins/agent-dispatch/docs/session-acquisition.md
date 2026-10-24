@@ -89,6 +89,14 @@ reservation and exact owner record. ACP selects its registered worker project;
 the default CLI worker needs no ACP registration. The queue lane still owns
 claim authority and does not qualify the execution workspace.
 
+The `dispatch:` namespace also publishes that execution identity as the
+worktree reference's `project`, but only from a current active reservation bound
+to the same worktree. It never substitutes the producing lane or borrows a
+historical/released allocation. A malformed non-null project refuses the
+provider response. Bridge validates and preserves the identity, then queries
+the actual workspace owner for fresh hosting admission before readiness or
+plugin staging; the provider does not supply an authoritative launch directory.
+
 Retries retain the recorded allocation even without an exclusive key, including
 its native handle and retirement marker. Routing changes do not change that
 allocation or destructive absence probes. An older coordinator lacking the

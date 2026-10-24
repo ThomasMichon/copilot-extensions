@@ -128,6 +128,73 @@ def test_namespace_resolve_unclaimed_pinned_task_uses_target_worktree(
     assert spec["worktree_id"] == "wt-pinned"
 
 
+@pytest.mark.parametrize("state", ["reserving", "spawned"])
+def test_namespace_preserves_active_execution_project_not_queue_lane(
+    monkeypatch, capsys, state,
+):
+    reservation = {
+        "worktree": "wt-active", "state": state, "release_requested": False,
+        "allocation_project": "execution-project", "worktree_path": "/actual/execution",
+    }
+    monkeypatch.setattr(
+        m, "_client",
+        lambda _args, **_kw: _FakeClient(
+            {"status": "queued", "repo": "github.com/example/producing-lane",
+             "target_worktree": "wt-active"},
+            reservations=[reservation],
+        ),
+    )
+    assert m.main(["namespace-resolve", "task-active"]) == 0
+    spec = json.loads(capsys.readouterr().out)
+    assert spec["project"] == "execution-project"
+    assert spec["worktree_id"] == "wt-active"
+    assert "cwd" not in spec
+
+
+@pytest.mark.parametrize("changes", [
+    {"state": "deferred"},
+    {"state": "failed"},
+    {"release_requested": True},
+    {"worktree": "another-workspace"},
+    {"allocation_project": None},
+])
+def test_namespace_does_not_infer_project_from_inactive_or_foreign_allocation(
+    monkeypatch, capsys, changes,
+):
+    reservation = {
+        "worktree": "wt-active", "state": "reserving", "release_requested": False,
+        "allocation_project": "execution-project", **changes,
+    }
+    monkeypatch.setattr(
+        m, "_client",
+        lambda _args, **_kw: _FakeClient(
+            {"status": "queued", "repo": "github.com/example/producing-lane",
+             "target_worktree": "wt-active"},
+            reservations=[reservation],
+        ),
+    )
+    assert m.main(["namespace-resolve", "task-active"]) == 0
+    assert "project" not in json.loads(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("project", ["", " ", True, []])
+def test_namespace_refuses_malformed_active_execution_project(monkeypatch, capsys, project):
+    monkeypatch.setattr(
+        m, "_client",
+        lambda _args, **_kw: _FakeClient(
+            {"status": "queued", "target_worktree": "wt-active"},
+            reservations=[{
+                "worktree": "wt-active", "state": "reserving",
+                "allocation_project": project,
+            }],
+        ),
+    )
+    assert m.main(["namespace-resolve", "task-active"]) == 4
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "invalid execution project" in captured.err
+
+
 @pytest.mark.parametrize("status", ["queued", "claimed", "started", "suspended"])
 @pytest.mark.parametrize("state", ["reserving", "spawned"])
 def test_namespace_resolve_active_reservation_supplies_acquisition_worktree(

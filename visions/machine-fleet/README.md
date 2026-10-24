@@ -223,10 +223,15 @@ meet. The hosting physical machine is the security boundary.
 
 ### Scoped credential relay
 
-The fleet composes the existing auth-relay provider model. Machine enrollment,
+The fleet composes the existing auth-relay provider model and the
+[Vault service's](../vault/README.md) credential and transaction authority.
+Machine enrollment,
 operator control, access to a registered service, and borrowing resource
-credentials are distinct authorities. Providers own issuance, account/audience
-selection, expiry, renewal, and any interaction required to acquire credentials.
+credentials are distinct authorities. Vault owns credential lifecycle and
+authentication transactions; providers implement issuance, account/audience
+selection, custody and platform interaction under that logical authority while
+retaining their own identity-policy restrictions. Unmigrated providers retain
+their existing ownership until an explicit transfer.
 The Gateway is not a blanket credential pool or an implicit source of authority.
 
 Explicitly enrolled, logged-in provider machines maintain the authenticated
@@ -250,6 +255,10 @@ execution capacity are separate, inspectable dimensions.
 
 Each adopted fleet supplies central management services and connections: Gateway,
 coordination, task state, indexing and declared communication capabilities.
+The Gateway-backed standard integrated profile installs a central Vault service
+container through the selected external deployment manager, not through
+Worktree Manager. Vault remains independently usable as a machine-local service
+without Fleet or central access; federation is optional and explicitly trusted.
 An unavailable future capability is an explicit requirement awaiting a supported
 implementation, not a fabricated ready service. Minimal capacity prioritizes
 these services; more capacity adds agent/build containers and product venues.
@@ -465,7 +474,8 @@ to the Gateway or its container manager.
 ### declarative-setup-modules
 
 Gateway and Vault setup are declared Fleet Manager modules, composed through the
-normal service, plugin and Worktree Manager lifecycle. Modules express selected
+normal service and plugin lifecycle. Worktree Manager is a presentation client,
+not the installer or credential/transaction owner. Modules express selected
 roles and configuration while the existing installer, supervisor, credential
 provider and service owners perform their own work. A declarative loadout does
 not require Kubernetes, a new controller or a parallel installation engine.
@@ -723,6 +733,7 @@ replacement.
 
 - Parent: [agent-fabric](../agent-fabric/README.md)
 - Related: [host-resource-providers](../host-resource-providers/README.md),
+  [Vault](../vault/README.md),
   [venue-parity](../venue-parity/README.md), [session-hosting](../session-hosting/README.md),
   [PR service](../plugins/agent-pull-requests/README.md)
 - Lifecycle: [plugin-services](../plugin-services/README.md), [installer](../installer/README.md),

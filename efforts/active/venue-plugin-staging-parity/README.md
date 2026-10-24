@@ -254,8 +254,9 @@ below used those effective runtime versions, not a source-only patch.
 - [ ] Verify publication from `dev` to `main`; perform only authorized rollout
   through the unified update path and record the effective running version.
   The earlier #8165 publication and running-version evidence above remains
-  settled. The subsequent caller/preflight correction #8405 requires its own
-  containing release and authorized rollout.
+  settled. The #8405 caller/preflight correction is now published and verified
+  in the running controller. The subsequent namespace-identity repair #8715
+  requires its own containing release and authorized rollout.
 - [ ] Complete the validation matrix below, or explicitly transfer any
   unavailable lane to a named tracked objective.
 - [ ] Reconcile #5286, #5072, and #954 without closing broader unrelated scope.
@@ -306,6 +307,8 @@ below used those effective runtime versions, not a source-only patch.
   modes, with effective paths/settings and launch version recorded.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
   evidence or explicit tracked transfers.
+  Installed static-local ACP now passes; genuine headed acquisition is blocked
+  by #8715. SSH and privileged native acceptance remain open.
 - [x] Source-preservation examples agree with executable cases: local
   same-world references retain the original path, remote local sources use
   reflected paths, Git declarations remain Git declarations after installation,
@@ -356,6 +359,59 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-24 - Verify installed local ACP and preserve execution ownership
+
+- Natural release run `40085094788` passed exact candidate-source qualification,
+  publication/readback and Main merge. Pinned Main
+  `e549f040e3e3f7b82cfeade3f1446fb000aed162` records admitted Dev
+  `442c9d38c8826bbb59947b225367e85a884f2fa1`; #8405 is an ancestor of that
+  admitted snapshot. All six affected production files match Dev and Main
+  byte-for-byte. This closes that publication gate, not the parent effort.
+- Explicitly authorized controller rollout encountered the existing #8312
+  Manager re-entry failure after a healthy Worktrees bootstrap. The documented
+  serialized engine fallback completed the full unified update successfully.
+  This is not a claim that the default Manager path is repaired.
+- The actual running Bridge reports `0.9.142.dev1`, ready, healthy and not
+  draining, with HTTP protocol 50. Its imported caller/preflight modules match
+  the qualified published source. Selected Worktrees, Codespaces, Containers and
+  SSH payloads are `1.24.252-dev1`, `0.5.123-dev1`, `0.2.100-dev1` and
+  `0.1.117-dev1`.
+- A fresh ordinary installed-client local ACP child completed both target-native
+  and controller-projected skill invocations with their hidden proof responses.
+  The original same-world controller path, target disablement, caller identity,
+  base settings, catalogs and user-global preferences were preserved. Its
+  native identity and execution cwd matched the ready receipt before the first
+  prompt; the successful one-turn body was ended after evidence capture.
+- A real coordinator task targeted at an independently created, sessionless
+  worktree then deferred before headed acquisition:
+  `Cannot establish hosting policy: managed target has no execution directory`.
+  The task and allocation remain preserved. An absent native head and missing
+  acquisition journal are not being relabeled as no-launch proof.
+- #8715 tracks the missing execution-project propagation through the Dispatch
+  worktree reference and Bridge namespace consumer. The bounded repair retains
+  active matching owner identity, rejects malformed identity, and keeps fresh
+  actual-checkout hosting checks before readiness and staging. It does not use
+  queue-lane identity, predicted cwd or a policy bypass. The distinct Worktrees
+  intrinsic-enforcement work in #8703 remains with its owner.
+- Failing-first producer and consumer controls reproduced the dropped identity
+  and original hosting refusal. Corrected selections pass 41 Dispatch namespace
+  and 350 coupled Bridge namespace, hosting and acquisition cases, including a
+  real native provider-child JSON round trip.
+- Validation also exposed Windows Git treating a long object expression as a
+  filesystem path under the checker's isolated configuration. Explicit revision
+  separation fixes the read without changing Git policy, bytes or deadlines.
+  The maintenance fixture includes the current HTTP-50 helper and source
+  closure. Its ten controls pass, including exact-object/missing-object reads
+  and a real flow-only update leaving every golden byte unchanged. The strict
+  checker passes all 814 fixtures without recapture.
+- Source lint, installation contract and documentation consistency pass.
+  Review, required CI, containing release, authorized rollout and actual
+  installed headed #8715 acceptance are still required.
+- Container access remains independently blocked by the vendor CLI loader
+  defect. Headed local, SSH, privileged, container and issue reconciliation
+  gates remain active; neither this proof nor the earlier Codespace acceptance
+  completes the broader program.
 
 ### 2026-10-23 - Preserve the explicit caller through ordinary CLI creation
 
