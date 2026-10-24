@@ -181,5 +181,16 @@ metadata prefix rather than later publication chunks, and committed metadata
 uses explicit UTF-8 decoding. Focused controls cover reverted/removed outputs,
 partial old/new/manifest staging, owned versus foreign aliases, size-triggered
 conversion with unavailable source checkpoints, and real non-ASCII Git blobs
-under a simulated legacy host code page. The updated source still owes fresh
-committed-source reproduction and a passing current-head review.
+under a simulated legacy host code page.
+
+The repaired source checkpoint `5820a7fb022e869dbd192044561c44bbcab26144`
+was retained through the managed source push before another genuine capture.
+Both write and no-write runs passed all 117 required model-free cases and
+validated interpreter/entrypoint receipts. This time the canonical publisher
+actually converted inline history to version 2: 73 declared outputs, five
+chunks, a 228,258-byte index and a largest chunk of 261,917 bytes. All 1,786
+prior records remain exact ordered prefixes of the complete 1,853-record
+history, with every artifact below the original cap. The canonical checker
+again accepts both contracts and all 583 fixtures. A passing current-head
+review and the remaining historical capture-owner gate are still required;
+this source evidence does not qualify a running receiver.

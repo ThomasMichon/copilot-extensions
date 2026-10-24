@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; DB foundation merged, inbox source in review; provenance review repairs qualified, fresh capture and review pending, full Phase 1 open
+- **Status:** Active; DB foundation merged, inbox source in review; provenance review repairs and chunked capture qualified, current review pending, full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -206,9 +206,16 @@ Its source implementation and qualification remain open.
   capability skips; 84 preparation, canonical-checker and real Git-encoding
   controls passed separately. An earlier oversized selection hit its nested
   wall-clock limit without an assertion result; it is not counted as a pass.
-- Fresh committed-source capture/no-write reproduction and a subsequent passing
-  current-head review remain required. No runtime, installer, live lane or
-  adoption effect is authorized by this source repair.
+- Fresh capture and no-write reproduction both passed all 117 required
+  model-free cases against provider-retained source checkpoint
+  `5820a7fb022e869dbd192044561c44bbcab26144`. The canonical publisher produced
+  73 outputs and genuinely converted to version 2: all 1,786 historical records
+  remain exact ordered prefixes of the 1,853-record result, with five chunks,
+  a 228,258-byte index and a largest chunk of 261,917 bytes. The unchanged
+  per-artifact cap holds; the canonical checker accepts two contracts and
+  583 fixtures.
+- A subsequent passing current-head review remains required. No runtime,
+  installer, live lane or adoption effect is authorized by this source repair.
 
 ### 2026-10-23 - Provenance contract merged; source implementation next
 - #8420 merged to `dev` as `a9b307b165a8ef14a305ecf0136250572f36aa2c`,
