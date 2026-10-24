@@ -63,8 +63,9 @@ result preserves observed hostname, physical name, actual environment,
 one-term execution identity and optional customization key. Pure source cases
 cover Windows, WSL and Linux with empty, unrelated and matching maps, literal
 platform-like hostname suffixes, projected legacy names, explicit configured
-selection, ambiguity and generated-key collisions. Existing target selectors
-are unchanged.
+selection, ambiguity and generated-key collisions. Target selection retains its
+authority boundaries; mixed-registry legacy guest lookup and conflicting named
+profiles have focused compatibility regressions.
 
 This foundation does not yet change registration/configuration, tuple producers,
 receiving-side writes or Manager entry points. Steps 2-3 and the complete

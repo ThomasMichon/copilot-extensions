@@ -527,6 +527,52 @@ def test_unscoped_guest_sibling_precedes_unscoped_native_fallback(hostname: str)
     )
 
 
+@pytest.mark.parametrize("guest_key", ["friendly-wsl", "friendly (WSL)"])
+@pytest.mark.parametrize("scoped_neighbor", [False, True])
+def test_configured_legacy_native_binding_selects_its_actual_guest(
+    guest_key: str, scoped_neighbor: bool,
+) -> None:
+    entries = {
+        key: MachineEntry(key, "", hostname="raw-host")
+        for key in ("friendly", guest_key)
+    }
+    if scoped_neighbor:
+        entries["other"] = MachineEntry("other", "", execution_platform="linux")
+    configured = resolve_local_execution_context(
+        entries, hostname="raw-host", environment="wsl", configured_machine="friendly",
+    )
+    observed = resolve_local_execution_context(entries, hostname="raw-host", environment="wsl")
+    assert configured == observed
+    assert configured.customization_key == guest_key
+    assert resolve_machine_selection(entries, "friendly", "wsl").entry.key == guest_key
+
+
+@pytest.mark.parametrize("scoped_neighbor", [False, True])
+def test_legacy_guest_selection_never_retargets_a_native_profile(scoped_neighbor: bool) -> None:
+    native = MachineEntry(
+        "friendly", "", hostname="raw-host",
+        ssh_environments=[SSHEnvironment("windows", "native-profile")],
+    )
+    guest = MachineEntry("friendly-wsl", "", hostname="raw-host")
+    entries = {native.key: native, guest.key: guest}
+    if scoped_neighbor:
+        entries["other"] = MachineEntry("other", "", execution_platform="linux")
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_machine_selection(entries, "native-profile", "wsl")
+
+
+@pytest.mark.parametrize(("key", "hostname", "actual", "observed"), [
+    ("foreign", "raw-host-wsl", "wsl", "raw-host"),
+    ("foreign-wsl", "raw-host", "windows", "raw-host-wsl"),
+])
+def test_generated_execution_cannot_shadow_legacy_hostname_addresses(
+    key: str, hostname: str, actual: str, observed: str,
+) -> None:
+    entry = MachineEntry(key, "", hostname=hostname)
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context({key: entry}, hostname=observed, environment=actual)
+
+
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 def test_selected_unscoped_keys_are_not_regenerated_from_metadata(environment: str) -> None:
     key = "custom-wsl" if environment == "wsl" else "custom"

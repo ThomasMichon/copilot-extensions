@@ -86,7 +86,8 @@ def _context(
     for collision in registry.values():
         canonical_key = _entry_execution(collision, observed)
         names = {
-            name.strip().casefold() for name in machine_identity_names(collision, include_metadata=False)
+            name.strip().casefold()
+            for name in machine_identity_names(collision, observed_hostname=observed)
         }
         names.add(canonical_key.casefold())
         if execution.casefold() in names and (

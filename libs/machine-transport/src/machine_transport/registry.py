@@ -275,13 +275,21 @@ def parse_machines_yaml(
 
 def machine_identity_names(
     entry: MachineIdentity, *, entries: Mapping[str, MachineIdentity] | None = None,
-    include_metadata: bool = True,
+    include_metadata: bool = True, observed_hostname: str | None = None,
 ) -> tuple[str, ...]:
     """Selection names; metadata exclusion leaves only keys, aliases and profiles."""
     values = (entry.key,)
     if include_metadata and not getattr(entry, "execution_platform", ""):
         hostname = entry.hostname
-        if hostname and split_machine_environment(entry.key).environment == "wsl":
+        literal = observed_hostname is not None and hostname.strip().casefold() == observed_hostname.casefold()
+        if literal:
+            hostname = hostname.strip()
+            if (
+                entry.key.strip().casefold() != observed_hostname.casefold()
+                and split_machine_environment(entry.key).environment == "wsl"
+            ):
+                hostname = f"{hostname}-wsl"
+        elif hostname and split_machine_environment(entry.key).environment == "wsl":
             hostname = split_machine_environment(hostname, "wsl").logical_machine
         values += (hostname,)
     values += (entry.alias,)
@@ -385,19 +393,7 @@ def normalize_machine_entries(
 
     owners: dict[str, str] = {}
     for entry in result.values():
-        literal = (
-            observed_hostname is not None and not entry.execution_platform
-            and entry.hostname.strip().casefold() == observed_hostname.casefold()
-        )
-        names = machine_identity_names(entry, include_metadata=not literal)
-        if literal:
-            hostname = entry.hostname.strip()
-            guest = (
-                entry.key.strip().casefold() != observed_hostname.casefold()
-                and split_machine_environment(entry.key).environment == "wsl"
-            )
-            names += (f"{hostname}-wsl" if guest else hostname,)
-        for name in names:
+        for name in machine_identity_names(entry, observed_hostname=observed_hostname):
             prior = owners.setdefault(name.casefold(), entry.key)
             if prior != entry.key:
                 raise AmbiguousMachineError(
@@ -523,9 +519,14 @@ def _find_machine_entry(
                 or (physical and physical_host(entry).casefold() == physical.casefold())
             )
         ]
-        if selected is None and len(legacy_candidates) > 1:
+        legacy_guest = (
+            execution_platform == "wsl" and selected is not None
+            and not getattr(selected, "execution_platform", "")
+            and not split_machine_environment(selected.key).environment
+        )
+        if (selected is None or legacy_guest) and len(legacy_candidates) > 1:
             raise AmbiguousMachineError(f"Machine {name!r} has ambiguous legacy {execution_platform} entries")
-        if selected is None and legacy_candidates:
+        if (selected is None or legacy_guest) and legacy_candidates:
             return legacy_candidates[0]
         if (selected and getattr(selected, "execution_platform", "")) or any(
             getattr(entry, "execution_platform", "") and name.casefold() in {
@@ -644,6 +645,11 @@ def resolve_machine_selection(
     if direct is not None:
         declared = getattr(direct, "execution_platform", "")
         implied = declared or split_machine_environment(direct.key).environment
+        if wanted and raw.casefold() != direct.key.casefold() and any(
+            env.alias.casefold() == raw.casefold() and env.name and env.name != wanted
+            for env in getattr(direct, "ssh_environments", ())
+        ):
+            raise ValueError(f"registered machine {raw!r} conflicts with the requested environment")
         if wanted and implied and implied != wanted:
             profile_only = raw.casefold() != direct.key.casefold() and any(
                 raw.casefold() == env.alias.casefold()

@@ -128,6 +128,10 @@ keys are not reformatted. Contextual normalization receives the literal observed
 hostname so native/guest sibling labels cannot trim it before selection.
 Ordinary `normalize_machine_entries(entries)` behavior is unchanged; the
 optional `observed_hostname` keyword is current-OS context, not target authority.
+The same context is used for legacy hostname-address collision checks.
+Mixed scoped/unscoped registries resolve an existing legacy guest before
+generating a fallback, while named native profiles retain their environment
+refusals.
 
 Consumers must separately prove the receiving project, namespace, ledger and
 retained allocation before writing or replaying. New naming facts do not
