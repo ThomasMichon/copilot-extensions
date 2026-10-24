@@ -1,0 +1,56 @@
+name: Chat container qualification
+
+on:
+  pull_request:
+    paths:
+      - services/chat/**
+      - tools/qualify_chat_container.py
+      - .github/workflows/chat-container-qualification.yml
+  workflow_dispatch:
+    inputs:
+      candidate_ref:
+        description: Immutable 40-hex Chat source commit
+        required: true
+        type: string
+      python_base:
+        description: Explicit digest-pinned Python Linux base (qualification only)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate immutable source
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref || github.sha }}
+        run: |
+          [[ "$CANDIDATE_REF" =~ ^[0-9a-f]{40}$ ]] || exit 1
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Prepare seasoned tooling and run Chat acceptance
+        env:
+          UV_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: >-
+          python tools/run-standalone-tests.py services/chat --prepare
+          --chat-suite acceptance --timeout 180
+      - name: Fresh independent Linux image and retained storage
+        env:
+          # Fixture only, not release admission. Published 2025-09-30.
+          PYTHON_BASE: ${{ inputs.python_base || 'python@sha256:70f7abeaf1577b30229dd1d7784d6c053a29104a56bb353fe23217ad6f0fabc3' }}
+          CANDIDATE_REF: ${{ inputs.candidate_ref || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_REF"
+          git show --no-patch --format=fuller HEAD
+          .test-venvs/linux/services/chat/bin/python tools/qualify_chat_container.py --python-base "$PYTHON_BASE"

@@ -1,10 +1,70 @@
 # Chat container contribution
 
-This directory supplies a **data-only loadout contribution**, not a delivered
-image, container installer or deployment. It realizes the template portion of
+This directory supplies an **offline wheel-only image recipe** and a
+**data-only loadout contribution**, not an admitted image release, container
+installer or deployment. It realizes portions of
 the reviewed [container contract](../../../efforts/active/agent-chat-graduation/container-service.md).
 The existing foreground Chat service remains independently usable; installing
 its wheel does not select this optional fleet profile.
+
+## Independently built foreground image
+
+Use `Dockerfile` with a dedicated build context containing only that file,
+`wheels/` and `requirements.lock`. The trusted artifact owner supplies the
+approved digest-pinned `PYTHON_BASE`, the exact platform-compatible service
+wheel and its complete `service` dependency closure, and exact versions plus
+SHA-256 hashes in the lock. Build installation is offline, wheel-only and
+hash-required. It never copies a checkout, host configuration, credentials or
+another runtime. `host.example.json` is synthetic non-secret configuration,
+not a production selection. No credential or private configuration is an
+image-build input.
+
+The image runs one foreground host as UID/GID `65532:65532`; SIGTERM drains
+and closes it. Keep the application filesystem read-only, drop capabilities,
+enable no-new-privileges, and provide bounded writable `/tmp`. Mount the
+selected non-secret configuration at `/run/config/chat.json` and its
+owner-resolved private key at `/run/secrets/chat-domain`, both read-only.
+The key must be readable by that UID, with no group/other POSIX access.
+Mount separately provisioned, owner-private retained storage at `/data`.
+Provision its ownership and `0700` mode explicitly; the image does not
+chown, create or adopt a replacement volume on ordinary startup.
+
+First creation is a distinct explicit operation against an **empty** retained
+directory. With the same image, configuration and retained mount selected by
+the deployment owner, override only the image command with:
+
+```text
+--config /run/config/chat.json --initialize-storage
+```
+
+This initializes storage without starting a listener or generating a credential.
+It refuses a live local writer, prior history, unknown content or a partial
+initialization; it is not a repair, purge or adoption command. Ordinary startup
+requires existing database identity, schema and epoch and never creates a
+missing database. A configured installation ID must survive replacement.
+The canonical writer lease remains on the retained volume; `/tmp/chat-run`
+contains only disposable endpoint/socket state. Do not move the lease to
+ephemeral storage. Local locking is not cross-host fencing.
+
+The image health check invokes the same installed host's authenticated
+`--health` mode through its canonical local endpoint. It checks the actual
+serving identity and admission state with bounded I/O; it neither opens the
+live database nor treats a status file as application health. It becomes
+unready during drain. No backend TCP port is exposed. A supported outbound
+Gateway connector remains a separate owner dependency, not a sidecar or
+proxy invented by this recipe.
+
+The optional `Chat container qualification` workflow runs
+`tools/qualify_chat_container.py` on a pinned source and explicitly selected
+digest-pinned Python Linux base. It builds a dedicated source-free context,
+starts fresh with read-only application content, one CPU, 128 MiB memory,
+64 PIDs and 16 MiB scratch, then checks missing-volume refusal, explicit
+initialization, authenticated health, two local participants, singleton
+refusal, SIGTERM, restart and stable-ID deduplication. Those are **fixture
+limits, not measured production capacity recommendations**. The report records
+the actual image/base/platform and timings. The disposable local volume has
+no qualified persistent disk quota; Gateway, cross-host fencing, different-code
+rollback, Komodo execution and private deployment remain unqualified.
 
 ## Select and actualize
 
@@ -70,8 +130,8 @@ Do not paste storage mounts, secret bytes, commands or image URLs into this
 reference-only namespace; those belong to the existing resolvers.
 
 The current Komodo provider produces a planning projection, not an applied
-container specification. Still open are the independently admitted image and
-artifact/lock inputs, actual configuration/secret/volume resolution, supported
+container specification. Still open are the independently admitted image release
+and production artifact/lock inputs, actual configuration/secret/volume resolution, supported
 Gateway connector and effect executor, prepared-plan confirmation and private
 publication. No implicit backend port, host networking, socket mount, privileged
 container or alternate controller is introduced here.

@@ -181,10 +181,13 @@ requirements.
   core, independent cursor and stable-request semantics with synthetic tests.
 - [x] Package a dependency-light installed client with no source checkout,
   sibling venv or Copilot requirement for its actual command.
-- [ ] Provide selected-client identity/catalog and explicit setup through the
+- [x] Provide selected-client identity/catalog and explicit setup through the
   existing lifecycle primitives before plugin/harness adoption. The service
   writer owns this integration; connection and adopter code must not fork
   an installer or infer selection from PATH.
+  #8696 qualifies explicit manual-client source/role selection and retained
+  installed invocation on native Linux/Windows. It does not authenticate a
+  release feed or provide service/native adoption.
 - [x] Package an independently operable hosted service with no source checkout,
   sibling venv or Copilot plugin requirement.
   The foreground `service` artifact merged in #7361; #7266 subsequently
@@ -260,9 +263,12 @@ requirements.
   qualify source-removed client invocation, exact bootstrap health and immutable
   reuse on native Linux/Windows Python3.10/3.11. #8531 completes this internal
   construction boundary, not selection, command publication or removal.
-- [ ] Implement selected manual-client setup and preserving removal through
+- [x] Implement selected manual-client setup and preserving removal through
   supported canonical custody, then qualify independently installed invocation.
   Do not turn the existing local wheel catalog into release-selection authority.
+  #8696 merged after corrected-head approval, required CI and the complete
+  486-node native portfolio on Linux/Windows Python3.10/3.11. The setup bootstrap
+  requires Python3.11; the separate Python3.10 floor refusal is explicitly tested.
 - [ ] Integrate the existing service lifecycle owner's stable-launcher,
   health/cutover and recovery binding; no second Chat supervisor, installer
   engine, command ledger or prerequisite Fleet deployment.
@@ -354,12 +360,14 @@ requirements.
   not this native portfolio.
 - [x] **Installed client:** flush-before-cursor-CAS and crash-released reader
   locks through the actual installed command, not just the callable core.
-- [ ] **Installed boundary:** fresh and repeat installation, actual console/
+- [x] **Installed boundary:** fresh and repeat installation, actual console/
   payload invocation, no source fallback, compatible previous selection and
   source-independent operation after the fixture checkout is unavailable.
-  #8531 qualifies independently constructed client slots and retained invocation
-  on both native platforms; selected-installation publication, different-code
-  update/recovery and preserving removal remain open.
+  #8531 qualifies independently constructed client slots and retained invocation.
+  #8696 adds selected manual-client publication, different-code update,
+  interrupted publication/recovery/removal, source-removed setup-module/catalog
+  invocation and preserving removal on both native platforms. This is the manual
+  client boundary; governed service lifecycle and native adoption remain open.
 - [ ] **Real consumer:** authenticated service plus two genuine existing
   participants exchange one stable-ID message and consume its exact body;
   scans and waits do not advance semantic reading.
@@ -463,7 +471,7 @@ an independent SDK version or live native qualification.
 | Recipient inbox and eligible sources | The client accepts explicit actor/channel controls; Bridge `inspect_live_inbox` projects direct-message receipts | No examined client API supplies authoritative Chat recipient/source assignment. The client/service writer coordinates that versioned assignment and its isolation/rebind errors with the existing local service/Bridge owner. A direct-message receipt projection is not this API. |
 | Shared notification intake | Bounded Chat `scan` v1; Bridge remote-event multiplexing and protocol13 `remote/events` | Remote runtime events do not subscribe to the conversation store. The service writer and existing host/Bridge owner must publish the Chat-feed registration, generation, finite callback, cancellation and quiescence binding. No per-session Python helper or continuous Node polling is an acceptable substitute. |
 | Native admission and completion | SDK `session.send`, primary final-ID semantics and optional `originatingMessageId`; bounded queue/event-log observations | Exact own primary correlation is usable. Unknown or non-primary admission remains held until its native host supplies authoritative reconciliation; queue absence, unrelated idle and expired history do not supply it. |
-| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with nine checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
+| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed resource catalog and explicit selected manual-client setup from #8696 | The connection writer can expose the supported inert/manual surface. Governed service setup, release-feed evidence and native adoption remain open; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
 | Resident cost | The native host's ordinary extension process is the baseline | Existing service/host multiplexing owns shared listening. Measure increasing recipients, bounded callback time/bytes, zero quiet/self/irrelevant/reconnect-only model turns and exact deregistration separately from that baseline. |
 
 Repository API homes are `services/chat/src/agent_chat_service/`,
@@ -482,6 +490,69 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-24 - Independent container-image candidate and host bindings
+
+- Added the Chat-owned offline wheel-only recipe and synthetic host
+  configuration under `services/chat/container`. It runs one foreground
+  non-root application with no exposed backend port, read-only configuration
+  and key inputs, separate disposable endpoints and retained conversation
+  storage. No Gateway connector, manager executor or second supervisor is
+  introduced.
+- Ordinary image startup requires an existing matching store. First creation
+  is explicit and empty-directory-only; missing, empty, mismatched or
+  redirected retained storage refuses without creating replacement history.
+  The canonical writer lease remains with retained data, not the disposable
+  run directory. Application health is authenticated over the canonical
+  endpoint and does not open a second database connection.
+- Local focused qualification passed 47 host/installed-artifact/inventory
+  tests, including an actual delayed-response health deadline. The existing
+  full Windows/Python 3.11 portfolio passed 490 tests plus its two declared
+  POSIX skips in 453.42 seconds before the final two refusal parameter cases
+  were added; those cases passed in the focused packet. The final inventory
+  contains 494 nodes. Recipe and existing template contracts passed 25 tests.
+  Local acceptance attempts exceeded the unchanged 180-second cap; this is
+  not a passing acceptance result.
+- Added the focused Linux Docker qualification lane for the actual
+  source-free image, explicit initialization, health, two local participants,
+  singleton refusal, SIGTERM and retained restart/deduplication. The pinned
+  Python base and resource bounds are disposable qualification fixtures,
+  not release admission or measured production capacity. Its execution and
+  the final native matrix remain pending for this candidate.
+- Parent status and all image-release/private-composition/Komodo/Gateway/
+  cross-host fencing/lifecycle/adoption obligations remain open. No private
+  configuration, release activation, production resource or running service
+  was changed.
+
+### 2026-10-24 - Selected manual-client setup reviewed, qualified and merged
+
+- #8696 merged as `1b2e67ce76e2853d9c70e95f3c8dc6d65cb80ae6`
+  after approval5640170231 of exact head
+  `b9978f2b9d043f8d5172205631148ca68d560163`, complete review-body
+  assessment, both resolved threads and all required green checks. Managed
+  completion used only the configured Maintainer exception to an additional
+  CODEOWNER vote; no CI bypass or unresolved finding was waived.
+- [Native run40135813390](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40135813390)
+  completed all four Linux/Windows Python3.10/3.11 cells at that exact head.
+  Every acceptance/full lane executed the same complete486-node inventory,
+  hash `90f16dd3ca9936096022efa19bea4fbaa8743a240eee7ea72e1d233691429899`.
+  Linux3.10 acceptance421/full486 passed in33.87s/42.79s; Linux3.11 in32.18s/54.51s.
+  Windows3.10 acceptance419/full484 passed with2 POSIX-only skips in53.32s/77.01s;
+  Windows3.11 in65.88s/122.09s. Limits remain180s/600s; no case, assertion or
+  skip-policy waiver. Positive selected construction runs on3.11;3.10 explicitly
+  qualifies its separate setup-bootstrap refusal and ordinary client support.
+- Both review defects are closed by the shared slot-admission boundary and
+  private publication inputs. The native3.11 POSIX lifecycle runs under
+  isolated `umask002`; installed invocation, actual interruption/recovery,
+  preserving removal and foreign-replacement protection remain qualified.
+- Re-read the full Plan and Validation Plan after merge. Closed only selected
+  manual-client identity/setup and its installed boundary. Service supervision,
+  Manager discovery, recipient assignment/shared listening/native admission,
+  container image/private composition/Komodo effects, migration and actual
+  authorized adoption remain open. The effort and #7238 remain Active.
+- Next slice: bind the Chat service/container realization to existing lifecycle
+  and deployment owners, preserving their implementation boundaries. A source
+  merge is not a release, running rollout or private deployment.
 
 ### 2026-10-24 - Selected setup review corrections
 
