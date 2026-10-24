@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -163,6 +163,20 @@ versioned topology and knowledge-repository settings are shown read-only.
 ### one-line-bootstrap
 A single published command takes a bare machine into the installer without any
 pre-installed harness tooling.
+
+The caller may optionally select a Git repository for adoption in that same
+attended transaction. The installer establishes its core toolkit first, then
+acquires the selected repository through Git's configured credential owner and
+hands off to explicitly trusted, repository-owned setup. Repository selection
+does not change the Manager's own installation or update source. Omitting it
+preserves the standalone Manager journey.
+
+The neutral installer does not absorb the selected repository's organization,
+private knowledge, machine inventory or connectivity policy. Authentication
+remains with its provider, including a genuine interactive opportunity when
+needed; access failure is not permission to substitute another account or source.
+An unfinished repository stage remains explicit without discarding a completed
+core installation or claiming full adoption.
 
 ### prerequisite-provisioning
 Detects and installs the foundational prerequisites, and **prompts to restart**
