@@ -8,7 +8,7 @@
   },
   "expected": {
     "advertised": {"protocol_version": 50, "min_protocol_version": 1},
-    "schema": {"version": 33, "pending_index": true},
+    "schema": {"version": 34, "pending_index": true},
     "empty_without_initialization": true,
     "bounded_poll": {"status": 200, "count": 1, "unoffered_untouched": true, "retry_same": true},
     "begin": [{"begin": true}, {"begin": false}],

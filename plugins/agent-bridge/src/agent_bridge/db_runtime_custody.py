@@ -69,6 +69,20 @@ class _RuntimeCustodyMixin:
         return RuntimeEpoch(identity, row["epoch"], row["revision"],
                             row["state"], row["transition_json"])
 
+    def _runtime_admission(
+        self, conn: sqlite3.Connection, identity: str, admission: RuntimeAdmission, *, cohort: str,
+    ) -> None:
+        if type(admission) is not RuntimeAdmission or admission.installation != identity:
+            raise RuntimeCustodyError(f"{cohort} admission belongs to another installation")
+        state = self._runtime_epoch(conn, identity)
+        if state.state != "open" or state.epoch != admission.epoch:
+            raise RuntimeCustodyError(f"{cohort} effects require the original open epoch")
+        if conn.execute(
+            "SELECT 1 FROM bridge_runtime_producers WHERE id=? AND installation=? AND epoch=?",
+            (admission.producer, identity, admission.epoch),
+        ).fetchone() is None:
+            raise RuntimeCustodyError(f"{cohort} producer is not enrolled")
+
     def initialize_runtime_epoch(self, installation: RuntimeInstallation) -> RuntimeEpoch:
         """Bind storage explicitly; existing rows remain unqualified history."""
         identity = self._runtime_installation(installation)

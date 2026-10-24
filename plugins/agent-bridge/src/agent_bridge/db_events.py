@@ -12,6 +12,7 @@ from .runtime_custody import RuntimeAdmission, admission_document
 
 if TYPE_CHECKING:
     from .native_keyed_admission import KeyedNativePrompt
+    from .turn_custody import NativeTurnConsumer
 
 
 class PendingPromptRemovedError(ValueError):
@@ -90,11 +91,21 @@ class _EventsMixin:
         pending_prompt_id: int | None = None,
         native_admission: KeyedNativePrompt | None = None,
         runtime_admission: RuntimeAdmission | None = None,
+        native_consumer: NativeTurnConsumer | None = None,
     ) -> dict | None:
         custody = admission_document(runtime_admission)
+        handoff = None
+        if native_consumer is not None:
+            from .turn_custody import new_handoff
+            handoff = new_handoff(session_id, turn_index, runtime_admission, native_consumer)
         if native_admission is not None:
             if pending_prompt_id is not None or self.read_only:
                 raise ValueError("keyed_native_admission_unavailable")
+            if native_consumer is not None and (
+                native_consumer.native_session_id != native_admission.expected_native_session_id
+                or prompt != native_admission.prompt
+            ):
+                raise ValueError("native_invocation_conflict")
             from .native_keyed_admission import admission_receipt, stored_receipt
             receipt = admission_receipt(session_id, turn_index, native_admission)
             encoded = json.dumps({"facts": native_admission.facts(), "receipt": receipt},
@@ -105,30 +116,47 @@ class _EventsMixin:
                 ) as conn:
                     saved = stored_receipt(self, session_id, native_admission, connection=conn)
                     if saved is not None:
+                        if native_consumer is not None:
+                            from .turn_custody import original_handoff
+                            row = self._native_turn(conn, native_consumer, saved["turn_index"])
+                            if row["native_handoff_json"] is None:
+                                raise ValueError("native_admission_history_unproven")
+                            if original_handoff(row)["consumer"] != native_consumer.document():
+                                raise ValueError("native_invocation_conflict")
                         conn.rollback()
                         return {"inserted": False, "receipt": saved}
+                    if native_consumer is not None:
+                        self._native_context(conn, native_consumer)
                     conn.execute(
                         "INSERT INTO turns (session_id,turn_index,prompt,started_at,"
-                        "acquisition_delivery_id,native_admission_json,runtime_custody_json) "
-                        "VALUES (?,?,?,?,?,?,?)",
-                        (session_id, turn_index, prompt, now, delivery_id, encoded, custody),
+                        "acquisition_delivery_id,native_admission_json,runtime_custody_json,"
+                        "native_handoff_json) VALUES (?,?,?,?,?,?,?,?)",
+                        (session_id, turn_index, prompt, now, delivery_id, encoded, custody, handoff),
                     )
                     return {"inserted": True, "receipt": receipt}
             except sqlite3.IntegrityError as exc:
                 raise ValueError("native_admission_conflict") from exc
         sql = (
             "INSERT INTO turns (session_id, turn_index, prompt, started_at, "
-            "acquisition_delivery_id,runtime_custody_json) VALUES (?, ?, ?, ?, ?, ?)"
+            "acquisition_delivery_id,runtime_custody_json,native_handoff_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
-        params = (session_id, turn_index, prompt, now, delivery_id, custody)
+        params = (session_id, turn_index, prompt, now, delivery_id, custody, handoff)
         if pending_prompt_id is None:
-            self._execute_runtime_admitted_write(sql, params, runtime_admission)
+            if native_consumer is None:
+                self._execute_runtime_admitted_write(sql, params, runtime_admission)
+            else:
+                with self._runtime_transaction(write=True) as conn:
+                    self._native_context(conn, native_consumer)
+                    conn.execute(sql, params)
             return
         if self.read_only:
             raise PermissionError("Read-only database cannot execute writes")
         with self._runtime_transaction(
             write=True, full_sync=runtime_admission is not None,
         ) as conn:
+            if native_consumer is not None:
+                self._native_context(conn, native_consumer)
             removed = conn.execute(
                 "DELETE FROM pending_prompts WHERE session_id=? AND id=? AND prompt=?",
                 (session_id, pending_prompt_id, prompt),

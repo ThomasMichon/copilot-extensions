@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 34
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -359,11 +359,13 @@ class _CoreMixin:
                 from .db_schema import validate_cold_recovery_schema
                 from .inbox_custody import validate_schema as validate_inbox_schema
                 from .inbox_consumer_schema import validate_schema as validate_consumer_schema
+                from .turn_custody_schema import validate_schema as validate_turn_schema
 
                 validate_schema(self._get_conn())
                 validate_cold_recovery_schema(self._get_conn())
                 validate_inbox_schema(self._get_conn())
                 validate_consumer_schema(self._get_conn())
+                validate_turn_schema(self._get_conn())
                 after = self._db_path.stat()
                 if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
                     raise ValueError("Read-only database changed during preparation")

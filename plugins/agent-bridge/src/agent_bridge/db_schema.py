@@ -28,6 +28,8 @@ class _SchemaMixin:
         from .inbox_custody import validate_schema as validate_inbox_schema
         from .inbox_consumer_schema import ensure_schema as ensure_consumer_schema
         from .inbox_consumer_schema import validate_schema as validate_consumer_schema
+        from .turn_custody_schema import ensure_schema as ensure_turn_schema
+        from .turn_custody_schema import validate_schema as validate_turn_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -44,6 +46,8 @@ class _SchemaMixin:
                         conn, require_history_indexes=recorded["version"] >= 32,
                         require_recovery_index=recorded["version"] >= 33,
                     )
+                if recorded is not None and recorded["version"] >= 34:
+                    validate_turn_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -52,9 +56,11 @@ class _SchemaMixin:
                 ensure_schema(conn)
                 ensure_inbox_schema(conn)
                 ensure_consumer_schema(conn)
+                ensure_turn_schema(conn)
                 validate_schema(conn)
                 validate_inbox_schema(conn)
                 validate_consumer_schema(conn)
+                validate_turn_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -68,6 +74,7 @@ class _SchemaMixin:
             validate_schema(conn)
             validate_inbox_schema(conn)
             validate_consumer_schema(conn)
+            validate_turn_schema(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -760,3 +767,12 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (33,))
             conn.commit()
             log.info("Schema migrated to version 33: indexed pending inbox handoff recovery")
+
+        if from_version < 34:
+            from .turn_custody_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (34,))
+            conn.commit()
+            log.info("Schema migrated to version 34: retained original native turn handoffs")

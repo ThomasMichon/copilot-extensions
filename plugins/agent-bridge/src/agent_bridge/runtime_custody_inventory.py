@@ -7,12 +7,14 @@ import sqlite3
 
 from .runtime_custody import RuntimeCustodyError
 from .inbox_custody import decode_handoff
+from .turn_custody import original_handoff as original_turn_handoff
 
 
 COHORTS = {
     "sessions": ("id", "status", "acp_session_id", "runtime_custody_json"),
     "turns": ("session_id", "turn_index", "acquisition_delivery_id", "completed_at",
-              "runtime_custody_json"),
+              "runtime_custody_json", "native_handoff_json", "native_handoff_started_at",
+              "native_accepted_at", "native_consumed_at", "native_outcome"),
     "workspace_embodiments": ("key_digest", "state", "session_id", "native_session_id", "turn_index"),
     "provider_embodiments": ("key_digest", "state", "session_id", "native_session_id"),
     "acquisition_attempts": ("delivery_id", "target", "worktree_id", "state"),
@@ -86,6 +88,8 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
         if table in ("sessions", "turns", "live_messages"):
             for row in rows:
                 association = row["runtime_custody_json"]
+                if table == "turns" and row["native_handoff_json"] is not None:
+                    original_turn_handoff(row)
                 if table == "live_messages" and row["handoff_json"] is not None:
                     handoff = decode_handoff(row["handoff_json"])
                     if handoff["message_id"] != row["id"] or handoff["admission"] != association:
