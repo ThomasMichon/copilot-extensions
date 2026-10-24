@@ -365,3 +365,12 @@ machine metadata/project enumeration with hosting eligibility.
   cases on native Windows. Canonical HTTP-47 capture and no-write replay each
   pass 117 probes against the published correction source. Historical evidence,
   independent expectations and protocol floors remain unchanged.
+- Reconciled the implementation with the upstream immutable-provenance sidecar
+  migration without reverting its storage layout or historical evidence.
+  Current-generation evidence is recaptured through the integrated canonical
+  producer, not hand-merged across the layout change.
+- Updated the existing CLI embodiment and remote-machine routing fixtures to
+  model the new read-only owner preflights and mandatory hosting flag. All
+  reservation cleanup controls remain; the two disconnected cohorts pass 11
+  and 28 cases, including actual subprocess plan serialization and decoded
+  Windows argument/exit propagation.
