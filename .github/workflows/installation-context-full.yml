@@ -13,12 +13,71 @@ on:
           - foundation
           - pull-requests-commands
           - pull-requests-bootstrap
+          - ssh-recipes
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  ssh-recipes-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-recipes'
+    name: SSH fixed recipes (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual SSH stamp, cold installation, failure and source independence
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_ssh.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify SSH native caller loss and ordinary durable result
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_genesis.py -k owning_ssh
+          --test-timeout 900 --timeout 1080
+  ssh-recipes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-recipes'
+    name: SSH fixed recipes (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual SSH stamp, cold installation, failure and source independence
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_ssh.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify SSH native caller loss and ordinary durable result
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_genesis.py -k owning_ssh
+          --test-timeout 900 --timeout 1080
   pull-requests-bootstrap-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-bootstrap'
     name: Pull Requests bootstrap (Ubuntu)

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve first-use admission while adding the fixed SSH recipe to the shared driver",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

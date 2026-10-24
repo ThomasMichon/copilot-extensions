@@ -659,7 +659,7 @@ canonical queued request receipts.
 ### Fixed first-use recipes and command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
-support the owning Agent Vault and Agent Pull Requests payloads' existing legacy
+support the owning Agent Vault, Agent Pull Requests and Agent SSH payloads' existing legacy
 **direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
@@ -710,6 +710,22 @@ source's identity by setting staging hints.
 The Windows reader invokes its native helper with
 typed in-process parameters, preserving JSON probe bytes rather than passing
 them through another PowerShell command-line parser.
+
+SSH's fixed service-less `stamp`/`provision` recipe is separate from adoption of
+its ordinary command, bootstrap and explicit installer publishers. It retains
+SSH's existing snapshot-default manifest and bespoke `runtime-gate` dispatchers;
+it does not rewrite that declaration into Pull Requests' direct-dispatch model.
+Admission requires SSH's exact module, legacy root, payload-root environment and
+native dispatcher declaration, its canonical installed payload and default
+legacy installation. Copied sources, retained snapshots, cells and custom roots
+remain unsupported here. Retained-source qualification under #5379 is separate.
+The recipe projects SSH's own context, keeps value-based no-self-provision
+semantics (an empty value does not disable it), refuses pinned and client-only
+requests, and removes ambient action/dry-run/payload/validated hints before
+invoking the fixed native action. Frozen inputs use SSH's existing
+`.install-stage/<request-id>-<live-executor-pid>/agent-ssh` location, preserving
+the native installer's staging reaper and transaction lock. It does not pass
+Vault service flags, force an update, create a profile or perform remote SSH work.
 
 Both native clients take the execution root, owning payload, addressed runtime
 root and originating project. Before creating driver state, they honor the
@@ -863,7 +879,13 @@ Pull Requests' corresponding actual-installer case uses its service-less
 canonical contract: cold stamp, provision from that exact retained snapshot
 with the installed payload unavailable, failed candidate preserving the
 healthy selection, and installed CLI/module origin after both source trees
-are removed. The caller-loss fixture runs with both fixed identities.
+are removed. The caller-loss fixture runs with each fixed identity.
+The manual `ssh-recipes` portfolio separately exercises SSH's actual materialized
+stamp and service-less installation, failed-candidate selection preservation and
+installed CLI/module origins after source removal on Windows and Linux. Its
+Python-free caller-loss fixture verifies native custody and the ordinary
+nonzero result. These are recipe prerequisites, not ordinary SSH publisher,
+retained-snapshot, namespaced, macOS or operator-host rollout acceptance.
 The hosted-only actual bootstrap case additionally enforces the declared hook
 deadline and output shape, closes its caller Job/group during cold construction,
 and verifies the same stamp operation/result survives. It then qualifies real

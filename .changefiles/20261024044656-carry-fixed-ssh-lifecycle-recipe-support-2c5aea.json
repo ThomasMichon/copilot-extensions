@@ -1,0 +1,9 @@
+{
+  "comment": "Carry fixed SSH lifecycle recipe support in the shared installation execution driver",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

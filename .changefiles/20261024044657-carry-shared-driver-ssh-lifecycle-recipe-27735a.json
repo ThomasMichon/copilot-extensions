@@ -1,0 +1,9 @@
+{
+  "comment": "Carry shared-driver SSH lifecycle recipe support without changing maintenance enrollment",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

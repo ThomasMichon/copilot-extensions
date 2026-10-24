@@ -342,6 +342,35 @@ def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None
         assert not job.get("continue-on-error")
 
 
+def test_ssh_recipes_use_explicit_bounded_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "ssh-recipes" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    for name, runner, opt_in in (
+        ("ssh-recipes-linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("ssh-recipes-windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-recipes'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 25
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        assert checkout["with"]["persist-credentials"] is False
+        commands = [step["run"].split() for step in job["steps"] if "run" in step]
+        assert commands == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_ssh.py",
+             "--test-timeout", "900", "--timeout", "1080"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_genesis.py", "-k", "owning_ssh",
+             "--test-timeout", "900", "--timeout", "1080"],
+        ]
+
+
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

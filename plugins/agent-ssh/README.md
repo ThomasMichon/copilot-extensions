@@ -5,6 +5,13 @@ The **SSH connectivity layer** for the agent fabric. It provides a standalone
 and defines the transport-provider contract used by direct and tunnel
 transports.
 
+The payload carries canonical installer-engine Python helpers for the shared
+installation driver's fixed legacy `stamp`/`provision` recipe. Those files are
+maintained by `tools/sync-installer-engine.py`, not a separate SSH copier.
+This prerequisite does not route ordinary SSH commands, bootstrap or explicit
+installer callers through the driver, and does not qualify retained snapshots,
+custom roots or cells. The native service-less installer remains unchanged.
+
 The installer's `uninstall` action serializes with install/update. It removes
 runtime/config contents but keeps transaction-lock files and `.install-stage`
 coordination, so the install directory may remain. Normal self-staging reap

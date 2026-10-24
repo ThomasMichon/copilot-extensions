@@ -54,6 +54,20 @@ integer and macOS `seconds:microseconds` birth identities. The native
 companion-lifecycle node above exercises that same lock through concurrent
 creation recovery and launch, rather than replacing it with a test double.
 
+## Optional SSH installation recipes
+
+The manual `installation-context-full.yml` portfolio `ssh-recipes` runs only
+the fixed SSH stamp/provision prerequisite on fresh Windows and Linux runners.
+It uses the existing isolated runner, canonical materializer, native foundation
+and ordinary queue. The packet covers no-write admission refusals, actual
+service-less installation, failed-candidate preservation, source-independent
+installed CLI/module origin and caller Job/group loss during Python-free cold
+acquisition. It does not adopt ordinary command/bootstrap publishers, exercise
+remote SSH, qualify retained snapshots or cells, or enroll the operator host.
+Run the non-download subset locally with `tools/run-plugin-tests.py update-driver
+--test-file tests/test_first_use_ssh.py`; the native cold cases require their
+existing explicit Windows/Linux genesis opt-ins.
+
 ## Optional SSH session snapshot
 
 The manual `installation-context-acceptance.yml` selector `ssh_snapshot=true`
