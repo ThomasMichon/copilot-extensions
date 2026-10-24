@@ -1,0 +1,9 @@
+{
+  "comment": "Align authorization controls with the Picker palette and document the existing provider-owned device authorization pattern.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

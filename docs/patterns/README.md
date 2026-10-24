@@ -378,6 +378,7 @@ the exemplars, and the vision it serves):
 
 | Pattern | Concern |
 |---------|---------|
+| [in-picker-device-authorization](in-picker-device-authorization.md) | Existing provider-owned device authentication through summary-conditioned actions and the shared nonblocking Manager modal; safety boundaries, SSH use and bounded candidate consumers |
 | [runtime-agent-plugin](runtime-agent-plugin.md) | The complete “add an `agent-*` plugin” path: choose the smallest runtime shape, implement the cross-platform install contract, generate payload-local commands, wire attributable bootstrap/glossary hooks, write skills against logical commands, and add service/provider ownership without dynamic initial-context snapshots |
 | [session-scoped-dynamic-guidance](session-scoped-dynamic-guidance.md) | The primary delivery path for guidance a harness depends on: a checked-in static pointer projection plus a `sessionStart` hook side effect that writes per-session dynamic content to `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`, avoiding unreliable `additionalContext` aggregation entirely |
 | [worktree-scoped-dynamic-guidance](worktree-scoped-dynamic-guidance.md) | Local-first stable guidance: enabled-payload-authenticated gitignored caches, concise checked-in selectors, lock-owned non-auto-loaded reviewed fallbacks, explicit inline decision kernels, and per-source completeness receipts; the inline catch-all recovers late/unpaired bodies without mistaking file existence for model admission |
