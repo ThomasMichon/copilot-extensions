@@ -6,11 +6,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from .execution_identity import IdentityError
-from .machine_environment import normalize_environment, split_machine_environment
+from .machine_environment import MachineEnvironment, normalize_environment, split_machine_environment
 from .registry import (
     MachineEntry,
     MissingExecutionSpaceError,
     PhysicalMachineError,
+    _profile_conflicts,
     entry_physical_host,
     find_machine_entry,
     machine_identity_names,
@@ -156,9 +157,7 @@ def resolve_local_execution_context(
             raise IdentityError("configured machine must be a nonempty string")
         configured = configured_machine.strip()
         if not any(configured.casefold() == key.casefold() for key in registry) and any(
-            profile.alias.casefold() == configured.casefold()
-            and profile.name and profile.name != platform
-            for entry in registry.values() for profile in entry.ssh_environments
+            _profile_conflicts(entry, configured, platform) for entry in registry.values()
         ):
             raise IdentityError("configured SSH profile conflicts with the current execution environment")
         # Keep the OS observation out of target-shaped suffix inference; keys,
@@ -172,10 +171,13 @@ def resolve_local_execution_context(
     if configured_machine is not None:
         try:
             selected = resolve_machine_selection(target_registry, configured, platform)
-        except MissingExecutionSpaceError:
+        except MissingExecutionSpaceError as exc:
             # This binding is already local; a missing customization is not
             # enrollment authority. Explicit key/platform conflicts still raise.
-            target = split_machine_environment(configured, platform)
+            target = (
+                MachineEnvironment(exc.physical_host, platform) if exc.physical_host
+                else split_machine_environment(configured, platform)
+            )
             return _context(registry, observed, target.machine, platform, target.logical_machine, None)
         return _context(
             registry, observed, selected.target.machine, platform,

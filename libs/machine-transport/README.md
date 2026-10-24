@@ -107,7 +107,10 @@ current configured binding.
 An established guest binding remains usable when only its native customization
 exists. This local adapter handles the registry's specific
 `MissingExecutionSpaceError` (`ValueError` subtype); the target selector still
-refuses the missing logical target. Both configured and observed results check
+refuses the missing logical target. The exception retains the resolved
+`physical_host`, so guest-qualified key, alias and display bindings keep the
+mapped family rather than reverting to their input spelling. Ambiguous physical
+families remain errors. Both configured and observed results check
 execution-key collisions against keys, compatibility names and profile aliases.
 Execution names are normalized before checking every colliding entry; trimming
 or presentation conversion cannot bypass that check. The scan includes other
@@ -131,7 +134,8 @@ optional `observed_hostname` keyword is current-OS context, not target authority
 The same context is used for legacy hostname-address collision checks.
 Mixed scoped/unscoped registries resolve an existing legacy guest before
 generating a fallback, while named native profiles retain their environment
-refusals.
+refusals even through qualified aliases. Profile environment labels use the
+shared environment normalizer.
 
 Consumers must separately prove the receiving project, namespace, ledger and
 retained allocation before writing or replaying. New naming facts do not

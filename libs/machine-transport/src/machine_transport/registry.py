@@ -60,6 +60,10 @@ class AmbiguousMachineError(ValueError):
 class MissingExecutionSpaceError(ValueError):
     """A known physical family has no entry for the requested environment."""
 
+    def __init__(self, message: str, *, physical_host: str = "") -> None:
+        super().__init__(message)
+        self.physical_host = physical_host
+
 
 class PhysicalMachineError(ValueError):
     """Physical metadata needs an execution context to select a logical machine."""
@@ -82,6 +86,16 @@ class MachineIdentity(Protocol):
 
 
 _Machine = TypeVar("_Machine", bound=MachineIdentity)
+
+
+def _profile_conflicts(entry: MachineIdentity, name: str, environment: str) -> bool:
+    if name.casefold() == entry.key.casefold():
+        return False
+    return any(
+        env.alias.casefold() == name.casefold() and bool(env.name.strip())
+        and normalize_environment(env.name) != environment
+        for env in getattr(entry, "ssh_environments", ())
+    )
 
 
 @dataclass(frozen=True)
@@ -467,6 +481,8 @@ def _find_machine_entry(
                 for entry in entries.values()
             ) else None
         )
+        if selected is not None and _profile_conflicts(selected, name, execution_platform):
+            raise ValueError(f"registered machine {name!r} conflicts with the requested environment")
         if selected and getattr(selected, "execution_platform", "") == execution_platform:
             return selected
         if (
@@ -484,14 +500,15 @@ def _find_machine_entry(
             return entry_physical_host(entry)
 
         physical = physical_host(selected) if selected else ""
-        physical_matches = {
-            physical_host(entry).casefold()
+        physical_names = [
+            physical_host(entry)
             for entry in entries.values()
             if name.casefold() in {
                 entry.hostname.casefold(), getattr(entry, "physical_host", "").casefold(),
                 entry.display_name.casefold(), physical_host(entry).casefold(),
             }
-        } if selected is None else set()
+        ] if selected is None else []
+        physical_matches = {value.casefold() for value in physical_names}
         candidates = [
             entry for entry in entries.values()
             if getattr(entry, "execution_platform", "") == execution_platform
@@ -528,14 +545,13 @@ def _find_machine_entry(
             raise AmbiguousMachineError(f"Machine {name!r} has ambiguous legacy {execution_platform} entries")
         if (selected is None or legacy_guest) and legacy_candidates:
             return legacy_candidates[0]
-        if (selected and getattr(selected, "execution_platform", "")) or any(
-            getattr(entry, "execution_platform", "") and name.casefold() in {
-                entry.hostname.casefold(), getattr(entry, "physical_host", "").casefold(),
-                physical_host(entry).casefold(),
-            }
-            for entry in entries.values()
-        ):
-            raise MissingExecutionSpaceError(f"machine {name!r} has no {execution_platform} logical entry")
+        if len(physical_matches) > 1:
+            raise AmbiguousMachineError(f"Machine {name!r} has ambiguous physical associations")
+        if (selected and getattr(selected, "execution_platform", "")) or physical_matches:
+            raise MissingExecutionSpaceError(
+                f"machine {name!r} has no {execution_platform} logical entry",
+                physical_host=physical or min(physical_names, default=""),
+            )
         return selected if selected and not getattr(selected, "execution_platform", "") else None
     if name in entries:
         return entries[name]
@@ -645,10 +661,7 @@ def resolve_machine_selection(
     if direct is not None:
         declared = getattr(direct, "execution_platform", "")
         implied = declared or split_machine_environment(direct.key).environment
-        if wanted and raw.casefold() != direct.key.casefold() and any(
-            env.alias.casefold() == raw.casefold() and env.name and env.name != wanted
-            for env in getattr(direct, "ssh_environments", ())
-        ):
+        if wanted and _profile_conflicts(direct, raw, wanted):
             raise ValueError(f"registered machine {raw!r} conflicts with the requested environment")
         if wanted and implied and implied != wanted:
             profile_only = raw.casefold() != direct.key.casefold() and any(

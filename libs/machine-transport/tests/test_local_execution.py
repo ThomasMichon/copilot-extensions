@@ -548,7 +548,12 @@ def test_configured_legacy_native_binding_selects_its_actual_guest(
 
 
 @pytest.mark.parametrize("scoped_neighbor", [False, True])
-def test_legacy_guest_selection_never_retargets_a_native_profile(scoped_neighbor: bool) -> None:
+@pytest.mark.parametrize("profile_name", [
+    "native-profile", "native-profile-wsl", "native-profile (WSL)",
+])
+def test_legacy_guest_selection_never_retargets_a_native_profile(
+    scoped_neighbor: bool, profile_name: str,
+) -> None:
     native = MachineEntry(
         "friendly", "", hostname="raw-host",
         ssh_environments=[SSHEnvironment("windows", "native-profile")],
@@ -558,7 +563,54 @@ def test_legacy_guest_selection_never_retargets_a_native_profile(scoped_neighbor
     if scoped_neighbor:
         entries["other"] = MachineEntry("other", "", execution_platform="linux")
     with pytest.raises(ValueError, match="conflicts"):
-        resolve_machine_selection(entries, "native-profile", "wsl")
+        resolve_machine_selection(entries, profile_name, "wsl")
+
+
+@pytest.mark.parametrize("binding", [
+    "native-label-wsl", "native-label (WSL)", "native-space-wsl", "{physical}-wsl",
+    "Human label-wsl", "Human label (WSL)",
+])
+@pytest.mark.parametrize("physical", ["Friendly", "physical-wsl"])
+def test_missing_guest_alias_fallback_preserves_its_resolved_physical_family(
+    binding: str, physical: str,
+) -> None:
+    binding = binding.format(physical=physical)
+    native = MachineEntry(
+        "native-space", "Human label", alias="native-label", hostname="raw-host",
+        physical_host=physical, execution_platform="windows",
+    )
+    entries = {native.key: native}
+    configured = resolve_local_execution_context(
+        entries, hostname="raw-host", environment="wsl", configured_machine=binding,
+    )
+    observed = resolve_local_execution_context(entries, hostname="raw-host", environment="wsl")
+    assert configured == observed
+    assert (configured.machine, configured.execution_machine) == (physical, f"{physical}-wsl")
+    with pytest.raises(ValueError, match="no wsl logical entry"):
+        resolve_machine_selection(entries, binding, "wsl")
+
+
+def test_missing_guest_metadata_does_not_hide_ambiguous_physical_families() -> None:
+    entries = {
+        key: MachineEntry(key, "Shared", execution_platform="windows", physical_host=physical)
+        for key, physical in (("first", "physical-a"), ("second", "physical-b"))
+    }
+    with pytest.raises(ValueError, match="ambiguous"):
+        resolve_local_execution_context(
+            entries, hostname="raw-host", environment="wsl", configured_machine="Shared-wsl",
+        )
+
+
+@pytest.mark.parametrize(("environment", "profile"), [
+    ("windows", "WIN"), ("wsl", " WSL "), ("linux", "LiNuX"),
+])
+def test_named_profile_environment_uses_shared_normalization(environment: str, profile: str) -> None:
+    key = "desk-wsl" if environment == "wsl" else "desk"
+    entry = MachineEntry(key, "", hostname="raw-host", ssh_environments=[SSHEnvironment(profile, "profile")])
+    context = resolve_local_execution_context(
+        {key: entry}, hostname="raw-host", environment=environment, configured_machine="profile",
+    )
+    assert context.execution_machine == key
 
 
 @pytest.mark.parametrize(("key", "hostname", "actual", "observed"), [
