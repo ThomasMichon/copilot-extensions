@@ -199,16 +199,21 @@ def test_derived_native_diagnostics_are_not_a_required_smoke_fallback() -> None:
     assert "tools/run-standalone-tests.py" not in commands
 
 
-def test_candidate_profiles_remain_focused_opt_in_native_acceptance() -> None:
+@pytest.mark.parametrize("platform,runner", [
+    ("linux", "ubuntu-latest"), ("windows", "windows-latest"),
+])
+def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform, runner) -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
     trigger = workflow.get("on", workflow.get(True))
     assert trigger["workflow_dispatch"]["inputs"]["candidate_profiles"]["default"] is False
-    job = workflow["jobs"]["candidate-profiles"]
+    name = f"candidate-profiles-{platform}"
+    job = workflow["jobs"][name]
     assert job["if"] == "${{ inputs.candidate_profiles }}"
-    assert job["strategy"]["matrix"]["os"] == ["ubuntu-latest", "windows-latest"]
-    assert job["strategy"]["fail-fast"] is False
+    assert job["runs-on"] == runner
+    assert job["timeout-minutes"] == 15
+    assert "strategy" not in job
     execution = job["steps"][-1]
     assert "--test-file tests/test_python_installer_engine.py" in execution["run"]
     for selector in ("local_role", "local_package", "role_health", "selected_extras"):
@@ -217,7 +222,7 @@ def test_candidate_profiles_remain_focused_opt_in_native_acceptance() -> None:
     for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
         assert "!inputs.candidate_profiles" in workflow["jobs"][name]["if"]
     required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    assert "candidate-profiles" not in required["jobs"]
+    assert name not in required["jobs"]
 
 
 def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
@@ -245,7 +250,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-service-linux", "pr-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
-        "candidate-profiles",
+        "candidate-profiles-linux", "candidate-profiles-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
