@@ -152,6 +152,43 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
     return data, declarations
 
 
+def _command_script_operand(command: list[str]) -> str | None:
+    suffixes = {".py", ".sh", ".ps1"}
+    if not re.fullmatch(
+        r"(?:pythonw?|pypy)(?:\d+(?:\.\d+)*)?(?:_d)?(?:\.exe)?",
+        Path(command[0]).name, re.IGNORECASE,
+    ):
+        if len(command) > 1 and Path(command[1]).suffix.lower() in suffixes:
+            return command[1]
+        if len(command) > 1 and command[1].startswith("-") and any(
+            Path(value).suffix.lower() in suffixes for value in command[2:]
+        ):
+            raise RegistrarError("script dependencies after non-Python options cannot yet be validated safely")
+        return None
+    arguments = iter(command[1:])
+    for value in arguments:
+        if value == "-" or value.startswith(("-c", "-m")):
+            return None  # Inline code/module operands and their arguments are not script files.
+        if value == "--":
+            operand = next(arguments, None)
+            return None if operand == "-" else operand
+        if value in {"-W", "-X", "--check-hash-based-pycs"}:
+            if next(arguments, None) is None:
+                raise RegistrarError("missing Python interpreter option value")
+        elif value.startswith(("-W", "-X", "--check-hash-based-pycs=")):
+            continue
+        elif value in {"--help", "--help-env", "--help-xoptions", "--help-all", "--version"}:
+            return None
+        elif value.startswith("-"):
+            if not re.fullmatch(r"-[bBdEhiIOPqRsSuvVx]+", value):
+                raise RegistrarError("Python interpreter options cannot yet be validated safely")
+            if "h" in value or "V" in value:
+                return None
+        else:
+            return value
+    return None
+
+
 def _validate_command_dependency(command: list[str], directory: Path, *, explicit_cwd: bool) -> None:
     if explicit_cwd and not directory.is_dir():
         raise RegistrarError(f"missing working directory dependency: {directory}")
@@ -162,9 +199,9 @@ def _validate_command_dependency(command: list[str], directory: Path, *, explici
     available = (directory / executable).is_file() if path_command else bool(shutil.which(executable))
     if not available:
         raise RegistrarError(f"missing command dependency: {executable}")
-    if len(command) > 1 and Path(command[1]).suffix in {".py", ".sh", ".ps1"}:
-        if not (directory / command[1]).is_file():
-            raise RegistrarError(f"missing script dependency: {command[1]}")
+    script = _command_script_operand(command)
+    if script is not None and not (directory / script).is_file():
+        raise RegistrarError(f"missing script dependency: {script}")
 
 
 def _validate_evaluator_dependency(declaration, resources) -> None:

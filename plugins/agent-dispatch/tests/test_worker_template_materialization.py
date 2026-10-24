@@ -689,6 +689,75 @@ def test_selected_evaluator_script_dependencies_are_checked_read_only(tmp_path, 
     assert not instance_dir().exists() and not active_dir().exists()
 
 
+@pytest.mark.parametrize("arguments", [
+    ["-u", "missing.py"], ["-I", "-W", "ignore", "missing.py"],
+    ["-X", "utf8", "missing.py"], ["--", "missing.py"], ["-u", "missing-script"],
+    ["-W", "-m", "missing.py"],
+])
+@pytest.mark.parametrize("file_backed", [False, True])
+def test_evaluator_script_after_python_options_is_required(tmp_path, arguments, file_backed):
+    policy = {"scripts": {"policy": [sys.executable, *arguments]}, "cwd": str(tmp_path)}
+    if file_backed:
+        path = tmp_path / "policy.json"
+        path.write_text(json.dumps(policy), encoding="utf-8")
+        selected = {"evaluator": str(path)}
+    else:
+        selected = {"evaluator_spec": policy}
+    _, row = provider({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy", **selected,
+        },
+    })
+    with pytest.raises(RegistrarError, match="missing script dependency"):
+        save(row)
+    assert not instance_dir().exists()
+
+
+@pytest.mark.parametrize("options", [
+    ["-u"], ["-I", "-W", "ignore"], ["-X", "utf8"], ["-Wignore"], ["-Iu"], ["--"],
+])
+def test_python_script_options_preserve_native_evaluator_invocation(tmp_path, options):
+    from agent_dispatch.producers.evaluator import load_registration_evaluator
+
+    script = tmp_path / "policy.py"
+    script.write_text("print('{\"decision\":\"noop\",\"reason\":\"native options\"}')", encoding="utf-8")
+    command = [sys.executable, *options, str(script)]
+    _, row = provider({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy",
+            "evaluator_spec": {"scripts": {"policy": command}, "cwd": str(tmp_path)},
+        },
+    })
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    assert declaration.spec["evaluator_spec"]["scripts"]["policy"] == command
+    decision, = load_registration_evaluator(dict(declaration.spec)).evaluate({})
+    assert decision.reason == "native options"
+
+
+@pytest.mark.parametrize("arguments", [
+    ["-c", "print('[]')", "data.py"], ["-cprint('[]')", "--consumer-option", "data.py"],
+    ["-m", "example.module", "data.py"], ["-mexample.module", "data.py"], ["--", "-"],
+])
+def test_python_nonfile_modes_do_not_invent_script_dependencies(arguments):
+    from agent_dispatch.worker_instances import _command_script_operand
+
+    assert _command_script_operand([sys.executable, *arguments]) is None
+
+
+@pytest.mark.parametrize("command,reason", [
+    ([sys.executable, "--unknown-option", "script.py"], "options cannot yet"),
+    ([sys.executable, "-W"], "missing Python interpreter option value"),
+    (["pwsh", "-NoProfile", "-File", "script.ps1"], "non-Python options"),
+    (["sh", "-u", "script.sh"], "non-Python options"),
+])
+def test_ambiguous_interpreter_options_refuse_dependency_claims(command, reason):
+    from agent_dispatch.worker_instances import _command_script_operand
+
+    with pytest.raises(RegistrarError, match=reason):
+        _command_script_operand(command)
+
+
 @pytest.mark.parametrize("kind", ["evaluator", "supervised-lane"])
 def test_valid_absolute_rule_policy_remains_supported(tmp_path, kind):
     policy = tmp_path / "rules.json"

@@ -237,6 +237,10 @@ The shared dependency validator uses the actual evaluator loader to inspect
 absolute policy files and the selected script's executable, script path and
 explicit working directory read-only, without evaluating a task or executing
 the script. Unselected script entries do not become required dependencies.
+Python script operands are checked after supported interpreter options,
+including option values and `--`; inline-code and module-mode arguments are
+not mistaken for script files. Unknown Python options and script-file operands
+after non-Python options refuse rather than claiming dependency validation.
 Script policies, including file-backed ones, require an explicit absolute or
 named working directory; the CLI's current directory is not evidence of the
 future evaluator process's context.
