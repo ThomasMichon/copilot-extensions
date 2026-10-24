@@ -8,14 +8,19 @@ import sqlite3
 import sys
 import time
 
-from update_driver import kernel_boot_identity, recovery_status, status
+import agent_procutil
+import pytest
+from update_driver import (
+    DriverError, RequestSpec, TrustedRunner, drain, enqueue, ensure_worker,
+    kernel_boot_identity, recovery_status, status,
+)
 
 
 def _encoded(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def test_schema_two_failure_and_pending_history_remain_readonly(area):
+def _legacy_state(area):
     root = area / "legacy-state"
     root.mkdir()
     database = root / "queue.sqlite3"
@@ -58,6 +63,11 @@ def test_schema_two_failure_and_pending_history_remain_readonly(area):
                     None if pending else boot, None, None,
                 ),
             )
+    return root, database, boot, failure
+
+
+def test_schema_two_failure_and_pending_history_remain_readonly(area):
+    root, database, boot, failure = _legacy_state(area)
     before = database.read_bytes()
     records = status(root=root)
     assert [record.id for record in records] == ["1" * 32, "2" * 32]
@@ -67,5 +77,37 @@ def test_schema_two_failure_and_pending_history_remain_readonly(area):
     assert original.boot_id == boot and original.settled_at is None
     assert pending.state == "pending" and pending.started_at is None
     assert recovery_status(root=root).current_boot_id == boot
+    assert database.read_bytes() == before
+    assert kernel_boot_identity() == boot
+
+
+@pytest.mark.parametrize("entry", ["enqueue", "worker", "drain"])
+def test_same_boot_legacy_marker_is_not_native_settlement_evidence(area, monkeypatch, entry):
+    root, database, boot, _ = _legacy_state(area)
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "UPDATE requests SET settled_at=?,settled_boot_id=? WHERE id=?",
+            (time.time(), boot, "1" * 32),
+        )
+    before = database.read_bytes()
+
+    def refuse_execution(*args, **kwargs):
+        pytest.fail("unproven legacy settlement reached execution")
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", refuse_execution)
+    with pytest.raises(DriverError):
+        if entry == "enqueue":
+            enqueue(
+                RequestSpec("fixture", argv=("new-request",)),
+                runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
+                root=root,
+            )
+        elif entry == "worker":
+            ensure_worker(
+                (sys.executable, "-m", "update_driver", "worker", "--root", str(root)),
+                root=root,
+            )
+        else:
+            drain(root=root, executor=refuse_execution)
     assert database.read_bytes() == before
     assert kernel_boot_identity() == boot
