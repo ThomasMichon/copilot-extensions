@@ -12,6 +12,7 @@
 - **Umbrella issue:** #6030
 - **Sub-issues:** #5861 (existing named reconciliation follow-on)
   and #8377 (diagnostic logging audit and retention)
+  and #7192 (first-class configurable Actions runner loadouts)
 
 ## Guiding Intent
 
@@ -33,6 +34,7 @@ placement is an explicit requirement; no option is a mandatory core dependency.
 |-------------|---------------------|-------------|
 | Campaign owner | Intent, substrate synthesis, integration and PR stewardship | Managed upstream worktree |
 | Deployment owner | Sequential adapter and fresh-environment proofs | Separate managed upstream worktree after plan review |
+| Runner loadout participant | Vision-first #7192 template, placement and declaration-to-managed-owner flow; existing release/lifecycle/authentication owners retained | Existing #7192 coordination and separate managed upstream worktree |
 | Trusted base-image participant | Bounded #8352 image recipe, contract, docs and tests; no controller or credential ownership | Separate managed upstream worktree; campaign owner integrates |
 | Adopter | Capacity, inventory, trust and live activation approval | Provider-specific downstream flow |
 
@@ -133,6 +135,39 @@ to deploy, force-stop an old owner, bypass release authentication or erase the
 accepted floor. The isolation and fencing details remain agent-recommended.
 
 ## Plan
+
+### Capacity-grid loadouts and configurable runner amendment
+
+The operator clarified the existing designer/controller split and requested
+upstream realization. Public-safe summary: fleet-manager designs expectations,
+actualizes contributed role/slot templates into the knowledge repository's
+final composition, and publishes named-machine allocations. The Gateway-side
+controller pulls published sources, prepares the deployment, notifies
+fleet-manager and waits for exact-plan confirmation. A grid-based view must
+compare CPU, memory, disk and other supported allocations against capacity.
+The confirmed operation includes required auth relays, tunnels, API/UX exposure
+and control-side deployments within an inspectable outfitting duration.
+
+The latest execution request is:
+
+> Make sure the vision upstream accounts for this. Then, see if you can wire in a flow for this into the grand system, building out the pieces needed to make GitHub Actions Runners for copilot-extensions configurable via fleet-manager
+
+The [runner-loadout realization plan](runner-loadouts.md) extends this
+existing campaign and #7192; it is not a second controller or a replacement
+for #6240/#6424/#6241 and #6681 ownership. Its decomposition and validation
+are **agent-recommended**. Existing client, Gateway/SSH, trusted-image and
+credential-provider work stays with its current owners.
+
+- [ ] Land the loadout/Gateway vision and this implementation amendment
+  through ordinary review before changing runtime behavior.
+- [ ] Implement contributed template/slot composition and capacity-aware
+  named-machine runner allocations, preserving custom registrar state.
+- [ ] Connect the committed desired composition to controller-owned source
+  acquisition, preparation, notification and exact-plan approval.
+- [ ] Carry the typed runner declaration through the real supported deployment
+  owner with complete support closure, bounded outcomes and no raw command API.
+- [ ] Prove real convergence, update/failure recovery, drain/removal and one
+  authorized job; planner-only acceptance cannot close this amendment.
 
 ### Repository-led preparation and local telemetry amendment
 
@@ -322,6 +357,11 @@ Implementation sequencing below is **agent-recommended**:
 
 All entries are **agent-recommended implementation gates**.
 
+- [ ] Loadout acceptance follows the [runner matrix](runner-loadouts.md#validation):
+  resource fit/refusal, template/registrar preservation, published-source pull,
+  exact confirmation, complete support readiness and bounded partial/unknown
+  outcomes through actual owner adapters. No secret, routing, new-host or
+  live-pool action is inferred from a plan or this source amendment.
 - [ ] Three-input reconciliation preserves user overrides/unknown roles and live
   unowned resources; stale config/inventory/quota invalidates apply.
 - [ ] No quota cannot trigger creation; one-host service-only placement reports
