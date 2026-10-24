@@ -72,6 +72,8 @@ jobs:
           --test-file tests/test_settlement.py
           --test-file tests/test_recovery.py
           --test-file tests/test_process.py
+          --test-file tests/test_settled_failure_process.py
+          --test-file tests/test_legacy_record_readback.py
       - name: Qualify actual immutable foundation construction and custody
         run: >-
           python tools/run-plugin-tests.py update-driver
@@ -123,6 +125,8 @@ jobs:
           --test-file tests/test_settlement.py
           --test-file tests/test_recovery.py
           --test-file tests/test_process.py
+          --test-file tests/test_settled_failure_process.py
+          --test-file tests/test_legacy_record_readback.py
       - name: Qualify actual immutable foundation construction and custody
         run: >-
           python tools/run-plugin-tests.py update-driver

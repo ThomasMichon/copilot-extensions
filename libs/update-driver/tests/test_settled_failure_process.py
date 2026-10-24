@@ -46,20 +46,37 @@ def _stop_fixture(process):
     process.communicate(timeout=5)
 
 
+def _responsive(heartbeat):
+    before = heartbeat.stat().st_size
+    eventually(lambda: heartbeat.stat().st_size > before, timeout=2)
+
+
 def test_native_timeout_allows_a_later_install_on_the_same_boot(area):
     root = area / "state"
     boot_before = kernel_boot_identity()
     marker = area / "timed-out-product-started"
+    effects = area / "timed-out-product-effects"
     later_marker = area / "later-product-completed"
+    unrelated_root = area / "unrelated-service"
+    unrelated_root.mkdir()
+    heartbeat = unrelated_root / "heartbeat"
     unrelated = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
-        cwd=area, stdin=subprocess.DEVNULL,
+        [
+            sys.executable, "-c",
+            "from pathlib import Path; import sys,time\n"
+            "with Path(sys.argv[1]).open('ab',buffering=0) as heartbeat:\n"
+            " while True:\n"
+            "  heartbeat.write(b'.'); time.sleep(.05)\n",
+            str(heartbeat),
+        ],
+        cwd=unrelated_root, stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         **agent_procutil.no_window_kwargs(),
     )
     first_worker = None
     later_worker = None
     try:
+        eventually(lambda: heartbeat.exists() and heartbeat.stat().st_size > 0)
         first = enqueue(
             RequestSpec("fixture", argv=("native-timeout",)),
             runner=TrustedRunner(
@@ -67,8 +84,9 @@ def test_native_timeout_allows_a_later_install_on_the_same_boot(area):
                     sys.executable, "-c",
                     "from pathlib import Path; import os,sys,time; "
                     "marker=Path(sys.argv[1]); temporary=marker.with_suffix('.pending'); "
+                    "effects=Path(sys.argv[2]).open('a'); effects.write('start\\n'); effects.close(); "
                     "temporary.write_text(str(os.getpid())); temporary.replace(marker); time.sleep(60)",
-                    str(marker),
+                    str(marker), str(effects),
                 ),
                 str(area), timeout=5,
             ),
@@ -80,10 +98,11 @@ def test_native_timeout_allows_a_later_install_on_the_same_boot(area):
             first_worker.communicate(timeout=15)
             assert exited(), "the exact timed-out fixture product did not exit"
         failed = status(first.id, root=root)
-        assert failed.state != "running"
+        assert failed.state in {"interrupted", "blocked", "completed"}
         assert failed.exit_code != 0
         assert failed.error
         assert unrelated.poll() is None
+        _responsive(heartbeat)
         assert kernel_boot_identity() == boot_before
 
         later = enqueue(
@@ -104,8 +123,10 @@ def test_native_timeout_allows_a_later_install_on_the_same_boot(area):
         assert status(later.id, root=root).exit_code == 0
         assert later_marker.read_text() == "completed"
         assert status(first.id, root=root).exit_code != 0
+        assert effects.read_text().splitlines() == ["start"], "failed work was automatically replayed"
         assert kernel_boot_identity() == boot_before
         assert unrelated.poll() is None
+        _responsive(heartbeat)
     finally:
         for process in (first_worker, later_worker, unrelated):
             if process is not None:
