@@ -286,8 +286,12 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   unoffered/offered/started messages, reopened storage, refused changed input
   and wrong targets, a successor that cannot inherit input, and late original
   outcomes. The combined retained/legacy regression cohort passes 291 cases.
-  Fresh committed-source HTTP-48 evidence and current-head review remain owed;
-  this correction does not complete the actual SDK or parent restoration gates.
+  Committed source `79d457e533cc1d165c03557d4da83f3725e31aa4` passes actual
+  HTTP-48 write/no-write capture in both installation modes with 76 outputs,
+  including executed alias folding and retained outcomes after alias cleanup.
+  The checker accepts both contracts and 658 fixtures. Current-head review
+  remains owed; this correction does not complete the actual SDK or parent
+  restoration gates.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

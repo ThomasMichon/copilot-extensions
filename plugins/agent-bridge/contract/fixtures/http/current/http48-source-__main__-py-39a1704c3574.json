@@ -6,11 +6,11 @@
   },
   "advertisement_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http48-retained-inbox.json",
-    "sha256": "3f669707866280511eb2892f561ab87d97e04d3438d5572089177990500d114d"
+    "sha256": "383f5a6b66f050ffdbd9a265cefa09901a036be02c87163e8c9cb95156d3f66c"
   },
   "scope": "unchanged source and immutable prior operation; no new runtime observation",
   "captured_from": {
-    "commit": "d411d903e347e41d558ad32eee45e078b06df486",
+    "commit": "79d457e533cc1d165c03557d4da83f3725e31aa4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 48,
     "source_path": "plugins/agent-bridge/src/agent_bridge/__main__.py",
