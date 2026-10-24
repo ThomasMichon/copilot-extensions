@@ -160,6 +160,16 @@ someone else's PR". The [execution-driver slice](execution-driver.md) therefore
 proceeds against the existing canonical updater, independently of open staging,
 watchdog and recurring-maintenance changes, without superseding their owners.
 
+**Repair evidence clarification (2026-10-23), summary:** audited, request-bound
+pre-launch recovery is allowed, but an explicit operator order to repair,
+clean-install or force-reinstall does not require historical cleanup evidence.
+Operator authorization is distinct from native-confirmed settlement. Preserve
+the actual prior failure, addressed installation scope, one active writer and
+unrelated services/data; do not require the broken owner to approve recovery.
+The [request record](inception-transcript.md#explicit-repair-authorization-and-legacy-pre-launch-audit)
+retains the exact words. This approves source implementation, not a concrete
+repair run on a host.
+
 ## Plan
 
 ### Phase 0 - Review the intent and plan
@@ -239,7 +249,8 @@ transaction execution from the existing recurring-maintenance assignment.
 - [ ] Review and implement [normal and operator-approved repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-version debounce, one active installer, clean normal rollback and bounded repair takeover without stale-marker vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record repair and unrelated services/data; no host/kernel restart prerequisite.
 - [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
 - [x] Land pinned-target active-request sharing through the existing queue and fixed first-use adapter; preserve later execution for unresolved moving targets. This does not close central desired-target selection, worker fan-out, same-boot recovery or repair takeover.
-- [ ] Land native-confirmed same-boot failure settlement, preserving interrupted/no-exit-status outcomes and older request history; qualify strict native cleanup, participant refusal, schema-2 compatibility and subsequent normal execution on Windows/Linux. Owner death without durable proof and legacy/approved repair remain separate open work.
+- [x] Land native-confirmed same-boot failure settlement, preserving interrupted/no-exit-status outcomes and older request history; qualify strict native cleanup, participant refusal, schema-2 compatibility and subsequent normal execution on Windows/Linux. Owner death without durable proof and legacy/approved repair remain separate open work.
+- [ ] Implement explicit operator-authorized legacy fence recovery without a historical cleanup-proof prerequisite, retaining original failed outcomes and recording authorization separately from native proof. Keep audited pre-launch recovery optional, normal admission conservative and active-installer takeover within the bounded repair contract.
 - [ ] Route ordinary supported suite-update entry points through one caller-independent execution owner over the complete canonical transaction.
 - [x] Migrate the public Manager/engine update commands, staged acquisition and hook `reconcile-plugins --apply` without replacing their canonical executors.
 - [ ] Migrate native launchers' direct validated plan-action execution and remaining suite-adopted first-use publishers while preserving standalone defaults.
@@ -446,6 +457,7 @@ credential/configuration effect occurs here.
 
 - [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality; compatible handoff health-gates before retirement, while incompatible/refused/hung handoff allows bounded owned-scope shutdown or identity-checked force termination before cold-start readiness.
 - [ ] **Cold recovery and retries:** breaking all predecessor handoff contracts does not veto selected Dev deployment. Qualify durable recovery after abrupt child death, consumer reconnect after stream/reply loss, safe retry/deduplication or unknown-outcome reconciliation, exclusive ownership and explicit failed-recovery reporting.
+- [ ] **Operator repair authority:** explicit repair proceeds without historical cleanup or pre-launch evidence, including older records that cannot supply it. Audited pre-launch recovery is optional. Distinguish authorization from native settlement, preserve actual failure/pending history, refuse implicit repair in ordinary callers, and verify scoped takeover, actual selected readiness and unrelated-data preservation separately.
 - [ ] **Source admission:** reject dirty, worktree-backed, unmerged or substituted source; preserve the exact resolved commit throughout a run.
 - [ ] **Materialization:** actual installer imports the complete vendor closure from a non-editable install with no source-checkout dependency.
 - [ ] **Identity:** identical inputs reuse unchanged completion bytes; different commits or assembly/dependency/profile inputs cannot overwrite a completed slot.
