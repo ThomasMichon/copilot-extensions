@@ -1,0 +1,9 @@
+{
+  "comment": "Document intrinsic Worktrees embodiment enforcement without a hosting-policy flag.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

@@ -639,7 +639,7 @@ def resolve_launch_plan(
     from .seed_launch import require_launch_capabilities, require_attempt_plan, require_attempt_target
     require_attempt_target(launch_attempt_id, target_machine=target_machine, seed=seed)
 
-    args = ["resolve", "--json", "--require-agent-hosting"]
+    args = ["resolve", "--json"]
     require_staging = bool(seed) or bool(defer_new_seed)
     if require_staging:
         args += ["--stage-launch-seed", "--require-native-seed"]
@@ -675,11 +675,6 @@ def resolve_launch_plan(
     except EngineError as e:
         detail = _engine_error_detail(e)
         require_launch_capabilities(detail, attempt_id=launch_attempt_id, staged=require_staging)
-        if "unrecognized arguments" in detail and "--require-agent-hosting" in detail:
-            raise EngineFeatureUnavailable(
-                "the installed engine cannot enforce repository hosting policy; "
-                "update agent-worktrees before launching"
-            ) from e
         if (
             bare_resume
             and "unrecognized arguments" in detail
@@ -707,7 +702,7 @@ def resolve_launch_plan(
         ):
             obj = run_json(
                 project,
-                ["resolve", "--base", "--no-mux", "--require-agent-hosting"],
+                ["resolve", "--base", "--no-mux"],
                 timeout=timeout,
                 stream_progress=True,
             )

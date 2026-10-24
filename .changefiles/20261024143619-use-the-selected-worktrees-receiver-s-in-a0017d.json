@@ -1,0 +1,9 @@
+{
+  "comment": "Use the selected Worktrees receiver's internal policy contract before unflagged embodiment.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

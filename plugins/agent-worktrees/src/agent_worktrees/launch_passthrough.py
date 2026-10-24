@@ -10,11 +10,6 @@ REJECTED_COPILOT_ARGS = ("--acp", "--stdio", "-p", "--prompt", "-i", "--interact
 def add_launch_passthrough_args(p: argparse.ArgumentParser) -> None:
     """Register the launch-passthrough flags shared by `embody` and `copilot`."""
     p.add_argument(
-        "--require-agent-hosting", action="store_true",
-        help="Require this receiving owner to enforce repository agent-hosting "
-        "policy at the actual execution checkout (older owners refuse this flag).",
-    )
-    p.add_argument(
         "--copilot-process-launcher", default=None, metavar="PATH",
         help="One-launch executable wrapper for direct Copilot or normalized "
         "setup. Requires an absolute executable path; custom templates and "

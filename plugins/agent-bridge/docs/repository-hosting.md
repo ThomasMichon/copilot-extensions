@@ -52,10 +52,11 @@ not cached policy admission: the receiving daemon still checks the actual
 execution checkout. `--cli` forwarding does not implement this daemon contract
 and refuses that flag combination.
 
-Dispatch also passes the mandatory flag to the receiving Worktrees `embody`
-owner. Its parser acknowledges actual-checkout enforcement; a legacy owner
-cannot silently allocate from a different default-branch policy and launch.
-Caller-side checks remain in place, but are never proof of receiver support.
+Worktrees `embody` enforces hosting policy internally; it has no hosting-policy
+flag. Before invoking that ordinary launch command, Dispatch also checks the
+selected receiver's existing read-only policy operation. A missing or invalid
+owner response refuses before embodiment; caller-side policy alone is not
+proof that the independently selected receiver supports enforcement.
 Historical receipt-only reads do not require new launch admission.
 
 ## Admission boundaries

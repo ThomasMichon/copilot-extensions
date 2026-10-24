@@ -131,9 +131,10 @@ the seed writer and final execution boundary also re-read policy. A policy
 added after planning blocks a new launch without deleting the retained seed.
 State-restoration and completion bookkeeping remain available after denial.
 
-Manager and remote callers send `--require-agent-hosting` so older engines
-refuse before allocation or seed submission, rather than executing a weaker
-compatibility path. Hosting-aware seed/admission writers require verb version 7.
+Hosting enforcement is intrinsic to Copilot launch and resume paths. There is
+no Worktrees hosting-policy flag, and callers do not add one to ordinary source
+or inspection commands. The receiving launch path checks its actual execution
+checkout regardless of the caller. Hosting-aware seed/admission writers require verb version 7.
 Unsupported receivers fail visibly; no caller silently chooses another harness.
 Manager shell diagnostics remain buffered until target admission: denial starts
 no automatic update, installer, reconciliation, launcher-root registration or

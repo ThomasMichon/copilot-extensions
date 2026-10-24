@@ -223,7 +223,7 @@ def test_remote_option_inventory_covers_all_resolve_parser_destinations() -> Non
         "dry_run", "recovery", "defer_projections", "no_resume", "bare_resume", "restore",
         "no_mux", "no_fast_forward", "json", "worktree_id", "codename", "base", "auto",
         "new_worktree", "bridge", "profile", "defer_new_seed", "stage_launch_seed",
-        "require_native_seed", "native_resume_session", "launch_attempt_id", "require_agent_hosting",
+        "require_native_seed", "native_resume_session", "launch_attempt_id",
         "require_launch_attempt",
         "seed_id", "launch_request_b64", "launch_request_status", "machine", "environment",
         "target_no_mux", "parent_session", "caller_worktree", "owner_ref", "seed", "copilot_args",
@@ -241,5 +241,5 @@ def test_powershell_remote_plan_quotes_each_value(remote) -> None:
     script = base64.b64decode(plan["remote_command"].rsplit(" ", 1)[1]).decode("utf-16le")
     assert script == (
         "& 'example' '--profile' 'profile with ''quotes''; $value' "
-        "'--no-resume' '--no-fast-forward' '--require-agent-hosting'; exit $LASTEXITCODE"
+        "'--no-resume' '--no-fast-forward'; exit $LASTEXITCODE"
     )

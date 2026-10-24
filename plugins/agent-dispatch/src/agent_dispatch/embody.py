@@ -489,7 +489,7 @@ def spawn_embodied_worker(
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
     from .hosting_policy import require_embodiment_harness
 
-    require_embodiment_harness(project=project, worktree_id=worktree_id, timeout=timeout)
+    require_embodiment_harness(exe_prefix, project=project, worktree_id=worktree_id, timeout=timeout)
     if seed is None:
         seed = autopilot_worker_prompt(
             task_id,
@@ -504,7 +504,7 @@ def spawn_embodied_worker(
         # `embody` subcommand. It lets a CWD-neutral caller name the target
         # project instead of relying on git-like CWD discovery.
         cmd += ["--project", project]
-    cmd += ["embody", "--require-agent-hosting"]
+    cmd += ["embody"]
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
         if resume_head:

@@ -62,7 +62,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     for index, arg in enumerate(args):
         if index == selector_end or arg in (
             "--new", "--worktree-id", "--no-mux", "--defer-new-seed", "--stage-launch-seed",
-            "--require-agent-hosting", "--require-native-seed",
+            "--require-native-seed",
             "--require-launch-attempt",
         ) or arg in attempt_options:
             continue
@@ -84,7 +84,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     encoded = base64.b64encode(raw).decode("ascii")
     project = cfg.project_name()
     command = shell_command(shell, [
-        project, "resolve", "--json", "--require-agent-hosting", "--launch-request-b64", encoded,
+        project, "resolve", "--json", "--launch-request-b64", encoded,
         *(["--require-native-seed"] if native_required else []),
         *(["--require-launch-attempt"] if "--require-launch-attempt" in args else []),
     ])
@@ -136,7 +136,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
             project, alias, request_id, kind, "mismatched launch identity",
         )
     launch_args = [project, "--worktree-id", receipt["worktree_id"],
-                   "--require-agent-hosting", "--stage-launch-seed", "--seed-id", receipt["seed_id"]]
+                   "--stage-launch-seed", "--seed-id", receipt["seed_id"]]
     if native_required:
         launch_args.append("--require-native-seed")
     if "--require-launch-attempt" in args:

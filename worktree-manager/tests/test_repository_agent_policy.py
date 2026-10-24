@@ -64,20 +64,20 @@ def test_incomplete_policy_never_authorizes_launch(
         engine_client.require_agent_hosting("/source")
 
 
-def test_old_engine_cannot_downgrade_hosting_check(
+def test_launch_planning_needs_no_hosting_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = []
 
     def run(project: str, args: list[str], **kwargs: object) -> dict:
         calls.append(args)
-        raise engine_client.EngineError("unrecognized arguments: --require-agent-hosting")
+        raise engine_client.EngineError("Managed agent launch refused: expose_agent: false")
 
     monkeypatch.setattr(engine_client, "run_json", run)
-    with pytest.raises(engine_client.EngineFeatureUnavailable, match="hosting policy"):
+    with pytest.raises(engine_client.EngineError, match="expose_agent: false"):
         engine_client.resolve_launch_plan("demo", base=True)
     assert len(calls) == 1
-    assert "--require-agent-hosting" in calls[0]
+    assert calls[0] == ["resolve", "--json", "--base"]
 
 
 def test_launch_rechecks_after_planning_before_mux_composition(
@@ -189,5 +189,6 @@ def test_recovery_runtime_is_resolved_before_admission_but_setup_is_not() -> Non
     powershell = (BIN / "launch-session.ps1").read_text(encoding="utf-8")
     assert posix.index('PYTHON="$AW_PY"') < posix.index("\n    run_recovery\n")
     assert powershell.index("$VenvPython = $AwPy") < powershell.index("\n    Invoke-RecoveryLaunch\n")
-    assert "resolve --require-agent-hosting" in posix
-    assert "@('resolve', '--require-agent-hosting')" in powershell
+    assert 'resolve_args+=(resolve "$@")' in posix
+    assert "@('resolve') + $CopilotArgs" in powershell
+    assert "--require-agent-hosting" not in posix + powershell

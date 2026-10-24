@@ -443,7 +443,7 @@ def cmd_request(args) -> int:
     try:
         protocol_options = {
             "command", "json", "launch_request_b64", "launch_request_status",
-            "require_agent_hosting", "require_native_seed",
+            "require_native_seed",
             "require_launch_attempt",
         }
         if not args.json or any(

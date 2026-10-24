@@ -338,10 +338,6 @@ def add_parsers(sub) -> None:
         help="Keep creation prompts queued until the returned command executes",
     )
     parser.add_argument("--stage-launch-seed", action="store_true", help="Require typed launch-seed staging")
-    parser.add_argument(
-        "--require-agent-hosting", action="store_true",
-        help="Require repository-owned hosting admission (refuse older receivers)",
-    )
     # The fence is unconditional; this capability flag excludes older engines before mutation.
     parser.add_argument(
         "--require-native-seed", action="store_true",

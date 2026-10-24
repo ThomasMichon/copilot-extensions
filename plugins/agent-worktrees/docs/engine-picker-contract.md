@@ -109,10 +109,11 @@ versions. It returns the policy provenance and `allowed: true`, or nonzero JSON
 `version`, `code`, `error`. A successful negative-policy check is not adoption
 or launch permission.
 
-Manager launch planning and SSH receivers require `--require-agent-hosting`;
-the flag is a compatibility fence, not an opt-in to enforcement. The current
-engine enforces repository policy even without the flag. Unsupported engines
-must refuse, with no fallback that removes it. Source-only `create` omits
+Copilot launch planning and receiving launch paths enforce repository policy
+internally, without a hosting-policy flag. Manager and SSH forwarding must not
+inject such a flag into source or inspection commands. Required owner policy
+checks and versioned seed/admission contracts refuse unsupported receivers
+before launch effects. Source-only `create` omits
 optional launch planning and returns no `launch` member.
 
 ## Launch-attempt resolution receipts
