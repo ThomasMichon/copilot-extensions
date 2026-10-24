@@ -441,9 +441,9 @@ def test_current_refresh_fixture_matches_real_http_producer_and_consumer(
     assert consumed.creation == expected["creation"]
     assert consumed.protocol_version == protocol.HTTP_PROTOCOL_VERSION
     assert consumed.min_protocol_version == expected["min_protocol_version"]
-    historical = StartSessionResponse.model_validate(expected)
+    historical = StartSessionResponse.model_validate(fixture["response"])
     assert historical.creation == consumed.creation
-    assert historical.protocol_version == expected["protocol_version"]
+    assert historical.protocol_version == fixture["response"]["protocol_version"] == 45
     capability = fixture["capability"]
     assert fixture["captured_from"]["protocol_generation"] == 45
     assert protocol.HTTP_PROTOCOL_MIN_SUPPORTED <= 45 <= protocol.HTTP_PROTOCOL_VERSION
