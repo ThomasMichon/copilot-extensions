@@ -105,6 +105,8 @@ jobs:
         run: python tools/seasoned_uv.py --uv uv -- --system pytest
       - name: Fresh configured authority and isolated CLI
         run: python -m pytest -q libs/installation-context/tests/test_runtime_profile_policy.py libs/installation-context/tests/test_runtime_deployment.py
+      - name: Management profile hold and unchanged custody controls
+        run: python -m pytest -q libs/payload-invocation/tests/test_cell_management.py -k "management_profile_hold or management_lease_borrows_exact or borrower_rejects_changed_custody"
       - name: Native POSIX policy parsing
         if: runner.os == 'Linux'
         run: python -m pytest -q libs/installation-context/tests/test_runtime_deployment_adapters.py -k "native_policy and profile and not powershell and not posix32"

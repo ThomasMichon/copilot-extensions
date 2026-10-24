@@ -712,6 +712,9 @@ even a valid explicit `runtimeProfiles` object holds ordinary publication with
 `reason: "runtime-profile-consumer-required"`. A true empty object is valid
 intent, not permission for a profile-unaware constructor to ignore that intent.
 No current native engine constructor is enabled by this reader.
+The hold also applies to explicit management leases and borrowed custody,
+including a live ticket acquired before profile settings were added. The
+managed-only exception remains available when `runtimeProfiles` is absent.
 
 Python `resolve_runtime_profile_policy` and the stdlib-only Python CLI action
 `runtime-profile-policy` resolve that input through the existing source,
@@ -730,6 +733,8 @@ flag and publication hold. Equivalent JSON formatting does not change it; a chan
 or installation does. This is a policy invalidation input, not a reusable
 admission receipt or whole-record approval. Unresolved provenance, pending mode
 activation and invalid policy return blocked intent, never a CPU default.
+Pending activation includes mode resolution reporting `status: "ready"` with
+`reason: "activation-required"`; it does not resolve a legacy-root profile.
 The CLI exits 1 for blocked or malformed input. Resolution writes no state and
 does not clear `deployment.allowPluginPublication`, select or authenticate a
 source release, approve a profile, qualify a feed/device, resolve/download a

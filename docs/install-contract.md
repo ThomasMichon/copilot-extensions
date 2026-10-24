@@ -3128,6 +3128,10 @@ input, not whole-record approval, source-byte authentication, a feed permission
 or an admission receipt. Explicit profile settings therefore hold ordinary
 publication until a profile-aware lifecycle enforces them; a valid configuration
 cannot silently be ignored by an older construction path.
+This includes explicit management admission and borrowing an existing custody
+ticket; managed-only publication without profile settings is unchanged. Pending
+installation-mode activation never yields profile intent for the legacy root,
+even when the underlying mode resolver reports readiness.
 Native constructors do not yet consume this new API;
 the actual closure, authority composition and constructor acceptance stay open.
 

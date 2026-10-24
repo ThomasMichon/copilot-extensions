@@ -199,7 +199,7 @@ def resolve_runtime_profile_policy(
         "status": "blocked", "reason": "runtime-profile-owner-unresolved",
         "owner": None, "selection": None, "policyId": None,
     }
-    if resolution["status"] != "ready":
+    if resolution["status"] != "ready" or resolution.get("reason") == "activation-required":
         return {**resolution, "runtimeProfiles": result}
     if deployment["state"] not in {"missing", "valid"}:
         result["reason"] = deployment["reason"]

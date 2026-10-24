@@ -170,28 +170,58 @@ def test_resolved_policy_binds_existing_owner_and_unchanged_intent(context_modul
 
 
 @pytest.mark.parametrize(
-    "status,state",
+    "status,reason,state",
     [
-        ("provenance-blocked", "missing"),
-        ("activation-required", "missing"),
-        ("ready", "invalid"),
-        ("ready", "unsupported"),
+        ("provenance-blocked", "provenance-blocked", "missing"),
+        ("ready", "activation-required", "missing"),
+        ("ready", "fixture-ready", "invalid"),
+        ("ready", "fixture-ready", "unsupported"),
     ],
 )
 def test_unresolved_owner_or_policy_never_falls_back_to_cpu(
     context_module,
     policy_owner,
     status,
+    reason,
     state,
 ):
     resolution, _, _ = policy_owner
     resolution["status"] = status
+    resolution["reason"] = reason
     resolution["deployment"].update(state=state, reason="fixture-refusal")
     profiles = context_module.resolve_runtime_profile_policy()["runtimeProfiles"]
     assert profiles["status"] == "blocked"
     assert profiles["selection"] is None
     assert profiles["owner"] is None
     assert profiles["policyId"] is None
+
+
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("profiles", [{}, {"backend": "cpu"}, {"allowSourceFallback": False}])
+@pytest.mark.parametrize("operation", ["lease", "borrow"])
+def test_management_rejects_profile_intent_before_custody(
+    context_module, policy_owner, managed, profiles, operation, monkeypatch,
+):
+    resolution, _, _ = policy_owner
+    resolution.update(actualMode="namespaced")
+    resolution["deployment"].update(
+        state="valid", managed=managed, runtimeProfiles=profiles,
+        allowPluginPublication=False,
+    )
+    monkeypatch.setattr(
+        context_module, "validate_context_receipt",
+        lambda *_args, **_kwargs: pytest.fail("Profile hold reached custody validation"),
+    )
+    with pytest.raises(context_module.InstallationContextError, match="profile-aware construction"):
+        if operation == "lease":
+            with context_module.runtime_publication_lease(
+                context="fixture-context", durable_home="fixture-home",
+            ):
+                pytest.fail("Profile hold acquired management custody")
+        else:
+            context_module.borrow_runtime_publication(
+                context="fixture-context", durable_home="fixture-home",
+            )
 
 
 def test_effective_policy_change_invalidates_identity_without_widening_publication(

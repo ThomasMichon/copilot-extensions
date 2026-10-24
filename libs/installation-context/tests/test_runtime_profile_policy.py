@@ -17,6 +17,7 @@ from test_installation_mode_governance import (
     _cell_layout,
     _load_module,
     _profile_environment,
+    _policy,
     _write_json,
 )
 
@@ -86,6 +87,38 @@ def test_fresh_configured_adopter_needs_no_profile_or_approval_file(adopter):
     assert profiles["policyId"].startswith("sha256:")
     assert sorted(arguments["os_profile"].rglob("*")) == before
     assert module.resolve_runtime_profile_policy(**arguments) == result
+
+
+def test_pending_activation_never_selects_a_profile_for_the_legacy_root(adopter):
+    module, arguments, _ = adopter
+    source = module.resolve_payload_source(**{
+        key: arguments[key]
+        for key in (
+            "payload_root", "plugin_id", "copilot_home", "project_root",
+            "source_descriptor", "marketplace_key", "environment",
+        )
+        if key in arguments
+    })
+    _write_json(
+        arguments["os_profile"] / ".copilot-extensions" / "installation-mode.json",
+        _policy(True, source["marketplaceId"]),
+    )
+    arguments = {
+        **arguments,
+        "legacy_probe": {
+            "declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z",
+        },
+    }
+    mode = module.resolve_installation_mode(**arguments)
+    assert (mode["desiredMode"], mode["actualMode"]) == ("namespaced", "legacy")
+    assert (mode["status"], mode["reason"]) == ("ready", "activation-required")
+    before = sorted(arguments["os_profile"].rglob("*"))
+    result = module.resolve_runtime_profile_policy(**arguments)
+    assert result["runtimeProfiles"] == {
+        "status": "blocked", "reason": "runtime-profile-owner-unresolved",
+        "owner": None, "selection": None, "policyId": None,
+    }
+    assert sorted(arguments["os_profile"].rglob("*")) == before
 
 
 def test_owner_bound_optional_policy_can_disable_source_and_select_accelerator(adopter):

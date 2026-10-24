@@ -842,3 +842,18 @@ profile-record API or a competing admission constructor.
   policy identity also binds the publication hold. Those API and actual
   Python/PowerShell controls passed 90 and 38 cases respectively before the
   additional alias fixtures; current-head hosted acceptance remains required.
+- The next review found two actual boundary gaps. Explicit management leases
+  and borrowers could ignore valid profile settings, and mode readiness with
+  `reason: activation-required` incorrectly yielded a legacy-root CPU policy.
+  Real-path regressions reproduced both before the fix. Management now rejects
+  profile settings by presence before custody validation, including an empty
+  object and an already-live ticket; managed-only publication is unchanged.
+  Pending activation now returns blocked intent with no owner, selection or
+  policy identity. The optional Linux/Windows lane exercises both the new
+  regressions and existing custody controls. One broad local cohort reached
+  its unchanged 300-second limit without a full receipt; it is not a pass.
+  The focused real-path cohort then passed all 13 cases, and all 53 pure
+  controls passed under the actor-free observer with source coverage in
+  15.860 seconds. Sync, source hashes, lint, install/docs and trusted-CI
+  contracts also pass locally.
+  Current-head unit evidence, native acceptance and a fresh review remain gates.
