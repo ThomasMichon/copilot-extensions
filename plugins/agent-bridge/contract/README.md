@@ -170,7 +170,7 @@ this local source checkpoint. No hook bypass, fabricated SHA, temporary guard
 disablement or version edit is needed. The later evidence changes form their
 own ordinary commit.
 
-The generated registry uses one-space JSON indentation to retain every
+The generated registry uses compact JSON encoding to retain every
 provenance record within the repository's unchanged file-size limit. Packet
 formatting and historical packet bytes remain unchanged.
 

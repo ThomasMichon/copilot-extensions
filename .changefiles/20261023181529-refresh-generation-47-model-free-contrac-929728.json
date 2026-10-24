@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh generation-47 model-free contract evidence from reachable merged source without weakening closure validation.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

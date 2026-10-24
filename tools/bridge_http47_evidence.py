@@ -120,9 +120,12 @@ PROBES = {
 FAMILY = "http47-owned-fixture-observations-v1"
 
 
-def encode(value: Any, *, indent: int = 2) -> bytes:
+def encode(value: Any, *, indent: int | None = 2) -> bytes:
     return (
-        json.dumps(value, indent=indent, ensure_ascii=False, allow_nan=False) + "\n"
+        json.dumps(
+            value, indent=indent, ensure_ascii=False, allow_nan=False,
+            separators=(",", ":") if indent is None else None,
+        ) + "\n"
     ).encode("utf-8")
 
 
@@ -483,7 +486,7 @@ def build_outputs(
                 source,
                 "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
             )
-    outputs[REGISTRY] = encode(registry, indent=1)
+    outputs[REGISTRY] = encode(registry, indent=None)
     return outputs
 
 
