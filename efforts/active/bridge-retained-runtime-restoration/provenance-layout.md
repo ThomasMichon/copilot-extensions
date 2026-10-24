@@ -112,7 +112,7 @@ cannot qualify an unknown runtime target or settle outstanding SDK/native work.
 - [ ] Exercise prior inline input, every canonical capture generation, source
       snapshot/closure, preparation and replay through the actual updated entry
       points. Preserve unrelated historical packets and capability floors.
-- [ ] Run the canonical checker and genuine committed-source capture/no-write
+- [x] Run the canonical checker and genuine committed-source capture/no-write
       reproduction in the bounded development lane. Preserve unit-only,
       impact-scoped required CI; do not add native/process matrices to it.
 - [ ] Review and merge the implementation, then return to the same #8389 source
@@ -149,7 +149,8 @@ checker over more than 1 MiB of materialized provenance. Capture guard tests
 retain their actual alias, closure and portfolio checks rather than accepting a
 size-limit refusal as a proxy for the intended failure.
 
-An in-memory three-way check used the genuine shared ancestor and verified that
+At the initial implementation checkpoint, an in-memory three-way check used the
+genuine shared ancestor and verified that
 both actual source histories preserve its complete prefix. Retaining that
 prefix once and both ordered append-only deltas produces 1,856 records and
 1,062,639 inline bytes. The lossless plan has five chunks, a 228,258-byte index
@@ -162,8 +163,11 @@ no-write reproduction through the existing bounded owner: all 117 selected
 model-free ASGI/owned-process cases passed on both runs, with the complete
 interpreter/entrypoint receipts checked before publication. The canonical
 checker accepts both contracts and all 583 fixtures. This refresh retains
-version 1 while its 1,014,241-byte index fits; conversion is exercised by the
-lossless three-way and canonical-checker controls, not claimed from that
-ordinary inline capture. Publication from a remotely retained source
-checkpoint, final integration review and the remaining capture-owner closure
-remain open.
+version 1 while its final 1,037,891-byte, 1,786-record index fits; conversion is
+exercised by the lossless three-way and canonical-checker controls, not claimed from that
+ordinary inline capture. The final write/no-write pair binds the provider-visible
+source checkpoint `10206a19b416298785dc7a39ffc96cecdf7c2abe`, retained through
+the normal managed source push before capture. Additional actual HTTP-45 and
+preference-authority entry-point controls consume both inline and chunked
+history, retaining their real admission/refusal and complete-history assertions.
+Final integration review and the remaining capture-owner closure remain open.

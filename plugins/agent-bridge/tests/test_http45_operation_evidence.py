@@ -59,7 +59,10 @@ def test_proposed_keyed_input_replays_through_production_admission(proposed_keye
         manager._run_prompt.assert_awaited_once()
 
 
-def test_capture_rejects_tampered_proposed_keyed_before_write(monkeypatch, tmp_path, proposed_keyed):
+@pytest.mark.parametrize("representation", ["inline", "chunked"])
+def test_capture_rejects_tampered_proposed_keyed_before_write(
+    monkeypatch, tmp_path, proposed_keyed, representation,
+):
     from agent_procutil import owned_process
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
     spec = importlib.util.spec_from_file_location("http45_proposed_capture", ROOT / "tools/capture_bridge_http45.py")
@@ -97,9 +100,12 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(monkeypatch, tmp_p
         destination = snapshot / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / path, destination)
-    for path, data in {
-        **metadata.inputs, **capture.registry_codec.plan(snapshot, metadata, registry),
-    }.items():
+    with monkeypatch.context() as bounds:
+        if representation == "chunked":
+            bounds.setattr(capture.registry_codec, "MAX_ARTIFACT_BYTES", 350000)
+        planned = capture.registry_codec.plan(snapshot, metadata, registry)
+    assert (len(planned) > 1) is (representation == "chunked")
+    for path, data in {**metadata.inputs, **planned}.items():
         destination = snapshot / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
@@ -115,7 +121,8 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(monkeypatch, tmp_p
     proposed.write_text(json.dumps(vector), encoding="utf-8")
     def output_hashes():
         files = [snapshot / contract / "registry.json",
-                 *(snapshot / contract / "fixtures").rglob("*.json")]
+                 *(snapshot / contract / "fixtures").rglob("*.json"),
+                 *(snapshot / contract / "provenance").rglob("*.json")]
         return {str(path.relative_to(snapshot)): hashlib.sha256(path.read_bytes()).hexdigest()
                 for path in files}
 
