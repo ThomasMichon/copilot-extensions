@@ -11,9 +11,10 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 The manual `installation-context-acceptance.yml` selector
 `immutable_runtime=true` runs only `tests/test_python_runtime_dev_live.py` through
-the canonical isolated `agent-worktrees` plugin runner. Its four native jobs
-cover Linux (`ubuntu-latest`) and macOS (`macos-latest`), each in `legacy` and
-`namespaced` mode, with fail-fast disabled. Python and `UV_PYTHON` are 3.11,
+the canonical isolated `agent-worktrees` plugin runner. Its four native matrix
+cells use two explicit jobs with literal Linux (`ubuntu-latest`) and macOS
+(`macos-latest`) runner routes, each with a `legacy`/`namespaced` mode matrix
+and fail-fast disabled. Python and `UV_PYTHON` are 3.11,
 matching the supported first-adopter floor. No host-state opt-in, live
 installation or service deployment is used.
 

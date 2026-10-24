@@ -259,7 +259,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "wheel-inputs-linux", "wheel-inputs-windows",
         "guardian-followthrough-macos",
         "runtime-profile-policy-linux", "runtime-profile-policy-windows",
-        "immutable-runtime-posix",
+        "immutable-runtime-linux", "immutable-runtime-macos",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]

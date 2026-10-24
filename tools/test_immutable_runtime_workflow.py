@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = yaml.safe_load(
     (ROOT / ".github/workflows/installation-context-acceptance.yml").read_text("utf-8")
 )
-JOB = WORKFLOW["jobs"]["immutable-runtime-posix"]
+JOB = WORKFLOW["jobs"]["immutable-runtime-linux"]
 STEPS = {step["name"]: step for step in JOB["steps"] if "name" in step}
 SOURCE = STEPS["Validate immutable runtime commit before checkout"]
 IDENTITY = STEPS["Record actual immutable runtime qualification identity"]
@@ -53,7 +53,7 @@ def test_manual_selection_preserves_every_existing_route_and_default():
     assert inputs["immutable_runtime_ref"]["type"] == "string"
     assert inputs["immutable_runtime_ref"]["default"] == ""
     routes = {
-        "immutable_runtime": {"immutable-runtime-posix"},
+        "immutable_runtime": {"immutable-runtime-linux", "immutable-runtime-macos"},
         "guardian_followthrough": {"guardian-followthrough-macos"},
         "watch_owner": {
             "watch-owner-native-linux", "watch-owner-native-windows",
@@ -92,6 +92,7 @@ def test_manual_selection_preserves_every_existing_route_and_default():
                 expected | routes["immutable_runtime"]
             )
     assert set(WORKFLOW["jobs"]) == diagnostics | set().union(*routes.values())
+    assert len(WORKFLOW["jobs"]) == 28
 
 
 @pytest.mark.parametrize("requested", ["", "A" * 40, "0123456789abcdef" * 2 + "01234567"])
@@ -179,32 +180,36 @@ def test_actual_identity_propagates_git_failures(monkeypatch, fail_at):
     assert caught.value.returncode == 23
 
 
-def test_exact_native_matrix_and_read_only_immutable_checkout():
-    assert JOB["if"] == "${{ inputs.immutable_runtime }}"
-    assert JOB["runs-on"] == "${{ matrix.os }}"
-    assert JOB["strategy"] == {
+@pytest.mark.parametrize("name,runner", [
+    ("immutable-runtime-linux", "ubuntu-latest"),
+    ("immutable-runtime-macos", "macos-latest"),
+])
+def test_exact_native_matrix_and_read_only_immutable_checkout(name, runner):
+    job = WORKFLOW["jobs"][name]
+    assert job["steps"] == JOB["steps"]
+    assert job["if"] == "${{ inputs.immutable_runtime }}"
+    assert job["runs-on"] == runner
+    assert "${{" not in job["runs-on"]
+    assert job["strategy"] == {
         "fail-fast": False,
-        "matrix": {
-            "os": ["ubuntu-latest", "macos-latest"],
-            "mode": ["legacy", "namespaced"],
-        },
+        "matrix": {"mode": ["legacy", "namespaced"]},
     }
-    assert JOB["timeout-minutes"] == 50
-    assert JOB["env"] == {"UV_PYTHON": "3.11"}
-    assert WORKFLOW["permissions"] == JOB["permissions"] == {"contents": "read"}
-    assert [step["uses"] for step in JOB["steps"] if "uses" in step] == [
+    assert job["timeout-minutes"] == 50
+    assert job["env"] == {"UV_PYTHON": "3.11"}
+    assert WORKFLOW["permissions"] == job["permissions"] == {"contents": "read"}
+    assert [step["uses"] for step in job["steps"] if "uses" in step] == [
         "actions/setup-python@v5", "actions/checkout@v4", "astral-sh/setup-uv@v9.0.0",
     ]
-    assert JOB["steps"][0]["with"] == {"python-version": "3.11"}
-    checkout = next(step for step in JOB["steps"] if step.get("id") == "runtime-checkout")
+    assert job["steps"][0]["with"] == {"python-version": "3.11"}
+    checkout = next(step for step in job["steps"] if step.get("id") == "runtime-checkout")
     assert checkout["with"] == {
         "ref": "${{ steps.runtime-source.outputs.sha }}",
         "persist-credentials": False,
         "fetch-depth": 2,
     }
-    assert JOB["steps"].index(SOURCE) < JOB["steps"].index(checkout)
-    assert JOB["steps"].index(checkout) < JOB["steps"].index(IDENTITY)
-    assert JOB["steps"].index(IDENTITY) < JOB["steps"].index(EXECUTION)
+    assert job["steps"].index(SOURCE) < job["steps"].index(checkout)
+    assert job["steps"].index(checkout) < job["steps"].index(IDENTITY)
+    assert job["steps"].index(IDENTITY) < job["steps"].index(EXECUTION)
     assert SOURCE["env"] == {
         "IMMUTABLE_RUNTIME_REF": "${{ inputs.immutable_runtime_ref }}",
         "DISPATCH_SHA": "${{ github.sha }}",
@@ -212,7 +217,9 @@ def test_exact_native_matrix_and_read_only_immutable_checkout():
     assert IDENTITY["env"] == {"EXPECTED_SHA": "${{ steps.runtime-source.outputs.sha }}"}
 
 
-def test_exact_runner_selection_budgets_and_failure_propagation():
+@pytest.mark.parametrize("name", ["immutable-runtime-linux", "immutable-runtime-macos"])
+def test_exact_runner_selection_budgets_and_failure_propagation(name):
+    job = WORKFLOW["jobs"][name]
     assert EXECUTION["env"] == {"RUNTIME_MODE": "${{ matrix.mode }}"}
     assert EXECUTION["run"] == (
         "python tools/run-plugin-tests.py agent-worktrees "
@@ -224,11 +231,11 @@ def test_exact_runner_selection_budgets_and_failure_propagation():
         "--test-file", "tests/test_python_runtime_dev_live.py",
         "-k", "$RUNTIME_MODE", "--timeout", "2500", "--plugin-timeout", "2700",
     ]
-    assert not JOB.get("continue-on-error")
-    assert "defaults" not in JOB and "defaults" not in WORKFLOW
-    commands = [step for step in JOB["steps"] if "run" in step]
+    assert not job.get("continue-on-error")
+    assert "defaults" not in job and "defaults" not in WORKFLOW
+    commands = [step for step in job["steps"] if "run" in step]
     assert commands == [SOURCE, IDENTITY, EXECUTION]
-    for step in JOB["steps"]:
+    for step in job["steps"]:
         assert not step.get("continue-on-error")
         assert "if" not in step and "shell" not in step
         command = step.get("run", "")

@@ -110,21 +110,20 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  immutable-runtime-posix:
+  immutable-runtime-linux:
     if: ${{ inputs.immutable_runtime }}
-    name: Native immutable runtime (${{ matrix.os }}, ${{ matrix.mode }})
-    runs-on: ${{ matrix.os }}
+    name: Native immutable runtime (Linux, ${{ matrix.mode }})
+    runs-on: ubuntu-latest
     timeout-minutes: 50
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
         mode: [legacy, namespaced]
     env:
       UV_PYTHON: "3.11"
-    steps:
+    steps: &immutable-runtime-steps
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -175,6 +174,21 @@ jobs:
         env:
           RUNTIME_MODE: ${{ matrix.mode }}
         run: python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_python_runtime_dev_live.py -k "$RUNTIME_MODE" --timeout 2500 --plugin-timeout 2700
+
+  immutable-runtime-macos:
+    if: ${{ inputs.immutable_runtime }}
+    name: Native immutable runtime (macOS, ${{ matrix.mode }})
+    runs-on: macos-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [legacy, namespaced]
+    env:
+      UV_PYTHON: "3.11"
+    steps: *immutable-runtime-steps
 
   runtime-profile-policy-linux:
     if: ${{ inputs.runtime_profiles }}
