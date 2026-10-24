@@ -4,11 +4,12 @@ Back to the [canonical effort](README.md),
 [architecture](architecture.md) and
 [Chat vision](../../../visions/plugins/agent-chat/README.md#templated-container-delivery).
 
-**Status: proposed specification, not a delivered container or deployment.**
+**Status: reviewed specification, not a delivered container or deployment.**
 The container role, template-derived private configuration and Komodo-driven
 deployment are operator-requested. The realization below is
-**agent-recommended** and must clear the repository review gate before
-container implementation or downstream configuration publication.
+**agent-recommended**; #8522 cleared the intent/specification review gate.
+Implementation and downstream publication still follow their own repository,
+admission and deployment gates.
 
 ## Ownership and existing contracts
 
@@ -162,4 +163,4 @@ already admitted single-operator coordination boundary.
 
 These are open acceptance obligations of the parent effort. No template
 publication, private configuration write or production rollout is certified by
-this proposed specification.
+this reviewed specification.

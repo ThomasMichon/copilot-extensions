@@ -92,6 +92,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
     companions = {}
     if component == "fleet-manager":
         companions = {
+            "_runtime_launcher.py": Path("libs/installer-engine/runtime_launcher.py"),
             "_installer_process.py": Path("libs/installer-engine/installer_engine_process.py"),
             "_construction_procutil.py": Path("libs/agent-procutil/src/agent_procutil/__init__.py"),
         }
@@ -377,7 +378,7 @@ def test_service_alias_uses_canonical_preparation_lease_and_tests(
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
         assert all(Path(path).is_relative_to(root / "tests") for path in command[5:-2])
         assert command[5] == str(root / "tests")
-        assert kwargs["limits"].wall_seconds == (120 if canonical == "services/chat" else 600)
+        assert kwargs["limits"].wall_seconds == (180 if canonical == "services/chat" else 600)
         assert kwargs["env"].get("AGENT_CHAT_TEST_SUITE") == (
             "acceptance" if canonical == "services/chat" else None
         )

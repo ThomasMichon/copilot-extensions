@@ -41,6 +41,23 @@ it, acquire tools or credentials, create a slot, change commands or select a
 role. Selected manual-client setup and preserving removal remain separate
 adapter work.
 
+The internal `construction.client_candidate` seam applies Chat's exact client
+extra/local closure to that canonical engine; it does not construct a service
+role. It verifies the installed resource RECORD before loading, refuses an
+already occupied canonical import scope, and leaves no top-level import aliases.
+Its installed construction callback copies the unchanged canonical retention
+launcher and runtime family into the **unpublished** slot. Fresh and reuse health
+check that bootstrap against the installed wheel. The slot-local launcher can
+then retain the completed runtime before site/application imports and invoke the
+manual client without source inputs or a predecessor runtime. This is not a
+selected command catalog or an independently runnable installer. No selector,
+client configuration, host registration or legacy installation is changed.
+
+The canonical engine's wheel-inspection and snapshot companions are included
+unchanged as required transitive bootstrap resources. This adapter still uses
+declared-source construction; delivering those companions does not select a
+wheel profile or grant artifact admission.
+
 ## Callable core
 
 Install the distribution with the chosen package manager. Runtime dependencies

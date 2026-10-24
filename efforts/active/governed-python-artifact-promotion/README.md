@@ -242,9 +242,14 @@ refusals and the installation authority's explicit path selection.
 - [x] Retain exact wheel-byte snapshots under the existing private input owner
       with explicit count, archive/closure/storage and deadline bounds (#8523).
       Custody evidence alone does not authenticate acquisition or approve reuse.
-- [ ] Implement the reviewed [wheel-input admission slice](wheel-input-admission.md):
-      compare actual wheel bytes with the exact selected record before retained
-      construction, then integrate owned reuse evidence without creating approval.
+- [x] Compose complete-profile inspection and retained byte custody with the
+      existing immutable constructor and installed receipt/health owner (#8534).
+      The explicit closed mode preserves ordinary source seasoning, independent
+      venvs, unchanged cached-byte reuse, exact binding invalidation and prior
+      selection on failure. No production approval or acquisition is enabled.
+- [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
+      authenticated approval/acquisition, supplied revocation and enabled real
+      consumer contracts remain open after the bounded construction component.
 - [ ] Teach installers (via the shared installer engine, not a parallel
       mechanism) to locate, verify, and consume a matching artifact set,
       falling back explicitly to the existing client-side source-build/venv
@@ -492,6 +497,13 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Prove the bounded closed-wheel constructor component with real independent
+      fresh venvs, a transitive closure and a 97-wheel closure, actual installed
+      origins/health, unchanged cached-byte reuse, altered binding/receipt/
+      distribution refusal, cancellation and selected-prior preservation.
+      Final-head Windows/Linux source-profile, inspected-wheel and real
+      first-party artifact lanes pass for #8534. This is component evidence,
+      not authenticated feed/default-policy or production consumer acceptance.
 - [ ] Prove the trusted default-branch promotion workflow builds, signs and
       publishes real artifact sets for the exact merged candidate. Record
       native signer identity, bundle/manifest digest agreement and immutable
@@ -651,6 +663,66 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Existing release-channel approval adapter implementation
+
+- Traced the owning first-use/update/native construction path. Installation
+  provenance, installation-mode selection and deployment publication permission
+  do not approve a dependency profile and were not repurposed as approval.
+- Extended the existing signed promotion index and pinned hosted Main
+  attestation verifier with a versioned exact-profile extension. Pre-signing
+  validation binds it to the actual first-party manifest, primary wheel and
+  selected vendored wheels. The release selector retains bounded private
+  subject bytes, verifies them before deriving whole-record approvals and
+  requires independently selected release/manifest/target/capability facts.
+  It introduces neither a personal approval map nor a new trust directory.
+- Native regression controls cover replacement during authentication, private
+  input custody, forged origins, mismatched selection, byte limits and cleanup
+  after signature failure, timeout or cancellation. The compatibility sweep
+  exposed a workflow fixture discarding its real composed candidate report;
+  all four affected checkout-attribute cases now pass with that report supplied
+  to the existing frozen-candidate exporter.
+- Reconciled with #8494's merged `resolve_runtime_profile_policy` adapter:
+  it supplies the existing owner-bound CPU-first policy intent, not approval.
+  The release adapter is complementary; no second configuration reader is added.
+- This is only the release-channel adapter. Real profile production and
+  publication, composition with that adopting-policy baseline, admitted governed acquisition,
+  source-mode selection with its independent exact lock, measured production
+  budgets and runtime consumer integration remain open. No installer is enabled,
+  no deployed capability is claimed and this effort remains **Active**.
+
+### 2026-10-24 - Closed offline constructor component merged; authority integration next
+
+- #8534 merged as `bd4c5539a3336b02c828e26e3d1a3e8ccf1cef5d`.
+  It composes inspected profiles and exact snapshots with the existing
+  `_candidate`/`_construct`, private policy transaction and installed origin/
+  health/retention owners. Source receipts remain schema 1; explicit closed
+  receipts bind the whole profile/lock and actual versions, closure and
+  hash-qualified archive origins. No new allocator or approval source exists.
+- Native Windows read custody now denies writers and deletion while permitting
+  independent readers and extended-length paths. It fixes the reproduced
+  CPython 3.14/NTFS last-access change-time false refusal without relaxing
+  path/byte integrity; POSIX change-time checks remain unchanged.
+- Review found and tests reproduced oversized health argv (70,534 characters
+  for a valid 97-wheel closure) and caller-relative UV paths in a private cwd.
+  Health now verifies parent digest bindings against the existing owned
+  receipt, keeping complete records out of argv; canonical UV selection binds
+  an absolute executable before retention. All derived consumers are synced.
+  The oversized policy module and stale exact-source admission were corrected,
+  not bypassed. The no-actor inventory, module cap and CI bounds are unchanged.
+- Final head `2aa7c0a230962e72f2316c20568fd46200d4203a` has approval
+  `5637805887`, no overview findings or unresolved threads, green required CI
+  `40082957848` and all six Windows/Linux native jobs in `40083043781`.
+  Local validation includes the 133-case native cohort, subsequent 100-case
+  large-closure/profile cohort, focused source/path controls and the 68-case
+  canonical candidate suite; concrete scope and tooling correction are in
+  [the component journal](wheel-input-admission.md).
+- The effort remains Active. The next owned stretch establishes the actual
+  existing release/configuration approval adapters and approved baseline,
+  followed by bounded approved-source acquisition and authority-selected exact
+  source fallback. The generic adapter remains this effort's prerequisite;
+  #6737 retains native CPU/accelerator engine application, not a transfer of
+  this parent gate. No production consumer, fallback or rollout is claimed.
 
 ### 2026-10-24 - Exact-set snapshot component merged; constructor remains open
 

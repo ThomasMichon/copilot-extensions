@@ -306,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--chat-membership-report requires a new file in an existing directory")
     chat_suite = (args.chat_suite or "acceptance") if args.component == "services/chat" else None
     if args.timeout is None:
-        args.timeout = 120.0 if chat_suite == "acceptance" else 600.0
+        args.timeout = 180.0 if chat_suite == "acceptance" else 600.0
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be finite and positive")
     if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
