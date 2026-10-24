@@ -731,7 +731,11 @@ win grows with build complexity.
   compiled inputs, with nine argument/environment/ambient regressions across
   direct, recursive and metadata inputs (80 compiler controls pass).
   Rebased onto current development while preserving its newly admitted unit
-  entries. Final post-repair validation and review remain open.
+  entries. The current development packet passes 421 controls with the one
+  expected POSIX-only helper skip on Windows. The current required packet
+  passes all 1509 units without observed effects in 208.547 seconds at
+  `5ec1b831ee7bcc1f449e30017974aec2bb191f4f`. Final published-head CI,
+  native qualification and review remain open.
   The parent Plan and Validation Plan remain open.
 
 ### 2026-10-24 - Policy/release planner merged; exact source lock next
