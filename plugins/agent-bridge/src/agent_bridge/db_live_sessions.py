@@ -777,6 +777,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
         report_duplicate: bool = False,
         require_idle: bool = False,
         runtime_admission: RuntimeAdmission | None = None,
+        enrolled_inbox: bool = False,
+        inbox_refusal: str | None = None,
     ) -> tuple[int | None, str | None]:
         """Atomically lease-check the target registration and enqueue, or reject.
 
@@ -802,103 +804,20 @@ class _LiveSessionsMixin(LiveControlsMixin):
         error message; the accept/reject decision itself is the atomic insert.
         An identical idempotent retry returns the original id with ``None``, or
         with ``"duplicate"`` when ``report_duplicate`` is set.
+
+        ``enrolled_inbox`` selects retained custody from durable enrollment in
+        that same transaction. A frontend refusal blocks retained targets, not
+        unrelated legacy queues or recovery of an already committed keyed send.
         """
+        from .live_message_enqueue import LiveMessageEnqueue, enqueue_fresh
+
         delivery = _validate_live_message_delivery(delivery)
-        association = _live_message_association(kind, runtime_admission)
-        cutoff = now - stale_seconds
-        cur = self._execute_runtime_admitted_write(
-            "INSERT OR IGNORE INTO live_messages "
-            "(session_id, sender, body, reply_to, kind, delivery, "
-            "idempotency_key, created_at, consumption_tracked, runtime_custody_json) "
-            f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ?, 1, ? "
-            "WHERE EXISTS ("
-            "  SELECT 1 FROM live_sessions ls "
-            f"  WHERE ls.session_id = {_CANON} AND ls.status = 'live' "
-            "    AND ls.updated_at >= ? "
-            "    AND ("
-            "      ls.worktree_id IS NULL OR ls.session_id = ("
-            "        SELECT session_id FROM live_sessions "
-            "        WHERE worktree_id = ls.worktree_id AND status = 'live' "
-            "          AND (ls.machine IS NULL OR ls.repo IS NULL OR "
-            "            (machine = ls.machine COLLATE NOCASE AND repo = ls.repo COLLATE NOCASE)) "
-            "          AND updated_at >= ? "
-            "        ORDER BY registered_at DESC, updated_at DESC LIMIT 1"
-            "      )"
-            "    )"
-            f"    AND (? IS NULL OR {_CANON} = ls.session_id)"
-            "    AND (? = 0 OR (ls.turn_state IN ('idle','completed') "
-            "      AND NOT EXISTS (SELECT 1 FROM live_messages pending "
-            "        WHERE pending.session_id=ls.session_id AND pending.consumed_at IS NULL "
-            "        AND (pending.delivered_at IS NULL OR pending.consumption_tracked=1) "
-            "        AND pending.kind NOT LIKE 'control:%')))"
-            ")",
-            (
-                session_id, session_id, sender, body, reply_to, kind, delivery,
-                idempotency_key, now, association,
-                session_id, session_id, cutoff, cutoff,
-                expected_session_id, expected_session_id, expected_session_id,
-                require_idle,
-            ),
-            runtime_admission,
-        )
-        if cur.rowcount == 1:
-            return int(cur.lastrowid or 0), None
-        if idempotency_key:
-            # The message and every canonical-id comparison in ONE statement
-            # (one snapshot): a rollover committing between separate reads
-            # would resolve the two handles differently and turn an identical
-            # retry into a false conflict.
-            msg_canon = (
-                "COALESCE((SELECT target_session_id FROM live_session_aliases "
-                "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
-            )
-            existing = self.execute_read(
-                "SELECT id, sender, body, reply_to, kind, delivery, runtime_custody_json, "
-                f"{msg_canon} = {_CANON} AS same_target, "
-                f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
-                "FROM live_messages WHERE idempotency_key = ?",
-                (session_id, session_id, expected_session_id, expected_session_id,
-                 expected_session_id, session_id, session_id, idempotency_key),
-            )
-            if existing:
-                original = existing[0]
-                same_request = (
-                    bool(original["same_target"])
-                    and original["sender"] == sender
-                    and original["body"] == body
-                    and original["reply_to"] == reply_to
-                    and original["kind"] == kind
-                    and original["delivery"] == delivery
-                    and original["runtime_custody_json"] == association
-                    and bool(original["same_expected"])
-                )
-                if same_request:
-                    return int(original["id"]), ("duplicate" if report_duplicate else None)
-                return None, "idempotency_conflict"
-        # Rejected -- derive a reason for the error message (best-effort; the
-        # authoritative decision was the 0-row insert above).
-        row = self.get_live_session(session_id)
-        if row is None:
-            return None, "not_found"
-        if not live_session_is_fresh(row, now, stale_seconds):
-            return None, "stale"
-        worktree_id = row.get("worktree_id")
-        current_sid = session_id
-        if worktree_id:
-            scoped = row.get("machine") is not None and row.get("repo") is not None
-            current_sid = (
-                self.current_live_session_for_worktree(
-                    worktree_id, now=now, stale_seconds=stale_seconds,
-                    machine=row.get("machine") if scoped else None,
-                    project=row.get("repo") if scoped else None,
-                )
-                or session_id
-            )
-        if current_sid != session_id:
-            return None, f"superseded:{current_sid}"
-        if expected_session_id is not None and expected_session_id != current_sid:
-            return None, f"expected_mismatch:{current_sid}"
-        return None, "session_busy" if require_idle else "stale"
+        if not enrolled_inbox:
+            _live_message_association(kind, runtime_admission)
+        return enqueue_fresh(self, LiveMessageEnqueue(
+            session_id, sender, body, now, reply_to, kind, delivery,
+            expected_session_id, idempotency_key, stale_seconds, report_duplicate, require_idle,
+        ), runtime_admission, enrolled_inbox=enrolled_inbox, inbox_refusal=inbox_refusal)
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
         """Unacknowledged, unconsumed messages, oldest-first (delivery order).

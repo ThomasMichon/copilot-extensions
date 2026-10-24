@@ -17,6 +17,15 @@
       "expected_incarnation": null
     },
     "enroll": 200,
+    "unsupported_interrupt": 409,
+    "ordinary_producer": {
+      "status": 200,
+      "stage": "admitted",
+      "same_keyed_retry": true,
+      "legacy_inbox_empty": true
+    },
+    "post_close_keyed_retry": {"status": 200, "duplicate": true, "same_message": true},
+    "changed_keyed_input": 409,
     "poll": {
       "status": 200,
       "body": "retained original body",

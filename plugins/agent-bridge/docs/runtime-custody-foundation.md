@@ -98,8 +98,10 @@ completion. An unknown attempt cannot return to an offered state. Handoff
 identity/input and recorded timestamps cannot be erased to mint a retry.
 Legacy poll/ACK/consumption methods do not send or settle retained handoffs.
 Associated messages are excluded from those legacy paths from insertion onward,
-not just after a handoff exists. An identical keyed retry must match the retained
-producer association, including legacy versus associated admission.
+not just after a handoff exists. Internal explicitly associated insertion
+retries must match the retained producer association. The ordinary producer
+recovery path below instead returns the original admitted row without acquiring
+a replacement frontend association.
 Registration deregistration, takeover and reaping preserve associated inbox
 history even when the registration itself goes away.
 
@@ -109,7 +111,8 @@ Both message insertion methods and
 the canonical SQL guards reject custody-associated `control:` kinds, including
 case variants. Legacy control claim refuses an existing unsupported associated
 control before expiry or claim mutations; ACK and withdrawal cannot settle it.
-Ordinary unassociated control behavior is unchanged.
+Control admission and pending-control enrollment are serialized as described
+below; never-enrolled legacy control behavior is unchanged.
 
 Custody transactions, including associated inbox insertion, commit with
 connection-local `synchronous=FULL` before returning. Both normal and adopted
@@ -203,11 +206,39 @@ enrollment nor reinitializes it. Original message, handoff and consumer identiti
 must match. Lost final-admission replies remain outstanding and cannot be
 converted to a second true result by repeating `/begin`.
 
-The ordinary message-producer routes and actual SDK consumer are not switched
-to this adapter yet. Unassociated legacy inbox rows remain unqualified and
+The actual SDK consumer is not switched to this adapter yet.
+Unassociated legacy inbox rows remain unqualified and
 refuse a retained batch without partial handoff commits. No SDK event,
 consumption evidence, automatic replay, proxy implementation or native behavior
 is inferred from these ASGI/installation/real-SQLite controls.
+
+## Ordinary producer admission
+
+`POST /api/v1/live-sessions/{session_id}/messages` now selects retained custody
+when the durable target enrollment requires it. The existing atomic freshness
+owner selects the current consumer and original frontend association in the
+same SQLite write transaction as insertion. This requires an original nonblank
+operation key and currently serving admitted local frontend; it does not
+initialize an epoch or enroll anyone. Missing, retired, foreign or stale
+observations refuse before admission, never fall back to a legacy row.
+A never-enrolled target remains on the ordinary legacy path, independently of
+another session's enrollment.
+
+An identical keyed retry observes its original message, payload and producer
+association before considering a fresh admission. It can therefore recover a
+lost admission reply after frontend replacement, closure or registration
+cleanup. Changed input refuses; neither recovery nor the returned admitted
+receipt grants an SDK invocation or implies acceptance or consumption.
+The original row survives a real producer-process exit before its reply.
+
+Retained startup, interrupt and control effects remain unsupported. The
+existing freshness insertion statement refuses their unqualified admission
+to an enrolled target, including readiness controls before a startup prompt.
+Enrollment refuses pending legacy controls, so control insertion and enrollment
+have one serial order; it never retires or silently settles the control.
+Direct internal owner methods and other producer cohorts are not thereby
+qualified. Full SDK wiring, outcome/consumption recovery and native/platform
+evidence remain open.
 
 ## Inventory is observation, not qualification
 
@@ -245,6 +276,7 @@ native-send settlement, host/remote enrollment, cross-owner revision closure,
 target-declared state compatibility and continuing installer retention remain
 unimplemented beyond the inbox owners and explicit local adapter above.
 No existing drain, SDK consumer or installer path is switched to this foundation.
+Only the bounded ordinary inbox-producer route above selects enrolled custody.
 No Dispatch database or adopter effect owner is involved.
 
 The focused tests cover real SQLite serial ordering, queue rollback, original

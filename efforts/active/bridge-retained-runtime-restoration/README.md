@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; installation/current-consumer DB prerequisites merged; transport/SDK integration and full Phase 1 open
+- **Status:** Active; local HTTP-48 transport merged; ordinary producer/SDK integration and full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -152,6 +152,8 @@ require their own review and qualification.
 - [ ] Bind the existing installation and current SDK consumer through the
       established user-owned boundary; keep cross-container ingress under
       authenticated proxy owners and reject unsupported exposure.
+      The explicit local HTTP-48 adapter merged in #8540; ordinary producer and
+      actual extension SDK enrollment/delivery remain open.
 - [ ] Preserve original durable messages, handoffs and outcomes across
       disconnect, timeout, restart and lost replies; reconcile uncertainty
       without dropping work or blindly resending it.
@@ -238,6 +240,53 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, authenticated consumer/SDK integration and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Wire ordinary keyed producer admission through current enrollment
+- The ordinary message route now asks the existing SQLite inbox owner to
+  select current enrollment and insert the original producer association in
+  one write transaction. It does not initialize an epoch or enroll a consumer.
+  Never-enrolled legacy targets remain separate; stale, retired, unsupported
+  or missing retained owners refuse instead of downgrading.
+- Retained admission requires an original operation key. Exact retries recover
+  the unchanged original row after frontend replacement, closure, registration
+  cleanup or a real producer-process exit before reply. Changed inputs refuse;
+  a recovered admission does not authorize an SDK invocation.
+- Unqualified control/startup/interrupt insertion and pending-control enrollment
+  are fenced at their existing DB owners. The actual startup-readiness path
+  refuses before creating or waiting for an unsupported legacy control.
+- The bounded producer/inbox/freshness/legacy/readiness cohort passes 430 cases
+  with three capability skips and verified cleanup. The stronger two-owner
+  race test explicitly distinguishes a stale closure CAS from the subsequent
+  fresh reconciliation; no runtime fence was relaxed to make the test pass.
+- The independent HTTP-48 probe now observes the ordinary producer rather than
+  seeding its admission through an internal DB method. Actual write/no-write
+  capture passes both installation modes against committed source
+  `d411d903e347e41d558ad32eee45e078b06df486`, retaining 75 outputs and every
+  older packet/provenance record. The canonical checker accepts two contracts
+  and 657 fixtures; 124 contract/fixture/current-capture replay cases pass,
+  with two collection capability skips. Read-only producer refusal passes
+  separately in both installation modes.
+- The first capture correctly refused publication when equal observation
+  objects had different insertion order. A reproduced regression now sorts
+  only object keys, preserving all values and array order. The full current
+  capture/refusal portfolio passes; no fixture expectation was relaxed.
+- Normal review/merge remain required. Actual extension
+  enrollment, SDK invocation/outcome/consumption recovery, native qualification
+  and all remaining parent Plan/Validation items stay open.
+
+### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
+- #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the
+  current-head Copilot review reported no open issues on
+  `d43e98f857d1746422797f3be078d36ecdc29544`, the installation-helper finding
+  was resolved, and provider-required checks passed.
+- The explicit local adapter and its corrected committed-source evidence are
+  landed prerequisites. They do not switch ordinary message producers or the
+  actual extension SDK to retained custody, enroll the full producer cohort,
+  qualify cross-container ingress, or change a running installation.
+- Reread the full Plan and Validation Plan. Full Phase 1b and the parent gates
+  remain open. Next connect the existing atomic message admission to the
+  current enrollment and bind the actual SDK send/consumption boundaries,
+  preserving original unknown work instead of legacy ACK/resend fallback.
 
 ### 2026-10-24 - Close the installation-owner capture gap found in review
 - Review of #8540 identified that the initial HTTP-48 closure covered the

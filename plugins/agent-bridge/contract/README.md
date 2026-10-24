@@ -113,9 +113,9 @@ Independent expectations live in `inputs/http48/retained-inbox.json`.
 `test_http48_capture_probes.py` executes the actual serving app, ordinary auth
 middleware, installation owner and SQLite handoffs in both legacy and namespaced
 fixture installations. It observes repeated poll/final-admission responses,
-wrong-epoch refusal and original outcomes after closure and registration cleanup.
-It does not run an ordinary message producer, extension SDK, native session or
-deployed receiver.
+ordinary keyed producer admission and recovery, interrupt/wrong-epoch refusal
+and original outcomes after closure and registration cleanup. It does not run
+an extension SDK, native session or deployed receiver.
 
 After committing matching source and source registry declarations:
 

@@ -741,17 +741,11 @@ async def post_live_message(
         existing_log = _store(request).get(target_session_id)
         after = existing_log.latest_id if existing_log is not None else 0
 
-    message_id, reason = db.enqueue_live_message_if_fresh(
-        target_session_id,
-        sender=body.sender,
-        body=body.body,
-        now=now,
-        reply_to=body.reply_to,
-        kind=message_kind,
-        delivery=body.delivery,
-        expected_session_id=expected_session_id,
-        idempotency_key=body.idempotency_key,
-        report_duplicate=True,
+    from .live_inbox import enqueue_message
+
+    message_id, reason = enqueue_message(
+        request, db, target_session_id, body, kind=message_kind,
+        expected_session_id=expected_session_id, now=now,
     )
     duplicate = reason == "duplicate"
     if duplicate:

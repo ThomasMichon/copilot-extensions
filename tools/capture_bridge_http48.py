@@ -119,7 +119,7 @@ def main() -> None:
     print(json.dumps({
         "source_commit": args.source_commit, "generation": 48,
         "write": args.write, "outputs": len(outputs),
-        "scope": "model-free local ASGI source evidence; not producer/SDK/native qualification",
+        "scope": "model-free local ASGI/ordinary-producer source evidence; not SDK/native qualification",
     }))
 
 

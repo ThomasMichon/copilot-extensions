@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-import time
 from typing import Any
 
 import pytest
@@ -68,10 +67,24 @@ def test_http48_capture_actual_observations(
         "expected_incarnation": body["expected_incarnation"],
     }
     observed["enroll"] = client.post(PREFIX + "/enroll", json=body).status_code
-    mid = db.enqueue_live_message(
-        consumer.session_id, "synthetic-sender", vector["requests"]["body"], time.time(),
-        runtime_admission=app.state.live_inbox_runtime._admission,
-    )
+    ordinary = f"/api/v1/live-sessions/{consumer.session_id}/messages"
+    message = {
+        "sender": "synthetic-sender", "body": vector["requests"]["body"],
+        "delivery": "queue", "idempotency_key": "synthetic-original-operation",
+    }
+    rejected = client.post(ordinary, json={**message, "delivery": "interrupt"})
+    observed["unsupported_interrupt"] = rejected.status_code
+    admitted = client.post(ordinary, json=message)
+    assert admitted.status_code == 200, admitted.text
+    mid = admitted.json()["message_id"]
+    replay = client.post(ordinary, json=message)
+    assert replay.status_code == 200, replay.text
+    observed["ordinary_producer"] = {
+        "status": admitted.status_code,
+        "stage": admitted.json()["receipt"]["stage"],
+        "same_keyed_retry": replay.json()["duplicate"] and replay.json()["message_id"] == mid,
+        "legacy_inbox_empty": db.list_pending_live_messages(consumer.session_id) == [],
+    }
     first = client.post(PREFIX + "/poll", json=current(body))
     assert first.status_code == 200, first.text
     row, = first.json()["messages"]
@@ -99,6 +112,14 @@ def test_http48_capture_actual_observations(
     app.state.ready = False
     app.state.session_manager.is_draining = True
     app.state.loop_governance = None
+    replay = client.post(ordinary, json=message)
+    observed["post_close_keyed_retry"] = {
+        "status": replay.status_code, "duplicate": replay.json()["duplicate"],
+        "same_message": replay.json()["message_id"] == mid,
+    }
+    observed["changed_keyed_input"] = client.post(
+        ordinary, json={**message, "body": "changed input"},
+    ).status_code
     observed["outcomes_after_close"] = []
     for stage in vector["requests"]["outcomes"]:
         reply = client.post(PREFIX + "/outcome", json=report(body, row, stage))

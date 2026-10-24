@@ -1,0 +1,16 @@
+{
+  "evidence_family": "http48-shared-asgi-v1",
+  "shared_operation_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http48-retained-inbox.json",
+    "sha256": "3f669707866280511eb2892f561ab87d97e04d3438d5572089177990500d114d"
+  },
+  "scope": "shared named ASGI portfolio, not an independent capture",
+  "captured_from": {
+    "commit": "d411d903e347e41d558ad32eee45e078b06df486",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 48,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_enqueue.py",
+    "source_git_blob": "c5b0efbf29c99eb0d8fe07f81eb9d346201057d3",
+    "source_sha256": "6560ed7c4e5362b6c8de7cd479b004af2607e27ae7c9638c91ef0085a415704c"
+  }
+}
