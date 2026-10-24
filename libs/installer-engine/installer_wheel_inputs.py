@@ -242,7 +242,9 @@ def _ordinary(path: Path) -> os.stat_result:
 
 
 def _identity(info: os.stat_result) -> tuple:
-    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+    # Windows 3.12 path stat and fstat disagree on ctime's birth/change meaning.
+    timestamp = getattr(info, "st_birthtime_ns", info.st_ctime_ns) if os.name == "nt" else info.st_ctime_ns
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, timestamp
 
 
 def inspect_wheel(
@@ -261,7 +263,8 @@ def inspect_wheel(
         for name in ("O_BINARY", "O_NOINHERIT", "O_NOFOLLOW", "O_NONBLOCK"):
             flags |= getattr(os, name, 0)
         with os.fdopen(os.open(path, flags), "rb") as stream:
-            if _identity(os.fstat(stream.fileno())) != _identity(before):
+            opened = os.fstat(stream.fileno())
+            if _identity(opened) != _identity(before):
                 raise WheelError("wheel input changed before inspection")
             digest = hashlib.sha256()
             size = 0
@@ -277,8 +280,10 @@ def inspect_wheel(
             if "sha256:" + digest.hexdigest() != sha256:
                 raise WheelError("wheel archive digest mismatch")
             facts = inspect_archive(stream, limits=limits, deadline=deadline)
+            after = os.fstat(stream.fileno())
             if (
-                _identity(os.fstat(stream.fileno())) != _identity(before)
+                _identity(after) != _identity(opened)
+                or after.st_ctime_ns != opened.st_ctime_ns
                 or _identity(_ordinary(path)) != _identity(before)
             ):
                 raise WheelError("wheel input changed during inspection")

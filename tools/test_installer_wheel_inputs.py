@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 import zipfile
 
 import pytest
@@ -59,6 +60,14 @@ def test_wrong_archive_digest_refuses(wheel_path, limits):
             wheel_path, sha256="sha256:" + "0" * 64, limits=limits,
             deadline=time.monotonic() + 10,
         )
+
+
+def test_path_and_handle_identity_agree_after_an_ordinary_overwrite(wheel_path):
+    wheel_path.write_bytes(wheel_path.read_bytes())
+    before = wheel_path.lstat()
+    os.utime(wheel_path, ns=(before.st_atime_ns, before.st_mtime_ns - 1_000_000_000))
+    with wheel_path.open("rb") as stream:
+        assert inspection._identity(wheel_path.lstat()) == inspection._identity(os.fstat(stream.fileno()))
 
 
 @pytest.mark.parametrize("field,value", [
@@ -238,6 +247,26 @@ def test_source_mutation_during_inspection_refuses(wheel_path, limits, monkeypat
         return result
 
     monkeypatch.setattr(inspection, "inspect_archive", mutate)
+    with pytest.raises(inspection.WheelError, match="changed"):
+        inspect(wheel_path, limits)
+
+
+def test_held_handle_change_time_is_checked_separately(wheel_path, limits, monkeypatch):
+    original = inspection.os.fstat
+    calls = 0
+
+    def changed_time(descriptor):
+        nonlocal calls
+        actual = original(descriptor)
+        calls += 1
+        return SimpleNamespace(
+            st_dev=actual.st_dev, st_ino=actual.st_ino, st_size=actual.st_size,
+            st_mtime_ns=actual.st_mtime_ns,
+            st_birthtime_ns=getattr(actual, "st_birthtime_ns", actual.st_ctime_ns),
+            st_ctime_ns=actual.st_ctime_ns + (1 if calls > 1 else 0),
+        )
+
+    monkeypatch.setattr(inspection.os, "fstat", changed_time)
     with pytest.raises(inspection.WheelError, match="changed"):
         inspect(wheel_path, limits)
 

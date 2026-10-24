@@ -1518,7 +1518,7 @@
     "tools/test_check_docs_consistency.py": "60577ce827514cc996a23c7e654a66286b83c202daea2f25e806dcb4315ba494",
     "tools/validate_materialized_candidate.py": "47935f3988182f1e8762bef1894c2e829fa2f27b81bd962a731e6b04f25f3661",
     "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990",
-    "libs/installer-engine/installer_wheel_inputs.py": "5a69f516fd6896347dc9e7c5a274ae21bb6d7a0dbc6b7d9670a1c992c21ffe28",
+    "libs/installer-engine/installer_wheel_inputs.py": "5ec59e454d0389a7d14f33c7c3f1d9f45c64ceb1f5dcc3b3359409415f67aee3",
     "tools/wheel_input_fixture.py": "21196f6e62a76be0714181b74b794465c8d20c83277bea309e5946488f3f8131",
     "tools/promotion_unit_tests/test_wheel_inputs.py": "8fdfccd141f7e41c5e1ba90f15c9d771a28cb91577166d55c4a34d1f811c5a53"
   },
