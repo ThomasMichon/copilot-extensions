@@ -472,6 +472,23 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-24 - Retain the current canonical import closure
+
+- The corrected456-node head completed both lanes on all four fresh
+  Linux/Windows3.10/3.11 combinations, with complete membership and only the
+  two declared Windows POSIX skips. Those results belong to
+  `be61115f28e1895baa51887083d646c126b644b1`, not a later rebased candidate.
+- Reconcile the independent native-selector additions without dropping any
+  dispatch exclusion. The updated canonical constructor from #8534 also
+  imports the wheel snapshot/inspection companions: deliver both unchanged
+  through the same artifact hooks and include them in resource/import-scope
+  and missing-input controls. This does not select Chat wheel profiles or
+  change artifact-admission authority.
+- Focused fresh-artifact and real-construction controls pass26 cases after
+  that dependency update. Preserve all previous cases and add the six companion
+  controls;462-node full/fast qualification and fresh final-head execution
+  remain required before treating the updated candidate as qualified.
+
 ### 2026-10-24 - Fresh-host qualification corrections
 
 - Fresh Linux3.10/3.11 lanes completed acceptance and full execution. Both

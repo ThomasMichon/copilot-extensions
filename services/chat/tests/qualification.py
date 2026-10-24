@@ -192,7 +192,7 @@ EXPECTED = {
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
     "test_workspace.py::test_workspace_deadline_rounding_never_exceeds_original_budget": 2,
-    "test_construction.py::test_occupied_import_scope_is_not_replaced": 4,
+    "test_construction.py::test_occupied_import_scope_is_not_replaced": 6,
     "test_construction.py::test_installed_health_refuses_bootstrap_drift": 3,
     "test_collaboration.py::test_metadata_refuses_invalid_fields_and_bounds": 22,
     "test_collaboration.py::test_annotated_pending_requires_complete_receipt_before_recovery": 6,
@@ -214,7 +214,7 @@ PARAMETER_COUNTS.update({
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_collaboration_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_refuses_unusable_installed_evidence": 17,
-    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 11,
+    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 13,
     "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 9,
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
     "test_cli.py::test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic": 2,
@@ -227,7 +227,7 @@ PARAMETER_COUNTS.update({
     "test_client.py::test_malformed_success_objects_do_not_confirm_an_operation": 6,
     "test_client.py::test_scan_validates_body_free_returned_only_progress_without_reading": 4,
     "test_distribution.py::test_installed_catalog_worker_preserves_isolation": 2,
-    "test_setup_distribution.py::test_independent_sdist_refuses_missing_construction_input": 3,
+    "test_setup_distribution.py::test_independent_sdist_refuses_missing_construction_input": 5,
     "test_distribution.py::test_source_independent_wheel": 2,
     "test_hosting.py::test_absolute_ingress_deadline_retires_slow_input_and_releases_admission": 2,
     "test_hosting.py::test_configuration_refuses_without_echoing_values": 7,

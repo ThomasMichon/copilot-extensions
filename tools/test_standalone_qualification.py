@@ -44,6 +44,7 @@ def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_pytho
     for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
         assert "!inputs.chat_construction" in jobs[name]["if"]
         assert "!inputs.wheel_inputs" in jobs[name]["if"]
+        assert "!inputs.runtime_profiles" in jobs[name]["if"]
 
 
 @pytest.mark.parametrize("profile,timeout,explicit", [

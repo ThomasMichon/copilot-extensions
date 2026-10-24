@@ -53,6 +53,11 @@ manual client without source inputs or a predecessor runtime. This is not a
 selected command catalog or an independently runnable installer. No selector,
 client configuration, host registration or legacy installation is changed.
 
+The canonical engine's wheel-inspection and snapshot companions are included
+unchanged as required transitive bootstrap resources. This adapter still uses
+declared-source construction; delivering those companions does not select a
+wheel profile or grant artifact admission.
+
 ## Callable core
 
 Install the distribution with the chosen package manager. Runtime dependencies

@@ -13,6 +13,8 @@ from agent_procutil.owned_process import run_caller_owned
     "_standalone_runtime_build.py",
     "src/agent_chat_service/versioned_runtime_publication.py",
     "src/agent_chat_service/installer_dependency_config.py",
+    "src/agent_chat_service/installer_wheel_inputs.py",
+    "src/agent_chat_service/installer_wheel_snapshot.py",
 ])
 def test_independent_sdist_refuses_missing_construction_input(tmp_path, installed_chat, missing):
     shutil.unpack_archive(installed_chat.sdist, tmp_path, "gztar")
@@ -54,7 +56,8 @@ if sys.version_info < (3,11):
 import installer_engine as engine
 assert Path(engine.__file__).parent == root
 assert engine.runtime is runtime
-for name in ("versioned_runtime_source","installer_engine_process","installer_dependency_policy"):
+for name in ("versioned_runtime_source","installer_engine_process","installer_dependency_policy",
+             "installer_wheel_inputs","installer_wheel_snapshot"):
     assert Path(sys.modules[name].__file__).parent == root
 policy=sys.modules["installer_dependency_policy"]
 assert Path(policy._configuration_path).parent == root
@@ -80,7 +83,8 @@ from types import ModuleType
 from agent_chat_service.client import ClientError
 from agent_chat_service.construction import _engine
 names=("versioned_runtime","versioned_runtime_source",
-       "installer_dependency_policy","installer_engine_process")
+       "installer_dependency_policy","installer_engine_process",
+       "installer_wheel_inputs","installer_wheel_snapshot")
 for name in names:
     foreign=ModuleType(name)
     sys.modules[name]=foreign
@@ -100,7 +104,7 @@ print(json.dumps({"foreign_imports_preserved":len(names)}))
 """
     assert json.loads(installed_chat.run(
         [str(installed_chat.core_python), "-I", "-B", "-c", probe], cwd=tmp_path,
-    )) == {"foreign_imports_preserved": 4}
+    )) == {"foreign_imports_preserved": 6}
 
 
 def test_installed_constructor_builds_chat_client_from_independent_inputs(
@@ -148,6 +152,7 @@ assert Path(engine.__file__).parent==resources
 assert not any(name in sys.modules for name in (
     "versioned_runtime","versioned_runtime_source",
     "installer_dependency_policy","installer_engine_process",
+    "installer_wheel_inputs","installer_wheel_snapshot",
 ))
 assert not (project.parents[1]/"libs"/"versioned-runtime").exists()
 assert not (project.parents[1]/"libs"/"installer-engine").exists()

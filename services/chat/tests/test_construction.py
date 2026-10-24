@@ -24,6 +24,7 @@ def test_construction_floor_refuses_before_resource_loading(monkeypatch):
 @pytest.mark.parametrize("name", [
     "versioned_runtime", "versioned_runtime_source",
     "installer_engine_process", "installer_dependency_policy",
+    "installer_wheel_inputs", "installer_wheel_snapshot",
 ])
 def test_occupied_import_scope_is_not_replaced(monkeypatch, name):
     monkeypatch.setattr(construction.sys, "version_info", (3, 11))
