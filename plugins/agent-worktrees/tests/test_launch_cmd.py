@@ -1466,14 +1466,34 @@ def test_custom_powershell_command_forwards_selected_directory(
 
 
 def _local_bash():
+    def native(candidate):
+        return candidate and not (
+            os.name == "nt"
+            and any(part.casefold() in {"system32", "windowsapps"} for part in Path(candidate).parts)
+        )
+
     shell = shutil.which("bash")
-    if os.name == "nt" and (not shell or "system32" in shell.casefold()):
+    if os.name == "nt" and not native(shell):
         git = shutil.which("git")
         candidate = Path(git).parent.parent / "bin" / "bash.exe" if git else None
         shell = str(candidate) if candidate is not None and candidate.is_file() else None
-    if not shell or (os.name == "nt" and "system32" in shell.casefold()):
+    if not native(shell):
         pytest.skip("a local Bash executable is unavailable")
     return shell
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows local Bash selection")
+@pytest.mark.parametrize("forwarder", ["System32", "WindowsApps"])
+def test_native_bash_fixture_rejects_wsl_forwarders(tmp_path, monkeypatch, forwarder):
+    git = tmp_path / "Git" / "cmd" / "git.exe"
+    bash = git.parent.parent / "bin" / "bash.exe"
+    bash.parent.mkdir(parents=True)
+    bash.touch()
+    monkeypatch.setattr(
+        shutil, "which",
+        lambda name: str(tmp_path / forwarder / "bash.exe") if name == "bash" else str(git),
+    )
+    assert _local_bash() == str(bash)
 
 
 @pytest.mark.parametrize("command_name", [None, "--", "--acp", "configured-command-name"])

@@ -9,8 +9,15 @@ from collections.abc import Mapping
 from .. import engine_client, harness_state
 from . import context
 from . import engine_group_b
-from . import housekeeping
 from .picker_tui import run_tui_picker
+
+
+def __getattr__(name):
+    if name == "housekeeping":
+        from . import housekeeping
+
+        return housekeeping
+    raise AttributeError(name)
 
 
 class ProjectSelectionError(RuntimeError):
@@ -85,6 +92,8 @@ def _start_housekeeping() -> None:
     """Run the production pre-Picker sweeps without delaying first paint."""
 
     def reap_background() -> None:
+        from . import housekeeping
+
         try:
             housekeeping.reap_orphan_mux_sessions(only_owned=True)
         except Exception:
@@ -105,6 +114,9 @@ def run(
     *,
     mock_mode: bool | None = None,
     local: bool = False,
+    bootstrap_payload: dict | None = None,
+    bootstrap_supplier=None,
+    lifetime_cancelled=None,
 ) -> Mapping[str, object] | None:
     """Run the production Picker against an adopted project.
 
@@ -119,22 +131,39 @@ def run(
     picker_root = None
     finished = threading.Event()
     root_lock = threading.Lock()
+    prepared_source = None
+    lifetime_kwargs = (
+        {"lifetime_cancelled": lifetime_cancelled} if lifetime_cancelled is not None else {}
+    )
 
     def prepare():
-        selected = project if resolved_mock and project else _select_project(project)
-        try:
-            payload = engine_group_b.picker_bootstrap(selected)
-        except engine_client.EngineFeatureUnavailable as error:
-            raise RuntimeError(
-                "the installed agent-worktrees engine predates "
-                "`picker-bootstrap --json`; update agent-worktrees"
-            ) from error
+        nonlocal prepared_source
+        if bootstrap_supplier is not None:
+            selected, payload = bootstrap_supplier()
+        else:
+            selected = project if bootstrap_payload is not None or resolved_mock and project else _select_project(project)
+            try:
+                payload = bootstrap_payload if bootstrap_payload is not None else engine_group_b.picker_bootstrap(selected)
+            except engine_client.EngineFeatureUnavailable as error:
+                raise RuntimeError(
+                    "the installed agent-worktrees engine predates "
+                    "`picker-bootstrap --json`; update agent-worktrees"
+                ) from error
         bootstrap = context.ProjectBootstrap.from_payload(payload)
         live = False if local else bootstrap.default_live
         if live:
             from .picker_tui import data_ssh as source
         else:
             from .picker_tui import data_local as source
+        from .. import resident_picker
+
+        if live and resident_picker.root_for(bootstrap.project) is not None:
+            from .prepared_source import PreparedSource
+
+            if prepared_source is not None:
+                prepared_source.close()
+            prepared_source = PreparedSource(source)
+            source = prepared_source
 
         def activate():
             # Commit only on the surviving pending screen. The worker resolves
@@ -143,6 +172,8 @@ def run(
                 os.chdir(bootstrap.cwd)
             context.bind_project_bootstrap(payload)
             project_config.bind_bootstrap(bootstrap.project, payload.get("project_config"))
+            if prepared_source is not None:
+                prepared_source.start()
 
         return PickerBinding(source, live, activate)
 
@@ -150,6 +181,12 @@ def run(
         nonlocal picker_root
         if resolved_mock or finished.is_set():
             return
+        from .. import resident_picker
+
+        if not resident_picker.wait_for_local(context.project(), finished.is_set):
+            return
+        from . import housekeeping
+
         _start_anchor_heal_check(context.project())
         _start_housekeeping()
         root = housekeeping.start_picker_monitor_root()
@@ -161,14 +198,25 @@ def run(
                 picker_root = root
 
     try:
+        if bootstrap_payload is not None:
+            binding = prepare()
+            binding.activate()
+            return run_tui_picker(
+                source=binding.source, live=binding.live, mock_mode=resolved_mock,
+                after_first_refresh=after_binding,
+                **lifetime_kwargs,
+            )
         return run_tui_picker(
             prepare=prepare,
             project_label=project or "selecting project",
             mock_mode=resolved_mock,
             after_first_refresh=after_binding,
+            **lifetime_kwargs,
         )
     finally:
         finished.set()
+        if prepared_source is not None:
+            prepared_source.close()
         with root_lock:
             if picker_root is not None:
                 picker_root.close()

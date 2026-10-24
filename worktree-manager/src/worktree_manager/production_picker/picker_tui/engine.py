@@ -597,6 +597,7 @@ class PickerApp(App):
         after_first_refresh=None,
         prepare=None,
         project_label="project",
+        lifetime_cancelled=None,
     ):
         super().__init__()
         self._source = source
@@ -605,6 +606,7 @@ class PickerApp(App):
         self._after_first_refresh = after_first_refresh
         self._prepare = prepare
         self._project_label = project_label
+        self._lifetime_cancelled = lifetime_cancelled
         self.binding_error = None
         self.result = None            # set by the screen on a launch decision
         # Idle-liveness self-exit (copilot-extensions#2761 follow-up) -- see
@@ -625,6 +627,8 @@ class PickerApp(App):
         )
 
     def on_mount(self) -> None:
+        if self._lifetime_cancelled is not None:
+            self.set_interval(0.25, self._check_owner_lifetime)
         if IDLE_TIMEOUT_SECS > 0:
             # Check at 1/10th the timeout (bounded to a sane range) so the
             # actual exit lands within ~10% of the configured threshold
@@ -633,7 +637,13 @@ class PickerApp(App):
             self._idle_check_timer = self.set_interval(
                 check_interval, self._check_idle_timeout)
 
+    def _check_owner_lifetime(self):
+        if self._lifetime_cancelled():
+            self.result = None
+            self.exit()
+
     def install_binding(self, binding):
+        self._last_input_activity = time.monotonic()
         self._source, self._live = binding.source, binding.live
         self.query_one(PendingBindingScreen).remove()
         self.screen.mount(PickerScreen(

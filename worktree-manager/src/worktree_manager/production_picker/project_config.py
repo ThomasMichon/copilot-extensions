@@ -57,7 +57,8 @@ def bind_bootstrap(project: str, values: object) -> None:
     cache = _ScalarCache()
     if isinstance(values, dict):
         for field, key in (
-            ("config_dir", "config-dir"), ("repo_dir", "repo-dir"), ("machine", "machine")
+            ("config_dir", "config-dir"), ("repo_dir", "repo-dir"), ("machine", "machine"),
+            ("install_dir", "install-dir"),
         ):
             value = values.get(field)
             if not isinstance(value, str) or not value.strip():
@@ -367,6 +368,9 @@ def _cached_machine_name(cache: _ScalarCache, epoch: int, project: str) -> str:
 
 @lru_cache(maxsize=None)
 def _install_dir(project: str) -> Path:
+    bound = _scalar_cache.values.get((project, "install-dir"))
+    if bound is not None:
+        return Path(bound)
     payload = engine_group_a.picker_paths(project)
     return Path(str(payload.get("install_dir") or ""))
 

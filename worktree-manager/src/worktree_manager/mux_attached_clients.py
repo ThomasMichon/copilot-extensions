@@ -16,7 +16,9 @@ from . import mux_discovery
 from .mux_mapping_registry import MuxMappingRegistry
 
 
-def mux_attached_clients(mux_bin: str, session: str, timeout_s: float = 1.0) -> int | None:
+def mux_attached_clients(
+    mux_bin: str, session: str, timeout_s: float = 1.0, *, mux_args: list[str] | tuple[str, ...] = (),
+) -> int | None:
     """Bounded, best-effort count of clients currently attached to
     ``session`` (``list-clients``, supported by both tmux and psmux).
 
@@ -29,7 +31,7 @@ def mux_attached_clients(mux_bin: str, session: str, timeout_s: float = 1.0) -> 
     including a genuine zero (an empty-but-successful listing)."""
     try:
         result = subprocess.run(
-            [mux_bin, "list-clients", "-t", session],
+            [mux_bin, *mux_args, "list-clients", "-t", session],
             capture_output=True,
             text=True,
             encoding="utf-8",

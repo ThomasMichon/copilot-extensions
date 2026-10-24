@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
 import threading
 import time
 from contextlib import closing
@@ -161,7 +162,9 @@ class WorktreesRuntime:
 
         with self._lock:
             return {
-                "capabilities": [CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY],
+                "capabilities": [
+                    CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY, "picker-bootstrap-v1",
+                ],
                 "worktrees": {
                     "contract_version": CONTRACT_VERSION,
                     "status": self._reason,
@@ -169,6 +172,33 @@ class WorktreesRuntime:
                     "error": self._error,
                 },
             }
+
+    def picker_bootstrap(self, payload: dict) -> dict:
+        from . import picker_bootstrap_runtime
+        from .execution_spaces import ExecutionSpaceError
+
+        if self._elected is not None and not self._elected():
+            self.close_admission("superseded")
+        with self._lock:
+            if not self._admitting:
+                return self._failure(self._reason, "resident bootstrap admission closed")
+            generation = self.store.generation
+        try:
+            result = picker_bootstrap_runtime.build(payload)
+        except (ExecutionSpaceError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            return self._failure("unavailable", str(error))
+        if self._elected is not None and not self._elected():
+            self.close_admission("superseded")
+        with self._lock:
+            if not self._admitting or self.store.generation != generation:
+                return self._failure("superseded", "resident changed during bootstrap")
+            self._demand[payload["project"]] = self._now()
+        if self._wake is not None:
+            self._wake.set()
+        return {
+            "ok": True, "contract_version": 1, "generation": generation,
+            "runtime_root": str(cfg.install_dir()), **result,
+        }
 
     def handle(self, payload: dict) -> dict:
         try:

@@ -133,6 +133,19 @@ The separate real peer control uses `tools/run-plugin-tests.py agent-dispatch
 --test-file tests/test_procutil.py -k "ssh_snapshot or (namespaced_sibling_resolution
 and agent-ssh)"`. No production credentials, remote hosts or capacity are needed.
 
+## Optional foreground completion custody
+
+The manual `installation-context-acceptance.yml` selector
+`interactive_completion=true` runs `libs/agent-procutil/tests/test_interactive.py`
+on Linux, macOS and Windows. It exercises real finite commands, normal-exit
+descendant cleanup, abrupt caller death, POSIX interruption and controlling-PTY
+input/resize/foreground restoration. Windows also generates a real SIGINT in
+the owned caller while its command remains blocked, then verifies descendant
+exit; it does not broadcast signals to an external console. Job refusal and
+cleanup-failure confirmation remain deterministic unit controls. This is
+completion custody evidence, not a resident Picker startup benchmark or an
+installed-runtime rollout, and does not expand required unit-only PR CI.
+
 ## Optional candidate dependency profiles
 
 The installation-context Python `runtime-profile-policy` reader has no
