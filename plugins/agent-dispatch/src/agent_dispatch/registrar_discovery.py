@@ -414,6 +414,7 @@ def _field_defining_hop_is_cross_repo(
     snapshot: RepositoryResourceSnapshot | None = None,
     _base_resource: str | None = None,
     activation=None,
+    expected_context: Mapping | None = None,
 ) -> bool:
     """Walk an ``extends:`` chain to find the *nearest* hop that actually
     defines ``field`` in its own raw ``forge`` mapping, and report whether
@@ -436,8 +437,9 @@ def _field_defining_hop_is_cross_repo(
     if not isinstance(ref, str) or not ref:
         return False  # malformed; let resolve_extends raise its own clear error later
     from .registrar_recipes import (
-        _MAX_CHAIN_DEPTH, _ref_identity, _read_recipe_document, resolve_recipe_ref,
+        _MAX_CHAIN_DEPTH, _ref_identity,
     )
+    from .registrar_recipe_io import read_resolved_recipe
     from .repository_resources import relative_repository_resource, split_repository_resource
 
     if (
@@ -458,9 +460,8 @@ def _field_defining_hop_is_cross_repo(
     hop_is_cross_repo = ref_path is None or not (
         ref_path == repo_root or repo_root in ref_path.parents
     )
-    template = (
-        _read_recipe_document(ref_path, ref=ref)
-        if ref_path is not None else resolve_recipe_ref(ref, base_dir=base_dir)
+    template = read_resolved_recipe(
+        identity, ref_path, ref=ref, base_dir=base_dir, expected_context=expected_context,
     )
     if not isinstance(template, Mapping):
         return False
@@ -484,6 +485,7 @@ def _field_defining_hop_is_cross_repo(
         snapshot=snapshot,
         _base_resource=next_base_resource,
         activation=activation,
+        expected_context=expected_context,
     )
 
 

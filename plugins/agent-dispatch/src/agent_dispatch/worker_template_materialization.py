@@ -68,9 +68,11 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
     request = {"extends": selected["reference"], **overrides, "name": name, "owner": OWNER}
     origins = {}
     context = {}
+    resources = RepositoryResourceSnapshot(execution=False)
+    expected_context = selected["recipe_context"]
     document = resolve_extends(
         request, base_dir=directory, activation=selected["activation"], path_origins=origins,
-        resolution_context=context,
+        resolution_context=context, snapshot=resources, expected_context=expected_context,
     )
     # This is the same reviewer cwd normalization used by source expansion.
     if document.get("kind") == "reviewer-loop" and "emitter.cwd" in origins:
@@ -81,10 +83,10 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
     original = rd.expand_declaration_document(
         request, directory=directory, repo_root=repo_root or None,
         activation=selected["activation"],
+        snapshot=resources, expected_context=expected_context,
     )
     source = selected["row"]["source"]
     suppliers = {}
-    resources = RepositoryResourceSnapshot(execution=False)
     for origin in [*origins.values(), *(entry["reference"] for entry in context.values())]:
         if is_repository_resource(origin):
             repository, _ = split_repository_resource(origin)
@@ -109,7 +111,6 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
     if suppliers and document.get("kind") in {"emitter", "evaluator"}:
         document["spec"] = dict(original[0].spec)
     if document.get("kind") == "effort-driver-loop" and document.get("worker_identity"):
-        resources = RepositoryResourceSnapshot(execution=False)
         origin = _identity_origin_root(origins.get("worker_identity", directory), directory)
         emitter = next(d for d in original if d.kind == "emitter")
         effective = str(emitter.spec.get("cwd") or directory)

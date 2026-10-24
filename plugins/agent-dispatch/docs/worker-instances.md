@@ -206,7 +206,10 @@ execution-repository selector remains an ordinary declaration field.
 `workers save` re-discovers the qualified source using current activation and
 checks its revision, materializes it through the existing `extends` parameter/
 deep-merge authority, validates dependencies, and compares its expanded
-registrations before and after relocation. It rechecks source closure after
+registrations before and after relocation. Every recipe read, including
+inherited forge provenance checks, must match the selected revision's physical
+source identities and decoded documents; a named-root change refuses before
+reading an unselected file. It rechecks source closure after
 collision validation before persistence. Inherited emitter/reviewer cwd values
 retain their defining directories. Registered repository references remain
 `repo:` resources through persistence and publication, retaining their owner's
@@ -217,8 +220,10 @@ cannot retain that qualification refuse rather than publishing plain paths.
 Named defining-hop suppliers remain qualified even when the selected outer
 template is local or plugin-owned and the inherited cwd was written as an
 absolute path.
-Absolute command arguments inside a named supplier retain `repo:` qualification
-as well, including emitter side-load and inline evaluator argv. Only an
+Absolute executable and script operands inside a named supplier retain `repo:`
+qualification as well, including emitter side-load and inline evaluator argv.
+Other command arguments remain opaque, so an output path need not exist at
+Save time and does not become a required source resource. Only an
 independently admitted named execution cwd permits read-only source arguments;
 an omitted cwd or unrelated plain path does not erase source admission.
 Overlapping named supplier roots refuse materialization rather than selecting
@@ -229,6 +234,11 @@ Dependency inspection resolves named command/cwd resources read-only without
 replacing their persisted names or granting execution authority.
 Emitter runtime tokens such as `{python}` are rendered only in the temporary
 dependency-check argv, through the same renderer used by the emitter.
+Static side-load executable/script dependencies receive the same checks as
+periodic commands, including the explicit-cwd requirement for relative paths.
+`{change_ref}` remains runtime data; using it to select an executable, script,
+Python module or inline code refuses because Save has no concrete execution
+dependency to validate. No dependency check executes provider code.
 Legacy webhook emitters keep their existing runtime builder; command/builtin
 validation applies only when the registration owner selects that shape.
 A worker identity must retain its defining

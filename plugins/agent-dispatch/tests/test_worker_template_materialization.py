@@ -383,6 +383,38 @@ def test_registered_repository_context_stays_named_through_local_publication(
         )
 
 
+def test_named_source_cannot_materialize_a_different_root_than_selected_catalog(monkeypatch, tmp_path):
+    from agent_dispatch import repository_resources
+    from tests.test_worker_templates import write_index
+
+    roots = [tmp_path / name for name in ("catalog-root", "resource-root")]
+    for root, label in zip(roots, ("selected", "substituted")):
+        index, _ = write_index(
+            root, index=root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json",
+        )
+        data = json.loads(index.read_text())
+        data["templates"][0]["kind"] = "supervised-lane"
+        index.write_text(json.dumps(data), encoding="utf-8")
+        (index.parent / "recipes" / "source.json").write_text(json.dumps({
+            "kind": "supervised-lane", "labels": [label], "body": {"type": "headless"},
+        }), encoding="utf-8")
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **k: repository_map(
+        registered_root("library", roots[0], "worktree"),
+    ))
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository", lambda *a, **k: (roots[1], "worktree"),
+    )
+    row = wt.discover_templates(activation())[0][0]
+    read_text = Path.read_text
+    def read_selected(path, *args, **kwargs):
+        assert not path.is_relative_to(roots[1]), "unselected recipe source was opened"
+        return read_text(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", read_selected)
+    with pytest.raises(RegistrarError, match="absent or changed"):
+        save(row)
+    assert not instance_dir().exists()
+
+
 @pytest.mark.parametrize("multiple_roots", [False, True])
 def test_plugin_recipe_uses_current_activation_or_refuses_ambiguous_roots(monkeypatch, tmp_path, multiple_roots):
     from plugin_activation import ActivePluginRoot

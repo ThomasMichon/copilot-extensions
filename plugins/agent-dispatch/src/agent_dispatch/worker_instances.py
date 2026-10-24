@@ -12,6 +12,11 @@ import shutil
 import time
 
 from . import registrar_discovery as rd
+from .command_operands import (
+    is_python_interpreter as _is_python_interpreter,
+    script_operand as _command_script_operand,
+    script_operand_index,
+)
 from .registrar import RegistrarError
 from .registrar_recipes import GLOBAL_RECIPES, deep_merge
 from .single_instance import SingleInstance
@@ -152,47 +157,6 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
     return data, declarations
 
 
-def _is_python_interpreter(executable: str) -> bool:
-    return re.fullmatch(
-        r"(?:pythonw?|pypy)(?:\d+(?:\.\d+)*)?(?:_d)?(?:\.exe)?",
-        Path(executable).name, re.IGNORECASE,
-    ) is not None
-
-
-def _command_script_operand(command: list[str]) -> str | None:
-    suffixes = {".py", ".sh", ".ps1"}
-    if not _is_python_interpreter(command[0]):
-        if len(command) > 1 and Path(command[1]).suffix.lower() in suffixes:
-            return command[1]
-        if len(command) > 1 and command[1].startswith("-") and any(
-            Path(value).suffix.lower() in suffixes for value in command[2:]
-        ):
-            raise RegistrarError("script dependencies after non-Python options cannot yet be validated safely")
-        return None
-    arguments = iter(command[1:])
-    for value in arguments:
-        if value == "-" or value.startswith(("-c", "-m")):
-            return None  # Inline code/module operands and their arguments are not script files.
-        if value == "--":
-            operand = next(arguments, None)
-            return None if operand == "-" else operand
-        if value in {"-W", "-X", "--check-hash-based-pycs"}:
-            if next(arguments, None) is None:
-                raise RegistrarError("missing Python interpreter option value")
-        elif value.startswith(("-W", "-X", "--check-hash-based-pycs=")):
-            continue
-        elif value in {"--help", "--help-env", "--help-xoptions", "--help-all", "--version"}:
-            return None
-        elif value.startswith("-"):
-            if not re.fullmatch(r"-[bBdEhiIOPqRsSuvVx]+", value):
-                raise RegistrarError("Python interpreter options cannot yet be validated safely")
-            if "h" in value or "V" in value:
-                return None
-        else:
-            return value
-    return None
-
-
 def _validate_command_dependency(command: list[str], directory: Path, *, explicit_cwd: bool) -> None:
     if explicit_cwd and not directory.is_dir():
         raise RegistrarError(f"missing working directory dependency: {directory}")
@@ -274,6 +238,30 @@ def _validate_dependencies(
             ))
             _validate_command_dependency(
                 command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
+            )
+        if declaration.kind == RegistrationKind.EMITTER and isinstance(
+            declaration.spec.get("side_load"), dict,
+        ):
+            from .producers.emitter import _render_command
+
+            side_command = _render_command(
+                declaration.spec["side_load"]["command"], change_ref="{change_ref}",
+            )
+            operand = script_operand_index(side_command, include_inline=True)
+            if any(
+                "{change_ref}" in side_command[index] for index in (0, operand)
+                if index is not None
+            ):
+                raise RegistrarError("dynamic side-load execution dependencies cannot be validated safely")
+            side_command = [
+                part if "{change_ref}" in part else resources.resolve(part)
+                for part in side_command
+            ]
+            directory = Path(resources.resolve(
+                str(declaration.spec.get("cwd") or repo_root or active_dir()), directory=True,
+            ))
+            _validate_command_dependency(
+                side_command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
             )
         if declaration.kind == RegistrationKind.SUPERVISED_LANE:
             # The registrar validates named identities on composed issue loops.

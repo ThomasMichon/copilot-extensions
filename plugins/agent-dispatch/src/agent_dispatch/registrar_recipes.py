@@ -20,6 +20,10 @@ from plugin_activation import ActivationReport, resolve_active_plugins
 
 from .recipes import EXTERNAL_AUTHOR_CLAUSE, RESOLUTION_CLAUSE, STAGNATION_CLAUSE, SUSPEND_CLAUSE
 from .registrar import RegistrarError
+from .registrar_recipe_io import (
+    read_recipe_document as _read_recipe_document,
+    read_resolved_recipe,
+)
 from .registrar_recipe_values import (
     _PLACEHOLDER_RE,
     _parse_plugin_ref as _parse_plugin_ref,
@@ -336,7 +340,6 @@ Completion requires the workspace to be clean and synchronized for reuse.
 
 #: Recipe files are declaration documents (YAML/JSON), same suffix contract
 #: `registrar_discovery.py` enforces for every other declaration file.
-_RECIPE_SUFFIXES = (".yaml", ".yml", ".json")
 
 #: Matches only a bare ``{identifier}`` placeholder -- never a format spec
 #: (``{0}``, ``{x:>10}``) and never anything containing a space, quote, or
@@ -381,49 +384,6 @@ def _safe_resolve_ref_path(path: Path, *, ref: str) -> Path:
         raise RegistrarIndeterminateError(
             f"extends: could not resolve recipe ref {ref!r} to a path: {exc}"
         ) from exc
-
-
-def _read_recipe_document(path: Path, *, ref: str) -> Mapping[str, Any]:
-    """Read and decode an already-resolved recipe file path.
-
-    Shared by every reference kind that ultimately resolves to an on-disk
-    file (a repo-local/cross-repo path, or a ``plugin:`` ref) -- the
-    suffix/encoding/read-error classification is identical regardless of
-    how ``path`` was derived.
-    """
-    from .registrar_discovery import (  # local import: avoid an import cycle
-        RegistrarIndeterminateError,
-        _decode,
-    )
-
-    if path.suffix not in _RECIPE_SUFFIXES:
-        raise RegistrarError(
-            f"extends: recipe file {ref!r} (resolved {path}) has unrecognized "
-            f"suffix {path.suffix!r}; expected one of {list(_RECIPE_SUFFIXES)}"
-        )
-    try:
-        if path.exists() and not path.is_file():
-            raise RegistrarError(f"extends: recipe file {ref!r} must be a regular file")
-        text = path.read_text(encoding="utf-8")
-    except UnicodeError as exc:
-        raise RegistrarError(
-            f"extends: recipe file {ref!r} (resolved {path}) has invalid encoding: {exc}"
-        ) from exc
-    except ValueError as exc:
-        raise RegistrarError(
-            f"extends: recipe ref {ref!r} could not be resolved to a path: {exc}"
-        ) from exc
-    except OSError as exc:
-        # Indeterminate, not invalid: a transient permission/read race on an
-        # extends: target must not be classified the same as a genuinely
-        # malformed declaration -- registrar_registry._classify_declaration()
-        # preserves a plugin declaration's last-known state only for this
-        # error class, same contract read_declaration_file_set's own
-        # equivalent OSError branch already follows.
-        raise RegistrarIndeterminateError(
-            f"extends: could not read recipe file {ref!r} (resolved {path}): {exc}"
-        ) from exc
-    return _decode(text, path.suffix, where=str(path))
 
 
 def _load_recipe_document(ref: str, *, base_dir: Path) -> Mapping[str, Any]:
@@ -753,6 +713,7 @@ def resolve_extends(
     path_origins: dict[str, Path | str] | None = None,
     activation: ActivationReport | None = None,
     resolution_context: dict[str, Any] | None = None,
+    expected_context: Mapping | None = None,
 ) -> dict[str, Any]:
     """Expand an ``extends:``-bearing declaration mapping into its fully
     resolved, ordinary ``kind:``-shaped form.
@@ -805,10 +766,12 @@ def resolve_extends(
     placeholder does not move its origin; an explicit field override does.
     A caller may supply its current activation snapshot and collect the actual
     reference documents in ``resolution_context`` for optimistic source revisions.
+    ``expected_context`` binds every read to that selected closure when supplied.
     """
     resolved, _pending_cwd_origin, origins = _resolve_extends_tracking_cwd_origin(
         data, base_dir=base_dir, _chain=_chain, _snapshot=snapshot,
         _activation=activation, _resolution_context=resolution_context,
+        _expected_context=expected_context,
     )
     if path_origins is not None:
         path_origins.clear()
@@ -822,6 +785,7 @@ def _resolve_extends_tracking_cwd_origin(
     _base_resource: str | None = None,
     _activation: ActivationReport | None = None,
     _resolution_context: dict[str, Any] | None = None,
+    _expected_context: Mapping | None = None,
 ) -> tuple[dict[str, Any], Path | str | None, dict[str, Path | str]]:
     """:func:`resolve_extends`'s actual implementation, additionally
     returning the directory a still-unresolved inherited ``spec.cwd``
@@ -877,9 +841,9 @@ def _resolve_extends_tracking_cwd_origin(
             f"extends: reference chain exceeds the maximum depth of "
             f"{_MAX_CHAIN_DEPTH} (chain: {chain_display})"
         )
-    template = (
-        _read_recipe_document(resolved_path, ref=ref)
-        if resolved_path is not None else resolve_recipe_ref(ref, base_dir=base_dir)
+    template = read_resolved_recipe(
+        identity, resolved_path, ref=ref, base_dir=base_dir,
+        expected_context=_expected_context,
     )
     if not isinstance(template, Mapping):
         raise RegistrarError(
@@ -916,6 +880,7 @@ def _resolve_extends_tracking_cwd_origin(
             template, base_dir=next_base_dir, _chain=(*_chain, identity), _snapshot=snapshot,
             _base_resource=next_base_resource,
             _activation=_activation, _resolution_context=_resolution_context,
+            _expected_context=_expected_context,
         )
     else:
         # Unlike spec.cwd normalization, provenance also applies to high-level

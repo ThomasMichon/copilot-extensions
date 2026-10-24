@@ -272,6 +272,7 @@ def _entry(
         )
         definitions[row_id] = {
             "row": row, "path": document_path, "reference": reference, "document": document,
+            "recipe_context": recipe_context,
         }
     return row
 
