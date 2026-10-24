@@ -149,6 +149,13 @@ leave the cache unavailable rather than inventing an installation identity.
    does not masquerade as an explicit user refresh to bypass cooldown every
    cycle. An explicit refresh request has one coalesced attempt/identity.
    No per-tenant/per-venue poller or separate daemon.
+   Single-flight must be the canonical producer/owner's, not merely a lock in
+   each Gate instance. Foreground callers must not start an owner to obtain it.
+   If cross-process foreground reconciliation is enabled, admit explicit
+   source/account operation exclusion using the existing nonblocking primitive,
+   separately from the short metadata-CAS lock; do not hold metadata custody
+   over provider I/O or invent a persistent global request queue. Missing
+   exclusion/cooldown evidence defers automatic work, not an uncoalesced retry.
 4. **Qualified result:** preserve per-account positive/error/partial/page-limit
    outcomes, immutable projections and all inactive/history rows. Storage CAS
    busy/conflict is not a reason to repeat provider work silently. Surface
