@@ -28,23 +28,25 @@ not a new periodic poller, and a status label is never connection/lease authorit
 
 ## First required pure-model refinements
 
-These are proposed hunks, not code changes:
+The following pure-model correction is admitted separately from all consumer
+activation. Captured unit validation is recorded in the source episode:
 
 1. `inventory_store.py: Policy/classify_status`: distinguish the universal
    **60-second badge age** from **300-second inactive refresh eligibility**.
-   Currently the prototype uses `inactive_age_s` as the stopped-row badge age;
-   using `Policy(60, 300, 30)` unchanged would show a 100-second stopped row as
-   fresh. Return stale-labelled cached data without forcing an inactive provider
-   refresh until the selected due/demand condition.
+   `StatusFreshness.reconcile` is only a due/uncertainty hint, not permission
+   for remote work. A stopped row is stale after 60 seconds but is not age-due
+   until 300 seconds; owner/demand admission remains caller-owned.
 2. Give the known-disconnect label precedence for its 30-second display period,
    even when the underlying provider fact is old; display the old fact's age
-   separately. Current prototype age expiry precedes that label. Control
-   invalidation is immediate regardless of this display grace.
+   separately. The private classifier additionally requires explicit
+   `known_disconnect_epoch`: current-owner event evidence, never reconstructed
+   from JSON. A matching persisted event timestamp alone cannot recreate grace
+   after restart. Control invalidation is immediate regardless of display grace.
 3. `apply_account_observation`: retain an enumerated Unknown-state venue's
    identity as uncertain status, without replacing older positive state with a
-   fresh success. The prototype's positive-only reducer skips such incoming
-   rows; R1b's all-venue status projection must not silently lose that identity.
-   This is a model extension, not retrospective whole-cache qualification.
+   fresh success. Preserve row/account error provenance and incomplete coverage;
+   an Unknown identity is not positive state or global absence. This is a model
+   extension, not retrospective whole-cache qualification.
 
 Proposed policy construction stays at the owner boundary: explicitly inject the
 selected values into the existing private model/Gate. If a private factory is
@@ -63,6 +65,39 @@ wiring still require explicit admission; the A guard fixture is not a quota.
 | `owner_inventory.py: qualified collection/reconcile adapter` | One existing source-owned metadata/reconcile producer. Call canonical `read_candidates` only for an admitted reconcile/authority boundary, not a cache read. Project actual reports into account-qualified non-secret store records; never serialize `InventoryScope` credentials/config digests. Join/drain bounded thread work with the existing owned helpers. |
 | `owner_cli.py: cmd_owner` construction of `ConnectionOwner/SessionForwards/AvailabilityGate` | Separate, explicit production wiring hunk. Supply the path/source/limits/policy only after existing owner setup, not from the pure store's import or a new daemon. Do not activate merely by constructing/reading a cache. |
 | Exact lifecycle provider seam, separately admitted | Qualified page/completeness and fresh selected credential/environment plumbing described below. No shared credential, provider or discovery algorithm is edited by this proposal. |
+
+### No-provider construction and owned local I/O (proposal only)
+
+An explicit inventory factory must **not** call/fall through the legacy
+`AvailabilityGate.__init__`, whose omitted listing argument imports/resolves
+`lifecycle.list_codespaces`. Proposed exact constructor hunk: extract only
+I/O-free state initialization into a private initializer; the legacy constructor
+retains provider resolution, while the inventory factory allocates its instance
+and calls only the I/O-free initializer with all bindings explicit. No fallback
+listing callable or provider import is installed in cache mode. Test that
+constructing/reading it cannot enter the legacy provider path.
+
+The existing owned helpers are `owner_inventory.joined_thread` and
+`drain_tasks`; `SessionForwards._probe_tasks` and `shutdown()` already register,
+cancel and drain owned work before forward teardown. Proposed local-read seam:
+one Gate-owned, registered load task at most for an immutable source/path
+binding and existing owner observation cohort. Concurrent callers join it with
+shielding and reuse the immutable result within that cohort. Only its body calls
+`joined_thread(read_inventory, ...)`; never schedule one new `to_thread` for
+each Gate read/cancel. A cancelled waiter does not cancel the shared load.
+Owner shutdown/rebinding stops admission, cancels the registered task once,
+and drains it (including its synchronous reader) before discarding its custody.
+Recheck binding/owner generation after awaiting; discard a superseded result.
+Reuse the existing task-registration/shutdown seam explicitly, rather than a
+new executor, service or timer. Byte-bounded synchronous reads do not prove a
+wall-clock filesystem latency bound; no such performance qualification is claimed.
+
+Provider reconciliation is a different task: the canonical source/account
+producer owns its callback, single-flight and cooldown across Gate consumers.
+Gate readers can submit a qualified demand, never create a per-Gate poller or
+start an owner. A metadata read task is not the provider-reconcile exclusion,
+and metadata CAS custody must never span provider I/O. Cross-process producer
+exclusion remains the separately admitted dependency below.
 
 ### Why the two named consumer methods alone cannot safely activate it
 

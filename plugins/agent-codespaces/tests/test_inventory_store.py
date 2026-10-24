@@ -213,7 +213,7 @@ def test_missing_valid_empty_and_source_proven_empty_are_distinct(filesystem, li
     # The model exposes no global absence/control verdict, even for this account.
     status = store.classify_status(
         proven.accounts[0], "missing", now_epoch=101,
-        live_transport_epoch=None, policy=store.Policy(60, 300, 30),
+        live_transport_epoch=None, known_disconnect_epoch=None, policy=store.Policy(60, 300, 30),
     )
     assert status.label == "unknown" and status.reasons == ("not_observed",)
 
@@ -578,7 +578,8 @@ def test_unknown_rows_cannot_become_successful_empty_or_replace_positive(limits)
     incoming = observation(rows=(row(state="Unknown"),), complete=True)
     empty = snapshot(accounts=())
     result = store.apply_account_observation(empty, incoming, limits=limits)
-    assert result.accounts[0].rows == () and result.accounts[0].complete is False
+    assert result.accounts[0].rows == incoming.rows
+    assert result.accounts[0].complete is False and result.accounts[0].error_code == "partial"
     old = snapshot()
     result = store.apply_account_observation(old, incoming, limits=limits)
     assert result.accounts[0].rows == old.accounts[0].rows
@@ -595,14 +596,19 @@ def test_reducer_checks_generation_order_bounds_and_cross_account_identity(limit
         store.apply_account_observation(old, observation(rows=(row("new"),)), limits=store.Limits(10000, 1, 4096))
 
 
-@pytest.mark.parametrize("age,expected", [(0, "fresh"), (300, "fresh"), (301, "stale")])
-def test_inactive_policy_is_explicit_and_does_not_evict(age, expected):
+@pytest.mark.parametrize("age,expected,due", [
+    (0, "fresh", False), (59, "fresh", False), (60, "fresh", False),
+    (61, "stale", False), (299, "stale", False), (300, "stale", True),
+    (301, "stale", True),
+])
+def test_inactive_badge_and_due_hint_are_separate_and_do_not_evict(age, expected, due):
     source = observation()
     result = store.classify_status(
-        source, "venue", now_epoch=100 + age, live_transport_epoch=None,
+        source, "venue", now_epoch=100 + age, live_transport_epoch=None, known_disconnect_epoch=None,
         policy=store.Policy(60, 300, 30),
     )
     assert result.label == expected and source.rows[0].state == "Stopped"
+    assert result.age == age and result.reconcile is due
     assert {field.name for field in fields(result)} == {"label", "age", "reasons", "reconcile"}
 
 
@@ -611,15 +617,139 @@ def test_status_only_restart_disconnect_grace_clock_and_source_unknown():
         state="Available", producer_epoch="stream-1", disconnected_at=110,
     ),), observed_at=110)
     policy = store.Policy(60, 300, 30)
-    classify = lambda value, now, epoch: store.classify_status(
-        value, "venue", now_epoch=now, live_transport_epoch=epoch, policy=policy,
+    classify = lambda value, now, epoch, lost=None: store.classify_status(
+        value, "venue", now_epoch=now, live_transport_epoch=epoch,
+        known_disconnect_epoch=lost, policy=policy,
     )
     assert classify(source, 120, "stream-1").label == "fresh"
-    assert classify(source, 120, None).label == "last_known"
-    assert classify(source, 141, None).label == "unknown"
+    assert classify(source, 120, None, "stream-1").label == "last_known"
+    assert classify(source, 141, None, "stream-1").label == "unknown"
     restarted = replace(source, rows=(replace(source.rows[0], disconnected_at=None),))
     assert classify(restarted, 120, None).label == "unknown"
     assert classify(source, 109, "stream-1").reasons == ("clock_uncertain",)
     partial = replace(source, complete=False, error_code="limit")
     assert classify(partial, 120, "stream-1").reasons == ("source_unknown",)
     assert classify(source, 161, "stream-1").label == "stale"
+
+
+@pytest.mark.parametrize("age", [59, 61, 299, 300])
+def test_active_badge_expiry_returns_only_a_due_hint(age):
+    source = observation(rows=(row(state="Available"),))
+    result = store.classify_status(
+        source, "venue", now_epoch=100 + age, live_transport_epoch=None,
+        known_disconnect_epoch=None, policy=store.Policy(60, 300, 30),
+    )
+    assert result.label == ("fresh" if age <= 60 else "stale")
+    assert result.reconcile is (age > 60)
+
+
+def test_explicit_inactive_due_budget_is_independent_even_before_badge_expiry():
+    result = store.classify_status(
+        observation(), "venue", now_epoch=130, live_transport_epoch=None,
+        known_disconnect_epoch=None, policy=store.Policy(600, 30, 10),
+    )
+    assert result.label == "fresh" and result.reconcile is True
+
+
+@pytest.mark.parametrize("invalid", [True, 1, "", {}])
+def test_disconnect_evidence_epoch_is_explicit_and_strict(invalid):
+    with pytest.raises(store.InventoryError, match="invalid_string"):
+        store.classify_status(
+            observation(), "venue", now_epoch=100, live_transport_epoch=None,
+            known_disconnect_epoch=invalid, policy=store.Policy(60, 300, 30),
+        )
+
+
+@pytest.mark.parametrize("elapsed,label", [(0, "last_known"), (30, "last_known"), (31, "unknown")])
+@pytest.mark.parametrize("partial", [False, True])
+def test_actual_disconnect_precedes_old_fact_age_without_refreshing_it(elapsed, label, partial):
+    source = observation(
+        rows=(row(state="Available", producer_epoch="stream-1", disconnected_at=1000),),
+        complete=not partial, error_code="partial" if partial else None,
+    )
+    before = document(snapshot(accounts=(source,)))
+    result = store.classify_status(
+        source, "venue", now_epoch=1000 + elapsed, live_transport_epoch=None,
+        known_disconnect_epoch="stream-1", policy=store.Policy(60, 300, 30),
+    )
+    assert result.label == label and result.age == 900 + elapsed and result.reconcile
+    assert ("source_unknown" in result.reasons) is partial
+    assert document(snapshot(accounts=(source,))) == before
+
+
+@pytest.mark.parametrize("now", [1000, 1030, 1031])
+@pytest.mark.parametrize("lost", [None, "another-stream"])
+def test_restart_or_unproven_epoch_cannot_recreate_grace_from_disk(now, lost):
+    source = observation(rows=(row(
+        state="Available", producer_epoch="stream-1", disconnected_at=1000,
+    ),))
+    result = store.classify_status(
+        source, "venue", now_epoch=now, live_transport_epoch=None,
+        known_disconnect_epoch=lost, policy=store.Policy(60, 300, 30),
+    )
+    assert result.label == "unknown" and result.reasons == ("transport_unverified",)
+    assert source.rows[0].disconnected_at == 1000
+
+
+@pytest.mark.parametrize("field", ["observed_at", "last_seen", "disconnected_at", "account_observed_at"])
+def test_future_timestamp_cannot_create_disconnect_grace(field):
+    values = dict(state="Available", producer_epoch="stream-1", disconnected_at=1000)
+    account = {}
+    if field == "account_observed_at":
+        account["observed_at"] = 1001
+    else:
+        values[field] = 1001
+    result = store.classify_status(
+        observation(rows=(row(**values),), **account), "venue", now_epoch=1000,
+        live_transport_epoch=None, known_disconnect_epoch="stream-1",
+        policy=store.Policy(60, 300, 30),
+    )
+    assert result.label == "unknown" and result.age is None
+    assert result.reasons == ("clock_uncertain",)
+
+
+@pytest.mark.parametrize("producer,live", [(None, None), ("stream-1", "stream-1")])
+def test_cold_missing_or_live_but_silent_channel_does_not_invent_disconnect(producer, live):
+    source = observation(rows=(row(state="Available", producer_epoch=producer),))
+    result = store.classify_status(
+        source, "venue", now_epoch=1000, live_transport_epoch=live,
+        known_disconnect_epoch=None, policy=store.Policy(60, 300, 30),
+    )
+    assert result.label == "stale" and result.age == 900
+    assert source.rows[0].disconnected_at is None
+
+
+@pytest.mark.parametrize("error", [None, "unavailable"])
+@pytest.mark.parametrize("row_error", [None, "unavailable"])
+def test_first_unknown_identity_is_immutable_uncertain_evidence(limits, error, row_error):
+    incoming = observation(
+        rows=(row("new", "Unknown", error_code=row_error),),
+        error_code=error, complete=error is None,
+    )
+    result = store.apply_account_observation(snapshot(accounts=()), incoming, limits=limits)
+    account = result.accounts[0]
+    assert account.rows == incoming.rows and account.complete is False
+    assert account.error_code == (error or "partial")
+    status = store.classify_status(
+        account, "new", now_epoch=101, live_transport_epoch=None,
+        known_disconnect_epoch=None, policy=store.Policy(60, 300, 30),
+    )
+    assert status.label == "unknown" and status.reasons == ("source_unknown",)
+    with pytest.raises(FrozenInstanceError):
+        account.rows[0].state = "Available"
+    with pytest.raises(FrozenInstanceError):
+        incoming.rows[0].observed_at = 101
+    assert result.accounts[0] == account
+
+
+def test_unknown_does_not_retimestamp_older_positive_fact_or_add_error_only_identity(limits):
+    old = snapshot()
+    incoming = observation(
+        rows=(row(state="Unknown", observed_at=200, last_seen=200),
+              row("unproved", "Available", observed_at=200, error_code="unavailable")),
+        observed_at=200,
+    )
+    result = store.apply_account_observation(old, incoming, limits=limits)
+    assert result.accounts[0].rows == old.accounts[0].rows
+    assert result.accounts[0].observed_at == 200
+    assert result.accounts[0].complete is False and result.accounts[0].error_code == "partial"

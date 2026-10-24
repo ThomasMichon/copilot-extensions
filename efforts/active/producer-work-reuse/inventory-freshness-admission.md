@@ -253,3 +253,24 @@ R1a explicitly excludes changes to existing candidate/config/credential,
 lifecycle/resolver/picker, owner/probe/forward modules, shared libraries, Bridge,
 SSH protocols, hooks/CLI/installation, settings or runtime activation. Admit
 those later by exact hunk/contract, after choosing policy and F versus S.
+
+## Admitted pure policy-model correction
+
+Only the private store/model, its tests and direct documentation/changefile are
+admitted here. The explicit policy remains required: universal 60-second status
+badge, separate 300-second inactive age-due hint, and 30-second actual-disconnect
+label. `StatusFreshness.reconcile` never grants remote work or control.
+
+The private `classify_status` API now requires `known_disconnect_epoch` alongside
+`live_transport_epoch`. Only current-owner evidence supplies the former; JSON,
+cold missing channels, silence and restart cannot synthesize it. A matching
+actual loss precedes old fact age, while future timestamps stay unknown.
+History/age and incomplete/error reasons remain visible, and expiry does not
+reset the event. Enumerated Unknown identities are retained uncertain, including
+their error metadata, without replacing older positive facts.
+
+No codec/schema, path, lock, CAS, atomic-write or custody algorithm changes.
+Accepted prior A/N1 artifacts remain retained unchanged; this correction's
+captured pure-unit run is separate, not another native qualification. Gate
+construction/local-read ownership is proposal-only; no consumer or policy
+factory is activated. Option F and the additive-only #5761 grant are unchanged.

@@ -1,5 +1,5 @@
 {
-  "comment": "Share qualified owner-wave account inventory, expose invocation-local candidate read provenance, add an unwired bounded inventory JSON model, batch mux probes and fence session renewal by generation",
+  "comment": "Share qualified owner-wave account inventory, expose invocation-local candidate read provenance, add an unwired bounded inventory JSON model with separate status/due hints and explicit disconnect evidence, batch mux probes and fence session renewal by generation",
   "changes": [
     {
       "plugin": "agent-codespaces",

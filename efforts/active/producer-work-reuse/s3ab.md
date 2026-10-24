@@ -414,3 +414,27 @@ development/integration lane, not an addition to required unit-only CI.
 | Installed/native venue | Unavailable by scope; no updater or live CodeSpace probe |
 | CPU/whole-wave metadata/latency tails | CPU/tails unmeasured; repeated authority CLI fanout is a known blocking source defect retained by #7949 |
 | S3c transport reuse | Excluded and retained by #7949 |
+
+### Pure policy-model correction checkpoint
+
+- Admitted only `inventory_store.py`, its existing test file, and direct
+  docs/changefile. This implements the already-selected status policy, below
+  the reviewed inventory architecture; it does not activate R1b.
+- Separate universal badge freshness from the inactive age-due hint. Passive
+  classification performs no I/O or remote effect; demand/owner gating stays
+  caller-owned. Explicit limits and policy remain mandatory.
+- Require current-owner `known_disconnect_epoch` explicitly. A matching actual
+  loss receives the selected display grace before old fact age, without
+  refreshing history, suppressing incomplete/error provenance or granting
+  control. Future clocks and persisted timestamps alone cannot create grace.
+- Retain first enumerated Unknown identities and error metadata uncertain;
+  preserve older positive facts unchanged. No fabricated fresh success or
+  global absence.
+- Storage/codec/CAS/custody bodies are unchanged. Prior captured A/N1 originals
+  and the accepted archive remain retained unchanged. Fresh pure-unit capture
+  and fast guards are pending below; no N1/N2 rerun or performance claim.
+- Tightened the proposal: cache construction must bypass legacy provider
+  resolution; local reads have one owned single-flight task per binding/cohort,
+  registered and drained through existing owner helpers. Canonical source/account
+  producer owns reconcile/coalescing, never a per-Gate poller. All such consumer
+  hunks remain unimplemented/unadmitted; Option F/#5761 boundaries unchanged.

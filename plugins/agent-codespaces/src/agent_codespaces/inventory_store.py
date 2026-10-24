@@ -467,11 +467,18 @@ def apply_account_observation(
     positive = set()
     unusable = False
     for row in observation.rows:
-        if row.error_code is not None or row.state.casefold() == "unknown":
+        previous = rows.get(row.name)
+        if row.state.casefold() == "unknown":
+            unusable = True
+            if previous is None or (
+                previous.state.casefold() == "unknown" and row.observed_at >= previous.observed_at
+            ):
+                rows[row.name] = row
+            continue
+        if row.error_code is not None:
             unusable = True
             continue
         positive.add(row.name)
-        previous = rows.get(row.name)
         if previous is None or row.observed_at >= previous.observed_at:
             rows[row.name] = row
     unseen = set(rows) - positive
@@ -492,13 +499,18 @@ def apply_account_observation(
 
 def classify_status(
     observation: AccountObservation, name: str, *, now_epoch: float,
-    live_transport_epoch: str | None, policy: Policy,
+    live_transport_epoch: str | None, known_disconnect_epoch: str | None, policy: Policy,
 ) -> StatusFreshness:
-    """Classify one account-qualified venue for display, never for an effect."""
+    """Return display age and a due hint, never effect or remote-work permission.
+
+    The owner supplies current-lifetime disconnect evidence explicitly; persisted
+    event timestamps alone cannot establish or restart a disconnect grace.
+    """
     if type(observation) is not AccountObservation or type(policy) is not Policy:
         raise InventoryError("invalid_argument")
     _text(name)
     _text(live_transport_epoch, optional=True)
+    _text(known_disconnect_epoch, optional=True)
     now = _time(now_epoch)
     row = next((item for item in observation.rows if item.name == name), None)
     if row is None:
@@ -508,13 +520,22 @@ def classify_status(
     if any(value > now for value in times):
         return StatusFreshness("unknown", None, ("clock_uncertain",), True)
     age = max(now - observation.observed_at, now - row.observed_at)
-    if not observation.complete or observation.error_code or row.error_code or row.state.casefold() == "unknown":
+    uncertain = not observation.complete or observation.error_code or row.error_code or row.state.casefold() == "unknown"
+    if (
+        known_disconnect_epoch is not None
+        and row.producer_epoch == known_disconnect_epoch
+        and live_transport_epoch != row.producer_epoch
+        and row.disconnected_at is not None
+    ):
+        reasons = ("disconnected",) + (("source_unknown",) if uncertain else ())
+        if now - row.disconnected_at <= policy.disconnected_grace_s:
+            return StatusFreshness("last_known", age, reasons, True)
+        return StatusFreshness("unknown", age, ("disconnect_grace_expired",) + reasons, True)
+    if uncertain:
         return StatusFreshness("unknown", age, ("source_unknown",), True)
-    maximum = policy.status_age_s if row.state.casefold() == "available" else policy.inactive_age_s
-    if age > maximum:
-        return StatusFreshness("stale", age, ("age_expired",), True)
     if row.producer_epoch is not None and live_transport_epoch != row.producer_epoch:
-        if row.disconnected_at is not None and now - row.disconnected_at <= policy.disconnected_grace_s:
-            return StatusFreshness("last_known", age, ("disconnected",), True)
         return StatusFreshness("unknown", age, ("transport_unverified",), True)
-    return StatusFreshness("fresh", age, ("status_age_only",), False)
+    due = age > policy.status_age_s if row.state.casefold() == "available" else age >= policy.inactive_age_s
+    if age > policy.status_age_s:
+        return StatusFreshness("stale", age, ("age_expired",), due)
+    return StatusFreshness("fresh", age, ("status_age_only",), due)
