@@ -65,8 +65,8 @@ copier changes instead belong to B6909, not an already-merged claim.
 
 ### Subsequent actual-merge settlement
 
-At Dev `0ccade9ed65dcd4ff3797df3bfbb5ec5c0281e75`, the following ten
-independent contracts have actually merged. Their **62 exact census keys**
+At Dev `696c9e00cdbcd0cd9356b4f1f7ca27401045b078`, the following eleven
+independent contracts have actually merged. Their **64 exact census keys**
 now carry the corresponding merged code below, not their former retained
 batch label. The linked merged PRs retain their scoped implementation, review,
 checks and validation context. This is a semantic contract disposition, not
@@ -84,6 +84,7 @@ an assertion that historical patches were replayed byte-for-byte.
 | M8444 | W4-BRIDGE-STDIO | 1 | #8444, `0f5b38374525c7dfbc11b47212a7a9905a9b6ec8` |
 | M8470 | W4-BIND | 12 | #8470, `abe1c6a7b0ae52807a9d41db5a4efa3a37d0797d` |
 | M8487 | W4-DEPENDENCY-METADATA | 28 | #8487, `0ccade9ed65dcd4ff3797df3bfbb5ec5c0281e75` |
+| M8513 | W4-CODESPACES-PORTABLE (profile only) | 2 | #8513, `696c9e00cdbcd0cd9356b4f1f7ca27401045b078` |
 
 The batch descriptions below preserve their original scope, not permission to
 republish settled work. In particular, the pane tests moved into the existing
@@ -93,7 +94,7 @@ assertion is accompanied by actual isolated native pipe/exit controls.
 Vault's compiler and NoService contracts remain separate, with their failed
 diagnostics retained rather than converted to timing qualification.
 No other retained, blocked or retirement-proposed key changes disposition.
-The 22 carried-forward retained keys are custody labels, not newly verified
+The 20 carried-forward retained keys are custody labels, not newly verified
 findings that every associated behavior is absent from current Dev.
 The parent remains #5682; the operator-closed #5694 is preserved history,
 not an open publication objective.
@@ -149,6 +150,24 @@ real installed-setuptools consumer obligations and separate layout/immutability/
 support dependencies remain with that ledger. No #6909 copier or private
 overlay is adopted, and no complete-plugin performance qualification,
 retirement approval, rollout or parent completion is implied.
+
+### Subsequent admission: W4-CODESPACES-PORTABLE profile
+
+M8513 settles only `77b67744e9a7` and `a03cdbb259e0` under
+`plugins/agent-codespaces/tests/test_launch_policy.py`: the Path import and
+the fixture's explicit Path.home isolation. The regression covers ordinary
+environment isolation and an inherited home-method override, then uses the
+real registration path and checks the persisted command and timeout. Production
+private-directory checks are unchanged; the existing Windows foreign-profile
+refusal and process-containment controls remain.
+
+The full launch-policy module passed 52 tests with five existing platform
+skips on the exact published head, in 15.49 seconds including preparation
+and cleanup, with exactly two workers and unchanged item/containment limits.
+The inherited-override regression failed before the fixture correction.
+This does not settle the mixed audit hunk B-CODESPACES-SPLIT or its
+R-BASH-SKIP proposal, and does not imply complete-plugin timing qualification
+or parent completion.
 
 ### Blocked existing owner
 
@@ -552,8 +571,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-codespaces/tests/test_launch_policy.py`
 
-- `@@ -6,6 +6,7 @@ import argparse` — `77b67744e9a7` — W4-CODESPACES-PORTABLE
-- `@@ -19,6 +20,7 @@ def _align_isolated_profile(monkeypatch, tmp_path):` — `a03cdbb259e0` — W4-CODESPACES-PORTABLE
+- `@@ -6,6 +6,7 @@ import argparse` — `77b67744e9a7` — M8513
+- `@@ -19,6 +20,7 @@ def _align_isolated_profile(monkeypatch, tmp_path):` — `a03cdbb259e0` — M8513
 
 ### `plugins/agent-codespaces/tests/test_unsaved_guard.py`
 
@@ -794,8 +813,8 @@ handling is separately counted. No unspecified hunk is silently retired.
 
 Mechanical self-check passed against freshly read immutable Git objects:
 **62 distinct paths, 128 distinct exact keys, zero missing/extra/duplicate
-keys, and one disposition on every row**. Updated totals are **79 actual-merged,
-25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 22 retained, and 2
+keys, and one disposition on every row**. Updated totals are **81 actual-merged,
+25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 20 retained, and 2
 proposed-retirement** continuation hunks. The blocked mixed key additionally
 partitions retained portability subspans from the R-BASH-SKIP review proposal;
 these are not additional full-hunk census rows.
