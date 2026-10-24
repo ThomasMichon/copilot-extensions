@@ -79,9 +79,9 @@ retains a handoff in the transaction inserting a new turn, including queued and
 keyed paths. Incomplete historical rows cannot acquire one retrospectively.
 An observational prepare/read, one-shot begin and original outcome report
 preserve distinct native acceptance, consumption and unknown state across
-closure and reopen. Actual native consumer enrollment and transport wiring are
-not implemented by these DB primitives; complete runtime qualification remains
-false.
+closure and reopen. These DB primitives do not enroll transports automatically.
+The linked guide describes explicit internal local process-owned ACP selection
+and final-send wiring; complete runtime qualification remains false.
 
 ## Internal inbox handoff owner
 

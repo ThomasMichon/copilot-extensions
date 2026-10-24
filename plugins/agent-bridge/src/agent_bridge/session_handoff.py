@@ -4,11 +4,36 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Awaitable, Callable
+from functools import wraps
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .models import SessionStatus
 from .session_manager import DaemonDrainingError, Session, _workspace_key, log
+
+if TYPE_CHECKING:
+    from .session_manager import SessionManager
+
+
+def _exclude_native_enrollment(
+    method: Callable[..., Awaitable[Session]],
+) -> Callable[..., Awaitable[Session]]:
+    @wraps(method)
+    async def run(manager: SessionManager, session_id: str, **kwargs: Any) -> Session:
+        resolved = manager._resolve_ref(session_id) or session_id
+        session = manager._sessions.get(resolved)
+        if session is None:
+            raise KeyError(f"Session {resolved} not found")
+        if session._handoff_in_progress:
+            raise ValueError(f"Session {resolved} handoff is already in progress")
+        session._handoff_in_progress = True
+        try:
+            return await method(manager, resolved, **kwargs)
+        finally:
+            session._handoff_in_progress = False
+
+    return run
 
 
 class _SessionHandoffMixin:
@@ -23,6 +48,8 @@ class _SessionHandoffMixin:
         not apply (their retire-before-spawn variant is deferred, mirroring the
         guard in ``handoff_session``)."""
         if not self._auto_handoff.enabled:
+            return False
+        if session._native_turn_transport is not None:
             return False
         if session.target.type == "remote-acp":
             return False
@@ -177,9 +204,14 @@ class _SessionHandoffMixin:
         concurrency guard see a coherent state.
         """
         turn_index = session.turn_count
-        session.turn_count += 1
+        native_owner = session._native_turn_transport
+        native_attempt = native_owner.attempt(turn_index, prompt) if native_owner is not None else None
+        custody = ({
+            "runtime_admission": native_owner.admission, "native_consumer": native_owner.consumer,
+        } if native_owner is not None else {})
         now = time.time()
-        self._db.create_turn(session.session_id, turn_index, prompt, now)
+        self._db.create_turn(session.session_id, turn_index, prompt, now, **custody)
+        session.turn_count += 1
         session.status = SessionStatus.RUNNING
         session.last_output_at = now
         self._db.update_session_status(
@@ -187,7 +219,10 @@ class _SessionHandoffMixin:
         )
         result: dict[str, Any] | None = None
         try:
-            result = await session.client.send_prompt(prompt)
+            result = await (
+                session.client.send_prompt(prompt) if native_attempt is None
+                else native_attempt.owner.client.send_prompt(prompt, native_attempt=native_attempt)
+            )
         except Exception as exc:
             self._db.update_turn(
                 session.session_id,
@@ -214,6 +249,7 @@ class _SessionHandoffMixin:
         )
         return text
 
+    @_exclude_native_enrollment
     async def handoff_session(
         self,
         session_id: str,
@@ -259,6 +295,10 @@ class _SessionHandoffMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        if session._native_turn_transport is not None:
+            from .runtime_custody import RuntimeCustodyError
+
+            raise RuntimeCustodyError("Selected native transport lifecycle handoff is not enrolled")
         from .hosting_policy import require_session_hosting
         from .cold_outages import assert_prompt_allowed
 

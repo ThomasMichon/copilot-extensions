@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; opt-in SDK source merged; remaining custody, native qualification and restoration open
+- **Status:** Active; opt-in SDK and original-turn DB source merged; explicit local native transport source implemented, full custody/qualification/restoration open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -135,8 +135,11 @@ require their own review and qualification.
 - [ ] Fence keyed creation, start/resume, queued/native sends, inbox/control
       handoffs, wake/redrive and host/lifecycle mutations at their effect owners.
       The [original-turn DB foundation](../../../plugins/agent-bridge/docs/native-turn-custody.md)
-      retains internal atomic handoffs and one-shot/outcome state; actual native
-      enrollment and transport effect-boundary wiring remain separate.
+      merged in #8713 and retains internal atomic handoffs and one-shot/outcome state; actual native
+      enrollment and transport effect-boundary wiring remain separate. The
+      bounded internal local process-owned ACP selection now gates original
+      turn insertion and the actual final send; full lifecycle/cohort and
+      installed qualification remain open.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -251,6 +254,72 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Explicit local native transport source controls
+- Followed the actual SessionManager-to-AcpClient path through the prompt lock
+  and scheduled SDK request, rather than treating the earlier DB primitive as
+  live transport custody. Internal explicit selection retains the actual
+  Session/client/Process/connection and target/cwd plus fresh incarnation and
+  child/frontend birth observations. Construction and inbox negotiation do not
+  select every client; ordinary defaults remain unchanged.
+- New direct, queued-to-turn and keyed admission retain the original consumer
+  atomically. Background prompt and synchronous turn authoring carry that
+  attempt to the final SDK call. Rechecks after lock/task scheduling and after
+  the full-durability begin refuse replacement, closure or changed context.
+  No lock is held awaiting a reply. Actual reply acceptance, attributed
+  consumption and semantic completion remain different facts.
+- Failures/cancellation and lost begin replies retain uncertainty under the
+  original turn; no resend or retrospective enrollment is granted. Selected
+  clients refuse unretained direct sends, implicit resume and unenrolled
+  lifecycle handoff. Host, remote, command/provider and private idle-continuation
+  cohorts remain explicitly unsupported by this selection.
+- The bounded coupled source lane passes 645 controls. Two cases use the actual
+  ACP SDK and stdio to separate synthetic children: each independently reads
+  the original committed SQLite handoff before observing the exact prompt;
+  one exits without replying. The fixture advertises and verifies synthetic
+  preferences instead of bypassing model-selection readback. No model
+  conversation, installed consumer or native platform qualification is claimed.
+- The wider regression lane exposed three stale handoff setups under the
+  existing hosting-policy owner. Correct only those tests: put the stop inside
+  the author callback, supply a real isolated directory, and explicitly isolate
+  the single-checkout guard from its separately tested hosting precondition.
+  Production hosting policy and successor/stop checks remain unchanged.
+- Source review and merge remain owed. Next cover creation/start/resume,
+  background and host/remote custody through their existing owners before
+  target compatibility and installer convergence. Phase 1/1b, native
+  qualification, restoration and running adoption stay open.
+- The ACP source reached its shrink-only ceiling during integration. Extract
+  prompt execution at its cohesive mixin boundary rather than raising the
+  ceiling. The ordinary, remote and private-idle paths retain their semantics.
+  The remote regression's old fixed acquisition count is updated to the
+  actual contract: at least one outstanding admission blocks drain, and all
+  nested admissions must release back to zero.
+- Independent source review found concurrent enrollment could cross the
+  entry-only lifecycle handoff check while hosting policy or successor launch
+  awaited. Exclude enrollment for the full existing handoff scope, releasing
+  it on failure/cancellation, and add both-boundary race controls. The
+  synthetic lost-reply test catches `asyncio.TimeoutError` for the declared
+  Python 3.10 minimum; the development-container run is not native 3.10
+  qualification.
+
+### 2026-10-24 - Original-turn DB foundation merged; native owner wiring next
+- #8713 merged as `24f4d66d63a679f7bd8f6ee1e34e4fc66a40d863` at
+  15:23:55 PDT after current-head approval `5640292804` on
+  `c54f9ce01795525be32089a58dabfac04a28b5aa`, no open findings and
+  passing required checks. Every captured execution source remained
+  byte-identical after managed publication.
+- Reread the complete Plan and Validation Plan. This lands the internal
+  original-turn DB owner, not actual transport enrollment, Phase 1, full
+  custody, native/platform qualification, restoration or running adoption.
+  Terminal observation settled the PR obligation. Guarded reconciliation
+  verified one published surviving commit and zero post-merge commits,
+  retained the reviewed tip and advanced only the owned source venue.
+- Next follow the existing native client owner through prompt and synchronous
+  handoff-authoring send boundaries. Bind real owner observations before
+  original turn insertion and fence the actual effect without auto-enrolling
+  other cohorts or changing ordinary defaults. The receiving extension SDK
+  remains its separate opt-in path; this is not a replacement receiver.
+  No live START, protected-owner operation or deployment is authorized.
 
 ### 2026-10-24 - Original-turn native handoff DB foundation
 - Schema 34 adds immutable handoff and separate started/accepted/consumed/unknown

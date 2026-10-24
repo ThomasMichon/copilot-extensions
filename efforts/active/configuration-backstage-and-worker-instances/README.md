@@ -204,6 +204,8 @@ not replace installed acceptance or authorize deployment.
 
 ### Direct retained repository-contribution authority from #7179
 
+<!-- backlog-reconciliation:7556:transfer:7179:to:efforts/active/configuration-backstage-and-worker-instances/README.md -->
+
 Copilot-assisted proposal; every row remains planned. The inspected repository
 catalog accepts an empty contribution list when effective plugin activation is
 indeterminate. Generic sanitization cannot repair a helper's successful empty

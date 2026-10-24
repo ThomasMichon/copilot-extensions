@@ -406,8 +406,14 @@ or a reason to create a daemon.
   and a real flow-only update leaving every golden byte unchanged. The strict
   checker passes all 814 fixtures without recapture.
 - Source lint, installation contract and documentation consistency pass.
-  Review, required CI, containing release, authorized rollout and actual
-  installed headed #8715 acceptance are still required.
+- #8730 merged as `1a357949dfe37b22528e8b248caf3c787712195c` after Copilot
+  approved exact head `1a1fe830526277a1a3c7e8707093770c24f6111c` with no inline
+  findings and required CI passed. Managed completion verified and reconciled
+  the merged squash without finalizing this active effort.
+- The containing release, authorized rollout and actual installed headed #8715
+  acceptance remain required. The preserved task and allocation retain their
+  existing recovery fences; source success does not fabricate an earlier
+  acquisition receipt or authorize a replacement native conversation.
 - Container access remains independently blocked by the vendor CLI loader
   defect. Headed local, SSH, privileged, container and issue reconciliation
   gates remain active; neither this proof nor the earlier Codespace acceptance

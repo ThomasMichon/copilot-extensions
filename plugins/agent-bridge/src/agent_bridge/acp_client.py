@@ -20,7 +20,7 @@ import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from acp import PROTOCOL_VERSION, text_block
+from acp import PROTOCOL_VERSION
 from acp.client.connection import ClientSideConnection
 from acp.schema import (
     AcceptElicitationResponse,
@@ -67,10 +67,12 @@ from .acp_preferences import (
 )
 from .acp_continuation import IdleAcpTransport, idle_operation
 from .acp_host_streams import AcpHostStreamsMixin
+from .acp_prompts import AcpPromptMixin
 from .privileged_plugins import lifecycle_rpc
 
 if TYPE_CHECKING:
     from .events import EventLog
+    from .native_turn_transport import NativeTurnTransport
 
 log = logging.getLogger("agent-bridge")
 
@@ -265,7 +267,7 @@ def resolve_acp_model_config() -> dict[str, str]:
 
 
 
-class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin):
+class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, AcpPromptMixin):
     """Wraps a single Copilot CLI subprocess running in ACP mode.
 
     Handles the ACP protocol (initialize, session/new, session/prompt)
@@ -321,6 +323,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin):
         self._process: asyncio.subprocess.Process | None = None
         self._connection: ClientSideConnection | None = None
         self._acp_session_id: str | None = None
+        self._native_turn_transport: NativeTurnTransport | None = None
 
         # Auto-approve all permission requests (agent-bridge default).
         # Ignored when on_permission is set.
@@ -655,74 +658,6 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin):
 
 
 
-
-    @idle_operation
-    async def send_prompt(self, text: str) -> dict[str, Any]:
-        """Send a prompt and block until the turn completes.
-
-        Returns a dict with the full turn result (response_text,
-        thought_text, tool_calls, stop_reason, error).
-        """
-        if not self._connection or not self._acp_session_id:
-            raise RuntimeError("No active ACP session")
-        if self._idle_transport is not None and not self.is_running:
-            raise RuntimeError("Private idle ACP continuation is not activated")
-
-        async with self._prompt_lock:
-            self._reset_buffers()
-            self._cancel_out_of_turn()
-            self._prompt_in_flight = True
-
-            try:
-                result = await self._prompt_or_transport_lost(text)
-                self._stop_reason = result.stop_reason
-                self._prompt_complete = True
-                self._emit("turn_complete", {
-                    "stop_reason": result.stop_reason,
-                })
-            except Exception as exc:
-                self._prompt_error = str(exc)
-                self._prompt_complete = True
-                self._emit("error", {"message": str(exc)})
-                raise
-            finally:
-                self._prompt_in_flight = False
-
-            return self._build_turn_result()
-
-    async def _prompt_or_transport_lost(self, text: str) -> Any:
-        """Await the ACP prompt, but fail fast if the transport drops mid-turn.
-
-        A dead reader (child exit, relayed-stream/loopback drop) would otherwise
-        leave ``connection.prompt()`` awaiting a reply that never comes, wedging
-        the turn in ``running`` forever with no terminal event. Racing the prompt
-        against the transport-lost signal converts that silent hang into a
-        ``ConnectionResetError`` the turn can terminate on (issue #22). Outside
-        host mode the event never fires, so behavior is unchanged.
-        """
-        prompt_fut = asyncio.ensure_future(
-            self._prompt_rpc(
-                session_id=self._acp_session_id,
-                prompt=[text_block(text)],
-            )
-        )
-        lost_fut = asyncio.ensure_future(self._transport_lost_event.wait())
-        try:
-            await asyncio.wait(
-                {prompt_fut, lost_fut}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if prompt_fut.done():
-                return prompt_fut.result()
-            raise ConnectionResetError(
-                f"{self._connection_loss_error or 'ACP transport lost'} "
-                "while a prompt was in flight"
-            )
-        finally:
-            for fut in (prompt_fut, lost_fut):
-                if not fut.done():
-                    fut.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, Exception):
-                        await fut
 
     @idle_operation
     async def cancel_prompt(self) -> None:
