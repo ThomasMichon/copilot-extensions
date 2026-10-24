@@ -217,3 +217,31 @@ fallback, resolver, download, signature verifier, profile directory, installer
 adapter, activation or runtime payload fan-out. The record API does not itself
 prove device detection, feed compatibility, approval origin or source
 provenance. Those remain prerequisite owner integrations, not success claims.
+
+## Optional release-index adapter
+
+`tools/promotion_python_artifacts.export_artifacts(..., runtime_profiles=[...])`
+can retain validated exact records in schema-2 `python-artifacts.json` before
+the existing release producer signs it. The default omits this metadata and
+preserves existing consumers. Supplying records does not approve them: a local
+candidate export has no authenticated Main admission. An existing immutable
+source release cannot be reused with a different requested profile set.
+Metadata must fit the release index's existing 1 MiB transfer limit.
+
+`tools/runtime_profile_release.select_release_profile` accepts independently
+selected repository, original Main admission signer, source/composition and
+approval-source identities from the installation authority. It authenticates
+a private retained copy through the existing hosted Main workflow attestation
+verifier, binds the exact index/admission identities, and derives the pure
+selector's whole-record approvals internally. The original input path cannot
+substitute bytes after retention. Missing metadata, wrong authority/source,
+malformed records, an incompatible target and unresolved ambiguity refuse.
+Later republication does not replace the source index's original admission.
+
+This is a source-tool API, not an activated publication input, adopter baseline,
+installer entry point or new signing system. No release profile is supplied by
+default. The adapter proves only approval of the signed metadata: artifact and
+wheel bytes, source authenticity supplied by the caller, feed compatibility,
+seasoning, revocation, acquisition and installation authorization retain their
+existing owners. The unchecked adapter/consumer acceptance above remains open
+until the adopting-policy seam and actual consumer are integrated and proved.

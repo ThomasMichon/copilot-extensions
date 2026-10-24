@@ -203,9 +203,13 @@ def export_artifacts(
     *, repo: Path, commit: str, content_tree: str, dev_head: str, main_before: str,
     out_dir: Path, source_policy: str = "governed", min_age_days: int | None = None,
     reuse_repository: str | None = None,
+    runtime_profiles: list[dict] | None = None,
 ) -> dict:
     """Build in a disposable candidate checkout; never mutate the promoted tree."""
     import promote_release as promotion
+    from runtime_profile_release import promotion_profiles
+
+    profiles = None if runtime_profiles is None else promotion_profiles(runtime_profiles)
 
     if out_dir.exists():
         raise PromotionArtifactError(f"{out_dir}: export destination already exists")
@@ -232,6 +236,8 @@ def export_artifacts(
                 source_policy=source_policy, min_age_days=min_age_days,
             )
             if reused is not None:
+                if profiles is not None and reused.get("runtime_profiles", []) != profiles:
+                    raise PromotionArtifactError("frozen source runtime profiles differ from this candidate")
                 staging.rename(out_dir)
                 return reused
         argv = [
@@ -252,6 +258,8 @@ def export_artifacts(
             "dev_head": dev_head,
             "content_tree": content_tree, "artifacts": entries,
         }
+        if profiles is not None:
+            index["runtime_profiles"] = profiles
         if reuse_repository is not None:
             signer, source, ref = (
                 os.environ.get("GITHUB_WORKFLOW_SHA"), os.environ.get("GITHUB_SHA"),
@@ -266,9 +274,10 @@ def export_artifacts(
             index["admission"] = {
                 "signer_digest": signer, "source_digest": source, "source_ref": ref,
             }
-        (staging / INDEX_NAME).write_text(
-            json.dumps(index, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        serialized = json.dumps(index, indent=2, sort_keys=True) + "\n"
+        if profiles is not None and len(serialized.encode("utf-8")) > _MANIFEST_LIMIT:
+            raise PromotionArtifactError("runtime profile index exceeds its existing size limit")
+        (staging / INDEX_NAME).write_text(serialized, encoding="utf-8")
         validate_artifacts(
             staging, content_tree=content_tree, dev_head=dev_head, main_before=main_before,
             projects=projects,
@@ -881,6 +890,10 @@ def validate_artifacts(
             or type(index.get("schema_version")) is not int or index["schema_version"] not in (1, 2)
         ):
             raise PromotionArtifactError("unsupported promotion artifact index")
+        if "runtime_profiles" in index:
+            from runtime_profile_release import promotion_profiles
+
+            promotion_profiles(index["runtime_profiles"], schema_version=index["schema_version"])
         bindings = [("dev_head", dev_head), ("content_tree", content_tree)]
         if index["schema_version"] == 1:
             bindings.append(("main_before", main_before))
