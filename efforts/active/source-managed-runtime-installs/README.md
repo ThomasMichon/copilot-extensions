@@ -396,7 +396,7 @@ transaction execution from the existing recurring-maintenance assignment.
   never host registration or a CodeSpace connection. Selected snapshots,
   primary/payload commands, explicit installers, cells/custom roots, live
   service deployment and #6909 remain separate.
-- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify Logger's
+- [x] **Agent-recommended bounded next-adopter prerequisite:** qualify Logger's
   fixed legacy `stamp` and `provision` recipes through the same native foundation,
   canonical queue and frozen-input owner before changing any ordinary Logger
   publisher. Admit only its canonical installed payload and default legacy root;
@@ -409,6 +409,17 @@ transaction execution from the existing recurring-maintenance assignment.
   preserves #7030 publication and #8370 diagnostics custody. Selected snapshots,
   command/bootstrap/explicit-installer publishers, task/timer registration,
   personal sync/prune, cells/custom roots and rollout remain separate.
+- [ ] **Agent-recommended bounded semantic prerequisite:** qualify Logger's
+  fixed legacy `install` action through the same foundation, canonical queue
+  and frozen-input owner before migrating its bootstrap's drift path.
+  Preserve the unchanged six-command declaration, exact source/root/project,
+  native staging and publication controls, and the actual task/timer
+  reconciliation that distinguishes `install` from service-less `provision`.
+  The [bounded plan](logger-install-action.md) requires isolated native
+  Windows/Linux registration adapters, real materialized runtime/consumer
+  checks, registration-failure outcomes and no personal sync/prune execution.
+  No ordinary publisher, host registration, maintenance enrollment, selected
+  snapshot, custom-root/cell or rollout is adopted by this prerequisite.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
