@@ -374,3 +374,7 @@ machine metadata/project enumeration with hosting eligibility.
   reservation cleanup controls remain; the two disconnected cohorts pass 11
   and 28 cases, including actual subprocess plan serialization and decoded
   Windows argument/exit propagation.
+- The integrated sidecar-aware source passes native Worktrees (121 cases) and
+  Bridge (286 cases) cohorts. Its newly published source checkpoint passes all
+  117 canonical capture probes and the no-write replay; only current-generation
+  owned evidence changes, retaining the upstream immutable provenance chunks.
