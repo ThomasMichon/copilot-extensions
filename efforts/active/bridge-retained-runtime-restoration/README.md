@@ -350,6 +350,12 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   missing-index controls refuse too. The 143 migration/custody/adoption controls
   and 120 final producer/enrollment/index controls pass. No running database
   was migrated and no target-state compatibility is inferred.
+- Source `329b9319c6cd3f3c4caf97a33caecd36e5d22ce8` passes actual
+  HTTP-48 write/no-write capture in both installation modes with 78 outputs,
+  including schema-32 and nonpartial-index observations. The unchanged checker
+  accepts both contracts and 660 fixtures; all 124 current
+  capture/contract/maintenance cases and the 18 changed-source module limits
+  pass. Current-head independent review remains required.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the
