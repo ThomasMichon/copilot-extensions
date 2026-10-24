@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify bounded fleet cleanup, exact producer containment, native hold recovery, and content reconciliation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
