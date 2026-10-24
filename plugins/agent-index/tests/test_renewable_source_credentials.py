@@ -20,6 +20,28 @@ def test_renewed_header_is_not_masked() -> None:
     assert value.split()[0].lower() == "bear" + "er"
 
 
+def test_account_relay_is_explicit_and_not_the_scoped_broker(monkeypatch, tmp_path):
+    from agent_index.indexing import engine
+    from fleet_manager import account_relay
+
+    calls = []
+    monkeypatch.setattr(account_relay, "token_provider", lambda path, **kwargs: (
+        calls.append((path, kwargs)) or (lambda: "renewed-account-token")
+    ))
+    spec = engine.SourceSpec(
+        name="github:example/project", type="github", auth_account="account-a",
+        auth_relay=str(tmp_path / "worker.json"),
+    )
+    kwargs = engine._connector_kwargs(spec)
+    assert kwargs["token_provider"]() == "renewed-account-token"
+    assert calls == [(tmp_path / "worker.json", {
+        "source": "github:example/project", "account": "account-a",
+    })]
+    from dataclasses import replace
+    with pytest.raises(SourceCredentialError, match="source-provider-policy-invalid"):
+        engine._connector_kwargs(replace(spec, auth_gateway=str(tmp_path / "other.json")))
+
+
 def test_http_refreshes_every_page_and_retry_without_ambient_fallback(monkeypatch) -> None:
     monkeypatch.setenv("GH_TOKEN", "wrong-ambient-token")
     monkeypatch.setattr("time.sleep", lambda _: None)

@@ -1,0 +1,17 @@
+{
+  "comment": "Add an explicit recipient-bound account credential relay alongside unchanged scoped Gateway and legacy relay protocols.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

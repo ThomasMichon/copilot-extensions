@@ -20,14 +20,21 @@ class SourceCredentialError(RuntimeError):
 
 
 def gateway_connector_kwargs(spec: SourceSpec) -> dict[str, object]:
-    if spec.auth_gateway is None or not spec.auth_account or spec.type not in ("git", "github"):
+    if (
+        (spec.auth_gateway is None) == (spec.auth_relay is None)
+        or not spec.auth_account or spec.type not in ("git", "github")
+    ):
         raise SourceCredentialError("source-provider-policy-invalid")
     try:
-        from fleet_manager.gateway_worker import token_provider
+        if spec.auth_relay is not None:
+            from fleet_manager.account_relay import token_provider
+        else:
+            from fleet_manager.gateway_worker import token_provider
     except ImportError:
         raise SourceCredentialError("source-provider-dependency-unavailable") from None
     provider = token_provider(
-        Path(spec.auth_gateway), source=spec.name, account=spec.auth_account,
+        Path(spec.auth_relay if spec.auth_relay is not None else spec.auth_gateway),
+        source=spec.name, account=spec.auth_account,
     )
     if spec.type == "github":
         return {"token_provider": provider}
