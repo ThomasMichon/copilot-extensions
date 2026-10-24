@@ -148,6 +148,41 @@ def test_retained_settlement_requires_a_successful_unsettled_copy(tmp_path):
         transaction.retain()
 
 
+@pytest.mark.parametrize("settlement", ["retain", "rollback", "keep"])
+@pytest.mark.parametrize("damage", ["root", "missing-target", "no-backup", "backup-path", "backup-state"])
+def test_valid_context_drift_cannot_change_captured_recovery_bindings(
+    tmp_path, capsys, settlement, damage,
+):
+    transaction, _before = case(tmp_path)
+    transaction.publish()
+    observed = {item.target: publication.state_path(item.target) for item in transaction.bindings}
+    evidence = [transaction.context, *transaction.receipts, *transaction.backups]
+    context = json.loads(transaction.context.read_text())
+    if damage == "root":
+        context["root"] = str(tmp_path)
+    elif damage == "missing-target":
+        context["entries"].pop()
+    elif damage == "no-backup":
+        context["entries"][0].update(backup=None, state=None)
+    elif damage == "backup-path":
+        context["entries"][0]["backup"] = context["entries"][1]["backup"]
+        context["entries"][0]["state"] = context["entries"][1]["state"]
+    else:
+        context["entries"][0]["state"]["modified"] += 1
+    transaction.context.write_text(json.dumps(context) + "\n", encoding="utf-8")
+    if settlement == "keep":
+        transaction.keep()
+        assert "captured bindings" in capsys.readouterr().err
+    else:
+        with pytest.raises(publication.PublicationProofError, match="captured bindings"):
+            getattr(transaction, settlement)()
+    assert {path: publication.state_path(path) for path in observed} == observed
+    assert all(path.exists() for path in evidence)
+    if settlement == "retain":
+        assert transaction._custody is not None
+        transaction._release()
+
+
 @pytest.mark.parametrize("fault", ["partial-stage", "post-rename", "source-set"])
 def test_ordinary_copy_failure_recovers_every_earlier_created_output(tmp_path, monkeypatch, fault):
     transaction, before = case(tmp_path)

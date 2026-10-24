@@ -331,6 +331,9 @@ must reacquire the normal target leases and check the current physical object
 against those original proofs through `check_owned`/`recover_owned`; retained
 bytes or a matching digest alone never authorize a foreign replacement.
 `keep()` retains its existing cleanup behavior.
+All three settlements bind the context's root and exact target-to-backup/state
+mapping to the values captured during publication. Valid JSON with altered
+recovery bindings cannot silently change restoration into removal.
 
 Rollback restores proven uncontested outputs, preserves foreign replacements
 and reports incomplete recovery with evidence retained. The separate
