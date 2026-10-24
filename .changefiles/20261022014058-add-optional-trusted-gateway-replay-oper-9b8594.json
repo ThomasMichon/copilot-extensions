@@ -1,9 +1,0 @@
-{
-  "comment": "Add optional trusted Gateway replay operations with configured caller scopes, durable transaction custody and cancellation-aware drain.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}
