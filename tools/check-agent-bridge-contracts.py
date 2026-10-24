@@ -76,6 +76,7 @@ _DEFERRED_KEYS = {
     "reference_sha256",
 }
 _HTTP_CAPABILITY_CONSTANTS = {
+    "retained_inbox": "RETAINED_INBOX_PROTOCOL_VERSION",
     "remote_acp_ownership": "REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION",
     "remote_acp": "REMOTE_ACP_PROTOCOL_VERSION",
     "remote_acp_targets": "REMOTE_ACP_TARGETS_PROTOCOL_VERSION",
@@ -735,6 +736,9 @@ def _validate_contract(
         if current >= 47:
             from bridge_http47_validation import validate_http47
             validate_http47(REPO, {"contracts": [contract]}, loaded, errors)
+        if current >= 48:
+            from bridge_http48_evidence import validate_http48
+            validate_http48(REPO, {"contracts": [contract]}, loaded, errors)
 
     missing_generations = sorted(evidence_generations - fixture_generations)
     if missing_generations:

@@ -99,6 +99,62 @@ When a wire contract does change:
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
+## HTTP-48 local retained-inbox evidence
+
+HTTP generation 48 introduces explicit local retained-inbox negotiation,
+enrollment, poll, final-admission and original-outcome routes. The
+`RETAINED_INBOX_PROTOCOL_VERSION` floor is 48; the supported HTTP minimum and
+every prior capability floor remain unchanged. See the
+[local adapter contract](../docs/runtime-custody-foundation.md#explicit-local-transport-adapter).
+An ordinary registration does not opt into retained custody, and an unsupported
+receiver cannot be used through legacy delivery as a fallback.
+
+Independent expectations live in `inputs/http48/retained-inbox.json`.
+`test_http48_capture_probes.py` executes the actual serving app, ordinary auth
+middleware, installation owner and SQLite handoffs in both legacy and namespaced
+fixture installations. It observes repeated poll/final-admission responses,
+wrong-epoch refusal and original outcomes after closure and registration cleanup.
+It does not run an ordinary message producer, extension SDK, native session or
+deployed receiver.
+
+After committing matching source and source registry declarations:
+
+```text
+python tools/capture_bridge_http48.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http48.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+The writer uses the existing bounded runner and source/entrypoint instrumentation
+with an explicitly observer-only portfolio. Its historical `HTTP47` request and
+bootstrap names are instrumentation reuse, not a generation-47 capture or native
+qualification. The default generation-47 child portfolio still requires its
+worker, host and peer. The new writer accepts only genuine HTTP-48 source with
+the retained-inbox floor of 48, checks the full committed dependency closure
+before and after execution, and publishes only its generation-48 packets plus
+lossless registry metadata. A later source checkpoint may refresh those exact
+registered current-generation paths, retaining every prior provenance record.
+Foreign owners, dirty packets and concurrent registry edits refuse before
+execution or publication; no older generation is refreshable. Unchanged semantic
+families link exact prior packets instead of copying or relabelling them.
+
+The closure also includes the actual payload installation owner under
+`plugins/agent-bridge/scripts/installation-context/`, not only its separately
+packaged `src` copy. The captured entrypoint's `_FRAGMENT_FILES` declaration
+determines required execution coverage. Every declared fragment must be present
+in the committed closure and observed executing under the guard; non-`src`
+location does not exempt it. Dirty entrypoint/fragment bytes, foreign helper
+origins and forged executable code refuse before helper effects. Historical
+inventory is checked against the captured tree, and required fragment identities
+are derived from captured entrypoint bytes rather than a producer-supplied list.
+
+All generation-47 packets remain immutable. The checker validates their original
+tree and exact primary/child bindings, not equality to a later generation's
+current source hashes. If the historical tree is unavailable, the reviewed
+packet/fixture-hash trust boundary still applies, with fixed owner/input
+requirements and content-addressed identities; newer files cannot retroactively
+become historical execution inputs. A recomputed digest alone is not provenance.
+
 HTTP generation 47 adds explicitly negotiated incompatible-preservation cold
 drain. Confirmed disjoint ranges select cold by default; graceful-only control
 refuses before destructive effects. Independent expected control vectors live in

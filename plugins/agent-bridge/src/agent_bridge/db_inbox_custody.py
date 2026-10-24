@@ -113,6 +113,23 @@ class _InboxCustodyMixin:
                  document, expected_incarnation, now),
             )
 
+    def observe_inbox_consumer(
+        self, installation: RuntimeInstallation, admission: RuntimeAdmission,
+        consumer: InboxConsumer, *, now: float,
+    ) -> str | None:
+        """Observe the current predecessor without enrolling or retiring it."""
+        self._inbox_consumer(consumer)
+        observed_time(now)
+        identity = self._runtime_installation(installation)
+        with self._runtime_transaction(write=False) as conn:
+            self._inbox_admission(conn, identity, admission)
+            self._registered_inbox_consumer(conn, consumer, now)
+            row = conn.execute(
+                 "SELECT incarnation FROM bridge_inbox_consumers WHERE session_id=? AND current=1",
+                 (consumer.session_id,),
+            ).fetchone()
+            return row["incarnation"] if row is not None else None
+
     def _current_inbox_consumer(
         self, conn: sqlite3.Connection, consumer: InboxConsumer, now: float,
         identity: str, epoch: int,
@@ -173,6 +190,8 @@ class _InboxCustodyMixin:
             for row in rows:
                 if row["runtime_custody_json"] is None:
                     raise RuntimeCustodyError("Legacy or foreign inbox admission remains unqualified")
+                if row["delivery"] not in ("steer", "queue"):
+                    raise RuntimeCustodyError("Retained inbox interrupt delivery remains unsupported")
                 original_admission = RuntimeAdmission.parse(row["runtime_custody_json"])
                 self._inbox_admission(conn, identity, original_admission)
                 raw = row["handoff_json"]
@@ -210,6 +229,8 @@ class _InboxCustodyMixin:
             self._inbox_admission(conn, identity, RuntimeAdmission.parse(row["runtime_custody_json"]))
             if row["session_id"] != consumer.session_id:
                 raise RuntimeCustodyError("Inbox handoff cannot move to another native context")
+            if row["delivery"] not in ("steer", "queue"):
+                raise RuntimeCustodyError("Retained inbox interrupt delivery remains unsupported")
             if handoff_stage(row) != "offered":
                 return False
             conn.execute("UPDATE live_messages SET handoff_started_at=? WHERE id=?",

@@ -13,6 +13,7 @@ from importlib.machinery import ModuleSpec, PathFinder
 
 REQUEST = "BRIDGE_HTTP47_CAPTURE_REQUEST"
 REQUEST_SHA = "BRIDGE_HTTP47_CAPTURE_REQUEST_SHA256"
+INSTALLATION_HELPER_PREFIX = "plugins/agent-bridge/scripts/installation-context/"
 _installed = False
 ROLES = {
     "cold_recovery_worker.py": "worker",
@@ -56,6 +57,19 @@ def relative_source(filename: str, proof: dict) -> str | None:
 def entry_role(filename: str) -> str | None:
     name = filename.replace("\\", "/")
     return next((role for suffix, role in ROLES.items() if name.endswith(suffix)), None)
+
+
+def installation_source(filename: str) -> str | None:
+    normalized = filename.replace("\\", "/")
+    _, marker, relative = normalized.rpartition("/scripts/installation-context/")
+    if marker and relative.endswith(".py"):
+        return INSTALLATION_HELPER_PREFIX + relative
+    name = normalized.rsplit("/", 1)[-1]
+    if name == "installation_context.py" or (
+        name.startswith("_installation_context_") and name.endswith(".py")
+    ):
+        return INSTALLATION_HELPER_PREFIX + name
+    return None
 
 
 def launch_role(argv: list) -> str | None:
@@ -104,6 +118,8 @@ def install(*, observer: bool = False) -> None:
         return
     path, request = load_request()
     proof = request["source_proof"]
+    root = Path(request["root"])
+    bind_installation = request.get("capture_generation") == 48
     own = "tools/bridge_http47_runtime.py"
     if sha(Path(__file__).read_bytes()) != proof[own]["sha256"]:
         raise ValueError("HTTP-47 runtime guard source is unproven")
@@ -185,13 +201,22 @@ def install(*, observer: bool = False) -> None:
         code = args[0]
         source = relative_source(code.co_filename, proof)
         role = entry_role(code.co_filename)
+        helper = installation_source(code.co_filename) if bind_installation else None
+        if source is None and helper is not None:
+            record({"kind": "refused", "source": helper})
+            raise ValueError("HTTP-48 unproven installation helper origin")
+        if helper is not None and "/src/" not in source and (
+            Path(code.co_filename).resolve() != root / source
+        ):
+            record({"kind": "refused", "source": source})
+            raise ValueError("HTTP-48 unproven installation helper origin")
         if source is None:
             # A worker/host/peer with the correct basename but foreign location
             # must not execute before we can prove its entrypoint.
             if role is not None:
                 raise ValueError("HTTP-47 unproven subprocess entrypoint")
             return
-        if "/src/" not in source and role is None:
+        if "/src/" not in source and role is None and helper is None:
             return  # pytest assertion-rewrites its test bodies; not runtime modules.
         checking = True
         try:
@@ -229,7 +254,11 @@ def install(*, observer: bool = False) -> None:
         )
 
 
-def verify_interpreters(directory: Path, proof: dict) -> dict:
+def verify_interpreters(
+    directory: Path, proof: dict, *,
+    expected_roles: frozenset[str] = frozenset({"worker", "host", "peer"}),
+    required_sources: frozenset[str] = frozenset(),
+) -> dict:
     """Require a bound entrypoint for every actual contributing child launch."""
     logs = []
     for path in sorted(directory.glob("*.jsonl")):
@@ -261,11 +290,13 @@ def verify_interpreters(directory: Path, proof: dict) -> dict:
                 if event["source"] not in proof:
                     raise ValueError("HTTP-47 executed source outside committed closure")
                 sources.add(event["source"])
-    if launched != started or {role for _, role in started} != {"worker", "host", "peer"}:
+    if launched != started or {role for _, role in started} != expected_roles:
         raise ValueError("HTTP-47 contributing interpreter launch/entrypoint coverage mismatch")
+    if not required_sources <= sources:
+        raise ValueError("Capture required runtime source execution is incomplete")
     return {
         "policy": "every-owned-interpreter-source-and-entrypoint-v1",
-        "roles": ["observer", "worker", "host", "peer"],
+        "roles": ["observer", *(role for role in ("worker", "host", "peer") if role in expected_roles)],
         "verified_sources": sorted(sources),
         "scope": "contained Python fixtures; not native Copilot or Windows qualification",
     }

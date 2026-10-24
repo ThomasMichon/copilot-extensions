@@ -144,7 +144,9 @@ def test_legacy_provider_backfill_persists_verified_publication(authority_state)
 
 
 def test_registration_reads_registry_under_authority_guard(authority_state, monkeypatch):
-    _config, _record, _root, _registry, _ledgers = authority_state
+    _config, _record, root, _registry, _ledgers = authority_state
+    repo = root.parent / "repository"
+    repo.mkdir()
     original = installer.read_projects_registry
     reads = []
 
@@ -154,13 +156,15 @@ def test_registration_reads_registry_under_authority_guard(authority_state, monk
         return original(*args, **kwargs)
 
     monkeypatch.setattr(installer, "read_projects_registry", guarded_read)
-    installer.register_project("new-project", "unused", "main")
+    installer.register_project("new-project", repo, "main")
     assert reads
     assert "new-project" in original()["projects"]
 
 
 def test_concurrent_project_registration_preserves_both_ledgers(authority_state):
     _config, _record, root, registry, _ledgers = authority_state
+    repo = root.parent / "repository"
+    repo.mkdir()
     script = """
 import sys,time
 from pathlib import Path
@@ -174,13 +178,13 @@ def delayed_read(*a,**k):
     time.sleep(0.2)
     return result
 installer.read_projects_registry=delayed_read
-installer.register_project(sys.argv[3], 'unused', 'main')
+installer.register_project(sys.argv[3], Path(sys.argv[4]), 'main')
 """
     env = dict(os.environ)
     env["PYTHONUTF8"] = "0"
     env["PYTHONPATH"] = str(Path(pr_publish.__file__).parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
     children = [subprocess.Popen(
-        [sys.executable, "-X", "utf8", "-c", script, str(root), str(registry), name],
+        [sys.executable, "-X", "utf8", "-c", script, str(root), str(registry), name, str(repo)],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         encoding="utf-8",
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,

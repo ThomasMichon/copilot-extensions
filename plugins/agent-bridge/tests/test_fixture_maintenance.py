@@ -150,19 +150,20 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
             destination = snapshot / deferred["reference_path"]
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO / deferred["reference_path"], destination)
-    closure = json.loads(
-        (REPO / CONTRACT / "fixtures/http/current/http47-owned-cold-drain.json").read_text(
-            encoding="utf-8",
-        )
-    )["execution_closure"]
-    for relative in closure:
-        destination = snapshot / relative
-        if not destination.exists():
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(REPO / relative, destination)
+    for packet in ("http47-owned-cold-drain.json", "http48-retained-inbox.json"):
+        source = REPO / CONTRACT / "fixtures/http/current" / packet
+        if not source.exists():
+            continue
+        closure = json.loads(source.read_text(encoding="utf-8"))["execution_closure"]
+        for relative in closure:
+            destination = snapshot / relative
+            if not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(REPO / relative, destination)
     for name in ("check-agent-bridge-contracts.py", "agent_bridge_contract_git.py",
                  "bridge_http45_evidence.py", "bridge_http47_evidence.py",
-                 "bridge_http47_validation.py", "agent_bridge_contract_registry.py",
+                 "bridge_http47_validation.py", "bridge_http48_evidence.py",
+                 "agent_bridge_contract_registry.py",
                  "agent_bridge_contract_paths.py", "agent_bridge_contract_publication.py"):
         destination = snapshot / "tools" / name
         destination.parent.mkdir(parents=True, exist_ok=True)

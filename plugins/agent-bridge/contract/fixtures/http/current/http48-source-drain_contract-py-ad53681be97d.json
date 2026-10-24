@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http48-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-drain_contract-py-ad53681be97d.json",
+    "sha256": "38b64998f05cdb20462ca51510db7f16d6ca29a9a8bb6b302081fecc60e4b605"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http48-retained-inbox.json",
+    "sha256": "a279ccf250421673e63b077e9be2a5dd780dfbd99662baf35486d57dacee4729"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "b179c886e69306bc7318c9d39e24dce6b7820b99",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 48,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/drain_contract.py",
+    "source_git_blob": "ddb62da3a9d55ee15ddab1c8354ad593d304449d",
+    "source_sha256": "6e967ecde980b52095c7bb1d955a60793706cb1bb3eb7df0cba73e416edc83d5"
+  }
+}

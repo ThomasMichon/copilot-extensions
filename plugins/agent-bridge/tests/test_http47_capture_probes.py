@@ -14,6 +14,7 @@ from zdd import process_exit
 
 import bridge_http47_evidence as evidence
 from agent_bridge import cold_outages
+from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 from agent_bridge.db import Database
 from agent_bridge.session_cold_drain import owned_execution
 from agent_bridge.session_manager import SessionManager
@@ -222,9 +223,10 @@ async def test_http47_capture_actual_observations(session_manager, tmp_path, mon
             allocated.set_draining(False)
         finally:
             allocated_db.close()
-        assert json.dumps(observed, sort_keys=True) == json.dumps(
-            vector["expected"], sort_keys=True
-        )
+        expected = json.loads(json.dumps(vector["expected"]))
+        assert HTTP_PROTOCOL_VERSION >= vector["generation"]
+        expected["advertised"]["protocol_version"] = HTTP_PROTOCOL_VERSION
+        assert json.dumps(observed, sort_keys=True) == json.dumps(expected, sort_keys=True)
         if request is not None:
             loaded_source_proof(request["source_proof"])
             report = evidence.safe(ROOT, Path(request["report"]).relative_to(ROOT).as_posix())

@@ -35,13 +35,19 @@ def installation(
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(root))
     monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    environment = {"HOME": str(home)}
+    if installation_context._is_wsl_guest():
+        # The isolated runner deliberately strips the real distribution name.
+        # Bind only this disposable profile to a synthetic direct-entry name.
+        monkeypatch.setenv("WSL_DISTRO_NAME", "SyntheticTestGuest")
+        environment["WSL_DISTRO_NAME"] = "SyntheticTestGuest"
     context = installation_context.stamp_context(
         payload_root=PAYLOAD, plugin_id="agent-bridge",
         source_descriptor={"kind": "github", "repo": "example/extensions"},
         durable_home=home / ".copilot-extensions", copilot_home=home / ".copilot",
         payload_version="1.0.0", payload_origin="explicit",
         expected_namespace_generation=0, expected_install_generation=0,
-        environment={"HOME": str(home)},
+        environment=environment,
     )
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", context["installReceipt"])
     if request.param == "namespaced":

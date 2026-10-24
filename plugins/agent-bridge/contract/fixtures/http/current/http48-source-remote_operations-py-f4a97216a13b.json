@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http48-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-remote_operations-py-f4a97216a13b.json",
+    "sha256": "de1b4701c2614438bbe0c75cc8f71c8d59c06ddea97a70e82ae556e6349fb508"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http48-retained-inbox.json",
+    "sha256": "a279ccf250421673e63b077e9be2a5dd780dfbd99662baf35486d57dacee4729"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "b179c886e69306bc7318c9d39e24dce6b7820b99",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 48,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+    "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+    "source_sha256": "de7ee7f6fdfb6aa8404efabb56a3b8b225f86da70c6d17a5578837b546366a3a"
+  }
+}
