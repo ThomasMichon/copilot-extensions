@@ -7,7 +7,7 @@ import uuid
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
 from .db_live_session_aliases import PROCESS_START_TOLERANCE_SECONDS
-from .inbox_custody import InboxConsumer, decode_handoff, handoff_stage, observed_time
+from .inbox_custody import InboxConsumer, decode_handoff, handoff_stage, observed_time, original_handoff
 from .runtime_custody import (
     RuntimeAdmission, RuntimeCustodyError, RuntimeInstallation, encode, nonblank, positive,
 )
@@ -160,18 +160,17 @@ class _InboxCustodyMixin:
         row = conn.execute("SELECT * FROM live_messages WHERE id=?", (message_id,)).fetchone()
         if row is None or row["handoff_json"] is None:
             raise RuntimeCustodyError("Original inbox handoff is absent")
-        retained = decode_handoff(row["handoff_json"])
+        retained = original_handoff(row)
         if (
-            retained["message_id"] != message_id or retained["id"] != handoff_id
+            retained["id"] != handoff_id
             or retained["consumer"] != consumer.document()
-            or retained["admission"] != row["runtime_custody_json"]
         ):
             raise RuntimeCustodyError("Original inbox handoff observations changed")
         return row
 
     def poll_live_message_handoffs(
         self, installation: RuntimeInstallation, admission: RuntimeAdmission,
-        consumer: InboxConsumer, *, now: float,
+        consumer: InboxConsumer, *, now: float, limit: int | None = None,
     ) -> list[dict[str, object]]:
         """Retain each original attempt before returning a body; never grant replay.
 
@@ -182,14 +181,16 @@ class _InboxCustodyMixin:
         """
         self._inbox_consumer(consumer)
         observed_time(now)
+        if limit is not None and (type(limit) is not int or not 1 <= limit <= 100):
+            raise RuntimeCustodyError("Inbox poll requires a bounded integer limit")
         identity = self._runtime_installation(installation)
         with self._runtime_transaction(write=True) as conn:
             self._inbox_admission(conn, identity, admission)
             self._current_inbox_consumer(conn, consumer, now, identity, admission.epoch)
             rows = conn.execute(
                 "SELECT * FROM live_messages WHERE session_id=? AND consumed_at IS NULL "
-                "AND kind NOT LIKE 'control:%' ORDER BY id",
-                (consumer.session_id,),
+                "AND kind NOT LIKE 'control:%' ORDER BY id" + (" LIMIT ?" if limit is not None else ""),
+                (consumer.session_id, limit) if limit is not None else (consumer.session_id,),
             ).fetchall()
             result = []
             for row in rows:

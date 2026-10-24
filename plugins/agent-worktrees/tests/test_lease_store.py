@@ -528,12 +528,9 @@ def test_squash_stale_filters_by_kind(
 
 
 def test_squash_stale_dry_run_reports_without_pushing(
-    remote: Path, settings: LeaseSettings,
+    released_history,
 ) -> None:
-    client = store(settings)
-    acquired = client.acquire("machine", "preview", "holder")
-    renewed = client.renew("machine", "preview", acquired.oid)
-    released = client.release("machine", "preview", renewed.oid)
+    remote, settings, _acquired, _renewed, released = released_history
     later = store(settings, now=BASE + timedelta(days=60))
 
     report = later.squash_stale(retention_days=30, dry_run=True)

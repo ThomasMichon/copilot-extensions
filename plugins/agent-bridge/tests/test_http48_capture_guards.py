@@ -15,9 +15,11 @@ import pytest
 
 import bridge_http48_evidence as evidence
 import bridge_http49_evidence as producer_evidence
+import bridge_http50_evidence as recovery_evidence
 import bridge_http47_validation as historical
 import capture_bridge_http48 as capture
 import capture_bridge_http49 as producer_capture
+import capture_bridge_http50 as recovery_capture
 import test_http47_capture_guards as old_guards
 from test_http47_capture_guards import (
     commit_fixture, fixture_git, source_seed as source_seed,
@@ -27,10 +29,12 @@ ROOT = Path(__file__).resolve().parents[3]
 historical_repository = old_guards.repository
 
 
-@pytest.fixture(params=["http48", "http49"])
+@pytest.fixture(params=["http48", "http49", "http50"])
 def capture_case(request):
-    return ((evidence, capture) if request.param == "http48"
-            else (producer_evidence, producer_capture))
+    return {
+        "http48": (evidence, capture), "http49": (producer_evidence, producer_capture),
+        "http50": (recovery_evidence, recovery_capture),
+    }[request.param]
 
 
 @pytest.fixture
@@ -65,6 +69,9 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) ->
     if evidence.GENERATION == 48:
         text = text.replace("RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION = 49\n", "")
         http["capability_versions"].pop("retained_inbox_producer", None)
+    if evidence.GENERATION < 50:
+        text = text.replace("RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION = 50\n", "")
+        http["capability_versions"].pop("retained_inbox_recovery", None)
     protocol.write_text(text, encoding="utf-8")
     next(row for row in http["source_paths"]
          if row["path"] == evidence.previous.PREFIX + "protocol.py")["sha256"] = evidence.digest(
@@ -164,8 +171,9 @@ def test_http48_capture_ignores_observation_object_key_order(
     observed = expected(root, evidence)
     for case in observed:
         observed[case] = dict(reversed(list(observed[case].items())))
-        observed[case]["ordinary_producer"] = dict(reversed(list(
-            observed[case]["ordinary_producer"].items(),
+        nested = "recovery" if evidence.GENERATION == 50 else "ordinary_producer"
+        observed[case][nested] = dict(reversed(list(
+            observed[case][nested].items(),
         )))
     assert observed == expected(root, evidence)
     monkeypatch.setattr(capture, "run_probes", lambda *args: observed)
@@ -192,7 +200,7 @@ def test_http48_capture_refresh_refuses_unowned_changes(
         path = root / evidence.PRIMARY
         packet = json.loads(path.read_bytes())
         if fault == "dirty-output":
-            packet["observations"]["legacy"]["poll"]["body"] = "foreign"
+            packet["observations"]["legacy"]["begin"] = [{"begin": False}]
         else:
             packet["captured_from"]["source_path"] = "foreign.py"
         path.write_bytes(evidence.encode(packet))
@@ -262,7 +270,7 @@ def test_http48_capture_unexpected_observation_writes_nothing(
     root, commit = repository
     before = (root / evidence.REGISTRY).read_bytes()
     wrong = expected(root, evidence)
-    wrong["namespaced"]["poll"]["body"] = "substituted"
+    wrong["namespaced"]["begin"] = [{"begin": False}]
     monkeypatch.setattr(capture, "run_probes", lambda *args: wrong)
     with pytest.raises(ValueError, match="plan changed"):
         capture.capture(root, commit, write=True)
@@ -271,7 +279,7 @@ def test_http48_capture_unexpected_observation_writes_nothing(
 
 
 @pytest.mark.parametrize("source", [
-    evidence.AFFECTED[1], evidence.installation.ENTRY,
+    evidence.previous.PREFIX + "routes/live_inbox.py", evidence.installation.ENTRY,
     evidence.installation.INSTALLATION_HELPER_PREFIX + "_installation_context_resolution.py",
 ])
 def test_http48_capture_dirty_source_refuses_before_probes(
@@ -381,7 +389,7 @@ def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_pat
         verify_interpreters(tmp_path, {})
 
 
-@pytest.mark.parametrize("future_generation", [48, 49])
+@pytest.mark.parametrize("future_generation", [48, 49, 50])
 def test_http47_historical_current_hashes_are_not_future_source_inputs(
     historical_repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, future_generation,
 ) -> None:

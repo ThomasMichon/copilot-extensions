@@ -116,7 +116,8 @@ def test_retained_producer_capability_is_distinct_from_transport() -> None:
     )
 
     assert RETAINED_INBOX_PROTOCOL_VERSION == 48
-    assert RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION == HTTP_PROTOCOL_VERSION == 49
+    assert RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION == 49
+    assert RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
     assert HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -135,6 +136,16 @@ def test_retained_producer_mixed_version_detection(generation, transport, produc
     client = _client(health)
     assert client.daemon_supports(RETAINED_INBOX_PROTOCOL_VERSION) is transport
     assert client.daemon_supports(RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION) is producer
+
+
+@pytest.mark.parametrize("generation,supported", [(0, False), (48, False), (49, False), (50, True)])
+def test_retained_recovery_has_its_own_advertised_floor(generation, supported) -> None:
+    from agent_bridge.protocol import RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION
+
+    assert RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION == HTTP_PROTOCOL_VERSION == 50
+    assert _client({"protocol_version": generation, "min_protocol_version": 1}).daemon_supports(
+        RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION,
+    ) is supported
 
 
 def _app(tmp_path):

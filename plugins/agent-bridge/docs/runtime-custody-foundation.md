@@ -273,6 +273,46 @@ Direct internal owner methods and other producer cohorts are not thereby
 qualified. Full SDK wiring, outcome/consumption recovery and native/platform
 evidence remain open.
 
+## Original handoff recovery
+
+HTTP generation 50 advertises `RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION`.
+Consumers requiring recovery or bounded polling must check that floor; 48
+qualifies the transport and 49 qualifies ordinary producer association, neither
+qualifies these additions. Retained delivery remains explicitly opted in;
+ordinary registration and legacy extension delivery defaults are unchanged.
+
+`GET /api/v1/live-sessions/{session_id}/retained-inbox/recovery` reads pending
+original handoff metadata, oldest first, with `limit` (1–100, default 50) and
+exclusive `after` message-ID pagination. `next_after` names the next page's
+exclusive boundary, or is null when that observation has no further page.
+Start a later reconciliation pass at zero: consumption may change between
+pages, and an empty page is not complete runtime custody or quiescence.
+`GET .../recovery/{message_id}` also retains a consumed handoff's receipt, so
+a lost outcome reply does not require reenrollment or a new send.
+
+Both reads use the existing receipt owner and original SQLite rows, exact
+native session IDs rather than aliases, and the same admitted local/authenticated
+endpoint boundary. They expose the original handoff ID, consumer observations,
+stage and timestamps, never the message body, producer admission or final-send
+permission. Reads remain available from an already prepared passive database
+after closure, consumer retirement, registration cleanup or frontend draining.
+They perform no initialization, enrollment, repair, reopening or cursor movement.
+Malformed original associations refuse rather than being skipped or repaired.
+The legacy message receipt keeps its unchanged response shape.
+
+The existing `/poll` accepts an optional strict `limit` of 1–100. A consumer can
+request one message at a time, retaining only that original handoff before a
+possible crash. Omitting the field preserves the earlier batch behavior.
+Repeated polls do not mint new attempts or recover a lost true `/begin` response.
+An old consumer's unresolved handoff remains its original observation, not a
+send opportunity for a newly enrolled successor.
+
+Schema 33 adds a partial pending-handoff index through normal writable
+preparation. The read projection selects no bodies and avoids scanning consumed
+history. Migration preserves original rows; passive adoption refuses an older
+schema and damaged current indexes without DDL or repair. These source controls
+are prerequisites for the still-open actual SDK consumer integration.
+
 ## Inventory is observation, not qualification
 
 DB inventory reads every row's selected identity/status metadata for known

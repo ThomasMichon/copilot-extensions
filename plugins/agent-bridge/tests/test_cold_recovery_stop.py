@@ -121,8 +121,7 @@ def test_cold_stop_migration_preserves_ambiguous_legacy_dormancy(tmp_path: Path)
     assert path.read_bytes() == before
     migrated = Database(path)
     try:
-        assert SCHEMA_VERSION == 32
-        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == 32
+        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         # v28 stores no stop provenance: this token preserves ambiguity, not
         # evidence that the operator, rather than cold drain, stopped the row.
         token = migrated.get_session("ambiguous")["cold_recovery_stop_token"]

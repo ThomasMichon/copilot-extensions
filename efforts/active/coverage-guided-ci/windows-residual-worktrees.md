@@ -88,6 +88,51 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-LEASE private preview input with original test identities retained
+
+This settles only these three original keys; their census headers, hashes
+and `MX-LEASE` dispositions remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_lease_store.py:8` | `6246565fedce0d2ae6d933cb61564d2eb55f9e1074f54f19242f37df61c3f435` |
+| `tests/test_lease_store.py:9` | `dd00fa7b0faa942ef8e8c08552f822c0d924a6add0811110964ed2fd350bc2cb` |
+| `tests/test_lease_store.py:10` | `93e1649380ec5da8ba23ad5188156cd1f45e7bd9029e287978b8c724cee863fd` |
+
+The kind-filter and mid-sweep reacquisition tests retain their complete
+ASTs from actual B-LEASE-SEED #7665 merge
+`85ff7d66cddb174a5ff91aa45b9d68bfbc2345aa` and the immutable source.
+Their fixture substitution and prepared-history unpacking belong to
+B-LEASE-SEED, not B-LEASE-ASSERT. The real reacquisition still occurs
+between the list observation and force-with-lease push.
+
+One fixture conversion remained unapplied at comparison `9445fea093`:
+`test_squash_stale_dry_run_reports_without_pushing` still rebuilt its
+acquire/renew/release inputs. It now takes `released_history`, using a
+private physical copy and deep-copied snapshots from the existing fixture.
+Only its fixture argument and four setup statements change. Every
+statement after setup, including preview/no-push, real apply, exact OIDs
+and stable repeated apply, remains AST-identical to actual B-LEASE-ASSERT
+#7698 merge `df0ab9b2ada18528d7fc8389246dd46a878f048a`.
+The complete converted function matches the immutable candidate after
+retaining its original function name; this final setup delta belongs
+to B-LEASE-SEED.
+
+The standalone idempotence test remains AST-identical to the historical
+base and both actual merges. Its historical deletion and the preview
+function's historical rename retain their accepted B-LEASE-ASSERT
+retirement: removal/rename deltas are retired, never tests. Every test
+identity, decorator, assertion and other function is unchanged.
+
+The complete native Windows lease-store module passes all 21 cases
+without skips: 108.56 pytest seconds, 129.55 seconds including preparation
+and cleanup. Exactly two contained workers retain original marks,
+item deadlines and resource ceilings. The private-copy controls, live
+holder protection, real race and retention consumers all execute.
+This module-level functional result is not normal-group or repeated
+complete same-head plugin qualification. Other residuals and parent
+qualification remain open.
+
 ### MX-RECOVERED existing fixture and publication-adapter boundary
 
 This settles only `tests/test_pr_break_glass.py:3`, header
