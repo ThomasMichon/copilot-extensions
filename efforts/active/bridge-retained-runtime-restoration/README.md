@@ -138,7 +138,10 @@ require their own review and qualification.
       merged in #8713 and retains internal atomic handoffs and one-shot/outcome
       state. Explicit internal local process-owned ACP selection and final-send
       wiring merged in #8732. Full lifecycle/cohort coverage and installed
-      qualification remain open.
+      qualification remain open. The
+      [original-acquisition DB foundation](../../../plugins/agent-bridge/docs/acquisition-custody.md)
+      adds internal epoch association and one-shot launch observations; actual
+      acquisition/create/start/resume and host effect-owner wiring remains next.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original acquisition epoch and one-shot launch custody in the existing journal; native lifecycle wiring remains unqualified.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
