@@ -254,6 +254,91 @@ def test_cached_filename_metadata_never_licenses_another_executable(tmp_path, mo
     assert runtime._code_sources[id(changed)] == (changed, None)
 
 
+@pytest.mark.parametrize("guard", ["parent", "child"])
+def test_guard_reads_immutable_frame_code_once(monkeypatch, guard):
+    reads, observed = [], []
+    code = (lambda: None).__code__
+    class Frame:
+        @property
+        def f_code(self):
+            reads.append(True)
+            return code
+    frame = Frame()
+    monkeypatch.setattr(stream, "_tracing", True)
+    monkeypatch.setattr(stream, "_guard_active", True)
+    monkeypatch.setattr(stream, "_guard_arming", False)
+    monkeypatch.setattr(runtime, "_frame_source", observed.append)
+    monkeypatch.setattr(runtime, "_started", True)
+    monkeypatch.setattr(runtime, "_arming", False)
+    monkeypatch.setattr(runtime, "_profile_arming", False)
+    monkeypatch.setattr(runtime, "_prior_profile", None)
+    monkeypatch.setattr(runtime, "_prior_thread_profile", None)
+    (stream._profile if guard == "parent" else runtime._thread_profile)(frame, "call", None)
+    assert reads == [True]
+    assert observed == ([frame] if guard == "parent" else [])
+
+
+def test_hot_audit_generated_filter_skips_unrelated_thread_state(monkeypatch):
+    reads = []
+    class State:
+        @property
+        def busy(self):
+            reads.append(True)
+            return False
+    monkeypatch.setattr(runtime, "_generated_active", True)
+    monkeypatch.setattr(runtime, "_generated_state", State())
+    runtime._generated_event("object.__getattr__", (object(), "f_code"))
+    assert not reads
+
+
+def test_hot_audit_parent_filter_skips_unrelated_guard_state(monkeypatch):
+    reads = []
+    class State:
+        def __bool__(self):
+            reads.append(True)
+            return True
+    for name in ("_guard_active", "_guard_arming", "_tracing"):
+        monkeypatch.setattr(stream, name, State())
+    stream._profile_event("object.__getattr__", (object(), "f_code"))
+    assert not reads
+
+
+def test_spawn_audit_fast_filter_skips_unrelated_event_comparisons():
+    comparisons = []
+    known = {"_cgs.audit_probe", "os.fork", "os.forkpty", "os.exec", "os.system",
+             "sys.settrace", "sys.setprofile", "subprocess.Popen", "os.posix_spawn"}
+    hashes = {hash(value) for value in known}
+    unrelated_hash = next(value for value in range(10) if value not in hashes)
+    class Event(str):
+        def __hash__(self):
+            return unrelated_hash
+        def __eq__(self, other):
+            comparisons.append(other)
+            return super().__eq__(other)
+    child_audit._event(Event("object.__getattr__"), ())
+    assert not comparisons
+
+
+def test_spawn_audit_fast_filter_covers_every_handled_event():
+    import ast
+    import inspect
+    import textwrap
+
+    function = ast.parse(textwrap.dedent(inspect.getsource(child_audit._event))).body[0]
+    guarded = next(node for node in function.body if isinstance(node, ast.Try))
+    gate = guarded.body[0].test
+    assert isinstance(gate, ast.Compare) and isinstance(gate.ops[0], ast.NotIn)
+    assert isinstance(gate.left, ast.Name) and gate.left.id == "event"
+    filtered = ast.literal_eval(gate.comparators[0])
+    handled = set()
+    for comparison in ast.walk(guarded):
+        if (isinstance(comparison, ast.Compare) and comparison is not gate
+                and isinstance(comparison.left, ast.Name) and comparison.left.id == "event"):
+            value = ast.literal_eval(comparison.comparators[0])
+            handled.update({value} if isinstance(value, str) else value)
+    assert filtered == handled
+
+
 @pytest.mark.parametrize("stale", [False, True])
 def test_executed_code_requires_verified_source_tree_and_strong_identity(tmp_path, monkeypatch, stale):
     import hashlib

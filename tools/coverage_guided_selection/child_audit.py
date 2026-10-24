@@ -204,6 +204,11 @@ def python_mode(arguments):
 def _event(event, arguments):
     global _probe
     try:
+        if event not in {
+            "_cgs.audit_probe", "os.fork", "os.forkpty", "os.exec", "os.system",
+            "sys.settrace", "sys.setprofile", "subprocess.Popen", "os.posix_spawn",
+        }:
+            return
         if event == "_cgs.audit_probe":
             _probe = arguments[0]
             return

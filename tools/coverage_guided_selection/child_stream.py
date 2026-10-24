@@ -135,7 +135,7 @@ def _install_generated_guard():
 
 def _generated_event(event, args):
     global _generated_count
-    if not _generated_active or getattr(_generated_state, "busy", False) or event not in {"compile", "exec"}:
+    if event not in {"compile", "exec"} or not _generated_active or getattr(_generated_state, "busy", False):
         return
     emitter = sys._getframe(0).f_back
     if emitter is None or emitter.f_code not in _generator_codes:
@@ -205,11 +205,12 @@ def _thread_profile(frame, event, arg):
         if frame.f_code not in (_thread_start_code, _start_thread.__code__):
             _auditor().error("unsupported low-level thread coverage lifecycle")
     elif event == "call" and _started:
-        if (frame.f_code is _thread_settrace_code and not _arming
+        code = frame.f_code
+        if (code is _thread_settrace_code and not _arming
                 and frame.f_globals is _thread_settrace_globals
                 and frame.f_locals.get(_thread_settrace_code.co_varnames[0]) is not _call):
             _auditor().error("child thread tracer was replaced")
-        if (frame.f_code is _thread_setprofile_code and not _profile_arming
+        if (code is _thread_setprofile_code and not _profile_arming
                 and frame.f_globals is _thread_setprofile_globals
                 and frame.f_locals.get(_thread_setprofile_code.co_varnames[0]) is not _thread_profile):
             _auditor().error("child thread-start profile guard was replaced")

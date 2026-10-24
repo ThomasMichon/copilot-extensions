@@ -279,11 +279,12 @@ def configure_parent(control, python, nonce, inventory, helpers):
 
 def _profile(frame, event, arg):
     if event == "call":
-        if (_tracing and frame.f_code is _runtime._thread_settrace_code
+        code = frame.f_code
+        if (_tracing and code is _runtime._thread_settrace_code
                 and frame.f_globals is _runtime._thread_settrace_globals
                 and frame.f_locals.get(_runtime._thread_settrace_code.co_varnames[0]) is not _parent_thread_trace):
             _auditor().error("parent thread line tracer was replaced")
-        if (_guard_active and not _guard_arming and frame.f_code is _runtime._thread_setprofile_code
+        if (_guard_active and not _guard_arming and code is _runtime._thread_setprofile_code
                 and frame.f_globals is _runtime._thread_setprofile_globals
                 and frame.f_locals.get(_runtime._thread_setprofile_code.co_varnames[0]) is not _profile):
             _auditor().error("parent thread executable-source guard was replaced")
@@ -296,12 +297,12 @@ def _profile(frame, event, arg):
 
 
 def _profile_event(event, args):
-    if _guard_active and not _guard_arming and event == "sys.setprofile":
+    if event == "sys.setprofile" and _guard_active and not _guard_arming:
         caller = sys._getframe(1)
         if (caller.f_code is not threading.Thread._bootstrap_inner.__code__
                 or threading.getprofile() is not _profile):
             _auditor().error("parent executable-source guard was replaced")
-    if _tracing and event == "sys.settrace":
+    if event == "sys.settrace" and _tracing:
         caller = sys._getframe(1)
         installers = [getattr(_coverage_owner, name, None)
                       for name in ("_installation_trace", "_start_tracer")]
