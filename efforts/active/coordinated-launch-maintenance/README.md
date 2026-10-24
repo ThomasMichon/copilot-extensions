@@ -868,3 +868,16 @@ repository history.
   native POSIX regression remain open under #6859/#7833.
 - The PR remains draft/held. No shared-host Task, installed runtime, service,
   updater, rollout or lifetime policy was changed.
+
+The first exact-candidate hosted run,
+[40083708067](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40083708067)
+at `e209652e3a9ddd2dcc88e3344c587f2b8dffe32d`, failed with confirmed fixture
+cleanup. Actual driver-owned adoption, direct installed action, the first
+resident cycle, negative topology and both crash-recovery/retention boundaries
+passed. The second resident launch refused `broker-admission-disabled` after
+stop/readopt. The adapter had dropped a same-generation previous registration,
+incorrectly choosing idempotent install rather than explicit re-enablement.
+The correction retains that previous identity; a healthy, already-published
+registration now returns without disabling or re-registering it. Stopped
+readoption and failed-readoption rollback have separate controls. This requires
+a fresh exact-candidate hosted run, not a retry of the failed commit.

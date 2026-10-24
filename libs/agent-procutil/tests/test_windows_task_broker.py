@@ -119,6 +119,35 @@ def test_installer_publish_failure_rolls_back_only_exact_registration(monkeypatc
     assert not config.pending_path.exists()
 
 
+def test_healthy_repeat_keeps_registration_and_accepted_finite_work_untouched(monkeypatch, tmp_path):
+    config = fixture_registration(tmp_path)
+    monkeypatch.setattr(task.Registration, "validate_files", lambda config: None)
+    monkeypatch.setattr(task, "_qualify", Mock())
+    task._publish(config)
+    operation = Mock(return_value={"installed": True, "accepting": True})
+    retained = Mock()
+    monkeypatch.setattr(task, "task_operation", operation)
+    monkeypatch.setattr(task, "_retain", retained)
+    task.reconcile(config, previous=config)
+    assert [call.args[0] for call in operation.call_args_list] == ["inspect"]
+    retained.assert_called_once_with(config, [config])
+    assert not config.pending_path.exists()
+    assert task._published(config) == config
+
+
+def test_stopped_same_generation_is_explicitly_readopted_not_treated_as_healthy(monkeypatch, tmp_path):
+    config = fixture_registration(tmp_path)
+    monkeypatch.setattr(task.Registration, "validate_files", lambda config: None)
+    monkeypatch.setattr(task, "_qualify", Mock())
+    task._publish(config)
+    operation = Mock(side_effect=[{"installed": True, "accepting": False}, {}])
+    monkeypatch.setattr(task, "task_operation", operation)
+    task.reconcile(config, previous=config)
+    assert [call.args[0] for call in operation.call_args_list] == ["inspect", "update"]
+    assert operation.call_args_list[1].kwargs == {"previous": config.task()}
+    assert not config.pending_path.exists()
+
+
 def test_installer_update_publish_failure_restores_previous_generation(monkeypatch, tmp_path):
     old = fixture_registration(tmp_path)
     new = fixture_registration(
@@ -192,19 +221,19 @@ def test_interrupted_first_adoption_restores_absence(monkeypatch, tmp_path, meta
     assert operation.call_args.kwargs == {"previous": None, "accepting": False}
 
 
-def test_repeat_adoption_rollback_does_not_remove_preexisting_task(monkeypatch, tmp_path):
+def test_stopped_repeat_rollback_preserves_preexisting_task_and_disabled_state(monkeypatch, tmp_path):
     config = fixture_registration(tmp_path)
     monkeypatch.setattr(task.Registration, "validate_files", lambda config: None)
     monkeypatch.setattr(task, "_qualify", Mock())
     task._publish(config)
     operation = Mock(side_effect=[
-        {"installed": True, "accepting": True}, {}, {"recovered": True},
+        {"installed": True, "accepting": False}, {}, {"recovered": True},
     ])
     monkeypatch.setattr(task, "task_operation", operation)
     monkeypatch.setattr(task, "_publish", Mock(side_effect=OSError("fixture publication failure")))
     with pytest.raises(OSError, match="fixture"):
-        task.reconcile(config)
-    assert operation.call_args.kwargs == {"previous": config.task(), "accepting": True}
+        task.reconcile(config, previous=config)
+    assert operation.call_args.kwargs == {"previous": config.task(), "accepting": False}
     assert task._published(config) == config
     assert not config.pending_path.exists()
 

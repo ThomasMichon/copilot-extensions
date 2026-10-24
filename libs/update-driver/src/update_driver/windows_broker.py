@@ -40,6 +40,6 @@ def adopt(runtime_root: Path, slot: Path, *, root: Path | None = None) -> Regist
         broker.recover(desired)
         previous = load(Path(runtime_root)) if os.path.lexists(desired.config_path) else None
         custody.assert_owned()
-        broker.reconcile(desired, previous=previous if previous != desired else None)
+        broker.reconcile(desired, previous=previous)
         custody.assert_owned()
         return desired

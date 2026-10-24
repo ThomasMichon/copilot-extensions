@@ -408,6 +408,9 @@ def reconcile(config: Registration, *, previous: Registration | None = None) -> 
         or (published is not None and not observed["installed"])
     ):
         raise _refuse("installation inspection refused")
+    if published == config and observed["installed"] and observed["accepting"]:
+        _retain(config, [config])
+        return
     original = expected if observed["installed"] else None
     _retain(config, [config, *([] if original is None else [original])])
     record = {

@@ -91,7 +91,7 @@ def test_real_driver_custody_covers_recovery_and_reconciliation(
                     contender.acquire()
                 events.append("reconcile")
                 assert config is adapter.desired
-                assert kwargs["previous"] is (previous if existing == "previous" else None)
+                assert kwargs["previous"] is (previous if existing != "absent" else None)
 
             adapter.recover.side_effect = lambda config: events.append("recover")
             adapter.reconcile.side_effect = reconcile
