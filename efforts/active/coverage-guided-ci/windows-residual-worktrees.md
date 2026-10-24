@@ -88,6 +88,35 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### N-UTF8-LAUNCH explicit encoded-intent child mode
+
+This settles only `tests/test_launch_request.py:1`, header
+`@@ -696,7 +696,9 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):`,
+full original hunk SHA256
+`05a7137dc04d8936a6c33077c1c807e094fb6a0ac246d6461e4621f56f7c7c22`.
+The prior native disposition below already names actual #7821 merge
+`b55d6811210ff472006db72e78abda7b459ae203`; this entry adds exact-key
+accounting, not another implementation.
+
+The complete real-PowerShell transport test has identical ASTs in that
+merge and accepted comparison `5744f3de143fa41dca67be0437241e8e4d9cbe8b`.
+It retains the source's explicit `-X utf8` Python child arguments and UTF-8
+pipe decoding. Relative to the immutable source, the accepted test also
+sets `PYTHONUTF8=0` and asserts UTF-8 mode inside the actual child. This
+proves the command-line override rather than inheriting an enabling
+environment. The non-ASCII intent reaches the maximum request-byte bound,
+passes through the real encoded PowerShell command and base64 Python
+decoder, and must compare equal after the actual JSON stdout round trip.
+The original 20-second native timeout and hidden-process flag remain.
+
+The exact native consumer passes without skips: 1 case, 9.15 pytest
+seconds, 19.64 seconds including preparation and cleanup, exactly two
+contained Windows workers with existing marks and resource bounds.
+This is single-key functional evidence only, not complete-module,
+normal-group or repeated complete-plugin qualification. No runtime/test,
+retirement, CI, mark, selection-policy or deadline edit is needed.
+Attribution and other residual contracts remain separately owned and open.
+
 ### N-UTF8-AUTHORITY explicit native registration-child encoding
 
 This settles only `tests/test_pr_authority.py:1`, header
