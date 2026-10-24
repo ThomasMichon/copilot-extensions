@@ -2,6 +2,7 @@
 
 Parent: [effort](README.md).
 
+- [2026-10-24](journal/2026/10.24%20progress.md): Qualified no-restart recovery release and supported guest repair/update acceptance; remaining identity work stays active.
 - [2026-10-22](journal/2026/10.22%20progress.md): Fresh-source recovery, native acquisition and publication-boundary acceptance.
 - [2026-10-21](journal/2026/10.21%20progress.md): Windows repair, local-first intent and producer acceptance.
 - [2026-10-20](journal/2026/10.20%20progress.md): 13 preserved entries.
