@@ -125,7 +125,7 @@ class _ControlServer(socketserver.ThreadingTCPServer):
 
 class _ControlHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
-        current_read = False
+        current_read = None
         try:
             self.request.settimeout(_READ_TIMEOUT_S)
             raw = self.rfile.readline(256 * 1024)
@@ -153,9 +153,9 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             if not isinstance(payload, dict):
                 payload = {}
             owner = self.server.owner
-            if action == "worktrees-read":
-                owner._on_current_read_started()
-                current_read = True
+            if action in {"worktrees-read", "repos-map-read"}:
+                owner._on_current_read_started(action)
+                current_read = action
             if owner.stream_handle is not None and action == "worktrees-feed":
                 def disconnected():
                     readable, _, _ = select.select([self.request], [], [], 0)
@@ -187,7 +187,7 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             return
         finally:
             if current_read:
-                self.server.owner._on_current_read_finished()
+                self.server.owner._on_current_read_finished(current_read)
 
 
 class ControlServer:
@@ -204,7 +204,7 @@ class ControlServer:
         self._handle = handle
         self.stream_handle = stream_handle
         self._active_handlers = 0
-        self._current_read_handlers = 0
+        self._current_read_handlers: dict[str, int] = {}
         self._active_handlers_lock = threading.Lock()
         self.token = token or load_or_create_control_token()
         bind = (_BIND, int(port) if port is not None else 0)
@@ -242,17 +242,17 @@ class ControlServer:
         with self._active_handlers_lock:
             return self._active_handlers
 
-    def _on_current_read_started(self) -> None:
+    def _on_current_read_started(self, action: str = "worktrees-read") -> None:
         with self._active_handlers_lock:
-            self._current_read_handlers += 1
+            self._current_read_handlers[action] = self._current_read_handlers.get(action, 0) + 1
 
-    def _on_current_read_finished(self) -> None:
+    def _on_current_read_finished(self, action: str = "worktrees-read") -> None:
         with self._active_handlers_lock:
-            self._current_read_handlers -= 1
+            self._current_read_handlers[action] -= 1
 
-    def current_read_count(self) -> int:
+    def current_read_count(self, action: str = "worktrees-read") -> int:
         with self._active_handlers_lock:
-            return self._current_read_handlers
+            return self._current_read_handlers.get(action, 0)
 
 
 class ControlClient:
@@ -327,6 +327,14 @@ class ControlClient:
         return self._request(
             READ_ACTION, payload,
             max_response_bytes=MAX_ROW_BYTES + 16384 if point else None,
+            total_timeout=self.timeout,
+        )
+
+    def repositories_read(self, payload: dict) -> dict:
+        from .repository_map import MAX_RESPONSE_BYTES, READ_ACTION
+
+        return self._request(
+            READ_ACTION, payload, max_response_bytes=MAX_RESPONSE_BYTES,
             total_timeout=self.timeout,
         )
 

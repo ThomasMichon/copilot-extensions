@@ -1,6 +1,7 @@
 """Explicit native-policy RED witnesses for fresh Manager engine repair."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 import os
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,6 +26,249 @@ pytestmark = pytest.mark.skipif(
     reason="real installer/lifecycle policy lane; not promotion-unit evidence",
 )
 REAL_RUN = subprocess.run
+
+
+def _copy_fixture_tree(source, destination, **options):
+    if os.name != "nt":
+        return shutil.copytree(source, destination, **options)
+    import ctypes
+    from ctypes import wintypes
+
+    native = ctypes.WinDLL("kernel32", use_last_error=True).CopyFileW
+    native.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.BOOL]
+    native.restype = wintypes.BOOL
+    pending = []
+    directories = []
+    ignore = options.pop("ignore", None)
+
+    def defer_file(source, destination):
+        pending.append((source, destination))
+        return destination
+
+    def remember_directory(directory, names):
+        directories.append((
+            directory, Path(destination) / Path(directory).relative_to(source),
+        ))
+        return ignore(directory, names) if ignore else []
+
+    def copy_file(pair):
+        origin, target = pair
+        if not native(os.fspath(origin), os.fspath(target), False):
+            return (origin, target, str(ctypes.WinError(ctypes.get_last_error())))
+        return None
+
+    result = shutil.copytree(
+        source, destination, copy_function=defer_file, ignore=remember_directory, **options,
+    )
+    with ThreadPoolExecutor(max_workers=4) as copies:
+        errors = [error for error in copies.map(copy_file, pending) if error]
+    if errors:
+        raise shutil.Error(errors)
+    # Deferred file creation changes directory times; restore them only after joining.
+    for origin, target in reversed(directories):
+        shutil.copystat(origin, target)
+    return result
+
+
+def _remove_fixture_tree(root: Path) -> None:
+    if os.name != "nt":
+        shutil.rmtree(root)
+        return
+    script = textwrap.dedent("""
+        import os, stat, sys
+        from concurrent.futures import ThreadPoolExecutor
+        from pathlib import Path
+
+        directories, files = [], []
+
+        def collect(path):
+            state = path.lstat()
+            if state.st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                if state.st_file_attributes & stat.FILE_ATTRIBUTE_DIRECTORY:
+                    path.rmdir()
+                else:
+                    path.unlink()
+                return
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    if entry.is_dir(follow_symlinks=False):
+                        collect(Path(entry.path))
+                    else:
+                        files.append(entry.path)
+            directories.append(path)
+
+        collect(Path(sys.argv[1]))
+        with ThreadPoolExecutor(max_workers=4) as removals:
+            for _ in removals.map(os.unlink, files):
+                pass
+        for directory in directories:
+            directory.rmdir()
+    """)
+    environment = dict(os.environ)
+    for name in ("TMP", "TEMP", "TMPDIR"):
+        environment[name] = str(root.parent)
+    try:
+        subprocess.run(
+            [sys.executable, "-I", "-S", "-B", "-c", script, str(root)],
+            cwd=root.parent, env=environment,
+            capture_output=True, text=True, check=True, timeout=10, **no_window_kwargs(),
+        )
+    except subprocess.CalledProcessError as error:
+        print(error.stderr, file=sys.stderr, end="", flush=True)
+        raise
+
+
+def test_repair_fixture_removal_keeps_link_target(tmp_path):
+    root = tmp_path / "fixture [literal] \u00e9"
+    (root / "nested").mkdir(parents=True)
+    (root / "nested" / "payload").write_bytes(b"fixture")
+    (root / "empty").mkdir()
+    target = tmp_path / "outside-fixture"
+    target.mkdir()
+    sentinel = target / "preserved"
+    sentinel.write_bytes(b"outside")
+    try:
+        (root / "link").symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"symbolic links unavailable: {error}")
+    _remove_fixture_tree(root)
+    assert not root.exists()
+    assert sentinel.read_bytes() == b"outside"
+
+
+def test_repair_fixture_removal_does_not_hide_missing_root(tmp_path):
+    with pytest.raises((FileNotFoundError, subprocess.CalledProcessError)):
+        _remove_fixture_tree(tmp_path / "missing")
+
+
+def test_repair_fixture_removal_relocates_its_own_temporary_directory(tmp_path, monkeypatch):
+    root = tmp_path / "fixture"
+    temporary = root / "tmp"
+    temporary.mkdir(parents=True)
+    (temporary / "file").write_bytes(b"fixture")
+    for name in ("TMP", "TEMP", "TMPDIR"):
+        monkeypatch.setenv(name, str(temporary))
+    _remove_fixture_tree(root)
+    assert not root.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows fixture root-link cleanup")
+def test_repair_fixture_removal_keeps_target_when_root_is_link(tmp_path):
+    target = tmp_path / "outside-fixture"
+    target.mkdir()
+    sentinel = target / "preserved"
+    sentinel.write_bytes(b"outside")
+    root = tmp_path / "linked-fixture"
+    try:
+        root.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows symbolic-link privilege unavailable")
+        raise
+    _remove_fixture_tree(root)
+    assert not os.path.lexists(root)
+    assert sentinel.read_bytes() == b"outside"
+
+
+def test_repair_fixture_removal_surfaces_worker_failure(tmp_path):
+    if os.name != "nt":
+        pytest.skip("Windows bounded fixture removal")
+    root = tmp_path / "fixture"
+    root.mkdir()
+    blocked = root / "blocked"
+    blocked.write_bytes(b"retained")
+    blocked.chmod(0o400)
+    try:
+        with pytest.raises(subprocess.CalledProcessError) as error:
+            _remove_fixture_tree(root)
+        assert "PermissionError" in error.value.stderr
+        assert blocked.read_bytes() == b"retained"
+    finally:
+        blocked.chmod(0o600)
+
+
+def test_repair_fixture_copy_preserves_content_and_metadata(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    original = source / "fixture caf\u00e9.txt"
+    data = bytes(range(256))
+    original.write_bytes(data)
+    os.utime(original, ns=(1234567890000000000, 1234567890123456700))
+    before = original.stat()
+    copied = tmp_path / "copy with spaces"
+    _copy_fixture_tree(source, copied, symlinks=True)
+    actual = copied / original.name
+    assert actual.read_bytes() == data == original.read_bytes()
+    assert actual.stat().st_mtime_ns == before.st_mtime_ns
+    assert actual.stat().st_mode == before.st_mode
+    assert original.stat().st_mtime_ns == before.st_mtime_ns
+
+
+def test_repair_fixture_copy_does_not_hide_native_failure(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    original = source / "removed-after-enumeration"
+    original.write_text("fixture")
+
+    def remove_before_copy(directory, names):
+        original.unlink()
+        return []
+
+    with pytest.raises(shutil.Error, match="removed-after-enumeration"):
+        _copy_fixture_tree(source, tmp_path / "copy", ignore=remove_before_copy)
+    assert not (tmp_path / "copy" / original.name).exists()
+
+
+def test_repair_fixture_copy_preserves_tree_and_independent_files(tmp_path):
+    source = tmp_path / "source"
+    nested = source / "nested"
+    nested.mkdir(parents=True)
+    (source / "empty").mkdir()
+    original = nested / "payload"
+    original.write_bytes(b"complete fixture")
+    (source / "ignored").write_bytes(b"not selected")
+    os.utime(nested, ns=(1234567890000000000, 1234567890123456700))
+    before = nested.stat()
+    destination = tmp_path / "copy"
+    (destination / "nested").mkdir(parents=True)
+    (destination / "nested" / "payload").write_bytes(b"old")
+    (destination / "unrelated").write_bytes(b"retained")
+
+    _copy_fixture_tree(
+        source, destination, ignore=shutil.ignore_patterns("ignored"),
+        symlinks=True, dirs_exist_ok=True,
+    )
+
+    copied = destination / "nested" / "payload"
+    assert copied.read_bytes() == b"complete fixture"
+    assert (destination / "empty").is_dir()
+    assert not (destination / "ignored").exists()
+    assert (destination / "unrelated").read_bytes() == b"retained"
+    assert (destination / "nested").stat().st_mtime_ns == before.st_mtime_ns
+    assert (destination / "nested").stat().st_mode == before.st_mode
+    copied.write_bytes(b"independent")
+    assert original.read_bytes() == b"complete fixture"
+
+
+def test_repair_fixture_copy_preserves_links(tmp_path):
+    source = tmp_path / "source"
+    source.mkdir()
+    target = tmp_path / "outside"
+    target.mkdir()
+    sentinel = target / "sentinel"
+    sentinel.write_bytes(b"not copied through link")
+    try:
+        (source / "directory-link").symlink_to(target, target_is_directory=True)
+        (source / "file-link").symlink_to(sentinel)
+    except OSError as error:
+        pytest.skip(f"symbolic links unavailable: {error}")
+    destination = tmp_path / "copy"
+    _copy_fixture_tree(source, destination, symlinks=True)
+    assert (destination / "directory-link").is_symlink()
+    assert (destination / "file-link").is_symlink()
+    assert os.readlink(destination / "directory-link") == os.readlink(source / "directory-link")
+    assert os.readlink(destination / "file-link") == os.readlink(source / "file-link")
+    assert sentinel.read_bytes() == b"not copied through link"
 
 
 def _load(path: Path, name: str):
@@ -58,7 +303,7 @@ def repair_case(
             "engine_repair_fixture_leases",
         )
         descriptor = leases._windows_private_lease_file(tmp_path.parent, root, "root-fixture")
-        temporary.callback(shutil.rmtree, root)
+        temporary.callback(_remove_fixture_tree, root)
         os.close(descriptor)
     else:
         root = Path(temporary.enter_context(
@@ -82,6 +327,7 @@ def repair_case(
     }.items():
         Path(value).mkdir(parents=True, exist_ok=True)
         monkeypatch.setenv(key, str(value))
+    monkeypatch.setattr(tempfile, "tempdir", str(root / "tmp"))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.chdir(home)
     temporary.callback(os.chdir, previous_cwd)
@@ -125,8 +371,15 @@ def repair_case(
     ignore = shutil.ignore_patterns(
         "tests", "__pycache__", "*.pyc", "*.pyo", ".git", ".test-venvs", "*.egg-info",
     )
-    shutil.copytree(PLUGIN, fresh, ignore=ignore, symlinks=True)
-    shutil.copytree(REPO / "libs", source / "libs", ignore=ignore, symlinks=True)
+    copies = temporary.enter_context(ThreadPoolExecutor(max_workers=2))
+    source_copies = [
+        copies.submit(_copy_fixture_tree, PLUGIN, fresh, ignore=ignore, symlinks=True),
+        copies.submit(
+            _copy_fixture_tree, REPO / "libs", source / "libs", ignore=ignore, symlinks=True,
+        ),
+    ]
+    for future in source_copies:
+        future.result()
     policy = source / "worktree-manager/scripts"
     policy.mkdir(parents=True)
     shutil.copy2(REPO / "worktree-manager/scripts/update_entry.py", policy / "update_entry.py")
@@ -156,9 +409,14 @@ def repair_case(
         encoding="utf-8",
     )
     incumbent = home / ".copilot/installed-plugins/fixture/agent-worktrees"
-    shutil.copytree(fresh, incumbent, symlinks=True)
     published = root / "registered-payload"
-    shutil.copytree(incumbent, published, symlinks=True)
+    # Both initial payloads precede every ownership or damage mutation.
+    payload_copies = [
+        copies.submit(_copy_fixture_tree, fresh, destination, symlinks=True)
+        for destination in (incumbent, published)
+    ]
+    for future in payload_copies:
+        future.result()
     cli = tools / ("copilot.exe" if os.name == "nt" else "copilot")
     cli.write_text("synthetic acquisition executable; never launched\n", encoding="utf-8")
     cli.chmod(0o700)
@@ -182,7 +440,7 @@ def repair_case(
         assert command[-3:] == ["plugin", "update", "agent-worktrees@fixture"]
         assert environment["COPILOT_HOME"] == str(home / ".copilot")
         acquisitions.append(list(command))
-        shutil.copytree(published, incumbent, symlinks=True, dirs_exist_ok=True)
+        _copy_fixture_tree(published, incumbent, symlinks=True, dirs_exist_ok=True)
         return subprocess.CompletedProcess(command, 0, "updated successfully, already at latest", "")
 
     monkeypatch.setattr(engine_origin, "_native_acquisition", acquire_registered_payload)
@@ -274,6 +532,14 @@ def _legacy_publication(case: SimpleNamespace) -> bytes:
     manifest["source"] = {"kind": "marketplace", "path": str(case.incumbent)}
     case.manifest.write_text(json.dumps(manifest), encoding="utf-8")
     return case.manifest.read_bytes()
+
+
+@pytest.mark.parametrize("iteration", ["first", "next"])
+def test_repair_fixture_owns_python_temporary_directory(repair_case, iteration):
+    expected = repair_case.home.parent / "tmp"
+    assert Path(tempfile.gettempdir()) == expected
+    with tempfile.TemporaryDirectory(prefix=f"{iteration}-") as temporary:
+        assert Path(temporary).parent == expected
 
 
 def test_legacy_source_owner_capture_is_readonly_before_acquisition(
@@ -374,6 +640,8 @@ def test_repair_engine_marketplace_incumbent_reaches_canonical_construction(repa
     script = "scripts/install.ps1" if os.name == "nt" else "scripts/install.sh"
     assert str(case.incumbent / script) in command
     assert "update" in command
+    assert "-ProvisionMissingRuntime" not in command
+    assert "--provision-missing-runtime" not in command
     assert len(case.acquisitions) == 1
 
 
@@ -397,7 +665,11 @@ def test_repair_engine_missing_bin_selects_constructing_action_after_admission(r
         assert not (case.runtime / "bin").exists()
         rc = case.update.repair_engine(case.source)
     assert case.effect.is_file(), _diagnostic(case, rc)
-    assert "provision" in case.calls[-1][0]
+    command = case.calls[-1][0]
+    assert "update" in command and "provision" not in command
+    flag = "-ProvisionMissingRuntime" if os.name == "nt" else "--provision-missing-runtime"
+    assert flag in command
+    assert len(case.calls) == 1
 
 
 def test_repair_engine_supported_lifecycle_install_control_reaches_boundary(repair_case):
@@ -417,6 +689,31 @@ def test_repair_engine_supported_lifecycle_install_control_reaches_boundary(repa
     assert case.effect.is_file(), _diagnostic(case, result.returncode)
     assert json.loads(case.effect.read_text())["boundary"] == "engine.numbered_candidate"
     assert result.returncode != 0, "fenced construction must not claim full repair success"
+
+
+@pytest.mark.parametrize(
+    "host_name", ["powershell.exe", "pwsh"] if os.name == "nt" else ["bash"],
+)
+def test_admitted_native_update_can_construct_a_missing_runtime(repair_case, host_name):
+    case = repair_case
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    command = [host]
+    if os.name == "nt":
+        command += ["-NoProfile", "-NonInteractive", "-File"]
+    suffix = "install.ps1" if os.name == "nt" else "install.sh"
+    command += [
+        str(case.fresh / "scripts" / suffix), "update",
+        "-InstallDir" if os.name == "nt" else "--install-dir", str(case.runtime),
+        "-ProvisionMissingRuntime" if os.name == "nt" else "--provision-missing-runtime",
+    ]
+    with case.admitted_incumbent():
+        assert not (case.runtime / "bin").exists()
+        result = case.execute(command, env=dict(os.environ), **no_window_kwargs())
+    assert (case.runtime / "bin").is_dir()
+    assert case.effect.is_file(), _diagnostic(case, result.returncode)
+    assert result.returncode != 0, "the construction fence must still report failure"
 
 
 def test_repair_engine_unsealed_origin_hint_does_not_bypass_ownership(repair_case, monkeypatch):
@@ -493,7 +790,7 @@ def test_repair_engine_scoped_context_never_falls_back_to_shared_root(repair_cas
     assert case.manifest.read_bytes() == before
 
 
-def test_repair_engine_partial_success_resumes_normal_update(repair_case, monkeypatch):
+def test_repair_engine_missing_bin_completes_one_update_lifecycle(repair_case, monkeypatch):
     case = repair_case
     observed = case.update._wait
     phases = []
@@ -503,16 +800,131 @@ def test_repair_engine_partial_success_resumes_normal_update(repair_case, monkey
         rc = observed(command, environment, cwd)
         assert rc != 0
         assert case.effect.is_file(), _diagnostic(case, rc)
-        phases.append("provision" if "provision" in command else "update")
+        assert "update" in command and "provision" not in command
+        phases.append("update")
         # Only the already-reached construction effect's result is simulated;
         # admission and the native action/dir-creation policy above were real.
         return 0
 
     monkeypatch.setattr(case.update, "_wait", successful_construction_effect)
     assert case.update.repair_engine(case.source) == 0
-    assert phases == ["provision", "update"]
+    assert phases == ["update"]
     assert (case.runtime / "bin").is_dir()
     assert json.loads(case.manifest.read_text())["commandBinding"] == case.receipt
+
+
+@pytest.mark.parametrize("scenario", ["unadmitted", "forged", "wrong-action", "no-root", "context"])
+def test_missing_bin_option_requires_existing_legacy_update_admission(repair_case, scenario):
+    case = repair_case
+    suffix = "install.ps1" if os.name == "nt" else "install.sh"
+    host = (shutil.which("pwsh") or shutil.which("powershell.exe")) if os.name == "nt" else shutil.which("bash")
+    command = [host]
+    if os.name == "nt":
+        command += ["-NoProfile", "-NonInteractive", "-File"]
+    command += [str(case.fresh / "scripts" / suffix),
+                "provision" if scenario == "wrong-action" else "update"]
+    if scenario != "no-root":
+        command += ["-InstallDir" if os.name == "nt" else "--install-dir", str(case.runtime)]
+    command += ["-ProvisionMissingRuntime" if os.name == "nt" else "--provision-missing-runtime"]
+    environment = dict(os.environ)
+    if scenario != "unadmitted":
+        environment["COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"] = "{}"
+        environment["COPILOT_PLUGIN_STAGED_FROM"] = str(case.incumbent)
+    if scenario == "context":
+        environment["COPILOT_EXTENSIONS_CONTEXT"] = str(case.home / "unbound/install.json")
+    before = case.manifest.read_bytes()
+    result = case.execute(command, env=environment, **no_window_kwargs())
+    assert result.returncode != 0
+    assert not (case.runtime / "bin").exists()
+    assert not case.effect.exists()
+    assert case.manifest.read_bytes() == before
+    if scenario != "forged":
+        assert "admitted legacy update" in result.stdout + result.stderr
+
+
+def test_normal_update_does_not_provision_a_missing_bin_implicitly(repair_case):
+    case = repair_case
+    suffix = "install.ps1" if os.name == "nt" else "install.sh"
+    host = (shutil.which("pwsh") or shutil.which("powershell.exe")) if os.name == "nt" else shutil.which("bash")
+    command = [host]
+    if os.name == "nt":
+        command += ["-NoProfile", "-NonInteractive", "-File"]
+    command += [str(case.fresh / "scripts" / suffix), "update",
+                "-InstallDir" if os.name == "nt" else "--install-dir", str(case.runtime)]
+    with case.admitted_incumbent():
+        before = case.manifest.read_bytes()
+        result = case.execute(command, env=dict(os.environ), **no_window_kwargs())
+        assert case.manifest.read_bytes() == before
+    assert result.returncode != 0
+    assert "Not installed" in result.stdout + result.stderr
+    assert not (case.runtime / "bin").exists()
+    assert not case.effect.exists()
+
+
+def test_repair_missing_bin_option_preserves_a_file_created_before_native_entry(
+    repair_case, monkeypatch,
+):
+    case = repair_case
+    observed = case.update._wait
+    bin_path = case.runtime / "bin"
+
+    def substitute_bin(command, environment, cwd):
+        bin_path.write_bytes(b"retained ordinary file")
+        return observed(command, environment, cwd)
+
+    monkeypatch.setattr(case.update, "_wait", substitute_bin)
+    assert case.update.repair_engine(case.source) != 0
+    assert bin_path.read_bytes() == b"retained ordinary file"
+    assert not case.effect.exists()
+
+
+def test_repair_missing_bin_option_preserves_a_link_created_before_native_entry(
+    repair_case, monkeypatch,
+):
+    case = repair_case
+    observed = case.update._wait
+    bin_path = case.runtime / "bin"
+    target = case.home.parent / "outside-runtime"
+    target.mkdir()
+    sentinel = target / "preserved"
+    sentinel.write_bytes(b"outside")
+
+    def substitute_bin(command, environment, cwd):
+        try:
+            bin_path.symlink_to(target, target_is_directory=True)
+        except OSError as error:
+            if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+                pytest.skip("Windows symbolic-link privilege unavailable")
+            raise
+        return observed(command, environment, cwd)
+
+    monkeypatch.setattr(case.update, "_wait", substitute_bin)
+    assert case.update.repair_engine(case.source) != 0
+    assert bin_path.is_symlink()
+    assert sentinel.read_bytes() == b"outside"
+    assert not case.effect.exists()
+
+
+def test_missing_bin_repair_retains_its_git_prerequisite(repair_case, monkeypatch):
+    case = repair_case
+    tools = case.home.parent / "broken-git"
+    tools.mkdir()
+    git = tools / ("git.cmd" if os.name == "nt" else "git")
+    git.write_text("@exit /b 17\r\n" if os.name == "nt" else "#!/bin/sh\nexit 17\n")
+    git.chmod(0o700)
+    observed = case.update._wait
+
+    def failed_git(command, environment, cwd):
+        child = {**environment, "PATH": str(tools) + os.pathsep + environment["PATH"]}
+        return observed(command, child, cwd)
+
+    monkeypatch.setattr(case.update, "_wait", failed_git)
+    assert case.update.repair_engine(case.source) != 0
+    assert not (case.runtime / "bin").exists()
+    assert not case.effect.exists()
+    assert "Missing prerequisite: git" in (
+        case.calls[-1][1].stdout + case.calls[-1][1].stderr
+    )
 
 
 def test_repair_engine_invalid_bin_is_not_removed_or_reinstalled(repair_case):

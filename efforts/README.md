@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Bounded Passive Git Observation](active/bounded-passive-git-observation/README.md) | Draft; reviewed R1 deadline/R2 passive fsmonitor proposal, implementation admission pending | #7944/#7945; preserves roster/publication, resident-control/storage and broader #2619/#6086 ownership; no rollout |
 | [Repository Agent Exposure Policy](active/repository-agent-exposure-policy/README.md) | Active; implementation authorized, standing-intent review first | #8332; repository-owned hosting veto, source-only workflows and external Code Review preserved |
 | [Ready Resident Prompt Receipt](active/ready-resident-prompt-receipt/README.md) | Active; delivery/control source slice, qualified backend and subject delivery remain gated | #7942; preserves receipt/roster owners and prohibits helper/lifecycle fallbacks |
 | [Bridge Retained Runtime Restoration](active/bridge-retained-runtime-restoration/README.md) | Active; #8179 proposal merged, bounded DB/storage foundation in source review; full Phase 1 open | #8063; specializes #7268 without substituting for Dispatch/adopter acknowledgement; no rollout |
@@ -25,7 +26,7 @@ that pattern to this repository.
 | [Feed Construction Release Gate](active/feed-construction-release-gate/README.md) | Active; source-owner census merged and one disposable cold construction/CLI diagnostic passed; full environment/profile/native and CI/promotion qualification open | #7529; preserves #3336/#6237 control and #7420/#7446/#7514 repair owners |
 | [Acknowledged Execution Handoff](active/acknowledged-execution-handoff/README.md) | Active; source/test scope assigned, optional effect adapter construction first | #7268; coordinator integration and live adoption remain open |
 | [Remote ACP Host Ownership](active/remote-acp-host-ownership/README.md) | Active; proposal and target-contribution prerequisite merged, qualified relationship claim integration next | #7237; existing session, claims and dispatch owners retained |
-| [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Active; core/client/host source delivered, collaboration contract proposed; native/setup/lifecycle qualification remains open | #7238; existing fleet, service and session-host owners retained |
+| [Agent Chat Graduation](active/agent-chat-graduation/README.md) | Active; portable collaboration merged; standard setup adapter derivation proposed, native/lifecycle graduation open | #7238; scoped Chat adapter changes, existing fleet/service/session-host owners retained |
 | [Conventional Fleet Connectivity](active/conventional-fleet-connectivity/README.md) | Active; plan reviewed, conventional source discovery first; direct refresh and Bridge derivation pending | #7206 under #63; preserves identity, profile and listing owners |
 | [Dispatch Extension Catalog](active/dispatch-extension-catalog/README.md) | Active; execution authorized, amended-plan review precedes templates, mapped sources and client semantic parity | #7091; preserves #6379/#4959/#6283 owners |
 | [Trusted Linux CI Offload](active/trusted-linux-ci-offload/README.md) | Active; pure existing-row backend selector/tests implemented; CI integration after #7164 and qualification/activation pending | #7122; preserves #6237/#3336/#1303 owners |
@@ -129,6 +130,7 @@ that pattern to this repository.
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
+| [Persistent Installer Diagnostics](active/persistent-installer-diagnostics/README.md) | Draft; durable native attempt logs and non-blocking upstream coordination | #8370; independent diagnostics delivery, separately qualified #6859 continuation |
 | [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
 | [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Active; proposal merged, native adapters and Windows/Linux execution proof before inheritance remain open | #5708; preserves #7069/#6987/#5839/#7057 owners |
 

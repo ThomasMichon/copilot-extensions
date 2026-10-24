@@ -1068,6 +1068,10 @@ read-only query. `--no-manager` still uses the same execution authority.
 `--recovery-status` reports restart-confirmed settlement availability;
 `--recover-after-restart` settles only old-boot interrupted work without
 replaying it. Both support `--json` and need no project.
+`--recover-for-repair [--json]` is a separate explicit operator authorization to
+release valid queue fences without historical cleanup proof; it runs no
+installation. The [shared recovery contract](../../../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+defines its scope and distinguishes authorization from native settlement.
 The [Manager reference](../../../worktree-manager/README.md#durable-update-execution)
 defines the shared lifetime, output, interruption and migration boundary.
 

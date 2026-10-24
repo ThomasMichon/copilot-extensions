@@ -257,7 +257,7 @@ def test_foundation_admission_allows_positively_settled_queue_failure(space):
     with sqlite3.connect(space / "queue.sqlite3") as db:
         db.execute(
             """UPDATE requests SET state='interrupted',started_at=1,finished_at=2,
-            boot_id=?,settled_boot_id=?,settled_at=3 WHERE id=?""",
+            boot_id=?,settled_boot_id=?,settled_at=3,settlement_kind='kernel_restart' WHERE id=?""",
             (BOOT, NEXT_BOOT, queued.id),
         )
     with custody(space) as owned:

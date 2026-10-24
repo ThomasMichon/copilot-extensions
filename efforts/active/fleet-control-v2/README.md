@@ -307,7 +307,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   including independent slow-sync refresh and initial exact-plan confirmation
   for ordinary as well as major deployment changes.
 - [ ] Supply Gateway configuration subscription and approved self-update,
-  with local validation/approval of major changes rather than private-repo CI.
+  with paired-source refresh, deployment notifications and initial exact-plan
+  confirmation for ordinary as well as major changes, rather than relying on
+  private-repo CI or treating a source merge as activation consent.
 - [ ] Compose an installed authenticated credential responder through the
   existing credential owner's lifecycle; maintain its channel independently
   of an interactive client invocation.
@@ -483,6 +485,10 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 
 ### 2026-10-23 - Interactive bootstrap and source-authority clarification
 
+- The intent amendment actually merged in #8353 as
+  `c4a6e79943d0756766a8562c32e882958b7f766b` after current-head approval
+  and required CI. Runtime implementation and every new bootstrap validation
+  obligation remain open; this is reviewed intent, not delivered setup.
 - Captured the operator's revised authority model in
   [the bootstrap amendment](bootstrap-and-authority.md), with provider-specific
   adapter names abstracted for this public repository. Public-safe wording is
