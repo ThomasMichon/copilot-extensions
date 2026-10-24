@@ -104,7 +104,7 @@ def test_snapshot_cancel_cleans_only_owned_paths(tmp_path):
 
 def test_snapshot_detects_retained_mutation(tmp_path):
     paths, hashes = inputs(tmp_path)
-    with pytest.raises(ValueError, match="changed|digest"):
+    with pytest.raises((ValueError, PermissionError), match="changed|digest|denied"):
         with retain(paths, hashes) as snapshot:
             path = next(iter(snapshot.paths.values()))
             path.chmod(0o600)
@@ -150,7 +150,7 @@ def test_snapshot_refuses_mutation_of_earlier_source(tmp_path, monkeypatch):
         return original(path)
 
     monkeypatch.setattr(snapshots, "_open", changed)
-    with pytest.raises(ValueError, match="changed"):
+    with pytest.raises((ValueError, PermissionError), match="changed|denied"):
         with retain(paths, hashes):
             pytest.fail("earlier source changed before exact set was retained")
 
@@ -173,6 +173,56 @@ def test_snapshot_compares_change_time_only_between_handle_stats(tmp_path, monke
         lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns),
     )
     monkeypatch.setattr(snapshots.os, "fstat", lambda fd: HandleStat(original(fd)))
+    with retain(paths, hashes) as snapshot:
+        snapshot.verify()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows read-sharing custody")
+def test_windows_snapshot_denies_writes_and_replacement_but_allows_readers(tmp_path):
+    paths, hashes = inputs(tmp_path)
+    with retain(paths, hashes) as snapshot:
+        path = next(iter(snapshot.paths.values()))
+        subprocess.run(
+            [sys.executable, "-I", "-S", "-c",
+             "import pathlib,sys; assert pathlib.Path(sys.argv[1]).read_bytes()", str(path)],
+            check=True, capture_output=True, timeout=10, creationflags=policy._HEADLESS,
+        )
+        snapshot.verify()
+        with pytest.raises(PermissionError):
+            path.chmod(0o600)
+            path.write_bytes(b"other")
+        replacement = tmp_path / "replacement"
+        replacement.write_bytes(b"other")
+        with pytest.raises(PermissionError):
+            os.replace(replacement, path)
+        snapshot.verify()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows access-time metadata")
+def test_windows_read_guard_does_not_treat_access_metadata_as_byte_mutation(tmp_path, monkeypatch):
+    paths, hashes = inputs(tmp_path)
+    original = os.fstat
+
+    class AccessUpdate:
+        def __init__(self, info):
+            self.info = info
+            self.st_ctime_ns = info.st_ctime_ns + 1
+
+        def __getattr__(self, name):
+            return getattr(self.info, name)
+
+    with retain(paths, hashes) as snapshot:
+        with monkeypatch.context() as patch:
+            patch.setattr(snapshots.os, "fstat", lambda fd: AccessUpdate(original(fd)))
+            snapshot.verify()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length file opens")
+def test_windows_read_guard_preserves_long_input_paths(tmp_path):
+    directory = tmp_path / ("long-" + "x" * 180)
+    directory.mkdir()
+    paths, hashes = inputs(directory)
+    assert all(len(str(path)) > 260 for path in paths.values())
     with retain(paths, hashes) as snapshot:
         snapshot.verify()
 
@@ -233,7 +283,7 @@ def test_snapshot_partial_failure_cleanup(tmp_path, monkeypatch, failure):
     monkeypatch.setattr(policy, "_private_retained_root", root)
     monkeypatch.setattr(snapshots, "_open", opened)
     monkeypatch.setattr(snapshots, "_check_deadline", deadline)
-    with pytest.raises((ValueError, OSError), match="budget|failure|deadline"):
+    with pytest.raises((ValueError, OSError), match="budget|failure|deadline|denied"):
         with retain(paths, hashes):
             pytest.fail("partial copy admitted")
     assert roots and all(not path.exists() for path in roots)

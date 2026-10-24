@@ -22,9 +22,11 @@ import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
     DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained,
-    _select_uv_executable, retain_uv_install,
+    _private_retained_root, _select_uv_executable, _temporary_inputs,
+    retain_closed_wheel_install, retain_uv_install,
 )
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
+from installer_wheel_snapshot import WheelInstallInputs
 
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
@@ -41,6 +43,7 @@ class FrozenInputs:
     retained_hash: str | None = None
     extras: tuple[str, ...] = ()
     local_packages: tuple[str, ...] | None = None
+    wheel_inputs: WheelInstallInputs | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +100,15 @@ def _construction_hash(
     return hashlib.sha256(json.dumps({
         "schema": "installer-engine.dependency-profile", "version": 1,
         **profile,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | None) -> str:
+    if wheels is None:
+        return source_hash
+    return hashlib.sha256(json.dumps({
+        "schema": "installer-engine.closed-wheel-inputs", "version": 1,
+        "source_hash": source_hash, "wheel_inputs": wheels.receipt(),
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
@@ -273,6 +285,23 @@ def _procutil(inputs: FrozenInputs) -> ModuleType:
 
 @contextmanager
 def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool):
+    if inputs.wheel_inputs is not None:
+        if refresh:
+            raise ValueError("Closed wheels require immutable numbered construction")
+        with _temporary_inputs(None) as temporary:
+            root = _private_retained_root(Path(temporary)).resolve()
+            frozen = freeze_inputs(inputs.plugin, root / "source")
+            if _wheel_construction_hash(
+                _construction_hash(_source_files(frozen.packages), inputs.extras, inputs.local_packages),
+                inputs.wheel_inputs,
+            ) != inputs.payload_hash:
+                raise RuntimeError("Runtime source changed before closed wheel construction")
+            with retain_closed_wheel_install(str(uv), inputs.wheel_inputs.snapshot, python=python) as transaction:
+                yield FrozenInputs(
+                    frozen.plugin, frozen.packages, inputs.payload_hash, transaction,
+                    frozen.payload_hash, inputs.extras, inputs.local_packages, inputs.wheel_inputs,
+                )
+        return
     files = _source_files(inputs.packages)
     environment = dict(os.environ)
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
@@ -363,6 +392,14 @@ def _child(
 
 
 def _input_origins(inputs: FrozenInputs) -> dict[str, str]:
+    if inputs.wheel_inputs is not None:
+        return {
+            name: (
+                inputs.wheel_inputs.snapshot.paths[filename].as_uri()
+                + "#sha256=" + digest.removeprefix("sha256:")
+            )
+            for name, _version, filename, digest in inputs.wheel_inputs.distributions
+        }
     return {
         tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]:
         root.as_uri() for root in _installed_packages(inputs)
@@ -381,6 +418,7 @@ def _verify_installed(
         )
     origins = _input_origins(inputs)
     excluded = _excluded_packages(inputs)
+    wheel_receipt = inputs.wheel_inputs.receipt() if inputs.wheel_inputs is not None else None
     probe = """
 import importlib, importlib.metadata, json, pathlib, sys
 slot = pathlib.Path(sys.argv[1]).resolve()
@@ -394,16 +432,19 @@ expected_origins = json.loads(sys.argv[3])
 expected_extras = json.loads(sys.argv[6])
 expected_selection = json.loads(sys.argv[7])
 excluded_packages = json.loads(sys.argv[8])
+expected_wheels = json.loads(sys.argv[9])
 proof = slot / ".runtime-input-origins.json"
 assert not proof.is_symlink(), "frozen origin evidence is a symlink"
-if sys.argv[5] == "fresh" or expected_extras or expected_selection is not None:
+if sys.argv[5] == "fresh" or expected_extras or expected_selection is not None or expected_wheels is not None:
     assert proof.is_file(), "fresh runtime has no frozen origin evidence"
 recorded_origins = None
 if proof.exists():
     receipt = json.loads(proof.read_text(encoding="utf-8"))
     assert receipt["schema"] == "installer-engine.frozen-input-origins" and \
-        type(receipt["version"]) is int and receipt["version"] == 1, \
+        type(receipt["version"]) is int and receipt["version"] == (2 if expected_wheels is not None else 1), \
         "frozen origin evidence has an unsupported schema"
+    assert receipt.get("wheel_inputs") == expected_wheels, \
+        "frozen origin evidence differs from the selected wheel inputs"
     recorded_origins = receipt["packages"]
     assert receipt.get("extras", []) == expected_extras, \
         "frozen origin evidence differs from the selected dependency profile"
@@ -413,13 +454,33 @@ if proof.exists():
         "frozen origin evidence does not cover the dependency graph"
     if sys.argv[5] == "fresh":
         assert recorded_origins == expected_origins, "frozen origin evidence differs from construction"
+if expected_wheels is not None:
+    import re
+    installed = [
+        re.sub(r"[-_.]+", "-", distribution.metadata["Name"]).lower()
+        for distribution in importlib.metadata.distributions()
+    ]
+    assert len(installed) == len(set(installed)) and set(installed) == set(expected_origins), \
+        "installed distribution set differs from the complete wheel closure"
 for name, expected in expected_origins.items():
     distribution = importlib.metadata.distribution(name)
     assert pathlib.Path(distribution.locate_file("")).resolve().is_relative_to(slot), \
         f"{name} metadata is outside the candidate runtime"
     origin = json.loads(distribution.read_text("direct_url.json") or "{}")
-    assert origin.get("dir_info") == {"editable": False} or \
-        origin.get("dir_info") == {}, f"{name} is not a non-editable local installation"
+    if expected_wheels is not None:
+        wheel = expected_wheels["distributions"][name]
+        assert distribution.version == wheel["version"], f"{name} installed version differs from inspected metadata"
+        archive = origin.get("archive_info")
+        digest = wheel["sha256"].removeprefix("sha256:")
+        assert "dir_info" not in origin and isinstance(archive, dict) and \
+            set(archive) <= {"hash", "hashes"} and \
+            archive.get("hash", "sha256=" + digest) == "sha256=" + digest and \
+            (archive == {} or archive.get("hashes") == {"sha256": digest}) and \
+            str(origin.get("url", "")).endswith("#sha256=" + digest), \
+            f"{name} was not installed from the inspected wheel archive"
+    else:
+        assert origin.get("dir_info") == {"editable": False} or \
+            origin.get("dir_info") == {}, f"{name} is not a non-editable local installation"
     if sys.argv[5] == "fresh":
         assert origin.get("url") == expected, f"{name} was not installed from frozen input"
     elif recorded_origins is not None:
@@ -440,7 +501,8 @@ for name in excluded_packages:
         _child(
             [str(python), "-I", "-B", "-c", probe, str(slot), module, json.dumps(origins),
              health_callable or "", "fresh" if require_frozen_origin else "reuse",
-             json.dumps(inputs.extras), json.dumps(inputs.local_packages), json.dumps(excluded)],
+             json.dumps(inputs.extras), json.dumps(inputs.local_packages), json.dumps(excluded),
+             json.dumps(wheel_receipt)],
             inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         )
     except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
@@ -471,6 +533,8 @@ def _construct(
     transaction = inputs.transaction
     if transaction is None:
         raise RuntimeError("Runtime construction requires the canonical retained UV transaction")
+    if inputs.wheel_inputs is not None:
+        inputs.wheel_inputs.verify()
     _child(
         list(transaction.argv),
         inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
@@ -479,6 +543,8 @@ def _construct(
     )
     if runtime.fingerprint_source(_source_files(inputs.packages)) != inputs.retained_hash:
         raise RuntimeError("Frozen runtime inputs changed during package construction")
+    if inputs.wheel_inputs is not None:
+        inputs.wheel_inputs.verify()
     return python
 
 
@@ -539,6 +605,7 @@ def numbered_candidate(
     expected_source_identity: dict | None = None,
     extras: tuple[str, ...] = (),
     local_packages: tuple[str, ...] | None = None,
+    wheel_inputs: WheelInstallInputs | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     """Construct or reuse an immutable identity; lifecycle owns cutover/governance."""
@@ -552,6 +619,7 @@ def numbered_candidate(
         expected_source_identity=expected_source_identity,
         extras=extras,
         local_packages=local_packages,
+        wheel_inputs=wheel_inputs,
         wait_timeout=wait_timeout, child_timeout=child_timeout,
     )
 
@@ -578,20 +646,32 @@ def _candidate(
     expected_source_identity: dict | None = None,
     extras: tuple[str, ...] = (),
     local_packages: tuple[str, ...] | None = None,
+    wheel_inputs: WheelInstallInputs | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     root = root.resolve()
     _assert_source_pin(plugin, expected_source_identity)
     extras = _selected_extras(plugin, extras)
-    if dev_owner is not None and (extras or local_packages is not None):
+    if dev_owner is not None and (extras or local_packages is not None or wheel_inputs is not None):
         raise ValueError("Dependency profiles require an immutable numbered runtime")
     packages = _package_roots(plugin)
     local_packages = _selected_local_packages(plugin, packages, local_packages)
+    if wheel_inputs is not None:
+        if not isinstance(wheel_inputs, WheelInstallInputs):
+            raise ValueError("Closed construction requires inspected wheel inputs")
+        wheel_inputs.verify()
+        included = {_package_name(package) for package in packages}
+        selected = set(local_packages) if local_packages is not None else included
+        installed = {name for name, _version, _filename, _digest in wheel_inputs.distributions}
+        if not selected <= installed or (included - selected) & installed:
+            raise ValueError("Inspected wheels differ from the selected local dependency graph")
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     inputs = FrozenInputs(
         plugin.resolve(strict=True), packages,
-        _construction_hash(_source_files(packages), extras, local_packages),
-        extras=extras, local_packages=local_packages,
+        _wheel_construction_hash(
+            _construction_hash(_source_files(packages), extras, local_packages), wheel_inputs,
+        ),
+        extras=extras, local_packages=local_packages, wheel_inputs=wheel_inputs,
     )
     with ExitStack() as retained:
         if dev_owner is not None:
@@ -657,8 +737,11 @@ def _candidate(
                     if origin_proof.is_symlink():
                         raise RuntimeError("Frozen installation origin evidence cannot be a symlink")
                     origin_proof.write_text(json.dumps({
-                        "schema": "installer-engine.frozen-input-origins", "version": 1,
+                        "schema": "installer-engine.frozen-input-origins",
+                        "version": 2 if inputs.wheel_inputs is not None else 1,
                         "packages": _input_origins(inputs),
+                        **({"wheel_inputs": inputs.wheel_inputs.receipt()}
+                           if inputs.wheel_inputs is not None else {}),
                         **({"extras": list(inputs.extras)} if inputs.extras else {}),
                         **({"local_packages": list(inputs.local_packages)}
                            if inputs.local_packages is not None else {}),
@@ -685,6 +768,8 @@ def _candidate(
                         inputs, slot, python, health_module, descriptor, child_timeout,
                         health_callable=health_callable,
                     )
+                    if inputs.wheel_inputs is not None:
+                        inputs.wheel_inputs.verify()
                     _assert_source_pin(plugin, expected_source_identity)
                     if dev_owner is not None:
                         _check_dev_owner(root, dev_owner)

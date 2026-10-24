@@ -87,12 +87,26 @@ verifier. Call `snapshot.verify()` before a dependent publication boundary;
 normal context exit also rechecks custody, then closes streams and removes only
 owned copies. Caller files need not remain unchanged after the snapshot yields.
 The expected SHA-256 map is byte evidence, not authenticated profile/feed policy.
+Windows controls additionally prove read-sharing permits independent readers
+but denies writes/replacement, handles access-time-only metadata updates without
+a false byte-mutation refusal, and preserves extended-length input paths.
 
 Fresh/cache parity, exact inclusive budgets, pre-open replacement, mutation of an
 earlier source, growth during copying, read/write errors, final-EOF deadline,
 retained mutation, cancellation cleanup and an actual `-I -S` bootstrap child
 are exercised in the same optional `wheel_inputs=true` native lane. No resolver,
 backend, venv constructor or production profile consumer is enabled by this API.
+
+`tools/test_installer_closed_wheels.py` extends that same optional native lane
+through the actual existing candidate constructor. Fresh independent venvs
+consume an inspected transitive wheel closure without ambient configuration,
+network, cache, dependency resolution or builds. The tests check installed
+health and exact distribution/origin receipts, PEP 440 version aliases,
+unchanged cached-byte reuse without reconstruction, changed binding refusal,
+installed receipt/closure corruption, and preservation of the selected prior
+after health failure or cancellation. These are real local first-touch and
+consumer-contract controls, not an authenticated approval/feed adapter or
+production consumer activation.
 
 ## Optional Dispatch service replay
 

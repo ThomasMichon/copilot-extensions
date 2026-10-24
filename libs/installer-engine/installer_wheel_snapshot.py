@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -28,12 +29,15 @@ def retain_wheel_inputs(archives, expected, **limits):
 
 def _unchanged(path, before, stream, *, opened=None):
     after = os.fstat(stream.fileno())
-    if (
-        _identity(after) != _identity(before)
-        or (opened is not None and after.st_ctime_ns != opened.st_ctime_ns)
-        or _identity(_ordinary(path)) != _identity(before)
-    ):
-        raise WheelError("wheel snapshot input changed")
+    changed = []
+    if _identity(after) != _identity(before):
+        changed.append("handle identity")
+    if os.name != "nt" and opened is not None and after.st_ctime_ns != opened.st_ctime_ns:
+        changed.append("handle change time")
+    if _identity(_ordinary(path)) != _identity(before):
+        changed.append("path identity")
+    if changed:
+        raise WheelError("wheel snapshot input changed: " + ", ".join(changed))
     return after
 
 
@@ -59,6 +63,37 @@ def _digest(stream, limit, deadline, destination=None):
 
 
 def _open(path):
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        import msvcrt
+        from installer_dependency_policy import _native_retained_path
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        create = kernel.CreateFileW
+        create.argtypes = [
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+            wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        ]
+        create.restype = wintypes.HANDLE
+        close = kernel.CloseHandle
+        close.argtypes = [wintypes.HANDLE]
+        close.restype = wintypes.BOOL
+        # Deny writers and deletion for the entire held-input lifetime. Windows
+        # change time can move on reads when NTFS last-access updates are enabled.
+        handle = create(_native_retained_path(path), 0x80000000, 1, None, 3, 0x00200000, None)
+        if handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+        except BaseException:
+            close(handle)
+            raise
+        try:
+            return os.fdopen(descriptor, "rb")
+        except BaseException:
+            os.close(descriptor)
+            raise
     flags = os.O_RDONLY
     for name in ("O_BINARY", "O_NOINHERIT", "O_NOFOLLOW", "O_NONBLOCK"):
         flags |= getattr(os, name, 0)
@@ -74,6 +109,11 @@ class WheelSnapshot:
     _records: Mapping[str, tuple]
     _deadline: float
 
+    @property
+    def digests(self) -> Mapping[str, str]:
+        """Asserted archive identities, not approval or semantic admission."""
+        return MappingProxyType({name: record[2] for name, record in self._records.items()})
+
     def verify(self):
         """Recheck custody before a caller's construction/publication boundary."""
         for name, path in self.paths.items():
@@ -85,6 +125,64 @@ class WheelSnapshot:
                 raise WheelError("retained wheel snapshot digest changed")
             _unchanged(path, before, stream, opened=opened)
         _check_deadline(self._deadline)
+
+
+@dataclass(frozen=True)
+class WheelInstallInputs:
+    """Inspected construction data; never profile/feed approval or a trust token.
+
+    The semantic profile owner supplies its full canonical binding and the actual
+    inspected distribution versions. The caller retains snapshot custody through
+    installed health; the installer binds this data into its existing identity.
+    """
+
+    snapshot: WheelSnapshot
+    binding_json: str
+    distributions: tuple[tuple[str, str, str, str], ...]
+
+    def receipt(self) -> dict:
+        return {
+            "construction": "closed-wheels",
+            "lock_id": "sha256:" + hashlib.sha256(self.binding_json.encode("ascii")).hexdigest(),
+            "binding": json.loads(self.binding_json),
+            "distributions": {
+                name: {"version": version, "filename": filename, "sha256": digest}
+                for name, version, filename, digest in self.distributions
+            },
+        }
+
+    def verify(self) -> None:
+        if not isinstance(self.snapshot, WheelSnapshot):
+            raise WheelError("wheel construction requires retained input custody")
+        _check_deadline(self.snapshot._deadline)
+        binding = json.loads(self.binding_json)
+        if not isinstance(binding, dict) or not binding or self.binding_json != json.dumps(
+            binding, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ):
+            raise WheelError("wheel construction binding must be canonical JSON")
+        if (
+            not isinstance(self.distributions, tuple) or not self.distributions
+            or len(self.distributions) != len(self.snapshot.paths)
+        ):
+            raise WheelError("wheel construction needs exact immutable distribution facts")
+        names, expected = set(), {}
+        for item in self.distributions:
+            _check_deadline(self.snapshot._deadline)
+            if not isinstance(item, tuple) or len(item) != 4 or any(
+                not isinstance(value, str) or not value for value in item
+            ):
+                raise WheelError("invalid wheel construction distribution facts")
+            name, _version, filename, digest = item
+            if (
+                re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None
+                or name in names or filename in expected
+            ):
+                raise WheelError("ambiguous wheel construction distribution set")
+            names.add(name)
+            expected[filename] = digest
+        if expected != self.snapshot.digests:
+            raise WheelError("wheel construction facts differ from retained inputs")
+        self.snapshot.verify()
 
 
 @contextmanager

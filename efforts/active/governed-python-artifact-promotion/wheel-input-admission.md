@@ -67,7 +67,7 @@ Do not modify another contributor's open candidate/profile PR to obtain inputs.
 - [x] Actual wheel fixtures match the full selected record; independently
   changed hash, name/version, tags, dependency metadata, extras and Python
   requirement refuse before construction.
-- [ ] Duplicate/ambiguous metadata, unsafe ZIP paths, oversized/compressed
+- [x] Duplicate/ambiguous metadata, unsafe ZIP paths, oversized/compressed
   metadata, file/input-count limits, deadline exhaustion and source replacement
   refuse without extracting or executing archive content.
 - [ ] Fresh and cached inputs follow the same validator. An unadmitted cache
@@ -91,6 +91,40 @@ retains all acquisition, platform, fallback, retention and rollout obligations.
 
 ## Journal
 
+### Closed transaction and installed receipt integration, 2026-10-24
+
+Implementation now composes the complete-profile verifier and retained snapshot
+with the existing Python candidate constructor. The explicit closed transaction
+accepts no source/resolver arguments, strips ambient UV/PIP/Python inputs and
+uses only offline, hash-required local wheels with no cache, dependency
+resolution or build discovery. Ordinary source seasoning refusal remains intact.
+The existing construction identity and origin receipt bind the complete
+profile/lock and actual installed distribution versions, exact closure and
+hash-qualified origins; source receipts remain compatible.
+
+Native Windows controls exercise two real independent venvs, a transitive wheel
+dependency, PEP 440 version aliases, poisoned ambient configuration, unchanged
+cached-byte reuse from a different retained path, changed mode/profile/target/
+policy bindings, installed-origin/closure corruption, and health failure/
+cancellation with the selected prior preserved. Hosted Linux/Windows validation,
+required CI, review and merge are still owed for this component. No production
+consumer or approval adapter is enabled, and acquisition, revocation, source
+fallback and broader effort acceptance remain open.
+
+The prepared CPython 3.14 native run exposed NTFS last-access updates advancing
+handle change time without a byte/path/mtime change. Two failing-first controls
+reproduced the false refusal and the absence of OS-enforced read custody.
+Windows source/retained handles now deny writes and deletion while permitting
+readers; the existing identity/digest checks remain, and POSIX change-time
+checks are unchanged. The 133-case native snapshot/construction/profile cohort,
+including the extended-length-path regression and the real editable backend
+control, passes on prepared CPython 3.14 tooling. The canonical candidate suite
+also passes all 68 cases. A broader source-policy/compile/inspection/sync run
+passed 558 cases with one unavailable POSIX-only case; its missing-backend
+failure was resolved by supplying the declared seasoned test backend in the
+isolated test venv and rerunning that exact native control successfully.
+Hosted evidence and review remain required; local passes do not close those items.
+
 ### Exact-set byte custody, 2026-10-24
 
 The next component adds `installer_wheel_snapshot.retain_wheel_inputs` beneath
@@ -101,6 +135,15 @@ caller-owned. Source identity/mutation checks, custody rechecks and cancellation
 partial-copy cleanup do not confer approval or introduce another constructor.
 Offline UV assembly, installed receipts/reuse, authenticated adapters, fallback
 and the parent effort's broader acceptance remain open.
+
+#8523 merged as `1c386200bd4297e0bb5321d43185e485f75777bd` after current-head
+approval with no findings/threads, required CI and all four Linux/Windows
+inspection/artifact jobs passed. Thirty snapshot controls and the existing
+archive/profile controls prove the input-bound refusal item above. Local
+validation passed 289 cases with one POSIX-only installer case unavailable on
+Windows; that skip is not credited as platform proof. The next owned stretch
+is the canonical closed UV transaction and installed receipt/health integration,
+not a second constructor or production consumer enabling.
 
 ### Component delivery and next stretch, 2026-10-24
 

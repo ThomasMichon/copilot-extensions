@@ -3112,8 +3112,8 @@ Actual consumers still need adapters from the existing installation authority
 and verified release/configuration channels, followed by admitted byte/metadata
 checks and immutable construction. Candidate release-input generation is a
 separate concern (#6941); neither constraints nor this inert record prove an
-approved, available CPU/accelerator closure. The current constructors and their
-retained slots remain unchanged by this preparation seam.
+approved, available CPU/accelerator closure. No production caller is enabled by
+these preparation and inspection APIs.
 
 `tools/runtime_profile_wheels.py` adds repository-only actual-byte verification,
 not an approval adapter. `verify_profile_wheels` requires the complete exact
@@ -3135,8 +3135,61 @@ through subsequent construction. Verification detects changed bytes during its
 own inspection, but produces no admission/reuse receipt and grants no trust to
 a path, feed, release or record. The caller still owes authenticated approval,
 source/feed/seasoning/revocation evidence, real device eligibility and the
-existing constructor integration. Explicit test budgets are not production
+installation-authority integration. Explicit test budgets are not production
 acquisition defaults or permission to enable a consumer.
+
+### Closed inspected-wheel construction
+
+`runtime_profile_wheels.profile_wheel_inputs` composes the same complete-profile
+verification with `WheelInstallInputs`, inert construction data containing the
+whole canonical profile binding and actual inspected distribution versions.
+The caller retains the existing `WheelSnapshot` context through installed
+health. This is not an approval token: the existing authority still owes
+authenticated release/profile/feed/target admission before invoking a consumer.
+No production installer selects this mode automatically.
+
+On Windows, original and retained wheel handles allow shared reads but deny
+writers and deletion for their held lifetime, including extended-length paths.
+NTFS read-access updates can advance handle change time, so that timestamp is
+not treated as a byte revision under this native read guard. Path/handle
+identity, birth time, size, mtime and full SHA-256 custody checks still apply;
+non-Windows change-time checks remain in place. Original handles close after
+the complete set is copied; retained handles close before owned cleanup.
+
+The Python engine's explicit `numbered_candidate(wheel_inputs=...)` path uses
+the same `_candidate` and `_construct` owners, independent venv creation,
+construction/retention leases, owned children, installed health and completion
+boundary as source construction. It retains the source graph for bootstrap
+process ownership and validates the existing extras/local-package selection.
+It does not introduce another allocator, mutable venv, cutover or fallback.
+Mutable dev construction refuses this mode.
+
+The canonical dependency-policy owner projects only the complete retained
+wheel set into a private hash-required requirements file. Named local wheel
+URLs carry the exact SHA-256 fragment as well as `--hash`. UV runs offline,
+without indexes, ambient UV/PIP/Python configuration, caches, dependency
+resolution, source discovery, interpreter downloads or build backends, using
+copy link mode and the exact candidate interpreter. Ordinary source policy
+continues to reject `--no-deps`; there is no blanket seasoning exemption.
+
+The existing `.runtime-input-origins.json` uses schema version 2 for this path
+(source receipts remain version 1). It binds the full profile/lock, mode,
+release, source-or-artifact, target and policy data, actual distribution
+versions and SHA-256-qualified origins. UV currently records local wheel hash
+fragments in `direct_url.json` URLs with empty `archive_info`; installed health
+requires that exact hash-qualified origin and rejects conflicting archive hash
+fields. It also requires the exact complete installed distribution set, with no
+unexpected or duplicate distribution. Receipt/binding/origin/version changes
+refuse reuse. Source content plus the whole wheel binding enters the existing
+immutable construction identity, so a changed policy, target or profile cannot
+reuse a numbered identity. A new retained copy of unchanged cached bytes can
+reuse a healthy runtime without a feed request or reconstruction.
+
+This component does not authenticate a profile, acquire/cache wheels, select
+hardware, admit a feed, supply production budgets or choose verified-source
+fallback. Missing or rejected inputs never trigger an automatic source or
+public-index fallback. Those authority/acquisition and consumer-enabling
+contracts remain required.
 
 ### Bounded wheel inspection
 

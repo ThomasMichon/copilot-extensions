@@ -239,6 +239,9 @@ refusals and the installation authority's explicit path selection.
 - [x] Provide the bounded shared wheel-inspection component and complete-set
       actual-byte verification (#8419). Inspection facts do not authenticate
       approval, enable a consumer or replace retained-construction evidence.
+- [x] Retain exact wheel-byte snapshots under the existing private input owner
+      with explicit count, archive/closure/storage and deadline bounds (#8523).
+      Custody evidence alone does not authenticate acquisition or approve reuse.
 - [ ] Implement the reviewed [wheel-input admission slice](wheel-input-admission.md):
       compare actual wheel bytes with the exact selected record before retained
       construction, then integrate owned reuse evidence without creating approval.
@@ -648,6 +651,29 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Exact-set snapshot component merged; constructor remains open
+
+- #8523 merged as `1c386200bd4297e0bb5321d43185e485f75777bd`.
+  The shared helper retains ordinary unlinked inputs as read-only exact copies
+  and streams under the existing private temporary-input owner. It shares one
+  deadline and explicit count, per-archive, closure-byte and temporary-storage
+  limits; snapshot verification composes with the complete-profile verifier.
+- Thirty native snapshot controls cover inclusive limits, replacement, mutation
+  across the set, growth/read/write failures, final-EOF deadline, cancellation,
+  caller-input preservation and actual isolated `-I -S` bootstrap. The combined
+  local snapshot/archive/profile/bootstrap/source-binding cohort passed 289
+  cases, with one POSIX-only installer case skipped on Windows.
+- Final-head review approved with no findings or threads, required CI passed,
+  and all four Linux/Windows inspection and real-built/offline artifact jobs
+  passed. The first CI refusal for incomplete shared-consumer release metadata
+  was corrected with changefiles and a fresh green run, not bypassed.
+- The next stretch integrates an explicit closed wheel mode through the existing
+  canonical transaction, constructor, installed-origin receipt and health/
+  completion owner. Ordinary source-policy checks remain intact; no arbitrary
+  record/hash or callback becomes profile/feed approval. Authenticated adapters,
+  acquisition, actual offline construction/reuse, source fallback, retention and
+  rollout remain open. This effort stays Active and the worktree is retained.
 
 ### 2026-10-24 - Bounded inspection component merged; retained assembly next
 
