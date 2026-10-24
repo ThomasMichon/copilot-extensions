@@ -216,7 +216,10 @@ KEYED_NATIVE_PROMPT_PROTOCOL_VERSION = 45
 STARTUP_PROGRESS_PROTOCOL_VERSION = 46
 NEGOTIATED_DRAIN_PROTOCOL_VERSION = 47
 RETAINED_INBOX_PROTOCOL_VERSION = 48
-HTTP_PROTOCOL_VERSION = 48
+# Ordinary message ingress associates and recovers keyed retained admissions.
+# HTTP 48 exposes the transport only, not this producer guarantee.
+RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION = 49
+HTTP_PROTOCOL_VERSION = 49
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

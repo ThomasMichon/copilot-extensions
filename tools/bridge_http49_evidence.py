@@ -1,0 +1,41 @@
+"""HTTP-49 ordinary retained-producer policy; HTTP-48 packets stay immutable."""
+
+from functools import partial
+
+import bridge_http48_evidence as transport
+import bridge_http_retained_evidence as common
+
+previous = common.previous
+historical = common.historical
+installation = common.installation
+CONTRACT = common.CONTRACT
+REGISTRY = common.REGISTRY
+GENERATION = 49
+VECTOR_SCHEMA = "http49-retained-producer-cases-v1"
+CAPTURE = "tools/capture_bridge_http49.py"
+SCOPE = "model-free retained ordinary-producer source evidence; not SDK/native qualification"
+INPUT = CONTRACT + "inputs/http49/retained-producer.json"
+PRIMARY = previous.CURRENT + "http49-retained-producer.json"
+FAMILY = "http49-retained-producer-asgi-v1"
+AFFECTED = transport.AFFECTED
+TEST = "plugins/agent-bridge/tests/test_http49_capture_probes.py"
+EXTRA_PATHS = (INPUT, TEST, "plugins/agent-bridge/tests/test_live_inbox_runtime.py",
+               "plugins/agent-bridge/tests/test_loop_governance_custody.py")
+PROBES = {"test_http49_capture_actual_observations": 2}
+POLICY = common.POLICY
+encode = common.encode
+digest = common.digest
+safe = common.safe
+contract = common.contract
+SPEC = common.EvidenceSpec(
+    GENERATION, INPUT, PRIMARY, FAMILY, AFFECTED, EXTRA_PATHS, PROBES,
+    (("RETAINED_INBOX_PROTOCOL_VERSION", 48), ("RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION", 49)),
+)
+baseline = partial(common.baseline, SPEC)
+source_snapshot = partial(common.source_snapshot, SPEC)
+source_fixture_path = partial(common.source_fixture_path, SPEC)
+history = partial(common.history, SPEC)
+build_outputs = partial(common.build_outputs, SPEC)
+validate_outputs = partial(common.validate_outputs, SPEC)
+validate = partial(common.validate, SPEC)
+validate_http49 = validate

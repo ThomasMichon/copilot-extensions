@@ -372,6 +372,26 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   observations. The 124-case current capture/contract/maintenance cohort,
   two-contract/660-fixture checker and all changed-module/install/documentation/
   changefile guards pass. Fresh independent exact-head review remains owed.
+- Review identified a version-skew defect: merged HTTP-48 transport predates the
+  new ordinary producer guarantee. Add a distinct producer floor/current
+  advertisement of 49, retaining transport floor 48, minimum 1 and every older
+  floor. Six capability tests reproduced the missing distinction; the corrected
+  mixed-version and capture-time historical-scope controls pass ten cases.
+- Shared capture mechanics were extracted without changing HTTP-48 policy
+  (28 controls passed before the version change). HTTP-49 has its own policy,
+  independent input and actual ASGI driver; all existing HTTP-48 packets and
+  input bytes stay frozen. Both policies share publication guards and retain
+  their own source generation and primary/child scope. The separate original
+  child-process binding portfolio passes 21 cases; observer support for 49
+  does not relax its default worker/host/peer requirements.
+- Current HTTP-49 source capture, complete canonical-reader checks and fresh
+  independent review remain required. The older approval does not cover this
+  new capability declaration; no SDK/native/adoption gate closes from it.
+- The cohesive protocol/both-writer/historical-scope selection passes 98 cases.
+  Two historical HTTP-48 execution-driver cases correctly require matching
+  source rather than the current HTTP-49 checkout; two unrelated collection
+  capability skips are not execution evidence. The current HTTP-49 selected
+  ASGI driver executes both installation modes without a skip.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

@@ -119,7 +119,7 @@ def install(*, observer: bool = False) -> None:
     path, request = load_request()
     proof = request["source_proof"]
     root = Path(request["root"])
-    bind_installation = request.get("capture_generation") == 48
+    bind_installation = request.get("capture_generation") in (48, 49)
     own = "tools/bridge_http47_runtime.py"
     if sha(Path(__file__).read_bytes()) != proof[own]["sha256"]:
         raise ValueError("HTTP-47 runtime guard source is unproven")
@@ -204,12 +204,12 @@ def install(*, observer: bool = False) -> None:
         helper = installation_source(code.co_filename) if bind_installation else None
         if source is None and helper is not None:
             record({"kind": "refused", "source": helper})
-            raise ValueError("HTTP-48 unproven installation helper origin")
+            raise ValueError(f"HTTP-{request['capture_generation']} unproven installation helper origin")
         if helper is not None and "/src/" not in source and (
             Path(code.co_filename).resolve() != root / source
         ):
             record({"kind": "refused", "source": source})
-            raise ValueError("HTTP-48 unproven installation helper origin")
+            raise ValueError(f"HTTP-{request['capture_generation']} unproven installation helper origin")
         if source is None:
             # A worker/host/peer with the correct basename but foreign location
             # must not execute before we can prove its entrypoint.

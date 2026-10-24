@@ -32,6 +32,10 @@ class EvidenceSpec:
     probes: dict[str, int]
     capability_floors: tuple[tuple[str, int], ...]
 
+    @property
+    def label(self) -> str:
+        return f"HTTP-{self.generation}"
+
 
 def contract(registry: dict) -> dict:
     return next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
@@ -42,7 +46,7 @@ def baseline(spec: EvidenceSpec, root: Path, commit: str) -> previous.registry_c
     protocol = previous.git(root, "show", commit + ":" + previous.PREFIX + "protocol.py")
     for name, floor in spec.capability_floors:
         if previous.constant(protocol, name) != floor:
-            raise ValueError("HTTP-48 retained-inbox capability floor changed")
+            raise ValueError(f"{spec.label} retained-inbox capability floor changed: {name}")
     return snapshot
 
 
@@ -96,12 +100,12 @@ def build_outputs(
     version = json.loads(safe(root, "plugins/agent-bridge/plugin.json").read_bytes())["version"]
     sources = {row["path"]: row for row in http["source_paths"]}
     if not set(spec.affected) <= sources.keys():
-        raise ValueError("HTTP-48 semantic owners must be registered before capture")
+        raise ValueError(f"{spec.label} semantic owners must be registered before capture")
     for source, row in sources.items():
         if row["sha256"] != proof[source]["sha256"]:
-            raise ValueError(f"unclassified HTTP-48 source drift: {source}")
+            raise ValueError(f"unclassified {spec.label} source drift: {source}")
         if source in spec.affected and row["semantic"] is not True:
-            raise ValueError(f"HTTP-48 affected source is not semantic: {source}")
+            raise ValueError(f"{spec.label} affected source is not semantic: {source}")
     if spec.generation not in http["evidence_window"]["generations"]:
         http["evidence_window"]["generations"].append(spec.generation)
     if version not in http["evidence_window"]["runtimes"]:
@@ -132,13 +136,13 @@ def build_outputs(
                     or previous.git_evidence.sha256_bytes(current) not in {
                         old["sha256"], digest(data),
                     }):
-                raise ValueError(f"HTTP-48 current output is dirty or not owned: {path}")
+                raise ValueError(f"{spec.label} current output is dirty or not owned: {path}")
         record = {
             "path": path, "sha256": digest(data), "role": method, "generation": spec.generation,
         }
         if old is None:
             if safe(root, path).exists() and safe(root, path).read_bytes() != data:
-                raise ValueError(f"HTTP-48 unregistered output already exists: {path}")
+                raise ValueError(f"{spec.label} unregistered output already exists: {path}")
             http["fixtures"].append(record)
         else:
             old.update(record)
@@ -159,7 +163,7 @@ def build_outputs(
         )),
         "input_sha256": proof[spec.input]["sha256"], "checked_probes": spec.probes,
         "scope": "actual local ASGI/SQLite adapter and ordinary producer; not SDK or native qualification",
-    }, previous.PREFIX + "protocol.py", "Actual source-bound HTTP-48 local ASGI observations.")
+    }, previous.PREFIX + "protocol.py", f"Actual source-bound {spec.label} local ASGI observations.")
     shared = {"path": spec.primary, "sha256": digest(outputs[spec.primary])}
     for source, row in sources.items():
         if not row["semantic"]:
@@ -190,7 +194,7 @@ def build_outputs(
                 "scope": "unchanged source and immutable prior operation; no new runtime observation",
             }
         register(source_fixture_path(spec, source), packet, source, (
-            "Shared actual HTTP-48 ASGI evidence." if source in spec.affected
+            f"Shared actual {spec.label} ASGI evidence." if source in spec.affected
             else "Unchanged-source link to immutable historical operation evidence."
         ))
     outputs.update(previous.registry_codec.plan(root, snapshot, registry))
@@ -206,22 +210,22 @@ def validate_outputs(
     )
     current = previous.registry_codec.load(root).materialized
     if current != snapshot.materialized and current != proposed.materialized:
-        raise ValueError("HTTP-48 capture registry is dirty or belongs to another plan")
+        raise ValueError(f"{spec.label} capture registry is dirty or belongs to another plan")
     http = contract(snapshot.materialized)
     required = {REGISTRY, spec.primary} | {
         source_fixture_path(spec, row["path"]) for row in http["source_paths"] if row["semantic"]
     }
     chunks = set(proposed.inputs) - {REGISTRY}
     if set(outputs) - chunks != required:
-        raise ValueError("HTTP-48 output ownership inventory mismatch")
+        raise ValueError(f"{spec.label} output ownership inventory mismatch")
     for before, after in zip(snapshot.materialized["contracts"],
                              proposed.materialized["contracts"], strict=True):
         if before["id"] != after["id"]:
-            raise ValueError("HTTP-48 changed contract ownership")
+            raise ValueError(f"{spec.label} changed contract ownership")
         if after["provenance"][:len(before["provenance"])] != before["provenance"]:
-            raise ValueError("HTTP-48 rewrote immutable provenance")
+            raise ValueError(f"{spec.label} rewrote immutable provenance")
         if len(after["fixtures"]) < len(before["fixtures"]):
-            raise ValueError("HTTP-48 removed historical fixtures")
+            raise ValueError(f"{spec.label} removed historical fixtures")
         for old, new in zip(before["fixtures"], after["fixtures"]):
             refresh = (
                 before["id"] == "agent-bridge.http-wire" and old["generation"] == spec.generation
@@ -229,7 +233,7 @@ def validate_outputs(
                 and new["generation"] == spec.generation
             )
             if old != new and not refresh:
-                raise ValueError("HTTP-48 rewrote immutable fixtures")
+                raise ValueError(f"{spec.label} rewrote immutable fixtures")
     immutable = (set(snapshot.inputs) - {REGISTRY}) | {
         row["path"] for owner in snapshot.materialized["contracts"] for row in owner["fixtures"]
         if not (owner["id"] == "agent-bridge.http-wire" and row["generation"] == spec.generation
@@ -239,16 +243,16 @@ def validate_outputs(
         if "reference_path" in row
     }
     if immutable & outputs.keys() or len({p.casefold() for p in outputs}) != len(outputs):
-        raise ValueError("HTTP-48 output collides with immutable input")
+        raise ValueError(f"{spec.label} output collides with immutable input")
     for path, data in outputs.items():
         if len(data) > previous.registry_codec.MAX_ARTIFACT_BYTES:
-            raise ValueError("HTTP-48 exceeds unchanged artifact size guard")
+            raise ValueError(f"{spec.label} exceeds unchanged artifact size guard")
         target = safe(root, path)
         if target.exists() and path != REGISTRY and target.read_bytes() != data:
             registered = next((row for row in http["fixtures"] if row["path"] == path), None)
             if (registered is None or registered["generation"] != spec.generation
                     or previous.git_evidence.sha256_bytes(target.read_bytes()) != registered["sha256"]):
-                raise ValueError(f"HTTP-48 cannot replace an unowned artifact: {path}")
+                raise ValueError(f"{spec.label} cannot replace an unowned artifact: {path}")
     loaded = {
         row["path"]: (row["sha256"], json.loads(safe(root, row["path"]).read_bytes()))
         for owner in snapshot.materialized["contracts"] for row in owner["fixtures"]
@@ -271,12 +275,15 @@ def validate(
         packet = primary[1]
         proof = packet["execution_closure"]
         captured = packet["captured_from"]
+        historical_scope = contract(registry)["declared_range"]["current"] > spec.generation
+        captured_contract = None
         if (packet["evidence_family"] != spec.family or packet["checked_probes"] != spec.probes
                 or packet["runtime_binding_policy"] != POLICY
                 or packet["runtime_roles"] != ["observer"]
                 or packet["execution_closure_sha256"] != digest(encode(proof))
-                or packet["input_sha256"] != proof[spec.input]["sha256"]):
-            raise ValueError("HTTP-48 primary evidence identity mismatch")
+                or packet["input_sha256"] != proof[spec.input]["sha256"]
+                or captured["protocol_generation"] != spec.generation):
+            raise ValueError(f"{spec.label} primary evidence identity mismatch")
         tree_result = previous.git_evidence.git("ls-tree", "-r", captured["commit"])
         tree = {}
         if tree_result.returncode == 0:
@@ -285,6 +292,7 @@ def validate(
                 mode, kind, blob = metadata.split()
                 tree[path] = (mode, kind, blob)
             original = baseline(spec, root, captured["commit"])
+            captured_contract = contract(original.materialized)
             required = previous.proof_paths(
                 root, original.materialized,
                 metadata_paths=set(original.inputs) - {REGISTRY},
@@ -294,11 +302,11 @@ def validate(
             required = {p for p in required if not runtime_python(p)}
             required.update(p for p in tree if runtime_python(p))
             if set(proof) != required:
-                raise ValueError("HTTP-48 closure inventory differs from captured tree")
+                raise ValueError(f"{spec.label} closure inventory differs from captured tree")
         elif require_tree:
-            raise ValueError("HTTP-48 publication requires the actual source tree")
+            raise ValueError(f"{spec.label} publication requires the actual source tree")
         elif not (set(spec.affected) | set(spec.extra_paths)) <= proof.keys():
-            raise ValueError("HTTP-48 historical closure lacks required owners")
+            raise ValueError(f"{spec.label} historical closure lacks required owners")
         previous.git_evidence.prefetch_objects(
             identity["blob"] for identity in proof.values()
             if isinstance(identity, dict) and isinstance(identity.get("blob"), str)
@@ -309,11 +317,11 @@ def validate(
             if (not isinstance(identity, dict) or set(identity) != {"blob", "sha256"}
                     or not re.fullmatch(r"[0-9a-f]{40}", identity["blob"])
                     or not re.fullmatch(r"[0-9a-f]{64}", identity["sha256"])):
-                raise ValueError("HTTP-48 invalid closure identity")
+                raise ValueError(f"{spec.label} invalid closure identity")
             if tree and tree.get(path) not in {
                 ("100644", "blob", identity["blob"]), ("100755", "blob", identity["blob"]),
             }:
-                raise ValueError(f"HTTP-48 closure blob differs from tree: {path}")
+                raise ValueError(f"{spec.label} closure blob differs from tree: {path}")
             actual = previous.git_evidence.blob_sha256(identity["blob"])
             if actual is None:
                 data = safe(root, path).read_bytes()
@@ -324,51 +332,61 @@ def validate(
                         usedforsecurity=False,
                     ).hexdigest() for value in (data, canonical)
                 }:
-                    raise ValueError(f"HTTP-48 closure blob is unprovable: {path}")
+                    raise ValueError(f"{spec.label} closure blob is unprovable: {path}")
                 actual = digest(canonical)
             if actual != identity["sha256"]:
-                raise ValueError(f"HTTP-48 closure content mismatch: {path}")
+                raise ValueError(f"{spec.label} closure content mismatch: {path}")
         vector_data = safe(root, spec.input).read_bytes()
         if previous.git_evidence.sha256_bytes(vector_data) != proof[spec.input]["sha256"]:
             vector_data = previous.git(root, "cat-file", "blob", proof[spec.input]["blob"])
         if previous.git_evidence.sha256_bytes(vector_data) != proof[spec.input]["sha256"]:
-            raise ValueError("HTTP-48 independent vector differs from closure")
+            raise ValueError(f"{spec.label} independent vector differs from closure")
         vector = json.loads(vector_data)
         if packet["observations"] != {
             case: vector["expected"] for case in ("legacy", "namespaced")
         }:
-            raise ValueError("HTTP-48 observations differ from independent input")
+            raise ValueError(f"{spec.label} observations differ from independent input")
         helper_data = safe(root, installation.ENTRY).read_bytes()
         helper_identity = proof[installation.ENTRY]
         if previous.git_evidence.sha256_bytes(helper_data) != helper_identity["sha256"]:
             helper_data = previous.git(root, "cat-file", "blob", helper_identity["blob"])
         if previous.git_evidence.sha256_bytes(helper_data) != helper_identity["sha256"]:
-            raise ValueError("HTTP-48 installation helper differs from closure")
+            raise ValueError(f"{spec.label} installation helper differs from closure")
         required_execution = installation.required_sources(helper_data)
         if (not required_execution <= proof.keys()
                 or packet["required_execution_sources"] != sorted(required_execution)):
-            raise ValueError("HTTP-48 installation execution inventory is incomplete")
+            raise ValueError(f"{spec.label} installation execution inventory is incomplete")
         shared = {"path": spec.primary, "sha256": primary[0]}
         if any(captured[key] != proof[captured["source_path"]][name] for key, name in (
             ("source_git_blob", "blob"), ("source_sha256", "sha256"),
         )):
-            raise ValueError("HTTP-48 primary source differs from closure")
+            raise ValueError(f"{spec.label} primary source differs from closure")
+        source_contract = (
+            captured_contract if historical_scope and captured_contract is not None
+            else contract(registry)
+        )
         for source in spec.affected:
-            row = next(r for r in contract(registry)["source_paths"] if r["path"] == source)
+            row = next(r for r in source_contract["source_paths"] if r["path"] == source)
             child = loaded[source_fixture_path(spec, source)][1]
-            if (not row["semantic"] or row["sha256"] != proof[source]["sha256"]
-                    or child["shared_operation_evidence"] != shared):
-                raise ValueError(f"HTTP-48 affected semantic source is not bound: {source}")
+            if ((not historical_scope and (
+                    not row["semantic"] or row["sha256"] != proof[source]["sha256"]))
+                    or child["shared_operation_evidence"] != shared
+                    or child["evidence_family"] != f"http{spec.generation}-shared-asgi-v1"):
+                raise ValueError(f"{spec.label} affected semantic source is not bound: {source}")
             origin = child["captured_from"]
             if (origin["source_path"] != source or origin["commit"] != captured["commit"]
                     or origin["source_git_blob"] != proof[source]["blob"]
-                    or origin["source_sha256"] != proof[source]["sha256"]):
-                raise ValueError(f"HTTP-48 shared source provenance mismatch: {source}")
-        for row in contract(registry)["source_paths"]:
+                    or origin["source_sha256"] != proof[source]["sha256"]
+                    or origin["protocol_generation"] != spec.generation):
+                raise ValueError(f"{spec.label} shared source provenance mismatch: {source}")
+        for row in source_contract["source_paths"]:
             source = row["path"]
             if not row["semantic"] or source in spec.affected:
                 continue
-            child = loaded[source_fixture_path(spec, source)][1]
+            child_path = source_fixture_path(spec, source)
+            if historical_scope and captured_contract is None and child_path not in loaded:
+                continue  # A later source owner was not an input to this immutable capture.
+            child = loaded[child_path][1]
             prior = child["preserved_from"]
             before = loaded[prior["path"]]
             origin, old = child["captured_from"], before[1]["captured_from"]
@@ -380,7 +398,8 @@ def validate(
                     or old["source_sha256"] != origin["source_sha256"]
                     or old["protocol_generation"] >= spec.generation
                     or origin["commit"] != captured["commit"]
-                    or origin["source_git_blob"] != proof[source]["blob"]):
-                raise ValueError(f"HTTP-48 unchanged-source link mismatch: {source}")
+                    or origin["source_git_blob"] != proof[source]["blob"]
+                    or origin["protocol_generation"] != spec.generation):
+                raise ValueError(f"{spec.label} unchanged-source link mismatch: {source}")
     except (ValueError, KeyError, TypeError, OSError, StopIteration) as exc:
-        errors.append(f"HTTP-48 execution closure: {exc}")
+        errors.append(f"{spec.label} execution closure: {exc}")

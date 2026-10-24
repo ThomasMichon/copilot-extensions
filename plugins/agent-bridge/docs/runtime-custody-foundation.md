@@ -239,6 +239,14 @@ is inferred from these ASGI/installation/real-SQLite controls.
 
 ## Ordinary producer admission
 
+HTTP generation 49 advertises `RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION` for the
+ordinary admission/recovery guarantee below. A producer relying on it must
+require that floor through the daemon's advertised health version. The
+retained-inbox transport floor of 48 alone is insufficient: its original
+receiver leaves ordinary message ingress unassociated. Unversioned and older
+receivers cannot qualify this guarantee from a successful ordinary response.
+The supported minimum and every earlier capability floor remain unchanged.
+
 `POST /api/v1/live-sessions/{session_id}/messages` now selects retained custody
 when the durable target enrollment requires it. The existing atomic freshness
 owner selects the current consumer and original frontend association in the
