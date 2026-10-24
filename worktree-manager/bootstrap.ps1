@@ -74,6 +74,58 @@ function Resolve-BootstrapExecutable([string]$Path) {
     return $current
 }
 
+function Find-PhysicalBootstrapPython {
+    foreach ($name in @('python3', 'python')) {
+        foreach ($command in @(Get-Command $name -CommandType Application -All -ErrorAction SilentlyContinue)) {
+            try {
+                if ($command.Source -match '[\\/]WindowsApps[\\/]') { continue }
+                $physical = Resolve-BootstrapExecutable $command.Source
+                foreach ($attempt in 1..2) {
+                    if ($physical -match '[\\/]WindowsApps[\\/]') { break }
+                    $probe = @(& $physical -I -S -B -c "import json,sys; print(json.dumps({'version': list(sys.version_info[:2]), 'base': sys.prefix == sys.base_prefix, 'executable': sys._base_executable}))" 2>$null)
+                    if ($LASTEXITCODE -ne 0 -or $probe.Count -ne 1) { break }
+                    $info = $probe[0] | ConvertFrom-Json -ErrorAction Stop
+                    if ($info.base -isnot [bool] -or -not $info.base -or $info.version.Count -ne 2) { break }
+                    if (($info.version[0] -isnot [int] -and $info.version[0] -isnot [long]) -or
+                        ($info.version[1] -isnot [int] -and $info.version[1] -isnot [long])) { break }
+                    if ($info.version[0] -lt 3 -or ($info.version[0] -eq 3 -and $info.version[1] -lt 11)) { break }
+                    if ($info.executable -isnot [string] -or -not [IO.Path]::IsPathRooted($info.executable)) { break }
+                    $base = Resolve-BootstrapExecutable $info.executable
+                    if ($base -ieq $physical) { return $physical }
+                    $physical = $base
+                }
+            } catch {
+                continue
+            }
+        }
+    }
+    return $null
+}
+
+function Find-BootstrapPython([string]$Uv) {
+    $ErrorActionPreference = 'Continue'
+    $lookup = @(& $Uv python find --no-project '>=3.11' 2>&1)
+    $lookupExit = $LASTEXITCODE
+    if ($lookupExit -eq 0) {
+        $output = @($lookup | Where-Object { $_ -isnot [Management.Automation.ErrorRecord] })
+        if ($output.Count -eq 1 -and -not [string]::IsNullOrWhiteSpace([string]$output[0])) {
+            return [string]$output[0]
+        }
+        throw 'Manager Python lookup returned an invalid executable.'
+    }
+    if (($lookup -join "`n") -match '(?i)(?:os error|WinError)\s+448\b') {
+        $physical = Find-PhysicalBootstrapPython
+        if ($physical) { return $physical }
+    }
+    & $Uv python install 3.11 | ForEach-Object { [Console]::Error.WriteLine([string]$_) }
+    if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
+    $python = @(& $Uv python find --no-project '>=3.11' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $python.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$python[0])) {
+        throw 'Manager needs Python 3.11 or newer.'
+    }
+    return [string]$python[0]
+}
+
 $Root    = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
 $Staging = Join-Path $Root 'staging'
 $Config  = Join-Path $Root 'config.toml'
@@ -207,15 +259,7 @@ if ($HaveGit) {
 
 Push-Location (Join-Path $PayloadParent 'worktree-manager')
 try {
-    $Python = $null
-    try { $Python = & $Uv python find --no-project '>=3.11' 2>$null }
-    catch { $Python = $null }
-    if ($LASTEXITCODE -ne 0 -or -not $Python) {
-        & $Uv python install 3.11
-        if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
-        $Python = & $Uv python find --no-project '>=3.11'
-    }
-    if ($LASTEXITCODE -ne 0 -or -not $Python) { throw 'Manager needs Python 3.11 or newer.' }
+    $Python = Find-BootstrapPython $Uv
     if ($commandArgs.Count) {
         & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
     } else {
