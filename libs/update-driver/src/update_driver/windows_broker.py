@@ -18,8 +18,10 @@ if TYPE_CHECKING:
 def adopt(runtime_root: Path, slot: Path, *, root: Path | None = None) -> Registration:
     """Reconcile a qualified action without acquiring a competing mutation lock.
 
-    The owning installer calls this after settling runtime selection, outside
-    publication leases. First adoption belongs to explicit native/foreground
+    The owning installer calls this with a retained, qualified runtime, outside
+    publication leases and before callbacks that may launch background work.
+    Broker ownership is independent of the application's selected generation.
+    First adoption belongs to explicit native/foreground
     installation custody, not ensure_worker or a foreground spawn fallback.
     """
     if os.name != "nt":

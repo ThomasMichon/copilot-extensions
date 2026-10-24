@@ -954,3 +954,52 @@ Windows registration qualification.
   Its changed exact candidate still needs disposable hosted qualification.
   Consumer installer wiring and the ordinary launch default remain held;
   no shared-host installation or rollout occurred.
+
+Exact-candidate hosted run
+[40087309148](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40087309148)
+passed at `4723fff84b141d2ec1696cd81d39d7bc19771788`. Adoption now executed
+the installed module entry point with the target slot's interpreter through
+the actual default native executor. Both installed-client resident cycles,
+all-caller-Job closure, exact delivery, finite broker exit, lifecycle,
+shared-ancestor refusal, both publisher-death/recovery boundaries, durable
+retention, old-action collection and final owned cleanup passed.
+This closes the fixed-entry qualification slice, not consumer-installer
+integration, default migration or host rollout.
+
+### 2026-10-24 - Manager pre-publication adoption, source only
+
+- Manager's qualified candidate now adopts the broker before selector
+  publication and the first transactional activation callback. The adoption
+  subprocess uses the already-qualified installed module entry and a live
+  nested witness; no runtime-publication lease is held at that boundary.
+  Broker runtime ownership is independent of application-selector rollback.
+- Explicit Windows bootstrap construction and `self-install --apply` use the
+  existing request queue and default native finite executor. A live inherited
+  or scoped caller joins its owner rather than enqueueing behind itself.
+  This is explicit installation, not an `ensure_worker` failure fallback.
+  Arbitrary application arguments never enter the bootstrap request, and its
+  bounded root/source/slot receipt prevents dispatch of a different request's
+  subsequently selected generation.
+- The broader contained selection exposed a missing transitive dependency in
+  source-only repair recovery. Its exact source-closure allowlist now admits
+  the driver's required `agent-zdd`; both source and materialized recovery
+  remain construction-free. The corrected selection passed 245 cases with
+  seven explicit skips in 82.61 seconds under the unchanged 180-second bound.
+  Additional receipt-negative cases were then added and await the final pass.
+  The final changed-surface selection, including those receipt controls,
+  passed 250 cases with seven explicit skips in 76.51 seconds under the same
+  180-second bound; changed Python lint and whitespace checks passed.
+  Final direct-API admission and cross-drainer safe-context controls then
+  passed 251 cases/seven skips in 95.57 seconds under that same bound. A raw
+  apply without custody now refuses before construction; explicit requests
+  restore their existing safe root/provider context rather than inheriting
+  whichever caller drains the queue.
+- The existing hosted-only fixture now performs first adoption through the
+  real Manager adapter with a private default execution root before the
+  direct installed-entry repeat and remaining native lifecycle controls.
+  Exact-candidate hosted qualification is still pending.
+- Documentation-impact review updated the Manager and shared-driver adoption
+  contracts and the existing consumer changefile. Other consumers, actual
+  cold Manager construction, normal launch-default migration, desktop,
+  maintenance, review/CI, promotion and authorized rollout remain open.
+  No shared-host Task, service, runtime, launcher or enrollment was changed.

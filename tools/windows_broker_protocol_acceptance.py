@@ -15,6 +15,7 @@ import subprocess
 import sys
 import time
 import venv
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -47,7 +48,35 @@ def adopt_action(package_root: Path, root: Path, generation: str) -> int:
     ])
 
 
-def adopt_generation(package_root: Path, root: Path, generation: str):
+def manager_adopt_action(package_root: Path, root: Path, generation: str) -> int:
+    admit(root, True)
+    if generation not in {"first", "replacement"}:
+        raise ValueError("fixture action generation refused")
+    imports(package_root)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "worktree-manager" / "scripts"))
+    from runtime_install import adopt_broker
+
+    adopt_broker(root, root / "versions" / generation)
+    print(json.dumps({"manager_adapter_adopted": True}))
+    return 0
+
+
+@contextmanager
+def manager_profile(root: Path):
+    admit(root, True)
+    previous = {key: os.environ.get(key) for key in ("HOME", "USERPROFILE")}
+    try:
+        os.environ.update({key: str(root / "manager-profile") for key in previous})
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def adopt_generation(package_root: Path, root: Path, generation: str, *, manager: bool = False):
     """Exercise the actual default executor and its native owned process tree."""
     admit(root, True)
     if generation not in {"first", "replacement"}:
@@ -56,6 +85,9 @@ def adopt_generation(package_root: Path, root: Path, generation: str):
     from update_driver import RequestSpec, TrustedRunner, drain, enqueue, status
     from agent_procutil.windows_broker_installation import load
 
+    if manager:
+        with manager_profile(root):
+            return _adopt_manager_generation(package_root, root, generation)
     execution = root / "execution"
     slot = root / "versions" / generation
     request = enqueue(
@@ -71,6 +103,27 @@ def adopt_generation(package_root: Path, root: Path, generation: str):
     completed = status(request.id, root=execution)
     if completed.state != "completed" or completed.exit_code != 0:
         raise RuntimeError("fixture driver-owned adoption failed: " + completed.log_path.read_text())
+    return load(root)
+
+
+def _adopt_manager_generation(package_root: Path, root: Path, generation: str):
+    admit(root, True)
+    if generation not in {"first", "replacement"}:
+        raise ValueError("fixture action generation refused")
+    from update_driver import RequestSpec, TrustedRunner, drain, enqueue, status
+    from agent_procutil.windows_broker_installation import load
+
+    request = enqueue(
+        RequestSpec("windows-broker-manager-fixture", source=generation, cwd=str(root)),
+        runner=TrustedRunner((
+            sys.executable, "-I", "-S", str(Path(__file__).resolve()),
+            "manager-adopt", str(package_root), str(root), generation,
+        ), str(root)),
+    )
+    drain()
+    completed = status(request.id)
+    if completed.state != "completed" or completed.exit_code != 0:
+        raise RuntimeError("fixture Manager adoption failed: " + completed.log_path.read_text())
     return load(root)
 
 
@@ -324,11 +377,12 @@ def inspect(root: Path) -> dict[str, object]:
     jobs = []
     adopted = False
     try:
-        config = adopt_generation(controller, root, "first")
+        config = adopt_generation(controller, root, "first", manager=True)
         adopted = True
         config = adopt_generation(controller, root, "first")
         result["driver_owned_adoption"] = True
         result["canonical_installed_action"] = True
+        result["manager_installer_adoption"] = True
         first_status = task_operation("status", config, Deadline(10))
         if first_status.get("configured") is not True:
             raise RuntimeError("fixture adoption was not configured")
@@ -553,6 +607,8 @@ def main() -> int:
     args = sys.argv[1:]
     if len(args) == 4 and args[0] == "adopt":
         return adopt_action(Path(args[1]), Path(args[2]), args[3])
+    if len(args) == 4 and args[0] == "manager-adopt":
+        return manager_adopt_action(Path(args[1]), Path(args[2]), args[3])
     if len(args) == 3 and args[0] == "caller":
         return caller(Path(args[1]), Path(args[2]))
     if len(args) == 6 and args[0] == "crash-publication":

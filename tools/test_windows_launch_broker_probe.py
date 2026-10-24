@@ -35,7 +35,9 @@ def test_protocol_caller_refuses_shared_host_before_loading_runtime(monkeypatch,
     protocol_probe.imports.assert_not_called()
 
 
-@pytest.mark.parametrize("entry", ["adopt_action", "adopt_generation"])
+@pytest.mark.parametrize("entry", [
+    "adopt_action", "manager_adopt_action", "_adopt_manager_generation", "adopt_generation",
+])
 def test_driver_adoption_fixture_refuses_shared_host_before_loading_runtime(
     monkeypatch, tmp_path, entry,
 ):

@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -750,10 +751,11 @@ def _complete_candidate(
     version = payload_version(payload)
     if before_publish is not None:
         before_publish()
+    installer = _runtime_installer()
+    installer.adopt_broker(root, slot)
     cleaned = tuple(clean_legacy_artifacts(root))
     stubs = _deploy_binstubs()
     _write_control_plane_provider_manifest(payload, root=root)
-    installer = _runtime_installer()
     if transactional_activation:
         installer.activate(
             root, slot.name, expected=previous,
@@ -799,7 +801,11 @@ def self_install(
     was_current = not needs_install(version, r)
     try:
         installer = _runtime_installer()
-        with installer.candidate(pd, r, assemble=_copy_payload) as ready:
+        with ExitStack() as custody:
+            if os.name == "nt" and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1":
+                if custody.enter_context(installer._installation_custody()) is None:
+                    raise RuntimeError("Manager construction requires live installation custody")
+            ready = custody.enter_context(installer.candidate(pd, r, assemble=_copy_payload))
             slot = ready.slot
             return _complete_candidate(
                 ready, pd, r, previous=previous, was_current=was_current,

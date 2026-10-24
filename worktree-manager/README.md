@@ -65,6 +65,27 @@ Empty/whitespace-only prior selectors have no runtime to retain, but their
 existence and exact bytes remain rollback state. Target and nonblank prior slot
 names still receive canonical validation.
 
+On Windows, explicit bootstrap construction and `self-install --apply` enter
+the existing installation execution driver. A caller with a live inherited or
+scoped witness joins that owner; a cold explicit caller submits a fixed
+installation recipe and drives the same finite native executor. Neither path
+calls `ensure_worker`, creates another mutation lock, or falls back from a
+failed background launch. Application arguments remain outside the bootstrap
+request. Its bounded completion receipt binds the root, source digest and
+actual installed slot; later selection by another request cannot silently
+change which runtime the bootstrap dispatches.
+
+While retaining the qualified candidate, the Windows installer adopts its
+finite launch broker through that slot's isolated installed
+`update_driver.windows_broker` entry, before selector publication and any
+daemon-activation callback. Broker retention/publication runs outside the
+application's selector lease. An application selector rollback does not undo a
+separately qualified broker action: its own durable runtime reference keeps
+that action valid independently of the selected application generation.
+Contained construction does not register a Task. The normal `spawn_daemon`
+default remains unchanged; this source integration does not authorize host
+installation or claim full cold-install, desktop or maintenance qualification.
+
 PowerShell, CMD and Bash launch the selected slot through the canonical retention
 bootstrap in isolated mode, preserve its exit status, and never resolve or acquire
 dependencies during ordinary launch. Mux cutover uses that same constructed

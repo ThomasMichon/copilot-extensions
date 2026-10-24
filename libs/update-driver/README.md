@@ -595,16 +595,24 @@ This entry point is for owning installers, never an ordinary spawn fallback.
 
 Adoption validates the fixed immutable action paths, recovers pending broker
 publication, loads the prior owned registration and reconciles under that
-custody. It runs outside the runtime publication lease. A crash after selection
+custody. It runs outside the runtime publication lease. A retained, qualified
+candidate may be adopted before application selector publication so the first
+activation callback already has its launch prerequisite. The broker's durable
+runtime ownership is independent of application selection or rollback.
+A crash after selection
 but before adoption does not discard a prior action: its durable runtime
 reference remains until explicit adoption/recovery settles. Missing first
 adoption is an explicit launch prerequisite, not a foreground-worker fallback.
 Contained construction never adopts an OS registration, and direct contained
 adoption refuses before reading installation state.
 
-This integrates foundation construction, not every consumer installer or the
-normal daemon-launch default. Those remaining migration and native lifetime
-qualification gates still apply.
+Foundation construction adopts after its own selection. The Windows Manager
+installer adopts before its first publication callback through the fixed
+installed entry above. Its explicit cold bootstrap and `self-install --apply`
+drive the existing finite native executor, while inherited/scoped callers
+join their owner. Ordinary `ensure_worker` failure still never falls back to
+foreground execution. Other consumer installers and the normal daemon-launch
+default remain separate migration and qualification gates.
 
 `tests/test_native_participant.py` exercises the real stock-PowerShell owner
 against unchanged Python participants: simultaneous joins, consumed environment,
