@@ -38,6 +38,19 @@ def _worktree_manager_pkg_dir() -> Path:
     return Path(worktree_manager.__file__).resolve().parent
 
 
+def _plugin_runtime_sources(plugins_dir: Path):
+    for plugin in plugins_dir.iterdir():
+        if not plugin.is_dir():
+            continue
+        for child in plugin.iterdir():
+            if child.name == "tests":
+                continue
+            if child.is_file() and child.suffix == ".py":
+                yield child
+            elif child.is_dir():
+                yield from child.rglob("*.py")
+
+
 def test_worktree_manager_imports_no_plugin_code_statically():
     pkg = _worktree_manager_pkg_dir()
     offenders = []
@@ -73,10 +86,25 @@ def test_no_plugin_imports_the_worktree_manager():
         return
     plugins_dir = root / "plugins"
     offenders = []
-    for py in plugins_dir.rglob("*.py"):
+    for py in _plugin_runtime_sources(plugins_dir):
         if _IMPORT_WORKTREE_MANAGER.search(py.read_text("utf-8")):
             offenders.append(str(py.relative_to(root)))
     assert not offenders, f"plugins import the worktree-manager (dependency edge!): {offenders}"
+
+
+def test_runtime_scan_retains_production_edges_not_test_harness_imports(tmp_path):
+    plugin = tmp_path / "plugins" / "example"
+    (plugin / "src").mkdir(parents=True)
+    (plugin / "tests" / "fixtures").mkdir(parents=True)
+    runtime = plugin / "src" / "runtime.py"
+    runtime.write_text("from worktree_manager import forbidden\n", encoding="utf-8")
+    (plugin / "entry.py").write_text("import worktree_manager\n", encoding="utf-8")
+    (plugin / "tests" / "fixtures" / "driver.py").write_text(
+        "from worktree_manager import synthetic_driver\n", encoding="utf-8",
+    )
+    sources = list(_plugin_runtime_sources(tmp_path / "plugins"))
+    assert set(sources) == {runtime, plugin / "entry.py"}
+    assert all(_IMPORT_WORKTREE_MANAGER.search(path.read_text("utf-8")) for path in sources)
 
 
 def test_no_plugin_declares_the_worktree_manager_as_a_dependency():

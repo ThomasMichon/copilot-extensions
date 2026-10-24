@@ -45,6 +45,8 @@ def _repos_usage() -> None:
     print("  remove <name>                       Remove a repo from the registry")
     print("  clone <remote> [--name N]           Clone a repo to srcroot and register")
     print("     [--target PATH]")
+    print("  setup <https-url> [--target PATH]  Plan or acquire/register and run explicit repo setup")
+    print("     [--apply] [--trust-repository-setup]")
     print("  srcroot [--set PATH]                Show or set the source root")
     print("     [--platform windows|wsl|linux]")
     print("  migrate [--default-class C]         Import legacy ~/.git-repos")
@@ -163,6 +165,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
     sub = argv[0]
     rest = argv[1:]
+
+    if sub == "setup":
+        from .repository_bootstrap import command
+
+        return command(rest)
 
     if sub == "configuration":
         from .repos_configuration import command

@@ -1,0 +1,205 @@
+"""Acquisition preserves unrelated source/registry state and credential ownership."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+from agent_procutil import no_window_kwargs
+import pytest
+
+from agent_worktrees import repos, repository_bootstrap as bootstrap, repository_setup as protocol
+from test_repository_setup import URL, commit, consumer, git, source as source
+
+pytestmark = pytest.mark.timeout(180)
+
+
+@pytest.fixture
+def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setattr(repos, "_current_platform", lambda: "windows")
+    monkeypatch.setattr(repos, "_best_effort_pin_credential", lambda *a: None)
+    unrelated = repos.RepoEntry(
+        name="precious", remote="https://example.invalid/other/precious",
+        repo_class="worktree", account="separate", tags=["preserve"],
+        paths={"windows": str(tmp_path / "precious")},
+    )
+    state = repos.read_registry(strict=True)
+    state.repos["precious"] = unrelated
+    repos.write_registry(state)
+    return repos._repos_yaml_path()
+
+
+def test_existing_source_registers_without_reclassifying_other_repos(source: Path, registry: Path) -> None:
+    before = asdict(repos.read_registry(strict=True).repos["precious"])
+    selected = bootstrap.acquire("sample", source, URL)
+    state = repos.read_registry(strict=True)
+    assert selected.commit == git(source, "rev-parse", "HEAD")
+    assert asdict(state.repos["precious"]) == before
+    assert state.repos["sample"].repo_class == "reference"
+    assert state.repos["sample"].agent is False
+    raw = registry.read_bytes()
+    assert bootstrap.acquire("sample", source, URL) == selected
+    assert registry.read_bytes() == raw
+
+
+@pytest.mark.parametrize("kind", ["dirty", "foreign", "registered-elsewhere", "managed", "alias"])
+def test_refusal_preserves_registry_bytes_and_source(source: Path, registry: Path, kind: str) -> None:
+    if kind == "dirty":
+        (source / "precious.txt").write_text("unpublished work", encoding="utf-8")
+    elif kind == "foreign":
+        git(source, "remote", "set-url", "origin", "https://example.invalid/other/sample")
+    else:
+        state = repos.read_registry(strict=True)
+        state.repos["alias" if kind == "alias" else "sample"] = repos.RepoEntry(
+            name="sample", remote=URL,
+            repo_class="worktree" if kind == "managed" else "reference",
+            paths={"windows": str(source.parent / "elsewhere" if kind == "registered-elsewhere" else source)},
+        )
+        repos.write_registry(state)
+    before = registry.read_bytes()
+    files = {p.name: p.read_bytes() for p in source.iterdir() if p.is_file()}
+    assert bootstrap.command([URL, "--target", str(source), "--apply",
+                              "--trust-repository-setup"]) == 1
+    assert registry.read_bytes() == before
+    assert {p.name: p.read_bytes() for p in source.iterdir() if p.is_file()} == files
+
+
+def test_plan_never_clones_registers_or_executes(source: Path, registry: Path, monkeypatch) -> None:
+    before = registry.read_bytes()
+    monkeypatch.setattr(bootstrap, "acquire", lambda *a: pytest.fail("plan acquired"))
+    monkeypatch.setattr(protocol, "run", lambda *a, **k: pytest.fail("plan executed"))
+    assert bootstrap.command([URL, "--target", str(source)]) == 0
+    assert bootstrap.command([URL, "--target", str(source.parent / "absent")]) == 0
+    assert registry.read_bytes() == before
+
+
+def test_no_trust_stops_before_even_check(source: Path, registry: Path, monkeypatch) -> None:
+    monkeypatch.setattr(bootstrap, "_terminal", lambda: False)
+    monkeypatch.setattr(protocol, "_call", lambda *a: pytest.fail("untrusted repository code"))
+    assert bootstrap.command([URL, "--target", str(source), "--apply"]) == 1
+    assert repos.read_registry(strict=True).repos["sample"].local_path() == str(source)
+
+
+@pytest.mark.parametrize("helper", ["", "store", "!gh auth git-credential", "manager\ncredential.helper store"])
+def test_explicit_account_never_falls_back_to_unqualified_helper(tmp_path, monkeypatch, helper) -> None:
+    monkeypatch.setattr(bootstrap.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a[0], 0, f"credential.helper {helper}\n", "",
+    ))
+    with pytest.raises(protocol.SetupError, match="ambient authentication was not attempted"):
+        bootstrap._credential_args("https://github.com/example/sample.git", "selected-login", cwd=tmp_path)
+
+
+def test_explicit_gcm_route_contains_no_token_and_preserves_global_settings(tmp_path, monkeypatch) -> None:
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "credential.helper manager\n", "")
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    selected = "https://github.com/example/sample.git"
+    args = bootstrap._credential_args(selected, "selected-login", cwd=tmp_path)
+    assert f"credential.{selected}.username=selected-login" in args
+    assert "credential.gitHubAccountFiltering=true" in args
+    assert len(calls) == 1 and "--get-urlmatch" in calls[0][0]
+    assert not any("token" in a or "extraheader" in a for a in args)
+
+
+def test_clone_failure_preserves_partial_target_and_does_not_register(tmp_path, registry, monkeypatch) -> None:
+    target = tmp_path / "sample"
+    before = registry.read_bytes()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(kwargs)
+        if "rev-parse" in argv:
+            return subprocess.CompletedProcess(argv, 128, "", "")
+        if "ls-remote" in argv:
+            return subprocess.CompletedProcess(argv, 0, URL, "")
+        target.mkdir()
+        (target / "partial").write_text("preserve", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 128)
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    with pytest.raises(protocol.SetupError, match="partial target was preserved"):
+        bootstrap.acquire("sample", target, URL)
+    assert registry.read_bytes() == before
+    assert (target / "partial").read_text() == "preserve"
+    assert "timeout" not in calls[-1]
+    assert not calls[-1].get("capture_output", False)
+    assert "stdin" not in calls[-1]
+
+
+def test_rewrite_refused_before_any_clone(tmp_path, registry, monkeypatch) -> None:
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if "rev-parse" in argv:
+            return subprocess.CompletedProcess(argv, 128, "", "")
+        return subprocess.CompletedProcess(argv, 0, "https://elsewhere.invalid/sample", "")
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", run)
+    with pytest.raises(protocol.SetupError, match="rewrites"):
+        bootstrap.acquire("sample", tmp_path / "sample", URL)
+    assert len(calls) == 2 and not any("clone" in argv for argv in calls)
+    assert not (tmp_path / "sample").exists()
+
+
+def test_nested_acquisition_refuses_before_clone(source, registry, monkeypatch) -> None:
+    before = registry.read_bytes()
+    monkeypatch.setattr(bootstrap, "_clone", lambda *a: pytest.fail("nested source acquired"))
+    with pytest.raises(protocol.SetupError, match="nested"):
+        bootstrap.acquire("sample", source / "child", URL)
+    assert registry.read_bytes() == before
+    assert not (source / "child").exists()
+
+
+def test_real_owner_cli_reaches_final_check(source: Path, registry: Path) -> None:
+    consumer(source, """
+if ($r.mode -eq 'apply') { Set-Content -LiteralPath $state -Value 'done' }
+$s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
+[IO.File]::WriteAllText($r.result_file,
+    ('{"version":1,"status":"' + $s + '","message":"owner verified"}'))
+""")
+    assert bootstrap.command([URL, "--target", str(source), "--apply",
+                              "--trust-repository-setup"]) == 0
+    assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
+
+
+def test_rejected_selected_declaration_preserves_successful_acquisition(source, registry) -> None:
+    (source / protocol.DECLARATION).write_text(json.dumps({"version": 99}), encoding="utf-8")
+    commit(source)
+    assert bootstrap.command([URL, "--target", str(source), "--apply",
+                              "--trust-repository-setup"]) == 1
+    assert repos.read_registry(strict=True).repos["sample"].local_path() == str(source)
+
+
+def test_real_manager_to_engine_to_repository_consumer(source, registry, tmp_path) -> None:
+    consumer(source, """
+if ($r.mode -eq 'apply') { Set-Content -LiteralPath $state -Value 'done' }
+$s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
+[IO.File]::WriteAllText($r.result_file,
+    ('{"version":1,"status":"' + $s + '","message":"owner verified"}'))
+""")
+    root = Path(__file__).resolve().parents[3]
+    log = tmp_path / "core-events.json"
+    driver = root / "worktree-manager" / "tests" / "assets" / "repository-setup-driver.py"
+    env = dict(os.environ)
+    result = subprocess.run(
+        [sys.executable, str(driver), str(root / "worktree-manager" / "src"),
+         URL, str(source), str(log)],
+        capture_output=True, text=True, timeout=180, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(log.read_text()) == ["prerequisites", "core"]
+    assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
+    assert "Repository setup: ready" in result.stdout
+    assert repos.read_registry(strict=True).repos["sample"].local_path() == str(source)

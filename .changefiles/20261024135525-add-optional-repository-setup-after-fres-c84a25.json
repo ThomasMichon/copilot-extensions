@@ -1,0 +1,9 @@
+{
+  "comment": "Add optional repository setup after fresh core readiness without changing the Manager update source",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
