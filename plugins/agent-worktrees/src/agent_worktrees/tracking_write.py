@@ -207,6 +207,7 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.launch_seed_state",
     "agent_worktrees.launch_request",
     "agent_worktrees.launch_attempt",
+    "agent_worktrees.launch_execution",
 )
 
 _verb_modules_loaded = False
@@ -624,17 +625,39 @@ def write_with_boot(
     ``min_version`` is forwarded to :func:`endpoint_from_rendezvous` --
     see its own docstring for the same-name-but-enriched-payload skew case
     it closes.
+
+    A published endpoint whose exact live PID/birth owner cannot serve this
+    request is not a starting monitor. Skip boot/wait in that case and use
+    the same locked fallback without ever sending to the incompatible owner.
+    Missing, dead or unconfirmed publishers retain ordinary boot handling.
     """
     started = time.time()
     verb = payload.get("verb") if isinstance(payload, dict) else None
+    lock_data: dict | None = None
 
     def _dial() -> tuple[str, int, str] | None:
-        return endpoint_from_rendezvous(read_lock_data(), verb=verb, min_version=min_version)
+        nonlocal lock_data
+        lock_data = read_lock_data()
+        return endpoint_from_rendezvous(lock_data, verb=verb, min_version=min_version)
+
+    def incompatible_live_owner() -> bool:
+        if endpoint_from_rendezvous(lock_data) is None:
+            return False
+        from . import locks
+
+        pid, birth = lock_data.get("pid"), lock_data.get("start_time")
+        return (
+            type(pid) is int and pid > 0 and isinstance(birth, str) and bool(birth)
+            and locks.pid_alive(pid) and locks.process_start_time(pid) == birth
+        )
 
     endpoint = _dial()
-    if endpoint is None and ensure_monitor is not None:
+    if endpoint is None and ensure_monitor is not None and not incompatible_live_owner():
         ensure_monitor()
-        while endpoint is None and time.time() - started < boot_wait_s:
+        while (
+            endpoint is None and not incompatible_live_owner()
+            and time.time() - started < boot_wait_s
+        ):
             time.sleep(poll_interval_s)
             endpoint = _dial()
     if endpoint is None:

@@ -60,8 +60,9 @@ def _details(value: object) -> dict:
     return value
 
 
-def _path(directory: Path, attempt_id: str, operation_id: str) -> Path:
-    path = directory / "launch-attempts" / identity(attempt_id) / (identity(operation_id) + ".json")
+def _path(directory: Path, attempt_id: str, operation_id: str, *, execution: bool = False) -> Path:
+    suffix = ".execution.json" if execution else ".json"
+    path = directory / "launch-attempts" / identity(attempt_id) / (identity(operation_id) + suffix)
     for item in (path, *path.parents):
         try:
             metadata = item.lstat()
@@ -209,6 +210,18 @@ def resolve(args, work: Callable[[], int]) -> int:
         if not isinstance(plan, dict):
             raise ValueError("Invalid launch plan")
         launch = plan.get("launch") if isinstance(plan.get("launch"), dict) else plan
+        command = launch.get("cmd")
+        if (
+            isinstance(command, list)
+            and command[:3] == [sys.executable, "-m", "agent_worktrees.launch_seed_exec"]
+        ):
+            from .launch_execution import Correlation
+
+            delimiter = command.index("--", 3)
+            launch["cmd"] = [
+                *command[:delimiter], *Correlation(attempt_id, operation_id).options(),
+                *command[delimiter:],
+            ]
         phase = (
             "unknown" if result or "error" in plan or launch.get("action") in {"none", "error"} else
             "remote-admission-returned" if launch.get("action") == "remote" and launch.get("launch_request_id") else

@@ -374,7 +374,7 @@ def test_remote_receiver_requires_policy_capable_daemon(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def dispatch(verb: str, args: dict, *, min_version: int) -> dict:
-        assert min_version == 7
+        assert min_version == 8
         raise ValueError("receiver predates repository hosting admission")
 
     monkeypatch.setattr(launch_request.launch_seed_state, "_dispatch", dispatch)

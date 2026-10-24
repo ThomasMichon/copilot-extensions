@@ -32,7 +32,9 @@ def observe(predicate, timeout, diagnostic):
     raise AssertionError(diagnostic())
 
 
-@pytest.mark.parametrize("payload_fixture", ["owning_payload", "owning_pull_requests", "owning_ssh"])
+@pytest.mark.parametrize("payload_fixture", [
+    "owning_payload", "owning_pull_requests", "owning_ssh", "owning_codespaces",
+])
 def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
     request, payload_fixture, area, native_window_observation,
 ):
@@ -147,7 +149,7 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
         assert foundation_status(root=root).state == "completed"
         assert foundation_status(root=root).operation_id == operation.operation_id
         frozen = Path((installation / "source-path").read_text().strip()).parent
-        if payload_fixture in {"owning_pull_requests", "owning_ssh"}:
+        if payload_fixture in {"owning_pull_requests", "owning_ssh", "owning_codespaces"}:
             assert frozen.parent.parent == installation / ".install-stage"
             assert frozen.parent.name.startswith(request.id + "-")
         else:

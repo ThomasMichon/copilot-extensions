@@ -8,6 +8,18 @@ import runpy
 
 import pytest
 
+from worktree_manager import runtime_launchers
+
+
+@pytest.fixture(params=[
+    ("worktree-manager", runtime_launchers._sh_binstub),
+    ("worktree-manager.cmd", runtime_launchers._cmd_binstub),
+    ("worktree-manager.ps1", runtime_launchers._ps1_binstub),
+], ids=["sh", "cmd", "ps1"])
+def canonical_launcher(request):
+    name, produce = request.param
+    return name, produce().encode("utf-8")
+
 
 @pytest.fixture
 def admission(tmp_path, monkeypatch):
@@ -24,6 +36,58 @@ def admission(tmp_path, monkeypatch):
     repo = Path(__file__).resolve().parents[2]
     api = runpy.run_path(str(repo / "worktree-manager/scripts/update_entry.py"))
     return api, home, commands, repo / "worktree-manager"
+
+
+def test_unregistered_canonical_launcher_is_admitted_without_writes(admission, canonical_launcher):
+    api, home, commands, payload = admission
+    name, body = canonical_launcher
+    path = commands / name
+    path.write_bytes(body)
+    root = home / ".worktree-manager"
+    before = api["validate_manager_ownership"](root, payload)
+    assert before[path] == body
+    assert api["validate_manager_ownership"](root, payload, expected=before) == before
+    assert path.read_bytes() == body
+    assert not root.exists()
+    assert sorted(commands.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("change", ["append", "prepend", "replace", "truncate"])
+def test_unregistered_edited_canonical_launcher_is_preserved(
+    admission, canonical_launcher, change,
+):
+    api, home, commands, payload = admission
+    name, body = canonical_launcher
+    edited = {
+        "append": body + b"\necho edited\n",
+        "prepend": b"echo edited\n" + body,
+        "replace": body.replace(b"worktree_manager", b"foreign_manager"),
+        "truncate": body[:-1],
+    }[change]
+    assert edited != body
+    path = commands / name
+    path.write_bytes(edited)
+    root = home / ".worktree-manager"
+    with pytest.raises(RuntimeError, match="Foreign Manager command preserved"):
+        api["validate_manager_ownership"](root, payload)
+    assert path.read_bytes() == edited
+    assert not root.exists()
+
+
+def test_unregistered_canonical_launcher_change_after_admission_is_refused(
+    admission, canonical_launcher,
+):
+    api, home, commands, payload = admission
+    name, body = canonical_launcher
+    path = commands / name
+    path.write_bytes(body)
+    root = home / ".worktree-manager"
+    before = api["validate_manager_ownership"](root, payload)
+    path.unlink()
+    with pytest.raises(RuntimeError, match="changed during construction"):
+        api["validate_manager_ownership"](root, payload, expected=before)
+    assert not path.exists()
+    assert not root.exists()
 
 
 def test_bootstrap_ignores_old_helper_after_registered_payload_refresh(admission, monkeypatch):

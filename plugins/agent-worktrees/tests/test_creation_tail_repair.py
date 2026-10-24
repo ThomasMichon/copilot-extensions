@@ -520,8 +520,11 @@ def test_creation_fences_companion_no_seed_launch_through_final_readiness(
                 launch_seed_exec.subprocess, "Popen",
                 lambda *a, **kw: pytest.fail("companion launched during repair"),
             )
-            with pytest.raises(ValueError, match="launch admission is busy"):
-                launch_seed_exec.launch(child_path, ["copilot"], admission_only=True)
+            if child_path.exists():
+                with pytest.raises(ValueError, match="launch admission is busy"):
+                    launch_seed_exec.launch(child_path, ["copilot"], admission_only=True)
+            else:
+                assert launch_seed_exec.launch(child_path, ["copilot"], admission_only=True) == 3
         blocked.append(True)
 
     def permissions(*args):

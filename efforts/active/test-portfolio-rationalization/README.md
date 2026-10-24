@@ -55,6 +55,13 @@ release gates, or count unexecuted native coverage as passing.
 
 ## Coordination
 
+The direct retained #4123 acceptance continues through this SAME existing Active ROOT's
+Plan, own and actual global Validation, and Journal under the incumbent domain, source,
+native and resource custodians. Every prior phase, alternative, hold and responsibility
+remains. Administrative supersession retires only duplicate tracking; a closed source is
+historical provenance, not a required live claim token. This intake grants no
+implementation, rollout, process action, reassignment or new blanket approval gate.
+
 The complete #3991 retained finite family continues through this existing Active ROOT's
 reviewed Plan, actual global Validation and Journal/open bounded-source process under
 the SAME declared and source-specific custodians. Preserve every incumbent alternative,
@@ -572,7 +579,114 @@ be verified, RETAIN #3991. Original technical reconciliation stays unresolved af
 administrative intake; no test, checker, collection, import, native,
 Vault/credential/service/provider or source effect is authorized.
 
+<!-- backlog-reconciliation:7556:transfer:4123:to:efforts/active/test-portfolio-rationalization/README.md -->
+
+### Direct complete fixture-origin temporary-link cleanup family from #4123
+
+Accept this finite family through the existing Phase7 migration-intake
+deduplication/domain-ownership gate into the SAME reviewed Active ROOT's Phase4
+Worktrees wave. Preserve the ENTIRE incumbent ROOT Plan, actual global Validation,
+Coordination and Journal, OPEN #1303, all direct inherited
+native/mock/order/history/unknown-case families and every actual
+audit/source/cohort/periodic-failure/release owner. This is proposed documentation
+intake only; it does not claim cleanup, run a test or confer source/resource/claim
+custody.
+
+#### Numbered unchecked Plan
+
+- [ ] Recover the actual supported pytest temporary-root/current-alias and explicit
+  fixture-created symlink routes that can place run-owned debris in a plugin directory.
+  Preserve the historical empty-pivots/empty-plugins origin and exact source/profile
+  evidence without inspecting real private targets or assuming today's leak from a
+  historical filename. Framework-created current aliases and explicit symlink_to calls
+  are different producers.
+- [ ] Establish ownership-qualified fixture finalization OR an appropriate
+  autouse/framework boundary, preserving the original alternatives. Register cleanup
+  early enough for setup failure as well as after yield; environment restoration is not
+  deletion proof and each individual test need not delete a framework-owned target
+  blindly.
+- [ ] Remove only the addressed run's proven-owned temporary link/artifact. Preserve
+  pre-existing authored files, foreign links, external targets and other runs'
+  retained/live/unknown ownership. Do not follow a link, remove its target or sweep a
+  shared plugin/temp root. Uncertain ownership is an explicit retained residual, not
+  deletion permission.
+- [ ] Preserve cleanup after success, primary test failure, setup failure, after-yield
+  failure and interruption/timeout through the supported bounded teardown boundary. Do
+  not mask the original failure, weaken assertions/budgets or use retry/skip/xfail as
+  cleanup proof.
+- [ ] When cleanup cannot finish, expose truthful residual ownership and actionable
+  diagnostics; preserve primary result separately. A nominal pytest exit or successful
+  environment reset does not mean no plugin-directory debris remains.
+- [ ] Keep this fixture-origin implementation with its actual owning fixture/Worktrees
+  portfolio custodians. #4122 installer-source tolerance, historical #5869 runner
+  sandbox-status suppression and long-run descendant/handle cleanup retain their
+  separate scopes and current owners. Do not reopen a closed historical token or use it
+  as a required live claim.
+- [ ] Preserve current runner-owned roots, declared effects, item/group/plugin/storage
+  limits and proper least-expensive faithful tiers. Genuine unit rules may use existing
+  unit admission; actual Linux/WSL filesystem/native integration retains its supported
+  bounded contained/periodic lane. No mandatory broad integration release gate, all-host
+  requirement or whole-portfolio prerequisite is introduced.
+- [ ] Document exact original/current producer, fixture and cleanup authority mapping,
+  historical hygiene fixes versus real behavior, supported/unavailable outcomes and any
+  remaining unknown. Git removal, ignore policy, missing literal .pytmp strings,
+  unrelated green suite counts and runner cleanup code are not the actual
+  fixture-cleanup postcondition.
+
+#### Numbered unchecked local Validation
+
+- [ ] Qualify the actual addressed fixture/framework routes with owned synthetic data in
+  the existing separately authorized lane. Record exact source, profile, platform and
+  producer; prove the run's own plugin-directory aliases/artifacts are gone without
+  following or changing targets.
+- [ ] Cover success, primary failure, setup-before-yield failure, after-yield failure
+  and supported bounded interruption/timeout. Demonstrate cleanup sensitivity rather
+  than a return-code-only assertion; preserve exact primary errors and no new arbitrary
+  deadlines.
+- [ ] Prove pre-existing authored files, foreign links, external targets, another run
+  and unresolved ownership are protected. A refused unsafe cleanup remains visible and
+  retained, not falsely successful.
+- [ ] Exercise cleanup refusal/failure and truthful residual ownership/diagnostics
+  separately from the original primary result. Keep #5869 runner status and #4122
+  installer tolerance distinct; neither supplies a substitute positive for this family.
+- [ ] Record actual bounded Linux/WSL/faithful contained results and unavailable-tier
+  reasons independently from source/ignore/merge/release evidence. Maintain current
+  admission, effect and budget rules; no fixture, import, collection, checker or test is
+  executed by this intake.
+
+#### Numbered continuing Coordination and delivery gate
+
+- [ ] Keep the existing fixture/test/Worktrees wave and portfolio
+  audit/source/cohort/failure custodians. Do not assign implementation to the
+  documentation planner or transfer process/resource leases. Apply the existing Phase7
+  deduplication and domain-Plan review acceptance; no new generic ACK is required.
+- [ ] Continue through current ROOT Plan/Validation/Journal and eligible OPEN
+  bounded-source coordination, retaining OPEN #1303 and all incumbent
+  native/mock/order/history/unknown-case and release holds. Preserve historical #4123
+  provenance without leaving a closed #4123 as a required live claim token.
+- [ ] Obtain a NEW normal reviewed ACTUAL source merge delivering this complete direct
+  unchecked Plan, local Validation, actual global ROOT Validation entry and continuing
+  Coordination. Old ROOT creation, #8178's unrelated intake, a title, child-only note,
+  Draft/Done target or this proposal is not delivery.
+- [ ] BEFORE #4123 supersession, read back the FULL CURRENT Active ROOT Plan/own
+  Validation/Coordination/Journal and verify all original/inherited requirements,
+  alternatives, unknowns, evidence tiers, actual current owners/holds and live #1303
+  survive. Journal only the actual administrative intake; preserve every old row and
+  historical outcome. If any genuine hold requires the source live, intake is
+  incomplete, eligibility changes or custody cannot be preserved, RETAIN #4123. No
+  cleanup, test, implementation or parent completion is claimed.
+
 ## Validation Plan
+
+- [ ] Resolve EVERY directly retained #4123 fixture-origin Plan/local Validation clause
+  above, preserving original finalizer-OR-autouse/framework alternatives, same
+  custodians, ownership/foreign-target safety, setup/pass/failure/interruption/residual
+  outcomes and original bounded Linux/WSL evidence tier. Administrative intake is not
+  cleanup, native proof or implementation. Preserve EVERY incumbent ROOT Plan AND own
+  Validation obligation; mark the parent Done only after all are resolved OR explicitly
+  transferred to named accepted tracked objectives. This parent gate does not delay
+  completion of the finite fixture family on unrelated portfolio work.
+
 
 - [ ] Resolve EVERY direct #3991 three-case historical Vault Linux Plan/Validation
   clause at its original scope/evidence tier and alternatives, including all-three
@@ -627,6 +741,8 @@ with another unbounded full-suite run. Portfolio reductions follow only after
 the inventory and evidence gates are available.
 
 ## Journal
+
+- [2026-10-24 - Direct retained acceptance from #4123](<journal/2026/10.24 backlog-intake-85-86.md>)
 
 ### 2026-10-23 - Direct retained acceptance from #3991
 
