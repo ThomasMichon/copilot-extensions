@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve complete macOS process birth identity when checking retained lifecycle locks; qualify live-owner refusal and exact PID-reuse reclamation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
