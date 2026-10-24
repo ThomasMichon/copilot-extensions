@@ -565,3 +565,68 @@ estimate, not a runtime-budget increase. Run only after quiet-lane admission.
 Until it passes unchanged, source publication, review-thread resolution,
 fresh review, required green CI and actual merge of #8217 remain open.
 The effort and parent trackers are not complete.
+
+### Complete v2 wire-row budget
+
+Draft #8217 reached `b5ab565a` with required green CI. Fresh review
+`5635819089` confirmed the two earlier corrections and identified a distinct
+complete-wire-row budget mismatch. The admitted source fix keeps
+`_encode_row`'s legacy field/type checks and existing semantic-version checks.
+A small v2-specific check encodes the complete projected row as compact JSON,
+`ensure_ascii=False`, UTF-8, including the actual `semantic_revision`.
+It runs before the atomic transaction, at v2 read construction, and at both
+engine admission paths. Manager's existing raw budget and its post-admission
+receiver-metadata exclusion remain unchanged.
+
+The unchanged baseline reproduced **one failed test**: a real
+`WorktreesRuntime`/SQLite publication accepted 65,536 stored bytes, emitted
+65,558 v2 bytes at revision 1 and was rejected by the actual Manager parser.
+After correction, the same regression rejects the wave before any durable
+head/row/observation/order change.
+
+Actual new cases, verified from the emitted JUnit:
+
+| Case | Coverage / result |
+|---|---|
+| Exact 65,536 / 65,537 wire bytes | Accept / reject, each with ASCII and multibyte text at semantic revisions 1, 9, 10 and 9,223,372,036,854,775,807: 16 cases |
+| Real producer-to-Manager path | Actual runtime/SQLite publisher, one-shot engine validation, real serialized publication frames, engine feed receiver, Manager parser/held-feed receiver and durable advisory reread; no mocked publication or Manager result |
+| Rejected wave | First publication and partial replacement batches leave all durable projection tables and the previous in-memory publication unchanged; another project remains isolated |
+| Revision digit growth | A row exactly at 65,536 bytes at semantic 9 becomes 65,537 at semantic 10 and is rejected atomically |
+| Semantic no-op | The next observation-only wave may advance head 9 → 10 while row semantic revision stays 9: zero semantic writes and zero semantic row frames |
+| One valid change | Reducing content by the actual added revision digit admits exactly 65,536 bytes at semantic 11: one semantic update and one row frame |
+| Both engine admissions | Oversize raw rows rejected at revisions 1, 10 and maximum signed-SQLite revision |
+| Receiver metadata | Accepted Manager rows exceed the wire bound after decoration but still commit through their existing metadata-stripping publication barriers |
+| Legacy capacity | A full 65,536-byte v1 row with observation fields remains usable by the new publisher; an actual compatible older-writer SQL publication of a full-capacity row remains readable as v1 and fails explicitly only when its projected v2 encoding is oversized |
+
+The maximum revision fixture seeds a valid committed head immediately before
+that revision rather than executing billions of waves. Revisions 9/10 are
+reached through real preceding publications. The new boundary matrix has
+23 test cases, not a native performance benchmark.
+
+The existing scoped Worktrees selector was extended only with the directly
+affected `test_worktrees_projection.py` module and the new cases in
+`test_worktrees_observations.py`: **192 passed, 11 deselected**. It retains
+the exclusions `actual_cli`, `real_transport`,
+`cross_real_authenticated_control_socket` and `real_producer`. Manager's
+same pure parser/feed selector reports **92 passed, 3,903 deselected**, with
+the eight previously recorded marker warnings still visible. Both actual
+JUnit files were located and parsed: 192/92 cases, zero failures/errors,
+including all 23 new boundary cases. No missing XML is inferred as success.
+
+Ruff F/E9, the actual scoped module-size guard, install contract and diff
+checks pass. No baseline, schema, election, writer-incarnation, receiver/UI,
+entrypoint or installed-runtime change is included. Existing product
+changefiles cover this correction.
+
+Documentation impact: the engine/Picker contract now specifies complete v2
+wire-byte accounting and unchanged legacy capacity; this effort records its
+validation and retained native gate. Performance impact: one bounded compact
+encoding per candidate row in the existing publication loop, and per v2
+admitted/emitted row; no new process, network/history scan, projection writer
+or semantic replacement is introduced. No launch-latency improvement or
+post-fix native qualification is claimed.
+
+The correction still requires ordinary draft publication, resolution of its
+specific thread only after the real fix is published, fresh accepted review
+and required current-head CI. The coordinator retains the independent
+unchanged two-second native hold; no ready/merge/rollout action is authorized.

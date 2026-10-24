@@ -234,6 +234,7 @@ class FeedReceiver:
                     observations.check_advance(
                         self._rows.get(wid), row, field="semantic_revision",
                     )
+                    observations.validate_wire_row(row)
                 self._rows[wid] = row
                 if len(self._rows) > self._begin["selected_count"]:
                     # Updates may insert before deleting, so bound against both rosters.

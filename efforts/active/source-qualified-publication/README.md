@@ -154,6 +154,23 @@ it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
 
+### 2026-10-24 — Complete v2 wire-row budget correction
+- Draft #8217 published `b5ab565a` with required green CI. Fresh review
+  confirmed the two earlier findings resolved but found that engine admission
+  omitted the serialized semantic revision from its row-byte accounting.
+- Reproduced a real durable publication of a 65,536-byte legacy row becoming
+  a 65,558-byte v2 row rejected by Manager. The admitted correction retains
+  legacy schema/type and version checks, then checks the complete v2 encoding
+  before the publication transaction, on reads and at both engine admission
+  paths. No fixed reservation or lowered legacy capacity is used.
+- Contained validation passes 192 Worktrees cases (including 23 new exact
+  boundary/rollback/compatibility cases) and the existing 92-case Manager
+  parser/feed selection. Actual JUnit files confirm both counts with zero
+  failures/errors. Details remain in [validation.md](validation.md).
+- No unchanged native timing case, deadline adjustment, ready transition,
+  merge or rollout occurred. Fresh publication/review/CI of this correction
+  and the independent native qualification hold remain separate gates.
+
 ### 2026-10-23 — Size-compliant entry and wire-admission corrections retained
 - The admitted two-helper extraction is committed locally in `5a946fd6f`.
   The actual root module has 6,760 lines against its 6,761 ceiling, without

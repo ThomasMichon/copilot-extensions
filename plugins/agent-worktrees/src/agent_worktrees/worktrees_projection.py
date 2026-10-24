@@ -208,6 +208,7 @@ class _Publication:
             if self.index is None and self.observations is not None:
                 observations.validate_rows([semantic], [value], self.revision)
             if contract_version == 2:
+                observations.validate_wire_row(semantic)
                 row = semantic
                 facts.append(copy.deepcopy(value))
             else:
@@ -344,6 +345,9 @@ class WorktreesProjection:
                     old_payload is not None and previous.semantic_rows[wid] == semantic_rows[wid]
                 )
                 versions[wid] = previous.semantic_revisions[wid] if same else revision
+                observations.validate_wire_row({
+                    **observations.semantic_row(row), "semantic_revision": versions[wid],
+                })
                 facts[wid] = observations.observation(
                     row, revision,
                     None if previous is None else previous.observations.get(wid),

@@ -150,6 +150,17 @@ are distinct. Every row adds `semantic_revision` (last semantic change in the
 current generation). Its `fact_provenance` retains quality, with observation
 times moved into a separate `observations` list:
 
+The 65,536-byte row limit counts the complete compact UTF-8 v2 row, including
+the actual decimal width of `semantic_revision`. Legacy field/type validation
+still applies separately to its semantic fields. The publisher checks every
+projected row before committing the atomic wave; one oversized row rejects the
+whole wave without advancing its head. Engine and Manager admission enforce
+the same complete-row limit. Manager's four locally derived metadata fields
+are excluded only when revalidating already-admitted rows, never at raw
+ingress. V1 row capacity and the schema-1 storage limit remain unchanged;
+a compatible older writer's row that cannot fit v2 is refused explicitly on
+that v2 read, not truncated or rewritten.
+
 ```json
 {
   "id": "tree",

@@ -57,6 +57,248 @@ def writes(path):
         return conn.execute("SELECT operation, id FROM test_row_writes").fetchall()
 
 
+def wire_bytes(value):
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def sized_row(size, revision, *, non_ascii=False, facts=False):
+    value = {"id": "one", "claims_assets": {
+        f"padding{i}": "é" * 2048 if non_ascii else "x" * 4096 for i in range(15)
+    }}
+    if facts:
+        value["fact_provenance"] = {
+            name: {"quality": "current", "observed_at": 1} for name in contract.FACTS
+        }
+    value["claims_assets"]["tail"] = ""
+    value["claims_assets"]["tail"] = "x" * (
+        size - wire_bytes({**contract.semantic_row(value), "semantic_revision": revision})
+    )
+    assert len(value["claims_assets"]["tail"]) <= 4096
+    assert wire_bytes({**contract.semantic_row(value), "semantic_revision": revision}) == size
+    return value
+
+
+@pytest.fixture
+def manager_contract(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "worktree-manager" / "src"))
+    from worktree_manager.worktree_feed_contract import CurrentFeed
+    from worktree_manager.worktree_rows_contract import parse_current_rows
+
+    return CurrentFeed, parse_current_rows
+
+
+def publication_tables(path):
+    with sqlite3.connect(path) as conn:
+        names = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name LIKE 'worktrees_projection_%' ORDER BY name",
+        ).fetchall()
+        return {name: sorted(conn.execute(f'SELECT * FROM "{name}"').fetchall(), key=repr)
+                for (name,) in names}
+
+
+def before_revision(owner, revision):
+    if revision == 1:
+        return
+    owner.publish("project", [{"id": "one", "title": "before"}], observed_at=1)
+    if revision <= 10:
+        for index in range(2, revision):
+            owner.publish("project", [{"id": "one", "title": f"before-{index}"}], observed_at=1)
+    else:
+        # Seed a valid signed-SQLite revision boundary without billions of waves.
+        owner.store._projects["project"] = replace(
+            owner.store._projects["project"], revision=revision - 1,
+        )
+        with sqlite3.connect(owner.store.db_path) as conn:
+            for table in ("head", "observation_head"):
+                conn.execute(
+                    f"UPDATE worktrees_projection_{table} SET revision=? WHERE project=?",
+                    (revision - 1, "project"),
+                )
+
+
+def test_complete_wire_budget_rejects_65558_before_durable_publication(tmp_path, manager_contract):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    before = publication_tables(owner.store.db_path)
+    value = sized_row(65558, 1)
+    assert wire_bytes(value) == 65536
+    try:
+        try:
+            owner.publish("project", [value], observed_at=1)
+        except ProjectionError as exc:
+            assert "byte bound" in str(exc)
+        else:
+            result = owner.handle(request())
+            assert wire_bytes(result["worktrees"][0]) == 65558
+            with pytest.raises(ValueError, match="byte bound"):
+                manager_contract[1](result)
+            pytest.fail("publisher committed 65536 stored bytes / 65558 v2 bytes rejected by Manager")
+        assert publication_tables(owner.store.db_path) == before
+        with pytest.raises(ProjectionUnavailable):
+            owner.store.read("project")
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("revision", [1, 9, 10, 2**63 - 1])
+@pytest.mark.parametrize("non_ascii", [False, True])
+@pytest.mark.parametrize("size", [65536, 65537])
+def test_complete_wire_budget_real_publication_to_manager(
+    tmp_path, manager_contract, revision, non_ascii, size,
+):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    before_revision(owner, revision)
+    owner.publish("other", [{"id": "other"}], observed_at=1)
+    before = publication_tables(owner.store.db_path)
+    previous = owner.store._projects.get("project")
+    value = sized_row(size, revision, non_ascii=non_ascii)
+    try:
+        if size == 65537:
+            with pytest.raises(ProjectionError, match="byte bound"):
+                owner.publish("project", [{"id": "two", "title": "must not commit"}, value],
+                              observed_at=2)
+            assert publication_tables(owner.store.db_path) == before
+            assert owner.store._projects.get("project") is previous
+            return
+        owner.publish("project", [value], observed_at=2)
+        result = json.loads(json.dumps(owner.handle(request()), ensure_ascii=False))
+        assert result["projection"]["revision"] == revision
+        assert result["worktrees"][0]["semantic_revision"] == revision
+        assert wire_bytes(result["worktrees"][0]) == 65536
+        assert validate_result(result, request()) == result
+        parsed = manager_contract[1](result)[0]
+        assert wire_bytes(parsed) > 65536
+        engine, manager = FeedReceiver(request()), manager_contract[0]()
+        for frame in publication_frames(result):
+            decoded = json.loads(json.dumps(frame, ensure_ascii=False, separators=(",", ":")))
+            engine.receive(decoded)
+            manager.receive(decoded)
+        assert engine.current["worktrees"] == result["worktrees"]
+        assert manager.rows[0] == parsed
+        assert read_advisory(owner.store.db_path, "project", contract_version=2)[
+            "worktrees"
+        ] == result["worktrees"]
+        assert owner.handle(request(1))["worktrees"] == [value]
+    finally:
+        owner.shutdown()
+
+
+def test_complete_wire_budget_digit_growth_and_noop_semantic_revision(tmp_path, manager_contract):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    before_revision(owner, 9)
+    value = sized_row(65536, 9, non_ascii=True)
+    owner.publish("project", [value], observed_at=2)
+    before = owner.handle(request())
+    durable = publication_tables(owner.store.db_path)
+    changed = {**value, "claims_assets": {**value["claims_assets"]}}
+    changed["claims_assets"]["tail"] = "y" + changed["claims_assets"]["tail"][1:]
+    assert wire_bytes({**changed, "semantic_revision": 10}) == 65537
+    audit_semantic_writes(owner.store.db_path)
+    try:
+        with pytest.raises(ProjectionError, match="byte bound"):
+            owner.publish("project", [{"id": "two"}, changed], observed_at=3)
+        assert publication_tables(owner.store.db_path) == durable
+        assert owner.store.read("project", contract_version=2)["worktrees"] == before["worktrees"]
+        assert writes(owner.store.db_path) == []
+        owner.publish("project", [value], observed_at=3)
+        current = owner.handle(request())
+        assert current["projection"]["revision"] == 10
+        assert current["worktrees"][0]["semantic_revision"] == 9
+        assert wire_bytes(current["worktrees"][0]) == 65536
+        frames = list(publication_frames(current, before))
+        assert sum(frame["type"] == "worktree" for frame in frames) == 0
+        assert writes(owner.store.db_path) == []
+        manager = manager_contract[0]()
+        for publication, previous in ((before, None), (current, before)):
+            for frame in publication_frames(publication, previous):
+                manager.receive(json.loads(json.dumps(frame, ensure_ascii=False)))
+        assert manager.rows[0]["semantic_revision"] == 9
+        changed["claims_assets"]["tail"] = changed["claims_assets"]["tail"][:-1]
+        owner.publish("project", [changed], observed_at=4)
+        final = owner.handle(request())
+        assert final["worktrees"][0]["semantic_revision"] == 11
+        assert wire_bytes(final["worktrees"][0]) == 65536
+        frames = list(publication_frames(final, current))
+        assert sum(frame["type"] == "worktree" for frame in frames) == 1
+        assert writes(owner.store.db_path) == [("UPDATE", "one")]
+        for frame in frames:
+            manager.receive(json.loads(json.dumps(frame, ensure_ascii=False)))
+        assert manager.rows[0]["semantic_revision"] == 11
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("revision", [1, 10, 2**63 - 1])
+def test_complete_wire_budget_both_engine_admissions_reject_raw_oversize(
+    tmp_path, manager_contract, revision,
+):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    owner.publish("project", [{"id": "one"}], observed_at=1)
+    try:
+        result = owner.handle(request())
+        result["projection"]["revision"] = revision
+        result["worktrees"] = [{**sized_row(65537, revision, non_ascii=True),
+                                "semantic_revision": revision}]
+        with pytest.raises(ProjectionUnavailable, match="byte bound"):
+            validate_result(result, request())
+        with pytest.raises(ValueError, match="byte bound"):
+            manager_contract[1](result)
+        receiver = FeedReceiver(request())
+        frames = list(publication_frames(result))
+        receiver.receive(frames[0])
+        with pytest.raises(ProjectionError, match="byte bound"):
+            receiver.receive(frames[1])
+        assert receiver.current is None
+    finally:
+        owner.shutdown()
+
+
+def test_complete_wire_budget_keeps_full_v1_capacity_with_observation_metadata(tmp_path):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    value = sized_row(65536, 1, facts=True)
+    shrink = wire_bytes(value) - 65536
+    value["claims_assets"]["tail"] = value["claims_assets"]["tail"][:-shrink]
+    assert wire_bytes(value) == 65536
+    try:
+        owner.publish("project", [value], observed_at=1)
+        assert owner.handle(request(1))["worktrees"] == [value]
+        assert wire_bytes(owner.handle(request())["worktrees"][0]) < 65536
+        assert read_advisory(owner.store.db_path, "project")["worktrees"] == [value]
+    finally:
+        owner.shutdown()
+
+
+def test_complete_wire_budget_older_writer_keeps_full_v1_capacity(tmp_path):
+    from agent_worktrees.worktrees_projection_index import SelectionIndex
+
+    store = WorktreesProjection(tmp_path / "legacy.sqlite3")
+    store.activate()
+    value = sized_row(65558, 1, non_ascii=True)
+    assert wire_bytes(value) == 65536
+    with sqlite3.connect(store.db_path) as conn:
+        conn.execute("INSERT OR REPLACE INTO worktrees_projection_owner VALUES (1, ?, ?)",
+                     ("b" * 32, "legacy-writer"))
+        conn.execute("INSERT INTO worktrees_projection_row VALUES (?, ?, ?)",
+                     ("project", "one", json.dumps(
+                         value, ensure_ascii=False, separators=(",", ":"),
+                     )))
+        conn.execute("INSERT INTO worktrees_projection_head VALUES (?, ?, ?, ?, ?, ?)",
+                     ("project", 1, "b" * 32, 1, 1, 1))
+        SelectionIndex([value]).persist(conn, "project")
+    before = publication_tables(store.db_path)
+    assert read_advisory(store.db_path, "project", contract_version=1)["worktrees"] == [value]
+    with pytest.raises(ProjectionError, match="byte bound"):
+        read_advisory(store.db_path, "project", contract_version=2)
+    assert publication_tables(store.db_path) == before
+
+
 @pytest.mark.timeout(180)
 def test_real_producer_thousand_rows_ten_observations_and_one_title(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"

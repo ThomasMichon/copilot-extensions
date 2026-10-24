@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 
 from .worktrees_projection_index import ProjectionError
@@ -118,6 +119,15 @@ def validate_observation(value: dict, revision: int) -> None:
             raise ProjectionError("invalid closure observation")
 
 
+def validate_wire_row(row: dict) -> None:
+    """Bound the complete schema-admitted v2 row, including its semantic revision."""
+    from .worktrees_projection import MAX_ROW_BYTES
+
+    payload = json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+    if len(payload.encode("utf-8")) > MAX_ROW_BYTES:
+        raise ProjectionError("current v2 wire row exceeds byte bound")
+
+
 def validate_rows(rows: list[dict], observations: list[dict], revision: int) -> None:
     from .worktrees_projection import _encode_row
 
@@ -137,6 +147,7 @@ def validate_rows(rows: list[dict], observations: list[dict], revision: int) -> 
             raise ProjectionError("invalid semantic revision")
         semantic = {k: v for k, v in row.items() if k != "semantic_revision"}
         _encode_row(semantic)
+        validate_wire_row(row)
         value = by_id.pop(row["id"], None)
         provenance = semantic.get("fact_provenance") or {}
         if (
