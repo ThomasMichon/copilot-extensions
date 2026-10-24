@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse the admitted PowerShell catalog interpreter for fresh source-qualified command binding, preserving isolated discovery and fail-closed helper outcomes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

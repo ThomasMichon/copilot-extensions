@@ -3333,6 +3333,12 @@ profile recording before the full-profile baseline; no product script is warmed.
 Each invocation and host shutdown must preserve every file byte, directory, and
 modification time. This measures diagnostic behavior, not the separate startup
 cache writes made by fresh Windows PowerShell processes.
+The owned case then changes the receipt and requires the next emission to
+refuse it without writes. Command-binding launcher controls execute the real
+isolated bootstrap/helper and separately retain unavailable-interpreter
+fallback, helper failure, empty-response refusal, and opt-in stderr-only
+tracing. An admitted launcher passes the helper in its first invocation;
+helper failures must not rediscover or launch a fallback interpreter.
 
 Run the relevant isolated integration suite when changing a runtime boundary;
 required PR CI's unit gate is not that evidence. Fast structural/contract checks

@@ -81,10 +81,17 @@ tests/test_adopter_publication.py --allow-explicit-tiers`.
 the first adopter. Other manifests retain byte-identical catalogs. The optional
 `catalogBindingModule` vendors the same pure ownership code into the runtime
 package for its existing deploy-manifest publisher.
-Binding emitters use isolated Python, including the PowerShell launcher probe
-and selected helper process: neither the project working directory, inherited
+Binding emitters use isolated Python, including the PowerShell launcher
+bootstrap and binding helper: neither the project working directory, inherited
 Python import paths, nor user-site startup hooks supply discovery code.
 Only the explicitly addressed payload helper supplies binding code.
+The PowerShell launcher admits its interpreter and runs that helper in the same
+process, avoiding a second Python startup. An unavailable launcher can fall
+back to a non-WindowsApps interpreter; an admitted helper's failure or empty
+response cannot trigger a retry. Each emission reads current ownership again:
+neither interpreter admission nor a prior catalog caches a binding decision.
+`COPILOT_EXTENSIONS_BOOT_TRACE` adds timestamped binding stages to stderr only;
+ordinary emission adds no trace output or diagnostic subprocess.
 
 The binding contains normalized source identity/fingerprint, plugin identity,
 and a selected installation only when its ownership has been validated.
