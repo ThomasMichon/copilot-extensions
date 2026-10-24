@@ -1395,7 +1395,7 @@ class TestClassifyGitTimeout:
 
         (tmp_path / ".git").mkdir()
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
             # Branch detection succeeds so classification reaches the git ops.
             if args[:2] == ("rev-parse", "--abbrev-ref"):
                 return subprocess.CompletedProcess(
@@ -1427,12 +1427,14 @@ class TestClassifyGitTimeout:
 
         (tmp_path / ".git").mkdir()
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
             if args[:2] == ("rev-parse", "--abbrev-ref"):
                 return subprocess.CompletedProcess(
                     ["git", *args], 0, "worktree/x\n", "")
-            raise subprocess.TimeoutExpired(
+            error = subprocess.TimeoutExpired(
                 cmd=["git", *args], timeout=timeout or go._CLASSIFY_GIT_TIMEOUT)
+            error.observation_started = True
+            raise error
 
         monkeypatch.setattr(go, "git", fake_git)
 
@@ -1449,7 +1451,7 @@ class TestClassifyGitProcessCount:
     def _run(monkeypatch, responses):
         calls = []
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
             calls.append(args)
             return responses(args)
 
@@ -1592,7 +1594,7 @@ class TestClassifyGitStateFetchFailed:
 
     @staticmethod
     def _run(monkeypatch, *, fetch_returncode, responses):
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, **options):
             if args[:1] == ("fetch",):
                 return types.SimpleNamespace(
                     returncode=fetch_returncode, stdout="", stderr="",
