@@ -372,3 +372,12 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   Review/merge, existing-owner outcome correlation, retention/history migration,
   selected-machine readers/sweeps, negotiated SSH admission and delivered
   conversation evidence remain owed.
+- Required CI on the first published head found three stale installer guardian
+  copies inherited during the managed publication rebase. The canonical owner
+  had already gained zombie-only process-group handling, but the vault,
+  pull-request runtime and shared updater copies had not been synchronized.
+  Ran the existing generator, retained the exact canonical bytes, added release
+  changefiles for every affected updater consumer and revalidated the install
+  contract. Both canonical zombie/live-member refusal controls pass; this is a
+  generated-copy consistency repair, not a new guardian design or native macOS
+  qualification. No failing CI gate was bypassed.
