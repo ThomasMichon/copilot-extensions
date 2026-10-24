@@ -19,9 +19,10 @@ REMOTE = "https://github.com/example/repository.git"
 
 
 def _packet(root: Path, commit=COMMIT) -> None:
-    path = root / preparation.PACKET
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps({"captured_from": {"commit": commit}}), encoding="utf-8")
+    for relative in preparation.PACKETS:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"captured_from": {"commit": commit}}), encoding="utf-8")
 
 
 def _registry() -> dict:
@@ -75,6 +76,41 @@ def test_missing_capture_fetches_only_exact_object_from_selected_remote(tmp_path
         (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
         (("show", f"{COMMIT}:{codec.REGISTRY}"), 10),
     ]
+
+
+def test_each_distinct_required_capture_is_prepared_and_validated(tmp_path, monkeypatch):
+    _packet(tmp_path)
+    second = "2" * 40
+    for relative in preparation.PACKETS[1:]:
+        (tmp_path / relative).write_text(json.dumps({
+            "captured_from": {"commit": second},
+        }), encoding="utf-8")
+    calls = _runner(monkeypatch, iter([0, 1, 0, 0]))
+    assert preparation.prepare(tmp_path, REMOTE) == COMMIT
+    assert calls == [
+        (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
+        (("show", f"{COMMIT}:{codec.REGISTRY}"), 10),
+        (("cat-file", "-e", f"{second}^{{commit}}"), 10),
+        (("fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",
+          "--no-auto-maintenance", "--no-write-fetch-head", REMOTE, second), 60),
+        (("cat-file", "-e", f"{second}^{{commit}}"), 10),
+        (("show", f"{second}:{codec.REGISTRY}"), 10),
+    ]
+
+
+@pytest.mark.parametrize("relative", preparation.PACKETS[1:])
+@pytest.mark.parametrize("fault", ["missing", "malformed"])
+def test_required_later_capture_refuses_before_git(tmp_path, monkeypatch, relative, fault):
+    _packet(tmp_path)
+    path = tmp_path / relative
+    if fault == "missing":
+        path.unlink()
+    else:
+        path.write_text('{"captured_from":{"commit":"HEAD"}}', encoding="utf-8")
+    calls = _runner(monkeypatch, iter([]))
+    with pytest.raises((FileNotFoundError, ValueError)):
+        preparation.prepare(tmp_path, REMOTE)
+    assert calls == []
 
 
 @pytest.mark.parametrize("fault", ["none", "missing", "hash"])
@@ -207,6 +243,7 @@ def _published_orphaned_closure(root, monkeypatch, *, chunked):
     rows = [{"commit": COMMIT, "detail": "x" * (96 << 10)} for _ in range(8)]
     contract = {
         "id": "agent-bridge.http-wire",
+        "declared_range": {"current": 47},
         "source_paths": [{
             "path": evidence.AFFECTED[0], "sha256": "", "semantic": True,
         }],
