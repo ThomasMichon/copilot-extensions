@@ -3137,6 +3137,7 @@ a path, feed, release or record. The caller still owes authenticated approval,
 source/feed/seasoning/revocation evidence, real device eligibility and the
 existing constructor integration. Explicit test budgets are not production
 acquisition defaults or permission to enable a consumer.
+
 ### Bounded wheel inspection
 
 `libs/installer-engine/installer_wheel_inputs.py` is a stdlib-only input
@@ -3165,9 +3166,14 @@ ZIP32/ZIP64 preflight bounds actual central-directory entries and directory
 bytes before `ZipFile` allocates an index; the aggregate metadata budget also
 caps that directory. Declared entry counts cannot bypass the actual scan.
 
-The repository-only profile facade compares actual name/version, dist-info
-identity, Python requirement, dependency requirements, extras and compatibility
-tags against the asserted exact record. Neither facts nor a matching digest
+The complete-profile verifier above uses this bounded core through the shared
+promotion inspector, not a separate per-wheel semantic facade. Its existing
+byte budgets retain their total-closure and per-metadata-file meanings; callers
+may additionally supply `WheelLimits` and a shared monotonic `deadline`.
+Record validation bounds compressed filename and target tags before calling
+the packaging parsers. Runtime RECORD policy permits SHA-256/384/512, while
+source-binding member facts always retain SHA-256 and first-party promotion
+still requires SHA-256 RECORD entries. Neither facts nor a matching digest
 authenticate the profile, admit a feed or authorize cached input. A successful
 inspection is not a retained snapshot: construction must still own immutable
 input custody and obtain authenticated selection/acquisition evidence. No

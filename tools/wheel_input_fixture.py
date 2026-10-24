@@ -9,15 +9,15 @@ PREFIX = "demo_pkg-1.0.dist-info/"
 
 
 def wheel_bytes(*, metadata=None, wheel=None, extra=None, record_mutator=None,
-                compression=zipfile.ZIP_DEFLATED):
+                compression=zipfile.ZIP_DEFLATED, prefix=PREFIX, name="demo_pkg"):
     entries = {
-        "demo_pkg/__init__.py": b"VALUE = 1\n",
-        PREFIX + "METADATA": metadata if metadata is not None else (
+        name + "/__init__.py": b"VALUE = 1\n",
+        prefix + "METADATA": metadata if metadata is not None else (
             b"Metadata-Version: 2.3\nName: demo-pkg\nVersion: 1.0\n"
             b"Requires-Python: >=3.10\nProvides-Extra: fast\n"
             b"Requires-Dist: helper>=2; extra == 'fast'\n\n"
         ),
-        PREFIX + "WHEEL": wheel if wheel is not None else (
+        prefix + "WHEEL": wheel if wheel is not None else (
             b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n"
         ),
         **(extra or {}),
@@ -27,12 +27,12 @@ def wheel_bytes(*, metadata=None, wheel=None, extra=None, record_mutator=None,
          .rstrip(b"=").decode(), str(len(data))]
         for name, data in entries.items()
     ]
-    rows.append([PREFIX + "RECORD", "", ""])
+    rows.append([prefix + "RECORD", "", ""])
     if record_mutator:
         record_mutator(rows)
     record = io.StringIO(newline="")
     csv.writer(record, lineterminator="\n").writerows(rows)
-    entries[PREFIX + "RECORD"] = record.getvalue().encode()
+    entries[prefix + "RECORD"] = record.getvalue().encode()
     result = io.BytesIO()
     with zipfile.ZipFile(result, "w", compression=compression) as archive:
         for name, data in entries.items():

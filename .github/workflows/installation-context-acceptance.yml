@@ -372,6 +372,8 @@ jobs:
         run: >-
           python -m pytest -q
           tools/test_installer_wheel_inputs.py
+          tools/promotion_unit_tests/test_runtime_profile_wheels.py
+          tools/test_runtime_profile_bootstrap.py
           tools/test_check_install_contract.py::TestExactRuntimeProfile
           tools/test_promotion_python_artifacts.py::test_trusted_wheel_validation_reads_real_metadata_and_members
           tools/test_promotion_python_artifacts.py::test_bundle_rejects_unsafe_wheels

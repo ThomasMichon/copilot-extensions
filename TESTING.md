@@ -62,12 +62,15 @@ metadata mutations, ambiguous/linked/encrypted members, compressed metadata
 limits, deadlines and source mutation/replacement. A real isolated `-I -S`
 interpreter proves the canonical inspector needs no site packages. The
 five byte-only cases in `tools/promotion_unit_tests/test_wheel_inputs.py`
-join the required no-actor packet; native filesystem/bootstrap and semantic
-profile checks remain in the development suite. Existing promotion and
+join the required no-actor packet alongside complete-profile checks in
+`tools/promotion_unit_tests/test_runtime_profile_wheels.py`. These cover
+SHA-256/384/512 RECORD policies, SHA-256 source facts, complete-set budgets,
+additional inspector limits and the shared deadline. Native filesystem/bootstrap
+checks remain in the development suite. Existing promotion and
 standalone artifact suites exercise the shared verifier's trusted-source
 import closure and source/toolchain checks. The optional
 `installation-context-acceptance.yml` selector `wheel_inputs=true` runs the
-native inspector, existing exact-profile controls, promotion wheel refusals
+native inspector, complete-profile verification, existing exact-profile controls, promotion wheel refusals
 and trusted CLI import-closure check on Linux and Windows. It does not expand
 the required unit-only CI packet to include native processes.
 

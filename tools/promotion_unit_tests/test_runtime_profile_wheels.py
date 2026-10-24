@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import base64
 import csv
+from dataclasses import replace
 import hashlib
 import io
 import sys
+import time
+from types import SimpleNamespace
 import zipfile
 
 import pytest
 
 from runtime_profile import ProfileError, SCHEMA, validate_profile
 from runtime_profile_wheels import verify_profile_wheels
+from installer_wheel_inputs import WheelLimits, inspect_archive
 
 
 _ENVIRONMENT = {
@@ -151,6 +155,58 @@ class TestRuntimeProfileWheels:
         profile, wheels = _inputs(mutate={"record_algorithm": algorithm, "bad_record": True})
         with pytest.raises(ProfileError):
             _verify(profile, wheels)
+
+    @pytest.mark.parametrize("algorithm", ["sha256", "sha384", "sha512"])
+    def test_generic_record_policy_preserves_sha256_source_facts_and_verified_unpacked_size(self, algorithm):
+        profile, wheels = _inputs(mutate={"record_algorithm": algorithm})
+        stream = wheels[profile.record()["wheels"][0]["filename"]]
+        limits = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
+        facts = inspect_archive(
+            stream, limits=limits, deadline=time.monotonic() + 5,
+            record_algorithms=frozenset({algorithm}),
+        )
+        with zipfile.ZipFile(stream) as archive:
+            assert facts.unpacked_size == sum(member.file_size for member in archive.infolist())
+            assert facts.member_hashes["engine/__init__.py"] == hashlib.sha256(
+                archive.read("engine/__init__.py"),
+            ).hexdigest()
+        if algorithm != "sha256":
+            from installer_wheel_inputs import WheelError
+            with pytest.raises(WheelError, match="unsupported wheel RECORD digest"):
+                inspect_archive(stream, limits=limits, deadline=time.monotonic() + 5)
+
+    @pytest.mark.parametrize("field,value", [
+        ("max_archive_bytes", 1), ("max_expanded_bytes", 1), ("max_member_bytes", 1),
+        ("max_metadata_bytes", 1), ("max_metadata_member_bytes", 1), ("max_members", 3),
+    ])
+    def test_complete_profile_honors_additional_bounded_inspector_limits(self, field, value):
+        profile, wheels = _inputs()
+        limits = WheelLimits(1 << 20, 1 << 20, 1 << 20, 1 << 16, 100, 100, 1 << 16)
+        with pytest.raises(ProfileError):
+            _verify(profile, wheels, limits=replace(limits, **{field: value}))
+
+    @pytest.mark.parametrize("deadline", [0, -1, True, float("nan"), float("inf")])
+    def test_complete_profile_rejects_invalid_or_exhausted_deadline(self, deadline):
+        profile, wheels = _inputs()
+        with pytest.raises(ProfileError):
+            _verify(profile, wheels, deadline=deadline)
+
+    def test_complete_profile_checks_deadline_during_archive_hashing(self, monkeypatch):
+        import installer_wheel_inputs
+
+        profile, wheels = _inputs()
+        now = [0]
+        monkeypatch.setattr(installer_wheel_inputs, "time", SimpleNamespace(monotonic=lambda: now[0]))
+
+        class ExpiringStream(io.BytesIO):
+            def read(self, size=-1):
+                now[0] = 2
+                return super().read(size)
+
+        filename = next(iter(wheels))
+        wheels[filename] = ExpiringStream(wheels[filename].getvalue())
+        with pytest.raises(ProfileError):
+            _verify(profile, wheels, deadline=1)
 
     @pytest.mark.parametrize("algorithm", ["md5", "sha1", "sha224"])
     def test_runtime_record_weak_digests_refuse(self, algorithm):

@@ -104,3 +104,24 @@ preservation case attempts a forbidden native-loader operation, and the
 dropin-registry FIFO case skips on Windows. These are not credited as unit
 proof; the inspector's five-node diagnostic preserves the unchanged no-actor
 guard and does not replace the complete hosted packet.
+
+### Complete-profile integration, 2026-10-23
+
+After #8399 merged, the bounded archive core was integrated beneath its
+existing complete-profile API rather than retaining the unpublished per-wheel
+semantic facade. Complete filename sets, shared archive/unpacked budgets,
+per-metadata-file budgets, SHA-256/384/512 RECORD support and strict first-party
+source/generator/SHA-256 policy remain intact. Source-binding facts retain
+SHA-256 regardless of a runtime wheel's RECORD algorithm. Optional explicit
+inspector limits and a shared deadline also bound archive hashing and the
+packaging parsers' compressed-tag expansion.
+
+The combined component/bootstrap cohort passes 181 tests. A broader run passed
+622 cases with 15 existing native skips and exposed a platform-dependent UV
+mock; pinning that mock's selected executable to a fixture path preserves its
+authority checks without touching live UV. The corrected source/profile/core
+cohort passes 233 tests. The four derived inspector copies and touched-Python
+syntax/import checks pass. Fresh hosted native, real-built artifact, required
+CI and review evidence are still required for this integrated head; the prior
+head's green runs are not credited to it. Authenticated acquisition, retained
+construction and the parent effort's remaining gates stay open.

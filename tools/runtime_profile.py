@@ -23,9 +23,7 @@ from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
-from installer_wheel_inputs import (
-    InspectedWheel, WheelError, WheelLimits, bounded_tag, inspect_wheel,
-)
+from installer_wheel_inputs import bounded_tag
 
 SCHEMA = "copilot-extensions.exact-runtime-profile"
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -39,49 +37,6 @@ _ENVIRONMENT = frozenset({
 
 class ProfileError(ValueError):
     """A malformed, incompatible, unapproved or ambiguous selection."""
-
-
-def inspect_profile_wheel(
-    path: Path, entry: dict, *, limits: WheelLimits, deadline: float,
-) -> InspectedWheel:
-    """Compare byte facts with an asserted record; never authenticate that record."""
-    try:
-        if Path(path).name != entry["filename"] or not entry["filename"].endswith(".whl"):
-            raise ProfileError("wheel filename differs from selected record")
-        inspected = inspect_wheel(path, sha256=entry["sha256"], limits=limits, deadline=deadline)
-        prefix, python, abi, platform = entry["filename"].removesuffix(".whl").rsplit("-", 3)
-        filename_tags, _ = bounded_tag(
-            "-".join((python, abi, platform)), limit=limits.max_tags, deadline=deadline,
-        )
-        name, version, _, tags = parse_wheel_filename(prefix + "-" + filename_tags + ".whl")
-        prefix_name, prefix_version = inspected.prefix.removesuffix(".dist-info/").rsplit("-", 1)
-        actual_tags = set()
-        for text in inspected.tags:
-            canonical, _ = bounded_tag(text, limit=len(tags), deadline=deadline)
-            actual_tags.update(parse_tag(canonical))
-        actual_extras = {canonicalize_name(extra, validate=True) for extra in inspected.provides_extras}
-        actual_requirements = {_requirement(text) for text in inspected.requires_dist}
-        if (
-            canonicalize_name(inspected.name, validate=True) != name
-            or canonicalize_name(entry["name"], validate=True) != name
-            or canonicalize_name(prefix_name, validate=True) != name
-            or Version(inspected.version) != version or Version(entry["version"]) != version
-            or Version(prefix_version) != version
-            or actual_tags != tags
-            or SpecifierSet(inspected.requires_python) != SpecifierSet(entry["requires_python"])
-            or actual_extras != _extras(entry["provides_extras"], "provided extras")
-            or len(actual_extras) != len(inspected.provides_extras)
-            or actual_requirements != {_requirement(text) for text in entry["requires_dist"]}
-            or len(actual_requirements) != len(inspected.requires_dist)
-        ):
-            raise ProfileError("wheel bytes differ from selected metadata record")
-        if time.monotonic() >= deadline:
-            raise ProfileError("wheel inspection deadline exhausted")
-        return inspected
-    except (WheelError, KeyError, TypeError, ValueError) as exc:
-        if isinstance(exc, ProfileError):
-            raise
-        raise ProfileError(f"invalid selected wheel: {exc}") from exc
 
 
 def _fields(value: Any, keys: set[str], label: str) -> dict:
@@ -135,7 +90,12 @@ def _requirement(text: str) -> Requirement:
     return requirement
 
 
-def _target(value: Any) -> None:
+def _tag(text: str, max_tags: int):
+    canonical, _ = bounded_tag(text, limit=max_tags, deadline=time.monotonic() + 120)
+    return parse_tag(canonical)
+
+
+def _target(value: Any, max_tags: int) -> None:
     _fields(value, {"environment", "tags", "device"}, "target")
     env = _fields(value["environment"], set(_ENVIRONMENT), "target environment")
     for key, item in env.items():
@@ -145,18 +105,18 @@ def _target(value: Any) -> None:
     if ".".join(env["python_full_version"].split(".")[:2]) != env["python_version"]:
         raise ProfileError("target Python major/minor disagrees with full version")
     tags = _strings(value["tags"], "target tags")
-    if not tags or any(not parse_tag(tag) for tag in tags):
+    if not tags or any(not _tag(tag, max_tags) for tag in tags):
         raise ProfileError("target needs actual interpreter compatibility tags")
     _reference(value["device"], "target device")
 
 
-def _closure(record: dict) -> None:
+def _closure(record: dict, max_tags: int) -> None:
     entries = record["wheels"]
     if not isinstance(entries, list) or not entries:
         raise ProfileError("closure: expected at least one wheel")
     wheels: dict[str, tuple[dict, list[Requirement]]] = {}
     target = record["target"]
-    compatible = {tag for text in target["tags"] for tag in parse_tag(text)}
+    compatible = {tag for text in target["tags"] for tag in _tag(text, max_tags)}
     for entry in entries:
         _fields(entry, {
             "name", "version", "filename", "sha256", "requires_python",
@@ -169,7 +129,13 @@ def _closure(record: dict) -> None:
         filename = _text(entry["filename"], "filename")
         if "/" in filename or "\\" in filename:
             raise ProfileError("wheel filename must be a basename")
-        wheel_name, wheel_version, _, tags = parse_wheel_filename(filename)
+        prefix, python, abi, platform = filename.removesuffix(".whl").rsplit("-", 3)
+        canonical, _ = bounded_tag(
+            "-".join((python, abi, platform)), limit=max_tags, deadline=time.monotonic() + 120,
+        )
+        wheel_name, wheel_version, _, tags = parse_wheel_filename(prefix + "-" + canonical + ".whl")
+        if not filename.endswith(".whl"):
+            raise ProfileError("wheel filename must end with .whl")
         if wheel_name != name or wheel_version != version or not tags & compatible:
             raise ProfileError(f"{name}: wheel identity or target tags disagree")
         _digest(entry["sha256"], "wheel digest")
@@ -234,9 +200,11 @@ class RuntimeProfile:
         return json.loads(self.canonical)
 
 
-def validate_profile(record: dict) -> RuntimeProfile:
+def validate_profile(record: dict, *, max_tags: int = 10_000) -> RuntimeProfile:
     """Freeze a complete asserted record, without attesting its origin/bytes."""
     try:
+        if type(max_tags) is not int or max_tags <= 0:
+            raise ProfileError("profile tag limit must be a positive integer")
         _fields(record, {
             "schema", "version", "release", "mode", "artifact", "component",
             "backend", "target", "roots", "approval_source", "acquisition_policy",
@@ -255,10 +223,10 @@ def validate_profile(record: dict) -> RuntimeProfile:
                 _digest(value, key)
         elif record["mode"] != "source" or record["artifact"] is not None:
             raise ProfileError("source mode must be independent of artifact identity")
-        _target(record["target"])
+        _target(record["target"], max_tags)
         if record["backend"] != "cpu" and record["backend"] != record["target"]["device"]:
             raise ProfileError("accelerator backend requires its explicit target device")
-        _closure(record)
+        _closure(record, max_tags)
         return RuntimeProfile(json.dumps(
             record, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
             allow_nan=False,

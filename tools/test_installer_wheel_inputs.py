@@ -6,6 +6,7 @@ from dataclasses import replace
 import hashlib
 import io
 import itertools
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -21,6 +22,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_wheel_inputs as inspection
 import runtime_profile
+from runtime_profile_wheels import verify_profile_wheels
 from wheel_input_fixture import PREFIX, wheel_bytes
 
 
@@ -46,6 +48,38 @@ def inspect(path, limits, **kwargs):
         path, sha256="sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
         limits=limits, deadline=time.monotonic() + 10, **kwargs,
     )
+
+
+def _verify_selected(path, entry, *, limits, deadline):
+    from packaging.markers import default_environment
+
+    helper = wheel_bytes(
+        name="helper", prefix="helper-2.0.dist-info/",
+        metadata=b"Metadata-Version: 2.4\nName: helper\nVersion: 2.0\n\n",
+    )
+    helper_entry = {
+        "name": "helper", "version": "2.0", "filename": "helper-2.0-py3-none-any.whl",
+        "sha256": "sha256:" + hashlib.sha256(helper).hexdigest(),
+        "requires_python": "", "provides_extras": [], "selected_extras": [], "requires_dist": [],
+    }
+    record = {
+        "schema": runtime_profile.SCHEMA, "version": 1,
+        "release": {"identity": "fixture-release", "sha256": "sha256:" + "2" * 64},
+        "mode": "source", "artifact": None, "component": "index-engine", "backend": "cpu",
+        "approval_source": "fixture-authority", "acquisition_policy": "fixture-policy",
+        "target": {"device": "cpu", "environment": default_environment(), "tags": ["py3-none-any"]},
+        "roots": ["demo-pkg[fast]==1.0"], "wheels": [entry, helper_entry],
+    }
+    # A frozen record is still revalidated by the complete-set byte API.
+    profile = runtime_profile.RuntimeProfile(json.dumps(record).encode())
+    with path.open("rb") as stream:
+        verify_profile_wheels(
+            profile, {path.name: stream, helper_entry["filename"]: io.BytesIO(helper)},
+            max_archive_bytes=limits.max_archive_bytes,
+            max_unpacked_bytes=limits.max_expanded_bytes,
+            max_metadata_bytes=limits.max_metadata_member_bytes,
+            limits=limits, deadline=deadline,
+        )
 
 
 def test_inspects_actual_metadata_record_and_tags(wheel_path, limits):
@@ -322,7 +356,7 @@ def test_corrupt_deflate_is_a_structured_refusal(wheel_path, limits):
         inspect(wheel_path, limits)
     assert isinstance(refusal.value.__cause__, zlib.error)
     with pytest.raises(runtime_profile.ProfileError):
-        runtime_profile.inspect_profile_wheel(
+        _verify_selected(
             wheel_path, selected_record(wheel_path), limits=limits, deadline=time.monotonic() + 10,
         )
 
@@ -485,13 +519,18 @@ def selected_record(path):
     }
 
 
-def test_selected_record_matches_semantic_names_versions_and_requirements(wheel_path, limits):
+def test_selected_record_matches_semantic_names_and_versions(wheel_path, limits):
     record = selected_record(wheel_path)
-    record["requires_dist"] = ['Helper >= 2; extra == "fast"']
-    facts = runtime_profile.inspect_profile_wheel(
+    _verify_selected(
         wheel_path, record, limits=limits, deadline=time.monotonic() + 10,
     )
-    assert facts.name == "demo-pkg"
+
+
+def test_selected_record_retains_exact_dependency_spelling_contract(wheel_path, limits):
+    record = selected_record(wheel_path)
+    record["requires_dist"] = ['Helper >= 2; extra == "fast"']
+    with pytest.raises(runtime_profile.ProfileError, match="dependency metadata differs"):
+        _verify_selected(wheel_path, record, limits=limits, deadline=time.monotonic() + 10)
 
 
 @pytest.mark.parametrize("field,value", [
@@ -502,7 +541,7 @@ def test_selected_record_matches_semantic_names_versions_and_requirements(wheel_
 def test_each_selected_record_binding_refuses(wheel_path, limits, field, value):
     record = {**selected_record(wheel_path), field: value}
     with pytest.raises(runtime_profile.ProfileError):
-        runtime_profile.inspect_profile_wheel(
+        _verify_selected(
             wheel_path, record, limits=limits, deadline=time.monotonic() + 10,
         )
 
@@ -520,7 +559,7 @@ def test_actual_metadata_cannot_be_hidden_by_rehashed_archive(wheel_path, limits
     wheel_path.write_bytes(data)
     record["sha256"] = "sha256:" + hashlib.sha256(data).hexdigest()
     with pytest.raises(runtime_profile.ProfileError):
-        runtime_profile.inspect_profile_wheel(
+        _verify_selected(
             wheel_path, record, limits=limits, deadline=time.monotonic() + 10,
         )
 
@@ -537,7 +576,7 @@ def test_actual_dependency_and_extra_changes_refuse(wheel_path, limits, before, 
     wheel_path.write_bytes(wheel_bytes(metadata=metadata))
     record["sha256"] = "sha256:" + hashlib.sha256(wheel_path.read_bytes()).hexdigest()
     with pytest.raises(runtime_profile.ProfileError):
-        runtime_profile.inspect_profile_wheel(
+        _verify_selected(
             wheel_path, record, limits=limits, deadline=time.monotonic() + 10,
         )
 
@@ -549,9 +588,12 @@ def test_compressed_tags_refuse_before_cartesian_allocation(wheel_path, limits, 
     wheel_path.write_bytes(wheel_bytes(wheel=(
         "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: " + tag + "\n\n"
     ).encode()))
-    monkeypatch.setattr(runtime_profile, "parse_tag", lambda *_: pytest.fail("unbounded Tag allocation"))
-    with pytest.raises(runtime_profile.ProfileError, match="limit"):
-        runtime_profile.inspect_profile_wheel(
+    parse_tag = runtime_profile.parse_tag
+    monkeypatch.setattr(runtime_profile, "parse_tag", lambda text: (
+        pytest.fail("unbounded Tag allocation") if text == tag else parse_tag(text)
+    ))
+    with pytest.raises(runtime_profile.ProfileError):
+        _verify_selected(
             wheel_path, selected_record(wheel_path), limits=limits, deadline=time.monotonic() + 10,
         )
 
@@ -564,19 +606,20 @@ def test_selected_filename_tag_expansion_is_also_bounded(wheel_path, limits, mon
         runtime_profile, "parse_wheel_filename", lambda *_: pytest.fail("unbounded filename allocation"),
     )
     with pytest.raises(runtime_profile.ProfileError, match="limit"):
-        runtime_profile.inspect_profile_wheel(
+        _verify_selected(
             path, selected_record(path), limits=limits, deadline=time.monotonic() + 10,
         )
 
 
-def test_repeated_compressed_alternatives_are_deduplicated_before_parsing(wheel_path, limits):
+def test_repeated_compressed_alternatives_retain_exact_wheel_tag_contract(wheel_path, limits):
     tag = ".".join(["py3"] * 200) + "-none-any"
     wheel_path.write_bytes(wheel_bytes(wheel=(
         "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: " + tag + "\n\n"
     ).encode()))
-    assert runtime_profile.inspect_profile_wheel(
-        wheel_path, selected_record(wheel_path), limits=limits, deadline=time.monotonic() + 10,
-    ).name == "demo-pkg"
+    with pytest.raises(runtime_profile.ProfileError):
+        _verify_selected(
+            wheel_path, selected_record(wheel_path), limits=limits, deadline=time.monotonic() + 10,
+        )
 
 
 def test_email_encoded_words_cannot_silently_change_dependency_metadata(wheel_path, limits):
@@ -590,6 +633,6 @@ def test_email_encoded_words_cannot_silently_change_dependency_metadata(wheel_pa
     record["sha256"] = "sha256:" + hashlib.sha256(wheel_path.read_bytes()).hexdigest()
     assert inspect(wheel_path, limits).requires_dist == (encoded.decode("ascii"),)
     with pytest.raises(runtime_profile.ProfileError):
-        runtime_profile.inspect_profile_wheel(
+        _verify_selected(
             wheel_path, record, limits=limits, deadline=time.monotonic() + 10,
         )

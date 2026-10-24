@@ -66,6 +66,7 @@ class WheelFacts:
     prefix: str
     metadata: Message
     wheel_metadata: Message
+    unpacked_size: int
 
 
 @dataclass(frozen=True)
@@ -274,9 +275,12 @@ def _member_chunks(
 
 def inspect_archive(
     archive: BinaryIO, *, limits: WheelLimits, deadline: float,
+    record_algorithms: frozenset[str] = frozenset({"sha256"}),
 ) -> WheelFacts:
     """Inspect a held archive without extraction; callers retain source custody."""
     _check_deadline(deadline)
+    if not record_algorithms or not record_algorithms <= {"sha256", "sha384", "sha512"}:
+        raise WheelError("unsupported wheel RECORD digest policy")
     try:
         preflight_archive(archive, limits=limits, deadline=deadline)
         with zipfile.ZipFile(archive) as bundle:
@@ -391,7 +395,11 @@ def inspect_archive(
                     if recorded_hash or recorded_size:
                         raise WheelError("wheel RECORD must not hash itself")
                     continue
-                digest = hashlib.sha256()
+                algorithm, separator, _ = recorded_hash.partition("=")
+                if not separator or algorithm not in record_algorithms:
+                    raise WheelError("unsupported wheel RECORD digest")
+                source_digest = hashlib.sha256()
+                digest = source_digest if algorithm == "sha256" else hashlib.new(algorithm)
                 size = 0
                 for chunk in _member_chunks(
                     archive, bundle, bundle.getinfo(name),
@@ -399,19 +407,21 @@ def inspect_archive(
                 ):
                     size += len(chunk)
                     digest.update(chunk)
+                    if digest is not source_digest:
+                        source_digest.update(chunk)
                 encoded = base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode("ascii")
                 if (
-                    recorded_hash != f"sha256={encoded}" or recorded_size != str(size)
+                    recorded_hash != f"{algorithm}={encoded}" or recorded_size != str(size)
                     or size != bundle.getinfo(name).file_size
                 ):
                     raise WheelError("wheel RECORD digest or size mismatch")
-                hashes[name] = digest.hexdigest()
+                hashes[name] = source_digest.hexdigest()
             return WheelFacts(
                 _single(package, "Name"), _single(package, "Version"),
                 _single(package, "Requires-Python", optional=True),
                 tuple(str(value).strip() for value in package.get_all("Provides-Extra", [])),
                 tuple(str(value).strip() for value in package.get_all("Requires-Dist", [])),
-                tags, MappingProxyType(hashes), prefix, package, wheel,
+                tags, MappingProxyType(hashes), prefix, package, wheel, expanded,
             )
     except (
         OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError,

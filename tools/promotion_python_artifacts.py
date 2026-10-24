@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from email.message import Message
 from typing import BinaryIO
@@ -387,6 +388,7 @@ def inspect_wheel(
     record_algorithms: frozenset[str] = frozenset({"sha256", "sha384", "sha512"}),
     source_dir: Path | None = None, component: str | None = None,
     candidate_root: Path | None = None,
+    limits: WheelLimits | None = None, deadline: float | None = None,
 ) -> tuple[Message, int]:
     """Inspect a wheel without execution; return actual metadata and unpacked size.
 
@@ -403,19 +405,26 @@ def inspect_wheel(
     info = parse_wheel_identity(Path(wheel["filename"]))
     prefix = f"{info['name']}-{info['version']}.dist-info/"
     try:
-        deadline = time.monotonic() + 120
+        deadline = time.monotonic() + 120 if deadline is None else deadline
+        limits = limits or WheelLimits(
+            max_archive_bytes=_BUNDLE_LIMIT, max_expanded_bytes=max_unpacked_bytes,
+            max_member_bytes=max_unpacked_bytes, max_metadata_bytes=3 * max_metadata_bytes,
+            max_members=100_000, max_tags=_WHEEL_TAG_LIMIT,
+            max_metadata_member_bytes=max_metadata_bytes,
+        )
         facts = inspect_archive(
-            archive, limits=WheelLimits(
-                max_archive_bytes=_BUNDLE_LIMIT, max_expanded_bytes=_BUNDLE_LIMIT,
-                max_member_bytes=_BUNDLE_LIMIT, max_metadata_bytes=3 * _MANIFEST_LIMIT,
-                max_members=100_000, max_tags=_WHEEL_TAG_LIMIT,
-                max_metadata_member_bytes=_MANIFEST_LIMIT,
-            ), deadline=deadline,
+            archive, limits=replace(
+                limits,
+                max_expanded_bytes=min(limits.max_expanded_bytes, max_unpacked_bytes),
+                max_member_bytes=min(limits.max_member_bytes, max_unpacked_bytes),
+                max_metadata_bytes=min(limits.max_metadata_bytes, 3 * max_metadata_bytes),
+                max_metadata_member_bytes=min(limits.max_metadata_member_bytes, max_metadata_bytes),
+            ), deadline=deadline, record_algorithms=record_algorithms,
         )
         wheel_metadata, package_metadata = facts.wheel_metadata, facts.metadata
         canonical_tags, _ = bounded_tag(
             "-".join(info[key] for key in ("python_tag", "abi_tag", "platform_tag")),
-            limit=_WHEEL_TAG_LIMIT, deadline=deadline,
+            limit=limits.max_tags, deadline=deadline,
         )
         python_tags, abi_tags, platform_tags = canonical_tags.split("-")
         expected_tags = {
@@ -424,12 +433,20 @@ def inspect_wheel(
             for abi in abi_tags.split(".")
             for platform in platform_tags.split(".")
         }
+        version_matches = facts.version == info["version"]
+        if expected_generator is None:
+            from packaging.version import Version
+            version_matches = Version(facts.version) == Version(info["version"])
         if (
             facts.prefix != prefix
-            or wheel_metadata.get_all("Generator") != [wheel["generator"]]
+            or (
+                expected_generator is not None
+                and wheel_metadata.get_all("Generator") != [expected_generator]
+            )
             or set(facts.tags) != expected_tags
-            or re.sub(r"[-_.]+", "_", facts.name).lower() != info["name"].lower()
-            or facts.version != info["version"]
+            or re.sub(r"[-_.]+", "_", facts.name).lower()
+            != re.sub(r"[-_.]+", "_", info["name"]).lower()
+            or not version_matches
         ):
             raise PromotionArtifactError("wheel metadata differs from declared source/toolchain")
         if source_dir is not None:
@@ -439,9 +456,7 @@ def inspect_wheel(
                     metadata=package_metadata,
                     component=component, candidate_root=candidate_root,
                 )
-        return package_metadata, sum(
-            member.file_size for member in zipfile.ZipFile(archive).infolist()
-        )
+        return package_metadata, facts.unpacked_size
     except (
         OSError, UnicodeDecodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError,
         ValueError,
