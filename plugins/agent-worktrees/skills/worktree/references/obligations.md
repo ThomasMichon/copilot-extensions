@@ -7,6 +7,14 @@ force-release a claim.
 
 - **A cross-repo worktree you created** -- finalize *it* first; its finalize
   flips this worktree's claim to `at-rest` automatically (no manual step).
+- **Your paired knowledge worktree** -- its reciprocal pairing carries a
+  protected `worktree` claim. Land its real changes through its own publication
+  policy and finalize that sibling before the harness. Clean/unused is not
+  finalized. Generic settle, release/remove, sweep, overwrite, handoff and
+  `--abandon` cannot clear the claim while the exact reciprocal sibling is not
+  finalized; unavailable or mismatched sibling state holds responsibility.
+  Harness finalization restores missing legacy pair claims instead of silently
+  concluding with unfinished knowledge work.
 - **A borrowed CodeSpace/container** -- merge or move its work off-box, then
   disconnect (the disconnect hook stamps it `at-rest` **and mirrors that onto the
   shared lease**, so the settle is visible cross-machine), or run

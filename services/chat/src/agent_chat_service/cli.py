@@ -49,7 +49,8 @@ def main(argv=None) -> int:
     workspace = sub.add_parser("workspace", help="Resolve trusted host initialization without adopting Chat")
     workspace.add_argument("--request-file", choices=["-"], required=True)
     sub.add_parser("status", help="Inspect local pending metadata without network or credentials")
-    for name in ("join", "leave", "post", "read", "wait", "members"):
+    for name in ("join", "leave", "post", "read", "wait", "members",
+                 "collaborate", "thread", "inbox"):
         child = sub.add_parser(name)
         child.add_argument("channel")
         if name == "post":
@@ -63,6 +64,14 @@ def main(argv=None) -> int:
         elif name == "members":
             child.add_argument("--limit", type=int)
             child.add_argument("--after")
+        elif name == "collaborate":
+            child.add_argument("--request-id", required=True)
+            child.add_argument("--request-file", choices=["-"], required=True)
+        elif name in {"thread", "inbox"}:
+            if name == "thread":
+                child.add_argument("event_id", type=int)
+            child.add_argument("--request-file", choices=["-"])
+            child.add_argument("--limit", type=int)
     sub.add_parser("resolve").add_argument("codename")
     scan = sub.add_parser("scan")
     controls = scan.add_mutually_exclusive_group(required=True)
@@ -103,6 +112,28 @@ def main(argv=None) -> int:
             if text == "-":
                 text = sys.stdin.buffer.read(8193).decode("utf-8")
             result = client.post(args.channel, text, args.request_id)
+        elif args.command == "collaborate":
+            fields = strict_json(sys.stdin.buffer.read(MAX_BODY_BYTES + 1))
+            if not isinstance(fields, dict) or set(fields) != {"text", "collaboration"}:
+                raise ClientError("invalid_request", "Provide exactly text and collaboration.")
+            result = client.post(
+                args.channel, fields["text"], args.request_id, collaboration=fields["collaboration"],
+            )
+        elif args.command in {"thread", "inbox"}:
+            fields = strict_json(sys.stdin.buffer.read(MAX_BODY_BYTES + 1)) if args.request_file else {}
+            allowed = {"epoch", "head", "after", "max_bytes", "limit"}
+            if args.command == "inbox":
+                allowed |= {"recent_after", "recent_limit"}
+            if not isinstance(fields, dict) or fields.keys() - allowed:
+                raise ClientError("invalid_request", "Invalid collaboration view controls.")
+            if args.limit is not None:
+                if "limit" in fields:
+                    raise ClientError("invalid_request", "Provide limit only once.")
+                fields["limit"] = args.limit
+            result = (
+                client.thread(args.channel, args.event_id, **fields) if args.command == "thread"
+                else client.inbox(args.channel, **fields)
+            )
         elif args.command == "read":
             client.read(args.channel, sys.stdout, limit=args.limit)
             return 0

@@ -62,6 +62,9 @@ from . import (
 )
 from .config import Config
 from .finalize_lock import FinalizeLock
+from .finalize_support import authority_fenced_write as _authority_fenced_write
+from .finalize_support import dry_run_finalize_preview as _dry_run_finalize_preview
+from .finalize_support import rollback_finalizing_freeze as _rollback_finalizing_freeze
 from .finalize_ref import is_content_on_upstream as _is_content_on_upstream
 from .finalize_ref import resolve_finalize_ref as _resolve_finalize_ref
 from .finalize_ref import warn_if_tracked_branch_diverged as _warn_if_diverged
@@ -1165,44 +1168,6 @@ def _assert_obligations_settled(
     )
 
 
-def _rollback_finalizing_freeze(
-    yaml_path, prior_status: str | None, worktree_id: str, config: Config | None = None,
-) -> None:
-    """Restore a mutable stable state after a post-freeze finalize failure.
-
-    Only restore a still-``finalizing`` record with a known prior status.
-    Production callers supply config so a changed owner cannot be written
-    during rollback. A terminal outcome already committed is never reverted.
-    """
-    if prior_status is None or not yaml_path.exists():
-        return
-    try:
-        with tracking._RecordLock(yaml_path, require_sidecar=True):
-            record = tracking.load_record(yaml_path)
-            if config is not None:
-                from .execution_spaces import ExecutionSpaceError, require_record_mutation
-                try:
-                    require_record_mutation(record, config)
-                except ExecutionSpaceError as exc:
-                    output.err(f"Cannot restore {worktree_id}'s status: {exc}; record unchanged.")
-                    return
-            if record.status != "finalizing":
-                return
-            record.status = prior_status
-            tracking.save_record(record, yaml_path)
-        output.warn(
-            f"Restored {worktree_id}'s tracking status to {prior_status!r} "
-            "after a finalize failure (was wedged at 'finalizing')."
-        )
-    except Exception as exc:
-        output.err(
-            f"Could not roll back {worktree_id}'s 'finalizing' freeze after a "
-            f"finalize failure ({exc}); run 'agent-worktrees doctor' or inspect "
-            f"the record manually -- creator ownership is at risk of being "
-            f"stuck."
-        )
-
-
 def _rehome_abandoned_obligations(
     record, worktree_id: str, config, *, handoff_to: str,
 ) -> bool:
@@ -1257,26 +1222,6 @@ def _worktree_branch(
     if record is not None and record.branch:
         return record.branch
     return f"worktree/{worktree_id}"
-
-
-def _authority_fenced_write(
-    yaml_path: Path, config: Config, mutate,
-) -> tracking.WorktreeRecord | None:
-    """Reload fresh, re-verify authority, then run ``mutate`` (given the
-    fresh record) under ONE required-sidecar lock, so a write off an
-    earlier, stale snapshot can never overwrite a record gone foreign since
-    (``mutate``'s own ``save_record`` nests safely, reentrant per path/
-    thread). Returns the fresh record, or ``None`` on a rejected check,
-    contention, or unreadable record -- callers treat that as "skip"."""
-    from .execution_spaces import require_record_mutation
-    try:
-        with tracking._RecordLock(yaml_path, require_sidecar=True):
-            fresh = tracking.load_record(yaml_path)
-            require_record_mutation(fresh, config)
-            mutate(fresh)
-            return fresh
-    except Exception:
-        return None
 
 
 def validate_and_finalize(
@@ -1364,6 +1309,16 @@ def validate_and_finalize(
         )
         return True
 
+    if record is not None and getattr(record, "pair_role", None) == "harness":
+        from . import paired_claims
+        record = _authority_fenced_write(yaml_path, config, paired_claims.ensure_claim)
+        if record is None:
+            output.err(
+                f"Cannot reconcile {worktree_id}'s paired worktree claim; "
+                "finalize is refused and paired responsibility is preserved."
+            )
+            return False
+
     # Seal the worktree's durable identity (title + session registry) from
     # session-state before any teardown, so a finalized/pruned worktree never
     # reads as "(untitled)" with no session linkage -- even with a bypassed
@@ -1424,15 +1379,17 @@ def validate_and_finalize(
 
     preserve_tracked_branch = False
     renamed_branch_to_clean: str | None = None
+    dirty_err = finalize_open_pr_gate.dirty_worktree_error(
+        worktree_path, wt_exists=wt_exists,
+    )
+    if dirty_err:
+        output.err(dirty_err)
+        return False
     if pr_mode:
         # PR mode (#4400 round 12): `assert_no_live_pr` above already refused
         # a still-open PR (short of --force-open-pr). `detach` allows an
         # early ok once pushed; other strategies require a genuine merge
         # AND live content not exceeding that merged head.
-        dirty_err = finalize_open_pr_gate.dirty_worktree_error(worktree_path, wt_exists=wt_exists)
-        if dirty_err:
-            output.err(dirty_err)
-            return False
         ok, err = _pr_finalize_precondition(record, repo, worktree_path, anchor)
         if not ok:
             output.err(err or "PR finalize precondition not met.")
@@ -1613,11 +1570,18 @@ def validate_and_finalize(
             record = tracking.load_record(yaml_path)
             require_record_mutation(record, config)
             checkout_managed = record.checkout_managed
+            from . import paired_claims
+            cleanup_records.enter_context(paired_claims.lifecycle_guard(record))
             if not finalize_obligations.assert_producers_settled(record, worktree_id, emit_error=output.err):
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = _has_live_session(record)
+        from . import prune
+        paired_pending = bool(
+            record is not None and record.is_paired
+            and prune.default_paired_sibling_final(record) is not True
+        )
 
         # PR mode (#4400 round 16): re-validate BEFORE reconciliation --
         # its rebase can itself drop a just-landed EMPTY race commit,
@@ -1637,20 +1601,39 @@ def validate_and_finalize(
         _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
         from .finalized_checkout import optional_snapshot
         finalized_identity = optional_snapshot(worktree_path) if Path(worktree_path).exists() else None
-        if not checkout_managed or inside_worktree or has_live_session:
+        process_blocker = (
+            procs.checkout_retirement_blocker(worktree_path)
+            if checkout_managed and not inside_worktree and not has_live_session
+            and not paired_pending and Path(worktree_path).exists()
+            else None
+        )
+        # Recheck after inspection for both retained finalization and removal.
+        # External writers can still race this check without a filesystem fence.
+        if pr_mode:
+            err = finalize_open_pr_gate.pr_precondition_recheck(
+                record, repo, worktree_path, anchor,
+                precondition_fn=_pr_finalize_precondition)
+            if err:
+                output.err(err)
+                _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
+                return False
+        if not checkout_managed or inside_worktree or has_live_session or paired_pending or process_blocker:
             reason = (
                 "the checkout is owned by an external session host"
                 if not checkout_managed
                 else (
                     "this shell is running inside the worktree"
                     if inside_worktree
-                    else "a live session or guidance worker is still using the worktree"
+                    else (
+                        "a live session or guidance worker is still using the worktree"
+                        if has_live_session
+                        else ("its paired sibling is not confirmed finalized" if paired_pending else process_blocker)
+                    )
                 )
             )
             output.ok(
                 f"Finalized: all content from {branch} is on "
-                f"{repo.remote}/{repo.default_branch}, so this worktree is "
-                f"safe to prune."
+                f"{repo.remote}/{repo.default_branch}."
             )
             if not checkout_managed:
                 output.info(
@@ -1659,13 +1642,19 @@ def validate_and_finalize(
                     f"tracking record, but only the external host may remove the "
                     f"checkout or branch."
                 )
+            elif paired_pending and not inside_worktree and not has_live_session:
+                output.info(
+                    "Leaving the checkout and branch in place until BOTH paired "
+                    "worktrees are finalized. Finalize the sibling, then use "
+                    "normal cleanup; unknown sibling state remains a hold."
+                )
             else:
                 output.info(
                     f"Leaving the worktree directory and branch in place because "
                     f"{reason}. Finalize never deletes the git branch or the "
                     f"folder of an active worktree -- that's expected, not a "
                     f"failure. They'll be removed by 'agent-worktrees cleanup' "
-                    f"once the session ends (this is the normal outcome when you "
+                    f"once its users exit (this is the normal outcome when you "
                     f"finalize from inside the session)."
                 )
             activity.log_event(
@@ -1675,37 +1664,15 @@ def validate_and_finalize(
                 reason=(
                     "external_checkout"
                     if not checkout_managed
-                    else ("inside_worktree" if inside_worktree else "live_session")
+                    else (
+                        "inside_worktree" if inside_worktree
+                        else ("live_session" if has_live_session else (
+                            "paired_pending" if paired_pending else "process_blocker"))
+                    )
                 ),
             )
         else:
             print("Removing worktree...")
-            # Tear down the mux session and terminate any process still rooted
-            # in the worktree before removing it, so directory locks don't leave
-            # an empty shell behind (issue dotfiles#139).
-            sessions.kill_tmux_session(worktree_id)
-            try:
-                killed = procs.terminate_processes_under(worktree_path)
-            except Exception:
-                killed = []
-            if killed:
-                names = ", ".join(
-                    f"{k['name'] or '?'}({k['pid']})" for k in killed if k["killed"])
-                if names:
-                    output.info(f"Terminated lingering process(es): {names}")
-
-            # PR mode (#4400 rounds 14-16): re-validate as the LAST possible
-            # step before removal -- narrows, but per reviewer feedback can't
-            # fully eliminate, the TOCTOU window absent a write-blocking hook.
-            if pr_mode:
-                err = finalize_open_pr_gate.pr_precondition_recheck(
-                    record, repo, worktree_path, anchor,
-                    precondition_fn=_pr_finalize_precondition)
-                if err:
-                    output.err(err)
-                    _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
-                    return False
-
             if not git_ops.remove_worktree(anchor, worktree_path):
                 output.warn("Could not remove worktree via git -- forcing directory removal.")
 
@@ -1826,7 +1793,7 @@ def validate_and_finalize(
             "worktree_finalized",
             worktree_id=worktree_id,
             branch=branch,
-            removed=not (inside_worktree or has_live_session),
+            removed=not (inside_worktree or has_live_session or paired_pending or process_blocker or not checkout_managed),
         )
 
         output.ok(f"Worktree {worktree_id} finalized.")
@@ -1901,30 +1868,5 @@ def _dry_run_push_preview(
     output.dry_run(f"Would push {repo.default_branch} to {repo.remote}")
     output.dry_run("Would update tracking status to 'pushed'")
     output.dry_run("Would release lock")
-    print()
-    output.ok("Dry run complete -- no changes made")
-
-
-def _dry_run_finalize_preview(
-    worktree_id: str,
-    config: Config,
-    worktree_path: str,
-    branch: str,
-    upstream: str,
-) -> None:
-    """Show what finalize would do without side effects."""
-    repo = config.default_repo
-
-    print()
-    print(f"Finalization plan for worktree {worktree_id}:")
-    output.dry_run(f"Would fetch from {repo.remote}")
-    output.dry_run(f"Would validate that {branch} content is on {upstream}")
-    output.dry_run(
-        f"Would remove worktree directory and branch ONLY if idle "
-        f"(no live session / not inside it): {worktree_path}"
-    )
-    output.dry_run("Would merge worktree permissions back to anchor")
-    output.dry_run("Would remove worktree path from trustedFolders")
-    output.dry_run("Would update worktree YAML status: finalized")
     print()
     output.ok("Dry run complete -- no changes made")

@@ -6,6 +6,15 @@
 
 **Decision: `selected_then_full_publication`.**
 
+**Later design proposal:** [durable inventory and push-assisted
+freshness](inventory-freshness-plan.md) explicitly revisits inventory and
+control-publication freshness. It is not a silently active relaxation of this
+contract. Functional optimization against this older schedule is paused while
+the successor's storage, grace/action policy and owned transport/ACP contracts
+are reviewed and selected. Credential/provider safety and atomic owner fences
+remain requirements; no unconditional provider-reauth loop is proposed for a
+status-only local cache read.
+
 The user explicitly selected the following semantics: each observation uses
 fresh selected-account/source checks; full live account/configuration/credential
 authority is checked before actionable publication. An unrelated candidate

@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 
 __all__ = [
+    "checkout_retirement_blocker",
     "copilot_relaunch_path",
     "count_processes_named",
     "is_descendant_of",
@@ -52,17 +53,28 @@ def _is_under(cwd: str, root: str) -> bool:
     return c == r or c.startswith(r + os.sep)
 
 
+def _physical_path(path: str, *, strict: bool = False) -> str:
+    resolved = os.path.realpath(path, strict=strict)
+    if os.name == "nt" and resolved.startswith("\\\\?\\"):
+        return "\\\\" + resolved[8:] if resolved[4:8].upper() == "UNC\\" else resolved[4:]
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # POSIX
 # ---------------------------------------------------------------------------
 
-def _iter_processes_posix():
+def _iter_processes_posix(*, strict: bool = False):
     """Yield ``(pid, cwd, name)`` for readable processes via ``/proc``."""
     proc = Path("/proc")
     try:
         entries = list(proc.iterdir())
     except OSError:
+        if strict:
+            raise
         return
+    if strict and str(os.getpid()) not in (entry.name for entry in entries):
+        raise OSError("process inspection unavailable: /proc does not contain the inspecting process")
     for entry in entries:
         if not entry.name.isdigit():
             continue
@@ -719,40 +731,70 @@ def count_processes_named(name: str, *, exclude_pid: int | None = None) -> int:
 
 
 def processes_with_cwd_under(
-    root: str, *, exclude_pids: set[int] | None = None,
+    root: str, *, exclude_pids: set[int] | None = None, require_available: bool = False,
 ) -> list[dict]:
     """Find processes whose cwd is at or under ``root``.
 
     Returns a list of ``{"pid": int, "name": str}`` dicts.  Best-effort: any
     process that can't be opened or read is silently skipped, and the current
     process (plus ``exclude_pids``) is never reported.
+    ``require_available`` raises ``OSError`` for unsupported platforms or an
+    unavailable enumeration backend; unreadable individual processes still skip.
     """
+    system = platform.system()
+    if require_available and system not in {"Windows", "Linux"}:
+        raise OSError(f"cwd inspection unsupported on {system}")
+    if require_available:
+        root = _physical_path(root, strict=True)
     excluded = {os.getpid()}
     if exclude_pids:
         excluded |= exclude_pids
     hits: list[dict] = []
 
-    if platform.system() == "Windows":
+    if system == "Windows":
         try:
             k32 = _win_kernel32()
         except OSError:
+            if require_available:
+                raise
             return hits
-        for pid in _win_enum_pids():
+        pids = _win_enum_pids(strict=True) if require_available else _win_enum_pids()
+        if require_available and os.getpid() not in pids:
+            raise OSError("process inspection unavailable: enumeration omits the inspecting process")
+        for pid in pids:
             if pid in excluded:
                 continue
             try:
                 cwd, name = _win_read_cwd(k32, pid)
             except OSError:
                 continue
-            if _is_under(cwd, root):
+            candidate = _physical_path(cwd) if require_available and cwd else cwd
+            if _is_under(candidate, root):
                 hits.append({"pid": pid, "name": name})
     else:
-        for pid, cwd, name in _iter_processes_posix():
+        processes = _iter_processes_posix(strict=True) if require_available else _iter_processes_posix()
+        for pid, cwd, name in processes:
             if pid in excluded:
                 continue
-            if _is_under(cwd, root):
+            candidate = _physical_path(cwd) if require_available and cwd else cwd
+            if _is_under(candidate, root):
                 hits.append({"pid": pid, "name": name})
     return hits
+
+
+def checkout_retirement_blocker(root: str) -> str | None:
+    """Keep unavailable cwd discovery distinct from a supported empty result."""
+    try:
+        root = _physical_path(root, strict=True)
+        if _is_under(_physical_path(os.getcwd()), root):
+            return f"live process still uses the checkout: current process({os.getpid()})"
+        holders = processes_with_cwd_under(root, require_available=True)
+    except OSError as exc:
+        return f"cwd inspection unavailable: {exc}; checkout removal deferred"
+    if holders:
+        names = ", ".join(f"{p['name'] or '?'}({p['pid']})" for p in holders)
+        return f"live process(es) still use the checkout: {names}"
+    return None
 
 
 def terminate_processes_under(
@@ -761,8 +803,8 @@ def terminate_processes_under(
     """Terminate every process whose cwd is at or under ``root``.
 
     Returns the list of ``{"pid", "name", "killed": bool}`` that were targeted.
-    Used by worktree cleanup to release directory locks before ``rmtree`` so a
-    reaped worktree directory can actually be removed.
+    Only explicit process-owner teardown may use this API. Preservation-oriented
+    finalize and cleanup inspect holders and defer instead.
     """
     targets = processes_with_cwd_under(root, exclude_pids=exclude_pids)
     if not targets:
