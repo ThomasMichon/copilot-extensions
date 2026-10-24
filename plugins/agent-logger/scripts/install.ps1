@@ -1487,8 +1487,40 @@ function New-SyncTaskAction {
     # path so this never depends on PATH contents at all.
     $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
     $taskHost = if ($pwshCmd) { $pwshCmd.Source } else { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
-    return New-ScheduledTaskAction -Execute $taskHost `
-        -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $TaskLauncher + '"')
+    # A GUI root plus CREATE_NO_WINDOW avoids Default Terminal handoff without
+    # conhost's loss of the child's exit code.
+    $guiPython = & $VenvPython -I -c 'from agent_procutil import windowless_python; print(windowless_python(require_windowless=True))'
+    if ($LASTEXITCODE -ne 0 -or -not $guiPython) {
+        throw 'Cannot register headless sync task: windowless Python is unavailable'
+    }
+    $headlessLauncher = [System.IO.Path]::ChangeExtension($TaskLauncher, '.py')
+    $headlessBody = @'
+import os
+import subprocess
+import sys
+import traceback
+from pathlib import Path
+
+log = Path(__file__).resolve().parent.parent / "logs" / "session-sync.log"
+log.parent.mkdir(parents=True, exist_ok=True)
+with log.open("w", encoding="utf-8") as output:
+    try:
+        result = subprocess.run(
+            [sys.argv[1], "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+             "Bypass", "-File", sys.argv[2]],
+            stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            env={**os.environ, "PYTHONUTF8": "1"},
+        )
+        code = result.returncode
+    except Exception:
+        traceback.print_exc(file=output)
+        code = 1
+sys.exit(code)
+'@
+    [System.IO.File]::WriteAllText($headlessLauncher, $headlessBody, [System.Text.UTF8Encoding]::new($false))
+    return New-ScheduledTaskAction -Execute ("$guiPython").Trim() `
+        -Argument ('-I "' + $headlessLauncher + '" "' + $taskHost + '" "' + $TaskLauncher + '"')
 }
 
 function Test-SyncTaskActionCurrent {

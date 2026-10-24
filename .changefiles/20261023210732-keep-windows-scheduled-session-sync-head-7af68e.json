@@ -1,0 +1,9 @@
+{
+  "comment": "Keep Windows scheduled session sync headless with logged diagnostics and real exit status; exclude internal metadata directories from usage capture.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

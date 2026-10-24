@@ -309,6 +309,13 @@ configuration fails explicitly instead of silently falling back.
 
 ### Discovering a fleet config repo for the scheduled sync
 
+The Windows task uses a GUI Python launcher and `CREATE_NO_WINDOW` so
+interactive-logon maintenance does not allocate a visible terminal. The task
+reports the sync command's exit code and retains the latest run's output in
+`<install-root>/logs/session-sync.log`. Accounting enumeration ignores dot-prefixed internal
+metadata directories under `session-state`; invalid session identities still
+fail explicitly.
+
 The scheduled sync (a systemd user timer on POSIX, a Scheduled Task on
 Windows) runs with no meaningful working directory of its own, so it can't
 rely on CWD-based repo-local config discovery the way an interactive shell

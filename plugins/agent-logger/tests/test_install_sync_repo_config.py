@@ -13,6 +13,7 @@ installer text markers.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -750,6 +751,71 @@ def _extract_ps1_function(name: str) -> str:
 
 def _extract_ps1_functions(*names: str) -> str:
     return "\n\n".join(_extract_ps1_function(name) for name in names)
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_sync_task_action_is_headless_and_preserves_exit_code(
+    tmp_path: Path, shell: str, exit_code: int,
+) -> None:
+    exe = shutil.which(shell)
+    if os.name != "nt" or not exe:
+        pytest.skip("requires Windows and PowerShell")
+    (tmp_path / "bin").mkdir()
+    launcher = tmp_path / "bin" / "task launcher.ps1"
+    result_file = tmp_path / "console-visible.txt"
+    launcher.write_text(
+        """
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ConsoleProbe {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
+}
+'@
+"""
+        + "[ConsoleProbe]::IsWindowVisible([ConsoleProbe]::GetConsoleWindow()) | "
+        + f"Set-Content -LiteralPath '{result_file}'\n"
+        + "[Console]::Error.WriteLine('synthetic diagnostic')\n"
+        + f"exit {exit_code}\n",
+        encoding="utf-8",
+    )
+    harness = tmp_path / "action.ps1"
+    harness.write_text(
+        _extract_ps1_function("New-SyncTaskAction")
+        + """
+function Write-SyncTaskLauncher {}
+function New-ScheduledTaskAction {
+    param($Execute, $Argument)
+    [pscustomobject]@{Execute=$Execute; Arguments=$Argument}
+}
+"""
+        + f"$TaskLauncher = '{launcher}'\n"
+        + f"$VenvPython = '{_venv_python_path(_resolve_test_venv_root())}'\n"
+        + "$action = New-SyncTaskAction\n"
+        + "$action | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW}
+    result = subprocess.run(
+        [exe, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        capture_output=True, text=True, check=True, timeout=20, **flags,
+    )
+    action = json.loads(result.stdout)
+    assert Path(action["Execute"]).name.lower() == "pythonw.exe"
+    assert action["Arguments"].startswith('-I "')
+    for _ in range(2):
+        result_file.unlink(missing_ok=True)
+        child = subprocess.run(
+            f'"{action["Execute"]}" {action["Arguments"]}',
+            capture_output=True, text=True, timeout=20, **flags,
+        )
+        assert child.returncode == exit_code, child.stdout + child.stderr
+        assert result_file.read_text(encoding="utf-8-sig").strip() == "False"
+        assert "synthetic diagnostic" in (
+            tmp_path / "logs" / "session-sync.log"
+        ).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
