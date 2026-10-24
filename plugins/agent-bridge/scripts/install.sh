@@ -2302,16 +2302,30 @@ _source_version() {
 }
 
 # True (0) if version $1 is strictly older than version $2. Normalizes the PEP
-# 440 dev separator first -- plugin.json carries `0.4.0-dev93` (hyphen) but
-# importlib.metadata reports the normalized `0.4.0.dev93` (dot), so without this
-# an equal version would not compare equal. `sort -V` then orders our
-# `0.4.0.devN` build stream correctly (dev71 < dev93 < dev100).
+# 440 dev separator and compares package components numerically, independently
+# of the host sort implementation. Source fingerprints do not order packages.
 _version_lt() {
     local a="${1//-/.}" b="${2//-/.}"
+    a="${a%%[+.]source.*}"; b="${b%%[+.]source.*}"
     [[ "$a" == "$b" ]] && return 1
-    local lower
-    lower="$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)"
-    [[ "$lower" == "$a" ]]
+    local -a pa pb
+    IFS='.' read -r -a pa <<< "$a"
+    IFS='.' read -r -a pb <<< "$b"
+    local len=${#pa[@]}
+    (( ${#pb[@]} > len )) && len=${#pb[@]}
+    local i ca cb na nb
+    for (( i = 0; i < len; i++ )); do
+        ca="${pa[i]:-}"; cb="${pb[i]:-}"
+        [[ -z "$ca" && -z "$cb" ]] && continue
+        [[ -z "$ca" ]] && return 1
+        [[ -z "$cb" ]] && return 0
+        na="${ca//[!0-9]/}"; nb="${cb//[!0-9]/}"
+        na="${na:-0}"; nb="${nb:-0}"
+        na=$((10#$na)); nb=$((10#$nb))
+        (( na < nb )) && return 0
+        (( na > nb )) && return 1
+    done
+    return 1
 }
 
 # Downgrade guard (#1790). A stress test caught an agent running the raw

@@ -1,0 +1,9 @@
+{
+  "comment": "Use portable numeric package ordering in POSIX downgrade and publication guards without host sort -V",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
