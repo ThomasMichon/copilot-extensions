@@ -599,7 +599,7 @@ _materialize_snapshot_vendored_libs() {
     local snapshot_dir="$1"
     mkdir -p "$snapshot_dir/libs"
     local lib source destination
-    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve; do
+    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve update-driver single-instance-lease; do
         source="$(_resolve_vendored_lib "$lib")" || {
             _fail "Cannot locate required snapshot library: $lib"
             return 1
@@ -620,7 +620,7 @@ _materialize_snapshot_vendored_libs() {
     local manifest
     for manifest in "$snapshot_dir/pyproject.toml" "$snapshot_dir"/libs/*/pyproject.toml; do
         if ! awk '
-        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve", libs, " ") }
+        BEGIN { split("agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport plugin-resolve update-driver single-instance-lease", libs, " ") }
         /^\[/ { sources = ($0 ~ /^\[tool\.uv\.sources\][[:space:]]*$/) }
         sources && $0 !~ /^[[:space:]]*#/ {
             for (i in libs) {

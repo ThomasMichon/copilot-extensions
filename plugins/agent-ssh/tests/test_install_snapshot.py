@@ -21,6 +21,7 @@ _HARNESS_TIMEOUT_SECONDS = 30
 _RUNTIME_LIBS = (
     "agent-procutil", "ssh-manager", "venue-copilot", "zdd", "remote-login-shell",
     "fleet-contracts", "machine-transport", "plugin-resolve",
+    "update-driver", "single-instance-lease",
 )
 
 
@@ -171,6 +172,43 @@ def _assert_snapshot_dependency_sources(snapshot: Path) -> None:
             assert not source.get("editable", False)
             assert (manifest.parent / source["path"]).resolve().is_relative_to(snapshot)
     policy._check_project(snapshot, (snapshot,), set())
+
+
+@pytest.mark.guard
+def test_checkout_stamp_retains_complete_driver_graph_without_source(tmp_path: Path) -> None:
+    payload = _stage_payload(tmp_path)
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    installation = home / ".agent-ssh"
+    if os.name == "nt":
+        shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        command = [
+            str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", str(payload / "scripts" / "install.ps1"), "stamp",
+            "-InstallDir", str(installation),
+        ]
+    else:
+        shell = shutil.which("bash")
+        if shell is None:
+            pytest.skip("native Bash unavailable")
+        command = [
+            shell, str(payload / "scripts" / "install.sh"), "stamp",
+            "--install-dir", str(installation),
+        ]
+    result = subprocess.run(
+        command, env=env, capture_output=True, text=True, timeout=90, check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    shutil.rmtree(payload)
+    shutil.rmtree(tmp_path / "libs")
+    _assert_snapshot_dependency_sources(snapshot)
+    for lib in ("update-driver", "agent-procutil", "single-instance-lease"):
+        assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
+    for suffix in ("ps1", "sh"):
+        assert (snapshot / "libs" / "update-driver" / "scripts" / f"first-use.{suffix}").is_file()
+    assert not (installation / "current-version").exists()
 
 
 def _assert_snapshot_transport_install(root: Path, env: dict[str, str]) -> None:

@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-ssh"
-version = "0.1.111-dev1"
+version = "0.1.112-dev1"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -26,9 +26,11 @@ dependencies = [
     "agent-fleet-contracts",
     "agent-machine-transport",
     "agent-plugin-resolve",
+    "agent-update-driver",
 ]
 
 [tool.uv.sources]
+agent-update-driver = { path = "libs/update-driver" }
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
 agent-machine-transport = { path = "libs/machine-transport" }
 agent-fleet-contracts = { path = "libs/fleet-contracts" }
