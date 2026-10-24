@@ -375,7 +375,7 @@ def test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed
     assert version.stdout.startswith("agent-logger " + actual["build_version"] + " (commit " + actual["commit"])
     for name, module in provision.LOGGER_COMMANDS:
         consumer = subprocess.run(
-            [str(python), "-I", "-B", "-m", module, "--help"], env=env, cwd=project,
+            [str(python), "-I", "-B", "-X", "utf8", "-m", module, "--help"], env=env, cwd=project,
             capture_output=True, text=True, timeout=30, **no_window_kwargs(),
         )
         assert consumer.returncode == 0 and "usage:" in consumer.stdout.lower(), (
