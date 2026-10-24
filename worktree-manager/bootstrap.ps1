@@ -32,6 +32,48 @@ function Write-BootstrapProgress(
     }
 }
 
+function Resolve-BootstrapExecutable([string]$Path) {
+    $root = [IO.Path]::GetPathRoot($Path)
+    if (-not $root) { throw 'Bootstrap executable must have an absolute path.' }
+    $remaining = @($Path.Substring($root.Length) -split '[\\/]' | Where-Object { $_ })
+    $current = $root
+    $links = 0
+    $ordinaryFile = $false
+    while ($remaining.Count) {
+        $component = $remaining[0]
+        $remaining = @($remaining | Select-Object -Skip 1)
+        if ($component -eq '.') { continue }
+        if ($component -eq '..') {
+            $parent = [IO.Path]::GetDirectoryName($current)
+            if ($parent) { $current = $parent }
+            continue
+        }
+        $candidate = [IO.Path]::Combine($current, $component)
+        $item = Get-Item -LiteralPath $candidate -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            $ordinaryFile = $false
+            $links++
+            $targets = @($item.Target)
+            if ($links -gt 40 -or $targets.Count -ne 1 -or -not $targets[0]) {
+                throw 'Bootstrap executable has an unsupported link or excessive indirection.'
+            }
+            $target = [string]$targets[0]
+            if (-not [IO.Path]::IsPathRooted($target)) { $target = [IO.Path]::Combine($current, $target) }
+            $current = [IO.Path]::GetPathRoot($target)
+            $remaining = @($target.Substring($current.Length) -split '[\\/]' |
+                Where-Object { $_ }) + $remaining
+            continue
+        }
+        if ([bool]$item.PSIsContainer -ne [bool]$remaining.Count) {
+            throw 'Bootstrap executable does not identify a regular file.'
+        }
+        $ordinaryFile = -not $item.PSIsContainer
+        $current = $candidate
+    }
+    if (-not $ordinaryFile) { throw 'Bootstrap executable does not identify a regular file.' }
+    return $current
+}
+
 $Root    = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
 $Staging = Join-Path $Root 'staging'
 $Config  = Join-Path $Root 'config.toml'
@@ -99,6 +141,9 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
         exit 1
     }
 }
+$UvCommand = Get-Command uv -CommandType Application,ExternalScript -ErrorAction Stop |
+    Select-Object -First 1
+$Uv = Resolve-BootstrapExecutable $UvCommand.Source
 
 $HaveGit = [bool](Get-Command git -ErrorAction SilentlyContinue)
 if (-not $HaveGit) {
@@ -163,12 +208,12 @@ if ($HaveGit) {
 Push-Location (Join-Path $PayloadParent 'worktree-manager')
 try {
     $Python = $null
-    try { $Python = & uv python find --no-project '>=3.11' 2>$null }
+    try { $Python = & $Uv python find --no-project '>=3.11' 2>$null }
     catch { $Python = $null }
     if ($LASTEXITCODE -ne 0 -or -not $Python) {
-        & uv python install 3.11
+        & $Uv python install 3.11
         if ($LASTEXITCODE -ne 0) { throw 'Manager base Python acquisition failed.' }
-        $Python = & uv python find --no-project '>=3.11'
+        $Python = & $Uv python find --no-project '>=3.11'
     }
     if ($LASTEXITCODE -ne 0 -or -not $Python) { throw 'Manager needs Python 3.11 or newer.' }
     if ($commandArgs.Count) {
