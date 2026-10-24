@@ -89,7 +89,8 @@ class ServiceCaller:
                 session._retry_connection = False
                 async with session.get(self.gateway + "/_fleet/challenge",
                                        allow_redirects=False) as response:
-                    check(response.status == 200, "gateway-challenge-refused", 401)
+                    check(response.status == 200, "gateway-challenge-refused",
+                          429 if response.status == 429 else 401)
                     raw = await _read(response, 16384)
                 try:
                     challenge = unpack(raw.decode("utf-8"))

@@ -1813,6 +1813,13 @@ measured at 129 seconds. Splitting those files preserves every collected test
 and all item, 300-second group and whole-plugin deadlines. Filtered invocations
 retain their existing single-group behavior.
 
+The focused `test_python_runtime_install.py` selector
+`-k prepared_bootstrap_loads_actual_installer_without_source` prepares the real
+retained Worktrees lifecycle, removes its frozen source and runs the copied
+installer's `--help` with an isolated interpreter. The complete closure must
+load, while deleting either wheel-snapshot helper must fail at its import.
+These controls require no package build, UV invocation or host runtime change.
+
 ### Native PR-owner installation acceptance
 
 The manual `installation-context-acceptance.yml` workflow retains its derived

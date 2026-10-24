@@ -869,6 +869,48 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     assert (package / "_build_info.py").read_text(encoding="utf-8") == content
 
 
+@pytest.mark.parametrize("missing", [None, "installer_wheel_snapshot.py", "installer_wheel_inputs.py"])
+def test_prepared_bootstrap_loads_actual_installer_without_source(tmp_path, monkeypatch, missing):
+    import agent_worktrees
+    from agent_worktrees import runtime_candidate as installer, update_stage
+
+    plugin = Path(__file__).resolve().parents[1]
+    frozen = tmp_path / "frozen-plugin"
+    shutil.copytree(plugin / "scripts", frozen / "scripts")
+    package = tmp_path / "site-packages" / "agent_worktrees"
+    package.mkdir(parents=True)
+    bootstrap = tmp_path / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    for name in (
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py",
+    ):
+        shutil.copyfile(frozen / "scripts" / name, bootstrap / name)
+    monkeypatch.setattr(agent_worktrees, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(installer.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(installer, "distribution_version", lambda _name: "2.0.0.dev1")
+    monkeypatch.setattr(update_stage, "fingerprint", lambda _path: "frozen-fingerprint")
+    installer.prepare_runtime_candidate({
+        "version": "2.0.0-dev1", "commit": "abc", "branch": "test",
+        "source": str(frozen), "deployment_source": json.dumps({"path": str(frozen)}),
+        "frozen_plugin": str(frozen),
+    })
+    shutil.rmtree(frozen)
+    if missing is not None:
+        (bootstrap / missing).unlink(missing_ok=True)
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(bootstrap / "runtime_install.py"), "--help"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    if missing is not None:
+        assert result.returncode != 0
+        assert f"No module named '{Path(missing).stem}'" in result.stderr
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "--settle-slot" in result.stdout
+
+
 def test_bash_bootstrap_skips_unusable_alias_and_searches_all_candidates(tmp_path):
     bash = shutil.which("bash") if os.name != "nt" else None
     if os.name == "nt" and (git := shutil.which("git")) is not None:

@@ -20,6 +20,11 @@ Gateway deployment/confirmation endpoint or an ARC installer. Existing
 unchanged; a loadout design does not imply that those providers implement its
 selected adapters.
 
+The optional [published preparation SDK](loadout-preparation.md) carries these
+same inputs through controller-owned Git acquisition, the existing authenticated
+service Gateway, scoped prepared notifications and an exact-generation review
+decision. It remains separate from deployment admission and ARC lifecycle.
+
 ## Registrar and contribution contract
 
 The existing `fleet-manager.config` owns adopter state. Add this namespace
