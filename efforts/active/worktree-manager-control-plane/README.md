@@ -910,6 +910,11 @@ Direct writes are machine-local; repository, knowledge, plugin, and preset
 sources are read-only. The sequencing and validation below are
 _(agent-recommended)_ realizations of that operator-approved boundary.
 
+- [ ] Optional bootstrap repository caller (#8545): establish core readiness,
+      then compose attended acquisition and explicitly trusted repository setup.
+      The [proposed concrete caller contract](optional-repository-bootstrap.md)
+      preserves #356's first-repository registration/setup/trust/readiness
+      ownership; it is not a second registration engine or a shipped option.
 - [x] Wave 0: review contribution, effective-state, and local-write contracts
       against existing owners; reconcile #543's old direct-repository-write
       premise without claiming its implementation complete.
@@ -1846,6 +1851,17 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+### 2026-10-24 - Optional repository bootstrap contract proposal
+
+- Added the [concrete caller proposal](optional-repository-bootstrap.md) for
+  #8545 after the neutral installer vision refinement in #8546 and the
+  core-readiness prerequisite in #8556. It specifies proposed arguments,
+  ordered core/acquisition/setup composition and a shared repository-owned
+  check/apply declaration. #356 retains registration/setup/trust/readiness
+  implementation and its standalone adoption/discovery scope. This is
+  agent-recommended design before code, not a supported option, setup
+  implementation, adoption result or rollout.
 
 ### 2026-10-23 - Direct retained acceptance from #3935
 
