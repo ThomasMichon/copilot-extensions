@@ -15,6 +15,9 @@ from pathlib import Path
 
 from packaging.version import Version
 
+# Installed control code must support the frozen-source mode-owner contract.
+MODE_OWNER_ABI = 1
+
 _LIFECYCLE_FILES = (
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py",

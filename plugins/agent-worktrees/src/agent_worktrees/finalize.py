@@ -135,22 +135,22 @@ def _warn_of_codespace_claims_for_worktree(worktree_id: str) -> None:
 
 
 def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) -> None:
-    """Warn-only safety net: report any mutable dev-slot claim this worktree
-    still holds across every plugin, with the exact release command --
+    """Warn-only safety net: report development claims in legacy plugin homes
+    that this worktree still holds, with the exact release command --
     never releases anything itself (mirrors
     :func:`_warn_of_codespace_claims_for_worktree`'s posture exactly).
 
-    A dev-slot claim (see ``libs/versioned-runtime``'s mutable-dev-slot
+    A dev-slot claim (see ``libs/versioned-runtime``'s development-runtime
     pattern) is a plain ``<root>/dev-claim.json`` sidecar a plugin installer
     writes next to its ``current-version`` marker when a worktree opts a
-    plugin's local install into the shared, mutable ``dev`` slot. Its schema
-    is a small, stable, dependency-free JSON shape
+    plugin's local install into explicitly claimed development generations.
+    Its schema is a small, stable, dependency-free JSON shape
     (``copilot-extensions.dev-slot-claim``) specifically so a reader never
     needs to import or shell out to the owning plugin's own runtime --
     marketplace-isolation, same posture as the CodeSpace-claim warning above,
     just satisfied by reading a plain file instead of calling a sibling
-    plugin's binstub. Every plugin's root lives at ``~/.<plugin-name>/`` by
-    convention, so this scans every such directory rather than hardcoding a
+    plugin's binstub. Legacy plugin roots live at ``~/.<plugin-name>/`` by
+    convention, so this scans those directories rather than hardcoding a
     plugin list -- a plugin that adopts the pattern later needs no change
     here.
 
@@ -161,13 +161,14 @@ def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) 
     path, not the id.
     """
     import json as _json
+    import shlex as _shlex
 
     home = Path.home()
     try:
         candidates = list(home.glob(".*/dev-claim.json"))
     except OSError:
         return
-    held: list[tuple[str, dict]] = []
+    held: list[tuple[str, Path, dict]] = []
     for path in candidates:
         try:
             data = _json.loads(path.read_text(encoding="utf-8"))
@@ -180,7 +181,7 @@ def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) 
         if data.get("owner") != worktree_path:
             continue
         plugin_name = path.parent.name.lstrip(".")
-        held.append((plugin_name, data))
+        held.append((plugin_name, path.parent, data))
     if not held:
         return
     output.warn(
@@ -188,17 +189,24 @@ def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) 
         "-- finalize does NOT release these for you. Confirm each plugin's "
         "local dev install is genuinely no longer needed, then release it:"
     )
-    for plugin_name, data in held:
+    for plugin_name, root, data in held:
         previous = data.get("previous_version") or "(unknown -- check dev-claim.json)"
+        values = [f"./plugins/{plugin_name}/scripts/install.ps1", str(root), worktree_path]
+        ps_script, ps_root, ps_owner = ("'" + value.replace("'", "''") + "'" for value in values)
+        sh_script, sh_root, sh_owner = (
+            _shlex.quote(value) for value in
+            (f"./plugins/{plugin_name}/scripts/install.sh", str(root), worktree_path)
+        )
         print(
             f"  · {plugin_name}: from a copilot-extensions checkout, "
-            f"`cd plugins/{plugin_name}; ./scripts/install.ps1 dev-release` "
-            f"(or `install.sh dev-release`) once that plugin has adopted the "
-            f"mutable-dev-slot pattern's release verb (see "
-            f"docs/patterns/mutable-dev-slot.md); this restores "
-            f"current-version -> {previous}. Until then, release manually: "
-            f"delete ~/.{plugin_name}/dev-claim.json, then run that plugin's "
-            f"`versioned_runtime.py activate {previous}` from its scripts/ dir."
+            f"`& {ps_script} dev-release -InstallDir {ps_root} -Owner {ps_owner}` "
+            f"(or `{sh_script} dev-release --install-dir {sh_root} --owner {sh_owner}`) "
+            f"requests restoration of current-version -> {previous} "
+            f"through the owning installer. "
+            f"Keep the claim until restoration settles. If that installer has no "
+            f"supported release flow, keep ownership and use its supported upgrade "
+            f"or repair procedure; do not remove the claim or activate a target manually "
+            f"(see docs/patterns/mutable-dev-slot.md)."
         )
 
 

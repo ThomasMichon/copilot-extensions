@@ -16,6 +16,51 @@ from pathlib import Path
 
 _WINDOWS = os.name == "nt"
 
+
+def balanced(text, start, opening, closing, *, error_type):
+    depth = 0
+    quoted = escaped = False
+    for offset in range(start, len(text)):
+        char = text[offset]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:offset], offset + 1
+    raise error_type("UV settings projection is incomplete")
+
+
+def uv_command(
+    uv, arguments, *, cwd, directory, operation, windows, argument_pairs, value_options,
+):
+    if not windows or len(os.path.abspath(cwd or Path.cwd())) < 260:
+        return [uv, "pip", operation, *arguments], cwd
+    # CreateProcess limits cwd even when its executable supports long paths.
+    retained = []
+    directory_supplied = False
+    for option, value in argument_pairs(arguments):
+        if option == "--directory":
+            directory_supplied = True
+            value = str(directory)
+        if option and value:
+            retained.extend([option, value] if option in value_options else [option + "=" + value])
+        else:
+            retained.append(option or value)
+    if not directory_supplied:
+        retained[:0] = ["--directory", str(directory)]
+    return [uv, "pip", operation, *retained], Path(directory.anchor)
+
+
 # native-executable:begin
 def physical_executable(path: str) -> str | None:
     """Read link targets before inspecting descendants, including the final file.

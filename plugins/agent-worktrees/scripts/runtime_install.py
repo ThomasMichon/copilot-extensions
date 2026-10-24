@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -113,9 +114,12 @@ def _publish_helpers(
     governance: Governance, frontend: dict | None, content: Path, slot: Path,
     descriptor: int, *, timeout: float,
     base_python: Path,
+    expected_payload_hash: str | None = None,
 ) -> helper_publication.HelperPublication | None:
     if frontend is None:
         return
+    if expected_payload_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", expected_payload_hash):
+        raise InstallationRefused("Helper publication requires a full source SHA256 pin")
     if (
         set(frontend) != {"shell", "executable", "scope"}
         or frontend["shell"] not in ("sh", "ps1")
@@ -157,9 +161,8 @@ def _publish_helpers(
             "bindings": helper_publication.declared_copies(
                 content, governance.root, frontend["scope"], frontend["shell"], bool(governance.context),
             ),
-            "content_hash": runtime.fingerprint_source(
-                engine._source_files(engine._package_roots(content)),
-            ),
+            "content_hash": expected_payload_hash if expected_payload_hash is not None
+            else runtime.fingerprint_source(engine._source_files(engine._package_roots(content))),
         }
         data = json.dumps(plan, sort_keys=True).encode()
         with os.fdopen(os.open(plan_path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600), "w+b") as stream:
@@ -193,6 +196,8 @@ def _publish_helpers(
             completed = engine.run_owned(
                 argv, cwd=Path(governance.root.anchor), env=environment, timeout=timeout,
                 procutil=agent_procutil, construction_fd=descriptor,
+                runtime_root=governance.root, runtime_version=slot.name,
+                runtime_path=Path(runtime.__file__),
             )
         except subprocess.CalledProcessError as error:
             if error.stderr:
@@ -580,7 +585,9 @@ def settle_candidate(
     expected_governance: dict, previous: str | None = None, wait_timeout: float = 180,
     cutover_guard=None, lifecycle_slot: Path | None = None, package_version: str | None = None,
     force_monitor_transition: bool = False,
+    dev_owner: str | None = None,
     frontend: dict | None = None, publication_source_root: Path | None = None,
+    publication_payload_hash: str | None = None,
     child_timeout: float = 180,
     base_python: Path | None = None,
     governance: Governance | None = None,
@@ -660,6 +667,7 @@ def settle_candidate(
                 helpers = _publish_helpers(
                     governance, frontend, publication_source_root, candidate_slot,
                     descriptor, timeout=child_timeout, base_python=base_python,
+                    expected_payload_hash=publication_payload_hash,
                 )
             handles: list[subprocess.Popen] = []
             summary = {"action": "interrupted"}
@@ -667,7 +675,7 @@ def settle_candidate(
                 if helpers is not None:
                     helpers.verify()
                 governance.recheck()
-                runtime.activate(root, version, link_free=True)
+                runtime.activate(root, version, link_free=True, dev_owner=dev_owner)
                 print(f"Runtime {version}: selection published", flush=True)
                 committed = True
                 if monitor_scope and not already_serving:
@@ -700,7 +708,7 @@ def settle_candidate(
                         elif any(content not in (
                             (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
                         ) for content in _selector_snapshot(root).values()):
-                            runtime.activate(root, version, link_free=True)
+                            runtime.activate(root, version, link_free=True, dev_owner=dev_owner)
                         if committed:
                             deployment.publish(root, manifest)
                         break
@@ -761,6 +769,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mode", choices=("ordinary", "repair", "dev", "dev-release"), default="ordinary")
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--mode-owner", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--construction-provenance", type=json.loads, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
     required = ("root", "plugin") if (
         arguments.inspect_helper_publication or arguments.complete_helper_publication
@@ -808,6 +817,12 @@ def main(argv: list[str] | None = None) -> int:
             {"expected_governance": arguments.governance_generation}
             if arguments.mode_owner else {}
         )
+        if arguments.mode_owner and arguments.payload_hash is not None:
+            mode_arguments["expected_payload_hash"] = arguments.payload_hash
+        if arguments.construction_provenance is not None:
+            if not arguments.mode_owner:
+                parser.error("construction provenance requires a whole-operation owner")
+            mode_arguments["construction_provenance"] = arguments.construction_provenance
         if not arguments.mode_owner:
             mode_arguments["expected_source_identity"] = arguments.expected_source_identity
         if arguments.frontend is not None:

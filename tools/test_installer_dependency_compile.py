@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -34,6 +35,44 @@ def test_compile_projection_is_admitted_without_install_flags():
     for projection, operation in [(settings(), "compile"), (compile_settings(), "install")]:
         with pytest.raises(policy.DependencyPolicyError, match="projection is unsupported"):
             policy.cutoff_arguments(projection, now=NOW, _operation=operation)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows subprocess cwd limit")
+@pytest.mark.parametrize("relative_directory", [False, True])
+def test_native_compile_probe_keeps_operation_and_configuration_beyond_cwd_limit(
+    tmp_path, monkeypatch, relative_directory,
+):
+    uv = shutil.which("uv")
+    assert uv, "native UV is required"
+    deep = tmp_path / ("a" * 100) / ("b" * 100) / ("c" * 50)
+    selected = deep / "selected" if relative_directory else deep
+    selected.mkdir(parents=True)
+    assert len(str(deep)) >= 260
+    (selected / "uv.toml").write_text(
+        'exclude-newer="2020-01-01T00:00:00Z"\n', encoding="utf-8",
+    )
+    requirements = selected / "requirements.in"
+    requirements.write_text("fixture-unresolved>=1\n", encoding="utf-8")
+    arguments = ["--no-index", str(requirements)]
+    if relative_directory:
+        arguments.extend(["--directory", "selected"])
+    actual = policy.subprocess.run
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return actual(command, **kwargs)
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    admitted = policy.prepare_uv_compile(
+        uv, arguments, env=offline_environment(tmp_path), cwd=deep, now=NOW,
+    )
+    assert admitted[admitted.index("--exclude-newer") + 1] == "2020-01-01T00:00:00Z"
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command[1:3] == ["pip", "compile"]
+    assert command[command.index("--directory") + 1] == str(selected.resolve())
+    assert options["cwd"] == Path(deep.anchor)
 
 
 @pytest.mark.parametrize("projection", [

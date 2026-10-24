@@ -782,6 +782,29 @@ promotion, and actual monitor retirement or recovery. A private, frozen control
 environment supplies installed lifecycle code even when the old runtime cannot
 start; it is not a selected deployment or a second lock protocol.
 
+On Windows installations, a completed, independently healthy runtime
+with the installed mode-owner ABI can instead supply that control interpreter.
+Its canonical retention lease is acquired before health/ABI verification and
+remains held through the owning process family. Package-version equality is not
+the compatibility check. Repair never uses the generation being repaired as its
+control; release considers the claim's original restore target. No installed
+control or an unavailable/incompatible ABI uses the private bootstrap, while malformed
+completion evidence, storage errors and failed health remain explicit refusals.
+Legacy Windows and namespaced Windows entrypoints use the same retained-control
+admission. POSIX entrypoints retain the private control bootstrap.
+
+The bounded Windows guardian co-retains each target before nested constructor
+writers start and releases those leases only after its whole owned Job settles.
+This prevents an enclosing Job's teardown from revoking a nested guardian's
+only candidate fence early. The scope uses private, per-operation registration
+packets backed by the actual canonical leases, not borrowed cutover authority.
+Packet readers share Windows rename/delete access without bypassing file
+permissions. A request withdrawn before the guardian reads it is cancellation;
+other storage failures still refuse registration.
+Only explicitly requested durable daemons may break away; constructor Jobs
+remain strict by default and contained tests still suppress daemon escape.
+The production context-child watchdog remains 480 seconds.
+
 An ordinary update discovers completed generations of the requested package,
 preferring the selected or last-known-good generation with matching frozen
 content. It retains and health-checks that build without rebuilding or
@@ -797,14 +820,26 @@ receipt. Owner containment and build provenance describe the actual inputs;
 the authorized payload still supplies installation governance. The installed
 control build carries the frozen source evidence into candidate construction,
 without rereading or attributing the build to that authorization payload.
-Each invocation refreshes the mutable `versions/dev` environment from a frozen,
-non-editable snapshot of the whole local dependency graph. This is the pattern's
-ordinary-rebuild form, not the pilot plugin's editable-source form: edits become
-visible on the next `dev` invocation, and installed preparation never writes
-generated provenance into the worktree. Another owner's claim refuses with exit
-code 2; configuration force is not a takeover.
+Its source-hash pin avoids duplicate initial scans of that snapshot. Retained
+source bytes are still validated before construction, and either reuse path
+rechecks actual source content rather than trusting the pin alone.
+Native helper publication uses that pin for its plan baseline while retaining
+the callback's full content checks and the parent's before/after publication
+checks; no callback or source-binding validation is skipped.
+`BUILD_INFO['source']` retains the input-worktree path; the saved deployment
+footprint's `path` names the authorized payload. They need not be the same.
+Each changed source graph builds an immutable
+`versions/dev-<source-sha256>` environment from a frozen, non-editable snapshot
+of the whole local dependency graph. An exact healthy target is reused without
+writing its environment. Compatible retained Windows control avoids a second
+control construction; cold, incompatible and other-platform paths still use the
+temporary bootstrap.
+Edits become visible only through another immutable generation on the next
+`dev` invocation, and installed preparation never writes generated provenance
+into the worktree. Another owner's claim refuses with exit code 2;
+configuration force is not a takeover.
 
-Release probes and restores the original numbered target before relinquishing
+Release probes and restores the original immutable target before relinquishing
 the claim. Failed construction or restoration leaves the claim available for
 diagnosis and an explicit retry; do not delete a held lock or hot-patch a numbered
 runtime. Structured installation contexts use the same commands with their

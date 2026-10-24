@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 import importlib.util
@@ -15,6 +17,7 @@ import sys
 import tempfile
 from types import ModuleType
 from typing import Any
+from collections.abc import Callable
 
 SOURCE_FILE = "runtime-source.json"
 SOURCE_SCHEMA = "copilot-extensions.runtime-source"
@@ -26,6 +29,65 @@ _PACKAGE_VERSION = re.compile(
 _GENERATED = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
 }
+
+
+def fingerprint_entries(
+    entries: dict[Path, str], *, label: Callable[[Path], str],
+    root_label: Callable[[Path], str], roots: list[Path],
+    normalize_link: Callable[[str], str], path_type: type[Path],
+    file_hashes: dict[Path, str] | None,
+    on_file: Callable[[Path, bytes], None] | None,
+) -> str:
+    """Hash validated entries with fingerprint_source's unchanged framed format."""
+    import hashlib
+
+    def frame(data: bytes) -> bytes:
+        return len(data).to_bytes(8, "big") + data
+
+    ordered = sorted(entries, key=label)
+    parallel = os.name == "nt" and on_file is None and len(ordered) > 4
+    digest = hashlib.sha256()
+    with ThreadPoolExecutor(max_workers=4) if parallel else nullcontext() as readers:
+        for start in range(0, len(ordered), 4):
+            batch = ordered[start:start + 4]
+            pending = {
+                entry: readers.submit(entry.read_bytes)
+                for entry in batch if entries[entry] != "symlink"
+            } if readers is not None else {}
+            for entry in batch:
+                kind = entries[entry]
+                if kind == "symlink":
+                    try:
+                        target = os.readlink(entry)
+                    except OSError as exc:
+                        raise OSError(
+                            f"fingerprint_source: could not read symlink {entry}: {exc}"
+                        ) from exc
+                    target = normalize_link(target)
+                    if os.path.isabs(target):
+                        try:
+                            target_resolved = path_type(target).resolve()
+                        except OSError:
+                            target_resolved = None
+                        if target_resolved is not None and any(
+                            target_resolved == root or target_resolved.is_relative_to(root)
+                            for root in roots
+                        ):
+                            target = root_label(target_resolved)
+                    data = path_type(target).as_posix().encode("utf-8")
+                else:
+                    try:
+                        data = pending[entry].result() if entry in pending else entry.read_bytes()
+                    except OSError as exc:
+                        raise OSError(f"fingerprint_source: could not read {entry}: {exc}") from exc
+                    if file_hashes is not None:
+                        file_hashes[entry] = hashlib.sha256(data).hexdigest()
+                    if on_file is not None:
+                        on_file(entry, data)
+                digest.update(frame(label(entry).encode("utf-8")))
+                digest.update(frame(kind.encode("utf-8")))
+                digest.update(frame(data))
+    return digest.hexdigest()
 
 
 class SourceIdentityError(ValueError):

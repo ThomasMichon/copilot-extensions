@@ -314,6 +314,54 @@ def test_probe_preserves_arguments_environment_and_cwd(monkeypatch, tmp_path):
     assert calls[0][1]["timeout"] == 30
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows subprocess cwd limit")
+@pytest.mark.parametrize("selection", ["cwd", "relative", "inline", "environment", "repeated"])
+def test_native_probe_preserves_configuration_beyond_windows_cwd_limit(tmp_path, monkeypatch, selection):
+    uv = shutil.which("uv")
+    assert uv, "native UV is required"
+    deep = tmp_path / ("a" * 100) / ("b" * 100) / ("c" * 50)
+    deep.mkdir(parents=True)
+    assert len(str(deep)) >= 260
+    selected = deep if selection == "cwd" else deep / "selected"
+    selected.mkdir(exist_ok=True)
+    (selected / "uv.toml").write_text(
+        'exclude-newer="2020-01-01T00:00:00Z"\n', encoding="utf-8",
+    )
+    environment = offline_environment(tmp_path)
+    arguments = ["--no-index", "fixture-unresolved>=1"]
+    if selection in ("relative", "repeated"):
+        arguments.extend(["--directory", "selected"])
+        if selection == "repeated":
+            arguments.extend(["--directory", "selected"])
+    elif selection == "inline":
+        arguments.append("--directory=selected")
+    elif selection == "environment":
+        environment["UV_WORKING_DIR"] = "selected"
+    actual = policy.subprocess.run
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return actual(command, **kwargs)
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    if selection == "repeated":
+        with pytest.raises(policy.DependencyPolicyError, match="configuration probe failed"):
+            policy.prepare_uv_install(uv, arguments, env=environment, cwd=deep, now=NOW)
+    else:
+        admitted = policy.prepare_uv_install(
+            uv, arguments, env=environment, cwd=deep, now=NOW,
+        )
+        assert admitted[:len(arguments)] == arguments
+        assert admitted[admitted.index("--exclude-newer") + 1] == "2020-01-01T00:00:00Z"
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command.count("--directory") == (2 if selection == "repeated" else 1)
+    assert command[command.index("--directory") + 1] == str(selected.resolve())
+    assert options["cwd"] == Path(deep.anchor)
+    assert options["env"] == environment
+
+
 def test_probe_error_never_prints_credential_projection(monkeypatch):
     secret = "private-config-value"
     monkeypatch.setattr(policy.subprocess, "run",

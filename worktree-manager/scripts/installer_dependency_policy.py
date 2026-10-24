@@ -362,26 +362,9 @@ def _anchor_roots() -> tuple[Path, ...]:
 
 
 def _balanced(text: str, start: int, opening: str, closing: str) -> tuple[str, int]:
-    depth = 0
-    quoted = escaped = False
-    for offset in range(start, len(text)):
-        char = text[offset]
-        if quoted:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                quoted = False
-        elif char == '"':
-            quoted = True
-        elif char == opening:
-            depth += 1
-        elif char == closing:
-            depth -= 1
-            if depth == 0:
-                return text[start + 1:offset], offset + 1
-    raise DependencyPolicyError("UV settings projection is incomplete")
+    return _configuration.balanced(
+        text, start, opening, closing, error_type=DependencyPolicyError,
+    )
 
 
 def cutoff_arguments(
@@ -510,6 +493,13 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
     return base, seen, files, editables
 
 
+def _uv_install_command(uv, arguments, *, cwd, directory, operation="install"):
+    return _configuration.uv_command(
+        uv, arguments, cwd=cwd, directory=directory, operation=operation,
+        windows=os.name == "nt", argument_pairs=_argument_pairs, value_options=_VALUE_OPTIONS,
+    )
+
+
 def prepare_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
@@ -523,7 +513,7 @@ def prepare_uv_install(
         arguments = _configuration.compile_arguments(
             arguments, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
         )
-    _source_inputs(
+    base, *_ = _source_inputs(
         arguments, env, cwd, trusted_source_roots,
         **({"operation": _operation} if _operation != "install" else {}),
     )
@@ -532,10 +522,13 @@ def prepare_uv_install(
         argument for argument in arguments
         if argument != "--quiet" and not re.fullmatch(r"-q+", argument)
     ]
-    command = [uv, "pip", _operation, "--show-settings", *probe_arguments]
+    command, probe_cwd = _uv_install_command(
+        uv, ["--show-settings", *probe_arguments], cwd=cwd, directory=base,
+        operation=_operation,
+    )
     try:
         result = subprocess.run(
-            command, capture_output=True, text=True, env=env, cwd=cwd,
+            command, capture_output=True, text=True, env=env, cwd=probe_cwd,
             timeout=SETTINGS_TIMEOUT_SECONDS, creationflags=_HEADLESS,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -915,8 +908,12 @@ def _retain_uv_install(
             raise DependencyPolicyError("retained UV configuration differs from the configured resolver")
         if editables:
             admitted.extend(["--config-setting", "editable_mode=compat"])
+        command, launch_cwd = _uv_install_command(
+            uv, admitted, cwd=retained_base, directory=retained_base,
+            operation=_operation,
+        )
         yield RetainedUVInstall(
-            (uv, "pip", _operation, *admitted), retained_environment, retained_base,
+            tuple(command), retained_environment, launch_cwd,
             {path: mirror(path) for path in projects}, source_hashes,
         )
 

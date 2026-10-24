@@ -241,6 +241,67 @@ def admitted(driver, root, owner, content, monkeypatch, *, hold=True):
             yield governance, lease
 
 
+@pytest.mark.parametrize("publication_case", ["namespaced"], indirect=True)
+@pytest.mark.parametrize(
+    ("shell", "executable"),
+    [(shell, executable) for shell, executable in native_hosts() if os.name != "nt" or shell == "ps1"],
+)
+@pytest.mark.parametrize("fault", ["healthy", "wrong-pin", "changed-input"])
+@pytest.mark.timeout(90)
+def test_pinned_helper_plan_preserves_native_and_parent_content_validation(
+    publication_case, monkeypatch, shell, executable, fault,
+):
+    driver, root, slot, owner, content, _identity = publication_case
+    fingerprint = driver.runtime.fingerprint_source
+    expected_hash = fingerprint(driver.engine._source_files(driver.engine._package_roots(content)))
+    parent_scans = []
+    run_owned = driver.engine.run_owned
+
+    def observe(paths, **kwargs):
+        parent_scans.append(True)
+        return fingerprint(paths, **kwargs)
+
+    def invoke(argv, **kwargs):
+        assert not parent_scans, "producer rehashed an already-admitted source baseline"
+        option = "-RuntimePublicationPlan" if shell == "ps1" else "--runtime-publication-plan"
+        plan = json.loads(Path(argv[argv.index(option) + 1]).read_text())
+        assert plan["content_hash"] == ("0" * 64 if fault == "wrong-pin" else expected_hash)
+        if fault == "changed-input":
+            path = content / "src" / "agent_worktrees" / "native_source_context.py"
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write("\n# changed after plan admission\n")
+        return run_owned(argv, **kwargs)
+
+    monkeypatch.setattr(driver.runtime, "fingerprint_source", observe)
+    monkeypatch.setattr(driver.engine, "run_owned", invoke)
+    with admitted(driver, root, owner, content, monkeypatch) as (governance, _lease):
+        for marker in ("current-version", "last-known-good"):
+            (root / marker).write_text("previous\n", encoding="utf-8")
+        before = {
+            path: path.read_bytes()
+            for path in (root / "current-version", root / "last-known-good", root / "deploy-manifest.json")
+        }
+        with driver.runtime.retention_custody(root, slot.name, payload_hash="candidate") as (_slot, descriptor):
+            arguments = dict(
+                timeout=CALLBACK_TIMEOUT, base_python=Path(sys._base_executable),
+                expected_payload_hash="0" * 64 if fault == "wrong-pin" else expected_hash,
+            )
+            frontend = {"shell": shell, "executable": executable, "scope": "resolvers"}
+            if fault == "healthy":
+                transaction = driver._publish_helpers(
+                    governance, frontend, content, slot, descriptor, **arguments,
+                )
+                assert len(parent_scans) == 2, "parent before/after publication checks must remain"
+                transaction.keep()
+            else:
+                with pytest.raises(subprocess.CalledProcessError):
+                    driver._publish_helpers(
+                        governance, frontend, content, slot, descriptor, **arguments,
+                    )
+                assert not parent_scans, "native refusal must precede parent publication"
+        assert {path: path.read_bytes() for path in before} == before
+
+
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("fault", ["healthy", "publisher", "full-pin", "invalid-ack"])
 @pytest.mark.timeout(90)
