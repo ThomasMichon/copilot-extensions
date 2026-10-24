@@ -58,14 +58,17 @@ if ($PSCmdlet.ParameterSetName -eq 'Start') {
     New-Item -ItemType Directory -Path (Join-Path $stage 'assets') | Out-Null
     Copy-Item -LiteralPath $workerScript -Destination (Join-Path $stage 'scripts\elevation-worker.ps1')
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\assets\ElevationNative.cs') -Destination (Join-Path $stage 'assets\ElevationNative.cs')
+    $scriptHash = (Get-FileHash -LiteralPath $ScriptPath -Algorithm SHA256).Hash
+    $requestedAt = [DateTimeOffset]::UtcNow
     $request = [ordered]@{
         schema = 1; runId = $runId; ownerSid = $sid
-        scriptPath = $ScriptPath; scriptHash = (Get-FileHash -LiteralPath $ScriptPath -Algorithm SHA256).Hash
+        scriptPath = $ScriptPath; scriptHash = $scriptHash
         scriptArguments = $ScriptArguments; workingDirectory = $WorkingDirectory; logPath = $LogPath
         sessionId = $SessionId; shellPath = Join-Path $PSHOME 'pwsh.exe'
         timeoutSeconds = $TimeoutSeconds; interactiveProbe = [bool]$InteractiveProbe
         taskName = "AgentConduct-Elevation-$runId"
-        deadline = [DateTimeOffset]::UtcNow.AddSeconds($ConsentTimeoutSeconds + $TimeoutSeconds + 30).ToString('O')
+        admissionDeadline = $requestedAt.AddSeconds($ConsentTimeoutSeconds).ToString('O')
+        deadline = $requestedAt.AddSeconds($ConsentTimeoutSeconds + $TimeoutSeconds + 30).ToString('O')
     }
     $WaitFor = Join-Path $stage 'request.json'
     $request | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $WaitFor -Encoding utf8NoBOM

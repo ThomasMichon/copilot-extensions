@@ -1777,11 +1777,17 @@ even when the operator confirms an unlocked desktop. Such a run emits an
 explicit unavailable-observation warning: it does not prove zero focus changes.
 Use an observer with access to the interactive foreground or obtain a literal
 operator witness of the two harmless cycles before claiming that dimension.
-The native fixture gives its real child PowerShell ten seconds and the complete
-command twenty-five seconds. A five-second fixture child bound expired in the
+The native fixture allows thirty seconds for queued consent admission, gives
+its real child PowerShell ten seconds and bounds the complete command at
+twenty-five seconds. A five-second fixture child bound expired in the
 combined native run; the separate two-second owned-Job deadline
 control and production defaults remain unchanged. Failure diagnostics retain
 the log tail rather than hiding the last completed stage behind a reader timeout.
+The worker contract selection also verifies an actual write/replacement denial
+between hashing and execution, separate admission expiry while execution time
+remains, and retained process-handle proof that long-lived descendants die on
+leftover detection and on forced worker exit. These controls are non-elevating
+and do not request a UAC dialog.
 
 Actual administrator qualification remains an explicitly approved, on-demand
 invocation of the skill's harmless `assets/probe.ps1` with `-ConsentConfirmed`,

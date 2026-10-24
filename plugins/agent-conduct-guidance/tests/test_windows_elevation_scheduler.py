@@ -110,7 +110,7 @@ def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_dire
                 PWSH, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(INVOKE),
                 "-ScriptPath", str(SKILL / "assets" / "probe.ps1"),
                 "-LogPath", str(log), "-InteractiveProbe",
-                "-ConsentTimeoutSeconds", "5", "-TimeoutSeconds", "10",
+                "-ConsentTimeoutSeconds", "30", "-TimeoutSeconds", "10",
             ],
             capture_output=True, text=True, encoding="utf-8", timeout=25,
             creationflags=subprocess.CREATE_NO_WINDOW,

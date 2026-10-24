@@ -55,6 +55,7 @@ $request = Get-Content -LiteralPath $RequestPath -Raw | ConvertFrom-Json
 $startedPath = Join-Path (Split-Path -Parent $RequestPath) 'worker-started.json'
 $code = 1
 $admin = $false
+$scriptRead = $null
 try {
     if ($Worker -or $request.interactiveProbe) {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -62,10 +63,15 @@ try {
         $admin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         if (-not $request.interactiveProbe -and -not $admin) { throw 'RunAs worker did not receive an administrator token.' }
         if ([Diagnostics.Process]::GetCurrentProcess().SessionId -ne $request.sessionId) { throw 'Worker reached the wrong desktop session.' }
-        if ((Get-FileHash -LiteralPath $request.scriptPath -Algorithm SHA256).Hash -cne $request.scriptHash) {
+        $scriptRead = [IO.File]::Open($request.scriptPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        if ((Get-FileHash -InputStream $scriptRead -Algorithm SHA256).Hash -cne $request.scriptHash) {
             throw 'Approved script changed before execution.'
         }
-        $remaining = [Math]::Floor(([DateTimeOffset]::Parse($request.deadline) - [DateTimeOffset]::UtcNow).TotalSeconds)
+        $now = [DateTimeOffset]::UtcNow
+        if ($now -ge [DateTimeOffset]::Parse($request.admissionDeadline)) {
+            throw 'Consent admission deadline expired before payload execution.'
+        }
+        $remaining = [Math]::Floor(([DateTimeOffset]::Parse($request.deadline) - $now).TotalSeconds)
         if ($remaining -lt 1) { throw 'Elevation request deadline expired before payload admission.' }
         $payloadTimeout = [int][Math]::Min($request.timeoutSeconds, $remaining)
         [AgentConduct.ElevationNative]::OwnWorker()
@@ -104,5 +110,7 @@ try {
     while ($errorCause -and $errorCause -isnot [ComponentModel.Win32Exception]) { $errorCause = $errorCause.InnerException }
     $code = if ($errorCause) { $errorCause.NativeErrorCode } else { 1 }
     Write-ElevationTerminal $request $(if ($code -eq 1223 -and -not $admin) { 'canceled' } else { 'failed' }) $code $admin
+} finally {
+    if ($null -ne $scriptRead) { $scriptRead.Dispose() }
 }
 exit $code

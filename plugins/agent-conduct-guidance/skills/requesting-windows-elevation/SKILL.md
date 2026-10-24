@@ -45,6 +45,8 @@ the dialog; never weaken policy merely to force one to appear.
    command paths and a deliberate working directory. Never put credentials in
    script arguments or logs. Preserve the operation's own consent and error
    checks. The helper binds the script hash before execution.
+   It holds a read handle that denies writes and replacement through execution;
+   leave that approved script unchanged until the operation finishes.
 2. **Prove the desktop route without elevation when needed.** Invoke the bundled
    harmless probe with `-InteractiveProbe`. This proves scheduler, session and
    logging only; its `probe` result is **not administrator success**.
@@ -99,6 +101,8 @@ Resume **waiting**, without repeating the operation:
 ```
 
 `-ConsentTimeoutSeconds` defaults to 300 and `-TimeoutSeconds` to 600.
-The original absolute deadline survives resumed waiting. A restart-required
+The separate admission deadline bounds queued startup and consent: execution
+cannot start after it merely because the payload still has time allocated.
+Both original absolute deadlines survive resumed waiting. A restart-required
 exit result remains visible and requires the operation owner's interpretation;
 this helper never restarts the machine.

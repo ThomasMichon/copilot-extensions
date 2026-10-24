@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import time
 
 import pytest
 
@@ -129,6 +130,7 @@ def native_request(tmp_path: Path, script: str, *, seconds: int = 10) -> tuple[P
         "sessionId": session.value, "shellPath": PWSH,
         "timeoutSeconds": seconds, "interactiveProbe": True,
         "deadline": (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(),
+        "admissionDeadline": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(),
     }), encoding="utf-8")
     return request, log
 
@@ -285,3 +287,147 @@ def test_missing_task_without_terminal_is_not_completed(tmp_path):
     result = run_ps("-Command", command)
     assert result.returncode != 0
     assert "missing without its matching terminal result" in result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows consent admission")
+def test_expired_consent_cannot_borrow_payload_execution_budget(tmp_path):
+    request, log = native_request(tmp_path, "Write-Output 'must-not-run'\n")
+    data = json.loads(request.read_text())
+    data["admissionDeadline"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    request.write_text(json.dumps(data), encoding="utf-8")
+    result = run_ps("-File", str(WORKER), "-RequestPath", str(request), "-Worker")
+    assert result.returncode != 0
+    assert "Consent admission deadline expired" in log.read_text(encoding="utf-8")
+    assert "must-not-run" not in log.read_text(encoding="utf-8")
+    assert not (tmp_path / "worker-started.json").exists()
+
+
+def wait_file(path: Path, process: subprocess.Popen, seconds: float = 12) -> None:
+    deadline = time.monotonic() + seconds
+    while not path.exists():
+        assert process.poll() is None, "Native worker exited before its fixture signal"
+        assert time.monotonic() < deadline, "Native worker did not reach its fixture signal"
+        time.sleep(.02)
+
+
+def start_worker(*arguments: str) -> subprocess.Popen:
+    return subprocess.Popen(
+        [PWSH, "-NoLogo", "-NoProfile", "-NonInteractive", *arguments],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+
+
+def settle_worker(process: subprocess.Popen) -> None:
+    if process.poll() is None:
+        process.kill()
+    process.communicate(timeout=5)
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows script read sharing")
+def test_verified_script_cannot_be_saved_or_replaced_before_execution(tmp_path):
+    request, log = native_request(tmp_path, "Write-Output 'locked-script-ran'\nexit 0\n")
+    payload = Path(json.loads(request.read_text())["scriptPath"])
+    verified = tmp_path / "verified"
+    release = tmp_path / "release"
+    command = (
+        "function Get-FileHash { param($LiteralPath,$InputStream,$Algorithm) "
+        "$hash = if ($null -ne $InputStream) { "
+        "Microsoft.PowerShell.Utility\\Get-FileHash -InputStream $InputStream -Algorithm $Algorithm "
+        "} else { Microsoft.PowerShell.Utility\\Get-FileHash -LiteralPath $LiteralPath -Algorithm $Algorithm }; "
+        f"[IO.File]::WriteAllText({quote(verified)}, 'ready'); "
+        f"while (-not [IO.File]::Exists({quote(release)})) {{ Start-Sleep -Milliseconds 20 }}; "
+        "return $hash }; "
+        f"& {quote(WORKER)} -RequestPath {quote(request)} -Worker; exit $LASTEXITCODE"
+    )
+    process = start_worker("-Command", command)
+    try:
+        wait_file(verified, process)
+        with pytest.raises(PermissionError):
+            payload.write_text("Write-Output 'changed'\n", encoding="utf-8")
+        replacement = tmp_path / "replacement.ps1"
+        replacement.write_text("Write-Output 'replacement'\n", encoding="utf-8")
+        with pytest.raises(PermissionError):
+            os.replace(replacement, payload)
+        release.write_text("go", encoding="utf-8")
+        output, error = process.communicate(timeout=20)
+        assert process.returncode == 0, output + error
+        assert "locked-script-ran" in log.read_text(encoding="utf-8")
+        payload.write_text("after-completion\n", encoding="utf-8")
+        os.replace(replacement, payload)
+    finally:
+        settle_worker(process)
+
+
+def descendant_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    child_pid = tmp_path / "child.pid"
+    release = tmp_path / "release-parent"
+    child = tmp_path / "child.ps1"
+    child.write_text(
+        f"[IO.File]::WriteAllText({quote(str(child_pid) + '.tmp')}, [string]$PID)\n"
+        f"[IO.File]::Move({quote(str(child_pid) + '.tmp')}, {quote(child_pid)})\n"
+        "Start-Sleep -Seconds 60\n",
+        encoding="utf-8",
+    )
+    script = (
+        f"$s = [Diagnostics.ProcessStartInfo]::new({quote(PWSH)})\n"
+        "$s.UseShellExecute=$false; $s.CreateNoWindow=$true\n"
+        f"foreach ($a in @('-NoLogo','-NoProfile','-NonInteractive','-File',{quote(child)})) "
+        "{ $s.ArgumentList.Add($a) }\n"
+        "$p = [Diagnostics.Process]::Start($s)\n"
+        f"while (-not [IO.File]::Exists({quote(release)})) {{ Start-Sleep -Milliseconds 20 }}\n"
+        "exit 0\n"
+    )
+    request, log = native_request(tmp_path, script, seconds=18)
+    return request, log, child_pid, release
+
+
+class ChildHandle:
+    def __init__(self, pid: int):
+        import ctypes
+        from ctypes import wintypes
+
+        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.kernel.OpenProcess.restype = wintypes.HANDLE
+        self.kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        self.kernel.WaitForSingleObject.restype = wintypes.DWORD
+        self.kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.handle = self.kernel.OpenProcess(0x100000 | 0x1000 | 1, False, pid)
+        assert self.handle, "Could not retain the exact fixture child's process handle"
+        assert self.kernel.WaitForSingleObject(self.handle, 0) == 258
+
+    def assert_stopped(self):
+        assert self.kernel.WaitForSingleObject(self.handle, 5000) == 0, "Owned descendant survived"
+
+    def close(self):
+        if self.kernel.WaitForSingleObject(self.handle, 0) == 258:
+            assert self.kernel.TerminateProcess(self.handle, 99)
+            assert self.kernel.WaitForSingleObject(self.handle, 5000) == 0
+        assert self.kernel.CloseHandle(self.handle)
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows descendant custody")
+@pytest.mark.parametrize("kill_worker", [False, True])
+def test_native_job_retires_descendants_on_leftover_or_worker_exit(tmp_path, kill_worker):
+    request, log, pid_file, release = descendant_fixture(tmp_path)
+    process = start_worker("-File", str(WORKER), "-RequestPath", str(request), "-Worker")
+    child = None
+    try:
+        wait_file(pid_file, process)
+        child = ChildHandle(int(pid_file.read_text(encoding="utf-8")))
+        if kill_worker:
+            process.kill()
+        else:
+            release.write_text("go", encoding="utf-8")
+        output, error = process.communicate(timeout=20)
+        assert process.returncode == (1 if kill_worker else 125), output + error
+        child.assert_stopped()
+        assert "AGENT_ELEVATION_END " not in log.read_text(encoding="utf-8")
+        if not kill_worker:
+            assert "left descendants" in log.read_text(encoding="utf-8")
+    finally:
+        settle_worker(process)
+        if child is not None:
+            child.close()
