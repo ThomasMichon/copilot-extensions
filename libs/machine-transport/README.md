@@ -82,6 +82,34 @@ resolved -- network call to reach a host that is actually the caller itself.
 
 ## Usage
 
+### Current-machine context without enrollment
+
+`resolve_local_execution_context(entries, *, hostname, environment,
+configured_machine=None)` returns immutable `LocalExecutionContext` naming
+facts: observed `hostname`, physical `machine`, actual `environment`, one-term
+`execution_machine` and optional `customization_key`. The caller supplies the
+current OS/substrate observations and, when applicable, its existing configured
+binding. Missing-file handling and configuration provenance remain caller-owned.
+An empty map or a map containing only other machines does not deny this local
+context. A matching map can customize physical and execution names. An observed
+physical hostname ending in `-wsl` or `-win` is literal, not address syntax.
+
+This is an additive API for the reviewed local-first correction, not an
+activation of tuple producers or an automatic migration of existing consumers.
+The existing target selectors and ownership fences retain their contracts.
+In particular, a missing guest customization can yield local guest naming
+facts here without making its native registry entry a guest target. Explicit
+configured conflicts, ambiguous customizations and invalid declarations still
+raise. Do not supply a requested target or a record's stored owner as the
+current configured binding.
+
+Consumers must separately prove the receiving project, namespace, ledger and
+retained allocation before writing or replaying. New naming facts do not
+authorize relabeling an admitted allocation, changing its references or
+transferring an incumbent owner. Consumer integration and installed acceptance
+remain tracked by the
+[local-first amendment](../../efforts/active/machine-alias-compatibility-and-locality/manifest-independent-local-identity.md).
+
 ### Contextual historical aliases
 
 `resolve_machine_selection()` is the shared address map; format parsing belongs
