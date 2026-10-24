@@ -380,7 +380,7 @@ transaction execution from the existing recurring-maintenance assignment.
   Selected-snapshot acceptance, compound stamp/provision, command/bootstrap/
   explicit-installer adoption, cells/custom roots, live service deployment and
   the existing #6909 snapshot-qualification ownership remain separate.
-- [ ] **Agent-recommended bounded bootstrap adoption:** route CodeSpaces'
+- [x] **Agent-recommended bounded bootstrap adoption:** route CodeSpaces'
   legacy session bootstrap's first stamp and installed-payload drift provisioning
   through its qualified fixed native actions and the same canonical queue.
   Package the self-contained foundation through the existing canonical source
@@ -396,6 +396,19 @@ transaction execution from the existing recurring-maintenance assignment.
   never host registration or a CodeSpace connection. Selected snapshots,
   primary/payload commands, explicit installers, cells/custom roots, live
   service deployment and #6909 remain separate.
+- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify Logger's
+  fixed legacy `stamp` and `provision` recipes through the same native foundation,
+  canonical queue and frozen-input owner before changing any ordinary Logger
+  publisher. Admit only its canonical installed payload and default legacy root;
+  retain its six-command required-context declaration, own controls, native
+  staging, dependency closure and actual service-less provision options.
+  Prove materialized stamp/construction, safe installed command/module/
+  distribution identity, failed-candidate preservation, Python-free caller
+  loss/concurrency and no-write source/publication/nested/unsupported refusal
+  on Windows/Linux. The [bounded matrix](<journal/2026/10.24 logger-first-use.md>)
+  preserves #7030 publication and #8370 diagnostics custody. Selected snapshots,
+  command/bootstrap/explicit-installer publishers, task/timer registration,
+  personal sync/prune, cells/custom roots and rollout remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
