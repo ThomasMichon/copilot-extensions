@@ -9,6 +9,30 @@ resolving a single `dirty` worktree once you already know which one needs
 attention; this reference covers finding and triaging *many* candidates at
 once, safely.
 
+## Step 0 -- Define the outcome and contain recurring allocation
+
+Record the operator's requested repositories, retention/count target, deletion
+scope, and protected owners. Resolve each repository's registration and worktree
+root; keep a separate baseline for each. Count actual Git checkouts, including
+system and retained finalized directories, not just visible Picker rows or
+tracking statuses. Reconcile Git's worktree inventory with directories carrying
+Git administrative markers under the resolved roots; a cache directory is not a
+checkout, and a missing tracking row is not proof a directory is disposable.
+Do not satisfy a count by hiding rows, archiving unmerged branches, or resetting
+real work. Retain it with an accountable owner or drive its disposition first.
+
+If recurring producers are growing the backlog, contain them through their
+owning subsystem **before** reaping their outputs, within the operator's
+authorization. For Dispatch, use `agent-dispatch:agent-dispatch` and its exact
+session command catalog. Inventory local registrations, inspect native
+`supervise override list`, and disable the approved exact IDs through
+`supervise override disable`. Verify each applicable registration against its
+persistent local mask, including relevant logical/declaration aliases. A
+registration can still say `active` while disabled; a pool summary need not
+include its concrete registration mask. Neither display alone proves effective
+containment. Preserve unrelated machines, existing live workers, and pending
+effects; disabling future admission is not cancellation of an admitted worker.
+
 ## Step 1 -- Baseline health (read-only)
 
 These commands are **project-scoped, not machine-wide**: `handoffs-check`,
@@ -50,6 +74,17 @@ and observation metadata alongside the value; do not read missing top-level
 fields as empty claims or known inactivity. Counts and shortlist snapshots are
 not action-time authority. A truncated report or an unavailable probe means
 unknown, not zero.
+
+Build a compact candidate manifest: full ID, repository, content/PR disposition,
+objective/owner evidence, claims, and next native action. Group by shared
+controller, terminal task, or identical suspected noise, but keep a per-checkout
+verdict. Fetch the repository and recover shared completion evidence once per
+cohort instead of repeatedly scanning whole fleets or transcripts. Reuse settled
+evidence until new facts contradict it; the lifecycle command still refreshes
+removal safety. Run bounded cohorts, capture each result, and avoid concurrent
+removals competing for the same repository lock. Independent repositories can
+progress separately. Do not repeat successful mutations after interrupted output
+without inspecting their resulting state.
 
 ## Step 2 -- Release the claims-ledger backlog (mechanical, safe)
 
@@ -93,6 +128,23 @@ path can reconcile that metadata. Do not add daemon-health, session-deletion,
 or process-retirement flags merely because a cleanup audit found stale status.
 Session conclusion/deregistration is not part of this mechanical claims pass:
 perform it only after Step 3 establishes objective completion.
+
+### Task claims, mirrors, and inherited journals are different evidence
+
+Resolve an opaque resource through its owner before selecting a cleanup command.
+A Dispatch task-generation wait is not necessarily a spawn reservation; do not
+feed every `task` claim to reservation retirement or infer its type from the
+reference's punctuation. Confirm the exact task/generation's authoritative
+state, preserve pending/unknown effects, and use the owner's supported terminal
+settlement. Retire dormant automation only within the approved scope, never by
+overriding a genuinely live owner.
+
+After settlement, verify the local ledger **and** any discovery/lease mirror.
+An already-released backend resource can still have an inherited orphan-journal
+row. Preview `claims cleanup <ref-or-source> --json` selectively; if it reports
+an unsupported kind, record the exact residual and track the missing native
+reconciliation path. Do not hand-edit the journal, relabel the resource, or
+claim that zero remaining workers means zero remaining audit obligations.
 
 ## Step 3 -- Verify session *content*, not just git + claims metadata
 
@@ -169,6 +221,23 @@ repository/operator-required approval, then remove that subset with
 than approved. Verify the returned outcome and the expected folder/branch
 absence; report partial results honestly.
 
+For an unexpectedly retained finalized checkout, inspect the **exact** hold,
+not just its old status. Registered session locks, muxes, hosted/external
+execution legs, bound-session/bridge evidence, and checkout-local guidance
+workers can protect different paths. A concluded session record does not prove
+all of those are inactive. Read only the candidate's attributable evidence;
+unknown ownership or a live worker is still a hold.
+
+After the owner settles, a lock clears, or a supported metadata repair succeeds,
+retry that candidate's normal `finalize` or non-forced `cleanup` and inspect its
+result. A previous refusal need not be permanent; do not jump from it to
+deleting locks, stopping processes, force removal, or repeatedly restarting the
+daemon. Conversely, a successful `finalize` can leave a protected directory in
+place. Confirm physical removal rather than counting the finalized status as a
+deleted checkout. Treat paired siblings independently: prove each sibling's
+content and custody, then use its own repository's lifecycle rather than
+assuming removal of one side removed both.
+
 Some worktree kinds are intentionally out of scope for the standard
 `cleanup` flow and will say so rather than silently no-op:
 
@@ -227,3 +296,18 @@ correctly flips to `false`), that's a defect worth filing once rather than
 hand-remediating the fleet every time it recurs -- see the `file-issue`
 skill/`error-response` discipline (fix or track every issue, never dismiss
 it as pre-existing and move on).
+
+## Step 8 -- Verify and stop at the agreed outcome
+
+Recount actual remaining checkouts **per requested repository**, with the same
+denominator as the baseline. Recheck the approved producer masks and any pending
+admissions separately from those counts. Report the preserved live/unfinished
+owners, completed removals, and exact unknown/unsupported residuals with their
+tracked disposition. A metadata-only audit row is not an extra checkout; a
+remaining checkout is not removed merely because its claims were released.
+
+Once the requested target is met, preserve the justified remainder instead of
+expanding into unrelated owners' active efforts. Stop owned bounded helpers and
+settle or explicitly transfer the sweep's own obligations. Further runtime
+repairs, automatic reclamation, or payload rollout require their own scope and
+authorization; a successful manual sweep does not authorize them.

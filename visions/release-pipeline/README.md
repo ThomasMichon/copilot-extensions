@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-20
+- **Last revised:** 2026-10-23
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -38,6 +38,12 @@ contribution checks, not as a first discovery during release qualification.
   source release, including explicit compatibility and approved lock variants.
 - **Composition:** the declared, immutable transformation inputs that determine
   generated versions, materialized content and artifact bytes.
+- **Tested candidate:** the frozen, composed release content on which release
+  tests execute; it belongs to the development source release rather than
+  introducing another release identity.
+- **Coverage projection:** attributable correspondence between tested candidate
+  locations and their original development sources, distinct from raw execution
+  evidence.
 - **Landing receipt:** evidence of the actual candidate, atomic publication and
   landed commit; operational provenance, not a competing source identity.
 - **Release control:** separately governed execution and recovery authority,
@@ -87,6 +93,16 @@ Publication and runtime activation remain distinct outcomes. Optional client
 artifact use and governed source assembly follow the
 [runtime admission contract](../plugin-services/runtime-assembly/README.md).
 
+### composed-before-release-testing
+
+Version stamping, vendoring and other shipped-source transformations precede
+authoritative release tests. Tests, artifact production and qualification use
+the same frozen composition; successful tests on an earlier development tree
+do not qualify later transformed bytes. A change to tested content or its
+admitted execution inputs invalidates incompatible evidence before publication.
+Independent artifact construction may overlap tests on that frozen composition,
+but release authority remains gated on their successful qualification.
+
 ### pr-time-integrity-contracts
 
 Changes affecting hashing, materialization, source-closure declarations or
@@ -107,6 +123,16 @@ refusals. Normalization never makes changed shipped code, dependencies or an
 incorrect source binding equivalent. Published archive and wheel digests still
 verify their actual stored bytes; downloads are not rewritten to make a digest
 pass.
+
+### attributable-development-coverage
+
+Raw coverage identifies the candidate content and locations actually executed.
+Its development-source view retains the originating development snapshot,
+vendored-copy provenance and the transformations that justify each coordinate
+mapping. Generated, transformed and unmappable regions remain distinguishable;
+a projection never claims that different development bytes were executed.
+Coverage consumers use only compatible, validated projections and expose
+missing attribution rather than silently treating it as covered.
 
 ### idempotent-source-publication
 

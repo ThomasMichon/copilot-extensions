@@ -251,8 +251,11 @@ Dev `8086afc7db615beb3ca01f003e8608e90be409af` at
 `2026-10-23T09:14:35Z`, which includes #8165. Native Codespace acceptance
 below used those effective runtime versions, not a source-only patch.
 
-- [x] Verify publication from `dev` to `main`; perform only authorized rollout
+- [ ] Verify publication from `dev` to `main`; perform only authorized rollout
   through the unified update path and record the effective running version.
+  The earlier #8165 publication and running-version evidence above remains
+  settled. The subsequent caller/preflight correction #8405 requires its own
+  containing release and authorized rollout.
 - [ ] Complete the validation matrix below, or explicitly transfer any
   unavailable lane to a named tracked objective.
 - [ ] Reconcile #5286, #5072, and #954 without closing broader unrelated scope.
@@ -353,6 +356,84 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-23 - Preserve the explicit caller through ordinary CLI creation
+
+- An actual installed Bridge local ACP launch exposed a client-side gap:
+  ordinary `create --caller` selected a delivery cursor but recomputed the
+  caller before creation. The target-native skill loaded, while the eligible
+  controller-selected plugin was absent. This failed acceptance is not credited.
+- Ordinary create and named-agent send now retain one selected caller through
+  affinity lookup, creation, conflict retry, and prompt delivery. Qualified
+  ownership checks and target-local precedence remain unchanged.
+- The corrected source CLI reached the actual installed Bridge HTTP and native
+  launch owner. It registered the original same-world controller payload path,
+  retained target disablement, and completed both projected and target-native
+  skill invocations in one child. Controller catalog, target base settings, and
+  user-global preferences remained unchanged. The successful test body ended.
+  This is candidate integration evidence, not published or installed-client
+  acceptance.
+- The directly affected CLI suites pass 315 tests. Related parser and ownership
+  fixtures now supply current immutable-invocation and qualified-owner facts.
+  Provider replay separately checks the current advertisement while retaining
+  the linked predecessor packet; no historical golden was rewritten.
+- Reconciliation with the concurrent HTTP-47 change preserves its full source
+  closure and strict critical-owner bindings. The ordinary-flow maintenance
+  fixture now carries the required tools, source inventory, and read-only local
+  object history. Batched local Git observations make the full 583-fixture check
+  complete in about 31 seconds without increasing its per-command deadline or
+  the fixture's 90-second check limit. Nine focused maintenance/batch tests,
+  41 existing checker regressions, and 331 reconciled client/capture tests pass.
+- The owned authority capture refreshes only its three current vectors and
+  their registry records from a real committed source checkpoint, reproducing
+  the output without writes and retaining the registry's existing indentation.
+- The final complete guard tier passes 391 tests with nine expected skips.
+- Review follow-up separates typed consumption of the unmodified HTTP-45
+  response from the current producer advertisement. Forced replacement also
+  preflights qualified remote ownership and capability before ending the
+  incumbent, retaining the captured caller facts for creation and retries.
+  Missing/malformed ownership, unsupported capability, a missing replacement
+  agent, and cross-request caller-context reuse all refuse without ending it.
+- #8405 merged as `9626b048209b0f3abde92d2b66ff0a89d93c9438` after
+  Copilot approved exact head `dfa9f4f5179d6185565f6947c7a0a9fcd44dad6b`,
+  both review findings were fixed and resolved, and required CI passed. Managed
+  completion verified the merge and reconciled the source worktree past the
+  squash without finalizing this active effort.
+- The containing release is blocked by #8411. Run `40055232492` passed source
+  units, artifact construction/attestation, and candidate composition before
+  exact candidate-source reuse rejected `services/chat/src/agent_chat_service/__init__.py`.
+  The existing bounded source-only repair claim and #3336 control/adoption
+  ownership remain authoritative; no competing repair, forced rerun, Main
+  mutation, or installed update was attempted.
+- Publication, authorized rollout, deployed local acceptance, the remaining
+  headed/SSH/privileged lanes, and the independently blocked trusted-container
+  proof remain open. The next slice observes that owned release repair, verifies
+  a containing qualified Main snapshot, then performs authorized running-state
+  and native acceptance instead of crediting this source merge as deployment.
+
+### 2026-10-23 - Prepare the remote-container controller and isolate bootstrap failure
+
+- The operator selected a remote container host and a client-only controller
+  installation, not a local engine, hypervisor, daemon, or elevated setup.
+  The consumer-owned configuration and pinned client installer are merged.
+  The actual current-user client reports the declared version; its isolated
+  first-touch and idempotence checks pass without modifying engine contexts,
+  host overrides, or credential configuration.
+- Exclusive coordination for the selected existing remote host was verified.
+  Its native connection bootstrap fails before writing the host stanza: a
+  forced self-import removes a private helper from an active module invocation.
+  A no-network reproduction distinguishes this external CLI defect from missing
+  authentication or plugin preparation. The temporary host lease was released;
+  no remote body, owned tunnel, or container remains running.
+- The consumer harness readiness guard and focused setup guide are now merged
+  after clean review and successful required CI. The owning bounded setup flow
+  deployed the published runtime, whose catalog command now reports the exact
+  external module-reload failure with exit 1 while inventory still succeeds.
+  Broken/healthy first-touch module fixtures also pass. This detects and
+  documents the defect rather than hotpatching the external distribution.
+- The trusted-container combined-selection proof remains open pending a working
+  connection bootstrap. The completed native Codespace evidence is unchanged;
+  static local/SSH/privileged acceptance and issue reconciliation remain open.
 
 ### 2026-10-23 - Verify published correction in both native Codespace modes
 

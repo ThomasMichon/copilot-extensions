@@ -115,6 +115,32 @@ def test_offer_snapshots_claims_without_mutating_source(handoff_state):
         bundle.bundle_id, bundle.bundle_id]
 
 
+@pytest.mark.parametrize("legacy_offer", [False, True])
+def test_unfinished_paired_worktree_cannot_be_transferred(handoff_state, tmp_path, legacy_offer):
+    ref = handoff_state[0].ref
+    bundle = _offer([ref])[0] if legacy_offer else None
+    source_path = claim_handoffs.cfg.project_dir("source-project") / "worktrees" / "wt-source.yaml"
+    source = tracking.load_record(source_path)
+    source.pair_id, source.pair_role, source.pair_kind = "pair", "harness", "worktree"
+    source.pair_ref = ref
+    tracking.save_record(source, source_path)
+    child_path = _record(tmp_path, "child-project", "wt-child")
+    child = tracking.load_record(child_path)
+    child.pair_id, child.pair_role, child.pair_kind = "pair", "knowledge", "worktree"
+    child.pair_ref = SOURCE
+    tracking.save_record(child, child_path)
+    before = source_path.read_bytes()
+
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match="paired.*finaliz"):
+        if bundle is None:
+            _offer([ref])
+        else:
+            claim_handoffs.accept_source(bundle.bundle_id, actor=CONSUMER)
+    assert source_path.read_bytes() == before
+    if bundle is not None:
+        assert claim_handoffs.show(bundle.bundle_id).state == "offered"
+
+
 def test_identical_offer_is_idempotent(handoff_state):
     refs = [handoff_state[0].ref]
     first, created = _offer(refs)

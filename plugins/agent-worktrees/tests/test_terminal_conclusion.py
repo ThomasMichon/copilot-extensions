@@ -1555,6 +1555,7 @@ def _pair_sibling(
         harness_machine, harness_project, harness_worktree_id,
     )
     record.pair_kind = "worktree"
+    record.status = "finalized"
     record_path = tracking_dir / f"{worktree_id}.yaml"
     tracking.save_record(record, record_path)
 
@@ -1616,7 +1617,8 @@ class TestReciprocalDisposal:
         tracking.save_record(record, record_path)
         return repo, record_path, worktree
 
-    def test_concludes_both_halves_of_a_clean_pair(self, tmp_path, monkeypatch, _worker_seed):
+    @pytest.mark.parametrize("creator_link", [False, True])
+    def test_concludes_both_halves_of_a_clean_pair(self, tmp_path, monkeypatch, _worker_seed, creator_link):
         sibling, sibling_path, _sibling_worktree = _pair_sibling(
             tmp_path,
             monkeypatch,
@@ -1625,6 +1627,9 @@ class TestReciprocalDisposal:
             harness_project="demo",
             harness_worktree_id="worker-20260901-abcd",
         )
+        if creator_link:
+            sibling.owner_ref = sibling.pair_ref
+            tracking.save_record(sibling, sibling_path)
         repo, record_path, _worktree = self._harness(
             tmp_path,
             monkeypatch, _worker_seed,
@@ -1632,6 +1637,18 @@ class TestReciprocalDisposal:
                 "host", "knowledge-proj", sibling.worktree_id,
             ),
         )
+        if creator_link:
+            from agent_worktrees import knowledge_plugins, worktree_creation
+            monkeypatch.setattr(knowledge_plugins, "compose_from_pair", lambda **kwargs: {})
+            record = tracking.load_record(record_path)
+            stamp = {name: getattr(record, name) for name in (
+                "pair_id", "pair_role", "pair_ref", "pair_kind",
+            )}
+            worktree_creation._stamp_and_compose_paired_knowledge(
+                types.SimpleNamespace(), record, record.worktree_path, stamp,
+            )
+            claim, = tracking.load_record(record_path).resources
+            assert claim.is_at_rest
 
         result = _conclude(
             record_path,
@@ -1645,13 +1662,14 @@ class TestReciprocalDisposal:
         harness_record = tracking.load_record(record_path)
         assert harness_record.kind == "bridge"
         assert harness_record.status == "complete"
+        assert not harness_record.live_resources
         # Discharged: both halves are jointly concluded, so the pairing
         # link itself is cleared -- otherwise the managed sweep's own
         # paired-worktree guard would strand both records forever.
         assert not harness_record.is_paired
         sibling_record = tracking.load_record(sibling_path)
         assert sibling_record.kind == "bridge"
-        assert sibling_record.status == "complete"
+        assert sibling_record.status == "finalized"
         assert not sibling_record.is_paired
 
     @pytest.mark.parametrize("blocker", [None, "dirty", "live", "receipt", "record", "open-pr", "effort"])
@@ -1761,9 +1779,10 @@ class TestReciprocalDisposal:
         {"metadata": {1: "integer", "1": "string"}},
         {"metadata": [{True: "boolean-key"}]},
     ], ids=["integer", "null", "nested-collision", "nested-list"])
-    def test_pair_receipt_non_string_keys_fail_closed(self, tmp_path, extra):
+    def test_pair_receipt_non_string_keys_fail_closed(self, tmp_path, monkeypatch, extra):
         from agent_worktrees import reap_cli
         from agent_worktrees import terminal_pair_progress as progress
+        monkeypatch.setattr(tc.cfg, "project_dir", lambda name=None: tmp_path / str(name))
 
         primary = tracking.create_new_record(
             "primary", "worktree/primary", str(tmp_path / "primary"), "demo", "host",
@@ -1778,6 +1797,8 @@ class TestReciprocalDisposal:
             (sibling, "knowledge", "demo", "primary"),
         ):
             record.owner, record.kind, record.status, record.origin = "dispatcher", "bridge", "complete", "delegate"
+            if role == "knowledge":
+                record.status = "finalized"
             record.pair_id, record.pair_role, record.pair_kind = "pair", role, "worktree"
             record.pair_ref = tracking.format_claim_ref("host", project, target)
             tracking.save_record(record, record.yaml_path)
@@ -1810,10 +1831,11 @@ class TestReciprocalDisposal:
         assert [path.read_bytes() for path in paths] == before
 
     @pytest.mark.parametrize("damaged", ["primary", "sibling", "receipt"])
-    def test_pair_invalid_utf8_evidence_is_already_fail_closed(self, tmp_path, damaged):
+    def test_pair_invalid_utf8_evidence_is_already_fail_closed(self, tmp_path, monkeypatch, damaged):
         from dataclasses import replace
         from agent_worktrees import reap_cli
         from agent_worktrees import terminal_pair_progress as progress
+        monkeypatch.setattr(tc.cfg, "project_dir", lambda name=None: tmp_path / str(name))
 
         primary = tracking.create_new_record(
             "primary", "worktree/primary", str(tmp_path / "primary"), "demo", "host",
@@ -1828,6 +1850,8 @@ class TestReciprocalDisposal:
             (sibling, "knowledge", "demo", "primary"),
         ):
             record.owner, record.kind, record.status, record.origin = "dispatcher", "bridge", "complete", "delegate"
+            if role == "knowledge":
+                record.status = "finalized"
             record.pair_id, record.pair_role, record.pair_kind = "pair", role, "worktree"
             record.pair_ref = tracking.format_claim_ref("host", project, target)
             tracking.save_record(record, record.yaml_path)

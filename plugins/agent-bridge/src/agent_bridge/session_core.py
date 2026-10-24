@@ -199,6 +199,7 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         # starts un-drained). Teardown (stop/end) is *never* gated -- it is the
         # operation the drain is waiting for (#1755).
         self._draining = False
+        self._cold_drain_entered = False
         # Drain observability + bounded lifetime (#1757). When the gate opens we
         # record when/why/by-whom and arm a watchdog that WARNs on an interval
         # and finally auto-releases the gate if no cutover ever retires this
@@ -519,6 +520,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
         """
         import asyncio as _asyncio
 
+        if getattr(self, "_cold_drain_entered", False):
+            from .session_cold_drain import refuse_graceful
+
+            return refuse_graceful(self, timeout)
         self.set_draining(True, reason=reason, source=source)
         await self.graceful_cancel_for_redeploy(
             exclude_session_id=exclude_session_id,
@@ -566,6 +571,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
                 "Drain timed out after %.0fs; %d session(s) still busy: %s",
                 timeout, len(busy), ", ".join(busy),
             )
+        if getattr(self, "_cold_drain_entered", False):
+            from .session_cold_drain import refuse_graceful
+
+            return refuse_graceful(self, timeout)
         return {
             "drained": drained or force,
             "clean": drained,

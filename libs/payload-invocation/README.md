@@ -174,9 +174,13 @@ separate native owner; this does not wrap those entrypoints.
 Lifecycle/publication CLI callers may pass `--project-root` to retain their
 launch project's source declarations while moving waiting supervisors out of a
 replaceable payload. Omission retains the original current-directory behavior;
-the option is not accepted by ordinary read-only catalog discovery. Logger
-carries that read context across its native staging handoff while the same
-live lease still validates source/root/purpose. On Windows Bash, re-executing
+the option is not accepted by ordinary read-only catalog discovery. Logger and
+Worktrees carry that read context across native staging while the same live
+lease still validates source/root/purpose. Worktrees also retains it through
+Python-owned helper publication and native manifest publication. Changing the
+working directory must not qualify an unresolved source or replace the owner
+of a pending reservation; an unattributed retry remains unattributed until its
+own successful publication clears the reservation. On Windows Bash, re-executing
 a command-string Bash before native Python avoids retaining the payload script
 descriptor in MSYS's native-exec parent.
 

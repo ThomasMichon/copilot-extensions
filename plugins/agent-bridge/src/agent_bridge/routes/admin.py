@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
+
+from ..drain_contract import DRAIN_CONTRACT_VERSION, DrainRequest
 
 if TYPE_CHECKING:
     from ..session_manager import SessionManager
@@ -25,41 +28,39 @@ async def run_gc(request: Request):
 
 @router.post("/drain")
 async def drain(request: Request):
-    """Open the drain gate and wait for in-flight work to settle.
+    """Negotiate preservation before graceful or explicitly destructive drain.
 
-    Refuses new sessions/turns immediately, then blocks until no session is
-    actively streaming a turn or hosting background sub-agents (the dev57 busy
-    oracle), or until ``timeout`` seconds elapse. This is the app-level,
-    OS-agnostic primitive a zero-downtime redeploy calls before swapping the
-    daemon, so an active turn is never hard-killed.
-
-    Body (all optional): ``{"timeout": 300, "poll": 1.0, "force": false}``.
+    Missing contracts are legacy/unnegotiated, never destructive. A valid
+    disjoint preservation range selects cold drain by default; an explicit
+    graceful-only policy refuses before effects. Authentication precedes control.
     """
     mgr: SessionManager = request.app.state.session_manager
     try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    if not isinstance(body, dict):
-        body = {}
-    try:
-        timeout = float(body.get("timeout", 300.0))
-        poll = float(body.get("poll", 1.0))
-    except (TypeError, ValueError):
-        timeout, poll = 300.0, 1.0
-    force = bool(body.get("force", False))
-    # Optional caller-supplied provenance so a cutover-driven drain is
-    # distinguishable from a manual one in logs/health (#1757).
-    source = body.get("source") or "drain-endpoint"
-    reason = body.get("reason")
-    # A session may exclude itself from graceful-cancel (an agent updating its
-    # own bridge must not have the turn running the update cancelled -- #1790).
-    exclude = body.get("exclude_session_id")
-    return await mgr.drain(
-        timeout=timeout, poll=max(0.05, poll), force=force,
-        source=str(source), reason=(str(reason) if reason is not None else None),
-        exclude_session_id=(str(exclude) if exclude else None),
-    )
+        body = await request.body()
+        control = DrainRequest.model_validate_json(body or b"{}")
+    except ValidationError as exc:
+        raise HTTPException(422, detail="invalid drain control: " + str(exc)) from exc
+    if control.contract_status == "incompatible":
+        if control.on_incompatible != "cold":
+            raise HTTPException(409, detail="incompatible drain contract; graceful-only control refused")
+        from ..session_cold_drain import cold_drain
+
+        try:
+            result = await cold_drain(
+                mgr, timeout=control.timeout, poll=control.poll, source=control.source,
+                reason=control.reason, exclude_session_id=control.exclude_session_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+    else:
+        result = await mgr.drain(
+            timeout=control.timeout, poll=control.poll, force=control.force,
+            source=control.source, reason=control.reason,
+            exclude_session_id=control.exclude_session_id,
+        )
+        result.setdefault("mode", "graceful")
+    result.update(contract_status=control.contract_status, drain_contract=DRAIN_CONTRACT_VERSION)
+    return result
 
 
 @router.post("/undrain")
@@ -138,5 +139,3 @@ async def reattach_hosts(request: Request):
     mgr: SessionManager = request.app.state.session_manager
     reattached = await mgr.reattach_session_hosts()
     return {"reattached": reattached}
-
-

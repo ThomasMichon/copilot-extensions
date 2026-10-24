@@ -46,6 +46,15 @@ guarantee, with agent-worktrees as its repo-identity anchor. A worktree
 checkout's own directory name is a per-session, per-machine identifier that
 must never be adopted downstream as if it were the repo's registered name.
 
+The resident agent-worktrees service maintains a flattened, attributable map of
+registered repository information, including each repository's resolved local
+root and management class. Consumers can obtain the whole map through one
+bounded read instead of reconstructing it with one lookup or subprocess per
+repository. Resolution belongs to the producer, not the request handler.
+Unavailable, stale, or invalid inventory remains distinguishable from a
+current, genuinely empty registry; a cached path never grants write or
+execution authority.
+
 A registered repo's identity extends beyond its path to its **contribution
 posture**: the concrete answer to "how may I propose and land a change here,
 and what is my standing to do so." agent-worktrees is the single durable
