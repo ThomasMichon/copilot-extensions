@@ -11,7 +11,7 @@ in-repo setting) into every command that resolves the repo, including where
 ``create``/``create-pr`` fork worktrees and target PRs from.
 
 :func:`load_inrepo_config_from_committed_ref` reads the config as actually
-**committed**, via ``git show`` -- entirely independent of the anchor's
+**committed**, via binary Git plumbing -- entirely independent of the anchor's
 working tree or index.
 """
 
@@ -79,7 +79,7 @@ def parse_yaml_text_safe(text: str) -> dict[str, Any]:
     """Parse a YAML string into a dict, returning ``{}`` on any problem.
 
     The blob-reading sibling of ``config._load_yaml_safe`` -- for content
-    read via ``git show`` (a string), never a file on disk.
+    read from a committed Git blob, never a file on disk.
     """
     try:
         raw = yaml.safe_load(text)
@@ -198,6 +198,50 @@ def _committed_candidates(
     return frozenset(found)
 
 
+def _read_committed_batch(
+    anchor: Path, remote: str, branch: str, candidates: tuple[Path, ...], deadline: float,
+) -> dict[Path, str] | None:
+    timeout = _probe_timeout(deadline)
+    if timeout is None:
+        return None
+    specs = [f"{remote}/{branch}:{candidate.as_posix()}".encode("utf-8") for candidate in candidates]
+    try:
+        result = git_ops.git(
+            "cat-file", "--batch", cwd=anchor, check=False, capture=True, timeout=timeout,
+            input_data=b"".join(spec + b"\n" for spec in specs),
+        )
+    except (OSError, ValueError, subprocess.SubprocessError, git_ops.GitError):
+        return None
+    if result.returncode != 0 or not isinstance(result.stdout, bytes):
+        return None
+    data, position, found = result.stdout, 0, {}
+    for candidate, spec in zip(candidates, specs):
+        end = data.find(b"\n", position)
+        if end < 0:
+            return None
+        header, position = data[position:end], end + 1
+        if header == spec + b" missing":
+            continue
+        fields = header.split()
+        if (
+            len(fields) != 3 or fields[1] != b"blob"
+            or len(fields[0]) not in (40, 64)
+            or any(c not in b"0123456789abcdef" for c in fields[0])
+            or not fields[2].isdigit()
+        ):
+            return None
+        try:
+            size = int(fields[2])
+        except ValueError:
+            return None
+        end = position + size
+        if data[end:end + 1] != b"\n":
+            return None
+        found[candidate] = data[position:end].decode("utf-8", errors="replace")
+        position = end + 1
+    return found if position == len(data) else None
+
+
 def load_inrepo_config_from_committed_ref(
     anchor: Path, rel_path_candidates: tuple[Path, ...], remote: str = "origin",
     *, parser: Callable[[str], dict[str, Any]] = parse_yaml_text_safe,
@@ -243,6 +287,15 @@ def _resolve_committed_config(
         return {}
 
     def _read_config_on(branch: str) -> dict[str, Any] | None:
+        batch = _read_committed_batch(anchor, remote, branch, rel_path_candidates, deadline)
+        if batch is not None:
+            for candidate in rel_path_candidates:
+                if candidate in batch:
+                    return parser(batch[candidate])
+            return None
+        logging.getLogger("agent-worktrees").warning(
+            "Committed-config batch unavailable; retaining bounded ordered reads.",
+        )
         present = _committed_candidates(anchor, remote, branch, rel_path_candidates, deadline)
         if present == frozenset():
             return None

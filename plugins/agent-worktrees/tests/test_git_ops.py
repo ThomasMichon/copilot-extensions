@@ -428,6 +428,28 @@ class TestPushTimeoutTreeKill:
         )
         cmd = [sys.executable, str(outer_script)]
 
+        original_spawn = push_timeout.spawn_sync_in_kill_on_close_job
+
+        def ready_spawn(*args, **kwargs):
+            proc, job = original_spawn(*args, **kwargs)
+            try:
+                # Qualify the fixture before the one-second timeout/cleanup assertion.
+                deadline = time.monotonic() + 10
+                while not (ready.exists() and pidfile.exists()) and proc.poll() is None:
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("native grandchild fixture did not become ready")
+                    time.sleep(0.05)
+                assert ready.exists() and pidfile.exists(), "native fixture exited before readiness"
+                return proc, job
+            except BaseException:
+                if job is not None:
+                    job.close()
+                else:
+                    push_timeout._kill_tree(proc)
+                proc.wait(timeout=5)
+                raise
+
+        monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", ready_spawn)
         grandchild_pid: int | None = None
         grandchild_start_time: str | None = None
         try:
