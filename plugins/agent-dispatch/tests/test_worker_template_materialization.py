@@ -6,6 +6,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -646,3 +647,97 @@ def test_file_script_policy_cannot_validate_against_the_cli_working_directory(tm
     with pytest.raises(RegistrarError, match="explicit absolute or named working directory"):
         save(row, activate=True)
     assert not instance_dir().exists() and not active_dir().exists()
+
+
+def test_relative_evaluator_executable_uses_policy_cwd_in_save_and_runtime(monkeypatch, tmp_path):
+    from agent_dispatch.producers.evaluator import load_registration_evaluator
+
+    policy_root = tmp_path / "policy cwd"
+    policy_root.mkdir()
+    if os.name == "nt":
+        source = os.environ["COMSPEC"]
+        name, arguments = "policy.exe", ["/d", "/c", "type", "decision.json"]
+    else:
+        source = shutil.which("cat")
+        if source is None:
+            pytest.skip("native cat executable unavailable")
+        name, arguments = "cat", ["decision.json"]
+    executable = policy_root / name
+    shutil.copy(source, executable)
+    (policy_root / "decision.json").write_text('{"decision":"noop","reason":"fixture"}', encoding="utf-8")
+    argv = [f".{os.sep}{name}", *arguments]
+    _, row = provider({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy",
+            "evaluator_spec": {"scripts": {"policy": argv}, "cwd": str(policy_root)},
+        },
+    })
+    save_root, coordinator_root = tmp_path / "save", tmp_path / "coordinator"
+    save_root.mkdir()
+    coordinator_root.mkdir()
+    monkeypatch.chdir(save_root)
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    assert declaration.spec["evaluator_spec"]["scripts"]["policy"] == argv
+    calls = []
+    def run(command, **kwargs):
+        calls.append((command, kwargs["cwd"]))
+        return subprocess.run(command, **kwargs)
+    evaluator = load_registration_evaluator(dict(declaration.spec), runner=run)
+    monkeypatch.chdir(coordinator_root)
+    decision, = evaluator.evaluate({})
+    assert decision.reason == "fixture"
+    assert calls[0][0][0] == str(executable) and calls[0][1] == str(policy_root)
+
+
+def test_legacy_webhook_template_uses_existing_runtime_builder():
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+    from agent_dispatch.supervisor_registration import build_command
+
+    _, row = provider({
+        "kind": "emitter", "spec": {"url": "http://localhost:8787", "port": 9400},
+    })
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    command = build_command(
+        declaration_to_registration(declaration, machine=None),
+        materialize=lambda *args: str(active_dir() / "fixture-webhook.json"),
+    )
+    assert "webhook" in command and "serve" not in command
+
+
+def test_inline_policy_does_not_load_or_refuse_an_ignored_file_policy(monkeypatch, tmp_path):
+    from agent_dispatch import repository_resources
+    from agent_dispatch.producers.evaluator import load_registration_evaluator
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    (supplier / "base.json").write_text(json.dumps({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy",
+            "evaluator": str(supplier / "unused-missing.json"),
+            "evaluator_spec": {"rules": []},
+        },
+    }), encoding="utf-8")
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda *a, **k: (supplier, "reference"))
+    _, row = provider({"extends": "repo:library:base.json"}, kind="evaluator")
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    assert load_registration_evaluator(dict(declaration.spec)).evaluate({})[0].reason == "no matching rule"
+
+
+def test_nonregular_policy_is_refused_before_the_owner_loader(monkeypatch, tmp_path):
+    policy = tmp_path / "directory.json"
+    policy.mkdir()
+    _, row = provider({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy", "evaluator": str(policy),
+        },
+    })
+    monkeypatch.setattr(
+        "agent_dispatch.producers.evaluator.load_registration_evaluator",
+        lambda *a, **k: pytest.fail("nonregular policy was opened"),
+    )
+    with pytest.raises(RegistrarError, match="nonregular evaluator policy"):
+        save(row)
+    assert not instance_dir().exists()

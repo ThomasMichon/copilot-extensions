@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -167,6 +168,38 @@ def test_one_invocation_uses_one_root_snapshot(tmp_path, monkeypatch):
     assert argv == ["python", str(first / "worker.py")]
     assert cwd == str(first)
     assert len(calls) == 1
+
+
+def test_relative_executable_binds_to_the_explicit_directory(tmp_path, monkeypatch):
+    directory = tmp_path / "policy cwd"
+    directory.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("plain execution context probed registry"),
+    )
+    argv, cwd = resources.resolve_execution_resources([f".{os.sep}worker", "--mode"], str(directory))
+    assert argv == [str(directory / "worker"), "--mode"] and cwd == str(directory)
+    assert resources.resolve_execution_resources(["python", "worker.py"], str(directory))[0] == [
+        "python", "worker.py",
+    ]
+    assert resources.resolve_execution_resources([f".{os.sep}worker"], None) == (
+        [f".{os.sep}worker"], None,
+    )
+
+
+def test_relative_executable_keeps_named_cwd_admission(tmp_path, monkeypatch):
+    calls = _registry(monkeypatch, tmp_path)
+    argv, cwd = resources.resolve_execution_resources([f".{os.sep}worker"], "repo:tools:.")
+    assert argv == [str(tmp_path / "worker")] and cwd == str(tmp_path)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_relative_executable_cannot_normalize_away_read_only_admission(tmp_path, monkeypatch, repo_class):
+    _registry(monkeypatch, tmp_path, repo_class=repo_class)
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
+        resources.resolve_execution_resources([f".{os.sep}worker"], "repo:tools:.")
 
 
 def test_distinct_repository_lookups_share_one_bounded_budget(tmp_path, monkeypatch):

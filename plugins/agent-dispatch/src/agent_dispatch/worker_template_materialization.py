@@ -107,10 +107,11 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
         if Path(resources.resolve(origin)) != Path(resources.resolve(effective)):
             raise RegistrarError("effort worker identity source context cannot yet be materialized safely")
     for declaration in original:
-        policy = (
-            declaration.evaluator if declaration.kind == "supervised-lane"
-            else declaration.spec.get("evaluator") if declaration.kind == "evaluator" else None
-        )
+        policy = None
+        if declaration.kind == "supervised-lane":
+            policy = declaration.evaluator
+        elif declaration.kind == "evaluator" and declaration.spec.get("evaluator_spec") is None:
+            policy = declaration.spec.get("evaluator")
         if isinstance(policy, str) and _absolute_or_named(policy) and not policy.startswith("repo:"):
             path = Path(policy).expanduser()
             if any(
@@ -126,13 +127,16 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
         ):
             raise RegistrarError("source-relative evaluator paths cannot yet be materialized safely")
         if declaration.kind == "evaluator":
-            path = declaration.spec.get("evaluator")
+            path = policy
             if path and (not _absolute_or_named(path) or path.startswith("repo:")):
                 raise RegistrarError("file-backed evaluator materialization requires an absolute local path")
             spec = declaration.spec.get("evaluator_spec")
             if isinstance(spec, dict) and spec.get("scripts") and not _absolute_or_named(spec.get("cwd")):
                 raise RegistrarError("source-relative evaluator script cwd cannot yet be materialized safely")
-        if declaration.kind == "emitter":
+        if declaration.kind == "emitter" and any(
+            key in declaration.spec
+            for key in ("command", "repository_issue_loop", "effort_driver_loop", "ci_repair")
+        ):
             from .producers.emitter import validate_spec
 
             try:

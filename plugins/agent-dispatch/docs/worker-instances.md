@@ -215,6 +215,8 @@ Dependency inspection resolves named command/cwd resources read-only without
 replacing their persisted names or granting execution authority.
 Emitter runtime tokens such as `{python}` are rendered only in the temporary
 dependency-check argv, through the same renderer used by the emitter.
+Legacy webhook emitters keep their existing runtime builder; command/builtin
+validation applies only when the registration owner selects that shape.
 A worker identity must retain its defining
 repository context; a changed execution root is not permission to select an
 unrelated identity. The existing cross-repository relative script-forge guard
@@ -232,6 +234,10 @@ the script. Unselected script entries do not become required dependencies.
 Script policies, including file-backed ones, require an explicit absolute or
 named working directory; the CLI's current directory is not evidence of the
 future evaluator process's context.
+Path-containing evaluator executables are checked and invoked relative to
+that admitted policy directory on both platforms. Selected inline policies
+retain precedence over ignored file-policy fields, as in the evaluator owner.
+Policy files must be regular files before the owner loader is called.
 Effort-loop identity relocation also refuses until its
 expansion owner can preserve a distinct defining context.
 A `composite` fragment without a supported
@@ -239,7 +245,9 @@ ordinary declaration shape remains unsupported. Ambiguous multi-root `plugin:`
 dependencies also refuse; browsing each distinct provider root remains valid.
 
 Unavailable recipe dependencies expose an explicit `unsupported_reason`, no
-form and no Instantiate action. Missing required user inputs or dependencies
+form and no Instantiate action. Resolution-error reasons are NUL-free and
+bounded to 4,096 characters, matching ordinary discovery finding limits.
+Missing required user inputs or dependencies
 fail Save without a record. Requirements prose is not executable policy.
 Provider commands never run while browsing or saving. Built-in IDs, recipe
 references and their existing save/activation actions are unchanged.

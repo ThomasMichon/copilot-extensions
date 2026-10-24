@@ -367,6 +367,20 @@ def test_external_probe_error_text_is_bounded_and_nul_free(monkeypatch):
     assert errors and all("\0" not in row["description"] and len(row["description"]) < 9000 for row in errors)
 
 
+def test_template_resolution_error_text_is_bounded_and_nul_free(monkeypatch, tmp_path):
+    from agent_dispatch.registrar import RegistrarError
+
+    root = tmp_path / "provider"
+    write_index(root)
+    def unavailable(*args):
+        raise RegistrarError("Fixture\0unavailable" + "x" * 5000)
+    monkeypatch.setattr("agent_dispatch.worker_template_materialization.inspect_template", unavailable)
+    report = plugin_report(ActivePluginRoot(root, ("global",), "installed"))
+    row = wt.discover_templates(report)[0][0]
+    assert row["instantiable"] == "false" and "fields" not in row
+    assert len(row["unsupported_reason"]) <= 4096 and "\0" not in row["unsupported_reason"]
+
+
 def test_new_provider_id_cannot_be_saved_or_activated(tmp_path):
     root = tmp_path / "provider"
     write_index(root)

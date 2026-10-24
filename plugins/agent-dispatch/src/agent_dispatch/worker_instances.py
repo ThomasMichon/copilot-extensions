@@ -156,10 +156,11 @@ def _validate_command_dependency(command: list[str], directory: Path, *, explici
     if explicit_cwd and not directory.is_dir():
         raise RegistrarError(f"missing working directory dependency: {directory}")
     executable = command[0]
-    if not shutil.which(executable) and not (
-        (Path(executable).is_absolute() or Path(executable).parent != Path("."))
-        and (directory / executable).is_file()
-    ):
+    path_command = Path(executable).is_absolute() or any(
+        separator in executable for separator in (os.sep, os.altsep) if separator
+    )
+    available = (directory / executable).is_file() if path_command else bool(shutil.which(executable))
+    if not available:
         raise RegistrarError(f"missing command dependency: {executable}")
     if len(command) > 1 and Path(command[1]).suffix in {".py", ".sh", ".ps1"}:
         if not (directory / command[1]).is_file():
@@ -179,6 +180,8 @@ def _validate_evaluator_dependency(declaration, resources) -> None:
         policy = spec.get("evaluator") if spec.get("evaluator_spec") is None else None
         if isinstance(policy, str) and policy.startswith("repo:"):
             raise RegistrarError("file-backed evaluator does not support named repository resources")
+        if isinstance(policy, str) and not Path(policy).expanduser().is_file():
+            raise RegistrarError("missing or nonregular evaluator policy dependency")
         evaluator = load_registration_evaluator(spec)
         if isinstance(evaluator, ScriptEvaluator):
             if not evaluator.cwd or not (

@@ -229,7 +229,7 @@ def _entry(
             raise RegistrarError("template kind differs from its resolved recipe")
     except (RegistrarError, OSError, ValueError, RuntimeError) as exc:
         recipe_context = {"error": str(exc)}
-        unsupported = f"Template materialization unavailable: {exc}"
+        unsupported = f"Template materialization unavailable: {exc}".replace("\0", "\\0")[:4096]
     else:
         unsupported = ""
     revision = digest({
