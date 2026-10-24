@@ -44,6 +44,7 @@ Use #7238 to accept a slice and record its source boundary before editing it.
 | Proposal editor | Sole shared vision/effort/service-lifecycle writer; `services/chat` core, client and hosting integration | #7238 and the proposal PR |
 | Plugin contributor | Disjoint `plugins/agent-chat` connection/native contribution; exact paths claimed before edits | #7238; input integrated by the proposal editor |
 | Collaboration contributor | Claimed continuation of the linked collaboration/thread/attention specification and its coordinated service/client slice; no transport or lifecycle takeover | [Bounded continuation claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6358796470) |
+| Chat setup adapter contributor | Derive the Chat-owned standard setup adapter through scoped changes; consume canonical construction and existing service lifecycle without taking their source | The operator's direction below and this reviewed effort |
 | Qualification contributor | Installed-consumer, native lifecycle and platform-boundary cases | #7238; input integrated by the proposal editor |
 | Conduct contributor | Generic scoped-peer ambient policy and discoverable rules-of-engagement skill, after the intent amendment clears review; no Chat/Bridge/Logger source | [Accepted disjoint scope](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6303930285) |
 | Process utility contributor | Canonical `libs/agent-procutil` caller-bounded cross-OS source, tests and library docs | [Public source claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6274245326) |
@@ -126,6 +127,14 @@ outside bounded ambient history. This public-safe summary does not identify
 private research sources or add another transport/controller. The
 [collaboration contract](collaboration.md) is agent-recommended realization of
 that existing intent, not installation or activation authority.
+
+Further operator direction:
+
+> Derive the Chat-owned standard setup adapter; only coordinate by making scoped changes, don't reach out to other agents directly or via PR/issue comments
+
+This extends the source derivation, not deployment authority or another
+component's implementation ownership. The proposed realization is in
+[Standard Chat setup adapter](architecture.md#standard-chat-setup-adapter).
 
 ## Plan
 
@@ -211,6 +220,24 @@ requirements.
   removal through normal independently installed artifacts.
 - [ ] Keep provider-specific templates, credential acquisition and organization
   policy in their own adapters, not the generic conversation package.
+
+#### Standard Chat setup adapter
+
+- [ ] Review the [Chat-owned adapter derivation](architecture.md#standard-chat-setup-adapter),
+  including the standard Manager baseline and the exact current construction/
+  selection/supervision gaps. No neighboring implementation is claimed.
+- [ ] Establish a canonical role-selective construction input before implementing
+  client-only setup; the current package-root constructor traverses all local
+  sources, including both of Chat's optional roles.
+- [ ] Implement selected manual-client setup and preserving removal through
+  supported canonical custody, then qualify independently installed invocation.
+  Do not turn the existing local wheel catalog into release-selection authority.
+- [ ] Integrate the existing service lifecycle owner's stable-launcher,
+  health/cutover and recovery binding; no second Chat supervisor, installer
+  engine, command ledger or prerequisite Fleet deployment.
+- [ ] Add optional Manager/readiness discovery only after the independently
+  runnable adapter and its readiness meanings are real. Keep the parent
+  service, native, migration and adoption gates open until actually proved.
 
 ### Phase 5 - Qualified release and explicit migration
 
@@ -383,6 +410,27 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-24 - Derive the standard Chat setup adapter
+
+- The operator extends this slice to the Chat-owned adapter, with coordination
+  through scoped changes only and no direct agent outreach or PR/issue comments.
+  The [derivation](architecture.md#standard-chat-setup-adapter) is proposed
+  realization under the existing intent, not a runtime rollout or transfer of
+  neighboring source.
+- Read-only tracing distinguishes Manager bootstrap/catalog knowledge,
+  installer/readiness discovery/planning, canonical construction/retention and
+  Chat's local wheel catalog from governed selected-client/service setup.
+  Optional Fleet source transitions remain with their existing owners.
+- The current canonical package-root constructor traverses all local sources;
+  Chat declares both optional role closures. Role-selective construction must
+  therefore be established, not inferred from the client extra or achieved by
+  copying the engine. Chat's workspace result still explicitly lacks assignment;
+  Bridge live-message receipts and remote hosted-session events do not supply
+  Chat recipient assignment or shared conversation-feed registration.
+- No installer, service, credential, native attachment or migration was invoked.
+  No executable adapter is claimed by this documentation change. Review the
+  derivation before dependent code and preserve the full Plan/Validation gate.
 
 ### 2026-10-24 - Portable collaboration merged; full graduation stays active
 
