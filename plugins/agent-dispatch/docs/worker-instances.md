@@ -208,8 +208,13 @@ execution admission (including refusal of a reference-only checkout).
 Absolute and implicit source-local execution contexts are qualified by the
 same supplier-context owner used by registrar discovery; composed forms that
 cannot retain that qualification refuse rather than publishing plain paths.
+Named defining-hop suppliers remain qualified even when the selected outer
+template is local or plugin-owned and the inherited cwd was written as an
+absolute path.
 Dependency inspection resolves named command/cwd resources read-only without
 replacing their persisted names or granting execution authority.
+Emitter runtime tokens such as `{python}` are rendered only in the temporary
+dependency-check argv, through the same renderer used by the emitter.
 A worker identity must retain its defining
 repository context; a changed execution root is not permission to select an
 unrelated identity. The existing cross-repository relative script-forge guard
@@ -217,7 +222,8 @@ is applied before flattening and remains a refusal, not a solved limitation.
 Relative evaluator script contexts or other dependencies whose meaning cannot
 be preserved refuse explicitly. File-backed evaluator policies require an
 absolute local path; their existing runtime loader does not accept named
-repository resources. Effort-loop identity relocation also refuses until its
+repository resources, whether selected directly or by a lane.
+Effort-loop identity relocation also refuses until its
 expansion owner can preserve a distinct defining context.
 A `composite` fragment without a supported
 ordinary declaration shape remains unsupported. Ambiguous multi-root `plugin:`

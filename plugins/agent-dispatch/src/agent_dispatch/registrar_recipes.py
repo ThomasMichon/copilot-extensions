@@ -885,7 +885,7 @@ def _resolve_extends_tracking_cwd_origin(
             f"document ({type(template).__name__})"
         )
     if _resolution_context is not None:
-        _resolution_context[identity] = dict(template)
+        _resolution_context[identity] = {"reference": ref, "document": dict(template)}
     global_identity_default = ref.startswith("global:") and "worker_identity" in template
     # The next hop's own base directory is only needed if there IS a next
     # hop (this template has its own extends:) or if it carries a relative

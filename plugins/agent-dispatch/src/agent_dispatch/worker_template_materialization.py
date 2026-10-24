@@ -52,7 +52,9 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
     from . import registrar_discovery as rd
     from .registrar_document import _identity_origin_root, qualify_supplier_context
     from .registrar_reconcile import declaration_to_registration
-    from .repository_resources import RepositoryResourceSnapshot
+    from .repository_resources import (
+        RepositoryResourceSnapshot, is_repository_resource, split_repository_resource,
+    )
     from .worker_instances import OWNER, validate_configuration
 
     if "extends" in overrides:
@@ -65,8 +67,10 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
     directory = Path(repo_root).expanduser() if repo_root else path.parent
     request = {"extends": selected["reference"], **overrides, "name": name, "owner": OWNER}
     origins = {}
+    context = {}
     document = resolve_extends(
         request, base_dir=directory, activation=selected["activation"], path_origins=origins,
+        resolution_context=context,
     )
     # This is the same reviewer cwd normalization used by source expansion.
     if document.get("kind") == "reviewer-loop" and "emitter.cwd" in origins:
@@ -79,14 +83,22 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
         activation=selected["activation"],
     )
     source = selected["row"]["source"]
+    suppliers = {}
+    resources = RepositoryResourceSnapshot(execution=False)
+    for origin in [*origins.values(), *(entry["reference"] for entry in context.values())]:
+        if is_repository_resource(origin):
+            repository, _ = split_repository_resource(origin)
+            suppliers[repository] = resources.root(repository)
     if source["provider"].startswith("repo:"):
         repository = source["provider"].removeprefix("repo:")
+        suppliers.setdefault(repository, Path(source["root"]))
+    for repository, root in suppliers.items():
         original = tuple(
-            qualify_supplier_context(declaration, repository, Path(source["root"]))
+            qualify_supplier_context(declaration, repository, root)
             for declaration in original
         )
-        if document.get("kind") in {"emitter", "evaluator"}:
-            document["spec"] = dict(original[0].spec)
+    if suppliers and document.get("kind") in {"emitter", "evaluator"}:
+        document["spec"] = dict(original[0].spec)
     if document.get("kind") == "effort-driver-loop" and document.get("worker_identity"):
         resources = RepositoryResourceSnapshot(execution=False)
         origin = _identity_origin_root(origins.get("worker_identity", directory), directory)
@@ -95,7 +107,10 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
         if Path(resources.resolve(origin)) != Path(resources.resolve(effective)):
             raise RegistrarError("effort worker identity source context cannot yet be materialized safely")
     for declaration in original:
-        if declaration.kind == "supervised-lane" and declaration.evaluator and not _absolute_or_named(declaration.evaluator):
+        if declaration.kind == "supervised-lane" and declaration.evaluator and (
+            not _absolute_or_named(declaration.evaluator)
+            or declaration.evaluator.startswith("repo:")
+        ):
             raise RegistrarError("source-relative evaluator paths cannot yet be materialized safely")
         if declaration.kind == "evaluator":
             path = declaration.spec.get("evaluator")

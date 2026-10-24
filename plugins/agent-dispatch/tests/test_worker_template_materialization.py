@@ -453,3 +453,76 @@ def test_effort_identity_relocation_refuses_before_selecting_target_rules(tmp_pa
         save(row, root=str(target))
     assert not instance_dir().exists()
     assert save(row, root=str(source))["persisted"]
+
+
+def test_emitter_runtime_tokens_validate_without_changing_persisted_argv():
+    path, row = provider({
+        "kind": "emitter", "spec": {
+            "id": "{name}", "command": ["{python}", "producer.py"],
+            "cwd": ".", "interval_seconds": 60,
+        },
+    })
+    (path.parent / "producer.py").write_text("print('[]')", encoding="utf-8")
+    assert save(row)["persisted"]
+    assert read_records()[0]["configuration"]["declaration"]["spec"]["command"] == [
+        "{python}", "producer.py",
+    ]
+
+
+@pytest.mark.parametrize("policy", ["./rules.json", "repo:library:rules.json"])
+def test_lane_file_backed_evaluator_rejects_unsupported_context(policy):
+    _, row = provider({**pool(), "evaluator": policy})
+    with pytest.raises(RegistrarError, match="source-relative evaluator"):
+        save(row)
+    assert not instance_dir().exists()
+
+
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_inherited_absolute_supplier_cwd_cannot_bypass_named_admission(monkeypatch, tmp_path, repo_class):
+    from agent_dispatch import repository_resources
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    (supplier / "producer.py").write_text("print('[]')", encoding="utf-8")
+    (supplier / "base.json").write_text(json.dumps({
+        "kind": "emitter", "spec": {
+            "id": "{name}", "command": ["{python}", "producer.py"],
+            "cwd": str(supplier), "interval_seconds": 60,
+        },
+    }), encoding="utf-8")
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda *a, **k: (supplier, repo_class))
+    _, row = provider({"extends": "repo:library:base.json"}, kind="emitter")
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    assert declaration.spec["cwd"] == "repo:library:."
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
+        repository_resources.resolve_execution_resources(
+            [sys.executable, "producer.py"], declaration.spec["cwd"],
+        )
+
+
+def test_inherited_evaluator_supplier_cwd_retains_actual_runtime_admission(monkeypatch, tmp_path):
+    from agent_dispatch import repository_resources
+    from agent_dispatch.producers.evaluator import EvaluatorRuntimeError, load_registration_evaluator
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    (supplier / "policy.py").write_text("print('never-executed')", encoding="utf-8")
+    (supplier / "base.json").write_text(json.dumps({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy",
+            "evaluator_spec": {
+                "scripts": {"policy": [sys.executable, "policy.py"]}, "cwd": str(supplier),
+            },
+        },
+    }), encoding="utf-8")
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda *a, **k: (supplier, "reference"))
+    _, row = provider({"extends": "repo:library:base.json"}, kind="evaluator")
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    assert declaration.spec["evaluator_spec"]["cwd"] == "repo:library:."
+    evaluator = load_registration_evaluator(
+        dict(declaration.spec), runner=lambda *a, **k: pytest.fail("reference-only script executed"),
+    )
+    with pytest.raises(EvaluatorRuntimeError, match="reference-only"):
+        evaluator.evaluate({})

@@ -164,6 +164,10 @@ def _validate_dependencies(
             raise RegistrarError("missing fleet dependency: ssh transport")
         command = declaration.spec.get("command")
         if isinstance(command, list) and command:
+            if declaration.kind == RegistrationKind.EMITTER:
+                from .producers.emitter import _render_command
+
+                command = _render_command(command)
             command = [resources.resolve(part) for part in command]
             executable = command[0]
             directory = Path(resources.resolve(
