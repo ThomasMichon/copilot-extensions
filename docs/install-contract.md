@@ -3023,13 +3023,16 @@ preflight. This is candidate lock construction, not target-profile approval,
 wheel acquisition, feed qualification or runtime activation.
 
 `retain_uv_source_compile` is a separate, explicit candidate-export mode. It
-retains the attributable first-party project graph using the same transaction,
-then derives `--no-emit-package` solely from that graph's unique distribution
-identities. UV still resolves those projects' transitive dependencies; only the
-owned projects are omitted from the hashed third-party export. Effective
+retains the attributable first-party project graph using the same transaction.
+It derives `--no-emit-package` only from unconditional local mappings required
+by each owning project's unmarked base dependencies, never from the inspected
+project set alone. Root metadata does not suppress its own registry identity.
+UV still resolves local dependencies' transitive requirements. Effective
 omissions must match exactly, source mappings cannot be disabled, and ambiguous
-identities, conditional/alternative source mappings, local artifacts and remote
-sources refuse. Editables remain private metadata inputs, never references back
+identities, direct local directory requirements (including inactive markers or
+unselected extras), conditional/alternative local mappings, mappings used only
+by optional or conditional branches, local artifacts and remote sources refuse.
+Editables remain private metadata inputs, never references back
 to live code. Ordinary compile exports keep their directory-dependency refusal.
 The caller independently verifies the selected source, retains the transaction
 through output consumption, and binds its own lock/trigger before assembly.

@@ -290,7 +290,9 @@ exports and the explicit retained source-graph mode. Native dated loopback-feed
 controls freeze source/configuration inputs, export hashed seasoned transitive
 dependencies without local distributions, and refuse missing upload-age
 evidence without replacing an existing output. Graph and effective-omission
-refusals preserve ordinary compile's directory-dependency boundary. These are
+refusals cover inactive markers/extras and recursive requirements, while native
+controls preserve root-metadata registry pins and recursively mapped local
+dependencies. Ordinary compile keeps its directory-dependency boundary. These are
 candidate-export controls, not source-origin approval or real-feed admission.
 
 `python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
