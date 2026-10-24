@@ -128,16 +128,20 @@ def test_darwin_permission_refusal_is_not_itself_cleanup_confirmation(monkeypatc
 
 
 @pytest.mark.skipif(not SUPPORTED, reason="native ownership support required")
-@pytest.mark.parametrize("mode", ["completed", "signalled", "owner-killed", "interrupt"])
+@pytest.mark.parametrize("mode", [
+    "completed", "signalled", "stopped-without-tty", "owner-killed", "interrupt",
+])
 def test_real_completion_cleans_descendants_before_observer_cleanup(tmp_path, mode):
-    if os.name == "nt" and mode == "signalled":
-        pytest.skip("native POSIX signal-status mapping")
+    if os.name == "nt" and mode in ("signalled", "stopped-without-tty"):
+        pytest.skip("native POSIX signal-status and stop contracts")
     state = tmp_path / "ready.json"
     command = (
         "import json,os,signal,subprocess,sys,time;from pathlib import Path;"
         "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)']);"
         "Path(sys.argv[1]).write_text(json.dumps([os.getpid(),child.pid]));"
-        "time.sleep(.3 if sys.argv[2] in ('completed','signalled') else 120);"
+        "time.sleep(.3 if sys.argv[2] in "
+        "('completed','signalled','stopped-without-tty') else 120);"
+        "os.kill(os.getpid(),signal.SIGSTOP) if sys.argv[2]=='stopped-without-tty' else None;"
         "os.kill(os.getpid(),signal.SIGTERM) if sys.argv[2]=='signalled' else sys.exit(7)"
     )
     wrapper = """
@@ -170,11 +174,13 @@ sys.exit(run_interactive([sys.executable,'-c',sys.argv[1],*sys.argv[2:]]))
         elif mode == "interrupt":
             state.with_suffix(".interrupt").touch()
         stdout, stderr = process.communicate(timeout=10)
-        expected = 143 if mode == "signalled" else 7 if mode == "completed" else 130
+        expected = {"signalled": 143, "completed": 7, "stopped-without-tty": 1}.get(mode, 130)
         if mode != "owner-killed":
             if process.returncode != expected:
                 print(stderr.decode(errors="replace"))
             assert process.returncode == expected, (stdout, stderr)
+        if mode == "stopped-without-tty":
+            assert b"a stopped interactive command requires a foreground terminal" in stderr
         _wait(lambda: all(_gone(pin) for pin in pins), "owned descendants remained alive")
     finally:
         if process.poll() is None:
@@ -187,7 +193,9 @@ sys.exit(run_interactive([sys.executable,'-c',sys.argv[1],*sys.argv[2:]]))
 
 
 @pytest.mark.skipif(os.name == "nt" or not SUPPORTED, reason="native POSIX controlling PTY")
-@pytest.mark.parametrize("mode", ["normal", "control-c", "suspend-resume"])
+@pytest.mark.parametrize("mode", [
+    "normal", "control-c", "suspend-resume", "wrapped-suspend-resume",
+])
 def test_real_pty_input_resize_signals_and_foreground_restore(tmp_path, mode):
     import fcntl
     import pty
@@ -232,7 +240,7 @@ if caller:
             os.tcsetpgrp(0,os.getpgrp())
             print('suspended',flush=True)
             os.tcsetpgrp(0,caller)
-            os.kill(caller,signal.SIGCONT)
+            os.killpg(caller,signal.SIGCONT)
             continue
         os.tcsetpgrp(0,os.getpgrp())
         sys.exit(os.waitstatus_to_exitcode(status))
@@ -240,6 +248,11 @@ os.close(writer)
 os.setpgid(0,0)
 assert os.read(reader,1)==b'g'
 os.close(reader)
+if sys.argv[3]=='wrapped-suspend-resume':
+    worker=os.fork()
+    if worker:
+        _,status=os.waitpid(worker,0)
+        sys.exit(os.waitstatus_to_exitcode(status))
 faulthandler.dump_traceback_later(6)
 before=termios.tcgetattr(0)
 code=run_interactive([sys.executable,'-c',sys.argv[1]])
@@ -250,7 +263,7 @@ Path(sys.argv[2]).write_text(json.dumps({
 """
     master, slave = pty.openpty()
     process = subprocess.Popen(  # noqa: S603 - fixed fixture argv
-        [sys.executable, "-c", wrapper, command, str(receipt)],
+        [sys.executable, "-c", wrapper, command, str(receipt), mode],
         stdin=slave, stdout=slave, stderr=slave, env=_environment(),
     )
     output = bytearray()
@@ -270,7 +283,7 @@ Path(sys.argv[2]).write_text(json.dumps({
         _wait(lambda: contains(b"input-ok"), "terminal input was not delivered")
         fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 33, 101, 0, 0))
         _wait(lambda: contains(b"resized"), "kernel resize signal was not delivered")
-        if mode == "suspend-resume":
+        if mode in ("suspend-resume", "wrapped-suspend-resume"):
             os.write(master, b"\x1a")
             _wait(lambda: contains(b"suspended"), "caller did not hand suspension to its shell")
         os.write(master, b"\x03" if mode == "control-c" else b"done\n")

@@ -97,12 +97,13 @@ def test_successful_binding_mounts_operational_widget_in_original_app(monkeypatc
 def test_owner_loss_after_binding_exits_and_cancels_the_live_loader(monkeypatch):
     from worktree_manager.production_picker.picker_tui import data_local
 
+    mounted = threading.Event()
     class Source:
         LOCAL = ("host", "Win")
         bucket = staticmethod(data_local.bucket)
         for_machine = staticmethod(data_local.for_machine)
 
-    monkeypatch.setattr(engine.PickerScreen, "_finish_mount", lambda self: None)
+    monkeypatch.setattr(engine.PickerScreen, "_finish_mount", lambda self: mounted.set())
     monkeypatch.setattr(engine.PickerScreen, "_after_first_refresh", lambda self: None)
 
     async def exercise():
@@ -114,9 +115,10 @@ def test_owner_loss_after_binding_exits_and_cancels_the_live_loader(monkeypatch)
         )
         async with app.run_test() as pilot:
             for _ in range(50):
-                if app.query(engine.PickerScreen):
+                if mounted.is_set():
                     break
                 await pilot.pause(.02)
+            assert mounted.is_set()
             screen = app.query_one(engine.PickerScreen)
             screen.loader = SimpleNamespace(cancel=lambda: cancelled.append(True))
             app.result = {"action": "new"}

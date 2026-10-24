@@ -290,8 +290,11 @@ owner, with the canonical caller-lifetime descriptor and unreaped group
 confirmation. A start gate prevents command execution before foreground
 handoff. Control/status pipes are separate from the real terminal streams;
 input, kernel resize signals and control signals reach the command directly.
-Stopped commands hand the terminal back to the caller for normal suspend/
-resume. Foreground ownership and terminal attributes are restored on exit;
+Stopped commands hand the terminal back and suspend the caller's foreground
+job group, including a shell wrapper, for normal suspend/resume. Without a
+controlling terminal, a stopped command fails explicitly and is cleaned up
+instead of signalling an unrelated parent group.
+Foreground ownership and terminal attributes are restored on exit;
 an unrelated foreground owner is never replaced.
 
 This is finite command custody, not a terminal server, PTY relay or daemon.

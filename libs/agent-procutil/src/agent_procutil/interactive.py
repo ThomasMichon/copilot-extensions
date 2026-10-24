@@ -176,11 +176,13 @@ def _posix(argv, env):
                 return 128 - code if code < 0 else code
             if event != "stopped":
                 raise RuntimeError("interactive owner completion is invalid")
+            if terminal.fd is None:
+                raise RuntimeError("a stopped interactive command requires a foreground terminal")
             command_attributes = terminal.settings()
             terminal.restore(process.pid)
             previous = signal.signal(signal.SIGTSTP, signal.SIG_DFL)
             try:
-                os.kill(os.getpid(), signal.SIGTSTP)
+                os.killpg(terminal.group, signal.SIGTSTP)
             finally:
                 signal.signal(signal.SIGTSTP, previous)
             terminal.give(process.pid, command_attributes)
