@@ -83,9 +83,11 @@ events and an absent initial-push base retain code checks. Invalid or
 unavailable diff evidence fails rather than claiming no overlap. Source-to-doc
 renames retain the deleted source path and therefore cannot skip validation.
 
-Markdown changes still run skill/effort/vision structure, documentation and
+Markdown changes still run release changefile lint, skill/effort/vision structure, documentation and
 runbook lint, file-size limits, workflow policy and gh-aw Markdown pin/version
 checks. The checks job and fixed-name required aggregate remain present.
+Markdown skills and instructions are shipping payload even without executable
+coverage overlap; their required changefile/version bump must not be skipped.
 The aggregate accepts only an explicit unselected/skipped unit result without
 fabricated coverage or reuse evidence; it does not mistake missing coverage for
 proof that executable changes are untested. The ungated trusted-CI guard binds

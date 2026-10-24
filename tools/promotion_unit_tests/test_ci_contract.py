@@ -98,6 +98,10 @@ def declarations():
         "id": "code-impact", "timeout-minutes": 2,
         "env": GUARD.CODE_IMPACT_ENV, "run": GUARD.CODE_IMPACT_SCRIPT,
     })
+    ci["jobs"]["checks"]["steps"].append({
+        "run": "python tools/check-changefile-presence.py --base base --head head",
+        "if": GUARD.CHANGEFILE_CONDITION,
+    })
     return routing, ci
 
 
@@ -208,7 +212,7 @@ def execute_source_ast_selector(output, event, read_diff, *, script=None):
 ])
 def test_code_impact_cannot_omit_diff_evidence_or_ignore_errors(tmp_path, change):
     routing, ci = declarations()
-    ci["jobs"]["checks"]["steps"][-1].update(change)
+    next(step for step in ci["jobs"]["checks"]["steps"] if step.get("id") == "code-impact").update(change)
     assert "code guards require conservative pinned-input coverage admission" in validate(tmp_path, routing, ci)
 
 
@@ -258,6 +262,24 @@ def test_code_guards_cannot_run_without_prior_coverage_impact(tmp_path, command)
     steps.remove(scan)
     steps.insert(0, scan)
     assert "code guards must follow validated executable coverage admission" in validate(tmp_path, routing, ci)
+
+
+@pytest.mark.parametrize("condition", [
+    GUARD.CODE_CONDITION, "false",
+    GUARD.CODE_CONDITION + " && " + GUARD.CHANGEFILE_CONDITION,
+])
+def test_markdown_plugin_release_lint_is_not_conditioned_on_test_coverage(tmp_path, condition):
+    routing, ci = declarations()
+    step = ci["jobs"]["checks"]["steps"][-1]
+    assert validate(tmp_path, routing, ci) == []
+    step["if"] = condition
+    assert "release changefile lint must remain independent of executable coverage" in validate(tmp_path, routing, ci)
+
+
+def test_markdown_plugin_release_lint_cannot_disappear(tmp_path):
+    routing, ci = declarations()
+    ci["jobs"]["checks"]["steps"].pop()
+    assert "release changefile lint must remain independent of executable coverage" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("event,paths,expected", [

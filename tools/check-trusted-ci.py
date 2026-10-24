@@ -26,6 +26,7 @@ UNIT_COMMAND = (
 )
 UNIT_UPLOAD_CONDITION = "steps.units.outputs.mode == 'executed'"
 CODE_CONDITION = "steps.code-impact.outputs.run == 'true'"
+CHANGEFILE_CONDITION = "github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'"
 CODE_GUARD_CONDITIONS = (
     CODE_CONDITION,
     CODE_CONDITION + " && github.event_name == 'pull_request'",
@@ -493,12 +494,17 @@ def _validate_ci(path: Path) -> list[str]:
                 or any(key in code_impact[0] for key in ("if", "continue-on-error"))
             ):
                 errors.append("code guards require conservative pinned-input coverage admission")
+            changefile_steps = [
+                step for step in check_steps if isinstance(step, dict)
+                and str(step.get("run", "")).startswith("python tools/check-changefile-presence.py")
+            ]
+            if len(changefile_steps) != 1:
+                errors.append("release changefile lint must remain independent of executable coverage")
             for step in check_steps:
                 if not isinstance(step, dict):
                     continue
                 command = str(step.get("run", "")).strip()
                 code_guard = command in CODE_GUARD_COMMANDS or command.startswith((
-                    "python tools/check-changefile-presence.py",
                     "python tools/check-module-size.py",
                     "python tools/prepare_bridge_contract_evidence.py",
                     "python tools/check-agent-bridge-contracts.py",
@@ -510,6 +516,11 @@ def _validate_ci(path: Path) -> list[str]:
                     or "continue-on-error" in step
                 ):
                     errors.append("code guards must follow validated executable coverage admission")
+                if command.startswith("python tools/check-changefile-presence.py") and (
+                    step.get("if") != CHANGEFILE_CONDITION
+                    or "continue-on-error" in step
+                ):
+                    errors.append("release changefile lint must remain independent of executable coverage")
             ast_impact = [
                 step for step in check_steps if isinstance(step, dict)
                 and step.get("id") == "source-ast-impact"

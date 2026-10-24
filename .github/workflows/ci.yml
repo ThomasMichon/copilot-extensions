@@ -91,7 +91,7 @@ jobs:
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-version-consistency.py
     - name: Changefile presence (touched plugins must have a pending changefile; PR-into-dev only)
-      if: steps.code-impact.outputs.run == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
+      if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
       run: python tools/check-changefile-presence.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
     - name: Module size (hard cap + shrink-only baseline, PR diff only)
       if: steps.code-impact.outputs.run == 'true' && github.event_name == 'pull_request'
