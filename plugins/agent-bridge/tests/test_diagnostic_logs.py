@@ -13,7 +13,6 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 import pytest
 from single_instance_lease import OperationLock
@@ -184,6 +183,15 @@ def test_expired_history_and_rotation_are_worker_only(handler, monkeypatch):
         return original_scan(path)
 
     monkeypatch.setattr(handler.store, "_scan", scan)
+    status_written = threading.Event()
+    original_write = handler.store.write_event
+
+    def write(event):
+        original_write(event)
+        if "diagnostic_buffer_callbacks" in event:
+            status_written.set()
+
+    monkeypatch.setattr(handler.store, "write_event", write)
     handler.store._last_maintenance = None
     async def serving():
         for index in range(8):
@@ -191,11 +199,13 @@ def test_expired_history_and_rotation_are_worker_only(handler, monkeypatch):
             await asyncio.sleep(0)
         logs.maintain_file_logging()  # same enqueue called by the heartbeat owner
     asyncio.run(serving())
-    wait_for(lambda: handler.writer.stats()["delivered"] >= 9)
+    accepted = handler.writer.stats()["accepted"]
+    wait_for(lambda: handler.writer.stats()["delivered"] >= accepted and status_written.is_set())
     assert scans and not archive.exists()
     events = [json.loads(line) for path in handler.store._files()
               for line in path.read_text(encoding="utf-8").splitlines()]
-    assert len(events) == 8
+    assert len([event for event in events if "diagnostic_buffer_callbacks" not in event]) == 8
+    assert any("diagnostic_buffer_callbacks" in event for event in events)
     assert len(handler.store._files()) >= 2
 
 
@@ -375,19 +385,16 @@ def test_initializer_is_once_offthread_and_close_never_joins_it():
     assert writer.stats()["abandoned"] == 1
 
 
-def test_existing_health_surface_exposes_owner_counters_without_log_contents(handler, monkeypatch):
-    import importlib
-
-    module = importlib.import_module("agent_bridge.routes.health")
-    monkeypatch.setattr(module, "slot_descriptor", lambda *_a, **_k: {})
-    monkeypatch.setattr(module, "get_default_manager",
-                        lambda: SimpleNamespace(carrier_diagnostics=lambda: {}))
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
-    response = asyncio.run(module.health(request))
-    assert response["status"] == "ok"
-    assert response["diagnostic_logging"]["configured"]
-    assert response["diagnostic_logging"]["scope"] == "application-only"
-    assert "message" not in response["diagnostic_logging"]
+def test_existing_worker_persists_loss_counters_as_ordinary_diagnostic_records(handler):
+    with handler.writer._lock:
+        handler.handle(record())
+    handler.store._last_maintenance = None
+    handler.maintain()
+    wait_for(lambda: handler.writer.stats()["delivered"] >= 1)
+    event = json.loads(handler.store.path.read_text(encoding="utf-8"))
+    assert event["diagnostic_buffer_callbacks"]["contended"] == 1
+    assert event["message"] == "diagnostic logging status"
+    assert event["pid"] == os.getpid()
 
 
 def test_real_retained_spool_processes_rotate_unicode_without_lost_rows(tmp_path):
@@ -430,7 +437,7 @@ assert s.store.last_error is None, s.store.last_error
     assert all(event["label"] == "λ🚀" for event in events)
 
 
-def test_actual_heartbeat_requests_quiet_maintenance_before_governance_backoff(
+def test_existing_owned_worker_maintains_quiet_logs_while_application_backs_off(
     tmp_path, monkeypatch,
 ):
     from unittest.mock import AsyncMock
@@ -459,14 +466,26 @@ def test_actual_heartbeat_requests_quiet_maintenance_before_governance_backoff(
     wait_for(lambda: handler.initialized)
     handler.handle(record("quiet-before-expiry"))
     wait_for(lambda: handler.store.path.exists() and handler.store.path.stat().st_size > 0)
+    status_written = threading.Event()
+    original_write = handler.store.write_event
+
+    def write(event):
+        original_write(event)
+        if "diagnostic_buffer_callbacks" in event:
+            status_written.set()
+
+    monkeypatch.setattr(handler.store, "write_event", write)
     handler.store.clock = lambda: datetime.now(timezone.utc) + timedelta(days=31)
     async def run():
         async with app.router.lifespan_context(app):
             for _ in range(800):
-                if handler.store.path.stat().st_size == 0:
+                if status_written.is_set() and app_module._governance_backoff.await_count:
                     break
                 await asyncio.sleep(0.01)
-            assert handler.store.path.stat().st_size == 0, json.dumps(handler.stats())
+            events = [json.loads(line) for path in handler.store._files()
+                      for line in path.read_text(encoding="utf-8").splitlines()]
+            assert any("diagnostic_buffer_callbacks" in event for event in events)
+            assert all(event["message"] != "quiet-before-expiry" for event in events)
     try:
         asyncio.run(run())
     finally:

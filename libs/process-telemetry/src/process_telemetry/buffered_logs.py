@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 
 from .buffer import BufferedSink
-from .diagnostic_logs import DiagnosticLog
+from .diagnostic_logs import DiagnosticLog, _utc
 
 
 def _validate_percent(template: str) -> None:
@@ -82,7 +83,7 @@ class BufferedDiagnosticLog(logging.Handler):
 
         self.writer = BufferedSink(
             self._consume, capacity=capacity, batch_size=min(32, capacity), max_bytes=65536,
-            on_start=initialize,
+            on_start=initialize, on_iteration=self._maintenance,
         ).start()
 
     def handle(self, record: logging.LogRecord) -> bool:
@@ -139,7 +140,7 @@ class BufferedDiagnosticLog(logging.Handler):
     def _consume(self, event: dict) -> None:
         control = event.get("_control")
         if control:
-            self.store.maintain(force=control == "startup")
+            self._maintenance(force=control == "startup")
             return
         template = event.pop("_template")
         args = event.pop("_args")
@@ -151,6 +152,22 @@ class BufferedDiagnosticLog(logging.Handler):
         if len(event["message"]) > 8192:
             raise ValueError("diagnostic formatted message limit")
         self.store.write_event(event)
+
+    def _maintenance(self, *, force: bool = False) -> None:
+        previous = self.store._last_maintenance
+        self.store.maintain(force=force)
+        writer = getattr(self, "writer", None)
+        if writer is not None and self.store._last_maintenance != previous:
+            observation = {
+                "ts": _utc(self.store.clock()).isoformat(),
+                "service": self.store.service, "component": self.store.component,
+                "logger": self.store.service + ".diagnostics", "level": "INFO",
+                "pid": os.getpid(), **self.store.attribution,
+                "message": "diagnostic logging status",
+                "diagnostic_buffer_callbacks": writer.stats(),
+                "storage_error": self.store.last_error,
+            }
+            self.store.write_event(observation)
 
     def maintain(self) -> None:
         """Request maintenance on this same writer, never on the serving thread."""

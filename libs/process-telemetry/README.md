@@ -101,6 +101,10 @@ over-8192-character formatted results fail the callback, preventing a small
 accepted format string from allocating unbounded output.
 Every conversion is parsed before interpolation; nested-parenthesis mapping keys
 are explicitly unsupported, so they cannot bypass width validation.
+Eligible maintenance also emits an ordinary local `diagnostic_buffer_callbacks`
+status record through the same retained writer. It is diagnostic history, not a
+new status registry, service endpoint or authority receipt; shutdown losses may
+remain unreported. Existing Bridge health packets stay unchanged.
 
 `BufferedSink(..., on_start=callback)` optionally performs owner initialization
 once on the same worker before consuming records. Existing callers default to
@@ -110,6 +114,12 @@ or replacement worker. `close()` remains nonjoining/nonflushing; `closed` report
 that state. The owner must not replace a writer still blocked after closure.
 Initialization and maintenance callbacks are not persisted log records, and
 `delivered` still counts successful callbacks, not receiver-confirmed persistence.
+`on_iteration=callback` optionally reuses the same existing per-batch/idle worker
+iteration and stop wait for owner maintenance, with no separate timer or task.
+Bridge uses that seam so its protected application, CLI orchestrator and health
+wire sources, registry and captured evidence remain unchanged. Successful queued
+sink callbacks (including explicit maintenance requests) count as `delivered`;
+initialization and per-iteration maintenance do not.
 
 See the actual adapters' [Bridge](../../plugins/agent-bridge/docs/diagnostic-logs.md)
 and [Dispatch](../../plugins/agent-dispatch/docs/diagnostic-logs.md) contracts.
@@ -153,6 +163,10 @@ This API is available for deliberate helper/owner adoption. Existing configured
 spools retain their original format, append behavior and **unretained** status.
 It does not adopt native stdout/stderr, installer attempts, lifecycle/bootstrap
 files, authoritative state or container output.
+An async owner may construct the sink off its serving path and explicitly use
+the existing adapter with `on_start=lambda: sink.maintain(force=True)` and
+`on_iteration=sink.maintain`. The sink constructor and direct callable remain
+synchronous; these options do not silently alter an old configuration.
 
 ## Measurements and reports
 

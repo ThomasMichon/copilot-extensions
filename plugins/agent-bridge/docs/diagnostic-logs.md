@@ -64,9 +64,10 @@ exception objects or source-line reads. This is not a replacement for a full
 native traceback or a generic redactor; caller-owned privacy adapters remain
 authoritative.
 
-Startup maintenance runs on that same worker before its first batch. The existing
-always-on heartbeat only enqueues maintenance, before governance backoff; it never
-waits for storage. The worker debounces maintenance and applies the same exact
+Startup maintenance runs on that same worker before its first batch. Normal
+maintenance uses its existing per-batch/idle iteration and existing stop wait:
+no separate timer/task/thread and no change to the protected application heartbeat.
+The worker debounces maintenance and applies the same exact
 UTC 30-day record-age policy, cutoff equality, future/skew handling, interrupted
 tail isolation, archive pruning and protected unknown timestamps as Dispatch.
 Both active and archived application records are maintained while quiet.
@@ -77,12 +78,15 @@ filesystem I/O. A slow/stuck storage call can occupy at most the existing worker
 producers continue with bounded loss. Closing rejects new work and abandons
 queued diagnostics without join, flush or retained-descendant EOF waits.
 
-`/health` adds `diagnostic_logging`: configured/accepting state, application-only
-scope, buffer callback counters and the sanitized storage error class. Counts
-include maintenance callbacks, and successful callback returns do not prove
-durable persisted records. Read-only `logs` discovery cannot prove another
-process's write health. Neither surface establishes serving generation,
-activation success or rollout authority.
+On eligible maintenance, the same worker writes an ordinary application JSONL
+record containing `diagnostic_buffer_callbacks` and the sanitized storage error
+class. This keeps loss observations discoverable in the existing log output,
+without a status registry, new endpoint or any change to the protected health
+wire response. Counters include maintenance callbacks; successful callback
+returns do not prove durable persisted records. The in-process owner also has
+`logging_status()`/handler statistics. Read-only `logs` discovery cannot prove
+another process's write health. None of these observations establishes serving
+generation, activation success, process authority or rollout permission.
 
 An independently observed serving-watchdog stall remains a separate unresolved
 boundary. These source tests prove the bounded logging path under controlled

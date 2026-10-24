@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
-from . import diagnostic_logs, telemetry
+from . import telemetry
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
 from .app_supersession import retire_previous_daemon
 from .app_worktree_cache import start_worktree_cache, stop_worktree_cache
@@ -584,7 +584,7 @@ async def lifespan(app: FastAPI):
     # the misleading turn-boundary `updated_at`. Cheap; always on.
     async def _heartbeat_loop() -> None:
         while True:
-            await diagnostic_logs.heartbeat_pause(_HEARTBEAT_INTERVAL_S)
+            await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
             try:
                 if await _governance_backoff(
                     governance,

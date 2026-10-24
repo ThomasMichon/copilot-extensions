@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import asyncio
 import logging
 import os
 import sys
@@ -84,12 +83,6 @@ def maintain_file_logging() -> None:
             handler.maintain()
 
 
-async def heartbeat_pause(interval: float) -> None:
-    """Use the existing owner's cadence, then enqueue before governance backoff."""
-    await asyncio.sleep(interval)
-    maintain_file_logging()
-
-
 def close_file_logging(handler: BufferedDiagnosticLog) -> None:
     handler.close()  # reject/abandon, no joins or EOF waits on daemon shutdown
     for namespace, (level, propagate) in handler._previous_loggers.items():
@@ -115,7 +108,8 @@ def inventory() -> dict:
     native_root = install_paths.install_dir().resolve()
     entry = location(root / "logs" / "diagnostics", "daemon", "agent-bridge.daemon")
     entry["delivery"] = "bounded BufferedSink; invalid/full/contended/abandoned records may be lost"
-    entry["maintenance"] = "startup and existing heartbeat enqueue on the same off-thread writer"
+    entry["maintenance"] = "startup and existing bounded writer iteration, including idle periods"
+    entry["counter_observation"] = "ordinary diagnostic_buffer_callbacks records in these files"
     patterns = (
         "agent-bridge.log*", "agent-bridge-err.log*", "lifecycle.log*",
         "reconcile.log*", "reconcile.err.log*", "logs/boot-trace.jsonl*",

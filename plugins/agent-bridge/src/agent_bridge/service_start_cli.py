@@ -657,6 +657,8 @@ def _cmd_ui(args: argparse.Namespace) -> None:
 
 
 def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
+    from .diagnostic_logs import register_log_commands
+    register_log_commands(sub)
     core = _core()
 
     start_p = sub.add_parser("start", help="Start the agent-bridge server")

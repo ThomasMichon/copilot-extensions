@@ -224,15 +224,15 @@ application consumer, not another plugin-specific copy or new framework.
 
 Bridge's serving producer must not inherit a blocking file/handler mutex or
 history rewrite. Its existing bounded diagnostic writer owns initialization,
-formatting, storage and maintenance; the existing heartbeat only requests
-maintenance, and shutdown never waits for a stuck sink. This source work does not
+formatting, storage and maintenance through its normal batch/idle iteration;
+shutdown never waits for a stuck sink. This source work does not
 ascribe an independently observed watchdog stall to logging or claim a live fix.
 
 - [x] Reconcile the shared architecture and async/compatibility boundary before
   implementation, preserving #8370/#6812 and native lifetime ownership.
 - [x] Extract shared policy without importing plugins or lock dependencies into
   the library; keep Dispatch's discovery/retention contract.
-- [x] Adopt actual Bridge bootstrap, heartbeat and application logger namespaces
+- [x] Adopt actual Bridge bootstrap, batch/idle maintenance and logger namespaces
   with bounded producer work and truthful loss/storage counters.
 - [x] Expose an explicit, separate retained-spool Python API with owner-provided
   new namespace/maintenance, no parent creation and unchanged legacy factories.
@@ -279,3 +279,11 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   registry-parse failure callsite is a regression. Required CI's shrink-only app
   size guard is addressed by factoring the existing heartbeat pause/enqueue
   boundary into the logging adapter, without widening a baseline or adding a task.
+- 2026-10-24 UTC — HTTP-47 binds the application, CLI orchestrator and health
+  sources as semantic owners. All three therefore remain byte-for-byte unchanged,
+  with the original registry and every capture/fixture/provenance artifact.
+  Register local discovery through the already-owned command registrar and use
+  the existing bounded writer's batch/idle iteration for maintenance. Loss/status
+  counters are ordinary `diagnostic_buffer_callbacks` records, not a wire observer,
+  new status registry, timer or task. This supersedes the earlier heartbeat-hook
+  candidate without weakening any captured source binding.

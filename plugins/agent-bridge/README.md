@@ -921,7 +921,8 @@ native/fallback diagnostic locations as JSON, without starting a service or
 creating files. Explicit daemon startup adopts bounded, off-thread application
 logging under the effective config root's `logs/diagnostics/daemon.jsonl`.
 The shared owner-injected policy retains records by 30 elapsed UTC days;
-`/health` exposes application buffer counters and sanitized storage errors.
+ordinary `diagnostic_buffer_callbacks` log records expose buffer counters and
+sanitized storage errors without changing the health wire contract.
 This does not adopt raw stdout/stderr, installer attempts or session-child logs.
 See [Application diagnostics](docs/diagnostic-logs.md) for async bounds, text/
 JSON compatibility, explicit retained-spool API and remaining qualification.
