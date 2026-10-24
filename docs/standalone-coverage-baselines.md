@@ -48,6 +48,10 @@ attribution. A timestamp/size-valid stale `.pyc` therefore invalidates collectio
 even when the installed `.py` bytes still match the checkout. The parent applies
 the same guard through an independently monitored profile hook alongside
 coverage.py's trace hook; neither path changes what code the application imports.
+Uncached frames normalize the filename once for all source/path checks. Only
+the normalized package-label prefix is reused across calls; module globals and
+verified code identities are still checked on every relevant frame. Unrelated
+frames never cache a negative admission decision.
 Dataclass-generated methods are admitted only after matching the actual
 standard-library emitter and a verified owning-source frame, pairing its
 compile/exec events, and comparing the executing generated code tree with those

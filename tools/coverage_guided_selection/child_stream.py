@@ -43,6 +43,7 @@ _profile_owner = None
 _prior_profile = _prior_thread_profile = None
 _root = ""
 _package = ""
+_package_path = ("", "")
 _control = None
 _arming = False
 _phase_marker = None
@@ -81,12 +82,12 @@ def _fail():
         pass
 
 
-def _source(filename):
+def _source(filename, key):
     value = _sources.get(filename)
     if value is None:
-        scoped = (filename.lower() if os.name == "nt" else filename).startswith(_root)
+        scoped = key.startswith(_root)
         if scoped:
-            value = _sources.get(os.path.normcase(filename))
+            value = _sources.get(key)
             if value is None and filename.endswith(".py"):
                 _auditor().error("unmapped code filename inside verified source scope")
     return value
@@ -222,21 +223,26 @@ def stop_import_profile():
 
 
 def _frame_source(frame):
+    global _package_path
     code = frame.f_code
     cached = _code_sources.get(id(code))
     if cached is not None and cached[0] is code:
         return cached[1]
-    source = _source(code.co_filename)
-    if source is not None and code not in _expected_codes.get(os.path.normcase(code.co_filename), ()):
+    key = os.path.normcase(code.co_filename)
+    source = _source(code.co_filename, key)
+    if source is not None and code not in _expected_codes.get(key, ()):
         _auditor().error("executed code differs from verified source inventory")
         source = None
     if source is None and _package:
         module = getattr(frame, "f_globals", {}).get("__name__", "")
-        package_path = os.path.normcase(code.co_filename).replace("\\", "/").split("/")[:-1]
+        package_path = key.replace("\\", "/")
+        if _package_path[0] != _package:
+            _package_path = (_package, os.path.normcase(_package) + "/")
+        package_prefix = _package_path[1]
         if (isinstance(module, str) and (module == _package or module.startswith(_package + "."))
-                or os.path.normcase(_package) in package_path):
+                or package_path.startswith(package_prefix) or "/" + package_prefix in package_path):
             _auditor().error("owned package executed outside verified source inventory")
-    if source is not None or os.path.normcase(code.co_filename) in _expected_codes:
+    if source is not None or key in _expected_codes:
         # Retain the object itself: recycled ids must never inherit an attribution.
         _code_sources[id(code)] = (code, source)
     return source

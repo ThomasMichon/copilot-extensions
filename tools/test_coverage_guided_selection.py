@@ -67,6 +67,7 @@ from tools.test_child_stream import (  # noqa: E402,F401
     test_staged_parent_source_is_byte_exact_and_end_checked,
     test_sparse_seen_fast_path_only_publishes_committed_records,
     test_distinct_actual_code_objects_do_not_alias_shared_string_filename,
+    test_foreign_frame_paths_normalize_once_without_caching_module_identity,
     test_executed_code_requires_verified_source_tree_and_strong_identity,
     test_parent_guard_replacement_is_reported_without_application_exception,
     test_generated_identity_requires_proven_emitter_owner_and_executed_bytes,

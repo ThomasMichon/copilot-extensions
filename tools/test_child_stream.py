@@ -110,6 +110,54 @@ def test_owned_package_shadow_cannot_be_a_successful_zero_hit_producer(monkeypat
     assert len(failures) == 1
 
 
+def test_foreign_frame_paths_normalize_once_without_caching_module_identity(monkeypatch):
+    from types import SimpleNamespace
+
+    calls, failures = [], []
+    original = os.path.normcase
+
+    def normalized(value):
+        calls.append(value)
+        return original(value)
+
+    for key, value in (("_sources", {}), ("_expected_codes", {}), ("_code_sources", {}),
+                       ("_root", "verified-installed-root/"), ("_package", "fixture_package"),
+                       ("_package_path", ("fixture_package", original("fixture_package") + "/"))):
+        monkeypatch.setattr(runtime, key, value)
+    monkeypatch.setattr(child_audit, "error", failures.append)
+    monkeypatch.setattr(os.path, "normcase", normalized)
+    for filename, owned in (
+        ("outside/fixture_package/source.py", True),
+        ("fixture_package/source.py", True),
+        ("outside\\fixture_package\\source.py", True),
+        ("outside/not_fixture_package/source.py", False),
+        ("outside/source.py", False),
+        ("outside/fixture_package", False),
+    ):
+        frame = SimpleNamespace(
+            f_code=compile("pass\n", filename, "exec"),
+            f_globals={"__name__": "unrelated"},
+        )
+        calls.clear()
+        failures.clear()
+        assert runtime._frame_source(frame) is None
+        assert bool(failures) is owned, filename
+        assert calls == [filename]
+        failures.clear()
+        frame.f_globals["__name__"] = "fixture_package.source"
+        assert runtime._frame_source(frame) is None
+        assert failures == ["owned package executed outside verified source inventory"]
+        assert id(frame.f_code) not in runtime._code_sources
+    monkeypatch.setattr(runtime, "_package", "outside")
+    frame = SimpleNamespace(f_code=compile("pass\n", "outside/source.py", "exec"),
+                            f_globals={"__name__": "unrelated"})
+    calls.clear()
+    failures.clear()
+    assert runtime._frame_source(frame) is None
+    assert calls == ["outside/source.py", "outside"]
+    assert failures == ["owned package executed outside verified source inventory"]
+
+
 @pytest.mark.parametrize("stale", [False, True])
 def test_executed_code_requires_verified_source_tree_and_strong_identity(tmp_path, monkeypatch, stale):
     import hashlib
