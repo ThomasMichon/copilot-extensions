@@ -55,8 +55,9 @@ Adapters must use the effective branches before retrieval and must not expose
 the store's internal global cursor, unrelated row metadata or unselected fields.
 Broad query/pagination/subscriptions and protected wire cursors remain unimplemented.
 
-Existing immutable `OperationIntent` values support only their three existing
-commands. The verified principal/account and snapshot authority must match the
+Immutable `OperationIntent` values support their original three commands and
+the fixed [`runner.converge`](arc-owner.md) operation. The verified
+principal/account and snapshot authority must match the
 original intent before operation-ID or result lookup. Target, command and
 generation require an exact `OperationGrant`; enrollment generations and
 operation target generations remain separate. The original canonical intent
@@ -64,6 +65,16 @@ and request digest are never rewritten. This authorizes admission only:
 resource parameters, current source policy, routing/installation/offer binding,
 backend delegation, accepted-work fences and effect-side policy still belong to
 their existing owners. A permit is not permission to skip those checks.
+
+`runner.converge` additionally requires the fourth `OperationGrant` field,
+`request_digest`, to equal the complete original intent's canonical digest.
+Command/target/generation-only runner grants refuse. The request contains the
+exact prepared proposal and selected deployment digest, so changing an image,
+chart, resolved scope, support receipt, duration, operation ID or selected
+configuration cannot reuse the grant. The original three commands retain their
+existing grant shape; supplying a digest for them is unsupported. The current
+policy owner must independently admit that exact deployment. A preparation
+review does not create such an enrollment/grant.
 
 The serving adapter calls the real verifier once per request, then passes that
 `VerifiedIdentity` directly to `authorize(..., role=..., installation=...)`.
@@ -109,6 +120,14 @@ and use one finite permit for the complete selection. An unchanged refresh
 still completes fresh authorization; it adds no pagination, replay or wire grant.
 Proof evidence stays consumed. Existing
 `revalidate` callers retain their unchanged replacement-handle semantics.
+
+`discard(permit)` withdraws an exact still-retained local handle after a caller
+refuses, cancels or fails a request. It returns false for an already consumed,
+copied or foreign handle and never refunds consumed proof evidence. This is
+capability cleanup, not authorization, completion evidence or a policy/fence
+callback: it remains usable when the current policy source itself is unavailable.
+Malformed non-Permit input refuses. A discarded handle cannot subsequently
+revalidate; another attempt needs fresh identity evidence and authorization.
 
 An authority may explicitly bind a reentrant `fence` at construction. All its
 admission and checkpoint calls then acquire that fence before its internal lock,

@@ -172,6 +172,16 @@ The latest execution request is:
 
 > Make sure the vision upstream accounts for this. Then, see if you can wire in a flow for this into the grand system, building out the pieces needed to make GitHub Actions Runners for copilot-extensions configurable via fleet-manager
 
+The operator subsequently prioritized adoption of the existing runner pool:
+
+> Let's focus on getting the ARC runners formally "adopted" by out fleet-manager and Gateway controller system, so nothing interferes with them. Then we can cease manual tweaks and leverage a formal kubernetes-style control plane for them.
+
+This prioritizes durable existing-pool adoption and controller ownership before
+further manual tuning or graphical presentation. It does not select another pool,
+replace ARC's pod lifecycle, or turn a session/task lease into permanent service
+ownership. The [adoption-first sequence](runner-loadouts.md#adoption-first-priority)
+retains the existing release, provider, custody, credential and activation gates.
+
 The [runner-loadout realization plan](runner-loadouts.md) extends this
 existing campaign and #7192; it is not a second controller or a replacement
 for #6240/#6424/#6241 and #6681 ownership. Its decomposition and validation
@@ -188,8 +198,16 @@ credential-provider work stays with its current owners.
   not supply a graphical loadout surface, controller execution or live runners.
 - [ ] Connect the committed desired composition to controller-owned source
   acquisition, preparation, notification and exact-plan approval.
+  #8535 supplies the published-source and authenticated Gateway SDK path with
+  durable scoped proposals, notifications, bounded plan inspection and exact
+  review decisions. Production controller binding, selected deployment-version
+  admission and managed-owner execution remain open; review is not a grant.
 - [ ] Carry the typed runner declaration through the real supported deployment
   owner with complete support closure, bounded outcomes and no raw command API.
+- [ ] Formally adopt the existing runner pool into durable fleet/controller
+  ownership, prove noninterference and session-independent reconciliation, then
+  retire manual tweaks and the temporary agent-held protection through the
+  existing ownership flow.
 - [ ] Prove real convergence, update/failure recovery, drain/removal and one
   authorized job; planner-only acceptance cannot close this amendment.
 
@@ -441,6 +459,23 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #8535 merged the published-source preparation and review SDK as
+  `b1cd2b1a1712dd4f6b4ac815e050b10fcfd990b1` after exact-head Copilot approval,
+  complete resolved-thread review and actual required-source checks. Acquisition
+  pins advertised immutable Git objects, ignores local replacement content and
+  preserves existing repository/process custody. The Gateway consumer retains
+  fleet-bound proposals and exact review decisions, with bounded current/replay
+  notices and linear, admission-paced plan inspection. Native source and actual
+  installed-package/Gateway contracts passed (37), as did handler/caller controls
+  (44) and selected observation contracts (5). Initial Linux source/installed
+  controls passed (20); the final broader rerun was unavailable after Docker
+  Desktop failed to start, not replaced by stub evidence. The required shared
+  installer-mirror guard was repaired by pulling forward the already-merged
+  #8574 fix, not bypassing CI. Re-read this full Request, Plan and Validation
+  Plan immediately after merge. The same worktree continues with real managed
+  ARC execution/lifecycle and production binding; graphical interaction and an
+  authorized actual job remain open. No live pool, capacity, routing, credential
+  or deployment state changed, and this parent remains Active.
 - #8465 merged the installed template/slot designer, portable ARC declaration,
   dependency-capability closure and named-machine CPU/memory/disk accounting.
   Exact-head Copilot approval and required checks passed after fixes for

@@ -101,6 +101,7 @@ class OperationGrant:
     command: str
     target: str
     generation: int
+    request_digest: str | None = None
 
     def __post_init__(self):
         _name(self.command)
@@ -108,6 +109,12 @@ class OperationGrant:
         _generation(self.generation)
         if self.command not in COMMAND_FIELDS:
             raise AdmissionError("unsupported-action")
+        if self.command == "runner.converge":
+            if (type(self.request_digest) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", self.request_digest) is None):
+                raise AdmissionError("invalid-record")
+        elif self.request_digest is not None:
+            raise AdmissionError("unsupported-scope")
 
 
 @dataclass(frozen=True)
@@ -135,7 +142,9 @@ class Enrollment:
         _items(self.operations, OperationGrant, MAX_GRANTS)
         object.__setattr__(self, "reads", tuple(sorted(self.reads, key=_scope_key)))
         object.__setattr__(self, "operations", tuple(sorted(
-            self.operations, key=lambda item: (item.command, item.target, item.generation),
+            self.operations, key=lambda item: (
+                item.command, item.target, item.generation, item.request_digest or "",
+            ),
         )))
 
     @property
@@ -382,7 +391,10 @@ class AdmissionAuthority:
             current.authority, enrolled.principal, enrolled.account,
         ):
             raise AdmissionError("actor-mismatch")
-        requested = OperationGrant(value["command"], value["target"], value["generation"])
+        requested = OperationGrant(
+            value["command"], value["target"], value["generation"],
+            request.request_digest if value["command"] == "runner.converge" else None,
+        )
         if requested not in enrolled.operations:
             raise AdmissionError("forbidden-scope")
         return requested
@@ -438,6 +450,22 @@ class AdmissionAuthority:
     def complete(self, permit: Permit, request: Request) -> None:
         """Consume a terminal handle through the same fresh validation boundary."""
         self._checkpoint(permit, request, retain=False)
+
+    def discard(self, permit: Permit) -> bool:
+        """Withdraw only this exact retained handle, without an authority decision.
+
+        Cleanup cannot refund consumed identity evidence or authorize an effect.
+        No policy/fence callback is needed to remove a local capability, including
+        when that callback is the reason the operation failed.
+        """
+        if type(permit) is not Permit:
+            raise AdmissionError("invalid-record")
+        with self._lock:
+            issued = self._issued.get(id(permit))
+            if issued is None or issued.permit is not permit:
+                return False
+            del self._issued[id(permit)]
+            return True
 
     def _checkpoint(self, permit: Permit, request: Request, *, retain: bool) -> Permit:
         with self._guard():

@@ -26,13 +26,23 @@ Generalized request:
 > work stops without destroying state. Do not introduce an unattended identity,
 > new issuer, or build-time authentication.
 
+These containers exist for operational tidiness, control and scale-out. They
+are not a host-security product. They scope per-cluster agent-* services and
+state that would otherwise be host-global. Clusters still federate through the
+Gateway. The physical machine is the security boundary. Persist selected
+directories with ordinary named volumes. Treat in-container systemd as
+disposable image PID 1 with tmpfs `/run`. Do not expand host LSM/AppArmor
+policy, mount pins or kernel-control work as part of this slice.
+
 This slice supports coding and planning without selecting a model or changing
 routing configuration. It closes part of
-[`full-harness-projection-trusted`](../../../visions/plugins/agent-containers/README.md#full-harness-projection-trusted),
+[`full-harness-projection-trusted`](../../../visions/plugins/agent-containers/README.md#full-harness-projection-trusted)
+and [`cluster-scoped-agent-globals`](../../../visions/machine-fleet/README.md#cluster-scoped-agent-globals),
 including persistent home/workspace and real self-maintenance, and the
 [machine-fleet vision](../../../visions/machine-fleet/README.md)'s existing
 role/service-authority separation. Implementation gaps stay in this effort;
-this plan does not revise vision intent.
+this plan records the posture extension above rather than treating trusted
+containers as a new security product.
 
 ## Existing coverage and ownership
 
@@ -165,8 +175,14 @@ not just switching the image digest.
 Real timer/service capability requires a supported container init, cgroup and
 supervision contract. Document host requirements and explicit unsupported
 capabilities; do not claim systemd works in every container, expose the manager
-socket, or add blanket privilege as a shortcut. Trusted is not unrestricted host
-filesystem or lifecycle authority.
+socket, or add blanket privilege as a shortcut. Trusted here means a full
+harness node versus restricted test isolation, not a new security boundary.
+Keep existing launch flags only as ordinary systemd-in-Docker needs. Do not
+author further host-policy or mount-pin work in this slice.
+
+Persist selected folders with named volumes at the declared home and workspace
+paths. Recreate the container; keep those volume names. `/run` stays tmpfs.
+Systemd runtime is disposable with the image.
 
 ## Phased plan and gates
 

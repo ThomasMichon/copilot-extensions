@@ -7,7 +7,7 @@
 - **Scope:** leaf (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Active
-- **Last revised:** 2026-10-07
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) and
   the plugin's [`README`](../../../plugins/agent-containers/README.md)
 
@@ -35,8 +35,13 @@ that, aims to project **as much of the harness as possible** into the container
 (its plugins/skills, the credential relay, launch parity, and — as the
 capability matures — **multiple repositories and their worktrees living
 container-local**), so a trusted container becomes a **seamless agent-bridge
-node** on par with a CodeSpace rather than a stripped-down runner. A
-**restricted venue** is a security boundary for lower-trust or injection-prone
+node** on par with a CodeSpace rather than a stripped-down runner. Those
+trusted cluster containers exist to **scope** the agent-* services and state
+that would otherwise be host-global, so each agent cluster has its own set of
+those “global” runtimes and stores. They still federate through the Gateway.
+The **physical machine** remains that posture’s security boundary; the
+container is tidiness, control and scale-out, not a second security product.
+A **restricted venue** is a security boundary for lower-trust or injection-prone
 reasoning: its blast radius is the container and its one repository workspace,
 host credentials do not cross the boundary, network reach and tools are
 explicitly granted, and the failure mode is a disposable bad diff rather than
@@ -59,6 +64,12 @@ For restricted work, containment rests on the container runtime and its
 resource, filesystem, privilege, and network boundaries — never on instructions
 asking the agent to behave. The harness running inside is replaceable; the
 containment contract is not.
+
+### Cluster-scoped globals
+A trusted full-harness container gives one agent cluster its own scoped
+agent-* services and state. Those locals are “global” only inside the cluster.
+Clusters federate through the Gateway. The hosting physical machine remains
+the security boundary for this posture.
 
 ### Repository-shaped workspace
 The agent receives a full repository clone inside its container and can use
@@ -119,7 +130,10 @@ machine has), and — as the capability matures — **multiple repositories and
 their worktrees created container-local** inside the venue, so agent-bridge
 drives a trusted container as seamlessly as any other venue. The goal is to
 make the container transport *invisible*: as much of the system as can be
-projected, is. Restricted fleets deliberately receive none of this by default
+projected, is. That node exists so the cluster can own its agent-* service and
+state scope rather than sharing the host’s globals; Gateway federation stays
+the cross-cluster path, and the physical machine stays the security boundary.
+Restricted fleets deliberately receive none of this by default
 (see `restricted-credential-boundary` / `harness-and-tool-latitude`).
 
 ### interactive-venue-reach-trusted
@@ -258,6 +272,10 @@ only after inspecting a running process.
   claim to withstand an omnipotent adversary controlling the container; the
   container runtime is trusted, and the posture is optimized for accidental and
   prompt-injected blast-radius containment.
+- **Trusted cluster containers are not a host-security product.** They scope
+  per-cluster agent-* services and state for tidiness, control and scale-out.
+  They federate through the Gateway. The physical machine is that posture’s
+  security boundary. Restricted venues remain a separate containment posture.
 - **Not one mandatory harness.** Containment must survive replacing the agent
   harness.
 - **Not ambient host identity for restricted work.** A restricted venue never

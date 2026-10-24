@@ -117,6 +117,23 @@ def test_real_two_principals_have_separate_views_and_no_token_role_grants(harnes
         first.expires_at += 100
 
 
+def test_discard_frees_only_original_handle_without_refunding_proof(keys):
+    harness = Harness(keys, capacity=1)
+    request = intent()
+    identity = harness.identity()
+    permit = harness.owner.authorize(identity, request, role="client", installation="client-a")
+    assert not harness.owner.discard(replace(permit))
+    assert harness.owner.discard(permit)
+    assert not harness.owner.discard(permit)
+    refuses("unknown-permit", harness.owner.revalidate, permit, request)
+    refuses("identity-reused", harness.owner.authorize, identity, request,
+            role="client", installation="client-a")
+    fresh = harness.admit(request)
+    harness.current = None
+    assert harness.owner.discard(fresh)
+    refuses("invalid-record", harness.owner.discard, object())
+
+
 @pytest.mark.parametrize("branch", [
     ObservationScope("origin-a", "project-b", "entity-a", ("status",)),
     ObservationScope("origin-b", "project-a", "entity-b", ("title",)),
