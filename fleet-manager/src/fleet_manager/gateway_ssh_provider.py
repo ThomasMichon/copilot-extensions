@@ -193,6 +193,6 @@ def project_gateway_authorization(
         "controller": selected["controller"], "directory_revision": selected["revision"],
         "directory_digest": digest(selected), "policy_digest": policy.policy_digest,
         "decision_digest": digest(decision), "state": decision["state"],
-        "user": local["user"], "peers": peers,
+        "user": local["user"], "host_key": local["host_key"], "peers": peers,
         "execution_authorized": False, "live_readiness_verified": False,
     }

@@ -1,5 +1,5 @@
 {
-  "comment": "Add strict Gateway profiles, optional Fleet policy/public-directory projection, and dedicated target-local login authorization with retained monotonic revisions and repeat-safe inputs.",
+  "comment": "Add strict Gateway profiles, optional Fleet policy/public-directory projection, dedicated monotonic login authorization and a principal/host-pin-verified native listener entrypoint; correctly remove inherited descriptor state at new daemon roots.",
   "changes": [
     {
       "plugin": "agent-ssh",

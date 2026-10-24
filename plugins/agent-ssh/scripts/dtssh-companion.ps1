@@ -141,9 +141,10 @@ switch ($Action) {
         if ($stopCode -ne 0) { exit $stopCode }
         # Win32 OpenSSH re-exec descriptors belong to the old SSH process chain,
         # not this explicitly new daemon root. Preserve every other variable.
-        [Environment]::SetEnvironmentVariable(
-            'C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE', $null, 'Process'
-        )
+        $descriptorState = 'Env:C28FC6F98A2C44ABBBD89D6A3037D0D9_POSIX_FD_STATE'
+        if (Test-Path -LiteralPath $descriptorState) {
+            Remove-Item -LiteralPath $descriptorState -ErrorAction Stop
+        }
         exit (Invoke-InstallHost -Install $install -Verb 'start' -ForegroundLauncher)
     }
     'stop' {

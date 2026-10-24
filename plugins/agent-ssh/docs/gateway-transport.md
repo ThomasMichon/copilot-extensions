@@ -143,11 +143,87 @@ forwarding denial, old-key rejection, re-admission and inbound withdrawal under
 the same server process, then stops its owned fixture. This is local native
 consumer evidence, not a live fleet enrollment or installed connector proof.
 
+## Native listener integration
+
+`agent_ssh.gateway_sshd` is an installed internal service entrypoint for an
+existing target-local lifecycle owner. That owner invokes the selected immutable
+interpreter with `-m agent_ssh.gateway_sshd --config <absolute-config-path>`.
+This is a foreground OpenSSH listener, not a second supervisor, installer,
+Gateway, connector, or public cutover verb. It is installable as part of
+`agent-ssh[fleet]` without a Copilot plugin host.
+
+The protected local JSON configuration has exactly these fields:
+
+```json
+{
+  "schema": "agent-ssh.gateway-native-ingress",
+  "version": 1,
+  "policy": "/absolute/durable/policy.json",
+  "directory": "/absolute/durable/admitted.json",
+  "machine": "worker-a",
+  "environment": "linux",
+  "public_key_file": "/absolute/local/identity/id_ed25519.pub",
+  "host_key_file": "/absolute/local/host/id_ed25519",
+  "state_dir": "/absolute/dedicated/native-ingress",
+  "sshd": "/absolute/native/sshd",
+  "ssh_keygen": "/absolute/native/ssh-keygen",
+  "port": 24107
+}
+```
+
+Paths are platform-native literal absolute references, not command templates;
+use the host's native environment (`windows`, `linux`, or `wsl`). The port is
+an example of the existing owner's explicitly selected nonprivileged loopback
+endpoint, never a default or an allocation by this adapter. The owner still
+owns endpoint selection/custody, stable installed launchers, startup/update,
+readiness, cutover and rollback. Startup refuses an already-bound endpoint
+before changing authorization. This bounded native bind preflight is **not an
+atomic reservation**: the owner must serialize selection and verify the actual
+native listener before publishing it. In particular, Windows OpenSSH can allow
+two native processes to bind the same loopback endpoint; successful process
+creation or an SSH banner alone cannot qualify endpoint ownership.
+
+Before changing authorization, preparation verifies the actual OS login user,
+the native environment, the selected private host key's derived public value
+against the admitted pin, and `sshd -t`. Windows additionally requires a
+non-elevated token and binds `AllowUsers` to the actual qualified Windows login
+principal; it does not guess a domain from environment variables. POSIX requires
+the current non-root account. The private state directory remains bound to that
+target, controller, principal and host key. Changed/foreign configuration is
+preserved and refused, not silently adopted. Conventional user key files,
+system sshd configuration and system PID files are untouched.
+
+The native config permits only public-key login for the selected principal,
+with strict modes and all forwarding disabled. A POSIX entrypoint execs native
+sshd; Windows retains the native child and descendants in the shared
+kill-on-owner-close Job with breakaway prohibited. Native execution changes
+working directory to durable state, never the source checkout. Only an
+ancestor Windows OpenSSH descriptor carrier is removed from new native child
+environments; unrelated identity and transport variables remain unchanged.
+Windows inetd-over-pipes is not a supported substitute for this listener.
+
+The same lifecycle owner calls `prepare(load(config_path))` when it accepts a
+new admitted directory. That uses the existing monotonic authorization writer
+without restarting the native server. This module does not fetch the directory,
+create a poller, or claim that event delivery is already integrated. The native
+fixture runs the actual package entrypoint with synthetic keys,
+authenticates through strict host pinning, proves key replacement and inbound
+withdrawal under the same server, refuses stale input and a changed host pin,
+preserves repeat mtimes/unrelated files, and confirms listener exit after its
+owner stops.
+
+Native authentication fixtures use `ssh -N -T`: the SSH client proves
+public-key authentication without requesting a shell, command or subsystem.
+Forwarding-denial cases use direct forwarding requests, not command shells.
+This avoids Win32 OpenSSH delegating an unnecessary test `cmd.exe` to the
+operator's default terminal. These fixtures do not claim headlessness of
+arbitrary remote command shells.
+
 ## Remaining setup integration
 
 This implements the outbound transport/profile part of
 [Gateway/SSH onboarding](../../../efforts/active/gateway-ssh-fleet-onboarding/README.md),
-and target-local login-key convergence, not the full setup executor.
+and target-local login-key convergence/native consumption, not the full setup executor.
 Gateway selection, Vault key preparation,
 public-key enrollment, reverse-connector ownership, target sshd readiness,
 forwarding grants, bidirectional proof and automatic admitted-key catch-up
