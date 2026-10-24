@@ -31,7 +31,8 @@ runner/workflow budgets are unchanged; this is not a production database change.
 The required pure unit packet includes
 `tools/promotion_unit_tests/test_runtime_profile_release.py`: optional
 schema-2 metadata, retained-subject attestation command/identity controls,
-immutable-source reuse conflicts and exact 1 MiB limits. All signatures and
+immutable-source reuse conflicts and exact 1 MiB limits, including below-limit
+and exact-limit export/readback without Windows newline expansion. All signatures and
 release/provider identities are synthetic; subprocess, network and production
 publication are not exercised. Existing source-profile selection cases remain
 in `tools/test_check_install_contract.py::TestExactRuntimeProfile`.

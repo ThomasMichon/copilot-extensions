@@ -274,10 +274,10 @@ def export_artifacts(
             index["admission"] = {
                 "signer_digest": signer, "source_digest": source, "source_ref": ref,
             }
-        serialized = json.dumps(index, indent=2, sort_keys=True) + "\n"
-        if profiles is not None and len(serialized.encode("utf-8")) > _MANIFEST_LIMIT:
+        serialized = (json.dumps(index, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        if profiles is not None and len(serialized) > _MANIFEST_LIMIT:
             raise PromotionArtifactError("runtime profile index exceeds its existing size limit")
-        (staging / INDEX_NAME).write_text(serialized, encoding="utf-8")
+        (staging / INDEX_NAME).write_bytes(serialized)
         validate_artifacts(
             staging, content_tree=content_tree, dev_head=dev_head, main_before=main_before,
             projects=projects,

@@ -227,6 +227,8 @@ preserves existing consumers. Supplying records does not approve them: a local
 candidate export has no authenticated Main admission. An existing immutable
 source release cannot be reused with a different requested profile set.
 Metadata must fit the release index's existing 1 MiB transfer limit.
+The exporter writes the measured UTF-8 bytes directly, without platform newline
+translation that could otherwise exceed that limit.
 
 `tools/runtime_profile_release.select_release_profile` accepts independently
 selected repository, original Main admission signer, source/composition and

@@ -143,6 +143,56 @@ class TestReleaseRuntimeProfile:
         assert not output.exists() and removed == [tmp_path]
         assert not list(tmp_path.glob("python-artifacts-*"))
 
+    @pytest.mark.parametrize("offset", [-1, 0, 1], ids=["below-limit", "exact-limit", "over-limit"])
+    def test_export_measures_the_exact_published_bytes(self, tmp_path, monkeypatch, offset):
+        record = _record()
+        expected = _index(record)
+        size = len((json.dumps(expected, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+        record["target"]["environment"]["platform_version"] += "x" * (
+            artifacts._MANIFEST_LIMIT + offset - size
+        )
+        monkeypatch.setitem(sys.modules, "promote_release", SimpleNamespace(
+            add_scratch_worktree=lambda *a, **kw: tmp_path,
+            remove_scratch_worktree=lambda *a, **kw: None,
+            _is_ancestor=lambda *a, **kw: True,
+        ))
+        monkeypatch.setitem(sys.modules, "reuse_promotion_artifacts", SimpleNamespace(
+            reuse_artifacts=lambda *a, **kw: None,
+        ))
+        monkeypatch.setattr(artifacts, "candidate_projects", lambda *a: {})
+        monkeypatch.setenv("GITHUB_WORKFLOW_SHA", "a" * 40)
+        monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+        monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+
+        def run(argv, **kwargs):
+            if "--out-dir" in argv:
+                output = Path(argv[argv.index("--out-dir") + 1])
+                (output / artifacts._BUNDLES_NAME).write_text("[]", encoding="utf-8")
+            return ""
+
+        monkeypatch.setattr(artifacts, "_run", run)
+        monkeypatch.setattr(publisher, "_gh", lambda argv, **kw: subprocess.CompletedProcess(
+            argv, 0, "verified", "",
+        ))
+        output = tmp_path / "export"
+        kwargs = dict(
+            repo=tmp_path, commit="d" * 40, content_tree="c" * 40,
+            dev_head="d" * 40, main_before="b" * 40, out_dir=output,
+            reuse_repository="example/plugins", runtime_profiles=[record],
+        )
+        if offset > 0:
+            with pytest.raises(artifacts.PromotionArtifactError, match="size limit"):
+                artifacts.export_artifacts(**kwargs)
+            assert not output.exists()
+        else:
+            index = artifacts.export_artifacts(**kwargs)
+            path = output / artifacts.INDEX_NAME
+            published = path.read_bytes()
+            assert len(published) == artifacts._MANIFEST_LIMIT + offset
+            assert b"\r\n" not in published and json.loads(published) == index
+            assert _select(path, target=record["target"]).profile == validate_profile(record)
+        assert not list(tmp_path.glob("python-artifacts-*"))
+
     def test_export_retains_profiles_before_build_activity(self, tmp_path, monkeypatch):
         record = _record()
         monkeypatch.setitem(sys.modules, "promote_release", SimpleNamespace(

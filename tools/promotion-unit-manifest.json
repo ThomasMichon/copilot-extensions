@@ -1192,7 +1192,10 @@
     "tools/promotion_unit_tests/test_runtime_profile_release.py::TestReleaseRuntimeProfile::test_unsafe_or_malformed_subject_refuses[invalid-json]",
     "tools/promotion_unit_tests/test_runtime_profile_release.py::TestReleaseRuntimeProfile::test_exact_existing_subject_limit_is_accepted",
     "tools/promotion_unit_tests/test_runtime_profile_release.py::TestReleaseRuntimeProfile::test_core_selector_still_owns_ambiguity_and_capability_retention",
-    "tools/promotion_unit_tests/test_runtime_profile_release.py::TestReleaseRuntimeProfile::test_artifact_approval_is_not_source_mode_or_artifact_integrity"
+    "tools/promotion_unit_tests/test_runtime_profile_release.py::TestReleaseRuntimeProfile::test_artifact_approval_is_not_source_mode_or_artifact_integrity",
+    "tools/promotion_unit_tests/test_runtime_profile_release.py::TestReleaseRuntimeProfile::test_export_measures_the_exact_published_bytes[below-limit]",
+    "tools/promotion_unit_tests/test_runtime_profile_release.py::TestReleaseRuntimeProfile::test_export_measures_the_exact_published_bytes[exact-limit]",
+    "tools/promotion_unit_tests/test_runtime_profile_release.py::TestReleaseRuntimeProfile::test_export_measures_the_exact_published_bytes[over-limit]"
   ],
   "sources": {
     "tools/artifact_source_build.py": "bd7079c5ac69199305b5aa949976ccf184e3cb6ffcf068521f17cd53cbc0e508",
@@ -1248,7 +1251,7 @@
     "tools/promotion_artifact_readiness.py": "7ba79b5b4f5140f35ae5bfe7540163ec90068f28639aa3fce00904e4f1613ea1",
     "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
     "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
-    "tools/promotion_python_artifacts.py": "ea97c6cf86bb95aee0ee7e08534e0f8740452b5f286b1d64891e2cfc5141e8c2",
+    "tools/promotion_python_artifacts.py": "7eb851bd675f0ac4537489646eb33a9bfe4318138f7de53edf1ac0d2457405ad",
     "tools/promotion_unit_contract.py": "25597fbde97b725d411e86e856b647f1ebf9f51c41a78f385ffaf0b31cc65eed",
     "tools/promotion_unit_effects.py": "bc724db0e33571f32fc80b016eb7a852935adeb08a7aa0cd4bfa4ca4513c3519",
     "tools/promotion_unit_packet.py": "9ece0640290877c82c6c4268b221eeb8a1df726ccf366985065726bd16f7e5af",
@@ -1309,7 +1312,7 @@
     "tools/runtime_profile.py": "de14c2d2ae9e6ecc94d9a9bdf38096c40e3c10469f803793d88c2d657e83d749",
     "tools/runtime_profile_release.py": "6c278abcc930125ff0be74784aa044aa7a4fea559a70f9aa9367f8398793bfc4",
     "tools/runtime_profile_cases.py": "a400cc0c62e6aaf0c905a98b15e0e99efe994899cb6dfac5a978a8f5bf29fb9f",
-    "tools/promotion_unit_tests/test_runtime_profile_release.py": "3ce3ec3fa2ef9ecce918b5767f72a8ad43583bdc32d0fe2a88f9d65c976e183b"
+    "tools/promotion_unit_tests/test_runtime_profile_release.py": "1526a5e17a8b05870c7a1392fd02e67ec1f3a997cc422c0a423f6fed2097df39"
   },
   "coverage_targets": [
     "tools/artifact_source_build.py",
