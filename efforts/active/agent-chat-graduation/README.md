@@ -256,6 +256,10 @@ requirements.
   Final-head native Linux/Windows controls prove client/service closure,
   omitted-distribution refusal and immutable reuse. This is a construction
   prerequisite, not selected Chat setup or an installed command publication.
+- [x] Consume that constructor from independently installed Chat artifacts and
+  qualify source-removed client invocation, exact bootstrap health and immutable
+  reuse on native Linux/Windows Python3.10/3.11. #8531 completes this internal
+  construction boundary, not selection, command publication or removal.
 - [ ] Implement selected manual-client setup and preserving removal through
   supported canonical custody, then qualify independently installed invocation.
   Do not turn the existing local wheel catalog into release-selection authority.
@@ -276,6 +280,8 @@ requirements.
 - [ ] Deliver an independently operable Chat service image and portable
   role/configuration template with explicit artifact, storage, identity,
   Gateway, placement and resource bindings through existing owners.
+  The candidate portable contribution uses the existing Fleet loadout and
+  reference-only Komodo binding schemas; it is not an image or effect executor.
 - [ ] Actualize that template in the resolved private configuration repository's
   dedicated worktree and publication flow, preserving overrides and selected
   template/source revisions rather than embedding private deployment state here.
@@ -349,6 +355,9 @@ requirements.
 - [ ] **Installed boundary:** fresh and repeat installation, actual console/
   payload invocation, no source fallback, compatible previous selection and
   source-independent operation after the fixture checkout is unavailable.
+  #8531 qualifies independently constructed client slots and retained invocation
+  on both native platforms; selected-installation publication, different-code
+  update/recovery and preserving removal remain open.
 - [ ] **Real consumer:** authenticated service plus two genuine existing
   participants exchange one stable-ID message and consume its exact body;
   scans and waits do not advance semantic reading.
@@ -471,6 +480,59 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-24 - Portable container-template contribution
+
+- Add the Chat-owned `chat.service` revision1 contribution and synthetic
+  allocation/reference-only Komodo examples under
+  [services/chat/container](../../../services/chat/container/README.md).
+  Every image/configuration/storage/credential/Gateway/manager/resource slot is
+  explicit, along with positive reservation/limit inputs and complete support
+  dependencies. No private configuration, ready support inventory or secret
+  values are committed.
+- Twenty contracts consume the real canonical Fleet template and role-binding
+  readers, including the source CLI's explicit file inputs. They cover private
+  override/provenance preservation, complete support closure and costs,
+  missing/foreign/invalid inputs, stale capacity refusal and the absence of
+  activation/mutation authority. This is pure planning evidence, not image,
+  fresh-machine runtime, Gateway or live Komodo qualification.
+- The reviewed specification permits this independent template slice while the
+  manual-client selection/publication/removal integration remains open.
+  Canonical construction and physical publication primitives are not by
+  themselves a complete selected installer; continue consuming the existing
+  lifecycle owners rather than copying another consumer's installer.
+- Image/lock delivery, private actualization, actual connector/effect bindings,
+  prepared-plan confirmation and every container recovery/deployment gate remain
+  open. No support capability label claims a corresponding delivered adapter.
+
+### 2026-10-24 - Installed construction qualified and merged
+
+- #8531 merged as `04386430b7f4722b66680ce807c6d516abb587a2`
+  after current-head Copilot approval, no findings or open threads, and all
+  required checks. The managed merge used the authorized additional-CODEOWNER
+  exception only; a pending attribution refresh first refused completion and
+  was allowed to finish normally. No CI check was bypassed.
+- Final reviewed head `312620e8852bdbfc903952159a8037810eff42bc`
+  completed both lanes in
+  [native run40087913979](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40087913979).
+  All eight receipts report complete execution and the same462-node membership
+  `73cab2cf2a6fd19d775819fe8a2c80e96314b861be8b59bb776eeb49fc5f5d25`.
+  Linux3.10 acceptance421/full462 passed in33.57s/42.00s; Linux3.11 in31.80s/43.01s.
+  Windows3.10 acceptance419/full460 passed with2 POSIX-only skips in56.97s/71.87s;
+  Windows3.11 in62.36s/88.60s. Both acceptance lanes retain all41 full-only cases
+  for the unfiltered complete lane, under the unchanged180s/600s bounds.
+- The same candidate completed local Windows3.11 acceptance in156.58s and full
+  in327.63s. All124 runnable runner/workflow contracts pass with one platform
+  skip, and the real trusted-workflow guard passes. Expanded validation repaired
+  a retained artifact fixture's omitted canonical launcher input without
+  changing Fleet implementation or narrowing its byte-integrity assertions.
+- Re-read the entire Plan and Validation Plan after merge. Close only the
+  installed-constructor consumption item. Selected manual-client setup and
+  preserving removal are the next bounded source slice; the local installed
+  catalog is not selected-release authority. Managed service lifecycle,
+  container/image templates, private actualization, Komodo execution, native
+  assignment/shared feed and real adoption remain open. #7238 stays Active;
+  no deployment, migration or private configuration change was performed.
 
 ### 2026-10-24 - Retain the current canonical import closure
 
