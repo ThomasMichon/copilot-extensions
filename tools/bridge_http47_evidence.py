@@ -49,7 +49,11 @@ AFFECTED = tuple(
         "app_supersession.py",
         "session_host/launcher.py",
     )
-) + ("libs/zdd/src/zdd/cutover_drain.py",)
+) + (
+    "libs/zdd/src/zdd/cutover_drain.py",
+    "libs/zdd/src/zdd/conditional.py",
+    "plugins/agent-worktrees/libs/zdd/src/zdd/conditional.py",
+)
 TESTS = (
     "plugins/agent-bridge/tests/conftest.py",
     "plugins/agent-bridge/tests/http47_binding_validation.py",
@@ -69,6 +73,7 @@ TESTS = (
 PROBES = {
     "test_http47_capture_actual_observations": 1,
     "test_cold_drain_default_client_automatic_and_strict_cutover_precedes_effects": 1,
+    "test_cold_drain_strict_graceful_rejects_even_mislabelled_clean": 2,
     "test_startup_cold_outage_after_initial_scan_waits_for_predecessor_exit": 1,
     "test_heartbeat_partial_cold_replacement_exit_preserves_delivery_fence": 2,
     "test_cold_recovery_two_successors_exclude_before_native_spawn": 1,

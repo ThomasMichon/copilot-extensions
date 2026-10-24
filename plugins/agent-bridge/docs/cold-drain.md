@@ -165,6 +165,8 @@ a cold result even if an erroneous producer labels it clean. Owner-pinned and
 drain-before-publication cutovers use the strict client hook before control,
 including the existing required-live-predecessor installer path. Ordinary,
 unrestricted drains retain automatic cold-on-confirmed-mismatch behavior.
+Conditional cutovers reject an explicitly cold response before normalizing its
+result, even if its completion flags incorrectly claim clean, unforced success.
 A generation that selected cold
 drain cannot subsequently attest a graceful drain, even after its admission gate
 is released; releasing a gate cannot undo an interruption.

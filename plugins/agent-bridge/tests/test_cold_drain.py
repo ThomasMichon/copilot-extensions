@@ -840,7 +840,11 @@ async def test_cold_drain_owner_identity_and_exclusion_refuse(
         await cleanup(session_manager)
 
 
-def test_cold_drain_strict_graceful_rejects_even_mislabelled_clean() -> None:
+@pytest.mark.parametrize("conditional", [False, True])
+def test_cold_drain_strict_graceful_rejects_even_mislabelled_clean(
+    conditional: bool,
+) -> None:
+    from zdd.conditional import PreparedCutover
     from zdd.cutover import CutoverError
     from zdd.cutover_drain import _drain_old
 
@@ -855,14 +859,24 @@ def test_cold_drain_strict_graceful_rejects_even_mislabelled_clean() -> None:
         drain_before_publish=True,
         make_client=lambda _url: SimpleNamespace(drain=lambda **_kw: response),
     )
+    prepared = SimpleNamespace(
+        verify_before_retire=lambda: None,
+        old=SimpleNamespace(),
+        new=SimpleNamespace(),
+        snapshot=SimpleNamespace(drain_predecessor=lambda *_: response),
+    )
+    conditional_owner = SimpleNamespace(
+        drain_predecessor=lambda timeout: PreparedCutover.drain_predecessor(prepared, timeout),
+    )
     result = SimpleNamespace(steps=[], drain=None)
-    with pytest.raises(CutoverError, match="did not drain"):
+    with pytest.raises(CutoverError, match="cold mode|did not drain"):
         _drain_old(
             owner,
             SimpleNamespace(port=1, base_url="fixture"),
             result,
             drain_timeout=1,
             force=False,
+            conditional=conditional_owner if conditional else None,
         )
 
 
