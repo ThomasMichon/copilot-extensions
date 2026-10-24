@@ -440,9 +440,9 @@ def test_actual_ssh_cold_provision_preserves_selection_and_source_independence(
     requests = status(root=root)
     assert len(requests) == 4 and requests[-1].state == "completed"
     assert requests[-1].exit_code != 0, diagnostic()
-    assert "fixture failed installed SSH candidate" in requests[-1].log_path.read_text(
-        errors="replace",
-    ), diagnostic()
+    assert json.loads(requests[-1].spec.source)["payload"] == str(failed_snapshot)
+    failure_log = requests[-1].log_path.read_text(errors="replace")
+    assert "Fresh runtime slot failed its health gate (versions/99.0.0)" in failure_log, diagnostic()
     assert (installation / "current-version").read_text().strip() == version
     assert completion.read_bytes() == complete
     assert not (installation / "versions" / "99.0.0" / ".install-complete.json").exists()
