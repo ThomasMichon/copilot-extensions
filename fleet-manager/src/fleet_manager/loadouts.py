@@ -252,6 +252,7 @@ def design_loadout(config: object, inventory: object, catalog: object | None = N
     }
     suggested = copy.deepcopy(config)
     suggested["extensions"]["loadout_composition"] = copy.deepcopy(composition)
+    canonical(suggested)
     result = {
         "schema": "fleet-manager.loadout-design", "version": 1,
         "status": "blocked" if blockers else "review-required",

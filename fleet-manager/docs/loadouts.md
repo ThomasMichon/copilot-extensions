@@ -219,6 +219,9 @@ Its `suggested_config` preserves the complete input configuration and adds
 the resolved composition at `extensions.loadout_composition`. The knowledge
 repository's existing publication owner can review and publish that desired
 configuration; this command never guesses or writes that repository.
+The suggested configuration must itself fit the normal bounded-input contract
+(1 MiB, nesting depth 12), not merely the larger output envelope; otherwise
+design refuses rather than offering configuration that subsequent reads reject.
 Template provenance/content digests and exact named placements remain in the
 composition. Neither a digest nor a saved reviewable result grants authority.
 

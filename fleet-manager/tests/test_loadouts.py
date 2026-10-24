@@ -10,7 +10,7 @@ import pytest
 
 from fleet_manager.__main__ import main
 from fleet_manager.loadouts import DIMENSIONS, design_loadout
-from fleet_manager.planning import PlanError
+from fleet_manager.planning import PlanError, canonical, decode
 
 
 def resource(cpu=1000, memory=2048, disk=4096):
@@ -104,6 +104,25 @@ def test_named_host_grid_exact_fit_support_dedup_and_publication_preserve_custom
     assert suggested["extensions"]["loadouts"] == args[0]["extensions"]["loadouts"]
     assert suggested["extensions"]["loadout_composition"] == composition
     assert compute(*args)["digest"] == result["digest"]
+    reloaded = decode(canonical(suggested))
+    assert compute(reloaded, *args[1:])["suggested_config"] == suggested
+
+
+@pytest.mark.parametrize("excess", ["nesting", "bytes"])
+def test_publication_config_must_fit_normal_reload_bounds_not_only_output_bounds(excess):
+    args = inputs()
+    if excess == "nesting":
+        nested = "leaf"
+        for _ in range(8):
+            nested = {"level": nested}
+        args[2]["templates"][0]["configuration"] = nested
+    else:
+        args[0]["extensions"]["custom"]["large"] = ["x" * 60000] * 12
+        args[2]["templates"][0]["configuration"] = {"large": ["y" * 60000] * 6}
+    for value in args:
+        canonical(value)
+    with pytest.raises(PlanError, match=f"input exceeds {excess[:-1] if excess == 'bytes' else excess} limit"):
+        compute(*args)
 
 
 def test_two_scale_sets_share_support_once_and_charge_both_runner_envelopes():
@@ -278,6 +297,9 @@ def test_actual_cli_reads_contributed_slots_and_reports_errors(tmp_path, capsys)
     result = json.loads(capsys.readouterr().out)
     assert result["composition"]["allocations"]["runners"]["configuration"]["max_runners"] == 2
     assert before == {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    (tmp_path / "config.json").write_bytes(canonical(result["suggested_config"]))
+    assert main(["design", *args]) == 0
+    assert json.loads(capsys.readouterr().out)["suggested_config"] == result["suggested_config"]
     inventory = tmp_path / "inventory.json"
     changed = json.loads(inventory.read_text())
     changed["hosts"][0]["capacity"]["disk_bytes"] -= 1
