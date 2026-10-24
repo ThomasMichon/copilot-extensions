@@ -56,7 +56,7 @@ def _project_path(project: str | None, worktree_id: str | None) -> Path:
 
     try:
         if worktree_id is None:
-            return configured_repository_paths(project)[project]
+            return configured_repository_paths(project, require_project_absolute=True)[project]
         from .record_read import read_exact_record
 
         previous = cfg.active_project()

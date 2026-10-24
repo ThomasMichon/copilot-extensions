@@ -111,6 +111,41 @@ def test_owner_prefix_does_not_replace_an_explicit_checkout(
     assert str(actual) in json.loads(capsys.readouterr().out)["error"]
 
 
+@pytest.mark.parametrize("anchor", [".", "relative"])
+def test_project_policy_refuses_cwd_relative_owner_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    anchor: str,
+) -> None:
+    config = _create_config(tmp_path)
+    path = core.cfg.project_dir(config.repo_name) / "config.yaml"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["repos"][config.repo_name]["anchor"] = anchor
+    path.write_text(json.dumps(data), encoding="utf-8")
+    controller = tmp_path / "unrelated-controller"
+    (controller / "relative").mkdir(parents=True)
+    monkeypatch.chdir(controller)
+    monkeypatch.setattr(agent_policy, "require_agent_hosting", _unexpected)
+    assert core.main([
+        "--project", config.repo_name, "agent-policy", "check", "--project-root", "--json",
+    ]) == 3
+    result = json.loads(capsys.readouterr().out)
+    assert "must be absolute" in result["error"] and "allowed" not in result
+
+
+def test_project_policy_does_not_reinterpret_unrelated_source_metadata(
+    tmp_path: Path, capsys: pytest.CaptureFixture,
+) -> None:
+    config = _create_config(tmp_path)
+    path = core.cfg.project_dir(config.repo_name) / "config.yaml"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["repos"]["other-source"] = {"anchor": "relative-source"}
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert core.main([
+        "--project", config.repo_name, "agent-policy", "check", "--project-root", "--json",
+    ]) == 0
+    assert json.loads(capsys.readouterr().out)["repository"] == config.default_repo.anchor
+
+
 def test_exact_worktree_policy_reads_record_and_restores_project_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
 ) -> None:

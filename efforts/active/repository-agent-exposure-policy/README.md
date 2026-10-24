@@ -10,7 +10,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** source-only intent and implementation PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; integrated Linux candidate qualified, native and publication gates open
+- **Status:** Active; source qualified, final review/release/adoption gates open
 - **Vision:** extends [agent-worktrees](../../../visions/plugins/agent-worktrees/README.md)
   repository identity/contribution posture and
   [agent-bridge](../../../visions/plugins/agent-bridge/README.md)
@@ -59,7 +59,8 @@ vendor CLI.
 The current machine-local `projects.yaml` field `expose_agent` filters Bridge
 discovery; `repos.yaml` uses `agent` when projecting local exposure into project
 registration. These are not already a repository-owned, consistently enforced
-hosting veto. Do not describe the proposed behavior as implemented.
+hosting veto. The qualified source candidate now adds that contract; publication,
+release and running adopter enforcement remain separate gates.
 
 Use the existing repository configuration and resolution rules documented in
 [configuration](../../../docs/configuration.md#in-repo-committed), including
@@ -114,42 +115,43 @@ _Agent-recommended implementation sequence; execution authorized._
 
 - [x] Review a vision amendment distinguishing source repositories from
   agent-hosting projects, before implementing the stronger hosting contract.
-- [ ] Define one effective repository-policy resolver, consumed through existing
+- [x] Define one effective repository-policy resolver, consumed through existing
   plugin boundaries without introducing a second registry or mandatory runtime
   dependency between otherwise independent plugins.
-- [ ] Add strict boolean `expose_agent` repository configuration using existing
+- [x] Add strict boolean `expose_agent` repository configuration using existing
   canonical/legacy path and marketplace resolution. An explicit repository
   `false` is a veto over stale local `true` and explicit named targets; a `true`
   or absent key does not independently grant adoption or launch authority.
-- [ ] Preserve existing machine-local exposure controls and absent-key
+- [x] Preserve existing machine-local exposure controls and absent-key
   compatibility. Do not silently reinterpret every historical
   `projects.yaml expose_agent: false` as the new repository-owned veto.
-- [ ] Preserve the operator's distinct discovery defaults: direct repository
+- [x] Preserve the operator's distinct discovery defaults: direct repository
   checks have no implicit veto; `repos.yaml` and `related.yaml` require explicit
   agent opt-in; `projects.yaml` contains Copilot/Manager launch projects.
-  Keep this repository worktree-class related only, with no advertised agent.
-- [ ] Refuse malformed explicit policy or an unreadable required policy source
+  The repository's own source-only posture and live catalog acceptance remain
+  Phase 3 obligations.
+- [x] Refuse malformed explicit policy or an unreadable required policy source
   with an actionable error rather than treating it as permission to host.
 
 ### Phase 2 - Managed adoption and launch boundaries
 
 _Agent-recommended implementation sequence; requires Phase 1._
 
-- [ ] Apply the effective veto before project-adoption side effects and before
+- [x] Apply the effective veto before project-adoption side effects and before
   managed authoring launch effects: Manager/picker, Bridge creation/embodiment,
   resume/re-embodiment, dispatch/autopilot and managed handoff successor paths.
   Inventory actual entry points during implementation; do not assume one front
   covers the others.
-- [ ] Check caller planning and the receiving launch boundary, including
+- [x] Check caller planning and the receiving launch boundary, including
   supported remote/provider routes. A stale discovery result or an explicit
   target must not bypass receiver enforcement; fail visibly when a required
   receiver cannot uphold the policy.
-- [ ] Preserve source-only workspace allocation and source-control lifecycle
+- [x] Preserve source-only workspace allocation and source-control lifecycle
   operations. Separate `create worktree` from `launch agent` even when a caller
   currently composes them.
-- [ ] Preserve external Copilot Code Review and review-only instructions without
+- [x] Preserve external Copilot Code Review and review-only instructions without
   a forgeable generic `purpose=review` exemption to managed authoring launch.
-- [ ] Return an actionable refusal identifying the policy and suggesting an
+- [x] Return an actionable refusal identifying the policy and suggesting an
   eligible external harness, without silently selecting or spawning one.
 
 ### Phase 3 - Adoption and state-preserving reconciliation
@@ -158,7 +160,9 @@ _Agent-recommended follow-through; live changes require separate authorization._
 
 - [ ] Add the source-only repository's explicit denial after generic enforcement
   and source-operation compatibility are qualified. Do not add an inert marker
-  and claim that hosting is already prevented.
+  and claim that hosting is already prevented. Keep this repository worktree-class
+  related only, with no advertised agent; preserve existing state until any
+  necessary reconciliation is explicitly approved.
 - [ ] Provide a supported preview/reconciliation path for conflicting existing
   project registrations. Preserve sessions, history, tracking and claims; no
   automatic termination, deletion or unregistration.
@@ -170,16 +174,16 @@ _Agent-recommended follow-through; live changes require separate authorization._
 
 _Agent-recommended proofs; record results as implementation proceeds._
 
-- [ ] Exercise strict policy parsing and canonical/legacy/marketplace resolution:
+- [x] Exercise strict policy parsing and canonical/legacy/marketplace resolution:
   absent, true, false, malformed and unreadable configurations; no
   success-shaped permission fallback.
-- [ ] Prove repository `false` defeats stale local `true`, explicit targets and
+- [x] Prove repository `false` defeats stale local `true`, explicit targets and
   cached discovery, while local exposure restrictions still apply and absent
   policy preserves compatibility without auto-adopting a project.
-- [ ] Prove an absent repository veto permits direct agent eligibility checks
+- [x] Prove an absent repository veto permits direct agent eligibility checks
   without advertising ordinary `repos.yaml` or `related.yaml` entries as agents;
   explicit catalog opt-in remains subject to the repository veto.
-- [ ] Use isolated fixtures to assert denial occurs before adoption writes,
+- [x] Use isolated fixtures to assert denial occurs before adoption writes,
   session/process/mux creation or seed submission for each inventoried managed
   entry point. Test caller and receiver boundaries, including remote/provider
   routing and unsupported enforcing receivers.
@@ -187,11 +191,11 @@ _Agent-recommended proofs; record results as implementation proceeds._
   completion remain usable under an external harness; externally hosted
   Copilot Code Review remains usable. Agent/review files confer no hosting
   permission and a generic review-purpose parameter cannot bypass denial.
-- [ ] Prove a policy introduced after a session exists does not kill it,
+- [x] Prove a policy introduced after a session exists does not kill it,
   discard its state or erase custody. Newly attempted managed
   resume/re-embodiment is refused; read-only inspection and deliberate
   state-preserving migration remain available.
-- [ ] Run targeted bounded suites and the applicable clean-room/native
+- [x] Run targeted bounded suites and the applicable clean-room/native
   Windows/Linux entry-point proofs before release/adoption; no production
   agent launch as an unapproved test.
 - [ ] Verify authorized installed policy enforcement and unchanged source/review
@@ -200,7 +204,7 @@ _Agent-recommended proofs; record results as implementation proceeds._
 
 ## Proposal
 
-Repository configuration to implement; **not yet enforced**:
+Qualified candidate configuration; **not yet released or installed**:
 
 ```yaml
 expose_agent: false
@@ -317,3 +321,32 @@ machine metadata/project enumeration with hosting eligibility.
   the originally authorized stop token while refusing a newer stop during brief
   generation. The fence keeps the original session and notice generation rather
   than recapturing authority after resume.
+
+### 2026-10-23 - Native qualification and public capture checkpoint
+
+- Native Windows source qualification passes the shared resolver (67 cases),
+  Worktrees policy/owner boundaries (90), Manager (82 with 18 platform skips),
+  Bridge receivers (93), Dispatch (18), and container admission (6). The selected
+  source boundary code, not a deployed runtime or real model session, was tested.
+- Repaired the Manager fixture's Windows Python forwarding: CRT `execv` lost
+  multiline code/argument quoting and returned success before its failing child.
+  Explicit bounded subprocess forwarding now preserves code, stdin and exit
+  status; the actual PowerShell wrapper refuses malformed policy before any
+  diagnostic pruning or automatic preparation.
+- Direct CodeSpace admission now checks an exact available venue before SSH
+  configuration can wake it, using its discovered raw identity/account without
+  projecting account bindings. Six new controls plus existing attached,
+  detached and SSH compatibility pass 195 disconnected cases; the final native
+  policy cohort passes 21 cases.
+- The public source checkpoint passes all 1,274 currently admitted unit cases.
+  Canonical HTTP-47 capture and no-write verification each pass all 117 required
+  model-free probes. Only owned current-generation evidence and registry metadata
+  are refreshed; older generations, protocol floors and independent expectations
+  remain unchanged.
+- Project-root admission also refuses CWD-relative owner anchors before policy
+  inspection. The stricter read applies only to the selected project; unrelated
+  legacy source metadata and ordinary record readers retain their existing
+  behavior. The final Worktrees/record cohort passes 202 cases.
+- Phases 1 and 2 are source-complete, not merged/released/installed claims.
+  The repository marker, contribution/review acceptance under it, release and
+  separately authorized live adoption/reconciliation remain the next gates.
