@@ -8,13 +8,13 @@ from .registrar import RegistrarError
 from .registrar_recipes import _absolutize_emitter_cwd, resolve_extends
 
 
-def inspect_template(path: Path, activation) -> tuple[dict, dict]:
+def inspect_template(path: Path, activation, snapshot=None) -> tuple[dict, dict]:
     from .worker_instances import digest
 
     context = {}
     document = resolve_extends(
         {"extends": str(path)}, base_dir=path.parent, activation=activation,
-        resolution_context=context,
+        resolution_context=context, snapshot=snapshot,
     )
     if document.get("kind") == "composite":
         raise RegistrarError("template kind cannot be materialized by the local instance lifecycle")

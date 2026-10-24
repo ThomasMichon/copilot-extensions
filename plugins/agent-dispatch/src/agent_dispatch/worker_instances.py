@@ -211,6 +211,11 @@ def _validate_command_dependency(command: list[str], directory: Path, *, explici
             and any((target / name).is_file() for name in ("__main__.py", "__main__.pyc"))
         ):
             raise RegistrarError(f"missing script dependency: {script}")
+    if not explicit_cwd and (
+        (path_command and not Path(executable).is_absolute())
+        or (script is not None and not Path(script).is_absolute())
+    ):
+        raise RegistrarError("relative command/script dependencies require an explicit working directory")
 
 
 def _validate_evaluator_dependency(declaration, resources) -> None:

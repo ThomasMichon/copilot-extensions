@@ -17,7 +17,7 @@ from .registrar import RegistrarError
 from .registrations import RegistrationKind
 from .repo_config import layered_repo_surface_dirs, surface_entry_present
 from .repository_resource_capture import run_agent_worktrees_capture
-from .repository_resources import split_repository_resource
+from .repository_resources import RepositoryResourceSnapshot, split_repository_resource
 from .worker_instances import digest, templates
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
@@ -188,6 +188,7 @@ def _text(value: object, field: str, limit: int) -> str:
 def _entry(
     source: TemplateSource, entry: object, root: Path, index: Path, *,
     activation: ActivationReport, definitions: dict | None = None,
+    snapshot: RepositoryResourceSnapshot,
 ) -> dict:
     if not isinstance(entry, dict) or set(entry) - {
         "id", "title", "description", "kind", "declaration", "requirements",
@@ -224,7 +225,7 @@ def _entry(
     try:
         if source.provider.startswith("repo-pointer:"):
             raise RegistrarError("template instantiation requires a canonical registered repository identity")
-        resolved, recipe_context = inspect_template(document_path, activation)
+        resolved, recipe_context = inspect_template(document_path, activation, snapshot)
         if resolved.get("kind", "supervised-lane") != kind:
             raise RegistrarError("template kind differs from its resolved recipe")
     except (RegistrarError, OSError, ValueError, RuntimeError) as exc:
@@ -278,6 +279,7 @@ def _entry(
 def _read_source(
     source: TemplateSource, findings: list[dict], *,
     activation: ActivationReport, definitions: dict | None = None,
+    snapshot: RepositoryResourceSnapshot,
 ) -> list[dict]:
     try:
         if source.kind == "user-local" and not surface_entry_present(source.root):
@@ -318,7 +320,10 @@ def _read_source(
         try:
             if isinstance(entry, dict) and isinstance(entry.get("id"), str) and names[entry["id"]] > 1:
                 raise ValueError(f"duplicate template id {entry['id']!r}")
-            rows.append(_entry(source, entry, root, index, activation=activation, definitions=definitions))
+            rows.append(_entry(
+                source, entry, root, index, activation=activation,
+                definitions=definitions, snapshot=snapshot,
+            ))
         except (OSError, ValueError, RuntimeError) as exc:
             _finding(findings, f"{source.index}#{offset}", "invalid-template", str(exc))
     return rows
@@ -329,6 +334,7 @@ def discover_templates(
 ) -> tuple[list[dict], dict]:
     """Enumerate inert provider rows and separately scoped completeness findings."""
     findings: list[dict] = []
+    snapshot = RepositoryResourceSnapshot(execution=False)
     sources = []
     for finding in activation.findings:
         _finding(findings, "plugin-activation", "activation-finding", str(finding))
@@ -353,7 +359,9 @@ def discover_templates(
         if token in seen:
             continue
         seen.add(token)
-        rows.extend(_read_source(source, findings, activation=activation, definitions=_definitions))
+        rows.extend(_read_source(
+            source, findings, activation=activation, definitions=_definitions, snapshot=snapshot,
+        ))
     return rows, {
         "state": "partial" if findings else "complete",
         "provider_templates": len(rows), "findings": findings,

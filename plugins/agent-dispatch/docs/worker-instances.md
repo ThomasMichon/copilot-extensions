@@ -148,6 +148,10 @@ from an already registered repository. A legacy repository pointer retains its
 pointer attribution; its label/path basename is not a registered repo identity.
 It remains browse-only until a canonical repository identity is available.
 Arbitrary directory pointers are not additional template roots.
+Repository discovery consumes the resident repository map without point-lookup
+fan-out. Named recipe dependencies in one catalog refresh share the existing
+registered-resource snapshot and lookup deadline. Separate refreshes and Save
+rechecks retain fresh snapshots; this is not a persistent cache.
 
 ```json
 {
@@ -253,8 +257,11 @@ future evaluator process's context.
 Path-containing evaluator executables are checked and invoked relative to
 that admitted policy directory on both platforms, preserving parent traversal
 for native filesystem resolution rather than collapsing symlink-sensitive paths.
-This binding is evaluator-specific: script-forge retains its declaring-repository
-path resolution and still refuses relative scripts without a declaring root.
+This binding is explicitly selected by evaluators and command-emitter tick and
+side-load execution. Script-forge retains its declaring-repository path resolution
+and still refuses relative scripts without a declaring root. Saving relative
+command or script dependencies requires an explicit working directory rather than
+validating against a root the eventual emitter process will not use.
 Selected inline policies
 retain precedence over ignored file-policy fields, as in the evaluator owner.
 Policy files must be regular files before the owner loader is called.

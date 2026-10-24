@@ -21,6 +21,7 @@ from agent_dispatch.worker_instances import (
     ACTIVATION_CONSENT, active_dir, instance_dir, read_records, save_instance,
 )
 from agent_dispatch.workers_catalog import catalog
+from tests.test_worker_templates import registered_root, repository_map
 
 
 @pytest.fixture(autouse=True)
@@ -30,9 +31,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(tmp_path / "overrides.json"))
     monkeypatch.setattr("plugin_activation.resolve_active_plugins", activation)
     monkeypatch.setattr("agent_dispatch.workers_catalog._observation", lambda: {"known": False})
-    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **k: SimpleNamespace(
-        returncode=0, stdout='{"inventory_authority":"complete","repos":[]}', stderr="",
-    ))
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **k: repository_map())
 
 
 def activation():
@@ -370,8 +369,8 @@ def test_registered_repository_context_stays_named_through_local_publication(
             "kind": "emitter", "declaration": "source.json",
         }],
     }), encoding="utf-8")
-    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **k: SimpleNamespace(
-        returncode=0, stdout='{"inventory_authority":"complete","repos":[{"name":"library"}]}', stderr="",
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **k: repository_map(
+        registered_root("library", root, repo_class),
     ))
     monkeypatch.setattr(repository_resources, "_registered_repository", lambda *a, **k: (root, repo_class))
     row = wt.discover_templates(activation())[0][0]
@@ -444,7 +443,7 @@ def test_composed_repository_source_cannot_lose_implicit_supplier_context(monkey
 
     path, _ = provider(_config())
     root = rd.registrar_dir()
-    monkeypatch.setattr(wt, "_repository_sources", lambda findings: [wt.TemplateSource(
+    monkeypatch.setattr(wt, "_repository_sources", lambda findings, **kwargs: [wt.TemplateSource(
         "repo:library", root, path.parent / "index.json", ("repo:library",),
         "repository-layer:templates",
     )])
@@ -619,6 +618,94 @@ def test_inherited_supplier_does_not_create_an_absent_execution_cwd(monkeypatch,
         assert save(row, activate=True)["activation"] == "pending"
         declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
         assert "cwd" not in declaration.spec
+
+
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_template_rows_share_one_refresh_registry_snapshot_and_deadline(monkeypatch, tmp_path, unavailable):
+    from agent_dispatch import repository_resources
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    (supplier / "base.json").write_text(json.dumps(pool()), encoding="utf-8")
+    clock, calls = [0.0], []
+    monkeypatch.setattr(repository_resources, "monotonic", lambda: clock[0])
+    def registered(name, **kwargs):
+        calls.append(name)
+        if unavailable:
+            clock[0] += 16
+            raise RegistrarError("fixture registry unavailable")
+        return supplier, "worktree"
+    monkeypatch.setattr(repository_resources, "_registered_repository", registered)
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **k: repository_map(
+        registered_root("library", supplier, "worktree"),
+    ))
+    path, _ = provider({"extends": "repo:library:base.json"}, kind="supervised-lane")
+    index = path.parent / "index.json"
+    data = json.loads(index.read_text())
+    data["templates"].append({**data["templates"][0], "id": "second"})
+    index.write_text(json.dumps(data), encoding="utf-8")
+    calls.clear()
+    for expected in (1, 2):
+        rows, _ = wt.discover_templates(activation())
+        assert len(rows) == 2
+        assert all(row["instantiable"] == ("false" if unavailable else "true") for row in rows)
+        assert calls == ["library"] * expected
+
+
+@pytest.mark.parametrize("script_argument", [False, True])
+def test_relative_emitter_dependencies_require_explicit_runtime_cwd(monkeypatch, tmp_path, script_argument):
+    command = [sys.executable, "producer.py"] if script_argument else [f".{os.sep}producer.tool"]
+    _, row = provider({
+        "kind": "emitter", "spec": {"id": "{name}", "command": command, "interval_seconds": 60},
+    })
+    root = tmp_path / "chosen-validation-root"
+    root.mkdir()
+    (root / ("producer.py" if script_argument else "producer.tool")).write_text("fixture", encoding="utf-8")
+    with pytest.raises(RegistrarError, match="explicit working directory"):
+        save(row, root=str(root))
+    assert not instance_dir().exists()
+
+
+@pytest.mark.parametrize("side_load", [False, True])
+def test_relative_emitter_executable_uses_declared_cwd_not_daemon_cwd(monkeypatch, tmp_path, side_load):
+    from agent_dispatch.producers import emitter
+    from tests.test_producers_emitter import FakeClient
+
+    root, daemon = tmp_path / "execution", tmp_path / "daemon"
+    root.mkdir()
+    daemon.mkdir()
+    if os.name == "nt":
+        source = os.environ["COMSPEC"]
+        name, arguments = "producer.exe", ["/d", "/c", "type", "tasks.json"]
+    else:
+        source = shutil.which("cat")
+        if source is None:
+            pytest.skip("native cat executable unavailable")
+        name, arguments = "cat", ["tasks.json"]
+    executable = root / name
+    shutil.copy(source, executable)
+    (root / "tasks.json").write_text("[]", encoding="utf-8")
+    command = [f".{os.sep}{name}", *arguments]
+    spec = {"id": "fixture", "command": command, "cwd": str(root), "interval_seconds": 60, "task_output": "json"}
+    if side_load:
+        spec["side_load"] = {"command": [command[0], *arguments[:-1], "{change_ref}.json"]}
+    _, row = provider({"kind": "emitter", "spec": spec})
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    monkeypatch.chdir(daemon)
+    monkeypatch.setattr(emitter, "receipts_path", lambda *a: tmp_path / "receipts.json")
+    client, calls = FakeClient(), []
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs["cwd"]))
+        return subprocess.run(argv, **kwargs)
+    if side_load:
+        emitter.run_side_load(
+            client, {"kind": "emitter", "spec": dict(declaration.spec)}, "tasks", runner=run,
+        )
+    else:
+        assert emitter.run_tick(client, dict(declaration.spec), holder="fixture", runner=run)["returncode"] == 0
+    assert calls[0][0][0] == str(executable) and calls[0][1] == str(root)
+    assert not client.created
 
 
 @pytest.mark.parametrize("kind", ["evaluator", "supervised-lane"])
