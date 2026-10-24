@@ -239,9 +239,12 @@ requirements.
 
 #### Collaboration contract continuation
 
-- [ ] Review and merge the claimed [collaboration/thread/recipient contract](collaboration.md)
+- [x] Review and merge the claimed [collaboration/thread/recipient contract](collaboration.md)
   over existing Chat state before dependent implementation, preserving the
   coordinated client/service/plugin extension points.
+  Reviewed contract #8134 merged as
+  `85942fd63be8c298ba880bf0d42b5a5747f15c24`; implementation and qualification
+  below remain open.
 - [ ] Implement and qualify optional structured posts and non-consuming
   thread/inbox projections through the existing store and installed client.
   Pending reply attention must outlive an ambient window without becoming a
@@ -376,6 +379,106 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-23 - Bound each pending branch before lookahead merge
+
+- The second review on `8d2d8fab9a` confirmed the first two findings resolved,
+  but its body retained a real Medium issue despite the overview's
+  "No open issues" label: small inbox pages still sorted an entire genuinely
+  pending backlog. No merge followed that ambiguous summary.
+- Regression-first measurement reproduced4634 versus205357 SQLite instructions
+  for100 versus5000 unanswered directed questions. Each indexed branch now
+  applies its snapshot/retirement filters and ordered lookahead limit before
+  merging their bounded IDs and loading canonical bodies.
+- Two additive cases cover unanswered requests and mixed answer/question
+  backlogs without changing pending semantics, captured paging, reader progress
+  or the120/600-second qualification allowances. The387-node acceptance packet
+  passes with352 passes, two allowed POSIX skips and33 full-only deselections
+  in78.78 seconds. Final full qualification and the next real-head review/CI
+  remain open.
+
+### 2026-10-23 - Review-driven projection work bounds
+
+- The first current-head review of #8159 found two real lock-held query costs:
+  an empty inbox scanned unrelated questions and a sparse thread scanned
+  unrelated channel events. Regression-first measurements reproduced growth
+  from5373 to225511 and1698 to75166 SQLite instructions, respectively, as
+  unrelated history grew from100 to5000 events.
+- Candidate selection now starts with indexed channel/recipient or canonical
+  reply-author relationships; thread IDs and the root are bounded before event
+  bodies are loaded. Derived channel/reply-author scalars are committed with
+  the canonical event and metadata, not writable attention state. No native
+  listener, transport or lifecycle source is involved.
+- Three additive regressions include unrelated questions, the viewer's own
+  ambient messages, another channel's correspondence and sparse-thread
+  pagination. Each requires no more than1000 extra SQLite instructions between
+  the small and large fixtures. The existing120-second acceptance lane passes
+  with349 passes, two allowed POSIX skips and33 full-only deselections in98.14
+  seconds;384 nodes are collected. Final same-candidate full qualification and
+  the next actual-head review/CI remain required before merge.
+- That full run exposed a Windows fixture race: the reader-lock child's ready
+  pathname became visible while replacement still temporarily denied reading
+  it. The fixture now requires a readable complete record within its unchanged
+  five-second deadline, still proves the same live child/lock and actual crash
+  release before Job cleanup, and adds one deterministic publication-race case
+  without removing the normal case. This does not change production reader
+  logic or hide a permanent publication failure.
+- Final candidate `d3265690f7` passed the unchanged full and acceptance lanes
+  without further source edits: full383 passes and two allowed POSIX skips
+  in108.58 seconds; acceptance350 passes, the same skips and33 full-only
+  deselections in77.97 seconds. Both complete385-node maps share
+  `e1b8371d38ee3691daed1058b305eae2ba63f393d2927fbdd7a0a4c02464f4e1`.
+  The original326 cases remain and59 cases are additive. The next current-head
+  review and required CI remain merge gates, not implied approvals.
+
+### 2026-10-23 - Portable collaboration candidate qualified
+
+- Implementation candidate `f95502367dc4880be906de48f22b30eb897ba95b`
+  adds optional typed posts, atomic canonical metadata/recipient indexes,
+  stable annotated recovery and non-consuming captured thread/inbox views.
+  Existing text event/page shapes, ordinary cursor settlement and the
+  transport/lifecycle/workspace owners remain unchanged.
+- The unchanged native Windows acceptance and full lanes exercised that same
+  immutable candidate: acceptance selected348 of381 nodes, with346 passes,
+  two allowed POSIX-only skips and33 full-only deselections in81.26 seconds;
+  full selected381, with379 passes and the same two allowed skips in98.72
+  seconds. Both maps were complete and shared membership digest
+  `b1fd10b81848876c5b93a22d5d65fb1ed2c2ef9f0f92b24ab3305afa59d51ac4`.
+  The original326 nodes remain;55 cases were added.
+- Simple end-to-end and fresh-artifact tiers use the existing real HTTP,
+  provider and source-removed installed client/core/service fixtures. They
+  cover lost structured responses, explicit original-ID recovery, recipient
+  and thread projections, and unchanged ordinary reading. No installer or
+  bootstrap changed, so a separate fresh-machine clean-room rig was not
+  required; these artifact environments are not managed-host deployment.
+- Eighteen focused pure metadata/control cases pass locally and are enrolled
+  additively in the existing source-unit manifest. Whole-packet Windows
+  qualification is not claimed: the earlier canonical packet refused a
+  native loader in activation-preservation after856 passes and one platform
+  skip. The exact boundary is retained with the existing portfolio owner in
+  [#1303](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6360280182);
+  no observer or neighboring implementation was weakened. The complete
+  required Linux source-unit packet still has to pass on the review head.
+- Changed-source lint, install-contract and documentation checks pass.
+  The registered `services/chat` consumer has one generated patch changefile;
+  no release version is hand-selected. Native Linux Chat, native feed
+  assignment, foreground attachment and managed adoption are not inferred
+  from these Windows source/artifact results.
+- Review/merge and the parent completion gate remain open. No runtime update,
+  deployment, private provider or external venue activation is authorized or
+  performed by this qualification.
+
+### 2026-10-23 - Collaboration contract reviewed
+
+- The four-document specification merged in #8134 at
+  `85942fd63be8c298ba880bf0d42b5a5747f15c24`, after current-head Copilot
+  approval with no findings and passing required checks.
+- Re-read the complete Plan and Validation Plan after merge. Only the contract
+  review item is resolved; structured post/view implementation, installed
+  qualification and the broader native/lifecycle/adoption gates remain open.
+- Continue in the same source worktree from the reviewed contract. Claim the
+  exact service/client/test boundary before code rather than finalizing the
+  still-Active parent effort.
 
 ### 2026-10-23 - Collaboration contract continuation
 

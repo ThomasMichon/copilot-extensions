@@ -226,6 +226,21 @@ def test_status_does_not_resolve_installation_or_enqueue(queued, monkeypatch):
     assert seen == {}
 
 
+def test_status_exposes_settlement_kind_without_executing_installation(queued, monkeypatch, capsys):
+    import json
+    import update_driver
+
+    seen, request = queued
+    request.state, request.error = "interrupted", "native scope settled after failure"
+    request.settled_at, request.settlement_kind = 1.0, "native_scope"
+    monkeypatch.setattr(update_driver, "status", lambda identifier: request)
+    assert boundary.cmd_update_request(_args(request_status=request.id, json=True)) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "interrupted" and result["exit_code"] is None
+    assert result["settlement_kind"] == "native_scope" and result["settled_at"] == 1.0
+    assert seen == {}
+
+
 def test_auth_report_stays_read_only_before_custody_resolution(queued, monkeypatch):
     seen, _request = queued
     monkeypatch.setattr(update_cli, "cmd_update", lambda args: 4)

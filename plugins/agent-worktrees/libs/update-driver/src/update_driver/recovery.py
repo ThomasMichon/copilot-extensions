@@ -11,7 +11,7 @@ from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import boot, foundation_state
 from .core import (
     DriverError, Request, StateError, _assert_database_identity, _database,
-    _foundation_operation, _request, _root, status,
+    _foundation_operation, _request, _root, _upgrade_schema, status,
 )
 
 
@@ -113,9 +113,11 @@ def recover_after_restart(*, root: Path | None = None) -> tuple[Request, ...]:
             assessment = _assess(requests, current)
             if assessment.refused:
                 raise RecoveryError("recovery evidence changed; reconciliation refused")
+            _upgrade_schema(db, root, lock)
             for identifier in assessment.eligible_ids:
                 db.execute(
                     """UPDATE requests SET state='interrupted',settled_boot_id=?,settled_at=?,
+                    settlement_kind='kernel_restart',
                     finished_at=COALESCE(finished_at,?),
                     error=COALESCE(error,'previous owner interrupted across kernel restart')
                     WHERE id=?""",
