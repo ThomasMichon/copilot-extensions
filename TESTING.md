@@ -2483,8 +2483,70 @@ python tools/run-plugin-tests.py agent-dispatch \
   --max-processes 32 --max-memory-mb 2048 --max-temp-mb 512
 ```
 
-Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
-than repeatedly importing file groups that contain no selected tests.
+Filtered (`-k`) and guard-only selections normally run as one contained
+sub-suite rather than repeatedly importing unrelated file groups.
+
+On Windows, the normal runner automatically partitions
+`agent-codespaces/tests/test_installer_engine_adoption.py` within its existing
+file-group plan: healthy admission and retry/fatal admission/orchestration run
+separately for each editable mode, with the non-boolean admission-spy negative
+controls in the editable failure group; standalone
+snapshot/development-generation lifecycle; and an exhaustive complement for
+everything else, including newly collected tests. The selectors are disjoint;
+other files retain their original groups and are not recollected for each
+partition. This also applies to `--test-file` and intersects every partition
+with a caller's `-k`; `--guards` remains an additional marker restriction.
+Non-Windows and unrelated suites retain their existing grouping.
+Exact-node selection manifests retain their existing collection plan and
+fail-closed missing-node admission rather than adding a keyword restriction.
+The Windows standalone snapshot fixture supplies a real pipless stdlib venv
+interpreter on its isolated PATH: a batch-only `py` shim cannot satisfy the
+installer's windowless native bootstrap invocation.
+
+This is automated partitioning, not a manual-selector or timeout exception.
+Each group retains the default 300-second ceiling, remaining plugin time
+still caps every group within the default 900-second aggregate, and the
+30-second runner request, existing pytest markers and 45-second native fixture
+subprocess deadlines are unchanged. An unexpectedly empty unfiltered partition
+fails. Filtered empty groups throughout an automatically partitioned plan may
+be traversed, including other files preceding the installer partitions, but
+cannot turn an entirely empty explicit-file selection into success; only the
+existing non-explicit guard-only empty-suite convention remains a skip.
+
+Within these automatic Codespaces partitions, pytest assertion exit `1` is sticky:
+later partitions still execute, but later passes cannot turn the plugin result
+green (#6917). Ordinary unpartitioned groups retain their fail-fast behavior.
+
+The native snapshot-copy contract is additionally exercised by
+`agent-codespaces/tests/test_snapshot_copy_contract.py` in canonical-source and
+real-materialized layouts. It compares fresh-destination copies with native
+`Copy-Item`, including complete binary/empty/hidden/read-only contents and
+root-reparse behavior; deterministic copy failures and linked canonical-input
+symbolic-link refusals must remain non-successful. Windows junction non-refusal
+is characterized rather than silently changed into a new policy. An unavailable
+actual symbolic-link capability blocks that required check; a junction, mock,
+privilege change or skip is not a substitute. Isolated no-op, omitted-entry, truncated
+content and wrong-destination mutations must fail the content oracle.
+The existing installer module retains its original node inventory while its
+real stamp fixture also compares complete library contents and a nested payload
+probe. No cache/metadata inputs are discarded to meet the native deadline.
+The shared PowerShell copy helper stays canonical on `dev`; normal release
+materialization, not checked-in per-plugin engine copies, supplies shipped bytes.
+Focused copy-contract results do not replace the complete automatic installer
+run or increase its existing native/item/group/aggregate limits.
+Interrupt/internal/usage failures, unfiltered empty collection, containment
+exceptions, resource failures and aggregate timeouts still abort immediately
+with their original status. The runner's multi-plugin policy is unchanged.
+
+`tools/test_run_plugin_tests.py` checks normal `run_plugin` command planning,
+real pytest collection inventory and exact-once coverage, explicit/filter
+selection behavior, failure propagation, and unchanged resource/aggregate
+limits. Run the owned native contract through the same automated plan without
+manual selectors:
+
+```powershell
+python tools\run-plugin-tests.py agent-codespaces --test-file tests\test_installer_engine_adoption.py
+```
 Use repeatable `--test-file <path-relative-to-tests>` with one plugin to avoid
 collecting unrelated modules before applying `-k`. Unknown, escaping and
 non-file selections fail before environment preparation. The Windows

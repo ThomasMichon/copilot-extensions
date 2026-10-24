@@ -1663,7 +1663,7 @@ function Materialize-SnapshotDependencies {
         if (Test-Path -LiteralPath $destination) {
             Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction Stop
         }
-        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+        Copy-InstallSnapshotItem -Source $source -Destination $destination
         $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
         $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $entry.Value
         $text = $text.Replace($oldLine, $newLine)
@@ -1718,7 +1718,7 @@ function Invoke-Stamp {
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
         $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            Copy-InstallSnapshotItem -Source $_.FullName -Destination (Join-Path $snapTmp $_.Name)
         }
         Materialize-SnapshotDependencies -SnapshotDir $snapTmp
         Deploy-SelfProvisioningBinstub -SnapshotSourcePath $snapTmp
