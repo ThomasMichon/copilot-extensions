@@ -218,9 +218,11 @@ not replace the held #6859 / #7833 lifetime repair.
 
 ### Phase 4 - Land, prove and finish
 
-- [ ] Close #8411's version/source-byte collision through the bounded
-  source-only compatibility repair, retaining exact unit evidence, normal
-  Main-derived allocation and the existing release owner's authority.
+- [x] Land #8411's bounded source-only compatibility repair in #8462,
+  retaining exact unit evidence, normal Main-derived allocation and the
+  existing release owner's authority.
+- [ ] Prove #8411's exact gate through a subsequent natural promotion
+  containing #8462 before closing the issue or completing its repair claim.
 - [ ] Update source-owned documentation and per-plugin changefiles, then drive
   each implementation through required review, CI, merge and source-worktree
   finalization.
@@ -297,6 +299,41 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-24 - Metadata repair merged; containing release still required
+
+- #8462 merged to `dev` at `33baf5fde3914a80c7e0407c3c6775f2c04c84c7`
+  after current-head Copilot approval, resolved findings and green required
+  CI. The managed merge exercised the repository's authorized review-rule
+  exception, not a failed-check bypass. The complete original import
+  closure and raw source-byte equivalence verifier remain required.
+- Review regressions now count metadata declarations independently of
+  value validity, handle simply quoted keys and commented/quoted table
+  headers, and refuse unsupported escaped, dotted, multiline-string and
+  array-table syntax explicitly. No duplicate or hidden project table is
+  treated as successful source metadata. Installed metadata remains the
+  primary version owner; Python 3.10 and the dependency-free core remain.
+- Pull-forward retained #8471's canonical construction resources and
+  independent sdist qualification. Windows passed 107 focused controls.
+  Linux passed the same 104 non-artifact controls and three actual artifact
+  cases, including both source-removed version variants and the canonical
+  resource sdist. An initial mounted-environment sdist timeout remains a
+  failed attempt, not a pass: measured setuptools import cost was 11.177
+  seconds there versus 1.010 seconds in a private native-filesystem copy.
+  The three remaining cases passed with unchanged 30-second artifact
+  deadlines in that isolated, automatically cleaned test environment.
+- A later pull-forward retained #8454's complete expanded positive
+  inventory and independently governed candidate-v3 proposal. The Chat
+  code, tests and fixture patches were byte-identical across that rebase.
+  The final required Linux packet passed all 1,385 units in 84.727 seconds,
+  with coverage once under the unchanged 300-second budget. Only Chat's
+  initializer digest differs from the upstream manifest; no node, source,
+  effect rule, coverage target or deadline was removed.
+- The containing natural release is the next gate. #8454 does not itself
+  activate Main, and historical source-units-v2 verification is unchanged.
+  #3336 retains Main/control, signing and publication custody. The effort,
+  #8411 repair claim and parent installed/normal-load gates remain open;
+  no forced workflow, host update or live recovery is authorized.
 
 ### 2026-10-23 - Keep the release-byte repair in source metadata
 
