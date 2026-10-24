@@ -272,7 +272,7 @@ class PickerScreenMaintenanceActionsMixin:
         else:
             return None
         return arr[i] if 0 <= i < len(arr) else None
-    def _decide(self, decision):
+    def _decide(self, decision, *, surface="picker-action"):
         """Record a launch decision and exit the TUI so __main__ can act on it.
 
         ``PickerApp.result`` stays ``None`` on cancel (q/Esc); a dict here is a
@@ -281,6 +281,15 @@ class PickerScreenMaintenanceActionsMixin:
         """
         if decision.get("deferred"):
             self.debug = decision.get("reason") or "Locality is not ready; refresh and retry."
+            if getattr(self, "real_ops", False) and not decision.get("attempt_id"):
+                from ...launch_confirmation import confirm_before_effect
+                from .. import context
+
+                confirm_before_effect(
+                    self, decision.get("project") or context.project(), decision,
+                    surface=surface, saved=self._decide, refusal=self.debug,
+                    refusal_code="locality-unresolved",
+                )
             self.refresh()
             return False
         if (
@@ -292,7 +301,7 @@ class PickerScreenMaintenanceActionsMixin:
 
             return confirm_before_effect(
                 self, decision.get("project") or context.project(), decision,
-                surface="picker-action", saved=self._decide,
+                surface=surface, saved=self._decide,
             )
         self.app.result = decision
         self.app.exit()
@@ -312,13 +321,6 @@ class PickerScreenMaintenanceActionsMixin:
         """
         raw = rec.get("raw") or {}
         m, e = rec.get("machine"), rec.get("env")
-        try:
-            is_local = self.src.is_local(m, e)
-        except RuntimeError as exc:
-            return {
-                "action": "resume", "deferred": True, "reason": str(exc),
-                "worktree_id": raw.get("id"), "is_local": None,
-            }
         decision = {
             "action": "resume",
             "journal_action": "open" if rec.get("mux_live") else "resume",
@@ -327,7 +329,7 @@ class PickerScreenMaintenanceActionsMixin:
             "machine": m,
             "env": e,
             "title": rec.get("title"),
-            "is_local": is_local,
+            "is_local": None,
         }
         opts = {}
         if no_mux:
@@ -340,6 +342,10 @@ class PickerScreenMaintenanceActionsMixin:
             opts["seed_prompt"] = seed_prompt
         if opts:
             decision["options"] = opts
+        try:
+            decision["is_local"] = self.src.is_local(m, e)
+        except RuntimeError as exc:
+            decision.update(deferred=True, reason=str(exc))
         return decision
     def _activate(self):
         zone = self.sel[0]

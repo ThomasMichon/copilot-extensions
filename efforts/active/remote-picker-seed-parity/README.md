@@ -716,3 +716,18 @@ do not establish that later transport fences preserve installed parity.
   integration; negotiated native SSH transport and all original installed
   conversation/exactly-once/cleanup gates remain open. No runtime rollout or
   delivered prompt-loss repair is implied by this source merge.
+- **2026-10-24** -- Attempt-journal confirmation #8542 merged with current-head
+  approval, resolved feedback and required CI. Known-target New/cold Resume
+  intent now persists before dismissal/effects; explicit mock actions remain
+  outside persistence. Unresolved-locality refusal recording is the next
+  linked-journal item, followed by outcomes and target receipt correlation.
+  The linked journal and this parent remain Active. No promotion/rollout,
+  restored SSH native-seed transport, installed prompt-loss repair or original
+  conversation/exactly-once acceptance is claimed by this source milestone.
+- **2026-10-24** -- Prepared the linked journal's unknown-locality refusal slice:
+  explicit unknown metadata, backward read compatibility and atomic validated
+  upgrade; confirmed refusals preserve selection/options without launch or
+  replacement intent. Focused action/storage checks and native Windows upgrade
+  crash checks pass. This is pending review, not a release or installed proof.
+  Continue outcome/target receipt correlation and negotiated target-owned SSH;
+  both efforts and all original delivered acceptance gates remain Active.
