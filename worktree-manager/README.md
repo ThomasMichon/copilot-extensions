@@ -70,6 +70,11 @@ retains the source/dependency/configuration inputs and constructs a non-editable
 runtime. Governed `uv pip install` selects runtime dependencies for this platform,
 not development groups or unrelated platforms, while retaining the configured
 indexes and the seven-day minimum external-dependency age.
+The Windows bootstrap resolves the selected UV command's filesystem links
+before its first Python lookup and retains that physical path for acquisition
+and the subsequent lookup. It does not launch a WinGet executable link or
+reselect UV if PATH changes during bootstrap; missing or unsupported targets
+fail before runtime construction without changing Windows mitigation policy.
 
 Only a candidate passing isolated installed-origin and real CLI-import health
 receives canonical completion and becomes `current-version`. Construction failure
