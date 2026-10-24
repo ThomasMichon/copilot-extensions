@@ -3118,7 +3118,7 @@ release, download wheels, detect hardware, resolve dependencies or activate a
 generation. `runtime_profile_wheels.verify_profile_wheels` separately checks
 the complete retained wheel set against the exact record, as described below.
 
-Actual consumers still need adapters from the existing installation authority
+Actual consumers still need integration with the existing installation authority
 and verified release/configuration channels, followed by admitted byte/metadata
 checks and immutable construction. Candidate release-input generation is a
 separate concern (#6941); neither constraints nor this inert record prove an
@@ -3144,6 +3144,37 @@ installation-mode activation never yields profile intent for the legacy root,
 even when the underlying mode resolver reports readiness.
 Native constructors do not yet consume this new API;
 the actual closure, authority composition and constructor acceptance stay open.
+
+`tools/runtime_profile_release.py` adds the repository-only release-channel
+adapter. An optional `runtime_profiles` extension in the existing
+`python-artifacts.json` index carries schema
+`copilot-extensions.release-runtime-profiles`, version 1, and a nonempty
+`profiles` array. Pre-signing artifact validation checks each complete record
+against its validated first-party bundle: the raw manifest digest, artifact ID,
+`<component>:<version>` release identity, payload digest, component, primary
+wheel and every selected first-party wheel digest must agree. An unused optional
+vendored library need not enter the applicable closure. Records use the fixed
+`promotion-main` approval reference and artifact mode. Source mode remains independent of
+artifact infrastructure and is not implemented by this adapter.
+
+`select_release_profile` retains the exact bounded index bytes under the
+installer's existing private temporary-input owner, then invokes
+`publish_python_artifacts.verify_attestation_subject` against the independently
+selected repository and pinned hosted Main workflow/source identity. It checks
+the same bytes after authentication before constructing its internal
+whole-record approval mapping. Caller-supplied approval maps, ambient producer
+hints and a subject's own signer declaration cannot establish approval.
+Selection additionally requires the independently selected source release,
+artifact/manifest pair, target, component, roots and capability. Returned
+evidence identifies the attested subject digest and producer; it is not feed
+admission or an installed-generation receipt.
+
+The producer does not yet generate or publish real profile records, and no
+runtime caller uses this adapter. Composition with the resolved adopting-policy
+baseline, independent source authentication/locking, actual governed acquisition,
+seasoning/revocation, measured production limits and consumer integration
+remain prerequisites. Existing indexes without the extension retain their
+original validation path and neither install nor update requires profiles.
 
 `tools/runtime_profile_wheels.py` adds repository-only actual-byte verification,
 not an approval adapter. `verify_profile_wheels` requires the complete exact

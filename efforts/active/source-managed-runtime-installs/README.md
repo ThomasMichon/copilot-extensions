@@ -297,7 +297,7 @@ transaction execution from the existing recurring-maintenance assignment.
   dispatch and no-write refusals on native Windows/Linux. Refuse unsupported
   cold custom roots and cells without changing healthy dispatch or adopting
   bootstrap/explicit installer publishers.
-- [ ] **Agent-recommended bounded bootstrap adoption:** route Pull Requests'
+- [x] **Agent-recommended bounded bootstrap adoption:** route Pull Requests'
   legacy session bootstrap's first stamp and drift provisioning through those
   qualified native actions and the same canonical queue. Preserve publication,
   exact source/root/project, killswitch, healthy and independent hook behavior,
@@ -305,6 +305,17 @@ transaction execution from the existing recurring-maintenance assignment.
   unsupported outcomes before state writes; remove its age/PID installer guard
   rather than retaining another execution owner. Explicit installers and cells
   remain separate acceptance.
+- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify SSH's
+  existing legacy stamp/provision actions through the same native foundation,
+  canonical queue and frozen-input owner before changing any ordinary SSH
+  publisher. Preserve its own payload declaration, source/root/project,
+  context/control semantics, native staging and actual service-less installer
+  options; do not infer Vault service flags or Pull Requests' snapshot layout.
+  Prove materialized cold install, installed CLI/source independence,
+  failed-candidate preservation, caller loss and no-write source/publication/
+  nested/unsupported refusal on native Windows/Linux. Command/bootstrap,
+  explicit installer, namespaced and retained-source #5379 qualification remain
+  separate unless directly exercised.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

@@ -35,6 +35,7 @@ companions = {
     for name in (
         "installer_engine.py", "installer_engine_process.py",
         "installer_dependency_policy.py", "installer_dependency_config.py",
+        "installer_wheel_inputs.py", "installer_wheel_snapshot.py", "runtime_launcher.py",
     )
 }
 setup(cmdclass=helpers["commands"](

@@ -44,7 +44,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
     assert membership_digest(mapping) != membership_digest(membership(changed))
     assert sum(PARAMETER_COUNTS.values()) == (
         236 + 6 + 18 + 7 + 46 + 3 + 10 + 28 + 6 + 21 + 3 + 1 + 2 + 1 + 8
-        + 10 + 4 + 11 + 10 + 9
+        + 10 + 4 + 11 + 10 + 9 + 14 + 2 + 6
     )
     for profile in ("acceptance", "full"):
         selected = {

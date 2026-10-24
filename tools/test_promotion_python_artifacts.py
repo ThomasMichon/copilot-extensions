@@ -975,13 +975,13 @@ def test_candidate_artifact_validation_checks_out_composed_attributes(
 
     monkeypatch.setattr(promotion, "consume_pending_changes", materialize)
     directory = tmp_path / "export"
-    promotion.promote(
+    report = promotion.promote(
         repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
         toolchain_source="seasoned-public" if entrypoint == "workflow" else "governed",
         toolchain_min_age_days=7 if entrypoint == "workflow" else None,
     )
     if entrypoint == "workflow":
-        _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+        _run_workflow_validator(repo, directory, dev, main, monkeypatch, report=report)
         index = json.loads((directory / artifacts.INDEX_NAME).read_text())
     elif entrypoint == "promote":
         report = promotion.promote(

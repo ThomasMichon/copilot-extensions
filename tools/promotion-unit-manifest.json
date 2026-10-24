@@ -1602,7 +1602,7 @@
     "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
     "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
     "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
-    "tools/promotion_python_artifacts.py": "6fd2da4247f3fd72aa5adff4417322b6c2aac56505c837932f9828ba108ddd80",
+    "tools/promotion_python_artifacts.py": "270066fb3d7532f38baf236bb9cd1139e167a113c0e0f306dc2080de15ffd0e0",
     "tools/promotion_unit_contract.py": "fd2128e4a492e5307533361c1443bb3e6623b338154d9c0ba8e9f4475029cfd5",
     "tools/promotion_unit_effects.py": "bc724db0e33571f32fc80b016eb7a852935adeb08a7aa0cd4bfa4ca4513c3519",
     "tools/promotion_unit_packet.py": "363c6c6288c4d733c0ace951e851eca12d236dcb4d1e4dfbbbf8cf73dcc7cbab",

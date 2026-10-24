@@ -15,8 +15,40 @@ def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path)
     )
 
 
+def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_python():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
+    triggers = workflow["on"] if "on" in workflow else workflow[True]
+    assert set(triggers) == {"workflow_dispatch"}
+    selected = triggers["workflow_dispatch"]["inputs"]["chat_construction"]
+    assert selected["type"] == "boolean" and selected["default"] is False
+    jobs = workflow["jobs"]
+    for suffix, host in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        job = jobs["chat-construction-" + suffix]
+        assert job["if"] == "${{ inputs.chat_construction }}"
+        assert job["runs-on"] == host
+        assert job["strategy"] == {
+            "fail-fast": False, "matrix": {"python": ["3.10", "3.11"]},
+        }
+        setup = next(step for step in job["steps"] if step.get("id") == "chat-python")
+        assert setup["with"]["python-version"] == "${{ matrix.python }}"
+        acceptance, full = [step for step in job["steps"] if "run" in step]
+        assert acceptance["env"]["UV_PYTHON"] == "${{ steps.chat-python.outputs.python-path }}"
+        assert acceptance["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/chat", "--prepare",
+            "--chat-suite", "acceptance", "--timeout", "180",
+        ]
+        assert full["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/chat",
+            "--chat-suite", "full", "--timeout", "600",
+        ]
+    for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
+        assert "!inputs.chat_construction" in jobs[name]["if"]
+        assert "!inputs.wheel_inputs" in jobs[name]["if"]
+        assert "!inputs.runtime_profiles" in jobs[name]["if"]
+
+
 @pytest.mark.parametrize("profile,timeout,explicit", [
-    ("acceptance", 120, False), ("full", 600, False),
+    ("acceptance", 180, False), ("full", 600, False),
     ("acceptance", 45, True), ("full", 45, True),
 ])
 @pytest.mark.parametrize("outcome", [0, 1])

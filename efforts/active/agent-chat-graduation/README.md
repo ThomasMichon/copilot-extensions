@@ -268,9 +268,11 @@ requirements.
 
 #### Container role, private templates and Komodo
 
-- [ ] Review and land the [container role specification](container-service.md)
+- [x] Review and land the [container role specification](container-service.md)
   against the evolving Chat, Gateway and loadout visions before implementing
   the container path or publishing downstream configuration.
+  #8522 merged after current-head approval and required CI. This closes the
+  intent/specification review only, not image delivery or private deployment.
 - [ ] Deliver an independently operable Chat service image and portable
   role/configuration template with explicit artifact, storage, identity,
   Gateway, placement and resource bindings through existing owners.
@@ -470,6 +472,85 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-24 - Retain the current canonical import closure
+
+- The corrected456-node head completed both lanes on all four fresh
+  Linux/Windows3.10/3.11 combinations, with complete membership and only the
+  two declared Windows POSIX skips. Those results belong to
+  `be61115f28e1895baa51887083d646c126b644b1`, not a later rebased candidate.
+- Reconcile the independent native-selector additions without dropping any
+  dispatch exclusion. The updated canonical constructor from #8534 also
+  imports the wheel snapshot/inspection companions: deliver both unchanged
+  through the same artifact hooks and include them in resource/import-scope
+  and missing-input controls. This does not select Chat wheel profiles or
+  change artifact-admission authority.
+- Focused fresh-artifact and real-construction controls pass26 cases after
+  that dependency update. Preserve all previous cases and add the six companion
+  controls;462-node full/fast qualification and fresh final-head execution
+  remain required before treating the updated candidate as qualified.
+
+### 2026-10-24 - Fresh-host qualification corrections
+
+- Fresh Linux3.10/3.11 lanes completed acceptance and full execution. Both
+  Windows floors exposed an actual workspace deadline subtraction rounding
+  above60s; keep the strict limit and cap forwarding to the original budget.
+  Two deterministic binary-exponent boundary regressions add coverage without
+  changing or removing any previous case.
+- Use two literal hosted OS routes with the existing Python-floor matrices,
+  rather than weakening the trusted-CI prohibition on dynamic runner routes.
+  The actual trusted-CI guard and52 bounded workflow/runner contracts pass.
+- The corrected Windows3.11 candidate passes417/456 acceptance nodes
+  (415 passed,2 POSIX skips,39 full-only deselections) in117.64s within180s,
+  and full454+2 skips in184.71s within600s. Both report complete execution and
+  membership
+  `855b1be0c87ee399cf619154debd38e3d8325c32cd872d99dea0b7fa54b142b0`.
+  Re-run all four fresh hosted combinations against the corrected head;
+  earlier results do not certify this changed candidate.
+
+### 2026-10-24 - Current installed-constructor qualification
+
+- The current Windows Python3.11.9 candidate passed the complete unfiltered
+  acceptance lane413+2 POSIX-only skips with39 full-only deselections in105.63s
+  within180s, and full452+2 skips in165.14s within600s. All454 collected nodes
+  retain membership
+  `c131716bfc0410a61a203204451e7512c4988dbd42206bf167363c32fdd35c95`;
+  execution is complete in both lanes.
+- Actual Python3.10.21 full compatibility passed452+2 skips in135.64s.
+  Python3.14.7 acceptance passed413+2 skips/39 deselections in109.28s, and
+  full452+2 skips in197.45s. Installed application/process-helper bytes were
+  checked against current source rather than assuming a cached venv was current.
+- Earlier attempts exceeded fast limits or failed native startup/fault
+  prerequisites. Those are failed observations, not retroactive passes.
+  Preserve every case under the operator-approved180s allowance, with600s full
+  and all existing per-operation/read/HTTP/custody bounds unchanged. The current
+  focused native controls passed3 cases in22.59s before the full unfiltered
+  qualification; no native assertion was removed or marked skipped.
+- Reuse only exact metadata-keyed installations; build immutable base/library
+  artifact inputs once, keep separate fresh version/role environments, and use
+  the existing caller-owned CWD/environment seam without another child adapter.
+  The optional native matrix pins the actual prepared interpreter and runs
+  both lanes on each selected Linux/Windows floor. Fresh hosted execution is
+  still required; a workflow definition is not its result.
+- This advances internal client construction, not selected setup/removal,
+  container delivery, private configuration or live adoption. Preserve the
+  reviewed #8522 container contract and every still-open parent gate.
+
+### 2026-10-24 - Container and Komodo amendment reviewed
+
+- #8522 merged as `e38e62981c410de3041215d1a6eafc24a1aff18e`
+  at08:03:41Z after current-head Copilot approval and all required checks.
+  The complete review reported no findings and no review threads remained.
+  Managed completion used the authorized additional-CODEOWNER review
+  exception, not a CI bypass.
+- Re-read the complete Plan and Validation Plan after merge. Close only the
+  container specification review item. Image/template delivery, private
+  actualization, Komodo execution and every container acceptance item remain
+  open; #7238 remains Open.
+- Continue the retained construction/client qualification slice before
+  claiming selected setup. The reviewed container contract now governs its
+  later fleet realization; no private configuration or runtime rollout is
+  implied by this merge.
+
 ### 2026-10-24 - Add template-owned Chat container and Komodo intent
 
 - Capture the operator's container/template/private-configuration/Komodo
@@ -486,6 +567,40 @@ shared-multiplex contracts above.
 - The independent construction consumer and its outstanding qualification stay
   separate. This amendment is not selected-client setup, managed service
   installation or completion of the parent effort.
+
+### 2026-10-24 - Consume canonical construction from installed Chat
+
+- Continue the Chat-owned setup adapter through the delivered resources, not a
+  constructor copy. `construction.client_candidate` supplies the exact client
+  extra/local closure and installed health to canonical `numbered_candidate`.
+  The loader verifies the wheel RECORD, refuses occupied canonical import
+  names and removes its temporary top-level aliases after loading.
+- The existing installed construction callback binds the canonical
+  `runtime_launcher.py` and runtime family into the unpublished slot. Health
+  verifies that exact bootstrap on fresh construction and immutable reuse.
+  An independent Chat sdist plus three independent declared-library sdists
+  build the actual candidate without checkout resources or sibling runtimes.
+  The manual client runs through the retained slot-local launcher after all
+  source inputs are removed; no selector is published.
+- Add focused role-delegation, import-scope, Python-floor, completed-slot and
+  bootstrap-drift controls. The optional `chat_construction` native workflow
+  selects the complete Chat portfolio on Linux/Windows Python3.10/3.11 instead
+  of adding subprocess work to required unit CI. Source-only artifacts and
+  native test definitions do not prove that this workflow has executed.
+- Actual freshly prepared Windows Python3.14.7 and Python3.10.21 full portfolios
+  each passed422 with2 POSIX-only skips,424/424 nodes and complete execution,
+  in168.66s and145.30s respectively within600s. The3.10 constructor refusal is
+  explicit and occurs before a runtime is created. Current acceptance passed383
+  with2 platform skips and39 full-only deselections in94.52s within120s.
+  Both lanes bind membership
+  `5ccc2afd362c113e5e2f5bbe234bdc591c3bbfb0e37131d20311dd639c7c6fa1`.
+  Initial focused collection exposed a stale managed test wheel; canonical
+  `--prepare` refreshed the changed package before these final full runs.
+- This is an internal construction consumer, not independently runnable
+  selected setup or preserving removal. Keep the manual-client selection,
+  installation ownership, service lifecycle, native assignment/shared-feed,
+  migration, release/adoption and parent completion gates open. No live
+  installation, command, configuration, service or subscription is changed.
 
 ### 2026-10-24 - Deliver construction resources in Chat artifacts
 

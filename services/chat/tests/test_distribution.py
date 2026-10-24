@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 
@@ -59,7 +60,7 @@ print(json.dumps({"installed_transport":checks}),flush=True)
 
 @pytest.mark.parametrize("installed_chat", [None, "0.1.20-dev1"], indirect=True,
                          ids=["source-metadata", "promoted-metadata"])
-def test_source_independent_wheel(tmp_path, installed_chat):
+def test_source_independent_wheel(tmp_path, installed_chat, request):
     run = installed_chat.run
     probe = """
 import importlib.metadata
@@ -104,6 +105,13 @@ finally:
         str(installed_chat.core_python), "-I", "-c", probe,
         str(installed_chat.core_target), str(tmp_path / "data"),
     ], cwd=tmp_path))
+    expected_version = request.node.callspec.params["installed_chat"]
+    if expected_version is None:
+        manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        expected_version = re.search(
+            r'(?m)^version = "([^"]+)"$', manifest.read_text(encoding="utf-8"),
+        )[1]
+    assert result["version"] == expected_version
     assert result["installed"] and result["messages"] == 1 and result["cursor"] == 0
     console = installed_chat.console
     assert run([str(console), "--version"], cwd=tmp_path).strip() == result["version"]
@@ -122,7 +130,7 @@ finally:
         "argv": [str(installed_chat.interpreter), "-I", "-m", "agent_chat_service.cli"],
         "shell": "direct", "availability": "ready",
     }
-    assert len(catalog["resource_sha256s"]) == 18
+    assert len(catalog["resource_sha256s"]) == 22
     assert "hosting.py" in catalog["resource_sha256s"]
     assert "workspace.py" in catalog["resource_sha256s"]
     assert "collaboration.py" in catalog["resource_sha256s"]
@@ -171,6 +179,8 @@ def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
             name: installer / name for name in (
                 "installer_engine.py", "installer_engine_process.py",
                 "installer_dependency_policy.py", "installer_dependency_config.py",
+                "installer_wheel_inputs.py", "installer_wheel_snapshot.py",
+                "runtime_launcher.py",
             )
         },
     }

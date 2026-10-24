@@ -35,6 +35,10 @@ on:
         description: Exercise role-selectable candidate construction and immutable reuse with real UV
         type: boolean
         default: false
+      chat_construction:
+        description: Qualify standalone Chat construction, retained invocation and Python floors
+        type: boolean
+        default: false
       ssh_snapshot:
         description: Run read-only SSH snapshot, native session writer and same-cell peer acceptance
         type: boolean
@@ -53,7 +57,7 @@ permissions:
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -74,7 +78,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -273,6 +277,41 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps: *candidate-profile-steps
+
+  chat-construction-linux:
+    if: ${{ inputs.chat_construction }}
+    name: Chat construction (Linux, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy: &chat-construction-strategy
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11"]
+    steps: &chat-construction-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        id: chat-python
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Independent artifacts and native Chat acceptance
+        env:
+          UV_PYTHON: ${{ steps.chat-python.outputs.python-path }}
+        run: >-
+          python tools/run-standalone-tests.py services/chat --prepare
+          --chat-suite acceptance --timeout 180
+      - name: Complete native Chat portfolio on the same candidate
+        run: >-
+          python tools/run-standalone-tests.py services/chat
+          --chat-suite full --timeout 600
+
+  chat-construction-windows:
+    if: ${{ inputs.chat_construction }}
+    name: Chat construction (Windows, Python ${{ matrix.python }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy: *chat-construction-strategy
+    steps: *chat-construction-steps
 
   ssh-snapshot-native-linux:
     if: ${{ inputs.ssh_snapshot }}
@@ -539,6 +578,7 @@ jobs:
           tools/test_installer_closed_wheels.py
           tools/promotion_unit_tests/test_runtime_profile_wheels.py
           tools/test_runtime_profile_bootstrap.py
+          tools/test_runtime_profile_release.py
           tools/test_check_install_contract.py::TestExactRuntimeProfile
           tools/test_promotion_python_artifacts.py::test_trusted_wheel_validation_reads_real_metadata_and_members
           tools/test_promotion_python_artifacts.py::test_bundle_rejects_unsafe_wheels

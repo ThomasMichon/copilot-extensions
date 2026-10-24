@@ -844,6 +844,7 @@ def validate_artifacts(
             raise PromotionArtifactError("artifact entries must be a list")
         names, plugins = {INDEX_NAME}, set()
         shared_toolchain = None
+        profile_manifests = {}
         for entry in entries:
             if not isinstance(entry, dict):
                 raise PromotionArtifactError("invalid artifact entry")
@@ -867,6 +868,14 @@ def validate_artifacts(
             if path.is_symlink() or not path.is_file() or _digest(path) != digest:
                 raise PromotionArtifactError(f"{name}: artifact digest mismatch")
             manifest = validate_bundle(path, entry, candidate_root=candidate_root)
+            if "runtime_profiles" in index:
+                with zipfile.ZipFile(path) as bundle:
+                    manifest_bytes = bundle.read("manifest.json")
+                if json.loads(manifest_bytes) != manifest or _digest(path) != digest:
+                    raise PromotionArtifactError("runtime-profile bundle changed during validation")
+                profile_manifests[identity] = (
+                    manifest, "sha256:" + hashlib.sha256(manifest_bytes).hexdigest(),
+                )
             toolchain = manifest["build_toolchain"]
             if shared_toolchain is not None and toolchain != shared_toolchain:
                 raise PromotionArtifactError("artifact sets do not share one build-toolchain lock")
@@ -879,6 +888,14 @@ def validate_artifacts(
                 floor = DEFAULT_MIN_AGE_DAYS if min_age_days is None else min_age_days
                 if provenance["min_age_days"] != floor:
                     raise PromotionArtifactError("artifact toolchain seasoning differs from required policy")
+        if "runtime_profiles" in index:
+            from runtime_profile import ProfileError
+            from runtime_profile_release import validate_release_bindings
+
+            try:
+                validate_release_bindings(index, profile_manifests)
+            except ProfileError as exc:
+                raise PromotionArtifactError(f"invalid release runtime profiles: {exc}") from exc
         if {path.name for path in directory.iterdir()} != names:
             raise PromotionArtifactError("unexpected files in promotion artifact directory")
         if projects is not None and {

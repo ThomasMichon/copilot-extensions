@@ -7,6 +7,13 @@ from collections import Counter
 
 
 FAMILIES = {
+    "test_construction.py": """
+test_construction_floor_refuses_before_resource_loading
+test_occupied_import_scope_is_not_replaced
+test_client_policy_delegates_one_canonical_candidate
+test_completed_slot_cannot_prepare_bootstrap
+test_installed_health_refuses_bootstrap_drift
+""",
     "test_collaboration.py": """
 test_metadata_refuses_invalid_fields_and_bounds
 test_structured_identity_recovery_and_legacy_shapes
@@ -36,6 +43,7 @@ test_existing_owner_head_and_execution_tuple_are_not_reassigned
 test_invalid_initialization_refuses_before_executing_owner
 test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback
 test_workspace_reads_share_one_finite_deadline
+test_workspace_deadline_rounding_never_exceeds_original_budget
 test_late_owner_response_cannot_turn_deadline_expiry_into_success
 test_workspace_requires_explicit_complete_owner_argv_before_execution
 test_owner_failure_is_not_retried_or_downgraded_to_anchor
@@ -97,6 +105,8 @@ test_fresh_installed_host_source_removed_independent_participants_and_crash_rest
     "test_setup_distribution.py": """
 test_independent_sdist_refuses_missing_construction_input
 test_installed_constructor_preserves_the_separate_bootstrap_floor
+test_installed_construction_refuses_foreign_imports_without_mutation
+test_installed_constructor_builds_chat_client_from_independent_inputs
 """,
     "test_local_endpoint.py": """
 test_local_endpoint_offline_status_never_resolves_or_executes
@@ -181,6 +191,9 @@ EXPECTED = {
 
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
+    "test_workspace.py::test_workspace_deadline_rounding_never_exceeds_original_budget": 2,
+    "test_construction.py::test_occupied_import_scope_is_not_replaced": 6,
+    "test_construction.py::test_installed_health_refuses_bootstrap_drift": 3,
     "test_collaboration.py::test_metadata_refuses_invalid_fields_and_bounds": 22,
     "test_collaboration.py::test_annotated_pending_requires_complete_receipt_before_recovery": 6,
     "test_collaboration.py::test_client_refuses_invalid_views_without_mutating_semantic_progress": 13,
@@ -201,7 +214,7 @@ PARAMETER_COUNTS.update({
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_collaboration_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_refuses_unusable_installed_evidence": 17,
-    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 9,
+    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 13,
     "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 9,
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
     "test_cli.py::test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic": 2,
@@ -214,7 +227,7 @@ PARAMETER_COUNTS.update({
     "test_client.py::test_malformed_success_objects_do_not_confirm_an_operation": 6,
     "test_client.py::test_scan_validates_body_free_returned_only_progress_without_reading": 4,
     "test_distribution.py::test_installed_catalog_worker_preserves_isolation": 2,
-    "test_setup_distribution.py::test_independent_sdist_refuses_missing_construction_input": 3,
+    "test_setup_distribution.py::test_independent_sdist_refuses_missing_construction_input": 5,
     "test_distribution.py::test_source_independent_wheel": 2,
     "test_hosting.py::test_absolute_ingress_deadline_retires_slow_input_and_releases_admission": 2,
     "test_hosting.py::test_configuration_refuses_without_echoing_values": 7,

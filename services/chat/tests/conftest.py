@@ -113,16 +113,10 @@ def caller_observer(monkeypatch):
 
 
 def run_artifact(argv, *, cwd=None, input_text=None, timeout=30):
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
     result = run_caller_owned(
-        [
-            sys.executable, "-I", "-c",
-            "import os,subprocess,sys; cwd=sys.argv.pop(1); "
-            "os.chdir(cwd) if cwd else None; os.environ.pop('PYTHONPATH',None); "
-            "sys.exit(subprocess.call(sys.argv[1:],"
-            "stdin=sys.stdin.buffer,stdout=sys.stdout.buffer,stderr=sys.stderr.buffer,"
-            "creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0))",
-            str(cwd) if cwd is not None else "", *map(str, argv),
-        ],
+        list(map(str, argv)), cwd=cwd, env=environment,
         timeout=timeout, input_text=input_text,
         max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=4 * 1024 * 1024,
     )
@@ -130,64 +124,103 @@ def run_artifact(argv, *, cwd=None, input_text=None, timeout=30):
     return result.stdout
 
 
+LIBRARIES = ("agent-procutil", "single-instance-lease", "endpoint-rendezvous")
+
+
+def build_artifact(original, source, output, hook, pattern):
+    shutil.copytree(
+        original, source,
+        ignore=shutil.ignore_patterns("build", "dist", "tests", "*.egg-info", "__pycache__",
+                                     ".venv", ".pytest_cache"),
+    )
+    output.mkdir(parents=True)
+    run_artifact([
+        sys.executable, "-I", "-c",
+        f"from setuptools.build_meta import {hook}; import sys; {hook}(sys.argv[1])",
+        str(output),
+    ], cwd=source)
+    artifact, = output.glob(pattern)
+    return artifact
+
+
 @pytest.fixture(scope="session")
-def installed_chat(tmp_path_factory, request):
-    root = tmp_path_factory.mktemp("chat-wheels")
+def chat_artifacts(tmp_path_factory):
+    root = tmp_path_factory.mktemp("chat-artifacts")
     project = Path(__file__).resolve().parents[1]
+    sources = root / "source"
+    for name in ("versioned-runtime", "installer-engine"):
+        shutil.copytree(
+            project.parents[1] / "libs" / name, sources / "libs" / name,
+            ignore=shutil.ignore_patterns("__pycache__", "tests", ".pytest_cache", ".ruff_cache"),
+        )
+
+    def build(name):
+        relative, hook, pattern = (
+            (Path("services") / "chat", "build_sdist", "*.tar.gz") if name == "chat"
+            else (Path("libs") / name, "build_wheel", "*.whl")
+        )
+        return name, build_artifact(
+            project.parents[1] / relative, sources / relative,
+            root / "artifacts" / name, hook, pattern,
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        artifacts = dict(workers.map(build, ("chat", *LIBRARIES)))
+    shutil.rmtree(sources)
+    assert not sources.exists()
+    return artifacts
+
+
+@pytest.fixture(scope="session")
+def chat_library_sdists(tmp_path_factory):
+    root = tmp_path_factory.mktemp("chat-library-sdists")
+    project = Path(__file__).resolve().parents[1]
+
+    def build(name):
+        return name, build_artifact(
+            project.parents[1] / "libs" / name, root / "source" / name,
+            root / "artifacts" / name, "build_sdist", "*.tar.gz",
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as workers:
+        artifacts = dict(workers.map(build, LIBRARIES))
+    shutil.rmtree(root / "source")
+    return artifacts
+
+
+@pytest.fixture(scope="session")
+def chat_installations():
+    return {}
+
+
+@pytest.fixture(scope="session")
+def installed_chat(tmp_path_factory, request, chat_artifacts, chat_installations):
+    version = getattr(request, "param", None)
+    if version in chat_installations:
+        return chat_installations[version]
+    root = tmp_path_factory.mktemp("chat-wheels")
     wheels = root / "wheels"
     wheels.mkdir()
-    sources = []
-    for name, original in (
-        ("source", project),
-        ("helper-source", project.parents[1] / "libs" / "agent-procutil"),
-        ("lease-source", project.parents[1] / "libs" / "single-instance-lease"),
-        ("endpoint-source", project.parents[1] / "libs" / "endpoint-rendezvous"),
-    ):
-        source = root / name
-        shutil.copytree(
-            original, source,
-            ignore=shutil.ignore_patterns("build", "dist", "tests", "*.egg-info", "__pycache__",
-                                         ".venv", ".pytest_cache"),
-        )
-        sources.append(source)
-    version = getattr(request, "param", None)
+    for name in LIBRARIES:
+        wheel = chat_artifacts[name]
+        shutil.copyfile(wheel, wheels / wheel.name)
+    archive = chat_artifacts["chat"]
+    unpacked = root / "sdist-build"
+    shutil.unpack_archive(archive, unpacked, "gztar")
+    extracted, = unpacked.iterdir()
     if version is not None:
-        manifest = sources[0] / "pyproject.toml"
+        manifest = extracted / "pyproject.toml"
         text, count = re.subn(
             r'(?m)^version = "[^"]+"$', f'version = "{version}"',
             manifest.read_text(encoding="utf-8"), count=1,
         )
         assert count == 1
         manifest.write_text(text, encoding="utf-8")
-    resources = root / "libs"
-    for name in ("versioned-runtime", "installer-engine"):
-        shutil.copytree(
-            project.parents[1] / "libs" / name, resources / name,
-            ignore=shutil.ignore_patterns("__pycache__", "tests", ".pytest_cache", ".ruff_cache"),
-        )
-    artifacts = root / "sdist"
-    artifacts.mkdir()
     run_artifact([
         sys.executable, "-I", "-c",
-        "from setuptools.build_meta import build_sdist; import sys; build_sdist(sys.argv[1])",
-        str(artifacts),
-    ], cwd=sources[0])
-    archives = list(artifacts.glob("agent_chat_service-*.tar.gz"))
-    assert len(archives) == 1
-    unpacked = root / "sdist-build"
-    shutil.unpack_archive(archives[0], unpacked, "gztar")
-    extracted, = unpacked.iterdir()
-    shutil.rmtree(resources)
-
-    def build(source):
-        run_artifact([
-            sys.executable, "-I", "-c",
-            "from setuptools.build_meta import build_wheel; import sys; build_wheel(sys.argv[1])",
-            str(wheels),
-        ], cwd=source)
-
-    with ThreadPoolExecutor(max_workers=4) as workers:
-        list(workers.map(build, [extracted, *sources[1:]]))
+        "from setuptools.build_meta import build_wheel; import sys; build_wheel(sys.argv[1])",
+        str(wheels),
+    ], cwd=extracted)
     built = list(wheels.glob("agent_chat_service-*.whl"))
     assert len(built) == 1 and len(list(wheels.glob("*.whl"))) == 4
     assert all(len(list(wheels.glob(prefix + "-*.whl"))) == 1 for prefix in (
@@ -212,9 +245,6 @@ def installed_chat(tmp_path_factory, request):
         installations = dict(workers.map(install, (
             ("core-installed", None), ("client-installed", "client"), ("service-installed", "service"),
         )))
-    for source in sources:
-        shutil.rmtree(source)
-        assert not source.exists()
     shutil.rmtree(unpacked)
     target, scripts, interpreter = installations["client-installed"]
     assert json.loads(run_artifact([
@@ -231,7 +261,7 @@ def installed_chat(tmp_path_factory, request):
     ], cwd=root))["source_independent"]
     core_target, _, core_python = installations["core-installed"]
     service_target, service_scripts, service_python = installations["service-installed"]
-    return SimpleNamespace(
+    result = SimpleNamespace(
         root=root, target=target, interpreter=interpreter,
         console=scripts / ("agent-chat.exe" if os.name == "nt" else "agent-chat"),
         core_target=core_target, core_python=core_python, run=run_artifact,
@@ -239,8 +269,10 @@ def installed_chat(tmp_path_factory, request):
         service_console=service_scripts / (
             "agent-chat-service.exe" if os.name == "nt" else "agent-chat-service"
         ),
-        sdist=archives[0],
+        sdist=archive,
     )
+    chat_installations[version] = result
+    return result
 
 
 @pytest.fixture
