@@ -326,12 +326,20 @@ class LaunchAttempts:
         except (OSError, sqlite3.Error, ValueError, TypeError, OverflowError) as exc:
             raise LaunchAttemptError("Could not read launch-attempt metadata.") from exc
 
-    def detail(self, attempt_id: str, *, include_input: bool = False) -> dict:
+    def detail(
+        self, attempt_id: str, *, include_input: bool = False,
+        event_limit: int = 1000, after_sequence: int = 0,
+    ) -> dict:
         """Input is opt-in and never returned after its original expiry deadline."""
         try:
             _identity(attempt_id)
             if type(include_input) is not bool:
                 raise ValueError("Invalid private-input selection")
+            if (
+                type(event_limit) is not int or not 1 <= event_limit <= 1000
+                or type(after_sequence) is not int or after_sequence < 0
+            ):
+                raise ValueError("Invalid launch-event page")
             if not self._exists():
                 raise LaunchAttemptError("Launch attempt was not found.")
             with self._connect() as connection:
@@ -346,7 +354,8 @@ class LaunchAttempts:
                 events = []
                 for event in connection.execute(
                     "SELECT sequence, observed_at, owner, phase, details FROM events "
-                    "WHERE attempt_id=? ORDER BY sequence LIMIT 1001", (attempt_id,),
+                    "WHERE attempt_id=? AND sequence>? ORDER BY sequence LIMIT ?",
+                    (attempt_id, after_sequence, event_limit + 1),
                 ):
                     details = json.loads(event["details"])
                     _validate_observation(event["owner"], event["phase"], details)
@@ -357,9 +366,11 @@ class LaunchAttempts:
                     ):
                         raise ValueError("Invalid stored launch observation")
                     events.append({**dict(event), "details": details})
-                result["events"] = events
-                if len(result["events"]) > 1000:
-                    raise LaunchAttemptError("Launch attempt exceeds the detail event budget.")
+                result["events"] = events[:event_limit]
+                result["events_has_more"] = len(events) > event_limit
+                result["next_event_sequence"] = (
+                    result["events"][-1]["sequence"] if result["events_has_more"] else None
+                )
                 if include_input:
                     if not row["inputs_available"]:
                         raise LaunchAttemptError("Private launch input has expired or was erased.")

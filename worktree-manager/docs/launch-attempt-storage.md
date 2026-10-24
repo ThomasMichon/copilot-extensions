@@ -36,6 +36,9 @@ launched Copilot, consumed prompt or safe replay.
 `entries` returns bounded metadata, with optional project/action/time filters.
 `detail` adds bounded structured observations. Neither selects private input.
 Metadata includes boolean `is_local` and `inputs_available` fields.
+Event history is paged with `event_limit` (at most 1000) and `after_sequence`;
+`events_has_more` and `next_event_sequence` explicitly identify another page.
+Growing accepted history never prevents recovery of unexpired private input.
 `detail(..., include_input=True)` explicitly retrieves exact prompt/options
 only before the original 90-day confirmation deadline. Corrupt stored metadata,
 events or input refuse rather than returning a success-shaped substitute.

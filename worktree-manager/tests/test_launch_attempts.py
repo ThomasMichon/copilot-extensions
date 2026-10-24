@@ -208,6 +208,40 @@ def test_observations_preserve_owner_meaning_and_do_not_infer_success(tmp_path):
     assert detail["events"][-1]["details"] == {"exit_code": 0}
 
 
+def test_large_accepted_history_does_not_hide_private_input_and_is_fully_pageable(tmp_path):
+    store = journal.LaunchAttempts(tmp_path)
+    attempt_id = record(store)
+    with sqlite3.connect(store.path) as connection:
+        connection.executemany(
+            "INSERT INTO events(attempt_id, observed_at, owner, phase, details) "
+            "VALUES (?, ?, 'manager', 'unknown', '{}')",
+            [(attempt_id, journal.time.time())] * 1000,
+        )
+    store.append(attempt_id, owner="manager", phase="launcher-returned", exit_code=0)
+    first = store.detail(attempt_id, include_input=True)
+    assert first["input"]["prompt"] == "  exact 'private' text\nsecond line\n"
+    assert len(first["events"]) == 1000
+    assert first["events_has_more"] is True
+    assert first["next_event_sequence"] == first["events"][-1]["sequence"]
+    second = store.detail(attempt_id, after_sequence=first["next_event_sequence"])
+    assert len(second["events"]) == 2
+    assert second["events_has_more"] is False and second["next_event_sequence"] is None
+    sequences = [event["sequence"] for event in first["events"] + second["events"]]
+    assert sequences == sorted(set(sequences)) and len(sequences) == 1002
+    assert second["events"][-1]["phase"] == "launcher-returned"
+
+
+@pytest.mark.parametrize("page", [
+    {"event_limit": 0}, {"event_limit": 1001}, {"event_limit": True},
+    {"after_sequence": -1}, {"after_sequence": True},
+])
+def test_event_page_arguments_refuse_invalid_or_unbounded_reads(tmp_path, page):
+    store = journal.LaunchAttempts(tmp_path)
+    attempt_id = record(store)
+    with pytest.raises(journal.LaunchAttemptError, match="detail"):
+        store.detail(attempt_id, **page)
+
+
 @pytest.mark.parametrize("details", [
     {"prompt": "private"}, {"stderr": "private"}, {"code": "private"},
     {"worktree_id": "private\ntext"}, {"exit_code": True},

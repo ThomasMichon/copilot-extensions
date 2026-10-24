@@ -264,3 +264,9 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   together: 199 focused cases with ten platform/privilege skips. Actual POSIX
   FIFO checks refuse all five read/write operations without opening or waiting
   for the FIFO; the bounded native alarm is never reached.
+- Bounded-reader review found that accepted histories could outgrow the detail
+  cap and hide still-unexpired input. Detail now pages observations with an
+  explicit continuation sequence and more-events flag, independently of private
+  input recovery. A 1002-event regression checks exact two-page coverage and
+  retained input; invalid/unbounded page arguments refuse. The focused storage
+  portfolio passes 56 cases with four platform/privilege skips.
