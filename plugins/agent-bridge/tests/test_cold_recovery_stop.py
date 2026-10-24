@@ -192,6 +192,73 @@ async def test_cold_stop_during_admission_prevents_native_launch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("preparation", ["workspace", "instructions"])
+@pytest.mark.parametrize("entry", ["automatic", "manual", "manual-old-stop"])
+async def test_cold_stop_during_launch_preparation_prevents_native_spawn(
+    interrupted_successor: RecoveryFixture, monkeypatch: pytest.MonkeyPatch,
+    preparation: str, entry: str,
+) -> None:
+    from agent_bridge import local_static_preparation, transport
+    from agent_bridge.session_host import spawner
+
+    manager, session_id, transcript = interrupted_successor
+    if entry == "manual-old-stop":
+        await manager.stop_session(session_id, force=True)
+    previous = _token(manager, session_id)
+    entered, release = asyncio.Event(), asyncio.Event()
+    module, name = (
+        (transport, "resolve_local_launch")
+        if preparation == "workspace" else (local_static_preparation, "prepare_for_launch")
+    )
+    original = getattr(module, name)
+    spawn = spawner.LocalSpawner.spawn
+    spawned = []
+
+    async def paused(*args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        await release.wait()
+        return await original(*args, **kwargs)
+
+    async def observe_spawn(*args: Any, **kwargs: Any) -> Any:
+        spawned.append(True)
+        return await spawn(*args, **kwargs)
+
+    monkeypatch.setattr(module, name, paused)
+    monkeypatch.setattr(spawner.LocalSpawner, "spawn", observe_spawn)
+    recovering = asyncio.create_task(
+        cold_outages.recover(manager, automatic=True)
+        if entry == "automatic" else manager.resume_session(session_id)
+    )
+    stopping = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        assert cold_outages.latest(manager.db, session_id)["recovery_phase"] == "launching"
+        stopping = asyncio.create_task(manager.stop_session(session_id, force=True))
+        await until(lambda: _token(manager, session_id) != previous)
+        newer = _token(manager, session_id)
+        assert newer and not stopping.done()
+        release.set()
+        if entry == "automatic":
+            assert await recovering == 0
+        else:
+            with pytest.raises(cold_outages.ColdRecoveryStoppedError):
+                await recovering
+        await stopping
+        assert _token(manager, session_id) == newer
+        assert cold_outages.latest(manager.db, session_id)["recovery_phase"] == "launching"
+        assert cold_outages.unsettled_launches(manager.db) == [session_id]
+        assert spawned == []
+        assert _boots(transcript) == 1
+        assert _prompts(transcript) == []
+    finally:
+        release.set()
+        await asyncio.gather(
+            recovering, *([stopping] if stopping is not None else []),
+            return_exceptions=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_cold_stop_after_native_launch_prevents_reconnect(
     interrupted_successor: RecoveryFixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -102,8 +102,11 @@ fenced rather than spawning another native process.
 An explicit dormant stop persists a fresh `cold_recovery_stop_token` before
 waiting for lifecycle ownership. Startup and heartbeat recovery refuse any
 retained token. Manual resume may override only the token it captured at
-admission; a newer stop wins at the launch and reconnect boundaries. Successful
-manual admission clears only its captured token, and background recovery can
+admission; a newer stop wins at the launch and reconnect boundaries. Admission
+is checked again after workspace and instruction preparation, immediately before
+invoking the native spawner. This read-only check preserves the earlier durable
+launch fence; it does not clear uncertain launch evidence on a stop or crash.
+Successful manual admission clears only its captured token, and background recovery can
 be re-enabled only by a conditional database write that respects newer stops.
 Busy-refused stops create no token; ordinary redeploy detach is not a dormant
 stop. Schema 29 adds this nullable gate. Legacy stopped, recovery-disabled rows

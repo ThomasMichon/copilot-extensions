@@ -498,6 +498,15 @@ def registered(manager: SessionManager, session: Session) -> None:
         raise ValueError("native launch did not register its replacement host")
 
 
+def revalidate_launch(manager: SessionManager, session_id: str) -> None:
+    """Recheck admission after preparation without clearing its durable fence."""
+    require_custody(manager, session_id)
+    _assert_recovery_current(manager, session_id)
+    row = latest(manager.db, session_id)
+    if row is None or row["recovery_phase"] != "launching":
+        raise ValueError("native launch requires its retained launching disposition")
+
+
 def guarded_resume(method: Any) -> Any:
     @wraps(method)
     async def run(manager: SessionManager, session_id: str, *args: Any, **kwargs: Any) -> Any:
