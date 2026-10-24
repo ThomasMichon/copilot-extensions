@@ -150,6 +150,29 @@ def _consumer_root(consumer: str) -> Path:
     return REPO / consumer
 
 
+def iter_library_consumer_names() -> list[str]:
+    """Canonical shared libraries addressable as ``libs/<directory>``."""
+    return sorted(
+        path.parent.relative_to(REPO).as_posix()
+        for path in (REPO / "libs").glob("*/pyproject.toml")
+        if not path.is_symlink() and not path.parent.is_symlink()
+    )
+
+
+def library_roots(consumer: str) -> list[Path]:
+    """Canonical and physical copies; editable pointers materialize later."""
+    if consumer not in iter_library_consumer_names():
+        return []
+    name = Path(consumer).name
+    roots = [REPO / consumer]
+    roots.extend(path.parent for path in PLUGINS_DIR.glob(f"*/libs/{name}/pyproject.toml"))
+    roots.extend(
+        root for standalone in iter_standalone_consumer_names()
+        if (root := REPO / standalone / "libs" / name).joinpath("pyproject.toml").is_file()
+    )
+    return roots
+
+
 def read_pyproject_project_version(root: Path) -> str | None:
     """The ``[project].version`` field of ``root/pyproject.toml`` --
     genuine TOML parsing, not a "first `version = ` line anywhere in the
@@ -218,7 +241,7 @@ def read_consumer_version(consumer: str) -> str | None:
     it (PR #4465/#4514 review: a shared-lib bump could pass the
     changefile-presence gate while a standalone consumer like
     `worktree-manager` kept its old version)."""
-    if is_standalone_consumer(consumer):
+    if is_standalone_consumer(consumer) or consumer in iter_library_consumer_names():
         return read_pyproject_project_version(_consumer_root(consumer))
     return read_plugin_json_version(consumer)
 
@@ -360,6 +383,16 @@ def apply(result: dict[str, tuple[str, str]]) -> list[str]:
     """Write the computed versions; return the list of successfully-applied consumers."""
     applied: list[str] = []
     for consumer, (old, new_version) in result.items():
+        if roots := library_roots(consumer):
+            written = []
+            for root in roots:
+                previous = read_pyproject_project_version(root)
+                written.append(_write_project_version(root / "pyproject.toml", new_version))
+                if previous is not None:
+                    _write_source_fallbacks(root, previous, new_version)
+            if all(written):
+                applied.append(consumer)
+            continue
         if is_standalone_consumer(consumer):
             # A standalone consumer (e.g. `worktree-manager`) has no
             # `plugin.json` and is never in the marketplace catalog or an

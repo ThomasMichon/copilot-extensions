@@ -1,0 +1,9 @@
+{
+  "comment": "Release canonical process helpers through library changefiles",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "dev"
+    }
+  ]
+}

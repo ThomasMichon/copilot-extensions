@@ -191,7 +191,9 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
     # with no new changefile for it would regress it back to dev's stale
     # literal (or repeat an already-shipped bump) the same way an
     # un-seeded plugin would (PR #4514 review).
-    for consumer in acc.iter_standalone_consumer_names():
+    for consumer in (
+        acc.iter_standalone_consumer_names() + acc.iter_library_consumer_names()
+    ):
         main_version = acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
         if main_version is None:
             continue  # never shipped on main yet -- dev's own literal stands as-is
@@ -200,7 +202,9 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
             continue
         seed_result[consumer] = (dev_version, main_version)
     if seed_result:
-        acc.apply(seed_result)
+        missing = set(seed_result) - set(acc.apply(seed_result))
+        if missing:
+            raise PromotionError(f"cannot seed shipped versions for: {', '.join(sorted(missing))}")
 
 
 def _sync_instruction_projections(
