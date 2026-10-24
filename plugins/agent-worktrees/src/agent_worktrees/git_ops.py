@@ -23,6 +23,7 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from . import env_scrub, git_tree_diff, push_timeout
+from .git_errors import GitError, _redact_args as _redact_args
 
 log = logging.getLogger("agent-worktrees")
 
@@ -120,29 +121,6 @@ def resolve_to_anchor(repo_path: Path) -> Path:
     return repo_path
 
 
-def _redact_args(cmd: list[str]) -> list[str]:
-    """Redact any injected credential header so tokens never reach logs/errors."""
-    out: list[str] = []
-    for a in cmd:
-        if a.startswith("http.extraheader="):
-            out.append("http.extraheader=<redacted>")
-        else:
-            out.append(a)
-    return out
-
-
-class GitError(Exception):
-    """A git command failed."""
-
-    def __init__(self, cmd: list[str], returncode: int, stderr: str) -> None:
-        self.cmd = _redact_args(cmd)
-        self.returncode = returncode
-        self.stderr = stderr
-        super().__init__(
-            f"git {' '.join(self.cmd[1:])} failed (rc={returncode}): {stderr}"
-        )
-
-
 #: A hooks directory guaranteed to hold no hooks, used to disable a repo's
 #: client-side guard hooks for trusted mechanical git ops (squash re-commit /
 #: rebase -- NOT ``push()``, which must let a repo's real pre-push release
@@ -161,7 +139,8 @@ def git(
     kill_tree: bool = False,
     isolated_repository: bool = False,
     auth_acquisition: bool = False,
-) -> subprocess.CompletedProcess[str]:
+    input_data: bytes | None = None,
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     """Run a git command with consistent error handling.
 
     Args:
@@ -180,8 +159,9 @@ def git(
         kill_tree: If True (real timeout), kill the whole tree on a stall -- :mod:`push_timeout`.
         isolated_repository: Ignore inherited Git repo/config selectors; use cwd.
         auth_acquisition: Record update-auth use only after this acquisition child runs.
+        input_data: Captured binary stdin/output for plumbing protocols.
     Returns:
-        CompletedProcess with stdout/stderr as strings.
+        CompletedProcess with text output, or bytes when input_data is supplied.
     """
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
@@ -192,10 +172,16 @@ def git(
 
     def execute():
         if kill_tree and timeout is not None:
-            return push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
+            return push_timeout.run_bounded(
+                cmd, cwd=cwd, env=env, timeout=timeout,
+                **({"binary": True, "input": input_data} if input_data is not None else {}),
+            )
+        io = (
+            {"input": input_data} if input_data is not None
+            else {"text": True, "encoding": "utf-8", "errors": "replace"}
+        )
         return subprocess.run(
-            cmd, cwd=cwd, capture_output=capture, text=True,
-            encoding="utf-8", errors="replace", env=env, timeout=timeout,
+            cmd, cwd=cwd, capture_output=capture, env=env, timeout=timeout, **io,
             **no_window_kwargs(),
         )
 

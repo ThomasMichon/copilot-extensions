@@ -14,7 +14,11 @@ endpoint. Action `picker-bootstrap` accepts `contract_version: 1`, an explicit
 `project`, absolute invocation `cwd`, Boolean `default_live`, and optional
 provider selection (`provider`, `providers_dir`). It resolves fresh layered
 project policy, including headless behavior, without changing the daemon's
-active project. The configured execution-space identity is validated before
+active project. Committed configuration candidates share one binary Git batch
+per resolved branch, preserving ordered precedence, empty-file semantics and
+fresh ref selection without a cross-request policy cache. A failed or malformed
+batch retains the bounded presence/ordered-read fallback and its original total
+resolution budget. The configured execution-space identity is validated before
 any handoff; invalid identity returns an explicit unavailable response.
 Workspace metadata reads one Git administration entry and one
 exact tracking record; it never reconstructs the roster in a request handler.

@@ -1,0 +1,9 @@
+{
+  "comment": "Batch fresh committed bootstrap policy reads without caching mutable configuration or extending deadlines",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
