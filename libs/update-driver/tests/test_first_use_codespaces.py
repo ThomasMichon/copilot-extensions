@@ -235,21 +235,7 @@ def test_actual_codespaces_cold_install_preserves_selection_and_installed_origin
     env = cold_environment(installation, project, area)
     env.pop("AGENT_VAULT_HOME")
     env["AGENT_CODESPACES_HOME"] = str(installation)
-    # Owner queries intentionally ignore CWD and read only adopted repositories.
-    installation.mkdir()
-    (installation / "adopted-repos.yaml").write_text(
-        "repos:\n  - path: " + json.dumps(str(project)) + "\n", encoding="utf-8",
-    )
-    if os.name == "nt":
-        # Never let the canonical disabled-config branch inspect a host task.
-        module = Path(env["PSModulePath"]) / "ScheduledTasks"
-        module.mkdir()
-        (module / "ScheduledTasks.psm1").write_text(
-            "function Get-ScheduledTask { param($TaskName) "
-            "[IO.File]::AppendAllText((Join-Path $env:USERPROFILE 'task-probes'), $TaskName); $null }\n"
-            "Export-ModuleMember -Function Get-ScheduledTask\n",
-            encoding="utf-8",
-        )
+    isolate_disabled_owner(installation, project, env)
 
     def diagnostic():
         return "\n".join(
@@ -338,6 +324,25 @@ def test_actual_codespaces_cold_install_preserves_selection_and_installed_origin
         + " (" + identity["build"]["commit"][:8] + ")"
     )
     assert len(status(root=root)) == 3 and completion.read_bytes() == complete
+
+
+def isolate_disabled_owner(installation, project, env):
+    """Use the native adoption/config reader without exposing host registrations."""
+    # Owner queries intentionally ignore CWD and read only adopted repositories.
+    installation.mkdir()
+    (installation / "adopted-repos.yaml").write_text(
+        "repos:\n  - path: " + json.dumps(str(project)) + "\n", encoding="utf-8",
+    )
+    if os.name == "nt":
+        # Never let the canonical disabled-config branch inspect a host task.
+        module = Path(env["PSModulePath"]) / "ScheduledTasks"
+        module.mkdir()
+        (module / "ScheduledTasks.psm1").write_text(
+            "function Get-ScheduledTask { param($TaskName) "
+            "[IO.File]::AppendAllText((Join-Path $env:USERPROFILE 'task-probes'), $TaskName); $null }\n"
+            "Export-ModuleMember -Function Get-ScheduledTask\n",
+            encoding="utf-8",
+        )
 
 
 @pytest.mark.parametrize("state", ["enabled", "disabled", "unknown"])

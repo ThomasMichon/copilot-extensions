@@ -1636,6 +1636,8 @@ function Materialize-SnapshotDependencies {
     $libsDir = Join-Path $SnapshotDir 'libs'
     New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
     $libraries = [ordered]@{
+        'agent-repository-policy' = 'repository-policy'
+        'agent-update-driver' = 'update-driver'
         'agent-ssh-manager' = 'ssh-manager'
         'agent-credential-relay' = 'credential-relay'
         'agent-config-migrate' = 'config-migrate'

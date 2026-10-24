@@ -96,6 +96,39 @@ integer and macOS `seconds:microseconds` birth identities. The native
 companion-lifecycle node above exercises that same lock through concurrent
 creation recovery and launch, rather than replacing it with a test double.
 
+## Optional CodeSpaces bootstrap adoption
+
+The manual `installation-context-full.yml` portfolio `codespaces-bootstrap`
+qualifies the actual materialized legacy hook on fresh Windows and Linux
+runners. It enforces the existing 15-second deadline and `{}` response,
+Python-free cold stamp, overlapping cold supervisors, caller Job/group loss,
+ordinary receipt/result, own-installed-payload drift, failed-candidate selection
+preservation, healthy no-op and source-independent installed CLI/module/
+distribution identity. The foundation must come from canonical payload
+materialization, not a fixture's separately supplied source tree.
+Windows additionally stamps the actual unmaterialized checkout shape, removes
+that source, validates the retained complete local dependency graph and provisions
+the real installed CLI from its snapshot. This protects the added driver
+dependency; it does not replace #6909's separate copy/runner/native matrix.
+POSIX legacy stamping retains its original payload pointer, so that Windows-only
+snapshot regression is not relabelled as a POSIX contract.
+
+No-write controls cover publication policy, no-self/pinned/nested invocation,
+unsupported source/context and missing/skewed support. Provider/guidance hooks
+are exercised independently after bootstrap refusal. Isolated adopted
+disabled-Owner configuration and native enabled/disabled/unknown registration
+adapters do not qualify live host registration, serving behavior or a CodeSpace
+connection. Selected snapshots, command publishers, explicit installers, cells,
+custom roots and #6909 acceptance remain separate.
+
+The non-download subset uses `tools/run-plugin-tests.py update-driver
+--test-file tests/test_first_use_codespaces_bootstrap.py`; the actual cold
+construction test requires the existing platform-specific genesis opt-in.
+The plugin smoke packet selects `test_bootstrap_driver.py`,
+`test_bootstrap_check_reconcile_always_on.py`, `test_bridge_provider_manifest.py`
+and `test_write_session_guidance.py` with the same runner. Heavy native matrices
+remain outside required PR CI.
+
 ## Optional SSH installation recipes
 
 The manual `installation-context-full.yml` portfolio `ssh-recipes` runs only
