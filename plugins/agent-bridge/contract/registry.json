@@ -559,9 +559,9 @@
     },
     {
      "path": "plugins/agent-bridge/src/agent_bridge/session_host_connection.py",
-     "sha256": "4edb89679ea978ab80578536d03c3f95ab3982e93e8382dc7d23b98c5f953575",
-     "semantic": false,
-     "non_semantic_reason": "Startup instrumentation forwards preparation/connection activity to the registered startup_progress producer; it owns no separate HTTP packet, capability floor, admission decision, cancellation or retry. The shared HTTP-46 startup operation and existing progress tests cover the forwarding."
+     "sha256": "e36de4857eff175398221987323a51df07a75b95357b0e5b4a2c66234af0ef08",
+     "semantic": true,
+     "non_semantic_reason": null
     },
     {
      "path": "plugins/agent-bridge/src/agent_bridge/transport.py",
@@ -583,7 +583,7 @@
     },
     {
      "path": "plugins/agent-bridge/src/agent_bridge/cold_outages.py",
-     "sha256": "a6aba0f59dd488aac45d7246036b95945115bd1d8361a19613487e701c01f570",
+     "sha256": "a1236eae1c0cea847b13bdbbc68dd2f7f3b98fcbea2d755de808037aa7cdb253",
      "semantic": true,
      "non_semantic_reason": null
     },
@@ -3687,403 +3687,409 @@
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-owned-cold-drain.json",
-     "sha256": "408c144f9f142caa5f695cccefb22104843af6a16aa67eb606375429a0504108",
+     "sha256": "92cecb3a89e40e28007c966a97e8f37b459bd9721ad632481a057718ab5eed22",
      "role": "Real ASGI/owned-process HTTP-47 observations and bounded native-fixture regressions.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-protocol-py-4a5fcd5ed164.json",
-     "sha256": "4502458d2515e12850fa1bedf30910eaafe47014d493e409fd73ea297c468fa0",
+     "sha256": "cf3f3aa06c5682b827e3c854d115280019c4080374d5dabc60ea5f0769ecc144",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-models-py-11746367dbc1.json",
-     "sha256": "efe7c872786c64582fcf688d1fde38ee96e3cae31c7fb1dec895af974f136d0d",
+     "sha256": "cc0a88d74c4b603a36ad488dcce383880da5f3325e84c0a804d300c78dc8093e",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-health-py-3ed03282937f.json",
-     "sha256": "77eec1617840ceab146d4f33e46e0da0f302a322f0ece001d8b1fa161888b4e3",
+     "sha256": "2079a29a039ccfcb15f4ce77d1912cc084593e2ff9e2f2c5088d4a9bcdec9b65",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-sessions-py-31ba49d0acb0.json",
-     "sha256": "3aa5ddf29e4de084277b67e87bfe2c7442d4361d6ea90eba1a237623cc409d7c",
+     "sha256": "20ac12f1461a9da6eb0ee8ec774da3d210555dc6f197a763dda2a931d9f9a937",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-remote-py-701105780c47.json",
-     "sha256": "b0fc3df95c7415aa4d75136351975bb0881de865eb5fd48af592cfc5bba76e39",
+     "sha256": "7e48058c9c88bd653936d8335ce431a1a291be22a6f7433c514cdd1a2724e15e",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-agents-py-1f691f23a717.json",
-     "sha256": "c1b2579f21f8b90cb4bc55f35fec2412dfc29932a5bc1db5bdba60f7101da23a",
+     "sha256": "3dfc6cd762765ea90a4bec5864ee8b2a889641691f74c702a99496555fc71c6c",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-prompt_models-py-47160b4a4e3f.json",
-     "sha256": "c35d0debbf95df34c3bbdf161df53ce9af2b2d92b32719e6a7320c9ec8858827",
+     "sha256": "1a1291dee487ebf8802b73391b18a30120cce7c23c86ea08a9aa907cdb16e572",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_start_models-py-bb8ea8b57a07.json",
-     "sha256": "548dd5854cd66fffe6a9b8c46fb6c5d30d6b3edcf3fc0af7d025fcbd6463e57e",
+     "sha256": "2c42a08d10cd6bc599a28107ae61b21c0d86f8f885f6737632bb6ecdd804872e",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-prompts-py-6627871b38e4.json",
-     "sha256": "53126e5237c2c8be434a46c13dc25de31c7f329425a50e9d61ea19b5580745b6",
+     "sha256": "4b8bd10d96611aa38fa0479b152ca61522e8f8054a5acaf376c33839930aeb05",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-cli_mode_models-py-2138f1160f56.json",
-     "sha256": "c836a1221dcadf384e9104e49b649991878461bccbb8119326c2f03bf7fc6def",
+     "sha256": "fcb7ffc0bb69d9ce75588b9f85d91598f73004b46e150884abff7b4e34b5ad50",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-provider_creation-py-a75acee72a1d.json",
-     "sha256": "09201e19e0440ac6557519e46f0a7475aa595ba41373dfbc714c94f03ea7fe1b",
+     "sha256": "093ac0764bb086f544856286e91fc6048034e3f2c9008430263f64a2be67d7a6",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_resume-py-792716430d4f.json",
-     "sha256": "adb613be3bf7c3e753e717bf168544e648daa90037aace15e587d297876ccc6a",
+     "sha256": "7a171adce77e4aac22c47a4df0c7578f19d1b5470ab0a7289d2ee1bf306778be",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_core-py-2d891a8ef0d4.json",
-     "sha256": "ba32f87f288ca55ee4913d8780323b8d8f3b1492c9681ae9869123859bc7a9f9",
+     "sha256": "af9b24297be4c2faebca707a89462651a621468fb07c403b547d7da31198b343",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-worktrees-py-744d8b03d4c7.json",
-     "sha256": "c196782335aaeda59096657d71cbb90ca25bd5b5d851a2b22d18c6b606a68a23",
+     "sha256": "0e4bb7d98324863139b37ef94d3e6a643f44df46286a35477feb852b308d8f96",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-worktree_refresh-py-a05a2983712f.json",
-     "sha256": "9c26bca7544c3cbb7b00b44bbd8c0bbff185af1bf1f3abeb23e3d9952a41f05c",
+     "sha256": "f534f04a7cf7a40359636b88567f945fa079feac25846e6305bc99ddfb49c291",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-client_worktrees-py-3b2c631a1219.json",
-     "sha256": "cf1dac70733059c9eac3ef37c36a9f4f64198c7f508e2ce4d3de0592fe0b348f",
+     "sha256": "ba5b2f1c97f109391e3118f1bd139cb4a1286cc7efdd007085593661ad52d734",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-worktree_entry-py-46f9e2a39377.json",
-     "sha256": "6359eedd2f2dac95c3915d1d49445ab3a5b7c96b8a160017cd7047c64b56bdb1",
+     "sha256": "b85f4fd9524ede465c7451f4e242fcdd9814fc492b9a469f784109a99d31db58",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-client_session_start-py-e017b510ec05.json",
-     "sha256": "2a0d90addb860ea504150a0e76478f1a93a1aa8e8aaba10562249b22aafce80e",
+     "sha256": "78410978c35a3b7782082356829701c5207924f1ebb170f00ef13f38fe0bac21",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-client_answers-py-bca299b357f8.json",
-     "sha256": "f8b7307c4a37d7aadb62cdf9da3cf372b89411ba0738a7baffc2dc6d948e40c3",
+     "sha256": "10aa10d548931ecbfe5472c90744fa9e0121789bdbe1acb8a2914cc76bf893f4",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-answers-py-135d3cfd18a1.json",
-     "sha256": "655d0ffa9c472b52c5a0d5f984959b2fc9774b716e50f7da5636c071be482a12",
+     "sha256": "3452814398f986113136f2e96208ee5c1b455ff8b9ffb672b9e852c6b68b2764",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-remote_acp_sessions-py-9bf67df773d0.json",
-     "sha256": "4a6d069fa7f8b3e98e38bef1651ef384bc802386f62abd7d70226b22bc352744",
+     "sha256": "da58080e1e708b1cdd3dee649bea0752834eb11aeac299f7f350248be8d223ac",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-live_message_models-py-ad1df213e385.json",
-     "sha256": "ba1fc3548056febe0e1c4621825f7d2a477e78a7d25761759b13b96d34599e8e",
+     "sha256": "96d3bf9deb7dd049ee05437845e79125736fc7ade051678f339541bfcbd537f5",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-remote_operations-py-f4a97216a13b.json",
-     "sha256": "81a4f57b2cbe0f0926d33a7267894728c5375d94430932bea545d55a7854c67e",
+     "sha256": "daed06a152397724f1e41d5f0fb00e044ae1f95b8fdde6882c355cc0cc728fa6",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-remote_operation_versions-py-51893d162d33.json",
-     "sha256": "79bfd1c2f398b540e7f81145cfb426a17c5883741320336ac67879eb26cd59f0",
+     "sha256": "424c9016a288f5120aa0fecf3146daa66f6b9b00fb52ec46948e8eda66958278",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-worktree_probe-py-b4b157658db2.json",
-     "sha256": "011871aeab351a493b48b817ef23239ddc30a3ae6758bc0163cc6ae991ba77a9",
+     "sha256": "bfe910adc53020b7195fb1b36dc965f64cac38bf7f055b9fc39f36025048f337",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-client-py-4da37b3e6052.json",
-     "sha256": "95dd2b41ab38969a213352fbcb7ab0e63a2cd9c887d46933d98850ee65686245",
+     "sha256": "80e3d4e5f8e308d50102c5665b4d8b8470cd1194596367df999aba80f416c75e",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-singleton_resume-py-4b3f72dcd82f.json",
-     "sha256": "56765caa590ced81517d46814847cd5b9405b2d3856bcba8e0178504d29676ee",
+     "sha256": "4a8ff078dcd99a932f2067d57720ae0466b5fde39e9a51f18f516806c3de00eb",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-remote_relationships-py-12915021fa76.json",
-     "sha256": "ee102dc4a24461c5f2ba7415996e9b4903463f48880ccfc9be4b83fd9efed5fc",
+     "sha256": "6bc522aed9bd7ef092aaeee8135989c5ad92fda6b77540f6cd9010015fd85d5f",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-relationships-py-9ea1e3623b41.json",
-     "sha256": "f39edda53eb6797e5c9439edb75957702afb6ecd5dcb48546887512ab501f925",
+     "sha256": "4ae223272b47332f8302c6b1d254eca5c5194d73f5cb39d67db177458ca376db",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_prompts-py-c96ec0163482.json",
-     "sha256": "827dfd4257e7c7abee84495e55b6ab4ded555412477a7706d1286a3bce043d71",
+     "sha256": "2d6f6ed214abc0c1c535462dc16ee4f3a30b89836c82a5262dc82e2ae5241c10",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-db_core-py-99ebecbbf70d.json",
-     "sha256": "1fbdb19c5b678da469d6ff110aadbf0615a87552dcb56f9533ab9bb0457c8427",
+     "sha256": "39f9fbff49a8f80e8120f750c2166b74b135b2ae9d97cb7bf5188bba3d20890b",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-app-py-711849c73497.json",
-     "sha256": "7b6afde2a42408769110f486dd430b7094c1dcd6b790e85b768da11afac61d7a",
+     "sha256": "740ca151436d1d3b6252f720be511fe16b72fddb847474b7d0c7d449e6f3276c",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-plugin_readiness-py-458778909269.json",
-     "sha256": "49d1914e0f800c54c5fd6f0e254973950d41f359ed6f5ea253cfa093a029b1a5",
+     "sha256": "887781a8fdfca5bbc1688826b55a42099e9e6ba33fa3853b52cc057436306700",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-live_controls-py-fd5a3493cc98.json",
-     "sha256": "2824888a7553bc358a916cfb981195ee913b05a8d32a19353bdde16a82781270",
+     "sha256": "4ea41cd702912c3cc5e71c6235d2adad360ec8cfd6580ebabb5e76b4e57340c6",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-acquisition_contract-py-6e08ce3715c5.json",
-     "sha256": "351a8c9aefef3b00f0d88d636c9782b9ce52a809e6b428bde29f88dd32f34c87",
+     "sha256": "b5ec98952ed364ea96688693a3873eb00b3d002dce8f8ac6c126a549ac1f5330",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-live_sessions-py-f54b20ccb08c.json",
-     "sha256": "a7712b9d2752eaa99f5c7aa9844dd35732bb70c3e4e6ef1de226c5528985a78f",
+     "sha256": "edbf097cac1b6a8d62b4e997cc2a941eaaa957f54ff4eed6d75cba48b8b2a518",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-plugin-readiness-mjs-57fd0603aa3a.json",
-     "sha256": "a48944bb1c3b5d9c99990e9e5d748160cba3e48f124f1e9f67de143f3e48da75",
+     "sha256": "e609f7340cea92558fa755cfc8a7839bc3895249c380b8b607345a1bc41dbc4a",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-delivery-mjs-5560a73cc793.json",
-     "sha256": "f2bd3783515539e2927ccbf2f56c78829deba2c3295ca89ab42bdef7304728e3",
+     "sha256": "a680255a48c1d5331fdcd5a265f3b2f20d006f9a801633ad6f5ccfdd2cdd3a4a",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-client_cli_mode-py-99546ca93889.json",
-     "sha256": "a17bac8bf7fbca0021983bca381470c05f4a097a813ddd7d705024304b9d65a5",
+     "sha256": "76e6c46778a7a6f9770c0d511f5240006d900e3c3e1c8e58fbb63192da3cf9e6",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-live_startup_controls-py-6a9b5db04daa.json",
-     "sha256": "05de6d906a9f24505b830bab3d2c79faffbb8d0b421fea57ea90a4f2a8866276",
+     "sha256": "d435e9f37e19591b4581cf41cd9d32cacb40d90441c5806837f4bbc832a96bc9",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-native_keyed_admission-py-7672340e25a9.json",
-     "sha256": "c6de22ad8d5b507d05857ecc098ed8b3d77ad170b2a0a8ed9ae4d4616622e407",
+     "sha256": "f728bd920472b0a7db69af179f7df3f3dcb945d773076240922e8780edb32442",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-native_keyed_client-py-8e750526b83e.json",
-     "sha256": "0c98c66196428c7859eb06a6dc64a54dfe4941acff5c87fa1c314014dda884e9",
+     "sha256": "30f192b7ef82120caf5f71d3ea2d5d2d79353cb9605b813438834ae3e20d5a77",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_targeting_cli-py-f114960154bf.json",
-     "sha256": "676f046ea0185d43b8edcc046f9a28dd643acfd8b4bb4c01155a3a837c7fbcd5",
+     "sha256": "f9681a73d24e86f50728f538d3b67cd0d8acea0ed05be6b397b7296ee5113321",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-workspace_creation_cli-py-41baaad2e79a.json",
-     "sha256": "0138acdb31e44ccdf5737627b84f016b03f3fb0f1c65fa4aa219db2d3e71f545",
+     "sha256": "be318fa3ca25c16fa608792f632a1f60e7c85927bed3d35c1fb73cb2fe48b442",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-client_prompt-py-645584af4d3c.json",
-     "sha256": "ca9e0b8851ab477a9e49732e33848368aa1295c3c47e1abc53d72263aaf86e3b",
+     "sha256": "55c3e6e582370fea016bf33f9be86c4e048097ed3d16e05e1d2c6da410fdae4a",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-startup_observation-py-bbfe417cbdb8.json",
-     "sha256": "9debababd00ef9e271b22a39de6fc4379a1699e76cde9f85308150c726961fc4",
+     "sha256": "1f6bbb0692b31c3919ff831228fdc38652ffe8198f0ecbdeae2ae6f3509a5ae3",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-startup_progress-py-e59ec5538c06.json",
-     "sha256": "2b29af6b56cba165cbdad7d05503e9a0fd9a436c76fc683af6764ee04f60e42f",
+     "sha256": "1b77b48bfc1504f3ea5126867364cf2bc801a8c04a85ea0869a8686d0df84ee3",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-send_outcome-py-5d8905177ab4.json",
-     "sha256": "18cb212b07adda1013523ffef5da2933121fdbd561dd7db2d0cd4436e4f67e8f",
+     "sha256": "85647fb80c724c5ffd908e400fd2c491c6edc927227097e0315ad7471b6fadf4",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-__main__-py-39a1704c3574.json",
-     "sha256": "5a417bb71163541bc438945241a9133e997eb4a1024c851d2d7ba5ee08b49b9a",
+     "sha256": "a89ec08e7127d40290a451230a0d6e137d680fe5069ced52e3c8cb20266af7ac",
      "role": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-drain_contract-py-ad53681be97d.json",
-     "sha256": "964f311afe00cbc01195e79a1d3496ce2bb8543c0181507517474e31c516b8d8",
+     "sha256": "9500b77427dba4a59006980b9c8faf7204c47f3a8c82933e664f8d217fc84e20",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-admin-py-86e47208c42f.json",
-     "sha256": "9fd35ef32dd70dc5b5b4fd7df073f9f4099cbfffc517ca2d542015d7fad228c0",
+     "sha256": "b9a214f0562ed979e3fdfe627458ab6d0747a0e13b5bdec1a1ab68c9b6874632",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-cold_outages-py-4c492c9d1b8f.json",
-     "sha256": "3e3ccf8c5ddfbd06af2bbebc448f0327581e86efafd80002939eac615e84751a",
+     "sha256": "69e8ed9f11308b2c27a754befe1b508631d59932d7715b9a9f1d8a39d456bd67",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_cold_drain-py-a9d2206a7603.json",
-     "sha256": "c17b1d0cd211d550b52fb3c269c57da8a0f227b972642ff2746fdf295b2e0aa2",
+     "sha256": "a93015325431f211d2930e31c7312d13de3938a3a076c64c3bb3beb4250f544a",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_drain_gate-py-cf56e59fbfbe.json",
-     "sha256": "b0647f0011fdec32cc86b1303076beb17ba269e5fa716fb358af20bc606c5436",
+     "sha256": "2fa922697bbd33ef9938e5e87104a82a43d8143f017268bd6f1bc1d4161acb1d",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_host_recovery-py-f7fd4737fa4d.json",
-     "sha256": "d6c155ec197d42419247ecb1ac5616dba832cda8a534c651e8cd48a8e6b8824a",
+     "sha256": "ed8c0237a609f426b6030d0827b465c5b99fa107479ad754807953e5a8b1fee1",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-launcher-py-e2f595db1646.json",
-     "sha256": "cf85b737f013dbcf209f5136a12ebdb685e0d5162eab7e070344c7ae15c1edfe",
+     "sha256": "1fd38e697a1a0736916929ce04968aaa3665dbff41f99dd5e36f573cc6b7e08a",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-cutover_drain-py-3536e2a4101a.json",
-     "sha256": "fe5ef9fb3610ba5a41631275f4f921918e2877c354a34ea89e089732f3036c2a",
+     "sha256": "5f4b0f301a1c4360bbdb57e03829f16ec7ec89c2827468088095b8937f5f356d",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-client_drain-py-911d396cf52b.json",
-     "sha256": "595a6404f1d11efe5a317f2a7dce6d59d8b9c6ed956487f6b987c6dfad8f11ae",
+     "sha256": "0cd38f5ba9bce050d07b509dd3f61a58feaa4d11568f4723cb6503ada256119a",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-app_supersession-py-c4afdfa62b07.json",
-     "sha256": "6fe2abfeeca8699b64e2f1ff38d5f33945e62afe18caf6bde9c2c69ae3d0ad78",
+     "sha256": "c9a241ea367055b28101f13d91a7c4f1bfd1cd994c9316ea8045fc06b76160dd",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_handoff-py-2eb1ec2e0923.json",
-     "sha256": "376952585fdf81d0298aa79d4402ac4653d2358896172de24d0fab4f0e694e8d",
+     "sha256": "36b06ca20459aef15365f34946c4bcedd86b7d1fce52fc94b82f5eb88fd473be",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_lifecycle-py-3edb263720cf.json",
-     "sha256": "c63ef28d7d4939816b98365f82262c046c7d7ea0c0f3c6e69f2d85da00f76379",
+     "sha256": "bf481517fa19ef70ee5cb4e2872f9542c92b355a8786b7011ac3395e707265b0",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-db_schema-py-8f576283170d.json",
-     "sha256": "87ab98b3eaa411a78b85c79b2951ac021022e538ca5ffc961a3df5172b36f404",
+     "sha256": "8d2c75047819fe3a226f4b6cc503ea21f431dd3312daa82b737206068ced0217",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-db_sessions-py-528ee2443331.json",
-     "sha256": "0e769131027e62c22df30c1517548c616678d585754a514142c8ce9027d75ece",
+     "sha256": "ae1d39d749a83672ee30737298a71435dfa89e9802aaead13b2516d5eeb32c57",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_recovery_dormancy-py-b470203e97e9.json",
-     "sha256": "f2b71b8186a0908139d960d2cf8e515b4e66727206037ced8dc57e70cafc3be2",
+     "sha256": "479688c92b6166b8cdf34a69c977b4a899798ffb649c3a908219ca4dd8e97dba",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-conditional-py-2241e52a986a.json",
-     "sha256": "d6620f8c5ec523c8f39033eb9db13cf0ca3efaec02f41b69dbf51899debe565e",
+     "sha256": "8f26186ef70121e820895efcf9505f3dc96fa431295314be8312648ff44bd2e1",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     },
     {
      "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-conditional-py-c23ba9440a57.json",
-     "sha256": "2626b5e630b0050b01c7bf9ed551c43eedc6f77da99aee6284161e05d6012b4e",
+     "sha256": "e8e78235931b7361ca73fca8d828f26376776d7f15ebbc60400b06eedc73b2e8",
+     "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
+     "generation": 47
+    },
+    {
+     "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-session_host_connection-py-32a524411610.json",
+     "sha256": "6f5197ca61f4c60292c5b238f29d08b0c62062d41018532173d8771d57446e11",
      "role": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure.",
      "generation": 47
     }
@@ -15259,6 +15265,550 @@
     },
     {
      "commit": "c1c1a57433d37c4c915aa97e0bd122333962dbf4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-worktrees/libs/zdd/src/zdd/conditional.py",
+     "source_git_blob": "7ed32b1030ad296a9e90aa3a2c493688f89af49f",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+     "source_git_blob": "43a93ecc0e7de5cc8248026d0ffc4708b3ee7df2",
+     "capture_method": "Real ASGI/owned-process HTTP-47 observations and bounded native-fixture regressions."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+     "source_git_blob": "43a93ecc0e7de5cc8248026d0ffc4708b3ee7df2",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+     "source_git_blob": "0f5cc84f3f7f7bbe3cc9b7fec2e3710629952553",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+     "source_git_blob": "52c36017b1d18c4ca9591f51e3edc426d8dd3532",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+     "source_git_blob": "37c6661b81a1bc1633a90c73a6c102b236ef2630",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+     "source_git_blob": "32ab059aad4fbc3eded6f9df0d80b35cfd3d2b3d",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+     "source_git_blob": "e1cd7775e3ac5b39ef66d7c6f4badbf018ac3c51",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+     "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+     "source_git_blob": "cf7a1f5d0f650e680b601a9087d3268dc302cfd3",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+     "source_git_blob": "4d5a40d53b8846ad584765f7d3561d8441efe490",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+     "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/provider_creation.py",
+     "source_git_blob": "22bb72dc8a3f90b5123fdb5d515db1e820778507",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_resume.py",
+     "source_git_blob": "f4ed4583caa88a333f7798cc5949c3f8766e750e",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_core.py",
+     "source_git_blob": "fe080b45679b6f228445380c3a5def845a052fe4",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktrees.py",
+     "source_git_blob": "7fa33c55151c13a6f093cf829298a3c66e3e2616",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_refresh.py",
+     "source_git_blob": "86759e4b1825af7c0044b64d6ded5fcbcc887bc3",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/client_worktrees.py",
+     "source_git_blob": "010ca9fa014afdad5c2876c84b78032e69a26455",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_entry.py",
+     "source_git_blob": "ae794db6b2223ecee04abf4c0280875883c1314c",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/client_session_start.py",
+     "source_git_blob": "8be375f0a61713c7a7a810bcf104b4aa19fe3d3c",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/client_answers.py",
+     "source_git_blob": "c55731f5cb1a26aaa54551161e82de1915842ada",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/answers.py",
+     "source_git_blob": "1f05d6749d0ecedef8d02a4bf2688a8fc1945c4b",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+     "source_git_blob": "0425fcff2907612477d1a1f715aaae7bfd1cd76a",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+     "source_git_blob": "688e638d85cef69b4e4b285e1280bdba8cf02f5d",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+     "source_git_blob": "2d8861eec1ef30d3eda2449ac3a3601c8f2fb469",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operation_versions.py",
+     "source_git_blob": "e44bca130d16fdda753cbae074d2863a8cec26bf",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/worktree_probe.py",
+     "source_git_blob": "ea0cd4f31b2938ba6c674cee18867c192a24b151",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/client.py",
+     "source_git_blob": "978d59d2636fb4cbd7fc437e2de1e77635662869",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/client_drain.py",
+     "source_git_blob": "f7cc3f211faf882121903c43729c0fb1c88bcd5f",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/singleton_resume.py",
+     "source_git_blob": "44ae0445dae3347199a200f8d119e8ffb75eeaa5",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/remote_relationships.py",
+     "source_git_blob": "7c1c1ed66582315cafc9d6242846b81f283b0095",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/relationships.py",
+     "source_git_blob": "e81850ca0e0cb8091fe60fe93e771c1ac9ce0baf",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_lifecycle.py",
+     "source_git_blob": "a315f153ec3509ad6e709c681bfb5982aa6446fa",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_prompts.py",
+     "source_git_blob": "0ef93c53a806102d3aac2f0c17ea41ba20264570",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/db_core.py",
+     "source_git_blob": "18ae5921d0ffcc227522bd64183894b106e812b1",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
+     "source_git_blob": "7edc2f79d70bdc5e70d0d0e7ef508dc0e6a4f690",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/app.py",
+     "source_git_blob": "d9ae15368380a2fdcfdb5c2375cd2da14514a7bc",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/app_supersession.py",
+     "source_git_blob": "cbf062bdccf47e0a44d80ec41ac81b3887a137c5",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/plugin_readiness.py",
+     "source_git_blob": "fd51388e8fd1b97f6374e61a7a8acd78b98799d3",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/live_controls.py",
+     "source_git_blob": "c55f500d6b1568ebf05153008d82b497d2544a2b",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/acquisition_contract.py",
+     "source_git_blob": "331f5b16d971e5069b8b9f9070ada176128c6478",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_sessions.py",
+     "source_git_blob": "37d905572259c17d5d2c501aee74176534c6fe0f",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/extensions/agent-bridge/plugin-readiness.mjs",
+     "source_git_blob": "441e130f19f486c5d69be71f9f82d770e988a542",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/extensions/agent-bridge/delivery.mjs",
+     "source_git_blob": "dd7d21971b3b224528428ff1c6b8529de9257185",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py",
+     "source_git_blob": "d70a74c51ba3733a8210838deab704203aa508f3",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
+     "source_git_blob": "8b1f74d379be0c4f56871f553fdf546c0127627b",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/native_keyed_admission.py",
+     "source_git_blob": "fce4792c6e54c321181ff68e9314af13cddf5ce6",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/native_keyed_client.py",
+     "source_git_blob": "142ca2e35db995444ef7775bff391af341dd1bd0",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py",
+     "source_git_blob": "7bd372c31ef81307248e3c7e12074f2b9a90795b",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
+     "source_git_blob": "e34368a3bc620f55c3d0e97032ccf8c1e117c9f3",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/client_prompt.py",
+     "source_git_blob": "2f87eed610aa0700f1a5d7c42b19c0dd3784e9a1",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/startup_observation.py",
+     "source_git_blob": "69e14738b0224ec360de53bd2c12e5060bdea6f3",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/startup_progress.py",
+     "source_git_blob": "99511d5e059cd68fd1d4bceb73f9b272c43049f0",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/send_outcome.py",
+     "source_git_blob": "1c0ad4cd79206d28d2f91de1f7d7eb66c818a6c7",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/__main__.py",
+     "source_git_blob": "0d4a3d3b2e7b537afcfdf3307f7da5a5f9cdb9d3",
+     "capture_method": "Unchanged-source reattestation linked to immutable prior evidence; no copied or relabelled runtime packet."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_host_connection.py",
+     "source_git_blob": "a726f461d44dff086d3a557fb7a9fc0e1cc5a7b0",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/drain_contract.py",
+     "source_git_blob": "ddb62da3a9d55ee15ddab1c8354ad593d304449d",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/admin.py",
+     "source_git_blob": "d2c4b2b090a972c5e06747fcc497041ee739c46e",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/cold_outages.py",
+     "source_git_blob": "06a02e96e3ca19ef0172cc948eac05ab38dd9349",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_cold_drain.py",
+     "source_git_blob": "dd2470cc7a98bf3b7dac49e6c08841a397a3b06b",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_drain_gate.py",
+     "source_git_blob": "678fce802dbad8234b50cefe689a91e010c1cecd",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_host_recovery.py",
+     "source_git_blob": "6d71457a91331756a504146f54539cdf87d5a909",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_host/launcher.py",
+     "source_git_blob": "12f1bdca2f85dede862f3daeeb6431b97997e683",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "libs/zdd/src/zdd/cutover_drain.py",
+     "source_git_blob": "f778fc809a13102a7a2d45f99cc6c5dc2029da17",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_handoff.py",
+     "source_git_blob": "314575b5e54d95c80650c9e46d4c54d8fb0301f3",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/db_sessions.py",
+     "source_git_blob": "fef31df28ddfb4c343496c97ac68c11c4fc743c8",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "plugins/agent-bridge/src/agent_bridge/session_recovery_dormancy.py",
+     "source_git_blob": "daac10e595ca069d4af2db470a7d47724363e3bc",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
+     "plugin_version": "0.4.1-dev3",
+     "generation": 47,
+     "source_path": "libs/zdd/src/zdd/conditional.py",
+     "source_git_blob": "7ed32b1030ad296a9e90aa3a2c493688f89af49f",
+     "capture_method": "Shared actual HTTP-47 operation/owned-process evidence for the affected semantic closure."
+    },
+    {
+     "commit": "6d62e72e06cf771a6dfe19473fb1070028c784b4",
      "plugin_version": "0.4.1-dev3",
      "generation": 47,
      "source_path": "plugins/agent-worktrees/libs/zdd/src/zdd/conditional.py",
