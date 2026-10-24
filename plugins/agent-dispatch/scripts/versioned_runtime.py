@@ -1018,7 +1018,7 @@ def gc(root: Path, keep: list[str] | None = None,
 
 
 def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str) -> set[str]:
-    protected = set(keep or [])
+    protected = set(keep or []).union(*_leases.read_runtime_references(root).values())
     # Missing selectors permit legacy-link fallback; unreadable selectors must
     # not become permission to delete their unknown target.
     for name in (CURRENT_VERSION_FILE, LAST_KNOWN_GOOD_FILE):

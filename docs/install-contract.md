@@ -1684,6 +1684,11 @@ its content under retention; candidate and rollback owners retain references
 through cutover/drain or rollback settlement. Canonical cleanup takes
 construction, exclusive retention, then selector-publication ownership and
 rechecks selectors before deleting; activation shares the same protection.
+An external lifecycle that must survive installer death additionally publishes
+owner-scoped durable generation references before changing its registration.
+Cleanup preserves those generations until that owner confirms publication,
+recovery or removal and explicitly shrinks its references; process-local
+retention alone does not protect an interrupted external registration.
 The install-contract guard executes a small fresh-root lifetime/reclamation
 probe as well as checking byte-identical fan-out. See
 [`versioned-runtime`](../libs/versioned-runtime/README.md) for the exact API,

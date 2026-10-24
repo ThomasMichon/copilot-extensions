@@ -24,6 +24,7 @@ from zdd.private_windows_native import native
 
 from . import _validated_daemon_cwd
 from .owned_process import run_caller_owned
+from .windows_broker_retention import replace as _retain
 from .windows_broker_native import NativeBrokerPeer, NativeChild, stage
 from .windows_broker_protocol import LaunchRequest, _path, _refuse, launch, retry_cleanup, serve
 
@@ -341,6 +342,7 @@ def recover(config: Registration) -> bool:
         or _published(config) not in (published, desired)
     ):
         raise _refuse("installer recovery state refused")
+    _retain(config, [candidate for candidate in (desired, previous, published) if candidate is not None])
     if previous is not None:
         _qualify(previous)
     response = task_operation(
@@ -364,6 +366,7 @@ def recover(config: Registration) -> bool:
     if _metadata(config.pending_path, 65536) != record or _published(config) != published:
         raise _refuse("installer recovery state changed", cleanup_confirmed=False)
     config.pending_path.unlink()
+    _retain(config, [] if published is None else [published])
     return True
 
 
@@ -406,6 +409,7 @@ def reconcile(config: Registration, *, previous: Registration | None = None) -> 
     ):
         raise _refuse("installation inspection refused")
     original = expected if observed["installed"] else None
+    _retain(config, [config, *([] if original is None else [original])])
     record = {
         "schema": _SCHEMA + ".publication", "version": 1,
         "desired": config.frame(),
@@ -427,6 +431,33 @@ def reconcile(config: Registration, *, previous: Registration | None = None) -> 
         recover(config)
         raise
     config.pending_path.unlink()
+    _retain(config, [config])
+
+
+def uninstall(config: Registration) -> None:
+    """Remove only the owned finite registration, then release its runtimes."""
+    config.validate_files()
+    recover(config)
+    published = _published(config)
+    if published is not None and published != config:
+        raise _refuse("installation transition refused")
+    observed = task_operation("inspect", config, Deadline(30))
+    if (
+        type(observed.get("installed")) is not bool
+        or type(observed.get("accepting")) is not bool
+        or (not observed["installed"] and observed["accepting"])
+    ):
+        raise _refuse("installation inspection refused")
+    if observed["installed"]:
+        response = task_operation("uninstall", config, Deadline(30))
+        if response.get("installed") is not False or response != {
+            "phase": "drained", "installed": False, "child_control": "retained-by-consumer",
+        }:
+            raise _refuse("installation removal unconfirmed", cleanup_confirmed=False)
+    if _published(config) != published:
+        raise _refuse("installation publication changed", cleanup_confirmed=False)
+    config.config_path.unlink(missing_ok=True)
+    _retain(config, [])
 
 
 def pipe_path(config: Registration, nonce: str) -> str:

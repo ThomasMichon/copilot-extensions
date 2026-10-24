@@ -524,7 +524,18 @@ adoption failure preserves a pre-existing Task rather than uninstalling it.
 The canonical execution driver must own mutation and settle its interrupted
 execution fences first. This record introduces no second mutation lock or
 automatic request replay. Both immutable generations must remain retained
-until publication or recovery removes the record. These are process-crash
+until publication or recovery removes the record. For canonical numbered
+installations, adoption publishes owner-scoped `runtime-references.json`
+barriers through the action slot's installed retention helper **before** Task
+mutation. Canonical GC and candidate removal honor those barriers after the
+installer process dies. Recovery shrinks them only after restoring Task and
+configuration and removing pending intent. A missing canonical helper or
+malformed reference evidence refuses rather than falling back to a process-local pin.
+`uninstall` confirms owned Task removal before removing adoption metadata and
+releasing that owner's barriers; an interrupted removal can be retried without
+touching another registration. Non-versioned independent installations retain
+their own immutable-action lifecycle and have no canonical slot collector.
+These are process-crash
 recovery semantics, not a claim of power-loss atomicity across Task Scheduler
 and filesystem storage.
 

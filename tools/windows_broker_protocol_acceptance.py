@@ -7,6 +7,7 @@ updates no host runtime and never registers outside a hosted Windows CI runner.
 from __future__ import annotations
 
 import ctypes
+import importlib.util
 import json
 import os
 import shutil
@@ -206,11 +207,25 @@ def negative_topology(root, pu, processes, children, jobs):
 def inspect(root: Path) -> dict[str, object]:
     admit(root, True)
     source = Path(__file__).resolve().parents[1]
-    packages = root / "immutable" / "site-packages"
-    packages.mkdir(parents=True)
+    controller = root / "controller" / "site-packages"
+    controller.mkdir(parents=True)
     for library, package in (("agent-procutil", "agent_procutil"), ("zdd", "zdd")):
-        shutil.copytree(source / "libs" / library / "src" / package, packages / package)
-    imports(packages)
+        shutil.copytree(source / "libs" / library / "src" / package, controller / package)
+    packages = root / "versions" / "first" / "site-packages"
+    shutil.copytree(controller, packages)
+    for generation in ("controller", "versions/first", "versions/replacement"):
+        bootstrap = root / generation / ".runtime-bootstrap"
+        bootstrap.mkdir(parents=True)
+        for helper in (source / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
+            shutil.copyfile(helper, bootstrap / helper.name)
+    runtime_source = root / "controller" / ".runtime-bootstrap" / "versioned_runtime.py"
+    spec = importlib.util.spec_from_file_location("fixture_runtime_gc", runtime_source)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("fixture canonical runtime collector unavailable")
+    runtime = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = runtime
+    exec(compile(runtime_source.read_bytes(), str(runtime_source), "exec"), runtime.__dict__)
+    imports(controller)
     import agent_procutil as pu
     from agent_procutil import windows_task_broker as task_adapter
     from agent_procutil.daemon_broker import _outside_job
@@ -282,7 +297,7 @@ def inspect(root: Path) -> dict[str, object]:
                     or json.loads(config.config_path.read_text(encoding="utf-8")) != config.frame()
                 ):
                     raise RuntimeError("fixture unhealthy action changed active adoption")
-                replacement = root / "replacement" / "site-packages"
+                replacement = root / "versions" / "replacement" / "site-packages"
                 shutil.copytree(packages, replacement)
                 config = Registration(
                     previous.installation, previous.root, previous.pythonw,
@@ -317,10 +332,18 @@ def inspect(root: Path) -> dict[str, object]:
 
                 for phase in ("task", "metadata"):
                     interrupted = interrupt_publication(
-                        packages, root, previous.frame(), config.frame(), phase,
+                        controller, root, previous.frame(), config.frame(), phase,
                     )
                     if interrupted != 73 or not config.pending_path.is_file():
                         raise RuntimeError("fixture publication interruption not confirmed")
+                    if runtime._leases.read_runtime_references(root).get(config.owner) != [
+                        "first", "replacement",
+                    ]:
+                        raise RuntimeError("fixture crashed installer lost runtime references")
+                    control = "gc-control-" + phase
+                    (root / "versions" / control).mkdir()
+                    if runtime.gc(root) != [control]:
+                        raise RuntimeError("fixture collector reclaimed a recovery generation")
                     try:
                         task_adapter.load(config.config_path, config.installation)
                     except pu.DaemonSpawnError as error:
@@ -338,6 +361,14 @@ def inspect(root: Path) -> dict[str, object]:
                         raise RuntimeError("fixture crash recovery did not restore original adoption")
                     recovery_controls.append(phase)
                 result["publication_crash_recovery"] = recovery_controls
+                if (
+                    runtime._leases.read_runtime_references(root).get(config.owner) != ["replacement"]
+                    or runtime.gc(root) != ["first"]
+                    or packages.exists()
+                ):
+                    raise RuntimeError("fixture old action generation was not retired after recovery")
+                result["crash_surviving_generation_retention"] = True
+                result["replaced_action_removed_before_second_cycle"] = True
                 task_operation("stop", config, Deadline(15))
                 if task_operation("status", config, Deadline(10)).get("accepting") is not False:
                     raise RuntimeError("fixture stop still accepts work")
@@ -357,7 +388,7 @@ def inspect(root: Path) -> dict[str, object]:
             process, outer = pu.spawn_sync_in_kill_on_close_job(
                 [
                     str(Path(sys.base_prefix) / "python.exe"), "-I", str(Path(__file__).resolve()),
-                    "caller", str(packages), str(root),
+                    "caller", str(controller), str(root),
                 ],
                 require_job=True, allow_breakaway=False, env=env, cwd=root,
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -453,8 +484,9 @@ def inspect(root: Path) -> dict[str, object]:
                     stream.close()
         if adopted:
             try:
-                task_adapter.recover(config)
-                task_operation("uninstall", config, Deadline(15))
+                task_adapter.uninstall(config)
+                if runtime._leases.read_runtime_references(root).get(config.owner):
+                    raise RuntimeError("fixture uninstall retained settled broker generations")
             except (OSError, RuntimeError, subprocess.SubprocessError):
                 cleanup = False
         result["cleanup_confirmed"] = cleanup and adopted

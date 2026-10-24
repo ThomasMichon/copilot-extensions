@@ -361,6 +361,12 @@ It also terminates a separate publishing interpreter without Python cleanup
 after Task replacement and after configuration publication. Each control must
 leave durable intent, refuse ordinary launch admission, and restore the prior
 Task/configuration through explicit installer recovery before continuing.
+The action generations use canonical runtime retention helpers. Between each
+interruption and recovery, real GC must remove an unrelated control slot while
+preserving both recovery generations after the publishing process has died.
+After recovery, the old action directory is collected before the second
+activation; the independent fixture controller remains available. Uninstall
+must release the settled registration's durable references.
 `protocol-result.json` reports this result and cleanup independently of the
 earlier capability probe; either failure rejects the job. Ordinary contained
 units never register a task. This lane is still synthetic source qualification,
