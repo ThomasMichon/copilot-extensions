@@ -1,0 +1,9 @@
+{
+  "comment": "Bound initial and default Git observations by one cleanup-inclusive deadline while preserving legacy foreground behavior.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

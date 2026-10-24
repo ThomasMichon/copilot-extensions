@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** plan-only PR, then independent dependency-ordered PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees/README.md`, derived status and resident authority; `visions/plugin-services/README.md`, service-scaled process ownership
 - **Umbrella issue:** #7944
 - **Sub-issues:** #7945
@@ -26,7 +26,8 @@ performance-measurement, headless-launch and process-containment patterns.
 |-------------|---------------------|-------------|
 | Plan author | Source trace, bounded proposal, plan PR only | #7944/#7945 and this effort |
 | Integration coordinator | Independent admission of exact implementation hunks | Reviewed proposal and the two tracking issues |
-| R1 implementer (unassigned) | Initial/default deadline and observation-lock separation | Separate managed worktree after admission |
+| R1a implementer | Admitted local deadline and opt-in cleanup only | `buzzing-clasp`; #7944 |
+| R1b implementer (unassigned) | Observation-lock separation after shared-owner admission | Separate managed worktree after admission |
 | R2 implementer (unassigned) | Invocation-local passive fsmonitor suppression | Separate managed worktree after R1 API admission |
 | Existing owners | Roster/feed publication, resident control and receipt storage | Existing issue/effort reservations; no reassignment |
 
@@ -98,8 +99,9 @@ or additional operator authorization.
 - [x] Specify separate R1/R2 contracts, exclusions and test-tier obligations.
 - [x] Address a fresh independent review and land the docs-only plan through
   source review and required CI.
-- [ ] Return exact plan/head/claims to the integration coordinator; obtain
-  independent admission before any functional edit.
+- [x] Return exact plan/head/claims to the integration coordinator; obtain
+  independent admission before any functional edit. R1a only is admitted;
+  R1b and R2 remain gated.
 
 ### R1 — One deadline and unlocked observation
 - [ ] Implement R1a local deadline propagation and contained cleanup from
@@ -119,7 +121,7 @@ or additional operator authorization.
 
 ## Validation Plan
 
-- [ ] Complete the plan-only checks in [validation.md](validation.md).
+- [x] Complete the plan-only checks in [validation.md](validation.md).
 - [ ] Exercise all R1 unit and real-process cases, including concurrent
   unrelated admission/publication and stale observation rejection.
 - [ ] Exercise all R2 policy tests and supported-native cycles; preserve
@@ -158,3 +160,21 @@ status reads over a new session-lifetime configuration policy.
   green CI. Its two Low findings prompted a discoverability-row follow-up
   and repair of a multiline PR-description transport loss. No contract,
   implementation or rollout authority was expanded.
+- Follow-up #8379 merged after the existing #8392 repair, preserved repair
+  bytes, fresh source approval and green required CI. The coordinator
+  admitted only R1a. First targeted units exercise local deadlines, failure
+  semantics and cleanup composition; actual native consumers and broader
+  concurrency/fsmonitor qualification remain open.
+- R1a first source checkpoint: 83 targeted new/existing contracts passed,
+  with 99 unrelated/native cases deselected. Focused Ruff, unchanged module
+  ceilings, install contract, effort structure, docs consistency and whitespace
+  checks passed. New cases cover one deadline, initial/default failures,
+  actual fetch attempts, UNKNOWN versus finalized display, reserved cleanup,
+  cancellation and unchanged legacy binary/input/timeout behavior.
+- The initial Python 3.9 invocation lacked `tomllib`; validation used an
+  already available modern interpreter and the normal isolated test wrapper.
+  Two failing test adapters/schema assertions were corrected and the combined
+  selection rerun green. No native timing/process qualification is inferred.
+- Requested checkpoint precedes actual isolated consumer/shim, held-pipe and
+  native cleanup expansion. R1b, R2, installed proof and root acceptance remain
+  unadmitted/open; no service or production fixture was changed.

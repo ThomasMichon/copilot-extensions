@@ -271,6 +271,26 @@ arguments, failed commands and malformed tree evidence report `UNKNOWN`, never a
 or completed state. This is per-pass batching, not a persistent fact cache or
 a change to daemon authority, fetch freshness, or session/tracking refinements.
 
+The first branch query, default-branch resolution and subsequent classification
+commands share one monotonic Git-observation deadline (15 seconds by default),
+including a five-second cleanup reservation rather than another allowance
+after timeout. Rendered and JSON `status-segment` use the same rule; optional
+remote-default lookup also retains its ten-second cap. A supplied shorter
+deadline dominates and is never restarted by a helper. At most five seconds
+remaining means no new Git child is started. This is not a whole-render,
+whole-roster, startup or real-time OS scheduling guarantee.
+
+Unavailable/timed-out observation yields `UNKNOWN`, not clean, detached,
+ORPHAN or fresh cleanup evidence. Confirmed live activity remains `ACTIVE`
+with unavailable branch metadata; missing checkouts remain `GONE`. A fetch
+counts as requested evidence only after an actual attempt. The observation
+runner requires its own Windows Job or unreaped POSIX group custody; an
+inherited contained-test group is refused rather than swept. Cleanup failure
+is an explicit error, not a successful observation. General Git calls and
+foreground push timeout/binary-input/inherited-group behavior are unchanged.
+Monitor admission-lock separation and passive fsmonitor restart prevention
+remain separately gated work; this local deadline does not establish them.
+
 #### `FINAL` vs `MERGED` -- the closure descriptor split
 
 A `completed` worktree (its content is fully on the default branch) does not
