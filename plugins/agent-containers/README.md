@@ -179,6 +179,11 @@ provider-exec when their selected runtime already contains Paramiko. Fresh
 installs do not infer dependencies from whichever repository/config happens to
 be the installer's working directory.
 
+Both profiles include the declared local repository-policy package in their
+explicit dependency targets, input fingerprint and installed-module health check.
+It resolves from the selected payload/source closure rather than relying on a
+package registry to provide that first-party library.
+
 Each package version/profile has its own immutable `versions/<version>+<profile>`
 slot. Switching with `-Profile base` / `--profile base` leaves older slots intact
 and reuses an already-completed matching slot. Even `--force` never rewrites a

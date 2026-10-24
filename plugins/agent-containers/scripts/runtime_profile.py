@@ -47,6 +47,7 @@ LIBRARIES = (
     "venue-copilot",
     "session-liveness-probe",
     "plugin-resolve",
+    "repository-policy",
 )
 
 

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -89,6 +90,63 @@ def _install_command(commands):
         call for call in commands
         if any(Path(argument).name == "installer_dependency_policy.py" for argument in call)
     )
+
+
+@pytest.fixture
+def repository_policy(payload: Path) -> Path:
+    library = payload / "libs" / "repository-policy"
+    library.mkdir(parents=True, exist_ok=True)
+    (library / "pyproject.toml").write_text(
+        '[project]\nname="agent-repository-policy"\nversion="0.1.0"\n', encoding="utf-8",
+    )
+    module = library / "src" / "repository_policy"
+    module.mkdir(parents=True)
+    (module / "__init__.py").write_text('POLICY = "first"\n', encoding="utf-8")
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname="agent-containers"\nversion="1.0.0"\n'
+        'dependencies=["agent-repository-policy"]\n'
+        '[tool.uv.sources]\nagent-repository-policy={path="libs/repository-policy"}\n',
+        encoding="utf-8",
+    )
+    return library
+
+
+@pytest.mark.parametrize("profile", ["base", "provider-exec"])
+def test_declared_repository_policy_is_an_explicit_local_install_and_health_input(
+    profiles: ModuleType, payload: Path, repository_policy: Path,
+    commands: list[list[str]], tmp_path: Path, profile: str,
+) -> None:
+    result = _provision(profiles, tmp_path / "runtime", payload, requested=profile)
+    install = _install_command(commands)
+    assert "--no-sources" in install
+    assert str(repository_policy) in install
+    health = next(call for call in commands if "-c" in call)
+    assert "repository_policy" in health[health.index("-c") + 1]
+    assert result["profile"] == profile
+
+
+@pytest.mark.parametrize("layout", ["source", "prepared"])
+def test_repository_policy_content_participates_in_each_profile_input_layout(
+    profiles: ModuleType, payload: Path, repository_policy: Path, layout: str,
+) -> None:
+    if layout == "source":
+        checkout = payload.parent / "checkout"
+        original = payload
+        payload = checkout / "plugins" / "agent-containers"
+        payload.mkdir(parents=True)
+        shutil.copyfile(original / "pyproject.toml", payload / "pyproject.toml")
+        shutil.copytree(original / "src", payload / "src")
+        shutil.copytree(original / "libs", checkout / "libs")
+        repository_policy = checkout / "libs" / "repository-policy"
+    roots = profiles._library_roots(payload, prepared=layout == "prepared")
+    assert repository_policy in roots
+    before = profiles._fingerprint(payload, roots)
+    module = repository_policy / "src" / "repository_policy" / "__init__.py"
+    info = module.stat()
+    module.write_text('POLICY = "other"\n', encoding="utf-8")
+    os.utime(module, ns=(info.st_atime_ns, info.st_mtime_ns))
+    assert module.stat().st_size == info.st_size
+    assert profiles._fingerprint(payload, roots) != before
 
 
 @pytest.mark.guard
