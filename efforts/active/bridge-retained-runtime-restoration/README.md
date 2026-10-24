@@ -239,6 +239,38 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
 
 ## Journal
 
+### 2026-10-24 - Durable current-consumer DB prerequisite
+- Add schema-31 enrollment through the existing DB owner: exact local
+  registration, installation/open epoch and consumer incarnation, with a
+  compare-and-swap predecessor and idempotent lost-reply reconciliation.
+- Retain superseded enrollment; ordinary heartbeat, alias rollover, registration
+  cleanup and historical handoffs cannot reactivate an old incarnation.
+  Poll and one-shot final admission require the current enrollment; original
+  outcomes remain recordable after retirement without renewing send permission.
+- The 216 focused isolated DB/inbox/registry controls pass, including both
+  final-admission/reload serial orders, competing enrollment, actual same-process
+  alias folding, retained outcomes and schema migration/passive adoption.
+  A historical v23 fixture now removes later-schema guards before dropping its
+  process-birth column; its original migration assertion remains intact.
+- This closes no Phase 1b Plan or Validation item: the internal prerequisite
+  still needs source review, and actual user-scoped registration, retained
+  transport/SDK integration and native recovery remain separate open gates.
+  No installed authentication or running service changes.
+
+### 2026-10-24 - Installation-binding prerequisite merged; enroll the consumer next
+- #8519 merged as `5f4bc412a942b11719393c1e056499c860243b53` after
+  exact-head Copilot approval on
+  `1a6e64a5c1420e246dd7ae4d853603462e11ceac`, the legacy-transfer thread
+  resolved and all three required checks passing.
+- Reread the full Plan and Validation Plan. This completes only the read-only
+  installation-binding prerequisite, not Phase 1b's installation-and-current-
+  consumer binding, actual SDK recovery or any full restoration gate.
+- Continue through the existing live registration and DB owner: persist the
+  negotiated current consumer incarnation, prevent a reload or alias successor
+  from inheriting an old final-send opportunity, then wire retained polling and
+  the actual SDK admission/outcome/consumption path. No credential hierarchy,
+  independent outbox or runtime activation is authorized by this merge.
+
 ### 2026-10-24 - Derive inbox installation observations through the existing owner
 - Add a read-only `LoopGovernance.runtime_installation(database)` prerequisite
   for local enrollment. The daemon's existing deployment, canonical receipt,

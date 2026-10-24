@@ -26,6 +26,8 @@ class _SchemaMixin:
         from .runtime_custody import ensure_schema, validate_schema
         from .inbox_custody import ensure_schema as ensure_inbox_schema
         from .inbox_custody import validate_schema as validate_inbox_schema
+        from .inbox_consumer_schema import ensure_schema as ensure_consumer_schema
+        from .inbox_consumer_schema import validate_schema as validate_consumer_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -37,6 +39,8 @@ class _SchemaMixin:
                     validate_schema(conn)
                 if recorded is not None and recorded["version"] >= 30:
                     validate_inbox_schema(conn)
+                if recorded is not None and recorded["version"] >= 31:
+                    validate_consumer_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -44,8 +48,10 @@ class _SchemaMixin:
                 self._ensure_current_columns(conn)
                 ensure_schema(conn)
                 ensure_inbox_schema(conn)
+                ensure_consumer_schema(conn)
                 validate_schema(conn)
                 validate_inbox_schema(conn)
+                validate_consumer_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -58,6 +64,7 @@ class _SchemaMixin:
             self._ensure_current_columns(conn)
             validate_schema(conn)
             validate_inbox_schema(conn)
+            validate_consumer_schema(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -723,3 +730,12 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (30,))
             conn.commit()
             log.info("Schema migrated to version 30: retained inbox handoff storage")
+
+        if from_version < 31:
+            from .inbox_consumer_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (31,))
+            conn.commit()
+            log.info("Schema migrated to version 31: durable current inbox consumer")

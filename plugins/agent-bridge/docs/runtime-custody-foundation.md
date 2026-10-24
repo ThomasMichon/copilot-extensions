@@ -122,6 +122,39 @@ reusable permission, interpret false/timeout as non-delivery, downgrade to legac
 delivery, or rebuild an independent outbox. No public route, ordinary extension
 poller, startup or installer currently activates these methods.
 
+## Durable current-consumer enrollment
+
+Schema 31 adds `bridge_inbox_consumers` to the same database. Explicit
+`enroll_inbox_consumer` binds an exact local live registration to its current
+consumer incarnation, installation and open admission epoch. It does not mint a
+credential, bind a client-selected database or retroactively enroll an ordinary
+legacy registration. A remote `venue` remains unsupported in this local owner.
+
+Enrollment compare-and-swaps the observed predecessor, retaining both
+incarnations. An identical retry after a lost enrollment reply observes the same
+current record without changing its revision. A stale predecessor, reused input,
+retired incarnation or historical handoff without enrollment refuses rather than
+reenrolling it. The extension must mint a new incarnation on extension reload or
+SDK/native-session change; its future transport owns observing and reconciling
+the current predecessor, not blindly retrying a failed CAS.
+
+Registration deletion, alias rollover and changes to process/native identity,
+machine, venue or non-live status retire the old enrollment in that same DB
+transaction. Ordinary heartbeats do not enroll or reactivate it. Poll and final
+admission require the exact current enrollment as well as fresh registration;
+concurrent reload and final admission therefore have one serial order. An
+already-committed final attempt stays outstanding after reload, and its original
+consumer can still report outcomes. A successor cannot inherit its old handoff.
+Unoffered original messages remain intact for the newly enrolled consumer.
+
+Enrollment history is immutable apart from irreversible retirement, survives
+registration cleanup and participates in DB revision/inventory observations.
+Migration never fabricates enrollment for older registrations or handoffs.
+Prepared/current database validation and passive adoption require the exact
+table, current-owner index and guards; they never reconstruct missing history.
+This remains an internal DB prerequisite: no HTTP registration, ordinary
+extension poll, SDK call, installed authentication or running service is changed.
+
 ## Inventory is observation, not qualification
 
 DB inventory reads every row's selected identity/status metadata for known
@@ -131,7 +164,7 @@ truncate terminal rows or create missing lazy tables. A missing table/field is
 reported as unknown (`None`), not an empty list; unknown tables and unassociated
 history are explicit blockers.
 
-The DB revision covers session/turn/inbox writes, producer enrollment and the epoch
+The DB revision covers session/turn/inbox writes, producer and consumer enrollment and the epoch
 only. It is not a cross-owner revision for acquisition, actual SDK consumers, native
 hosts or arbitrary SQLite writers. An expected-epoch/revision read detects
 intervening covered-owner writes but is not a global quiescence certificate.

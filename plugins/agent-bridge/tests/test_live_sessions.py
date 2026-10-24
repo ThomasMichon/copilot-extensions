@@ -290,6 +290,11 @@ def test_migration_v24_alone_installs_aliases_triggers_and_start_time(tmp_path: 
     db = Database(tmp_path / "b.db")
     try:
         conn = db._get_conn()
+        from agent_bridge.inbox_consumer_schema import definitions as consumer_schema
+
+        # Remove later-schema dependencies before reconstructing the v23 shape.
+        for name, (kind, _table, _) in reversed(list(consumer_schema().items())):
+            conn.execute(f"DROP {kind} {name}")
         conn.executescript(
             "DROP TRIGGER live_sessions_retired_id_fence;"
             "DROP TRIGGER live_sessions_drop_orphaned_aliases;"

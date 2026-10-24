@@ -34,7 +34,7 @@ class _InboxCustodyMixin:
             raise RuntimeCustodyError("Inbox producer is not enrolled")
 
     @staticmethod
-    def _current_inbox_consumer(
+    def _registered_inbox_consumer(
         conn: sqlite3.Connection, consumer: InboxConsumer, now: float,
     ) -> None:
         # Exact native id, not alias resolution: a renamed conversation cannot
@@ -48,8 +48,86 @@ class _InboxCustodyMixin:
             or abs(row["process_started_at"] - consumer.process_started_at)
             >= PROCESS_START_TOLERANCE_SECONDS
             or row["updated_at"] < now - LIVE_SESSION_STALE_SECONDS
+            or row["venue"] is not None
+            or conn.execute(
+                "SELECT 1 FROM live_session_aliases WHERE alias_session_id=?",
+                (consumer.session_id,),
+            ).fetchone() is not None
         ):
             raise RuntimeCustodyError("Inbox consumer registration changed or is unqualified")
+
+    def enroll_inbox_consumer(
+        self, installation: RuntimeInstallation, admission: RuntimeAdmission,
+        consumer: InboxConsumer, *, expected_incarnation: str | None, now: float,
+    ) -> None:
+        """CAS current local observations; retired incarnations never reenroll.
+
+        The extension owns minting a new incarnation on reload or SDK-context
+        change. An exact retry recovers a lost enrollment reply, not an old send.
+        This internal method does not authenticate or enroll a transport.
+        """
+        self._inbox_consumer(consumer)
+        observed_time(now)
+        if expected_incarnation is not None:
+            nonblank(expected_incarnation)
+        identity = self._runtime_installation(installation)
+        document = encode(consumer.document())
+        with self._runtime_transaction(write=True) as conn:
+            self._inbox_admission(conn, identity, admission)
+            self._registered_inbox_consumer(conn, consumer, now)
+            original = conn.execute(
+                "SELECT * FROM bridge_inbox_consumers WHERE incarnation=?",
+                (consumer.incarnation,),
+            ).fetchone()
+            if original is not None:
+                if (
+                    original["current"] != 1 or original["installation"] != identity
+                    or original["epoch"] != admission.epoch
+                    or original["session_id"] != consumer.session_id
+                    or original["consumer_json"] != document
+                    or original["predecessor"] != expected_incarnation
+                ):
+                    raise RuntimeCustodyError("Inbox consumer incarnation is retired or reused")
+                return
+            if conn.execute(
+                "SELECT 1 FROM live_messages WHERE handoff_json IS NOT NULL "
+                "AND json_extract(handoff_json,'$.consumer.incarnation')=? LIMIT 1",
+                (consumer.incarnation,),
+            ).fetchone() is not None:
+                raise RuntimeCustodyError("Historical inbox incarnation cannot gain new enrollment")
+            current = conn.execute(
+                "SELECT incarnation FROM bridge_inbox_consumers WHERE session_id=? AND current=1",
+                (consumer.session_id,),
+            ).fetchone()
+            if (current["incarnation"] if current is not None else None) != expected_incarnation:
+                raise RuntimeCustodyError("Inbox consumer enrollment changed; reconcile before retry")
+            conn.execute(
+                "UPDATE bridge_inbox_consumers SET current=0 WHERE session_id=? AND current=1",
+                (consumer.session_id,),
+            )
+            conn.execute(
+                "INSERT INTO bridge_inbox_consumers "
+                "(incarnation,installation,epoch,session_id,consumer_json,predecessor,current,enrolled_at) "
+                "VALUES (?,?,?,?,?,?,1,?)",
+                (consumer.incarnation, identity, admission.epoch, consumer.session_id,
+                 document, expected_incarnation, now),
+            )
+
+    def _current_inbox_consumer(
+        self, conn: sqlite3.Connection, consumer: InboxConsumer, now: float,
+        identity: str, epoch: int,
+    ) -> None:
+        self._registered_inbox_consumer(conn, consumer, now)
+        current = conn.execute(
+            "SELECT * FROM bridge_inbox_consumers WHERE incarnation=? AND current=1",
+            (consumer.incarnation,),
+        ).fetchone()
+        if (
+            current is None or current["installation"] != identity or current["epoch"] != epoch
+            or current["session_id"] != consumer.session_id
+            or current["consumer_json"] != encode(consumer.document())
+        ):
+            raise RuntimeCustodyError("Inbox consumer is not the current enrolled incarnation")
 
     @staticmethod
     def _original_handoff(
@@ -85,7 +163,7 @@ class _InboxCustodyMixin:
         identity = self._runtime_installation(installation)
         with self._runtime_transaction(write=True) as conn:
             self._inbox_admission(conn, identity, admission)
-            self._current_inbox_consumer(conn, consumer, now)
+            self._current_inbox_consumer(conn, consumer, now, identity, admission.epoch)
             rows = conn.execute(
                 "SELECT * FROM live_messages WHERE session_id=? AND consumed_at IS NULL "
                 "AND kind NOT LIKE 'control:%' ORDER BY id",
@@ -127,7 +205,7 @@ class _InboxCustodyMixin:
         identity = self._runtime_installation(installation)
         with self._runtime_transaction(write=True) as conn:
             self._inbox_admission(conn, identity, admission)
-            self._current_inbox_consumer(conn, consumer, now)
+            self._current_inbox_consumer(conn, consumer, now, identity, admission.epoch)
             row = self._original_handoff(conn, message_id, consumer, handoff_id)
             self._inbox_admission(conn, identity, RuntimeAdmission.parse(row["runtime_custody_json"]))
             if row["session_id"] != consumer.session_id:

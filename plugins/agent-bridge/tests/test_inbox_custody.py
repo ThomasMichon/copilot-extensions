@@ -29,6 +29,7 @@ def inbox(tmp_db):
     admission = tmp_db.enroll_runtime_producer(owner, epoch.epoch, producer)
     consumer = InboxConsumer("native-a", "consumer-a", 102, 1.0)
     register(tmp_db, consumer)
+    tmp_db.enroll_inbox_consumer(owner, admission, consumer, expected_incarnation=None, now=10.0)
     return tmp_db, owner, producer, admission, consumer
 
 
@@ -210,7 +211,10 @@ def test_missing_expired_and_aliased_registration_cannot_mint_final_authority(in
     db.execute_write("INSERT INTO live_session_aliases VALUES ('native-a','native-b',12)")
     db.execute_write("UPDATE live_sessions SET session_id='native-b' WHERE session_id='native-a'")
     db.execute_write("UPDATE live_messages SET session_id='native-b' WHERE session_id='native-a'")
-    successor = replace(consumer, session_id="native-b")
+    successor = replace(consumer, session_id="native-b", incarnation="consumer-b")
+    db.enroll_inbox_consumer(
+        owner, admission, successor, expected_incarnation=None, now=12.0,
+    )
     with pytest.raises(RuntimeCustodyError, match="observations changed"):
         db.begin_live_message_handoff(
             owner, admission, successor, row["id"], row["handoff"]["id"], now=12.0,
@@ -393,7 +397,7 @@ def test_frozen_legacy_migration_preserves_returned_body_uncertainty(tmp_path):
     assert path.read_bytes() == before
     db = Database(path)
     try:
-        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 30
+        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 31
         row, = db.execute_read("SELECT * FROM live_messages")
         assert row["body"] == "possibly already polled"
         assert row["runtime_custody_json"] is None and row["handoff_json"] is None
@@ -402,6 +406,7 @@ def test_frozen_legacy_migration_preserves_returned_body_uncertainty(tmp_path):
         admission = db.enroll_runtime_producer(owner, epoch.epoch, RuntimeProducer("a", 101, "birth"))
         consumer = InboxConsumer("native-a", "consumer-a", 102, 1.0)
         register(db, consumer)
+        db.enroll_inbox_consumer(owner, admission, consumer, expected_incarnation=None, now=10.0)
         with pytest.raises(RuntimeCustodyError, match="Legacy or foreign"):
             db.poll_live_message_handoffs(owner, admission, consumer, now=11.0)
         assert any("unassociated:live_messages" in item

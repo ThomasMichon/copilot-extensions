@@ -21,6 +21,8 @@ COHORTS = {
     "acquisition_launch_gates": ("worktree_id", "delivery_id", "mode", "session_id"),
     "pending_prompts": ("id", "session_id"),
     "live_sessions": ("session_id", "pid", "process_started_at", "status"),
+    "bridge_inbox_consumers": ("incarnation", "installation", "epoch", "session_id",
+                              "consumer_json", "predecessor", "current", "enrolled_at"),
     "live_messages": ("id", "session_id", "kind", "claimed_at", "outcome", "delivered_at", "consumed_at",
                       "runtime_custody_json", "handoff_json", "handoff_started_at"),
     "cli_mode_reservations": ("worktree_id", "reservation_id", "claimed_by_session_id"),
@@ -115,7 +117,8 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
     return {
         "version": 1, "coverage": "bridge-db-session-turn-inbox-foundation-v1",
         "epoch": epoch, "producers": producers, "rows": rows_by_table,
-        "revision_coverage": ["sessions", "turns", "live_messages", "producer-enrollment", "epoch"],
+        "revision_coverage": ["sessions", "turns", "live_messages", "producer-enrollment",
+                              "consumer-enrollment", "epoch"],
         "storage_inventory_complete": not missing and not unknown,
         "unmediated_cohorts": list(UNMEDIATED), "blockers": blockers,
         "restore_qualified": False, "acknowledged": False,
