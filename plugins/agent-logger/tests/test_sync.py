@@ -495,9 +495,12 @@ def test_local_target_push_is_incremental(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("target_name", ["local", "onedrive"])
 @pytest.mark.parametrize("selection", [None, {"abc-123"}, set()])
+@pytest.mark.parametrize("protection_mode", ["none", "essential", "redact"])
 def test_filesystem_push_prunes_out_of_scope_walks(
     tmp_path: Path, monkeypatch, target_name: str, selection: set[str] | None,
+    protection_mode: str,
 ) -> None:
+    from agent_logger.sync.protection import ProtectionSettings
     from agent_logger.sync.targets import filesystem
 
     source = _make_source(tmp_path)
@@ -532,14 +535,23 @@ def test_filesystem_push_prunes_out_of_scope_walks(
         else {"root": str(destination), "subfolder": "archive"}
     )
     target = build_target(target_name, options)
+    target.protection = ProtectionSettings(
+        redact_secrets=protection_mode == "redact",
+        session_files="essential" if protection_mode == "essential" else "all",
+    )
     result = target.push(source, "machine", selection, batch_mode=True)
     assert result.ok, result.detail
     root = destination / ("archive" if target_name == "onedrive" else "") / "machine"
-    assert (root / "session-store.db").read_bytes() == b"index"
+    if protection_mode == "none":
+        assert (root / "session-store.db").read_bytes() == b"index"
+    else:
+        assert not (root / "session-store.db").exists()
     for sid in ("abc-123", "other"):
         included = selection is None or sid in selection
         assert (root / "session-state" / sid / "events.jsonl").exists() == included
-        assert (root / "provenance" / f"{sid}.json").exists() == included
+        assert (root / "provenance" / f"{sid}.json").exists() == (
+            included and protection_mode != "essential"
+        )
     assert source in scanned
     assert not (root / "installed-plugins").exists()
 

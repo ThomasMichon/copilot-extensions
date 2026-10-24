@@ -934,6 +934,19 @@ def _copy_session_tree(
     return copied, nbytes
 
 
+def _iter_publication_source_files(source, excluded_roots, include_sessions, *, batch_mode):
+    def directory_in_scope(relative: Path) -> bool:
+        if relative in (Path("session-state"), Path("provenance")):
+            return True
+        return relative.parts[0] == "session-state" and is_session_path_included(
+            relative, include_sessions, batch_mode=batch_mode,
+        )
+
+    return _iter_regular_source_files(
+        source, excluded_roots, directory_filter=directory_in_scope,
+    )
+
+
 def _session_needs_replace(
     source: Path,
     destination: Path,
@@ -1728,15 +1741,8 @@ class FilesystemTarget(Target):
             try:
                 marker_name_casefold = publication_admission.PUBLICATION_IDENTITY_MARKER.casefold()
 
-                def directory_in_scope(relative: Path) -> bool:
-                    if relative in (Path("session-state"), Path("provenance")):
-                        return True
-                    return relative.parts[0] == "session-state" and is_session_path_included(
-                        relative, include_sessions, batch_mode=batch_mode,
-                    )
-
-                source_files = _iter_regular_source_files(
-                    source, detritus.roots, directory_filter=directory_in_scope,
+                source_files = _iter_publication_source_files(
+                    source, detritus.roots, include_sessions, batch_mode=batch_mode,
                 )
                 for src_file in source_files:
                     rel = src_file.relative_to(source)
