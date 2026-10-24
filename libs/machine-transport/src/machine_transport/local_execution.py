@@ -63,11 +63,15 @@ def _context(
     registry: Mapping[str, MachineEntry], observed: str, physical: str,
     platform: str, execution: str, customization_key: str | None,
 ) -> LocalExecutionContext:
-    collision = next(
-        (entry for key, entry in registry.items() if key.casefold() == execution.casefold()), None,
-    )
+    collision = next((
+        entry for entry in registry.values()
+        if execution.casefold() in {
+            name.casefold() for name in machine_identity_names(entry, include_metadata=False)
+        }
+    ), None)
     if collision is not None and (
         collision.key != customization_key
+        or collision.key.casefold() != execution.casefold()
         or collision.execution_platform not in ("", platform)
     ):
         raise IdentityError(f"local execution identity {execution!r} conflicts with a registered machine")
@@ -78,15 +82,13 @@ def _context(
 
 
 def _literal_binding(registry: Mapping[str, MachineEntry], configured: str, observed: str) -> bool:
-    if configured.casefold() != observed.casefold():
-        return False
     direct = [
         entry for entry in registry.values()
         if configured.casefold() in {
             name.casefold() for name in machine_identity_names(entry, include_metadata=False)
         }
     ]
-    return not direct or (
+    return (not direct and configured.casefold() == observed.casefold()) or (
         len(direct) == 1 and direct[0].key.casefold() == observed.casefold()
         and not direct[0].execution_platform and not _platform(direct[0], observed)
     )
@@ -116,6 +118,11 @@ def resolve_local_execution_context(
         if not isinstance(configured_machine, str) or not configured_machine.strip():
             raise IdentityError("configured machine must be a nonempty string")
         configured = configured_machine.strip()
+        if not any(configured.casefold() == key.casefold() for key in registry) and any(
+            profile.alias.casefold() == configured.casefold() and profile.name != platform
+            for entry in registry.values() for profile in entry.ssh_environments
+        ):
+            raise IdentityError("configured SSH profile conflicts with the current execution environment")
         if _literal_binding(registry, configured, observed):
             configured_machine = None
     if configured_machine is not None:
@@ -138,6 +145,7 @@ def resolve_local_execution_context(
         if folded in {
             entry.key.casefold(), entry.hostname.casefold(), entry.alias.casefold(),
             entry.physical_host.casefold(),
+            *(alias.casefold() for alias in entry.compatibility_aliases),
         }
     ]
     families = {_physical(entry, observed) for entry in matches}

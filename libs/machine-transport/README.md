@@ -107,7 +107,9 @@ An established guest binding remains usable when only its native customization
 exists. This local adapter handles the registry's specific
 `MissingExecutionSpaceError` (`ValueError` subtype); the target selector still
 refuses the missing logical target. Both configured and observed results check
-execution-key collisions. Actual-platform entries take precedence over
+execution-key collisions against keys, compatibility names and profile aliases.
+Aliases of a literal observed host retain the same naming facts; an explicit
+profile/environment conflict is still a refusal. Actual-platform entries take precedence over
 unscoped native fallbacks, and a selected entry keeps its registry key rather
 than regenerating it from aliases or physical metadata.
 

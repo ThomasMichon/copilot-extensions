@@ -67,6 +67,54 @@ def test_unmapped_literal_hostname_can_remain_the_local_binding(environment: str
     assert context.execution_machine == ("literal-wsl-wsl" if environment == "wsl" else "literal-wsl")
 
 
+@pytest.mark.parametrize(("environment", "slot"), [
+    (environment, slot)
+    for environment in ("windows", "wsl", "linux")
+    for slot in ("alias", "compatibility_aliases", "ssh_profile")
+    if (environment, slot) != ("wsl", "ssh_profile")
+])
+def test_registered_aliases_preserve_the_literal_observed_host(environment: str, slot: str) -> None:
+    entry = MachineEntry(
+        "literal-wsl", "", hostname="literal-wsl",
+        alias="friendly" if slot == "alias" else "",
+        compatibility_aliases=("friendly",) if slot == "compatibility_aliases" else (),
+        ssh_environments=[SSHEnvironment(environment, "friendly")] if slot == "ssh_profile" else [],
+    )
+    context = resolve_local_execution_context(
+        {entry.key: entry}, hostname="literal-wsl", environment=environment,
+        configured_machine="friendly",
+    )
+    assert context.machine == "literal-wsl"
+    assert context.execution_machine == ("literal-wsl-wsl" if environment == "wsl" else "literal-wsl")
+
+
+def test_literal_host_alias_does_not_override_explicit_native_space() -> None:
+    entry = MachineEntry(
+        "literal-wsl", "", hostname="literal-wsl", alias="friendly", execution_platform="windows",
+    )
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(
+            {entry.key: entry}, hostname="literal-wsl", environment="wsl", configured_machine="friendly",
+        )
+
+
+@pytest.mark.parametrize(("environment", "profile"), [
+    ("windows", "linux"), ("wsl", "windows"), ("linux", "windows"),
+])
+def test_literal_host_profile_alias_cannot_override_its_environment(
+    environment: str, profile: str,
+) -> None:
+    entry = MachineEntry(
+        "literal-wsl", "", hostname="literal-wsl",
+        ssh_environments=[SSHEnvironment(profile, "profile-only")],
+    )
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(
+            {entry.key: entry}, hostname="literal-wsl", environment=environment,
+            configured_machine="profile-only",
+        )
+
+
 @pytest.mark.parametrize("environment", ["windows", "wsl"])
 def test_projected_legacy_entries_keep_their_original_keys(environment: str) -> None:
     entry = MachineEntry(
@@ -164,6 +212,22 @@ def test_generated_guest_key_cannot_shadow_native_entry(key: str, configured: bo
         )
 
 
+@pytest.mark.parametrize("slot", ["alias", "compatibility_aliases", "ssh_profile"])
+@pytest.mark.parametrize("configured", [False, True])
+def test_generated_guest_key_cannot_shadow_identity_labels(slot: str, configured: bool) -> None:
+    entry = MachineEntry(
+        "foreign-native", "", execution_platform="windows",
+        alias="RAW-HOST-WSL" if slot == "alias" else "",
+        compatibility_aliases=("RAW-HOST-WSL",) if slot == "compatibility_aliases" else (),
+        ssh_environments=[SSHEnvironment("windows", "RAW-HOST-WSL")] if slot == "ssh_profile" else [],
+    )
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(
+            {entry.key: entry}, hostname="raw-host", environment="wsl",
+            configured_machine="raw-host" if configured else None,
+        )
+
+
 @pytest.mark.parametrize("unrelated", [False, True])
 def test_configured_guest_does_not_require_optional_guest_entry(unrelated: bool) -> None:
     entries = {
@@ -206,6 +270,18 @@ def test_selected_unscoped_keys_are_not_regenerated_from_metadata(environment: s
     )
     assert automatic == configured
     assert automatic.execution_machine == key
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+def test_observed_compatibility_name_keeps_the_matching_customization(environment: str) -> None:
+    entry = MachineEntry(
+        "custom-execution", "", physical_host="physical",
+        execution_platform=environment, compatibility_aliases=("old-host",),
+    )
+    context = resolve_local_execution_context(
+        {entry.key: entry}, hostname="OLD-HOST", environment=environment,
+    )
+    assert (context.machine, context.execution_machine) == ("physical", entry.key)
 
 
 @pytest.mark.parametrize("hostname", ["", "two terms", "../host", "host/project/id"])
