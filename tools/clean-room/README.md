@@ -272,8 +272,9 @@ The verifier requires a fetch failure for a package on that feed and a native
 connection-refused diagnostic, a nonzero nonsignal installer exit,
 and exactly one durable `install` `begin`/`fail` pair whose PIDs match the actual
 installer and whose terminal version matches the prepared source generation.
-No selection, deploy manifest, completed generation or running endpoint may be
-published. An incomplete candidate may be cleaned by the installer itself.
+No selection, deploy manifest, completed generation, active routing or Dispatch
+`run/endpoint.json` advertisement may be published. An incomplete candidate may
+be cleaned by the installer itself.
 Missing tools, malformed source, clone/preparation failures, timeouts, unrelated
 nonzero exits, malformed records and any success record fail the scenario.
 

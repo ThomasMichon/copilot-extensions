@@ -45,7 +45,7 @@ def verify(logs: Path, runtime: Path, plugin: str, commit: str) -> dict[str, obj
     assert datetime.fromisoformat(events[0]["ts"]) <= datetime.fromisoformat(events[1]["ts"])
     for relative in (
         "current-version", "last-known-good", "deploy-manifest.json",
-        "active.json", "running-version.json", "venv",
+        "active.json", "run/endpoint.json", "running-version.json", "venv",
     ):
         path = runtime / relative
         assert not path.exists() and not path.is_symlink(), f"unexpected publication: {relative}"

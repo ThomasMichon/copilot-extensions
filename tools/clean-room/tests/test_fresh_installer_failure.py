@@ -57,9 +57,9 @@ class FailureVerifierTests(unittest.TestCase):
     def write(self, name: str, content: str) -> None:
         (self.logs / name).write_text(content, encoding="utf-8")
 
-    def check(self) -> dict[str, object]:
+    def check(self, plugin: str = "agent-bridge") -> dict[str, object]:
         self.write("lifecycle.log", "".join(json.dumps(event) + "\n" for event in self.events))
-        return VERIFIER.verify(self.logs, self.runtime, "agent-bridge", COMMIT)
+        return VERIFIER.verify(self.logs, self.runtime, plugin, COMMIT)
 
     def test_truthful_failure_accepts_cleaned_or_incomplete_unpublished_candidate(self) -> None:
         result = self.check()
@@ -123,7 +123,7 @@ class FailureVerifierTests(unittest.TestCase):
     def test_any_publication_including_dangling_selection_or_other_complete_slot_fails(self) -> None:
         for name in (
             "current-version", "last-known-good", "deploy-manifest.json",
-            "active.json", "running-version.json", "venv",
+            "active.json", "run/endpoint.json", "running-version.json", "venv",
             "versions/other/.install-complete.json",
         ):
             with self.subTest(name=name):
@@ -133,6 +133,20 @@ class FailureVerifierTests(unittest.TestCase):
                 with self.assertRaises(AssertionError):
                     self.check()
                 path.unlink()
+
+    def test_dispatch_rendezvous_file_or_dangling_advertisement_is_not_absence(self) -> None:
+        for event in self.events:
+            event["service"] = "agent-dispatch"
+        self.assertIs(self.check("agent-dispatch")["published_runtime"], False)
+        endpoint = self.runtime / "run" / "endpoint.json"
+        endpoint.parent.mkdir()
+        endpoint.write_text('{"transport":"tcp","port":12345}', encoding="utf-8")
+        with self.assertRaises(AssertionError):
+            self.check("agent-dispatch")
+        endpoint.unlink()
+        endpoint.symlink_to(self.root / "absent-endpoint")
+        with self.assertRaises(AssertionError):
+            self.check("agent-dispatch")
 
     def test_prepared_identity_must_match_the_pinned_commit(self) -> None:
         with self.assertRaises(AssertionError):
