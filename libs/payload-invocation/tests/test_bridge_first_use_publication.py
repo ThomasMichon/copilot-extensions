@@ -168,6 +168,9 @@ def _initialize_shell_profiles(
     *[pytest.param("legacy", "failed-resolver", entry, marks=pytest.mark.skipif(
         os.name == "nt", reason="Bash resolver error propagation",
     )) for entry in ("payload", "stamped-no-pointer")],
+    *[pytest.param("legacy", "standalone-no-flock", entry, marks=pytest.mark.skipif(
+        os.name == "nt", reason="POSIX no-flock provisioning lock",
+    )) for entry in ("payload", "stamped-global")],
 ])
 def test_bridge_actual_first_use_publication(
     binding_fixture: dict, bridge_release: Path, shell: str, scope: str, state: str, entry: str,
@@ -185,6 +188,8 @@ def test_bridge_actual_first_use_publication(
         "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
     ):
         environment.pop(key, None)
+    if state == "standalone-no-flock":
+        environment["COPILOT_EXT_NO_FLOCK"] = "1"
     if os.name == "nt":
         environment.pop("PSModulePath", None)
         environment["LOCALAPPDATA"] = str(fixture["home"] / "AppData/Local")
@@ -241,7 +246,9 @@ def test_bridge_actual_first_use_publication(
     }
     policy_state = (
         "missing" if state in {"mode-changed-missing", "deployment-changed-under-lock"} else
-        "standalone" if state in {"standalone-unicode", "deactivation-standalone"} or readiness else
+        "standalone" if state in {
+            "standalone-unicode", "standalone-no-flock", "deactivation-standalone",
+        } or readiness else
         "managed" if ((state.startswith("healthy-") and state != "healthy-invalid") or
                       state in {"deactivation-managed", "deactivation-healthy"}) else
         "invalid" if state == "healthy-invalid" else state
@@ -515,6 +522,10 @@ def test_bridge_actual_first_use_publication(
                 "action": "provision", "root": str(root), "environmentRoot": str(root),
             }, evidence
         assert "failed rc=37" in (root / ".provision-status").read_text(encoding="utf-8-sig")
+        if state == "standalone-no-flock":
+            assert not (root / ".provision.lock.pid").exists(), evidence
+            assert not (root / ".provision.reap.mutex").exists(), evidence
+            assert not (root / ".provision.lock").exists(), evidence
     else:
         assert result.returncode == (29 if state == "healthy-exit" else 0), evidence
         assert json.loads(result.stdout) == {

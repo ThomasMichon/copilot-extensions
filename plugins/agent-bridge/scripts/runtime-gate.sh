@@ -255,22 +255,31 @@ if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]];
     flock 9
 else
     _lock_link="$RUNTIME_ROOT/.provision.lock.pid"
+    _reap_mutex="$RUNTIME_ROOT/.provision.reap.mutex"
     until ln -s "$$" "$_lock_link" 2>/dev/null; do
         _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
         case "$_owner" in
             *[!0-9]*|"") _live=0 ;;
             *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
         esac
-        if [[ -z "$_owner" ]]; then
-            # The link vanished after the failed `ln -s` (or is not a
-            # symlink): never unlink then -- a live lock could be created
-            # between the read and the unlink. Just retry.
-            sleep 0.1
-        elif [[ "$_live" == 0 && "$(readlink "$_lock_link" 2>/dev/null || true)" == "$_owner" ]]; then
-            rm -f "$_lock_link"
-        else
+        if [[ "$_live" == 1 ]]; then
             sleep 1
+            continue
         fi
+        # Match the canonical shim: keep competing stale reapers from
+        # replacing the owner between revalidation and removal.
+        if ! mkdir "$_reap_mutex" 2>/dev/null; then
+            sleep 1
+            continue
+        fi
+        _owner2="$(readlink "$_lock_link" 2>/dev/null || true)"
+        if [[ -n "$_owner2" && "$_owner2" == "$_owner" ]]; then
+            case "$_owner2" in
+                *[!0-9]*) rm -f -- "$_lock_link" ;;
+                *) kill -0 "$_owner2" 2>/dev/null || rm -f -- "$_lock_link" ;;
+            esac
+        fi
+        rmdir "$_reap_mutex" 2>/dev/null || true
     done
 fi
 trap '_unlock_provision' EXIT INT TERM

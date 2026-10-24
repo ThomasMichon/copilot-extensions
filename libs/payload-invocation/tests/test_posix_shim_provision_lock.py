@@ -77,6 +77,11 @@ def _posix(path: Path) -> str:
 
 
 def _rendered_lock_section(tmp_path: Path, entry: str) -> str:
+    if entry == "bridge":
+        dispatcher = SCRIPT.parents[2] / "plugins/agent-bridge/scripts/runtime-gate.sh"
+        text = dispatcher.read_text(encoding="utf-8")
+        start = text.index(LOCK_START)
+        return 'RUNTIME_ROOT="$_runtime_root"\n' + text[start:text.index(LOCK_END, start)]
     if entry == "dispatch":
         dispatcher = SCRIPT.parents[2] / "plugins/agent-dispatch/scripts/runtime-gate.sh"
         text = dispatcher.read_text(encoding="utf-8")
@@ -145,7 +150,7 @@ def _assert_lock_scenario(tmp_path: Path, entry: str, hooks: str) -> None:
     assert status == "acquired" and holder == pid
 
 
-@pytest.mark.parametrize("entry", ["shim", "dispatch"])
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
 def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
     tmp_path: Path, entry: str,
 ) -> None:
@@ -165,7 +170,7 @@ def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
     _assert_lock_scenario(tmp_path, entry, hooks)
 
 
-@pytest.mark.parametrize("entry", ["shim", "dispatch"])
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
 def test_posix_reaper_serializes_another_reaper_after_final_read(
     tmp_path: Path, entry: str,
 ) -> None:

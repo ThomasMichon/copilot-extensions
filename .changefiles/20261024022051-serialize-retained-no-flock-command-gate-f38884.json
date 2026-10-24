@@ -1,0 +1,9 @@
+{
+  "comment": "Serialize retained no-flock command-gate stale-owner reaping without deleting a competing live lock.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
