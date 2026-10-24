@@ -89,13 +89,18 @@ Bridge's optional `BufferedDiagnosticLog` uses the **existing** `BufferedSink`
 writer, not another collector or service. Its producer copies bounded primitives
 without a blocking logging-handler lock, formatting, file access or history work.
 The existing copier limits (including 512 characters per string and supported
-primitive types) apply: invalid, contended, full, failed and abandoned work is
-observable, not lossless delivery. Exception type and up to eight frame
+primitive types) apply. The logging adapter retains nonprimitive arguments as
+explicit type placeholders and clips long primitive strings, without calling
+repr/str/equality hooks or serializing exception arguments. Unsupported envelopes,
+contention, overflow, failed callbacks and abandoned work remain observable losses,
+not lossless delivery. Exception type and up to eight frame
 locations are copied without exception objects/arguments, source reads, arbitrary
 repr, environment or credentials. Formatting, retention and kernel I/O occur on
 that one existing worker. Dynamic or over-512 format width/precision and
 over-8192-character formatted results fail the callback, preventing a small
 accepted format string from allocating unbounded output.
+Every conversion is parsed before interpolation; nested-parenthesis mapping keys
+are explicitly unsupported, so they cannot bypass width validation.
 
 `BufferedSink(..., on_start=callback)` optionally performs owner initialization
 once on the same worker before consuming records. Existing callers default to

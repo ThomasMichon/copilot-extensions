@@ -199,23 +199,64 @@ def test_expired_history_and_rotation_are_worker_only(handler, monkeypatch):
     assert len(handler.store._files()) >= 2
 
 
-def test_existing_buffer_mutex_is_nonblocking_and_invalid_fields_are_counted(handler):
+def test_existing_buffer_mutex_is_nonblocking_and_nonprimitive_arguments_have_placeholders(handler):
     with handler.writer._lock:
         handler.handle(record())
     assert handler.writer.stats()["contended"] == 1
     item = record("%s", object())
     handler.handle(item)
-    assert handler.writer.stats()["invalid"] == 1
-    assert logs.logging_status()["buffer_callbacks"]["invalid"] == 1
+    wait_for(lambda: handler.writer.stats()["delivered"] >= 1)
+    assert handler.writer.stats()["invalid"] == 0
+    event = json.loads(handler.store.path.read_text(encoding="utf-8"))
+    assert event["message"] == "<object>" and event["argument_adaptation"]
 
 
 def test_formatting_cannot_expand_unbounded_width_or_call_object_hooks(handler):
     handler.handle(record("%1000000000s", "bounded"))
     wait_for(lambda: handler.writer.stats()["sink_failed"] == 1)
     assert not handler.store.path.exists()
-    handler.handle(record("%*s", 2**62, "bounded"))
+    from process_telemetry.buffered_logs import _validate_percent
+    with pytest.raises(ValueError, match="mapping key"):
+        _validate_percent("%(a(b))10000s")
+    _validate_percent("literal %%(a(b))10000s")
+    handler.handle(record("%(a(b))10000s", {"a(b)": "bounded"}))
     wait_for(lambda: handler.writer.stats()["sink_failed"] == 2)
     assert not handler.store.path.exists()
+    handler.handle(record("%*s", 2**62, "bounded"))
+    wait_for(lambda: handler.writer.stats()["sink_failed"] == 3)
+    assert not handler.store.path.exists()
+
+
+def test_actual_registry_failure_with_path_and_exception_is_retained(handler, tmp_path, monkeypatch):
+    from agent_bridge.agent_registry import resolve_repo_remote
+
+    registry = tmp_path / "synthetic-registry.yaml"
+    registry.write_text("repos: [", encoding="utf-8")
+    monkeypatch.setenv("AGENT_WORKTREES_REPOS_YAML", str(registry))
+    assert resolve_repo_remote("synthetic") is None
+    wait_for(lambda: handler.writer.stats()["delivered"] >= 1)
+    event = json.loads(handler.store.path.read_text(encoding="utf-8"))
+    assert event["message"].startswith("Failed to parse repos.yaml at <")
+    assert "Path>" in event["message"] and "Error>" in event["message"]
+    assert event["argument_adaptation"]
+    assert handler.writer.stats()["invalid"] == 0
+
+
+def test_placeholder_adaptation_never_calls_argument_formatting_or_equality_hooks(handler):
+    class Argument:
+        def __str__(self):
+            raise AssertionError("no str hook")
+
+        def __repr__(self):
+            raise AssertionError("no repr hook")
+
+        def __eq__(self, _other):
+            raise AssertionError("no equality hook")
+
+    handler.handle(record("operation failed: %s", Argument()))
+    wait_for(lambda: handler.writer.stats()["delivered"] >= 1)
+    event = json.loads(handler.store.path.read_text(encoding="utf-8"))
+    assert event["message"] == "operation failed: <Argument>"
 
 
 def test_daemon_bootstrap_preserves_primary_failure_and_closes_owner(monkeypatch, handler):

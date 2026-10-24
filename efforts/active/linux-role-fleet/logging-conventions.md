@@ -271,3 +271,11 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   checks pass. Linux/macOS native and live external qualification are not claimed
   by this explicitly source-only Windows stretch. Released helper/config
   adoption and actual running-state readback remain integration work.
+- 2026-10-24 UTC — #8495 source review identified a nested mapping-key formatting
+  bypass and loss of ordinary failure records with Path/exception arguments.
+  Complete conversion validation now rejects unsupported mapping keys before
+  interpolation; safe bounded type placeholders preserve those failures without
+  producer-side repr/str/equality hooks or raw exception arguments. The actual
+  registry-parse failure callsite is a regression. Required CI's shrink-only app
+  size guard is addressed by factoring the existing heartbeat pause/enqueue
+  boundary into the logging adapter, without widening a baseline or adding a task.

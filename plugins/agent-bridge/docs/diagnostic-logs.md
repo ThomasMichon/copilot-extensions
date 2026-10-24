@@ -41,13 +41,19 @@ bounded `BufferedSink`. There is no second collector, daemon or logging registry
 
 Producer work is bounded primitive copying and a nonblocking queue offer:
 no handler mutex wait, message formatting, filesystem operation or history scan
-runs on the asyncio serving thread. Unsupported/oversized inputs, contention,
-overflow, callback failure and abandoned work are observable losses. The existing
+runs on the asyncio serving thread. Nonprimitive arguments (including Path and
+exception objects used by existing failure callsites) become explicit bounded
+type placeholders, never repr/str/equality calls; long primitive arguments are
+clipped to the copier's string limit. `argument_adaptation` records that context
+loss without dropping the whole failure. Unsupported/oversized envelopes,
+contention, overflow, callback failure and abandoned work are observable losses. The existing
 queue holds at most 128 records plus one 32-record drain batch, with the copier's
 primitive/string limits and 64 KiB per-record serialization estimate. These are
 not heap-size or lossless-delivery guarantees. Worker formatting rejects dynamic
 or over-512 field width/precision and over-8192-character results as failed
 callbacks, rather than allowing a small format string to allocate unbounded output.
+The validator parses every complete conversion and rejects nested-parenthesis
+mapping keys before interpolation, rather than relying on a partial regex match.
 
 The worker formats approved primitive arguments and writes UTC `ts`, service,
 component, logger, level, PID, existing OS process-start token (null if unknown),

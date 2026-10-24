@@ -3,17 +3,69 @@
 from __future__ import annotations
 
 import logging
-import re
+import math
 
 from .buffer import BufferedSink
 from .diagnostic_logs import DiagnosticLog
 
 
+def _validate_percent(template: str) -> None:
+    """Validate every conversion before Python can allocate formatted output."""
+    index = 0
+    while index < len(template):
+        if template[index] != "%":
+            index += 1
+            continue
+        index += 1
+        if index < len(template) and template[index] == "%":
+            index += 1
+            continue
+        if index < len(template) and template[index] == "(":
+            end = template.find(")", index + 1)
+            if end < 0 or "(" in template[index + 1:end]:
+                raise ValueError("unsupported diagnostic mapping key")
+            index = end + 1
+        while index < len(template) and template[index] in "-+#0 ":
+            index += 1
+        for precision in (False, True):
+            if precision:
+                if index >= len(template) or template[index] != ".":
+                    break
+                index += 1
+            if index < len(template) and template[index] == "*":
+                raise ValueError("diagnostic dynamic format limit")
+            start = index
+            while index < len(template) and "0" <= template[index] <= "9":
+                index += 1
+            if index > start and int(template[start:index]) > 512:
+                raise ValueError("diagnostic format width/precision limit")
+        if index < len(template) and template[index] in "hlL":
+            index += 1
+        if index >= len(template) or template[index] not in "diouxXeEfFgGcrsa%":
+            raise ValueError("unsupported diagnostic conversion")
+        index += 1
+
+
+def _safe_argument(value):
+    """Retain a failure's context without calling user repr/str or path hooks."""
+    kind = type(value)
+    if value is None or kind is bool:
+        return value, False
+    if kind is str:
+        return value[:512], len(value) > 512
+    if kind is int and -(2**63) <= value < 2**63:
+        return value, False
+    if kind is float and math.isfinite(value):
+        return value, False
+    return "<" + kind.__name__[:128] + ">", True
+
+
 class BufferedDiagnosticLog(logging.Handler):
     """Producer does no formatting, file access, history work or blocking lock.
 
-    Only bounded primitives enter BufferedSink. Nonprimitive/oversized records
-    are counted as invalid rather than invoking arbitrary repr/format hooks.
+    Only bounded primitives enter BufferedSink. Nonprimitive arguments become
+    explicit type placeholders without invoking repr/format/equality hooks.
+    Unsupported envelopes are counted as invalid.
     """
 
     def __init__(self, store: DiagnosticLog, *, capacity: int = 128):
@@ -44,12 +96,27 @@ class BufferedDiagnosticLog(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             event = self.store._record_fields(record)
-            event["_template"] = record.msg
+            event["_template"], adapted = _safe_argument(record.msg)
             args = record.args
-            event["_args"] = list(args) if type(args) is tuple and len(args) <= 32 else args
+            if type(args) is tuple and len(args) <= 32:
+                prepared = [_safe_argument(value) for value in args]
+                event["_args"] = [value for value, _changed in prepared]
+                adapted = adapted or any(changed for _value, changed in prepared)
+            elif type(args) is dict and len(args) <= 32 and all(
+                type(key) is str and len(key) <= 512 for key in args
+            ):
+                prepared = {key: _safe_argument(value) for key, value in args.items()}
+                event["_args"] = {key: value for key, (value, _changed) in prepared.items()}
+                adapted = adapted or any(changed for _value, changed in prepared.values())
+            else:
+                event["_args"] = []
+                adapted = True
+            if adapted:
+                event["argument_adaptation"] = "bounded primitives or type placeholders"
             for key in ("operation_id", "correlation_id", "generation"):
                 if key in record.__dict__:
-                    event[key] = record.__dict__[key]
+                    value, changed = _safe_argument(record.__dict__[key])
+                    event[key] = None if changed else value
             if record.exc_info:
                 kind, _error, trace = record.exc_info
                 event["exception_type"] = kind.__name__
@@ -76,13 +143,10 @@ class BufferedDiagnosticLog(logging.Handler):
             return
         template = event.pop("_template")
         args = event.pop("_args")
-        tokens = re.finditer(
-            r"%(?:\([^)]*\))?[-+#0 ]*(\d+|\*)?(?:\.(\d+|\*))?[hlL]?[a-zA-Z%]", template,
-        ) if args else ()
-        for token in tokens:
-            if any(part == "*" or (part is not None and int(part) > 512)
-                   for part in token.groups()):
-                raise ValueError("diagnostic format width/precision limit")
+        if type(template) is not str:
+            template = str(template)  # only snapshotted primitive types reach here
+        if args:
+            _validate_percent(template)
         event["message"] = template % (tuple(args) if type(args) is list else args) if args else template
         if len(event["message"]) > 8192:
             raise ValueError("diagnostic formatted message limit")

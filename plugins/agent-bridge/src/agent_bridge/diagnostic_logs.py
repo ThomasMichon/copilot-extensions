@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 import os
 import sys
@@ -81,6 +82,12 @@ def maintain_file_logging() -> None:
     for handler in logging.getLogger("agent-bridge").handlers:
         if isinstance(handler, BufferedDiagnosticLog):
             handler.maintain()
+
+
+async def heartbeat_pause(interval: float) -> None:
+    """Use the existing owner's cadence, then enqueue before governance backoff."""
+    await asyncio.sleep(interval)
+    maintain_file_logging()
 
 
 def close_file_logging(handler: BufferedDiagnosticLog) -> None:
