@@ -305,14 +305,17 @@ def test_actual_ssh_cold_provision_preserves_selection_and_source_independence(
         argv, env={**env, "AGENT_SSH_NO_SELFPROVISION": "1"}, cwd=project,
         capture_output=True, text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
     )
-    assert dispatch.returncode == 0 and version in dispatch.stdout, (
+    assert dispatch.returncode == 0, (
         dispatch.stdout, dispatch.stderr, diagnostic(),
     )
     origin = subprocess.run(
         [str(python), "-I", "-B", "-c",
-         "import agent_ssh,json; print(json.dumps(agent_ssh.__file__))"],
+         "import agent_ssh,json; from importlib.metadata import version; "
+         "print(json.dumps({'origin':agent_ssh.__file__,'version':version('agent-ssh')}))"],
         env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert origin.returncode == 0, origin.stdout + origin.stderr
-    assert Path(json.loads(origin.stdout)).is_relative_to(slot)
+    distribution = json.loads(origin.stdout)
+    assert Path(distribution["origin"]).is_relative_to(slot)
+    assert dispatch.stdout.strip() == "agent-ssh " + distribution["version"]
     assert len(status(root=root)) == 3 and completion.read_bytes() == complete
