@@ -55,12 +55,15 @@ class ProcInfo:
 
     ``raw`` is the unsplit command line when argv boundaries could not be
     recovered (the ``ps`` fallback), so paths containing spaces still match.
+    ``started`` is the creation time when known (Windows FILETIME), so a stale
+    parent pid that was since reused is not mistaken for the real parent.
     """
 
     pid: int
     ppid: int
     argv: tuple[str, ...]
     raw: str = ""
+    started: int | None = None
 
 
 @dataclass(frozen=True)
@@ -180,7 +183,8 @@ def _read_proc_windows() -> list[ProcInfo] | None:
     from agent_procutil import no_window_flags
 
     script = ("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,"
-              "CommandLine | ConvertTo-Json -Compress")
+              "CommandLine,@{n='Created';e={ if ($_.CreationDate) "
+              "{ $_.CreationDate.ToFileTimeUtc() } }} | ConvertTo-Json -Compress")
     try:
         result = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -202,7 +206,9 @@ def _read_proc_windows() -> list[ProcInfo] | None:
         except (KeyError, TypeError, ValueError):
             continue
         if cmdline:
-            procs.append(ProcInfo(pid, ppid, _split_windows_cmdline(cmdline)))
+            created = row.get("Created")
+            procs.append(ProcInfo(pid, ppid, _split_windows_cmdline(cmdline),
+                                  started=created if type(created) is int else None))
     return procs
 
 
@@ -417,6 +423,33 @@ def lock_holder(name: str, table: list[ProcInfo] | None = None) -> LiveUser | No
     return LiveUser(holder.pid, ROLE_LOCK, command or "<unknown command>", detail)
 
 
+def _own_tree(table: list[ProcInfo]) -> frozenset[int]:
+    """This process and its live descendants in ``table`` (e.g. the stdio
+    carrier its own session sync spawned): never live users of the box.
+
+    A Windows process keeps a dead parent's pid and pids are reused, so a
+    parent link counts only when the parent is not newer than the child (or
+    either creation time is unknown).
+    """
+    me = os.getpid()
+    if me <= 1:
+        return frozenset({me})  # init adopts every orphan: its children are not ours
+    by_pid = {p.pid: p for p in table}
+    children: dict[int, list[ProcInfo]] = {}
+    for proc in table:
+        children.setdefault(proc.ppid, []).append(proc)
+    own, stack = {me}, [me]
+    while stack:
+        pid = stack.pop()
+        born = by_pid[pid].started if pid in by_pid else None
+        for child in children.get(pid, ()):
+            if child.pid not in own and (born is None or child.started is None
+                                         or born <= child.started):
+                own.add(child.pid)
+                stack.append(child.pid)
+    return frozenset(own)
+
+
 def live_users(name: str, *, table: list[ProcInfo] | None = None) -> list[LiveUser]:
     """Every live local user of CodeSpace ``name`` (lock holder first)."""
     if table is None:
@@ -426,7 +459,7 @@ def live_users(name: str, *, table: list[ProcInfo] | None = None) -> list[LiveUs
     if holder is not None:
         users.append(holder)
     if table:
-        own = frozenset({os.getpid()})
+        own = _own_tree(table)
         users.extend(u for u in users_from_table(name, table, exclude_pids=own)
                      if holder is None or u.pid != holder.pid)
     return users
