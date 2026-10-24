@@ -285,9 +285,43 @@ For the later structured-signal slice specifically, the design merged in #8187.
 The coordinator subsequently admitted its exact functional shared API/file scope,
 including isolated port-zero SDK/wire fixtures. The admission does not permit
 collector edits, installed enrollment, reserved callers or process-custody changes.
-Actual native source Logs/Metrics receipt still awaits the collector handshake.
+The Journal records the separately admitted native source Logs/Metrics receipt.
+Independent campaign verification and installed/native-budget qualification remain open.
 
 ## Journal
+
+### 2026-10-23 — Native structured-signal correctness receipt
+
+- One sequential owned source Picker process completed the existing refresh
+  callback and matching Key-receipt path, including fixture rows and UI stop.
+  All five observations matched both persisted trace IDs/labels and structured
+  log IDs, typed attributes, timestamps, fixed body/event and severity.
+  All 12 DELTA metric points matched their exact stage/outcome intervals,
+  units, counts, sums, extrema and explicit bucket distributions, without
+  duplicates, missing or mismatched owned records.
+- The source was clean at `134e6e078ac977f80254a7121d975797c56543ac`;
+  the relevant producer, reporter, probe and readback bytes matched #8228's
+  `069fa9cb74fae2505c818ff02524d9ddc6a71ce0`. #8239's
+  `5a402c069abc45000fe0b767845189519f232b76` is documentation/accounting,
+  not a replacement producer identity. Isolated SDK/protobuf 1.45.1 and source
+  versus serving-distribution identities were retained; payload identity is unknown.
+- The separately authorized consumer-owned collector retained the exact owned
+  records in local files in the same serving generation. Deployment canaries
+  were excluded. The existing writer drained and stopped; local queue, writer,
+  export and sampling-loss counters were zero. Each requested signal had one
+  accepted request, with no rejected, unknown or unattempted generated records.
+- This was correctness-only under saturated shared-host CPU, using the existing
+  single enabled-child path rather than paired timing reports. No timing
+  retries, percentile, overhead or budget claim follows. Settled source/wire
+  negative controls were not repeated because the relevant bytes were unchanged.
+- Producer validation plus exact durable readback proves extrema and explicit
+  sum preservation, not generic receiver enforcement. ACK is not persistence,
+  fsync or retention; generation-reset gaps remain unknown. Rotated-file
+  age/size limits are not a hard quota or idle-active expiry guarantee.
+- No producer enrollment, collector mutation or installed rollout occurred.
+  Independent campaign verification, native new/resume, headed first paint,
+  production row authority, installed overhead and all retained #8036 gates
+  remain with #7935/#5900. This effort remains Active.
 
 ### 2026-10-23 — Structured-signal source slice merged
 

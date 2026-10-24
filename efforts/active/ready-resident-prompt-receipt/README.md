@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent planning PR; separately admitted owner implementation
 - **Created:** 2026-10-23
-- **Status:** Active; delivery/control implementation admitted, backend/subject producer prerequisites retained
+- **Status:** Active; delivery/control and subject producer source merged, backend/integration qualification retained
 - **Vision:** [Worktree lifetime authority](../../../visions/plugins/agent-worktrees/README.md); [same-cell composition](../../../visions/plugin-services/installation-cells/README.md)
 - **Umbrella issue:** #7942 (dependency slice only; does not take over the consumer)
 
@@ -125,9 +125,9 @@ The concrete names, byte ceilings and decomposition in `contract.md` are
   [contract.md](contract.md#trusted-subject-producer-amendment) before code.
 - [x] Add optional actual-record qualification to the existing writer and only
   its existing post-registration caller; preserve the registration transaction.
-- [ ] Validate the real caller plus writer against the focused matrix in the
+- [x] Validate the real caller plus writer against the focused matrix in the
   contract, then clear source review, required CI and verified merge.
-- [ ] Return the exact field/identity contract to the receipt integration owner;
+- [x] Return the exact field/identity contract to the receipt integration owner;
   retain backend, native/live, macOS and installed acceptance as separate gates.
 
 ## Validation Plan
@@ -325,3 +325,25 @@ All functional phases remain gated even if this proposal merges.
   uses the existing `set_head_session` transition and asserts the resolved head
   before publication. This corrects the regression's evidence, not runtime
   subject authority.
+
+### 2026-10-23 — Subject producer source merged; integration remains open
+
+- #8331 merged into `dev` at `2026-10-23T22:57:16Z` as
+  `827860f080ccf9bda456fb0324de785bcc3de85e`, from reviewed head
+  `d161cc99cfac1cbb4f1682372cb6e075048e477c`. Copilot review `5635242006`
+  approved that exact head and the sole review thread is resolved.
+- Required PR gate, source-attribution and workflow-lockdown checks passed;
+  eligible unit coverage, guards/lint and identifier checks also passed.
+  The corrected writer selection passed 27 tests, following the full 86-test
+  caller/writer selection and three focused caller checks. Install contract
+  and the unchanged module-size cap passed.
+- The exact additive field/identity contract was returned to the receipt
+  integration owner. The producer amendment's source obligations are complete,
+  without changing backend/consumer ownership or adding readiness inference.
+- #7942 and this effort remain open. The next gate is the receipt owner's
+  real backend/Node integration and complete observation matrix, then separately
+  admitted native/live, macOS publisher, release and installed acceptance.
+  No new timing run, service change or deployment was performed.
+- Retain the workspace and original validation evidence. This post-merge
+  journal is a local checkpoint for the next admitted documentation integration,
+  not a claim that the checkpoint itself is already published.

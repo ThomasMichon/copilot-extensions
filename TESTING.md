@@ -388,6 +388,36 @@ run/attempt/job/upload/archive checks. Main's metadata-only CI supplies no test
 proof. Historical `legacy-ci-v1` verification remains separate and is never an
 implicit fallback for missing unit evidence.
 
+Source PR CI has a separate exact-input reuse boundary in
+`tools/ci_pr_unit_reuse.py`. It binds the current source/merge/base, workflow,
+manifest/source closure, hosted image, Python identity, actual installed
+distribution file bytes and sealed child environment before looking up prior
+proof. A fresh PR child gets only the declared noncredential environment plus
+fixed Python isolation settings; GitHub event IDs, credentials and unrelated
+ambient variables are not unit inputs. Toolchain binding is bounded, and the
+read-only provider search has an eight-second total budget.
+
+An eligible prior run must have a successful exact-attempt unit job and fresh
+upload, the matching context-derived artifact identity, immutable archive
+bytes and the original canonical three-file packet. Every phase, source hash,
+effect refusal and actual production call-coverage requirement still applies.
+The aggregate records `executed` versus `reused` with the original run/attempt
+and packet digest; a reused packet is not uploaded again as a fresh producer.
+Producing-run/attempt artifact names avoid retry collisions. The aggregate
+preserves GitHub's successful-unit-job retention on failed-job-only retries
+of the same immutable run, without accepting future-attempt evidence.
+Unknown or incompatible evidence retains fresh execution. The provider
+inventory includes failures, pending runs and retry revisions in a complete
+bounded qualification epoch. A later retry of a lower-ID run changes that
+epoch rather than hiding behind ID ordering; incomplete history cannot reuse.
+Reruns that invoke the helper always execute fresh units, and PR checkout
+validation remains mandatory when toolchain binding is unavailable. The pure synthetic
+tests in `tools/promotion_unit_tests/test_ci_pr_unit_reuse.py` exercise provider,
+attempt, archive, coverage, dependency-byte and environment refusals without
+network, Git or child actors. Real CLI/provider execution is complementary
+integration evidence, not an admitted unit effect. This does not alter the
+release packet's format or independent execution for every Main release.
+
 The first runtime-regression cohort in
 `tools/promotion_unit_tests/test_runtime_regressions.py` exercises actual
 project-routing, mux-result, anchor-guard and parent/sub-agent turn decisions.

@@ -297,7 +297,7 @@ def test_manual_source_ci_keeps_units_without_restoring_candidate_qualification(
     assert len(execution) == 1
     assert execution[0]["if"] == "steps.impact.outputs.run == 'true'"
     assert execution[0]["run"] == (
-        'python tools/run-promotion-unit-tests.py --source-sha "$GITHUB_SHA" '
+        'python tools/ci_pr_unit_reuse.py --source-sha "$GITHUB_SHA" '
         '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
     )
 

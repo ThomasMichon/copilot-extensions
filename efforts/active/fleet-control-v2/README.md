@@ -255,6 +255,15 @@ snapshot recovery option rather than exposing the trusted store's global
 retention/cursor activity. This is not historical replay or a resident
 subscription; actual plan review precedes its isolated reader implementation.
 
+The operator subsequently defined initial fleet setup from a logged-in
+interactive machine, the user-side heartbeat/authentication pump, paired-repo
+desired configuration, independent slow-sync control dispatch, confirmation-gated
+deployment and exclusive fleet-manager whole-machine creation/removal.
+The [bootstrap and authority amendment](bootstrap-and-authority.md) records
+verbatim public-safe extracts, an explicitly labeled provider-neutral summary,
+and **agent-recommended implementation/validation decomposition**. It does not
+authorize provider changes, deploy anything or assign another owner's source.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -294,6 +303,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Realize the [configuration lifecycle](configuration-lifecycle.md) with
   existing release/client/deployment owners: cold bootstrap, no-op repeats,
   ordered migrations, interrupted-step recovery and data-compatible rollback.
+  Compose the [operator-directed bootstrap/source-authority contract](bootstrap-and-authority.md),
+  including independent slow-sync refresh and initial exact-plan confirmation
+  for ordinary as well as major deployment changes.
 - [ ] Supply Gateway configuration subscription and approved self-update,
   with local validation/approval of major changes rather than private-repo CI.
 - [ ] Compose an installed authenticated credential responder through the
@@ -458,12 +470,36 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   implementation slice; skipped tiers and unsupported platforms remain explicit.
 - [ ] Required repository guards/CI and actual review pass before each merge;
   runtime readiness and rollout remain separately proven.
+- [ ] Complete the [bootstrap/source-authority gates](bootstrap-and-authority.md#validation-plan):
+  actual interactive first setup, installed pump/paired-repo refresh,
+  independent slow-sync dispatch, notifications and exact-plan confirmation,
+  persistent PR flow and no Gateway whole-machine provisioning/removal.
 
 ## Proposal
 
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-23 - Interactive bootstrap and source-authority clarification
+
+- Captured the operator's revised authority model in
+  [the bootstrap amendment](bootstrap-and-authority.md), with provider-specific
+  adapter names abstracted for this public repository. Public-safe wording is
+  distinguished from verbatim extracts and agent-recommended mechanisms.
+- Revised the fleet and Gateway intent: logged-in interactive fleet-manager
+  bootstrap, explicit installed heartbeat/authentication pump, paired harness
+  and private-config sources, independent slow-sync fallback and notification/
+  confirmation-driven deployment. Persistent configuration still follows PRs.
+- Replaced the earlier major-change-only initial approval wording: ordinary
+  computed deployments also wait for fleet-manager confirmation. Gateway can
+  repurpose existing admitted machines; only operator-side fleet-manager may
+  create/remove whole machines through the provider owner.
+- Kept repository intent distinct from current authenticated policy/revocation
+  evidence. No runtime source allocation, provider operation, enrollment,
+  deployment, secret transfer, source retirement or agent coordination is
+  inferred. The entire Fleet Control V2 Plan/Validation remains the completion
+  gate; this is intent amendment, not delivered bootstrap behavior.
 
 ### 2026-10-23 - Conditional recovery source merged
 
