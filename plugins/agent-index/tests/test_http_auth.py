@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 
 import httpx
 import pytest
@@ -170,4 +171,30 @@ def test_remote_status_sanitizes_credential_failure(monkeypatch):
     result = cli._status_payload()
     assert result["state"] == "unreachable"
     assert result["index"]["chunks"] is None
+    assert result["error"] == "http-auth-command-failed"
+
+
+def test_credential_uses_bounded_caller_owned_execution(monkeypatch):
+    def execute(command, **kwargs):
+        assert command == ["credential-provider"]
+        assert kwargs == {
+            "timeout": 30, "max_stdout_bytes": 16386, "max_stderr_bytes": 4096,
+        }
+        return subprocess.CompletedProcess(command, 0, "synthetic-credential\n", "")
+
+    monkeypatch.setattr(http_auth, "run_caller_owned", execute)
+    assert http_auth._credential(["credential-provider"]) == "synthetic-credential"
+
+
+def test_containment_failure_is_sanitized_in_status(monkeypatch):
+    policy(monkeypatch)
+    monkeypatch.setattr(cli, "client_url", lambda: "https://index.example.test/api/index")
+    monkeypatch.setattr("agent_index.transport.plan_route", lambda: ("client", {}))
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("synthetic-sensitive-containment-diagnostic")
+
+    monkeypatch.setattr(http_auth, "run_caller_owned", fail)
+    result = cli._status_payload()
+    assert result["state"] == "unreachable"
     assert result["error"] == "http-auth-command-failed"

@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import ipaddress
-import os
 import re
-import signal
 import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil.owned_process import run_caller_owned
 
 from . import config
 from .client import AgentIndexClient
@@ -26,39 +24,19 @@ def configured() -> bool:
 
 
 def _credential(command: list[str]) -> str:
-    process = None
-    job = None
     try:
-        process, job = spawn_sync_in_kill_on_close_job(
-            command,
-            allow_breakaway=False,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            **no_window_kwargs(),
-            **({"start_new_session": True} if os.name != "nt" else {}),
+        result = run_caller_owned(
+            command, timeout=30, max_stdout_bytes=16386, max_stderr_bytes=4096,
         )
-        output, _ = process.communicate(timeout=30)
-        if process.returncode:
+        if result.returncode:
             raise HttpAuthError("http-auth-command-failed")
-        value = output.decode("ascii").strip()
+        value = result.stdout.strip()
+        value.encode("ascii")
         if not 1 <= len(value) <= 16384 or not re.fullmatch(r"[A-Za-z0-9._~+/-]+=*", value):
             raise HttpAuthError("http-auth-credential-invalid")
         return value
-    except (OSError, UnicodeError, subprocess.SubprocessError):
+    except (OSError, UnicodeError, RuntimeError, subprocess.SubprocessError):
         raise HttpAuthError("http-auth-command-failed") from None
-    finally:
-        if job is not None:
-            job.close()
-        elif process is not None and os.name != "nt":
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        if process is not None:
-            if process.poll() is None:
-                process.kill()
-            process.wait(timeout=5)
 
 
 def read_client(

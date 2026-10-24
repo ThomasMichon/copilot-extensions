@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -94,3 +95,15 @@ def test_actual_credential_errors_never_expose_provider_output(script):
         http_auth._credential([sys.executable, "-c", script])
     assert "synthetic-sensitive-diagnostic" not in str(error.value)
     assert "invalid credential with spaces" not in str(error.value)
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_actual_unbounded_provider_output_is_stopped(stream):
+    script = (
+        f"import sys; stream=sys.{stream}.buffer; "
+        "exec('while True:\\n stream.write(b\"x\" * 8192); stream.flush()')"
+    )
+    started = time.monotonic()
+    with pytest.raises(http_auth.HttpAuthError, match="http-auth-command-failed"):
+        http_auth._credential([sys.executable, "-c", script])
+    assert time.monotonic() - started < 15

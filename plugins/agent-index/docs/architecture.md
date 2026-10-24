@@ -64,7 +64,9 @@ http_auth:
 
 The command must emit only the credential on stdout; it owns provider selection
 and noninteractive refresh. The CLI never starts a login, persists the token,
-or reports provider output. Acquisition is headless with a 30-second deadline.
+or reports provider output. Acquisition is headless with a 30-second deadline,
+caller-owned process-tree cleanup, and capture-time limits of 16,386 stdout
+bytes and 4,096 stderr bytes. Credentials are limited to 16,384 ASCII characters.
 The exact endpoint binding, remote installation identity, HTTPS verification
 (or explicitly selected loopback transport), disabled ambient proxies and
 redirect refusal prevent credential forwarding to another destination.
