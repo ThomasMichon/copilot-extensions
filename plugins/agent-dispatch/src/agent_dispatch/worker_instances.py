@@ -13,9 +13,9 @@ import time
 
 from . import registrar_discovery as rd
 from .command_operands import (
+    execution_operand_indices,
     is_python_interpreter as _is_python_interpreter,
     script_operand as _command_script_operand,
-    script_operand_index,
 )
 from .registrar import RegistrarError
 from .registrar_recipes import GLOBAL_RECIPES, deep_merge
@@ -247,10 +247,9 @@ def _validate_dependencies(
             side_command = _render_command(
                 declaration.spec["side_load"]["command"], change_ref="{change_ref}",
             )
-            operand = script_operand_index(side_command, include_inline=True)
             if any(
-                "{change_ref}" in side_command[index] for index in (0, operand)
-                if index is not None
+                "{change_ref}" in side_command[index]
+                for index in execution_operand_indices(side_command)
             ):
                 raise RegistrarError("dynamic side-load execution dependencies cannot be validated safely")
             side_command = [

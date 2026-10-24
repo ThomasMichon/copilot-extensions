@@ -8,20 +8,33 @@ from pathlib import Path
 from .registrar import RegistrarError
 
 
-def is_python_interpreter(executable: str) -> bool:
+def _executable_name(executable: str) -> str:
     if executable.startswith("repo:"):
         from .repository_resources import split_repository_resource
 
         _, executable = split_repository_resource(executable)
+    return Path(executable).name.casefold().removesuffix(".exe")
+
+
+def is_python_interpreter(executable: str) -> bool:
     return re.fullmatch(
         r"(?:pythonw?|pypy)(?:\d+(?:\.\d+)*)?(?:_d)?(?:\.exe)?",
-        Path(executable).name, re.IGNORECASE,
+        _executable_name(executable), re.IGNORECASE,
     ) is not None
 
 
 def script_operand_index(command: list[str], *, include_inline: bool = False) -> int | None:
     suffixes = {".py", ".sh", ".ps1"}
     if not is_python_interpreter(command[0]):
+        if _executable_name(command[0]) in {"pwsh", "powershell"} and any(
+            value.casefold() in {"-file", "-f"} for value in command[1:]
+        ):
+            raise RegistrarError("script dependencies after non-Python options cannot yet be validated safely")
+        if _executable_name(command[0]) in {"sh", "bash", "dash", "ash", "zsh", "ksh", "fish"}:
+            if len(command) > 1 and command[1] != "-" and not command[1].startswith("-"):
+                return 1
+            if len(command) > 2 and command[1] == "-c":
+                return 2 if include_inline else None
         if len(command) > 1 and Path(command[1]).suffix.lower() in suffixes:
             return 1
         if len(command) > 1 and command[1].startswith("-") and any(
@@ -63,3 +76,30 @@ def script_operand_index(command: list[str], *, include_inline: bool = False) ->
 def script_operand(command: list[str]) -> str | None:
     index = script_operand_index(command)
     return command[index] if index is not None else None
+
+
+def execution_operand_indices(command: list[str]) -> set[int]:
+    """Include shell program operands while keeping script arguments as data."""
+    name = _executable_name(command[0])
+    if name in {"sh", "bash", "dash", "ash", "zsh", "ksh", "fish"}:
+        if len(command) > 1 and command[1] in {"-", "-s"}:
+            return {0}
+        if len(command) > 2 and command[1] == "--":
+            return {0, 2}
+        if len(command) > 2 and re.fullmatch(r"-[a-zA-Z]*c", command[1]):
+            return {0, 2}
+        if len(command) > 1 and not command[1].startswith("-"):
+            return {0, 1}
+    elif name in {"pwsh", "powershell", "cmd"}:
+        for index, value in enumerate(command[1:], start=1):
+            mode = value.casefold()
+            if mode in {"-file", "-f"} and name != "cmd" and index + 1 < len(command):
+                return {0, index + 1}
+            if mode in {"-command", "-c", "-commandwithargs", "-encodedcommand", "-ec", "/c", "/k"}:
+                return {0, *range(index + 1, len(command))}
+    if name in {"sh", "bash", "dash", "ash", "zsh", "ksh", "fish", "pwsh", "powershell", "cmd"} and any(
+        "{change_ref}" in value for value in command[1:]
+    ):
+        raise RegistrarError("dynamic shell execution operands cannot be validated safely")
+    operand = script_operand_index(command, include_inline=True)
+    return {0, operand} if operand is not None else {0}

@@ -238,7 +238,14 @@ Static side-load executable/script dependencies receive the same checks as
 periodic commands, including the explicit-cwd requirement for relative paths.
 `{change_ref}` remains runtime data; using it to select an executable, script,
 Python module or inline code refuses because Save has no concrete execution
-dependency to validate. No dependency check executes provider code.
+dependency to validate. Shell script/program operands follow the same rule;
+unsupported dynamic shell shapes refuse instead of treating code as data.
+Ordinary arguments after an identified script or POSIX shell `-c` program
+remain runtime data.
+Only the selected evaluator entry receives strict option/dependency checks.
+Unsupported unused entries stay inert with conservative named supplier paths,
+so they neither reject the current selection nor lose source admission if
+retained for a later selection. No dependency check executes provider code.
 Legacy webhook emitters keep their existing runtime builder; command/builtin
 validation applies only when the registration owner selects that shape.
 A worker identity must retain its defining

@@ -202,3 +202,81 @@ def test_qualification_uses_operand_index_not_equal_option_values(tmp_path, pyth
     assert qualified.spec["command"] == [
         python, "-W", str(directory), "repo:library:directory-entrypoint", output,
     ]
+
+
+@pytest.mark.parametrize("command", [
+    ["sh", "{change_ref}"], ["sh", "-c", "{change_ref}"],
+    ["sh", "-lc", "{change_ref}"],
+    ["pwsh", "-File", "{change_ref}"], ["powershell", "-Command", "{change_ref}"],
+    ["cmd", "/c", "echo", "{change_ref}"],
+])
+def test_side_load_dynamic_shell_execution_is_not_an_opaque_data_operand(
+    monkeypatch, tmp_path, command,
+):
+    import shutil
+
+    which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda value: sys.executable if value == "sh" else which(value))
+    _, row = provider({
+        "kind": "emitter", "spec": {
+            "id": "{name}", "command": [sys.executable, "-c", "print('[]')"],
+            "cwd": str(tmp_path), "interval_seconds": 60, "side_load": {"command": command},
+        },
+    })
+    with pytest.raises(RegistrarError, match="dynamic .*execution"):
+        save(row)
+    assert not instance_dir().exists()
+
+
+def test_unused_evaluator_options_do_not_reject_selected_script_or_erase_supplier(monkeypatch, tmp_path):
+    from agent_dispatch.producers.evaluator import load_registration_evaluator
+
+    supplier, execution = tmp_path / "supplier", tmp_path / "execution"
+    supplier.mkdir()
+    execution.mkdir()
+    selected = supplier / "selected.py"
+    selected.write_text('print(\'{"decision":"noop","reason":"selected only"}\')', encoding="utf-8")
+    unused = supplier / "unused.ps1"
+    (supplier / "base.json").write_text(json.dumps({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "selected",
+            "evaluator_spec": {
+                "cwd": "repo:execution:.",
+                "scripts": {
+                    "selected": [sys.executable, str(selected)],
+                    "unused": ["pwsh", "-File", str(unused)],
+                },
+            },
+        },
+    }), encoding="utf-8")
+    roots = {"library": (supplier, "reference"), "execution": (execution, "worktree")}
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda name, **k: roots[name])
+    _, row = provider({"extends": "repo:library:base.json"}, kind="evaluator")
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    spec = dict(declaration.spec)
+    assert spec["evaluator_spec"]["scripts"]["unused"] == ["pwsh", "-File", "repo:library:unused.ps1"]
+    assert not unused.exists()
+    assert load_registration_evaluator(
+        spec, runner=subprocess.run,
+    ).evaluate({})[0].reason == "selected only"
+    from agent_dispatch.producers.evaluator import EvaluatorRuntimeError
+    changed = {
+        **spec, "evaluator_ref": "unused",
+        "evaluator_spec": {**spec["evaluator_spec"], "cwd": str(execution)},
+    }
+    with pytest.raises(EvaluatorRuntimeError, match="reference-only"):
+        load_registration_evaluator(
+            changed, runner=lambda *a, **k: pytest.fail("unselected source lost admission"),
+        ).evaluate({})
+
+
+@pytest.mark.parametrize("command", [
+    ["sh", "-c", "printf '%s' \"$1\"", "fixture", "{change_ref}"],
+    ["sh", "-lc", "printf '%s' \"$1\"", "fixture", "{change_ref}"],
+    ["pwsh", "-File", "script.ps1", "{change_ref}"],
+])
+def test_shell_execution_roles_do_not_treat_later_script_arguments_as_code(command):
+    from agent_dispatch.command_operands import execution_operand_indices
+
+    assert all("{change_ref}" not in command[index] for index in execution_operand_indices(command))

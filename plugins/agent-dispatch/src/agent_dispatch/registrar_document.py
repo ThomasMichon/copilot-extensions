@@ -66,7 +66,7 @@ def qualify_supplier_context(
             return f"repo:{repository}:{relative.as_posix()}"
         return value  # An explicit cwd outside the supplier is not its context.
 
-    def qualify_command(command, *, emitter: bool = False):
+    def qualify_command(command, *, emitter: bool = False, strict: bool = True):
         if not isinstance(command, (list, tuple)) or not command or not all(
             isinstance(part, str) for part in command
         ):
@@ -78,7 +78,14 @@ def qualify_supplier_context(
             from .producers.emitter import _render_command
 
             roles = _render_command(command, change_ref="{change_ref}")
-        dependencies = {0, script_operand_index(roles)}
+        try:
+            dependencies = {0, script_operand_index(roles)}
+        except RegistrarError:
+            if strict:
+                raise
+            # Unselected unsupported commands stay inert and source-fenced.
+            # Strict interpretation is deferred until this entry is selected.
+            return [qualify(part, implicit=False) for part in command]
         return [
             qualify(part, implicit=False) if index in dependencies else part
             for index, part in enumerate(command)
@@ -114,7 +121,8 @@ def qualify_supplier_context(
             qualified["cwd"] = qualify(evaluator.get("cwd"))
         if isinstance(evaluator["scripts"], Mapping):
             qualified["scripts"] = {
-                name: qualify_command(command) for name, command in evaluator["scripts"].items()
+                name: qualify_command(command, strict=name == spec.get("evaluator_ref"))
+                for name, command in evaluator["scripts"].items()
             }
         spec["evaluator_spec"] = qualified
     else:
