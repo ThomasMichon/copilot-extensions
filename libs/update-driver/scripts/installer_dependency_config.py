@@ -115,14 +115,14 @@ def verify_retained_sources(
 def prepare_uv_install(
     uv, arguments, *, environment, cwd, now, trusted_source_roots, projection,
     operation, deadline, native_target, compile_inputs, source_inputs, select_uv,
-    cutoff, argument_pairs, balanced, error_type, settings_timeout, headless,
+    cutoff, argument_pairs, balanced, error_type, settings_timeout, headless, value_options,
 ):
     remaining_timeout(deadline, error_type=error_type)
     if native_target and environment.get("UV_PYTHON_PLATFORM"):
         raise error_type("native source lock export cannot override its selected target")
     if operation in ("compile", "source-compile"):
         arguments = compile_inputs(arguments, environment, cwd, trusted_source_roots, operation)
-    source_inputs(
+    base, *_ = source_inputs(
         arguments, environment, cwd, trusted_source_roots,
         **({"operation": operation} if operation != "install" else {}),
     )
@@ -130,10 +130,14 @@ def prepare_uv_install(
     uv = select_uv(uv)
     probe_arguments = [arg for arg in arguments if arg != "--quiet" and not re.fullmatch(r"-q+", arg)]
     native_operation = "compile" if operation == "source-compile" else operation
+    command, probe_cwd = uv_command(
+        uv, ["--show-settings", *probe_arguments], cwd=cwd, directory=base,
+        operation=native_operation, windows=os.name == "nt", argument_pairs=argument_pairs,
+        value_options=value_options,
+    )
     try:
         result = subprocess.run(
-            [uv, "pip", native_operation, "--show-settings", *probe_arguments],
-            capture_output=True, text=True, env=environment, cwd=cwd,
+            command, capture_output=True, text=True, env=environment, cwd=probe_cwd,
             timeout=remaining_timeout(deadline, error_type=error_type, cap=settings_timeout),
             creationflags=headless,
         )
@@ -162,6 +166,51 @@ def prepare_uv_install(
               and argument not in ("--reinstall", "--force-reinstall")):
             cleaned.append(argument)
     return [*cleaned, *admitted]
+
+
+def balanced(text, start, opening, closing, *, error_type):
+    depth = 0
+    quoted = escaped = False
+    for offset in range(start, len(text)):
+        char = text[offset]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif char == opening:
+            depth += 1
+        elif char == closing:
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:offset], offset + 1
+    raise error_type("UV settings projection is incomplete")
+
+
+def uv_command(
+    uv, arguments, *, cwd, directory, operation, windows, argument_pairs, value_options,
+):
+    if not windows or len(os.path.abspath(cwd or Path.cwd())) < 260:
+        return [uv, "pip", operation, *arguments], cwd
+    # CreateProcess limits cwd even when its executable supports long paths.
+    retained = []
+    directory_supplied = False
+    for option, value in argument_pairs(arguments):
+        if option == "--directory":
+            directory_supplied = True
+            value = str(directory)
+        if option and value:
+            retained.extend([option, value] if option in value_options else [option + "=" + value])
+        else:
+            retained.append(option or value)
+    if not directory_supplied:
+        retained[:0] = ["--directory", str(directory)]
+    return [uv, "pip", operation, *retained], Path(directory.anchor)
+
 
 # native-executable:begin
 def physical_executable(path: str) -> str | None:

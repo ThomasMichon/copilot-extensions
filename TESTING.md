@@ -2891,6 +2891,11 @@ named Windows UV commands through real guarded SDK/Python-owned installs.
 Named controls use an owned child's fixture-only PATH; external `*-system`
 qualification retains the target's actual PATH and verifies it is unchanged.
 
+`tools/test_installer_dependency_policy.py` also exercises real Windows UV
+configuration probes beyond the native subprocess cwd limit. Plain cwd,
+relative/inline `--directory` and `UV_WORKING_DIR` retain the selected project's
+stricter cutoff while UV starts from a short native cwd.
+
 Repository-tool installer-sync and vendor-guard link controls use the shared
 `native_file_symlink` fixture. Only Windows error 1314, raised by actual file-link
 creation, produces an explicit missing-privilege skip; other failures propagate.

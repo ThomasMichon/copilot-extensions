@@ -15,7 +15,7 @@ from runtime_install_fixture import isolate_account_profile, remove_fixture_work
 
 @pytest.mark.timeout(2400)
 @pytest.mark.parametrize("namespaced", [False, True], ids=["legacy", "namespaced"])
-def test_real_native_dev_refreshes_source_and_release_restores_original(
+def test_real_native_dev_selects_immutable_source_and_release_restores_original(
     tmp_path, monkeypatch, namespaced,
 ):
     uv = shutil.which("uv")
@@ -54,7 +54,16 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
     git = shutil.which("git")
     assert git is not None
     subprocess.run([git, "-C", str(owner), "init", "-q"], check=True, **no_window_kwargs())
-    subprocess.run([git, "-C", str(owner), "add", "."], check=True, **no_window_kwargs())
+    if os.name == "nt":
+        subprocess.run(
+            [git, "-C", str(owner), "config", "core.longpaths", "true"],
+            check=True, **no_window_kwargs(),
+        )
+    added = subprocess.run(
+        [git, "-C", str(owner), "add", "."],
+        capture_output=True, text=True, **no_window_kwargs(),
+    )
+    assert added.returncode == 0, added.stdout + added.stderr
     subprocess.run(
         [
             git,
@@ -129,6 +138,7 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
             try:
                 result = subprocess.run(
                     argv,
+                    executable=argv[0] if os.name == "nt" else None,
                     env=environment,
                     stdout=subprocess.PIPE,
                     stderr=stream,
@@ -151,6 +161,9 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
         assert result.returncode == expected, result.stdout + log.read_text(
             encoding="utf-8", errors="backslashreplace",
         )
+        if os.name == "nt" and label in ("dev-first", "dev-second", "dev-reuse"):
+            output = result.stdout + log.read_text(encoding="utf-8", errors="backslashreplace")
+            assert output.count("installed mode-owner ABI 1 verified") == 1, output
         return result.stdout
 
     run(
@@ -189,8 +202,9 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
                 "-c",
                 "import json; from agent_worktrees.iteration_probe import VALUE; "
                 "from agent_worktrees._build_info import BUILD_INFO; "
-                "print(json.dumps([VALUE, BUILD_INFO['runtime_generation']]))",
+                "print(json.dumps([VALUE, BUILD_INFO['runtime_generation'], BUILD_INFO['source']]))",
             ],
+            executable=str(python) if os.name == "nt" else None,
             env=environment,
             text=True,
             timeout=45,
@@ -199,6 +213,7 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
         return json.loads(output)
 
     original_identity = observe(original_python)
+    assert original_identity[2] == authority.as_posix()
     original_origins = json.loads(
         (original_python.parent.parent / ".runtime-input-origins.json").read_text(
             encoding="utf-8",
@@ -259,48 +274,67 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
         ]
         second = first
     run(first, "dev-first")
-    assert (root / "current-version").read_text().strip() == "dev"
+    first_version = (root / "current-version").read_text().strip()
+    assert lifecycle.runtime.is_dev_generation(first_version) and len(first_version) == 68
     claim_path = root / "dev-claim.json"
     claim = json.loads(claim_path.read_text())
     assert claim["owner"] == str(owner.resolve())
     assert claim["previous_version"] == original["runtime_version"]
-    dev_python = (
-        root / "versions" / "dev" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    )
+    first_python = lifecycle.runtime.slot_python(root, first_version)
+    assert first_python is not None
+    first_marker_path = root / "versions" / first_version / ".install-complete.json"
+    first_marker = first_marker_path.read_bytes()
+    dev_python = first_python
     first_identity = observe(dev_python)
+    assert first_identity[2] == plugin.as_posix()
     dev_origins = json.loads(
         (dev_python.parent.parent / ".runtime-input-origins.json").read_text(encoding="utf-8"),
     )
     assert "runtime-origin-fixture" not in dev_origins["packages"]
     assert first_identity[0] == 1 and first_identity[1] != original_identity[1]
     probe_source.write_text("VALUE = 2\n", encoding="utf-8")
+    assert observe(first_python) == first_identity, "deployed code followed its worktree"
     run(second, "dev-second")
+    second_version = (root / "current-version").read_text().strip()
+    assert lifecycle.runtime.is_dev_generation(second_version) and second_version != first_version
+    dev_python = lifecycle.runtime.slot_python(root, second_version)
+    assert dev_python is not None
     dev_manifest = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8"))
-    assert dev_manifest["runtime_slot"] == "dev"
-    assert dev_manifest["source"]["path"] == plugin.as_posix()
+    assert dev_manifest["runtime_slot"] == second_version
+    assert dev_manifest["source"]["path"] == authority.as_posix()
     assert dev_manifest["source"]["payload_fingerprint"] != (
         original_manifest["source"]["payload_fingerprint"]
     )
     second_identity = observe(dev_python)
+    assert second_identity[2] == plugin.as_posix()
     assert second_identity[0] == 2 and second_identity[1] != first_identity[1]
+    second_marker_path = root / "versions" / second_version / ".install-complete.json"
+    second_marker = second_marker_path.read_bytes()
+    run(second, "dev-reuse")
+    assert (root / "current-version").read_text().strip() == second_version
+    assert second_marker_path.read_bytes() == second_marker
+    assert observe(dev_python) == second_identity
+    assert first_marker_path.read_bytes() == first_marker
+    assert observe(first_python) == first_identity
+    assert json.loads(claim_path.read_text())["selected_generation"] == second_version
     assert json.loads(claim_path.read_text())["previous_version"] == original["runtime_version"]
     assert marker_path.read_bytes() == original_marker
     assert observe(original_python) == original_identity
     deployed = [str(dev_python), "-I", "-B", "-m", "agent_worktrees"]
-    bootstrap = root / "versions" / "dev" / ".runtime-bootstrap"
+    bootstrap = root / "versions" / second_version / ".runtime-bootstrap"
     assert (bootstrap / "runtime_install_modes.py").is_file()
     # The owning source can disappear; release consumes only retained installed code.
     remove_fixture_worktree(owner)
     assert not owner.exists()
     status = json.loads(run([*deployed, "dev-status", "--json"], "deployed-status"))
     assert status["claim"]["owner"] == str(owner.resolve())
-    assert status["runtime_slot"] == "dev"
+    assert status["runtime_slot"] == second_version
     release = [*deployed, "dev-release", "--owner", str(owner), "--json"]
     run(
         [*deployed, "dev-release", "--owner", str(tmp_path / "other"), "--json"],
         "deployed-conflict", expected=2,
     )
-    assert claim_path.exists() and (root / "current-version").read_text().strip() == "dev"
+    assert claim_path.exists() and (root / "current-version").read_text().strip() == second_version
     receipt_path = original_python.parent.parent / ".runtime-input-origins.json"
     receipt_bytes = receipt_path.read_bytes()
     receipt = json.loads(receipt_bytes)
@@ -308,7 +342,7 @@ def test_real_native_dev_refreshes_source_and_release_restores_original(
     receipt["packages"][name] = "file:///wrong/origin"
     receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
     run(release, "deployed-bad-origins", expected=1)
-    assert claim_path.exists() and (root / "current-version").read_text().strip() == "dev"
+    assert claim_path.exists() and (root / "current-version").read_text().strip() == second_version
     receipt_path.write_bytes(receipt_bytes)
     restored_result = json.loads(run(release, "deployed-release"))
     assert restored_result["runtime_version"] == original["runtime_version"]

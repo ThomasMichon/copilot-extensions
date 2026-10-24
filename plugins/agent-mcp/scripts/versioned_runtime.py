@@ -65,25 +65,37 @@ import re
 import shutil
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
 from contextlib import contextmanager
 
 
 _runtime_components = globals().get("_retained_runtime_components", {})
+_runtime_components_lock = threading.RLock()
+
+
+def _reset_runtime_component_lock() -> None:
+    global _runtime_components_lock
+    _runtime_components_lock = threading.RLock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_runtime_component_lock)
 
 
 def _runtime_component(name: str):
-    if name not in _runtime_components:
-        source = Path(__file__).with_name(name + ".py")
-        spec = importlib.util.spec_from_file_location(__name__ + "_" + name, source)
-        if spec is None or spec.loader is None:
-            raise FileNotFoundError(f"Runtime component is unavailable: {name}")
-        component = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = component
-        exec(compile(source.read_bytes(), str(source), "exec"), component.__dict__)
-        _runtime_components[name] = component
-    return _runtime_components[name]
+    with _runtime_components_lock:
+        if name not in _runtime_components:
+            source = Path(__file__).with_name(name + ".py")
+            spec = importlib.util.spec_from_file_location(__name__ + "_" + name, source)
+            if spec is None or spec.loader is None:
+                raise FileNotFoundError(f"Runtime component is unavailable: {name}")
+            component = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = component
+            exec(compile(source.read_bytes(), str(source), "exec"), component.__dict__)
+            _runtime_components[name] = component
+        return _runtime_components[name]
 
 
 _leases = _runtime_component("versioned_runtime_leases")
@@ -1044,7 +1056,8 @@ def dev_claim_path(root: Path) -> Path:
 
 
 def is_dev_generation(version: str) -> bool:
-    return bool(re.fullmatch(r"dev-[0-9a-f]{32}", version))
+    """Recognize legacy UUID generations and immutable full source hashes."""
+    return bool(re.fullmatch(r"dev-(?:[0-9a-f]{32}|[0-9a-f]{64})", version))
 
 
 def _require_dev_owner(root: Path, owner: str | None) -> dict:
@@ -1536,11 +1549,11 @@ def _normalize_windows_extended_path(target: str) -> str:
     return target
 
 
-def fingerprint_source(paths, *, on_progress=None) -> str:
+def fingerprint_source(paths, *, on_progress=None, file_hashes=None, on_file=None) -> str:
     """Fingerprint complete source inputs through the shipped stdlib component."""
     return _runtime_component("versioned_runtime_source").fingerprint_source(
         paths, _normalize_windows_extended_path=_normalize_windows_extended_path,
-        on_progress=on_progress,
+        on_progress=on_progress, file_hashes=file_hashes, on_file=on_file,
     )
 
 

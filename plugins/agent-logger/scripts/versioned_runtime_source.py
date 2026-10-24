@@ -610,7 +610,9 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-def fingerprint_source(paths, *, _normalize_windows_extended_path, on_progress=None) -> str:
+def fingerprint_source(
+    paths, *, _normalize_windows_extended_path, on_progress=None, file_hashes=None, on_file=None,
+) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
 
     Covers the FULL attributable runtime install input, not just one
@@ -960,6 +962,11 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path, on_progress=N
     digest = hashlib.sha256()
 
     def _update(f: Path, data: bytes) -> None:
+        if entries[f] != "symlink":
+            if file_hashes is not None:
+                file_hashes[f] = hashlib.sha256(data).hexdigest()
+            if on_file is not None:
+                on_file(f, data)
         digest.update(_frame(_label(f).encode("utf-8")))
         # The entry's kind is framed as ITS OWN length-prefixed record,
         # never concatenated into `data` as a string prefix: a regular
@@ -973,7 +980,7 @@ def fingerprint_source(paths, *, _normalize_windows_extended_path, on_progress=N
             on_progress()
 
     ordered = sorted(entries, key=_label)
-    if len(ordered) < 2:
+    if len(ordered) < 2 or on_file is not None or _os.name != "nt":
         for f in ordered:
             _update(f, _read_data(f))
     else:

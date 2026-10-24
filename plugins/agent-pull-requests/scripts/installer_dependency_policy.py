@@ -357,26 +357,9 @@ def _anchor_roots() -> tuple[Path, ...]:
 
 
 def _balanced(text: str, start: int, opening: str, closing: str) -> tuple[str, int]:
-    depth = 0
-    quoted = escaped = False
-    for offset in range(start, len(text)):
-        char = text[offset]
-        if quoted:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                quoted = False
-        elif char == '"':
-            quoted = True
-        elif char == opening:
-            depth += 1
-        elif char == closing:
-            depth -= 1
-            if depth == 0:
-                return text[start + 1:offset], offset + 1
-    raise DependencyPolicyError("UV settings projection is incomplete")
+    return _configuration.balanced(
+        text, start, opening, closing, error_type=DependencyPolicyError,
+    )
 
 
 def cutoff_arguments(
@@ -524,6 +507,13 @@ def _compile_arguments(arguments, environment, cwd, roots, operation):
     )
 
 
+def _uv_install_command(uv, arguments, *, cwd, directory, operation="install"):
+    return _configuration.uv_command(
+        uv, arguments, cwd=cwd, directory=directory, operation=operation,
+        windows=os.name == "nt", argument_pairs=_argument_pairs, value_options=_VALUE_OPTIONS,
+    )
+
+
 def prepare_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
@@ -540,6 +530,7 @@ def prepare_uv_install(
         source_inputs=_source_inputs, select_uv=_select_uv_executable, cutoff=cutoff_arguments,
         argument_pairs=_argument_pairs, balanced=_balanced, error_type=DependencyPolicyError,
         settings_timeout=SETTINGS_TIMEOUT_SECONDS, headless=_HEADLESS,
+        value_options=_VALUE_OPTIONS,
     )
 
 
@@ -898,9 +889,12 @@ def _retain_uv_install(
         if _projection is not None:
             _projection.append(original_projection[0])
             _projection.append(retained_projection[0])
+        command, launch_cwd = _uv_install_command(
+            uv, admitted, cwd=retained_base, directory=retained_base,
+            operation="compile" if _operation == "source-compile" else _operation,
+        )
         yield RetainedUVInstall(
-            (uv, "pip", "compile" if _operation == "source-compile" else _operation, *admitted),
-            retained_environment, retained_base,
+            tuple(command), retained_environment, launch_cwd,
             {path: mirror(path) for path in projects}, source_hashes,
         )
 
