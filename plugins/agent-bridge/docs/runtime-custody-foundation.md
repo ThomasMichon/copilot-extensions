@@ -19,6 +19,19 @@ are exact observations supplied by the owning caller. These methods neither
 authenticate that caller nor resolve provenance or acquire native custody.
 No public route or ordinary application startup calls them automatically.
 
+`LoopGovernance.runtime_installation(database)` now supplies the internal
+installation binding through the daemon's existing installation owner. It
+validates the canonical receipt against the loaded deployment's payload,
+rechecks installation mode/generations and maintenance, requires the actual
+daemon runtime root, and binds the actual open `Database` path. A second check
+rejects a concurrent governance or deployment-source change; subsequent calls
+cannot switch the installation/database association on the same owner.
+Resolution is read-only: it does not initialize an epoch, enroll any participant
+or change installed authentication. Missing/foreign/stale installation evidence
+refuses rather than accepting a client-selected identity or path. Isolated
+legacy and namespaced installation controls exercise this helper; they do not
+qualify a running installation or native consumer.
+
 Local storage schema 28 requires the custody tables, nullable associations,
 ordinary turn-admission columns and canonical guards. The existing writable
 migration owner prepares older databases before publishing that schema version;

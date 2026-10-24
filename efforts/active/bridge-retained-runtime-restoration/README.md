@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; user-owned consumer/recovery refinement proposed; consumer/SDK integration and full Phase 1 open
+- **Status:** Active; user-owned consumer/recovery refinement reviewed; consumer/SDK integration and full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -146,7 +146,7 @@ require their own review and qualification.
       This slice does not close actual transport/SDK integration or Phase 1.
 
 ### Phase 1b - User-owned consumer enrollment and recovery
-- [ ] Review [consumer-recovery.md](consumer-recovery.md) before implementing
+- [x] Review [consumer-recovery.md](consumer-recovery.md) before implementing
       its local enrollment/poll/SDK integration; no per-consumer token or
       independent native-authentication prerequisite.
 - [ ] Bind the existing installation and current SDK consumer through the
@@ -238,6 +238,31 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, authenticated consumer/SDK integration and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Derive inbox installation observations through the existing owner
+- Add a read-only `LoopGovernance.runtime_installation(database)` prerequisite
+  for local enrollment. The daemon's existing deployment, canonical receipt,
+  installation-mode and governance owners select the association, including the
+  actual open DB path; a client cannot supply an installation or payload path.
+- Isolated legacy and namespaced controls cover active receipt state,
+  payload/source/generation drift, maintenance, changed runtime/DB/manifest
+  paths and a mid-resolution generation change. All 32 focused governance
+  cases pass; two unrelated collection skips are not qualification evidence.
+- No public route, ordinary startup, extension poller or SDK effect activates
+  this helper yet. Durable current consumer-incarnation enrollment and actual
+  poll/final-admission/outcome wiring remain the next Phase 1b stretch.
+  No Plan or Validation Plan completion is inferred from this prerequisite.
+
+### 2026-10-24 - Consumer trust and recovery refinement merged
+- #8515 merged as `ba25d5f5d58cdc02736cce67da42a39a72737076` after
+  Copilot approval on exact head `fe823c41870de3b8ac8541ad80cbd34d24e44286`,
+  no findings and all required checks passing.
+- Reread the effort's Plan and Validation Plan. Only Phase 1b's design-review
+  prerequisite is complete; local enrollment, actual SDK delivery/recovery,
+  native qualification and all remaining restoration gates stay open.
+- Continue source implementation through the existing installation,
+  registration, inbox and extension owners. No per-consumer authentication
+  prerequisite or runtime/network change is introduced.
 
 ### 2026-10-24 - Refine the trust boundary around message recovery
 - Traced the actual shared-token middleware, registration, extension process
