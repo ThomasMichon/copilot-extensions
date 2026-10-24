@@ -35,6 +35,12 @@ The current checkpoint is pure/injected source validation only. Native child,
 held-pipe, caller-death, shutdown and installed qualification remain open.
 Keep #8458 draft, the implementation task active, and #7944/#7945 open.
 
+The current eight open review threads prevent source acceptance. The
+[atomic-creation and handoff proposal](atomic-creation-and-drain-review-proposal.md)
+identifies the fresh existing Job-list adapter, its missing deadline/reader
+contract and the separate client promotion-before-drain boundary. Neither
+new shared creation behavior nor that client hunk is implemented or admitted.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
