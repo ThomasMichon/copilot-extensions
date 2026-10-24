@@ -1756,6 +1756,35 @@ and retains timestamped Bridge diagnostics and operation-label-only stage
 timing, without writing provider stdin or task credentials into the stage log.
 All diagnostics remain inside the unchanged test and subprocess deadlines.
 
+### Consented Windows elevation (Agent Conduct Guidance)
+
+`tools/run-plugin-tests.py agent-conduct-guidance --test-file tests/test_windows_elevation.py`
+covers exact terminal IDs, incomplete/stale/success-shaped failure refusal,
+actual stdout/stderr, argument quoting, native exit codes, script drift and
+owned-Job deadlines. Broker failure controls replace `Start-Process`, so this
+selection never requests UAC or registers a task.
+
+On a quiescent, active same-user Windows desktop, set
+`AGENT_CONDUCT_TEST_INTERACTIVE_ELEVATION=1` and select
+`tests/test_windows_elevation_scheduler.py` through that same runner. Its two
+bounded cycles use private directories, real limited interactive tasks and the
+harmless probe. They observe visible console windows and foreground transitions,
+require matching `probe` receipts and verify exact task cleanup. They never
+request UAC and do not qualify administrator execution.
+The native fixture gives its real child PowerShell ten seconds and the complete
+command twenty-five seconds. A five-second fixture child bound expired in the
+combined native run; the separate two-second owned-Job deadline
+control and production defaults remain unchanged. Failure diagnostics retain
+the log tail rather than hiding the last completed stage behind a reader timeout.
+
+Actual administrator qualification remains an explicitly approved, on-demand
+invocation of the skill's harmless `assets/probe.ps1` with `-ConsentConfirmed`,
+a fresh private log and the selected interactive desktop. Require its actual
+elevated-token output and matching successful terminal marker; do not count a
+limited `probe` result, scheduler result or canceled dialog as that proof.
+No ordinary test/CI path prompts a human, changes UAC policy, stores a password,
+registers a highest-privilege task or reboots.
+
 ### Native Agent Machines lifecycle boundaries
 
 `tools/run-plugin-tests.py agent-machines --test-file tests/test_registry_native.py`

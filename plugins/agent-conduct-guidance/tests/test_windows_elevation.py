@@ -1,0 +1,270 @@
+"""Portable protocol controls and bounded native worker checks; never request UAC."""
+
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, timedelta, timezone
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
+
+PLUGIN = Path(__file__).resolve().parents[1]
+SKILL = PLUGIN / "skills" / "requesting-windows-elevation"
+WORKER = SKILL / "scripts" / "elevation-worker.ps1"
+INVOKE = SKILL / "scripts" / "invoke-windows-elevation.ps1"
+PWSH = shutil.which("pwsh")
+RUN_ID = "a" * 32
+
+
+def quote(value: object) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def run_ps(*arguments: str) -> subprocess.CompletedProcess[str]:
+    assert PWSH
+    return subprocess.run(
+        [PWSH, "-NoLogo", "-NoProfile", "-NonInteractive", *arguments],
+        capture_output=True, text=True, encoding="utf-8", timeout=25,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+
+
+def test_owned_projection_and_discoverable_skill():
+    declarations = json.loads((PLUGIN / "instruction-projections.json").read_text())
+    projection, = [row for row in declarations["projections"] if row["id"] == "elevation-fallback"]
+    assert projection["deliveryMode"] == "inline"
+    assert projection["template"] == "instructions/elevation-fallback.instructions.md"
+    assert projection["destination"].endswith("/agent-conduct-guidance/elevation-fallback.instructions.md")
+    content = (PLUGIN / projection["template"]).read_text(encoding="utf-8")
+    assert "requesting-windows-elevation" in content
+    assert "agent-conduct-guidance@" in content
+    assert len(content.encode()) < 2048
+    skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    assert "name: requesting-windows-elevation\n" in skill
+    assert "RunLevel=Highest" in skill and "cannot register" in skill
+    assert "not administrator success" in skill.replace("**", "")
+    assert "wait" in skill.lower() and "1223" in skill
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+@pytest.mark.parametrize(
+    ("state", "code", "elevated"),
+    [("success", 0, True), ("failed", 7, True), ("canceled", 1223, False), ("probe", 0, False)],
+)
+def test_terminal_round_trip_uses_exact_log_and_actual_result(tmp_path, state, code, elevated):
+    log = tmp_path / "quoted ' log.log"
+    request = {"runId": RUN_ID, "logPath": str(log)}
+    command = (
+        f". {quote(WORKER)} -RequestPath unused -LibraryOnly; "
+        f"$r = {quote(json.dumps(request))} | ConvertFrom-Json; "
+        f"Write-ElevationTerminal $r {quote(state)} {code} ${str(elevated).lower()}; "
+        f"Read-ElevationTerminal {quote(log)} {quote(RUN_ID)} | ConvertTo-Json -Compress"
+    )
+    result = run_ps("-Command", command)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "schema": 1, "runId": RUN_ID, "state": state, "exitCode": code, "elevated": elevated,
+    }
+    assert log.read_text(encoding="utf-8").startswith("AGENT_ELEVATION_END ")
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"schema": 1, "runId": "b" * 32, "state": "success", "exitCode": 0, "elevated": True},
+        {"schema": 1, "runId": RUN_ID, "state": "success", "exitCode": 7, "elevated": True},
+        {"schema": 1, "runId": RUN_ID, "state": "success", "exitCode": 0, "elevated": False},
+        {"schema": 1, "runId": RUN_ID, "state": "success", "exitCode": True, "elevated": True},
+        {"schema": 1, "runId": RUN_ID, "state": "unknown", "exitCode": 0, "elevated": True},
+        {"schema": 1, "runId": RUN_ID, "state": "failed", "exitCode": 0, "elevated": True},
+        {"schema": 1, "runId": RUN_ID, "state": "canceled", "exitCode": 0, "elevated": False},
+        {"schema": 1, "runId": RUN_ID, "state": "probe", "exitCode": 7, "elevated": False},
+    ],
+)
+def test_terminal_refuses_stale_or_success_shaped_failures(tmp_path, value):
+    log = tmp_path / "operation.log"
+    log.write_text("AGENT_ELEVATION_END " + json.dumps(value) + "\n", encoding="utf-8")
+    result = run_ps(
+        "-Command",
+        f". {quote(WORKER)} -RequestPath unused -LibraryOnly; "
+        f"Read-ElevationTerminal {quote(log)} {quote(RUN_ID)}",
+    )
+    assert result.returncode != 0
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+def test_incomplete_terminal_is_not_completion(tmp_path):
+    log = tmp_path / "operation.log"
+    log.write_text('AGENT_ELEVATION_END {"schema":', encoding="utf-8")
+    result = run_ps(
+        "-Command",
+        f". {quote(WORKER)} -RequestPath unused -LibraryOnly; "
+        f"$r = Read-ElevationTerminal {quote(log)} {quote(RUN_ID)}; "
+        "if ($null -ne $r) { throw 'Incomplete marker accepted' }",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def native_request(tmp_path: Path, script: str, *, seconds: int = 10) -> tuple[Path, Path]:
+    import ctypes
+    from ctypes import wintypes
+
+    session = wintypes.DWORD()
+    assert ctypes.windll.kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(session))
+    payload = tmp_path / "payload ' spaced.ps1"
+    payload.write_text(script, encoding="utf-8")
+    log = tmp_path / "operation.log"
+    log.write_text("begin\n", encoding="utf-8")
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({
+        "schema": 1, "runId": RUN_ID, "scriptPath": str(payload),
+        "scriptHash": hashlib.sha256(payload.read_bytes()).hexdigest().upper(),
+        "scriptArguments": ['spaces "quotes" ; $literal \u00e9'],
+        "workingDirectory": str(tmp_path), "logPath": str(log),
+        "sessionId": session.value, "shellPath": PWSH,
+        "timeoutSeconds": seconds, "interactiveProbe": True,
+        "deadline": (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(),
+    }), encoding="utf-8")
+    return request, log
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows PowerShell worker")
+@pytest.mark.parametrize("code", [0, 7])
+def test_native_worker_preserves_both_streams_arguments_and_exit(tmp_path, code):
+    request, log = native_request(tmp_path, (
+        "param([string]$Value)\n"
+        "Write-Output ($Value | ConvertTo-Json -Compress)\n"
+        "[Console]::Error.WriteLine('stderr-native-control')\n"
+        f"exit {code}\n"
+    ))
+    result = run_ps("-File", str(WORKER), "-RequestPath", str(request), "-Worker")
+    assert result.returncode == code, result.stderr
+    lines = log.read_text(encoding="utf-8").splitlines()
+    assert json.dumps('spaces "quotes" ; $literal \u00e9', ensure_ascii=False) in lines
+    assert "stderr-native-control" in lines
+    terminal = json.loads(lines[-1].removeprefix("AGENT_ELEVATION_END "))
+    assert terminal["exitCode"] == code
+    assert terminal["state"] == ("probe" if code == 0 else "failed")
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows PowerShell worker")
+def test_native_worker_deadline_is_not_a_success_marker(tmp_path):
+    request, log = native_request(tmp_path, "Start-Sleep -Seconds 60\n", seconds=2)
+    result = run_ps("-File", str(WORKER), "-RequestPath", str(request), "-Worker")
+    assert result.returncode == 124, result.stderr
+    text = log.read_text(encoding="utf-8")
+    assert "deadline expired" in text
+    assert "AGENT_ELEVATION_END " not in text
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows PowerShell worker")
+def test_native_worker_refuses_script_drift_before_start(tmp_path):
+    request, log = native_request(tmp_path, "Write-Output 'should-not-run'\n")
+    data = json.loads(request.read_text())
+    Path(data["scriptPath"]).write_text("Write-Output 'changed'\n", encoding="utf-8")
+    result = run_ps("-File", str(WORKER), "-RequestPath", str(request), "-Worker")
+    assert result.returncode != 0
+    assert not (tmp_path / "worker-started.json").exists()
+    assert "changed before execution" in log.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Windows consent preflight")
+def test_normal_invocation_requires_prior_explicit_consent(tmp_path):
+    result = run_ps(
+        "-File", str(INVOKE), "-ScriptPath", str(SKILL / "assets" / "probe.ps1"),
+        "-LogPath", str(tmp_path / "not-created.log"),
+    )
+    assert result.returncode != 0
+    assert "explicit operation-specific consent" in result.stderr
+    assert not (tmp_path / "not-created.log").exists()
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Windows broker failure controls")
+@pytest.mark.parametrize("canceled", [False, True])
+def test_broker_reports_cancellation_and_missing_worker_without_requesting_uac(tmp_path, canceled):
+    request, log = native_request(tmp_path, "exit 0\n")
+    data = json.loads(request.read_text())
+    data["interactiveProbe"] = False
+    request.write_text(json.dumps(data), encoding="utf-8")
+    behavior = (
+        "throw [ComponentModel.Win32Exception]::new(1223)"
+        if canceled else "[pscustomobject]@{ExitCode = 0}"
+    )
+    result = run_ps(
+        "-Command",
+        f"function Start-Process {{ {behavior} }}; "
+        f"& {quote(WORKER)} -RequestPath {quote(request)}; exit $LASTEXITCODE",
+    )
+    expected = 1223 if canceled else 1
+    assert result.returncode == expected, result.stdout + result.stderr
+    terminal = json.loads(log.read_text(encoding="utf-8").splitlines()[-1].removeprefix("AGENT_ELEVATION_END "))
+    assert terminal["exitCode"] == expected
+    assert terminal["state"] == ("canceled" if canceled else "failed")
+    assert terminal["elevated"] is False
+    assert not (tmp_path / "worker-started.json").exists()
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Windows consent preflight")
+def test_interactive_probe_does_not_authorize_another_script(tmp_path):
+    script = tmp_path / "not-the-probe.ps1"
+    script.write_text("throw 'must not execute'\n", encoding="utf-8")
+    result = run_ps(
+        "-File", str(INVOKE), "-ScriptPath", str(script),
+        "-LogPath", str(tmp_path / "not-created.log"), "-InteractiveProbe",
+    )
+    assert result.returncode != 0
+    assert "only the bundled harmless probe" in result.stderr
+    assert not (tmp_path / "not-created.log").exists()
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+def test_completion_observes_task_stop_before_reading_its_terminal(tmp_path):
+    log = tmp_path / "completion-race.log"
+    log.write_text("begin\n", encoding="utf-8")
+    command = (
+        f". {quote(WORKER)} -RequestPath unused -LibraryOnly; "
+        f"$script:receipt = @{{runId={quote(RUN_ID)};logPath={quote(log)}}}; "
+        "$task = [pscustomobject]@{State=4;LastTaskResult=267009}; "
+        "$task | Add-Member ScriptMethod GetInstances { param($flags) "
+        "Write-ElevationTerminal $script:receipt success 0 $true; "
+        "$this.State=3; $this.LastTaskResult=0; return [pscustomobject]@{Count=0} }; "
+        f"Get-ElevationTaskCompletion $task {quote(log)} {quote(RUN_ID)} | ConvertTo-Json -Compress"
+    )
+    result = run_ps("-Command", command)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["state"] == "success"
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+@pytest.mark.parametrize(("state", "last"), [(4, 267009), (3, 267011), (2, 267009)])
+def test_startup_and_running_states_are_not_missing_completion(tmp_path, state, last):
+    log = tmp_path / "starting.log"
+    log.write_text("begin\n", encoding="utf-8")
+    result = run_ps(
+        "-Command",
+        f". {quote(WORKER)} -RequestPath unused -LibraryOnly; "
+        f"$task = [pscustomobject]@{{State={state};LastTaskResult={last}}}; "
+        "$task | Add-Member ScriptMethod GetInstances { param($flags) [pscustomobject]@{Count=0} }; "
+        f"$r = Get-ElevationTaskCompletion $task {quote(log)} {quote(RUN_ID)}; "
+        "if ($null -ne $r) { throw 'Early completion accepted' }",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows worker admission")
+def test_expired_request_cannot_start_payload_after_late_consent(tmp_path):
+    request, log = native_request(tmp_path, "Write-Output 'must-not-run'\n")
+    data = json.loads(request.read_text())
+    data["deadline"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    request.write_text(json.dumps(data), encoding="utf-8")
+    result = run_ps("-File", str(WORKER), "-RequestPath", str(request), "-Worker")
+    assert result.returncode != 0
+    text = log.read_text(encoding="utf-8")
+    assert "deadline expired before payload admission" in text
+    assert "must-not-run" not in text
+    assert not (tmp_path / "worker-started.json").exists()

@@ -1,0 +1,9 @@
+{
+  "comment": "Add consent-scoped Windows elevation through a temporary interactive task with output logs and matching completion receipts.",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

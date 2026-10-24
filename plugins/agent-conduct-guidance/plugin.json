@@ -14,6 +14,8 @@
     "process-hygiene",
     "headless",
     "windows",
+    "elevation",
+    "uac",
     "subprocess",
     "delegation",
     "sub-agents",
