@@ -88,6 +88,53 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-PROVIDER existing record setup and assertions retain separate ownership
+
+This settles only these three original keys, with their census headers,
+hashes and `MX-PROVIDER` dispositions unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_providers.py:4` | `6db6024d74dfbbaa623dda25c8bffad69d4e509c0a7b09d129d88dacaab42241` |
+| `tests/test_providers.py:14` | `5fd5cf6df59515601007e9840bf3da9182ec303bda64b05427a0e0a94ec7e73a` |
+| `tests/test_providers.py:15` | `62224877e5561ed71cefe2c2d03ba3aa8b21007763ec52cf19d60c12203a78db` |
+
+Hunk 4's explicit `"Hello"` input and exact output assertion belong to
+B-PROVIDER-ASSERT, actual #7695 merge
+`08db822fe28f887ced822580a6a0f3fb3c25b609`. The following encrypted-identity
+case's fixture argument/unpack instead belongs to B-PROVIDER-RECORD,
+actual #7691 merge `5106ca4d00f69dfbc74b7486da85ae9d55636d2b`.
+Both complete functions match their respective merges and the immutable
+source by AST at comparison `09bce158f3`.
+
+Hunk 14's malformed-codename stale-marker case calls `_open_record` under
+B-PROVIDER-RECORD; its added no-marker-text and empty `attribution_head`
+assertions belong to B-PROVIDER-ASSERT. The complete strengthened function
+matches #7695 and the immutable source. The next disabled-attribution
+stale-marker case's fixture argument/unpack (hunk 14) and `_open_record`
+call (hunk 15) belong to B-PROVIDER-RECORD; that complete function matches
+#7691 and the immutable source. These record-boundary controls do not
+replace actual publication tests or bypass provider/attribution decisions.
+
+Hunk 15's non-string-codename guard signature belongs to B-PROVIDER-RECORD:
+actual #7710 merge `d96da43cc8f905d74e86cc144ba00ed73c424ab8`
+removed only its unused fixture parameters. Its complete function matches
+that merge and the immutable source. The two historical function-removal
+deltas in the same hunk retain their accepted B-PROVIDER-ASSERT retirement:
+`test_codename_mode_skips_marker_for_a_malformed_codename` and
+`test_codename_mode_skip_does_not_record_attribution_head` still execute,
+and their complete ASTs match the historical base and all three actual
+merges above. This retires removal deltas, never their tests. The separate
+`test_no_attribution_omits_marker` removal delta in hunk 16 is outside
+this reconciliation.
+
+All seven affected native consumer cases pass: 33.57 pytest seconds,
+39.59 seconds including preparation and cleanup, exactly two contained
+Windows workers with unchanged marks, item deadlines and resource bounds.
+This focused functional selection is not a normal-group, full-module or
+repeated complete same-head qualification result. No code/test edit is
+needed; other residuals and the parent Windows qualification gate stay open.
+
 ### MX-IMPERFECT existing fixture and fault prerequisites remain separate
 
 This settles only these two original keys; their headers, hashes and
