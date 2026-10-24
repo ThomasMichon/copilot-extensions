@@ -1,0 +1,13 @@
+{
+  "comment": "Batch effective Picker configuration in the optional bootstrap handoff without weakening machine identity checks or older-engine compatibility.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

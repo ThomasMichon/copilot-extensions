@@ -470,10 +470,15 @@ workers. Bound scalars survive ordinary setup/reload file-cache invalidation;
 accepting a new project binding resets them. Environment-enabled mock operations
 still resolve implicit project selection and refuse ambiguity. This consumer
 support does not assert that every engine produces those optional fields.
-The current engine producer supplies **only `config_dir`**. Effective `repo-dir`
-and `machine` remain two memoized worker scalar queries; a registry anchor is
-never substituted for a layered machine-local anchor override. Older engines
-without the optional payload retain all three scalar queries.
+Manager requests `picker-bootstrap --json --project-config` to obtain the
+configuration directory, effective repository directory and validated machine
+in the existing worker request. This uses one layered engine configuration
+load without unrelated control-plane PR overlays; a registry anchor is never
+substituted for a layered machine-local anchor override. The default engine
+bootstrap remains configuration-load-free. Only an explicit unsupported-option
+response falls back to the older bootstrap, whose missing fields retain the
+memoized worker scalar queries. Configuration, identity and timeout failures
+are not retried as compatibility fallbacks.
 Binding replacement never waits for an older scalar read; late results stay in
 their original binding/epoch. Failed scalar lookups may retry after reload,
 without discarding accepted bootstrap values.

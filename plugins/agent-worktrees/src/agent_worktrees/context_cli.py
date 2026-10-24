@@ -102,6 +102,11 @@ def add_parsers(sub) -> None:
         help="Emit the production Picker bootstrap decisions as JSON",
     )
     p.add_argument(
+        "--project-config",
+        action="store_true",
+        help="Include effective repository and validated machine scalars in JSON",
+    )
+    p.add_argument(
         "--json",
         action="store_true",
         help="Emit the versioned bootstrap payload as JSON",
@@ -500,6 +505,19 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
     }
     if getattr(args, "json", False):
         payload["project_config"] = {"config_dir": str(cfg.project_dir(resolved))}
+        if getattr(args, "project_config", False):
+            from .execution_spaces import require_current_execution_space
+
+            try:
+                config = cfg.load_config(
+                    include_control_plane_related_pr=False, project=resolved,
+                )
+                require_current_execution_space(config)
+                payload["project_config"].update(
+                    repo_dir=str(config.default_repo.anchor), machine=config.machine,
+                )
+            except Exception as exc:
+                return output._json_error(f"Cannot resolve Picker project configuration: {exc}")
         output._json_output(payload)
     else:
         print(payload["project"])
