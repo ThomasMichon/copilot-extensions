@@ -4,6 +4,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 import subprocess
 
@@ -52,6 +53,24 @@ def test_published_legacy_launcher_fingerprints_are_owned(name, body):
     assert hashlib.sha256(body.encode("utf-8")).hexdigest() in recovery._OWNED_STUBS[name]
     edited = (body + "\necho edited\n").encode("utf-8")
     assert hashlib.sha256(edited).hexdigest() not in recovery._OWNED_STUBS[name]
+
+
+@pytest.mark.parametrize("name,producer", [
+    ("worktree-manager", "_sh_binstub"),
+    ("worktree-manager.cmd", "_cmd_binstub"),
+    ("worktree-manager.ps1", "_ps1_binstub"),
+])
+def test_current_generated_launcher_fingerprints_are_owned(monkeypatch, name, producer):
+    source = Path(__file__).resolve().parents[3] / "worktree-manager" / "src"
+    monkeypatch.syspath_prepend(str(source))
+    from worktree_manager import runtime_launchers
+
+    assert Path(runtime_launchers.__file__).resolve() == (
+        source / "worktree_manager" / "runtime_launchers.py"
+    ).resolve()
+    body = getattr(runtime_launchers, producer)().encode("utf-8")
+    assert hashlib.sha256(body).hexdigest() in recovery._OWNED_STUBS[name]
+    assert hashlib.sha256(body + b"\necho edited\n").hexdigest() not in recovery._OWNED_STUBS[name]
 
 
 @pytest.fixture

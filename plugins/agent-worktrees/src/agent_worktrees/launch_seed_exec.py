@@ -12,8 +12,21 @@ from agent_procutil import no_window_kwargs
 
 from . import embody_resume, installer, launch_admission, launch_seed_state, sessions
 from . import tracking, tracking_write
+from . import launch_execution
 
 BOUNDARY_MARKER = "# agent-worktrees:launch-seed-boundary-v1"
+ATTEMPT_BOUNDARY_MARKER = "# agent-worktrees:launch-attempt-boundary-v1"
+
+
+def _interactive_console() -> bool:
+    if sys.stdin is None or not sys.stdin.isatty():
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        # Windows NUL can report isatty() without an attached console.
+        return bool(ctypes.windll.kernel32.GetConsoleCP())
+    return True
 
 
 def _final_cold_error(record) -> str | None:
@@ -38,6 +51,7 @@ def deferred_command(
     command: list[str], record_path: Path, *, seed_id: str | None = None,
     admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None,
+    correlation: launch_execution.Correlation | None = None,
 ) -> list[str]:
     prefix = [
         sys.executable, "-m", "agent_worktrees.launch_seed_exec",
@@ -51,6 +65,8 @@ def deferred_command(
         prefix += ["--preserve-seed-id", preserve_seed_id]
     if native_resume_session:
         prefix += ["--native-resume-session", native_resume_session]
+    if correlation:
+        prefix += correlation.options()
     return [*prefix, "--", *command]
 
 
@@ -68,14 +84,21 @@ def _script_index(command: list[str]) -> int | None:
     return None
 
 
-def _invocation_command(record_path: Path, seed_id: str, command: list[str]) -> list[str]:
+def _invocation_command(
+    record_path: Path, seed_id: str, command: list[str],
+    correlation: launch_execution.Correlation | None = None,
+) -> list[str]:
     return [
         sys.executable, "-I", "-m", "agent_worktrees.launch_seed_exec",
-        "--invoke", "--record", str(record_path), "--seed-id", seed_id, "--", *command,
+        "--invoke", "--record", str(record_path), "--seed-id", seed_id,
+        *(correlation.options() if correlation else []), "--", *command,
     ]
 
 
-def _setup_command(record_path: Path, seed_id: str, command: list[str]) -> list[str] | None:
+def _setup_command(
+    record_path: Path, seed_id: str, command: list[str],
+    correlation: launch_execution.Correlation | None = None,
+) -> list[str] | None:
     index = _script_index(command)
     if index is not None:
         script = Path(command[index])
@@ -91,9 +114,12 @@ def _setup_command(record_path: Path, seed_id: str, command: list[str]) -> list[
                 )
                 if delimiter is None:
                     return None
-                inner = _setup_command(record_path, seed_id, command[delimiter + 1:])
+                inner = _setup_command(record_path, seed_id, command[delimiter + 1:], correlation)
                 return [*command[:delimiter + 1], *inner] if inner is not None else None
-        if script.is_file() and BOUNDARY_MARKER in script.read_text(encoding="utf-8-sig").splitlines():
+        markers = script.read_text(encoding="utf-8-sig").splitlines() if script.is_file() else []
+        if BOUNDARY_MARKER in markers:
+            if correlation and ATTEMPT_BOUNDARY_MARKER not in markers:
+                return None
             flags = (
                 ["-LaunchSeedRecord", str(record_path), "-LaunchSeedId", seed_id,
                  "-LaunchSeedRuntimePython", sys.executable]
@@ -101,13 +127,25 @@ def _setup_command(record_path: Path, seed_id: str, command: list[str]) -> list[
                 else ["--launch-seed-record", str(record_path), "--launch-seed-id", seed_id,
                       "--launch-seed-runtime-python", Path(sys.executable).as_posix()]
             )
+            if correlation:
+                for name, value in (
+                    ("LaunchAttemptId", correlation.attempt_id),
+                    ("LaunchResolutionId", correlation.resolution_id),
+                    ("LaunchParentId", correlation.parent_id),
+                ):
+                    if value is not None:
+                        flags += [("-" + name) if script.suffix.lower() == ".ps1" else {
+                            "LaunchAttemptId": "--launch-attempt-id",
+                            "LaunchResolutionId": "--launch-resolution-id",
+                            "LaunchParentId": "--launch-parent-id",
+                        }[name], value]
             return [*command[:index + 1], *flags, *command[index + 1:]]
         return None
     host = Path(command[0]).name.lower() if command else ""
     if host in {"copilot", "copilot.exe", "copilot.cmd"} or (
         host in {"gh", "gh.exe"} and command[1:2] == ["copilot"]
     ):
-        return _invocation_command(record_path, seed_id, command)
+        return _invocation_command(record_path, seed_id, command, correlation)
     return None
 
 
@@ -115,6 +153,21 @@ def launch(
     record_path: Path, command: list[str], *, invoke: bool = False, seed_id: str | None = None,
     admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None,
+    correlation: launch_execution.Correlation | None = None,
+) -> int:
+    def work(execution=None):
+        return _admitted_launch(
+            record_path, command, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            execution=execution,
+        )
+    return launch_execution.run(record_path, correlation, work) if correlation else work()
+
+
+def _admitted_launch(
+    record_path: Path, command: list[str], *, invoke: bool, seed_id: str | None,
+    admission_only: bool, preserve_seed_id: str | None, native_resume_session: str | None,
+    execution: launch_execution.Execution | None,
 ) -> int:
     from . import agent_policy
 
@@ -133,14 +186,16 @@ def launch(
                 record_path, command, invoke=invoke, seed_id=seed_id, admission_only=True,
                 preserve_seed_id=preserve_seed_id,
                 native_resume_session=native_resume_session,
+                execution=execution,
             )
-    return _launch(record_path, command, invoke=invoke, seed_id=seed_id)
+    return _launch(record_path, command, invoke=invoke, seed_id=seed_id, execution=execution)
 
 
 def _launch(
     record_path: Path, command: list[str], *, invoke: bool, seed_id: str | None,
     admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None,
+    execution: launch_execution.Execution | None = None,
 ) -> int:
     try:
         record = tracking.load_record(record_path)
@@ -217,33 +272,41 @@ def _launch(
             return 3
         seed = receipt["seed"]["text"]
         argv = embody_resume.with_seed(command, seed)
+        if execution:
+            execution.observed(
+                "seed-claimed", seed_id=current.seed_id, handoff_id=receipt["seed"]["handoff_id"],
+            )
     elif current is not None:
-        argv = _setup_command(record_path, current.seed_id, command)
+        argv = _setup_command(
+            record_path, current.seed_id, command, execution.child() if execution else None,
+        )
         if argv is None:
             print(
                 "Launch prompt remains staged: this launcher must adopt "
-                "the launch-seed invocation boundary or use normalized setup.",
+                "the required launch-seed/attempt invocation boundary or use normalized setup.",
                 file=sys.stderr,
             )
             return 3
     try:
-        if os.name != "nt" and not invoke and not admission_only:
+        if os.name != "nt" and not invoke and not admission_only and execution is None:
             os.execvp(argv[0], argv)
         # A real interactive child inherits this console; non-interactive
         # consumers must not allocate a new one.
         process = subprocess.Popen(
             argv, stdout=sys.stdout, stderr=sys.stderr,
-            **({} if sys.stdin.isatty() else no_window_kwargs()),
+            **({} if _interactive_console() else no_window_kwargs()),
         )
     except OSError as exc:
         restored = launch_seed_state.restore(record_path, receipt) if receipt else None
         print(f"Could not start Copilot command: {exc}; seed restoration: {restored}", file=sys.stderr)
         return 3
     cleanup_failed = False
+    if execution:
+        execution.spawned(process.pid, invoke=invoke)
     if receipt:
         try:
             launch_seed_state.finish(record_path, receipt)
-        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
+        except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, KeyboardInterrupt) as exc:
             cleanup_failed = True
             print(
                 f"Copilot started, but staged-seed cleanup is unconfirmed: {exc}. "
@@ -255,6 +318,8 @@ def _launch(
     while True:
         try:
             result = process.wait()
+            if execution:
+                execution.process_exit_code = result
             return result if result or not cleanup_failed else 3
         except KeyboardInterrupt:
             continue
@@ -268,17 +333,28 @@ def main() -> int:
     parser.add_argument("--admission-only", action="store_true")
     parser.add_argument("--preserve-seed-id", default=None)
     parser.add_argument("--native-resume-session", default=None)
+    parser.add_argument("--launch-attempt-id", default=None)
+    parser.add_argument("--launch-resolution-id", default=None)
+    parser.add_argument("--launch-parent-id", default=None)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("a launch command is required")
     try:
+        correlation = (
+            launch_execution.Correlation(
+                args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id,
+            )
+            if any((args.launch_attempt_id, args.launch_resolution_id, args.launch_parent_id))
+            else None
+        )
         return launch(
             args.record, command, invoke=args.invoke, seed_id=args.seed_id,
             admission_only=args.admission_only,
             preserve_seed_id=args.preserve_seed_id,
             native_resume_session=args.native_resume_session,
+            correlation=correlation,
         )
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         print(f"Could not hand off staged launch prompt: {exc}", file=sys.stderr)

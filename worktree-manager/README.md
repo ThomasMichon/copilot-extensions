@@ -150,8 +150,10 @@ environment admission remain with the subsequent engine repair and its own
 transactional publisher; Manager construction does not modify those helpers.
 An existing valid Manager registration owns its fixed local-bin launcher family;
 bootstrap snapshots those files and refuses concurrent changes before publishing.
-Without that registration, unrelated commands remain protected rather than
-adopted by filename. Package, ordinary-path and selected-provider checks remain.
+Without that registration, only exact published launcher bytes, including the
+current generated CMD, PowerShell and POSIX launchers, are recognized. Edited or
+unrelated commands remain protected rather than adopted by filename. Package,
+ordinary-path and selected-provider checks remain.
 Repair-child launches explicitly forward standard input, output and error to
 the existing caller handles while retaining hidden native children and their
 completion custody. Redirected diagnostics must reach the durable request log,

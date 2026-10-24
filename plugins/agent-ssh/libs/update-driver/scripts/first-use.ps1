@@ -46,20 +46,22 @@ switch -CaseSensitive ($plugin) {
     'agent-vault' { $prefix = 'AGENT_VAULT' }
     'agent-pull-requests' { $prefix = 'AGENT_PULL_REQUESTS' }
     'agent-ssh' { $prefix = 'AGENT_SSH' }
+    'agent-codespaces' { $prefix = 'AGENT_CODESPACES' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
     throw 'Stamp-to-selected-snapshot provisioning requires SSH.'
 }
-if ($plugin -ceq 'agent-ssh') {
+if ($plugin -cin @('agent-ssh', 'agent-codespaces')) {
+    $label = if ($plugin -ceq 'agent-ssh') { 'SSH' } else { 'CodeSpaces' }
     $sshDeclaration = @{
-        module = 'agent_ssh'; legacyRuntimeRoot = '.agent-ssh'
-        payloadRootEnv = 'AGENT_SSH_PAYLOAD_ROOT'
+        module = $plugin.Replace('-', '_'); legacyRuntimeRoot = '.' + $plugin
+        payloadRootEnv = $prefix + '_PAYLOAD_ROOT'
     }
     foreach ($field in $sshDeclaration.GetEnumerator()) {
         $value = $invocation.PSObject.Properties[$field.Key]
         if ($null -eq $value -or $value.Value -isnot [string] -or $value.Value -cne $field.Value) {
-            throw 'SSH first use requires its declared native runtime gate.'
+            throw "$label first use requires its declared native runtime gate."
         }
     }
     if ($invocation.payloadDispatcher -isnot [PSCustomObject] -or
@@ -68,8 +70,16 @@ if ($plugin -ceq 'agent-ssh') {
         $invocation.payloadDispatcher.posix -cne 'scripts/runtime-gate.sh' -or
         $invocation.payloadDispatcher.windows -cne 'scripts/runtime-gate.ps1' -or
         @($invocation.payloadDispatcher.PSObject.Properties).Count -ne 2) {
-        throw 'SSH first use requires its declared native runtime gate.'
+        throw "$label first use requires its declared native runtime gate."
     }
+}
+if ($plugin -ceq 'agent-codespaces' -and (
+    (Test-Path Env:AGENT_CODESPACES_INSTALLATION_ID) -or
+    $RuntimeRoot -ine (Join-Path $env:USERPROFILE '.agent-codespaces') -or
+    [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ine
+        (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
+    [IO.Path]::GetFileName($Payload) -cne $plugin)) {
+    throw 'CodeSpaces first use requires its canonical installed payload and default legacy root.'
 }
 if ($plugin -cin @('agent-pull-requests', 'agent-ssh')) {
     $label = if ($plugin -ceq 'agent-ssh') { 'SSH' } else { 'Pull Requests' }
@@ -109,7 +119,7 @@ $recipe = @{
     installationContext = 'required'
 }
 $provisionMode = $invocation.PSObject.Properties['provisionMode']
-if ($plugin -ceq 'agent-ssh') {
+if ($plugin -cin @('agent-ssh', 'agent-codespaces')) {
     if ($null -ne $provisionMode -and
         ($provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'snapshot')) {
         throw 'Owning payload does not declare the fixed first-use provision recipe.'

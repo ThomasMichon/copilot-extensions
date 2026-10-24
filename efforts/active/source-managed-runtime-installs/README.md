@@ -365,7 +365,7 @@ transaction execution from the existing recurring-maintenance assignment.
   preservation and no-write controls on native Windows/Linux. This does not
   reopen the qualified bootstrap, adopt explicit installers, exercise remote
   SSH, authorize rollout or close the separate network-backed #5379 gate.
-- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify CodeSpaces'
+- [x] **Agent-recommended bounded next-adopter prerequisite:** qualify CodeSpaces'
   fixed legacy `stamp` and `provision` recipes through the same native
   foundation, canonical queue and frozen-input owner before changing any
   ordinary CodeSpaces publisher. Admit only its canonical installed payload
@@ -380,6 +380,22 @@ transaction execution from the existing recurring-maintenance assignment.
   Selected-snapshot acceptance, compound stamp/provision, command/bootstrap/
   explicit-installer adoption, cells/custom roots, live service deployment and
   the existing #6909 snapshot-qualification ownership remain separate.
+- [ ] **Agent-recommended bounded bootstrap adoption:** route CodeSpaces'
+  legacy session bootstrap's first stamp and installed-payload drift provisioning
+  through its qualified fixed native actions and the same canonical queue.
+  Package the self-contained foundation through the existing canonical source
+  materializer; do not assume recipe fixtures already made it part of this
+  payload. Preserve exact source/root/project, required context and native
+  stamp differences, publication and no-self/pinned controls, killswitch,
+  healthy no-op and independent provider/guidance hooks. Remove its age/PID
+  installer guard, with no foreground or nested fallback. Qualify the actual
+  15-second hook, output-free launch acknowledgement, Python-free cold stamp,
+  caller loss/concurrency, ordinary durable receipts/results, installed
+  CLI/module/distribution identity and no-write refusals on Windows/Linux.
+  Use isolated disabled-Owner configuration and native registration adapters,
+  never host registration or a CodeSpace connection. Selected snapshots,
+  primary/payload commands, explicit installers, cells/custom roots, live
+  service deployment and #6909 remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

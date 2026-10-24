@@ -150,13 +150,74 @@ verified target request receipt described below. Structured target admission
 uses that existing durable version-2 receipt and requires a non-null attempt
 when the new fence is present. No resolution receipt proves process start,
 native conversation identity, prompt acceptance or retry eligibility. Native
-outcome integration, joined history readers and sweeps remain separate work.
+acceptance integration, joined history readers and sweeps remain separate work.
 
 The explicit source integration lane is
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_attempt_native.py`.
 It checks actual daemon transport and process loss after the initial receipt.
 The default unit portfolio excludes that lane; neither lane proves installed
 Copilot conversation or prompt acceptance.
+
+### Deferred execution observations
+
+Before publishing a journaled plan, the resolver places its attempt and exact
+resolution-operation IDs in the existing deferred command's private wrapper
+arguments. It does not add them to ambient session environment or use a
+per-worktree "current attempt" pointer. Each executing wrapper gets a distinct
+execution-operation ID, with an explicit parent ID for a cooperative setup's
+backend wrapper. Concurrent launches cannot inherit another attempt merely
+because they share a worktree.
+
+The existing tracking-write owner retains prompt-free
+`worktree-launch-execution` version-1 files alongside resolution receipts as
+`launch-attempts/<attempt-id>/<execution-id>.execution.json`. Each is bounded
+to 16 KiB and four events: `execution-requested`, optional `seed-claimed`,
+optional `process-spawned`, and `execution-returned` or `unknown`.
+The subject binds the resolution ID, parent execution ID, observed worktree ID
+and its creation nonce when available. Initial persistence precedes seed claim,
+setup or process execution. Initial failure refuses the command. An unconfirmed
+post-effect observation is reported, but never repeats a spawn or skips the
+existing seed-settlement and process-wait ownership.
+An interrupted post-effect receipt write or process-identity probe is likewise
+unconfirmed, not permission to unwind past an already-started child. Interrupted
+seed settlement retains its existing uncertainty fence while child waiting
+continues.
+
+Each write rechecks the advertised verb/version. A published incompatible
+endpoint with a confirmed live PID/birth owner is not a starting monitor:
+the client skips boot and polling and uses the same locked direct fallback.
+Missing, dead, reused or unconfirmed publishers keep ordinary boot handling.
+An incompatible endpoint is never sent a request, and ambiguous sent writes
+are never replayed.
+
+`seed-claimed` records only the saved seed and handoff IDs: ownership was taken,
+not necessarily delivered. A later proven spawn failure can restore that seed.
+`process-spawned` records only the OS PID, process-birth token when readable,
+and `launcher-command` or `backend-command`. A missing birth token remains
+unknown identity, not permission to inspect or terminate a reused PID.
+The latter boundary means the configured backend command was passed to
+`Popen`, not that Copilot opened a conversation or accepted its first turn.
+`execution-returned` records the launch routine's result before the final
+audit acknowledgement, the separately observed child exit code when a wait
+completed, and whether an earlier receipt was unconfirmed. Final audit
+uncertainty can itself make the helper return 3 even when the routine returned
+0. None is an acceptance verdict. Crash loss leaves incomplete history; it
+never manufactures success or grants automatic replay.
+
+Record-backed seedless/custom launchers expose only the wrapper process unless
+their backend boundary supplies its own evidence. Base plans without a record
+retain resolution evidence only. Native conversation/turn association, joined
+Manager history, retention and sweeps remain separate work. In particular,
+the optional resident prompt-receipt adapter's missing qualified backend is
+unavailable, not evidence that a prompt was absent or accepted.
+
+The explicit source lane
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_execution_native.py`
+exercises real daemon/process evidence and process loss after seed claim.
+Set `COPILOT_EXTENSIONS_NATIVE_WINDOWS=1` on an interactive Windows desktop to
+also observe two consoleless-parent backend cycles for visible windows and
+foreground changes. These are synthetic backend checks, not installed Copilot
+acceptance or local/SSH same-conversation qualification.
 
 ## SSH launch-prompt admission
 
@@ -903,6 +964,16 @@ or record mutation; migrate to normalized setup or explicitly adopt this
 boundary. Ordinary seedless commands are unaffected. A failure after backend
 invocation may follow delivery and must not
 automatically restore a potentially submitted prompt.
+
+Journaled seeded setup additionally declares the exact line
+`# agent-worktrees:launch-attempt-boundary-v1`, accepts `-LaunchAttemptId`,
+`-LaunchResolutionId`, `-LaunchParentId` (PowerShell), or
+`--launch-attempt-id`, `--launch-resolution-id`, `--launch-parent-id` (Bash),
+and forwards these as the corresponding long options to the invocation helper
+before its `--` delimiter. The standard scripts implement both contracts.
+A v1 seed-only custom script is never given unsupported correlation flags or
+silently allowed to drop a journaled attempt; it must adopt this additive
+boundary or use normalized setup. Unjournaled v1 launches remain compatible.
 
 - **`--json` → stdout is JSON only; stderr is logs only.** No TTY prompts, no
   color, no picker. `--json` implies `--no-mux`.

@@ -16,12 +16,71 @@ on:
           - ssh-recipes
           - ssh-bootstrap
           - ssh-commands
+          - codespaces-recipes
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  codespaces-recipes-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-recipes'
+    name: CodeSpaces fixed recipes (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify fixed CodeSpaces recipes, installed consumer and isolated service branches
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_codespaces.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify CodeSpaces caller loss and ordinary durable result
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_genesis.py -k owning_codespaces
+          --test-timeout 900 --timeout 1080
+  codespaces-recipes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-recipes'
+    name: CodeSpaces fixed recipes (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify fixed CodeSpaces recipes, installed consumer and isolated service branches
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_codespaces.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify CodeSpaces caller loss and ordinary durable result
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_genesis.py -k owning_codespaces
+          --test-timeout 900 --timeout 1080
   ssh-commands-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-commands'
     name: SSH commands (Ubuntu)
