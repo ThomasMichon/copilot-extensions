@@ -68,6 +68,13 @@ upfront context and unnecessary exploration.
   hold. Future implementation uses normal public source-claim policy, not
   permission inferred from issue age or closure. If a concrete existing claim
   requires #1612 to remain open, retain that issue rather than abandon it.
+- **Research/cost intake:** the complete #4139 and #4140 additions below use
+  Phase 8's existing domain-acceptance gate and one primary placement each:
+  research-artifact/overlap in Phase 3 and per-skill cost/optimization in
+  Phase 4. The same three lanes retain every incumbent obligation, nonexpiring
+  claim, frozen result and independent source/native/archival hold. Normal
+  review, actual merge and full current-root readback precede tracker
+  supersession; intake selects no normative standard or implementation owner.
 
 ## Context
 
@@ -179,6 +186,42 @@ prompts the primary context channel.
   cost; otherwise retain flat owner fragments and standardize only kernels and
   references.
 
+#### Direct research-artifact and overlap acceptance from #4139
+
+<!-- backlog-reconciliation:7556:transfer:4139:to:efforts/active/progressive-context-disclosure/README.md -->
+
+This is direct unchecked acceptance in Phase 3 through the existing Phase 8
+and migration-intake gate, not implemented research indexing or overlap
+analysis. Phase 2 calibration and Phase 6 diagnostics retain their own roles.
+
+- [ ] A1. Provide topic-indexed, section-addressable research artifacts so a
+  consumer can identify and read the task-relevant sections without loading a
+  monolithic research block. Reuse existing attributable artifact/storage
+  authority; a file list or metadata inventory alone does not satisfy this
+  outcome.
+- [ ] A2. Make task-relevant random access preserve exact source/owner,
+  applicability, stable section identity, resolution base and necessary
+  interacting/shared context. Required grounding and pre-exploration rules
+  remain available; unrelated research should not be eagerly pulled merely to
+  find the topic.
+- [ ] A3. Provide an overlap diagnostic that identifies the actual
+  duplicated/overlapping context chunks and their source/section relationships
+  so the user can understand redundant inclusion. Label exact duplication,
+  broader overlap, uncertainty and coverage limits honestly; counts or
+  applyTo-overlap findings alone are not the requested result.
+- [ ] A4. Keep overlap findings advisory. A diagnostic or low-cost variant cannot
+  suppress safe required guidance, paraphrase independently owned policy,
+  invent precedence, assert model admission from file existence or authorize
+  execution of an indexed artifact.
+- [ ] A5. Preserve compatible current exact-session, reviewed-static and
+  source-selected local delivery, with explicit resolution bases and contained
+  targets; unavailable/unsafe/foreign references remain visible rather than
+  guessed away.
+- [ ] A6. Retain architecture/evaluation/authoring-review custody and existing
+  calibration gates. Neither new artifact indexing nor an overlap report
+  declares a disclosure standard, revives a retired aggregator or expands the
+  bounded archival claimant's ownership.
+
 ### Phase 4 - Authoring guidance and exemplars
 
 - [ ] Update `customizing-copilot:authoring-skills`, its hook-composition
@@ -193,6 +236,55 @@ prompts the primary context channel.
   stable identifiers, and bounded critical bytes.
 - [ ] Document how resume recovery, exact-session guidance files, and
   progressive disclosure compose without duplicating complete guidance.
+
+#### Direct per-skill cost and heavy-skill optimization acceptance from #4140
+
+<!-- backlog-reconciliation:7556:transfer:4140:to:efforts/active/progressive-context-disclosure/README.md -->
+
+This is direct unchecked acceptance in Phase 4 through the existing Phase 8
+and migration-intake gate. Existing cost-conscious authoring guidance is
+delivered; full triggered-body profiling and qualified heavy-skill variants
+remain unfinished. Phase 2 evaluation and Phase 6 diagnostics remain separate
+supporting lanes, not competing primary owners.
+
+- [ ] B1. Profile each selected skill's full body at its actual supported
+  load/admission boundary. Attribute source/version, boundary, body/reference
+  versus eager/deferred contribution and available measurements. Clearly
+  separate native measured token usage, character-derived estimates, metadata
+  upper bounds and unavailable telemetry; frontmatter-only counts are not full
+  triggered-body profiling.
+- [ ] B2. Expose that attributable per-skill cost so authors can identify
+  genuinely heavy loads without printing private prompts, credentials or
+  research contents. Preserve known/unknown coverage and do not manufacture
+  zero cost for missing evidence.
+- [ ] B3. Apply and document lazy-loading and summary-variant patterns for heavy
+  skills using focused on-demand references. Summaries preserve critical policy,
+  source/provenance, applicability and all task-required obligations; shorter
+  but incorrect or under-grounded variants fail.
+- [ ] B4. Preserve the delivered lean-body, one-level reference, proactive
+  decomposition and 500-line ceiling guidance. Extend the SAME authoring/review
+  homes with usable measurement interpretation and evidence-backed heavy-skill
+  examples; do not introduce a rival guidance owner or call generic advice
+  completed optimization.
+- [ ] B5. Compare before/after cost and actual task correctness at the relevant
+  supported boundary. Retain provenance, required-guide selection and bounded
+  exploration, and disclose historical/new, native/heuristic and
+  unsupported/unavailable tiers. The existing experiment-first gates govern
+  normative deferral/summary rules; no unrelated universal every-host or
+  whole-parent prerequisite is added to a finite leaf.
+- [ ] B6. Keep rendering, source/trust/containment, native activation and
+  model-selection custody unchanged. Existing #7101 snapshots remain inert
+  historical DATA; no archive extraction, hook execution, benchmark, model trial
+  or rollout is authorized by intake.
+
+Before either #4139 or #4140 source supersession, obtain existing Phase 8/domain
+acceptance through a NEW normal reviewed ACTUAL merge containing the complete
+direct Plan, actual global Validation and continuing Coordination. Fully read
+back the CURRENT root, including Participants, every incumbent Plan/Validation
+row and complete unchanged historical Journal. A topical link, old #7868
+receipt, proposed payload or title is not delivery. Missing scope or custody
+keeps that original OPEN. Journal only actual intake; no feature completion,
+cancellation, implementation/native authorization or blanket ACK regime follows.
 
 ### Phase 5 - Plugin-owned rendering and native-host seam
 
@@ -412,6 +504,19 @@ and creates no replacement umbrella or competing effort.
 
 ## Validation Plan
 
+- [ ] Global Validation A (#4139): prove topic/section random access loads the
+  required research and interacting source context, not irrelevant full blocks,
+  and the actual diagnostic identifies duplicated/overlapping chunks with
+  source/coverage limits. Include wrong/missing/unsafe reference and
+  advisory-no-suppression cases; preserve exact provenance, correctness and
+  current required guidance.
+- [ ] Global Validation B (#4140): establish attributable full per-skill
+  load-cost evidence at the selected supported boundary and validate heavy-skill
+  lazy/summary before/after behavior, preserving critical rules and required
+  grounding. Label actual versus estimated/metadata/unknown and historical
+  versus new results; generic file counts, a single successful calibration cell
+  or shorter invalid output do not pass.
+
 - [ ] Qualify every retained original/inherited row above at its exact
   source/model/venue/boundary. Existing baseline/runner/accounting or archival
   delivery is partial evidence, not general calibration or native acceptance.
@@ -464,6 +569,20 @@ reviewed decision record. Then update authoring guidance and reviewer
 enforcement before migrating the complete contributor stack.
 
 ## Journal
+
+### 2026-10-24 - Research-artifact and per-skill cost acceptance proposed
+
+- Added #4139's complete topic/section random-access and context-chunk overlap
+  scope directly to Phase 3, and #4140's full load-cost visibility, qualified
+  heavy-skill lazy/summary patterns and author guidance directly to Phase 4.
+  All twelve substantive Plan clauses and both actual global Validation
+  entries remain unchecked; current guidance/accounting delivery is credited.
+- Existing Phase 8/migration-intake domain acceptance governs the additions.
+  Preserve all three lanes, every incumbent checkbox, original alternatives,
+  frozen/invalid/confounded evidence, full historical Journal and separate
+  #2173/#2256/#1508/#7101 custody. Normal review, actual merge and full current
+  readback precede source supersession. No standard, phase, capability,
+  native activation, performance improvement or rollout is declared complete.
 
 ### 2026-10-22 - Complete original and inherited acceptance retained
 
