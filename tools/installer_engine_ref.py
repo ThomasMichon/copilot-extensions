@@ -33,7 +33,10 @@ PYTHON_FILES = (
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
 )
-PYTHON_ADOPTERS = ("agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh", "agent-codespaces")
+PYTHON_ADOPTERS = (
+    "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",
+    "agent-codespaces", "agent-logger",
+)
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
 STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver",)
 STANDALONE_NATIVE_FILES = ("installer-engine.ps1", "installer-engine.sh")

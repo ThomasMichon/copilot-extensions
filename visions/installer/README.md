@@ -187,6 +187,16 @@ Installs the user-global ground runtime and baseline services by driving the
 harness's **own** install flow, so the deployed core matches what the harness
 expects rather than a parallel reimplementation that can drift.
 
+### setup-invocation-authorizes-dependencies
+A user or authorized agent directly invoking the trusted harness setup flow
+authorizes installation of the dependencies required by its selected
+configuration, including the installer and selected plugins. The flow carries
+that authority through the real component installers rather than asking for
+another approval of each package or resolved lock. Existing source restrictions,
+integrity, seasoning, revocation and installation-ownership checks still apply;
+dependency authorization does not select additional optional capabilities or
+grant unrelated activation and background execution.
+
 ### first-harness-repo-adoption
 Offers three paths for the initial harness repo — adopt an existing local
 checkout, clone a remote URL into a chosen source root, or skip — and registers

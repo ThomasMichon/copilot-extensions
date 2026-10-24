@@ -47,17 +47,19 @@ switch -CaseSensitive ($plugin) {
     'agent-pull-requests' { $prefix = 'AGENT_PULL_REQUESTS' }
     'agent-ssh' { $prefix = 'AGENT_SSH' }
     'agent-codespaces' { $prefix = 'AGENT_CODESPACES' }
+    'agent-logger' { $prefix = 'AGENT_LOGGER' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
     throw 'Stamp-to-selected-snapshot provisioning requires SSH.'
 }
-if ($plugin -cin @('agent-ssh', 'agent-codespaces')) {
-    $label = if ($plugin -ceq 'agent-ssh') { 'SSH' } else { 'CodeSpaces' }
+if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger' }[$plugin]
     $sshDeclaration = @{
-        module = $plugin.Replace('-', '_'); legacyRuntimeRoot = '.' + $plugin
+        legacyRuntimeRoot = '.' + $plugin
         payloadRootEnv = $prefix + '_PAYLOAD_ROOT'
     }
+    if ($plugin -cne 'agent-logger') { $sshDeclaration.module = $plugin.Replace('-', '_') }
     foreach ($field in $sshDeclaration.GetEnumerator()) {
         $value = $invocation.PSObject.Properties[$field.Key]
         if ($null -eq $value -or $value.Value -isnot [string] -or $value.Value -cne $field.Value) {
@@ -73,13 +75,13 @@ if ($plugin -cin @('agent-ssh', 'agent-codespaces')) {
         throw "$label first use requires its declared native runtime gate."
     }
 }
-if ($plugin -ceq 'agent-codespaces' -and (
-    (Test-Path Env:AGENT_CODESPACES_INSTALLATION_ID) -or
-    $RuntimeRoot -ine (Join-Path $env:USERPROFILE '.agent-codespaces') -or
+if ($plugin -cin @('agent-codespaces', 'agent-logger') -and (
+    (Test-Path ("Env:" + $prefix + '_INSTALLATION_ID')) -or
+    $RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
     [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ine
         (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
     [IO.Path]::GetFileName($Payload) -cne $plugin)) {
-    throw 'CodeSpaces first use requires its canonical installed payload and default legacy root.'
+    throw "$label first use requires its canonical installed payload and default legacy root."
 }
 if ($plugin -cin @('agent-pull-requests', 'agent-ssh')) {
     $label = if ($plugin -ceq 'agent-ssh') { 'SSH' } else { 'Pull Requests' }
@@ -114,18 +116,43 @@ $installer = if ($null -eq $invocation.PSObject.Properties['installer']) {
 } else { $invocation.installer }
 $recipe = @{
     schema = 'copilot-extensions.payload-invocation'
-    command = $plugin
     noSelfProvisionEnv = $noSelf
     installationContext = 'required'
 }
+if ($plugin -ceq 'agent-logger') {
+    $loggerCommands = @(
+        @('agent-logger', 'agent_logger'),
+        @('collate-session', 'agent_logger.segmenter.collate'),
+        @('read-session-digest', 'agent_logger.segmenter.read_digest'),
+        @('prepare-session-log', 'agent_logger.segmenter.prepare_log'),
+        @('ramp-up-session', 'agent_logger.segmenter.ramp_up'),
+        @('session-sync', 'agent_logger.sync.engine')
+    )
+    if ($invocation.plugin -isnot [string] -or $invocation.plugin -cne $plugin -or
+        $invocation.installerLifecycle -isnot [bool] -or -not $invocation.installerLifecycle -or
+        $null -ne $invocation.PSObject.Properties['command'] -or
+        $null -ne $invocation.PSObject.Properties['module'] -or
+        $null -ne $invocation.PSObject.Properties['provisionMode'] -or
+        $invocation.commands -isnot [array] -or $invocation.commands.Count -ne $loggerCommands.Count) {
+        throw 'Logger first use requires its fixed six-command lifecycle declaration.'
+    }
+    for ($index = 0; $index -lt $loggerCommands.Count; $index++) {
+        $item = $invocation.commands[$index]
+        if ($item -isnot [PSCustomObject] -or
+            $item.command -isnot [string] -or $item.command -cne $loggerCommands[$index][0] -or
+            $item.module -isnot [string] -or $item.module -cne $loggerCommands[$index][1]) {
+            throw 'Logger first use requires its fixed six-command lifecycle declaration.'
+        }
+    }
+} else { $recipe.command = $plugin }
 $provisionMode = $invocation.PSObject.Properties['provisionMode']
 if ($plugin -cin @('agent-ssh', 'agent-codespaces')) {
     if ($null -ne $provisionMode -and
         ($provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'snapshot')) {
         throw 'Owning payload does not declare the fixed first-use provision recipe.'
     }
-} elseif ($null -eq $provisionMode -or
-    $provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'direct') {
+} elseif ($plugin -cne 'agent-logger' -and ($null -eq $provisionMode -or
+    $provisionMode.Value -isnot [string] -or $provisionMode.Value -cne 'direct')) {
     throw 'Owning payload does not declare the fixed first-use provision recipe.'
 }
 foreach ($field in $recipe.GetEnumerator()) {

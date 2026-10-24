@@ -12,6 +12,14 @@ release-preferred exact profiles, automatic governed source fallback and reuse.
 Knowledge/machine overlays are optional for stricter policy or explicit
 capability selection, not a prerequisite for normal installation.
 
+Direct user or authorized-agent execution of the trusted harness setup flow
+is the approval authority for dependencies required by the selected
+configuration, including its installer and selected plugins. Component
+installers carry that scoped authorization through dependency resolution;
+there is no separate package approver, consent prompt or hand-built exact-lock
+approval file. Source, integrity, seasoning and revocation checks still
+constrain what the operation may acquire and assemble.
+
 This is desired policy, not proof that the adapter or consumer is implemented.
 The repository-only record API merged in #7044 remains inert. Approval is not a
 candidate's `approval_source` string, a self-declared flag or a matching digest.
@@ -26,12 +34,15 @@ Runtime enabling and production rollout retain their existing gates.
   extra controller. Establish the actual existing release/configuration
   adapters and their ownership; do not expose the raw inert approvals map as
   user configuration.
-  The installation-context `resolve_runtime_profile_policy` reader now supplies
+  The installation-context `resolve_runtime_profile_policy` reader (#8494) supplies
   the configuration-intent side through the existing source/mode/deployment
   owner, with no new policy file. It does not approve an exact record or
   independently verify source bytes. Release authentication is #8367; actual
   composition with that channel, governed source closure and the native
   constructor remains required before checking this item.
+  Bind source-mode authorization to the actual invoked setup and its selected
+  configuration through the existing installation/custody owner. The read-only
+  intent reader is not itself evidence of an authorized setup operation.
 - [ ] Prefer compatible profiles through the verified release channel, then
   check their complete exact closure against actual approved-source policy.
   Preserve the selected release and capability when a profile is unavailable.
@@ -64,6 +75,9 @@ review gate only. Neither review gate enables a runtime.
 - [ ] Real fresh-adopter invocation with no runtime-profile settings or approval
   files reaches CPU selection and permitted construction without a prompt for
   individual dependency approval.
+  Exercise the real setup-to-component installer boundary, including an
+  authorized agent caller. A configuration read, forged invocation flag or
+  unrelated component/closure must not inherit that operation's authority.
 - [ ] Both a real admissible release profile and a missing/blocked artifact
   profile reach the correct mode. Source fallback records its own exact lock,
   independently verified source and trigger without requiring artifact assets.
@@ -71,6 +85,9 @@ review gate only. Neither review gate enables a runtime.
   including roots, extras, markers, tags and device requirements. Prove a
   permitted CPU closure; use an available approved accelerator lane or document
   its exact unavailable boundary without inventing parity.
+  The complete-profile comparator (#8399), bounded shared inspector (#8419)
+  and invocation-owned exact snapshots (#8523) supply preparation primitives,
+  not authenticated acquisition, admitted reuse or engine-consumer acceptance.
 - [ ] Changed policy/supplied revocation invalidates affected reuse; unchanged
   warm invocation reuses admitted inputs without resolution or a feed request.
 - [ ] Wrong source/record/target, blocked fallback, integrity failure and

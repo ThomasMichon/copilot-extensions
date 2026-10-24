@@ -5,7 +5,7 @@
   needs, from an approved artifact source, under one provenance identity.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md) ·
   [`docs/pipelines.md`](../../../docs/pipelines.md) ·
   [`docs/architecture.md`](../../../docs/architecture.md)
@@ -59,6 +59,14 @@ source.
 
 ### adopter-supplied-complete-defaults
 
+Direct invocation of a trusted harness setup flow by a user or an authorized
+agent is the installation action that authorizes the dependencies required by
+the selected harness configuration. That authority carries through the
+installer and its selected components, including their transitive dependencies;
+it does not require a separate approval service, per-package consent or an
+adopter-authored approval map. An already-authorized controller applies the
+same boundary for its addressed installation.
+
 An adopting harness can supply a complete, reviewed selection policy that
 works for operators who never customize local runtime settings. Its existing
 installation authority applies that policy automatically: prefer compatible
@@ -74,6 +82,10 @@ still binds independently verified source and freezes a complete exact closure
 within declared constraints before assembly. Neither the presence of a
 candidate nor its self-declared approval authorizes it. Adopting a default
 never grants service activation, model download or unattended execution.
+The invoked setup approves the required dependency operation, not arbitrary
+packages, changed configuration or acquisition-policy exceptions. Signature,
+integrity, source, seasoning and revocation checks enforce that authorization;
+they are not another actor from whom ordinary setup must obtain consent.
 
 ### one-verified-acquisition-path
 

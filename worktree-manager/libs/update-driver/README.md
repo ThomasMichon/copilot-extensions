@@ -659,7 +659,8 @@ canonical queued request receipts.
 ### Fixed first-use recipes and command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
-support the owning Agent Vault, Agent Pull Requests, Agent SSH and Agent CodeSpaces payloads' existing legacy
+support the owning Agent Vault, Agent Pull Requests, Agent SSH, Agent CodeSpaces
+and Agent Logger payloads' existing legacy
 **direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
@@ -683,6 +684,19 @@ actual materialized installation and installed CLI origin with isolated
 disabled config, native enabled/disabled/unknown registration adapters and
 caller loss. Adapter observations do not establish live host registration or
 serving readiness; no real CodeSpace or connection is needed.
+
+Logger's fixed prerequisite admits only its canonical installed payload and
+default legacy root. It preserves the six declared command/module pairs,
+required context and native runtime gates without a top-level command/module
+or provision-mode declaration. The fixed adapter supplies no service flags:
+native `provision` constructs the package/runtime and deployment manifest,
+whereas sync/prune task or timer registration belongs to explicit install/update.
+The manual `logger-recipes` portfolio exercises native stamp/construction,
+safe installed help consumers, source independence, failed-candidate selection,
+Python-free caller loss/concurrency and no-write controls. No personal sessions
+are processed. Adding these recipes does not migrate Logger's command,
+bootstrap or explicit installer publishers, qualify selected snapshots,
+admit cells/custom roots, enroll a periodic worker or authorize host rollout.
 
 Pull Requests' legacy cold payload and generated primary commands use the same
 fixed recipe before outer provisioning locks or cold resolver writes. The

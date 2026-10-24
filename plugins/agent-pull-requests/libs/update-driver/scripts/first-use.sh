@@ -61,14 +61,16 @@ case "$plugin" in
     agent-pull-requests) prefix=AGENT_PULL_REQUESTS ;;
     agent-ssh) prefix=AGENT_SSH ;;
     agent-codespaces) prefix=AGENT_CODESPACES ;;
+    agent-logger) prefix=AGENT_LOGGER ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
     printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
 fi
-if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces ]]; then
+if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
     label=SSH; [[ "$plugin" != agent-codespaces ]] || label=CodeSpaces
-    [[ "$(query "$manifest" module)" == "${plugin//-/_}" &&
+    [[ "$plugin" != agent-logger ]] || label=Logger
+    [[ ( "$plugin" == agent-logger || "$(query "$manifest" module)" == "${plugin//-/_}" ) &&
         "$(query "$manifest" legacyRuntimeRoot)" == ".$plugin" &&
         "$(query "$manifest" payloadRootEnv)" == "${prefix}_PAYLOAD_ROOT" &&
         "$(query "$manifest" $'payloadDispatcher\034posix')" == scripts/runtime-gate.sh &&
@@ -78,11 +80,12 @@ if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces ]]; then
         printf '%s first use requires its declared native runtime gate.\n' "$label" >&2; exit 1;
     }
 fi
-if [[ "$plugin" == agent-codespaces ]]; then
-    [[ ! -v AGENT_CODESPACES_INSTALLATION_ID && "$runtime" == "$HOME/.agent-codespaces" &&
+if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
+    installation_hint="${prefix}_INSTALLATION_ID"
+    [[ ! -v "$installation_hint" && "$runtime" == "$HOME/.$plugin" &&
         "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
         "$(basename -- "$payload")" == "$plugin" ]] || {
-        printf 'CodeSpaces first use requires its canonical installed payload and default legacy root.\n' >&2
+        printf '%s first use requires its canonical installed payload and default legacy root.\n' "$label" >&2
         exit 1
     }
 fi
@@ -122,7 +125,33 @@ else
     [[ "$code" == 3 ]] || exit "$code"
     installer=install
 fi
-if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces ]]; then
+if [[ "$plugin" == agent-logger ]]; then
+    [[ "$(query "$manifest" plugin)" == "$plugin" &&
+        "$(query_type "$manifest" installerLifecycle)" == boolean &&
+        "$(query "$manifest" installerLifecycle)" == true &&
+        "$(query_type "$manifest" commands)" == array &&
+        "$(printf '%s' "$manifest" | LC_ALL=C awk -f "$__foundation_assets/json-query.awk" \
+            -v mode=len -v query_path=commands)" == 6 ]] || {
+        printf 'Logger first use requires its fixed six-command lifecycle declaration.\n' >&2; exit 1;
+    }
+    for field in command module provisionMode; do
+        if query_type "$manifest" "$field" >/dev/null; then
+            printf 'Logger first use requires its fixed six-command lifecycle declaration.\n' >&2; exit 1
+        else
+            code=$?
+            [[ "$code" == 3 ]] || exit "$code"
+        fi
+    done
+    logger_commands=(agent-logger collate-session read-session-digest prepare-session-log ramp-up-session session-sync)
+    logger_modules=(agent_logger agent_logger.segmenter.collate agent_logger.segmenter.read_digest
+        agent_logger.segmenter.prepare_log agent_logger.segmenter.ramp_up agent_logger.sync.engine)
+    for index in "${!logger_commands[@]}"; do
+        [[ "$(query "$manifest" $'commands\034'"$index"$'\034command')" == "${logger_commands[$index]}" &&
+            "$(query "$manifest" $'commands\034'"$index"$'\034module')" == "${logger_modules[$index]}" ]] || {
+            printf 'Logger first use requires its fixed six-command lifecycle declaration.\n' >&2; exit 1;
+        }
+    done
+elif [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces ]]; then
     if provision_type="$(query_type "$manifest" provisionMode)"; then
         [[ "$provision_type" == string && "$(query "$manifest" provisionMode)" == snapshot ]] || {
             printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
@@ -140,7 +169,7 @@ fi
     "$(query_type "$manifest" version)" == number &&
     "$(query "$manifest" version)" == 2 && "$installer" == install &&
     "$(query "$manifest" noSelfProvisionEnv)" == "$no_self" &&
-    "$(query "$manifest" command)" == "$plugin" &&
+    ( "$plugin" == agent-logger || "$(query "$manifest" command)" == "$plugin" ) &&
     "$(query "$manifest" installationContext)" == required ]] || {
     printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
 }
