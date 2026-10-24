@@ -409,7 +409,7 @@ transaction execution from the existing recurring-maintenance assignment.
   preserves #7030 publication and #8370 diagnostics custody. Selected snapshots,
   command/bootstrap/explicit-installer publishers, task/timer registration,
   personal sync/prune, cells/custom roots and rollout remain separate.
-- [ ] **Agent-recommended bounded semantic prerequisite:** qualify Logger's
+- [x] **Agent-recommended bounded semantic prerequisite:** qualify Logger's
   fixed legacy `install` action through the same foundation, canonical queue
   and frozen-input owner before migrating its bootstrap's drift path.
   Preserve the unchanged six-command declaration, exact source/root/project,
@@ -420,6 +420,18 @@ transaction execution from the existing recurring-maintenance assignment.
   checks, registration-failure outcomes and no personal sync/prune execution.
   No ordinary publisher, host registration, maintenance enrollment, selected
   snapshot, custom-root/cell or rollout is adopted by this prerequisite.
+- [ ] **Agent-recommended bounded bootstrap adoption:** route Logger's
+  legacy bootstrap first stamp and drift `install` through its qualified
+  fixed actions, packaged foundation and the same canonical queue. Preserve
+  the six-command declaration, exact source/root/project, publication and
+  no-self/pinned controls, killswitch and healthy no-op. Keep actual task/timer
+  reconciliation distinct from service-less provision and retain independent
+  provider/guidance hooks. The [bounded plan](logger-bootstrap.md) requires
+  actual 15-second hook/output qualification, native caller loss/concurrency,
+  retained lifecycle source and isolated registration effects without personal
+  sync/prune. Remove its age/PID installer guard and foreground fallback;
+  selected snapshots, command/explicit-installer publishers, cells/custom
+  roots, live periodic workers and rollout remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
