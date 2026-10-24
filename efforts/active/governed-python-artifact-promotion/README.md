@@ -30,6 +30,7 @@ and does not permit third-party dependency bytes in published artifact sets.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | _(unassigned)_ | Design, spike, and phased implementation | a dedicated `copilot-extensions` worktree |
+| Consumer coordinator | Wheel-byte validation and shared-installer consumer integration | Managed contribution worktree; #4876 |
 
 ## Coordination
 
@@ -235,6 +236,9 @@ refusals and the installation authority's explicit path selection.
 
 ### Phase 3 - Verified consumption with correct fallback
 
+- [ ] Implement the reviewed [wheel-input admission slice](wheel-input-admission.md):
+      compare actual wheel bytes with the exact selected record before retained
+      construction, then integrate owned reuse evidence without creating approval.
 - [ ] Teach installers (via the shared installer engine, not a parallel
       mechanism) to locate, verify, and consume a matching artifact set,
       falling back explicitly to the existing client-side source-build/venv
@@ -641,6 +645,18 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Shared-installer wheel-input continuation
+
+- Resumed the retained consumer scope after the publication milestone.
+  The shared constructor now supplies frozen source inputs, retained UV
+  execution, candidate health and construction/retention custody; it does not
+  yet realize the selected runtime profile from inspected wheel bytes.
+- The [bounded consumer sub-plan](wheel-input-admission.md) precedes its
+  implementation. It preserves existing authority/profile and candidate-input
+  owners and keeps byte consistency distinct from permission, source fallback
+  and service activation. No new runtime loader, global cache or rollout is
+  enabled by this proposal. The parent effort remains Active.
 
 ### 2026-10-15 - Historical implementation, freshness and publication receipts
 

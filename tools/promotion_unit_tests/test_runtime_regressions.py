@@ -96,6 +96,7 @@ def test_native_execution_check_is_project_independent():
         (["update", "--detach"], False),
         (["update", "--supervised-debug"], False),
         (["update", "--not-recovery-status"], False),
+        (["update", "--recover-for-repair"], True),
     ],
 )
 def test_other_project_routing_contracts_are_preserved(argv, allowed):

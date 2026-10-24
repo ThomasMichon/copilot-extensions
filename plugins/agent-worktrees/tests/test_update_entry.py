@@ -153,6 +153,7 @@ def test_update_entry_fetches_before_python(update_entry_case, front, runtime, n
         ["update", "--request-status=synthetic-request"],
         ["update", "--recovery-status"],
         ["update", "--recover-after-restart"],
+        ["update", "--recover-for-repair"],
         ["update", "--help"],
         ["unknown", "update"],
     ],

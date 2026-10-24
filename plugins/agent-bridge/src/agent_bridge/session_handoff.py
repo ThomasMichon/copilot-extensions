@@ -259,6 +259,9 @@ class _SessionHandoffMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .cold_outages import assert_prompt_allowed
+
+        assert_prompt_allowed(self._db, session_id, None)
         # A cooperative stop announced before or at any point during this
         # handoff wins: never leave a successor the stop can't reach.
         notices_at_start = session._stop_notices
@@ -291,6 +294,7 @@ class _SessionHandoffMixin:
             session.status = SessionStatus.STOPPED
             await self.resume_session(session_id, drain=False)
 
+        assert_prompt_allowed(self._db, session_id, None)
         # 1. Resolve the successor's opening turn. External requestors may
         #    provide the exact prompt text; otherwise the predecessor authors a
         #    brief and agent-bridge wraps it as the successor seed.
@@ -334,6 +338,7 @@ class _SessionHandoffMixin:
         #    wouldn't reach (re-checked once the successor is up, too).
         if stop_arrived():
             raise RuntimeError(f"Handoff of {session_id} abandoned: a stop was requested")
+        assert_prompt_allowed(self._db, session_id, None)
         successor = await self.start_session(
             session.target,
             agent_name=session.agent_name,

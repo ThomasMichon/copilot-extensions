@@ -80,6 +80,8 @@ def _env(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_d)
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / f".{PROJECT}")
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path / ".agent-worktrees")
+    monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_: None)
+    monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *_: None)
 
     origin = tmp_path / "origin.git"
     _git("init", "-q", "--bare", "-b", "base", str(origin), cwd=tmp_path)
