@@ -264,6 +264,16 @@ verbatim public-safe extracts, an explicitly labeled provider-neutral summary,
 and **agent-recommended implementation/validation decomposition**. It does not
 authorize provider changes, deploy anything or assign another owner's source.
 
+**Further operator clarification, public-safe summary:** a minimally privileged
+fleet application resource has its own identity/session lifetime, independently
+of more tightly governed downstream source credentials. Relay redundancy is
+intended to preserve availability through independently eligible producers,
+not override tenant/resource policy or silently substitute accounts. Frequent
+application-imposed MFA and forced periodic sign-out are not requested. The
+[resource-specific continuity boundary](runtime-authentication.md#resource-specific-credential-continuity)
+captures the distinction; no tenant-policy exemption or fixed interaction
+allowance is assumed.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -482,6 +492,35 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-24 - Actual broker compatibility and resource-specific continuity
+
+- Captured the operator's independent fleet/source-resource session boundary
+  without promising an exemption from tenant-wide policy. Relay redundancy
+  retains exact account/resource/permission/recipient eligibility and current
+  revocation; an affected resource's challenge is not fleet-wide sign-out.
+- An isolated Windows probe reused an existing approved API/client through
+  its native credential owner. MSAL `1.39.0` and broker runtime `0.20.6`
+  silently acquired actual RS256 SHR, not the existing `jwt-pop-v1`
+  ES256/DPoP format. A fresh empty client cache initially found no account;
+  that observation did not establish an unavailable Windows session.
+- The maintained Microsoft SignedHttpRequest validator `8.14.0` verified the
+  actual embedded issuer token, sender-key binding, proof signature, route
+  and nonce. Two local matrices passed 26 expectations, including stolen
+  access alone, an attacker-signed proof over the stolen access credential,
+  tampered proof, wrong issuer/audience/client/role/method/host/path/nonce
+  and duplicate-proof denial. The single-use nonce fence is explicit
+  diagnostic code, not a library-supplied or production replay store.
+- A silent request with `force_refresh` still returned the same valid
+  embedded credential. This proves cache reuse, not renewal. Actual
+  provider renewal remains under bounded observation; no weekly
+  interaction cadence, real challenge/revocation, Linux TLS exchange,
+  hardware-key attestation or installed responder lifetime is proven.
+- The diagnostic uses in-memory credential handoff and no interactive
+  acquisition, credential export, application registration, consent or
+  live service activation. It does not broaden the existing DPoP verifier
+  or select a production SHR profile. Provider/profile source allocation,
+  retained-owner review and every remaining parent gate stay open.
 
 ### 2026-10-23 - Interactive bootstrap and source-authority clarification
 
