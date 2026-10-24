@@ -12,24 +12,6 @@ from .engine_live_screens import ProgressScreen
 _SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
-    def _confirm_new_worktree(self, dlg, seed_prompt: str = ""):
-        """Confirmed New-worktree options (+ an optional seed prompt, read
-        straight off the SAME dialog's prompt field -- see
-        ``_open_optmenu``) -> the launch decision (#88 F4)."""
-        on = {o["label"] for o in dlg["opts"] if o["on"]}
-        tm, te = dlg["target"]
-        self._decide({
-            "action": "new", "machine": tm, "env": te,
-            "is_local": (tm, te) == self.src.LOCAL,
-            "options": {
-                "anchor": "Anchor repo" in on,
-                "bare": "Bare" in on,
-                "no_mux": "No Mux" in on,
-                "ahp": "AHP" in on,
-                "local_model": "Local model" in on,
-                "seed_prompt": seed_prompt,
-            },
-        })
     def _confirm_cleanup(self, dlg):
         """Confirmed Clean/Sync scope -> build (and, when armed, start) the
         per-worktree maintenance progress run (#88 F4)."""
@@ -301,6 +283,17 @@ class PickerScreenMaintenanceActionsMixin:
             self.debug = decision.get("reason") or "Locality is not ready; refresh and retry."
             self.refresh()
             return False
+        if (
+            getattr(self, "real_ops", False) and not decision.get("attempt_id")
+            and decision.get("action") in {"new", "resume", "restore", "open-venue"}
+        ):
+            from ...launch_confirmation import confirm_before_effect
+            from .. import context
+
+            return confirm_before_effect(
+                self, decision.get("project") or context.project(), decision,
+                surface="picker-action", saved=self._decide,
+            )
         self.app.result = decision
         self.app.exit()
         return True
@@ -328,6 +321,7 @@ class PickerScreenMaintenanceActionsMixin:
             }
         decision = {
             "action": "resume",
+            "journal_action": "open" if rec.get("mux_live") else "resume",
             "worktree_id": raw.get("id"),
             "id4": rec.get("id4"),
             "machine": m,
@@ -475,14 +469,13 @@ class PickerScreenMaintenanceActionsMixin:
                "opts": opts}
         # Prompt recovery currently supports only this execution environment.
         show_prompt = _SEED_PROMPT_ENABLED and (tm, te) == self.src.LOCAL
-        scr = ScopeDlgScreen(dlg, show_prompt=show_prompt)
+        scr = ScopeDlgScreen(
+            dlg, show_prompt=show_prompt, launch_local=(tm, te) == self.src.LOCAL,
+            journal_enabled=self.real_ops,
+        )
 
         def _after(confirmed):
             if not confirmed:
                 return
-            on = {o["label"] for o in dlg["opts"] if o["on"]}
-            seed_prompt = ""
-            if show_prompt and not ({"Anchor repo", "Bare"} & on):
-                seed_prompt = scr.seed_prompt
-            self._confirm_new_worktree(dlg, seed_prompt=seed_prompt)
+            self._decide(scr.launch_decision)
         self.app.push_screen(scr, _after)

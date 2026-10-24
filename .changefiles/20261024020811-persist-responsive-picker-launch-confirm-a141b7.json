@@ -1,0 +1,9 @@
+{
+  "comment": "Persist responsive Picker launch confirmations before dismissal or allocation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

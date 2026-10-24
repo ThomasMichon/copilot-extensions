@@ -10,6 +10,9 @@ import pytest
 from machine_transport import MachineEntry, SSHEnvironment
 from worktree_manager.production_picker.picker_tui import data_local, data_ssh, tasks
 from worktree_manager.production_picker.picker_tui import engine_worktree_actions as actions
+from worktree_manager.production_picker.picker_tui.engine_maintenance_actions import (
+    PickerScreenMaintenanceActionsMixin,
+)
 
 
 @pytest.mark.parametrize("target", [
@@ -68,7 +71,7 @@ def test_unscoped_guest_tuple_builds_local_source_and_local_task_command(monkeyp
 
     monkeypatch.setattr(actions.subprocess, "Popen", popen)
 
-    class Screen(actions.PickerScreenWorktreeActionsMixin):
+    class Screen(actions.PickerScreenWorktreeActionsMixin, PickerScreenMaintenanceActionsMixin):
         src = data_local
         app = SimpleNamespace(result=None)
         source_tabs = data_ssh.source_tabs(sources)

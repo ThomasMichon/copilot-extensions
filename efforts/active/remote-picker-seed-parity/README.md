@@ -709,3 +709,10 @@ do not establish that later transport fences preserve installed parity.
   budgets, rather than waiting to discover each later fixture mismatch in a
   separate full-release cycle. Local tail evidence is supplementary, not a
   replacement for a containing hosted release or immutable publication.
+- **2026-10-24** -- Attempt-journal storage foundation #8505 merged after
+  current-head approval with no findings and required CI. The protected store
+  is independent of launch authority and is not yet wired to confirmation or
+  target receipts. Continue the linked journal's responsive pre-effect
+  integration; negotiated native SSH transport and all original installed
+  conversation/exactly-once/cleanup gates remain open. No runtime rollout or
+  delivered prompt-loss repair is implied by this source merge.

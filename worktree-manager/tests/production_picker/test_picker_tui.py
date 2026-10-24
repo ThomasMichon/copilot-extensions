@@ -413,6 +413,15 @@ async def _wait_for_initial_setup(pilot, scr, *, timeout: float = 5.0):
     )
 
 
+async def _wait_for_launch_confirmation(pilot):
+    from worktree_manager.launch_confirmation import _SavingLaunch
+
+    async with asyncio.timeout(10):
+        while any(isinstance(screen, _SavingLaunch) for screen in pilot.app.screen_stack):
+            await pilot.pause(0.01)
+    await pilot.pause()
+
+
 @pytest.fixture(autouse=True)
 def _wait_for_non_live_run_test(monkeypatch):
     original_run_test = PickerApp.run_test
@@ -2169,6 +2178,7 @@ def test_open_worktree_cli_exits_with_resume_decision():
                 "open-cli", {"worktree": "emancipation-cube-win-bridge-2222"})
             assert ok is True
             assert "CLI session" in msg
+            await _wait_for_launch_confirmation(pilot)
             # The picker recorded a resume decision for that worktree and exited.
             assert app.result is not None
             assert app.result["action"] == "resume"
@@ -2215,6 +2225,7 @@ def test_open_venue_exits_with_open_venue_decision():
             )
             assert ok is True
             assert "my-codespace" in msg
+            await _wait_for_launch_confirmation(pilot)
             assert app.result is not None
             assert app.result["action"] == "open-venue"
             assert app.result["provider"] == "agent-codespaces"
@@ -2275,6 +2286,7 @@ def test_embody_cli_internal_action_exits_with_resume_decision(monkeypatch):
             )
             assert ok is True
             assert "interactive CLI session" in msg
+            await _wait_for_launch_confirmation(pilot)
             assert app.result is not None
             assert app.result["action"] == "resume"
             assert app.result["worktree_id"] == "fresh-task-worktree"
@@ -2372,6 +2384,7 @@ def test_launch_in_new_window_runs_in_background_without_exiting_picker(
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+            await _wait_for_launch_confirmation(pilot)
 
             assert app.result is None  # the Picker was never exited
             assert len(calls) == 1
@@ -2418,6 +2431,7 @@ def test_launch_in_new_window_failure_is_reported_via_debug_not_raised(
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+            await _wait_for_launch_confirmation(pilot)
 
             assert app.result is None
             assert "Launch in new window failed" in scr.debug
@@ -2464,6 +2478,7 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+            await _wait_for_launch_confirmation(pilot)
 
             assert scr.debug == "Opened in a new window"
             # The captured message never reached the real stdout.
@@ -2685,6 +2700,7 @@ def test_embody_cli_internal_action_reports_transaction_failure(monkeypatch, res
             )
             assert ok is True
             assert "interactive CLI session" in msg
+            await _wait_for_launch_confirmation(pilot)
             assert app.result is None
             assert ("launcher metadata unreadable" if resolve_error else "started") in scr.debug
 
@@ -2767,6 +2783,7 @@ def test_embody_cli_internal_action_ssh_dispatches_for_remote_machine(monkeypatc
                 },
             )
             assert ok is True
+            await _wait_for_launch_confirmation(pilot)
             assert captured["argv"][:4] == [
                 "ssh",
                 "-o",
@@ -5198,7 +5215,7 @@ def test_new_worktree_remote_target_remains_seedless(monkeypatch, target):
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
             assert dlg._show_prompt is False
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["machine"] == machine
