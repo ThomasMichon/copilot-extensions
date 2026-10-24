@@ -20,6 +20,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -752,6 +753,52 @@ def _extract_ps1_function(name: str) -> str:
 
 def _extract_ps1_functions(*names: str) -> str:
     return "\n\n".join(_extract_ps1_function(name) for name in names)
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_sync_task_interpreter_probe_preserves_non_ascii_path(
+    tmp_path: Path, shell: str,
+) -> None:
+    exe = shutil.which(shell)
+    if os.name != "nt" or not exe:
+        pytest.skip("requires Windows and PowerShell")
+    probe_venv = tmp_path / "probe-venv"
+    venv.EnvBuilder(with_pip=False).create(probe_venv)
+    expected_json = json.dumps(str(tmp_path / "python-\u96ea" / "pythonw.exe"), ensure_ascii=True)
+    (probe_venv / "Lib" / "site-packages" / "agent_procutil.py").write_text(
+        "def windowless_python(*, require_windowless):\n"
+        "    assert require_windowless\n"
+        f"    return {expected_json}\n",
+        encoding="ascii",
+    )
+    launcher = tmp_path / "task.ps1"
+    launcher.write_text("exit 0\n", encoding="ascii")
+    harness = tmp_path / "probe.ps1"
+    harness.write_text(
+        _extract_ps1_function("New-SyncTaskAction")
+        + """
+function Write-SyncTaskLauncher {}
+function New-ScheduledTaskAction {
+    param($Execute, $Argument)
+    [pscustomobject]@{Execute=$Execute; Arguments=$Argument}
+}
+[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437)
+"""
+        + f"$TaskLauncher = '{launcher}'\n"
+        + f"$VenvPython = '{probe_venv / 'Scripts' / 'python.exe'}'\n"
+        + f"$expected = '{expected_json}' | ConvertFrom-Json\n"
+        + "$action = New-SyncTaskAction\n"
+        + "if ($action.Execute -cne $expected) { throw 'interpreter path was corrupted' }\n"
+        + "[Console]::Out.Write('path preserved')\n",
+        encoding="ascii",
+    )
+    result = subprocess.run(
+        [exe, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "path preserved"
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])

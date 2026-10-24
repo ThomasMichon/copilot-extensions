@@ -1489,10 +1489,11 @@ function New-SyncTaskAction {
     $taskHost = if ($pwshCmd) { $pwshCmd.Source } else { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
     # A GUI root plus CREATE_NO_WINDOW avoids Default Terminal handoff without
     # conhost's loss of the child's exit code.
-    $guiPython = & $VenvPython -I -c 'from agent_procutil import windowless_python; print(windowless_python(require_windowless=True))'
-    if ($LASTEXITCODE -ne 0 -or -not $guiPython) {
+    $guiPythonJson = & $VenvPython -I -c 'import json; from agent_procutil import windowless_python; print(json.dumps(windowless_python(require_windowless=True), ensure_ascii=True))'
+    if ($LASTEXITCODE -ne 0 -or -not $guiPythonJson) {
         throw 'Cannot register headless sync task: windowless Python is unavailable'
     }
+    $guiPython = $guiPythonJson | ConvertFrom-Json -ErrorAction Stop
     $headlessLauncher = [System.IO.Path]::ChangeExtension($TaskLauncher, '.py')
     $headlessBody = @'
 import os
