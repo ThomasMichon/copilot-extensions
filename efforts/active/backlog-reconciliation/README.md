@@ -22,20 +22,24 @@ it does not implement fixes, change product behavior, or declare deployment.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Coordinator | Census, adjudication, publication and completion | #7556 |
-| Evidence researchers | Disjoint issue batches, read-only findings | Coordinator-assigned batches |
+| Evidence researchers | Disjoint wide graph sweeps, read-only findings | Coordinator-assigned thematic scopes |
 | Existing issue owners | Unchanged implementation and acceptance responsibility | Existing issue and effort records |
 
 ## Coordination
 
 - **Topology:** One coordinator; independent, read-only research assignments.
 - **Host (owns PRs):** Coordinator.
-- **Delegates:** Exact, non-overlapping sets within batches of 10-20 issues;
-  researchers cannot close issues, edit plans, or spawn nested workers.
+- **Delegates:** The same four researchers cover exact, non-overlapping primary
+  issue sets across the eligible backlog. Research is wider than publication:
+  use broad thematic sweeps and share cross-theme candidate edges through the
+  coordinator. Researchers cannot close issues, edit plans, or spawn workers.
 - **Handoff:** Researchers return requirement mappings, current source and
   merged-history citations, successor candidates, remaining gaps and confidence.
   The coordinator verifies evidence and live issue state before publication.
 - **Scope:** Open GitHub issues in this repository, excluding pull requests.
-  Oldest-first selection uses creation time, not last-updated time.
+  Survey the whole eligible backlog before selecting coherent consolidation
+  groups. Preserve creation-oldest-first coverage within themes and among
+  comparably ready groups rather than repeatedly revisiting unchanged issues.
 - **Author eligibility:** Research and mutate only issues whose original author
   is listed in the repository's live collaborator roster. Check author metadata
   before reading issue content and recheck membership before publication,
@@ -67,9 +71,11 @@ it does not implement fixes, change product behavior, or declare deployment.
   rollout obligation is not stale merely because its issue is old. Preserve its
   responsibility and route any proposed consolidation through the existing
   coordination record.
-- **Cadence:** Keep pulling the next batch after each adjudication; at least
-  every six hours check queue supply and campaign state. Native same-owner
-  context rollover preserves the charter, cursor, researchers and obligations.
+- **Cadence:** Keep pulling the next graph-backed consolidation group after each
+  adjudication; at least every six hours check queue supply and campaign state.
+  Publish in audited units of 10-20 issues, with a whole-queue census between
+  units. Native same-owner rollover preserves the graph, cursors, researchers
+  and obligations.
 - **Pause:** Ask for guidance at the fixed 50% checkpoint, or earlier only for a
   genuine authority conflict, missing evidence, safety gate or design decision.
   The numerical target never licenses unsupported closure.
@@ -104,6 +110,15 @@ Operator request, with identifying organizational references redacted:
 >
 > Keep an effort journal for yourself, make a structured state in your session folder, and use native context management to pass your charter onto the next context round, allowing you to run this session continuously. Ensure once every 6 hours that you're topped up on work, but otherwise keep pulling issues to keep yourself going as you finish batches. Check in for more guidance once you get down to 50% of what we started with. You shouldn't even have much to ask about: it's unlikely we'll need to abandon explored ideas just to get down to the threshold, there is so much "filler" in the catalog. Through aggregation and deuplication alone I think you'll knock down 10-20%, and then by analyzing open issues against actual completed work, I bet you'll knock out anout 40-60%.
 
+Operator direction change, 2026-10-24:
+
+> Yes, let's make the research wider. Focus now on holistically sweeping issues and building out a graph, to basically just consolidate issues based on alignment and theme
+
+The wider graph-first sweep supersedes the original research batch width, not
+the fixed checkpoint, author eligibility, ownership or requirement-preservation
+constraints. Concrete graph representation, typed relationships and retained
+small publication units below are agent-recommended execution choices.
+
 ## Plan
 
 ### Phase 1 - Baseline and reviewed charter
@@ -115,14 +130,22 @@ Operator request, with identifying organizational references redacted:
 
 ### Phase 2 - Continuing reconciliation
 
-- [ ] Research batches of 10-20, mapping every original requirement to current
-  evidence, a preserved successor, or a retained gap.
+- [ ] Holistically sweep the eligible open backlog and build an issue/effort
+  relationship graph; use alignment and theme to identify consolidation groups.
+- [ ] _(Agent-recommended)_ Execute the [graph-first sweep](graph-sweep.md)
+  through the same four researchers, with explicit primary coverage, cross-theme
+  edges, retained uncertainties and reconstructible operational state.
+- [ ] Map every original requirement in a proposed consolidation to its complete
+  receiving objective or a retained gap; investigate actual implementation
+  evidence when claiming completion, rather than making that the prerequisite
+  for discovering thematic alignment.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
 - [ ] Coalesce thematic duplicates into canonical issues and existing efforts;
   transfer explicit residual checklists before closing superseded reports.
 - [ ] Refresh live and original-cohort metrics, append journal checkpoints, and
-  continue oldest-first until at most 729 issues remain.
+  continue graph-backed consolidation with creation-oldest-first coverage until
+  at most 729 issues remain.
 
 ### Phase 3 - Threshold guidance
 
@@ -144,6 +167,13 @@ Operator request, with identifying organizational references redacted:
   continue to count in the whole-queue census and fixed checkpoint.
 - [ ] Every consolidation explicitly preserves all unique unresolved
   requirements, acceptance conditions and owner responsibilities in its successor.
+- [ ] _(Agent-recommended)_ Every eligible open issue appears in the graph
+  coverage roster with a primary research owner and a reviewed or explicitly
+  pending outcome; excluded issues remain metadata-only and counted.
+- [ ] _(Agent-recommended)_ Graph relations distinguish thematic alignment,
+  duplicate/subsumed outcomes, dependencies, incompatible alternatives and
+  ownership constraints. Shared vocabulary or a graph path alone never
+  authorizes closure; each proposed transfer has complete direct acceptance.
 - [ ] The operational ledger can reconstruct the next batch and live
   researchers, PRs, watches and schedule after native context rollover.
 - [ ] The final whole-queue open count is at most 729; numerical progress never

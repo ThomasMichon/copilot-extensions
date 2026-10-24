@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-24 - Operator-directed graph-first thematic sweep](<journal/2026/10.24 graph-first-direction.md>)
 - [2026-10-24 - Batches eighty-nine and ninety, two finite completions and eight lossless consolidations](<journal/2026/10.24 batches-89-90.md>)
 - [2026-10-24 - Batches eighty-seven and eighty-eight, ten complete lossless consolidations](<journal/2026/10.24 batches-87-88.md>)
 - [2026-10-24 - Batches eighty-five and eighty-six, one finite completion and seven lossless consolidations](<journal/2026/10.24 batches-85-86.md>)
