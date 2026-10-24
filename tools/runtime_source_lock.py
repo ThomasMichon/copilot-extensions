@@ -28,6 +28,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "versioned-runtime"))
 import installer_dependency_policy as dependencies
+from installer_engine import _source_files
 from installer_wheel_inputs import _check_deadline
 from versioned_runtime_source import SourceIdentity, read_source_identity
 
@@ -86,6 +87,16 @@ def _source(payload: Path, expected: SourceIdentity) -> dict:
             or project["version"] != expected.package_version):
         raise ProfileError("source candidate project differs from its selected identity")
     return project
+
+
+def _retained_source(transaction, payload: Path, deadline: float) -> None:
+    files = set(_source_files((payload,)))
+    if payload not in transaction.sources or not files <= transaction.source_hashes.keys():
+        raise ProfileError("retained source does not cover the independently verified payload")
+    for path, retained_digest in transaction.source_hashes.items():
+        _check_deadline(deadline)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != retained_digest:
+            raise ProfileError("retained source differs from the independently verified payload")
 
 
 @contextmanager
@@ -152,8 +163,10 @@ def retain_source_lock(
         with dependencies.retain_uv_source_compile(
             uv, [*arguments, "--output-file", str(output)],
             cwd=payload, env=environment, trusted_source_roots=(payload,),
+            deadline=deadline, native_target=True,
         ) as transaction:
             _source(payload, expected_source)
+            _retained_source(transaction, payload, deadline)
             _check_deadline(deadline)
             result = subprocess.run(
                 list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,

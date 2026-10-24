@@ -265,6 +265,17 @@ refusals and the installation authority's explicit path selection.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
+- [ ] **Accepted from #6234 (reviewed #6767 helper slice):** realize immutable
+      promotion-built helper wheels in independent owned runtimes through this
+      effort's admission/consumer/retention boundary. Prove complete closure and
+      extras, standalone first install, second-consumer survival after uninstall/
+      cache retirement, matched hardlink-aware savings, independent cell/trust
+      ownership, two installers/two marketplaces, recovery and rollback. The
+      measured experiment is not production admission or completion. Do not add
+      a routing broker, shared mutable venv or parallel constructor. Publication
+      readiness stays with its existing release objective; merged #6697 is
+      evidence, not a delivery owner. No rollout/new-feed/model/corpus authority
+      is conferred. #6234 retains its parent and native engine/application work.
 - [ ] Teach installers (via the shared installer engine, not a parallel
       mechanism) to locate, verify, and consume a matching artifact set,
       falling back explicitly to the existing client-side source-build/venv
@@ -699,6 +710,41 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Source candidate review repairs
+
+- Addressed #8705's four findings: updated the exact optional-lane workflow
+  assertion; refused effective universal/platform overrides in native candidate
+  mode; required complete canonical retained-source coverage and matching
+  original digests before compilation; and propagated the caller's deadline
+  through retention entry, both settings probes and per-chunk source copying.
+  A transient copy-time edit cannot be hidden by restoring the original before
+  candidate consumption.
+- Reused the existing configuration companion to keep canonical modules below
+  their cap, preserving ordinary preparation defaults. Synchronized the two
+  canonical helpers across every existing adopter and added the affected
+  plugin/standalone changefile. Refreshed only their two source hashes in the
+  required unit manifest; its node selection and budget are unchanged.
+- The development regression packet passes **562 tests**, with one expected
+  POSIX-only helper skip on Windows. Contract, synchronization, documentation,
+  feed-neutrality and Python lint checks pass. The required packet and repaired
+  published-head CI/native review gates remain open. This is still an
+  input-binding component, not governed acquisition or an enabled constructor;
+  the parent remains **Active**.
+
+### 2026-10-24 - Explicit helper-consumer custody acceptance
+
+- Accepted the remaining immutable-helper consumer slice described in
+  #4876 comment `6390022767` from the continuing #6234 owner. The complete
+  closure/extras, standalone, second-consumer reference survival, matched
+  hardlink-aware allocation, cell/trust, two-installer/two-marketplace and
+  recovery/rollback gates are retained above as unchecked work in this existing
+  admission/consumer/retention objective.
+- Acceptance transfers only that bounded helper slice; it does not make it
+  implemented, close either parent or transfer publication ownership. The peer
+  retains the lean-runtime parent and native engine/application follow-through.
+  No source-lock/acquisition duplication, broker/shared venv, production
+  activation, new feed or model/corpus change is authorized.
 
 ### 2026-10-24 - Selected source/lock candidate binding
 

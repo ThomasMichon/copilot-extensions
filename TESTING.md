@@ -314,7 +314,12 @@ existing source receipt validator and retained compiler. Fresh offline sources
 prove the empty third-party case; a dated synthetic loopback feed proves a
 nonempty exact hashed candidate. Independent selection mismatch, source mutation,
 wrong interpreter target, malformed/inapplicable output, byte-limit exhaustion,
-child failure, timeout and cancellation refuse and clean up. The same optional
+child failure, timeout and cancellation refuse and clean up. Retained inventory
+coverage and original digest comparison reject a transient source edit even if
+the original is restored before resolution returns. Native candidate mode
+rejects universal/platform overrides, including environment configuration.
+The caller's deadline covers retention entry, both UV settings probes and
+per-chunk source copying as well as compilation and consumption. The same optional
 `dependency_compile=true` Linux/Windows lane runs these controls, not required
 unit CI. They do not qualify private-feed policy, wheel admission or deployment.
 

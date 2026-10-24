@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from contextlib import contextmanager
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
@@ -183,6 +184,86 @@ def test_source_integrity_failure_is_not_an_availability_fallback(adopter, sourc
     with pytest.raises(ValueError, match="bytes"):
         with candidate(adopter, source, target, tmp_path):
             pytest.fail("corrupt source reached resolution")
+
+
+def test_transient_source_change_cannot_be_labeled_with_restored_origin(
+    adopter, source, target, tmp_path, monkeypatch,
+):
+    actual = locks.dependencies.retain_uv_source_compile
+    backend = source[0] / "fixture_backend.py"
+    original = backend.read_bytes()
+    snapshots = []
+
+    @contextmanager
+    def changed(uv, arguments, **options):
+        backend.write_bytes(original + b"\nTRANSIENT = True\n")
+        with actual(uv, arguments, **options) as transaction:
+            snapshots.append(transaction.sources[source[0]])
+            backend.write_bytes(original)
+            yield transaction
+
+    monkeypatch.setattr(locks.dependencies, "retain_uv_source_compile", changed)
+    with pytest.raises(ProfileError, match="retained source differs"):
+        with candidate(adopter, source, target, tmp_path):
+            pytest.fail("restored origin mislabeled a changed retained snapshot")
+    assert backend.read_bytes() == original
+    assert snapshots and all(not path.exists() for path in snapshots)
+
+
+def test_missing_retained_source_coverage_refuses(adopter, source, target, tmp_path, monkeypatch):
+    actual = locks.dependencies.retain_uv_source_compile
+
+    @contextmanager
+    def incomplete(uv, arguments, **options):
+        with actual(uv, arguments, **options) as transaction:
+            transaction.source_hashes.pop(source[0] / "fixture_backend.py")
+            yield transaction
+
+    monkeypatch.setattr(locks.dependencies, "retain_uv_source_compile", incomplete)
+    with pytest.raises(ProfileError, match="cover"):
+        with candidate(adopter, source, target, tmp_path):
+            pytest.fail("incomplete retained inventory reached compilation")
+
+
+@pytest.mark.parametrize("override", ["environment", "configuration", "universal"])
+def test_native_platform_override_cannot_hide_an_applicable_dependency(
+    adopter, source, target, tmp_path, override,
+):
+    manifest = source[0] / "pyproject.toml"
+    requirement = "fixture-unavailable==1.0; sys_platform == " + repr(sys.platform)
+    manifest.write_text(manifest.read_text().replace("dependencies=[]", "dependencies=[" + json.dumps(requirement) + "]"))
+    selected_source = _selected_identity(source[0])
+    environment = offline_environment(tmp_path)
+    other_platform = "x86_64-unknown-linux-gnu" if sys.platform == "win32" else "x86_64-pc-windows-msvc"
+    if override == "environment":
+        environment["UV_PYTHON_PLATFORM"] = other_platform
+    else:
+        configuration = tmp_path / "uv.toml"
+        value = "universal=true" if override == "universal" else "python-platform=" + json.dumps(other_platform)
+        configuration.write_text("[pip]\n" + value + "\n")
+        environment["UV_CONFIG_FILE"] = str(configuration)
+    with pytest.raises(locks.dependencies.DependencyPolicyError, match="selected target"):
+        with candidate(adopter, selected_source, target, tmp_path, env=environment):
+            pytest.fail("cross-platform resolution omitted an applicable dependency")
+
+
+def test_source_deadline_reaches_settings_probe_during_context_entry(
+    adopter, source, target, tmp_path, monkeypatch,
+):
+    actual = subprocess.run
+    timeouts = []
+
+    def run(command, **options):
+        if "--show-settings" in command:
+            timeouts.append(options["timeout"])
+            raise subprocess.TimeoutExpired(command, options["timeout"])
+        return actual(command, **options)
+
+    monkeypatch.setattr(locks.subprocess, "run", run)
+    with pytest.raises(locks.dependencies.DependencyPolicyError, match="timed out"):
+        with candidate(adopter, source, target, tmp_path, deadline=time.monotonic() + 5):
+            pytest.fail("expired preflight reached resolution")
+    assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
 
 
 def test_target_must_match_actual_selected_interpreter(adopter, source, target, tmp_path):
