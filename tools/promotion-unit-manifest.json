@@ -1513,7 +1513,7 @@
     "tools/accumulate_bumps.py": "3ff0fdce5f81e5ca706591284cdb007a5253d09de4aa643e85f4f914b9b02269",
     "tools/changefile.py": "5eb39b6273af7bec09e54c4168967a17f3c3d1e7b57d196cc1dac4763529555f",
     "tools/uv_editable_ref.py": "cf1cb7324f4ba057e0ea2f1d63b78f635ea2d7925b8ea8835fda8a000444f8aa",
-    "tools/promotion_unit_tests/test_library_versions.py": "7ede621b475958bb68bfc06000fd3d1b12b81325a10fb9000a02ce2489f4164f",
+    "tools/promotion_unit_tests/test_library_versions.py": "47ed93e1e4b851f32684db33631a58bbba460d33aa80bba1f9c6389f1de00a7d",
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
     "libs/config-migrate/src/config_migrate/core.py": "77d2469a245ee27ff80a1f24a236f38b896c23d011e2c8e4720a77df19a748c6",
     "libs/config-migrate/src/config_migrate/registry.py": "e542436a67d0ca488261e5fd17f921d2947296bc2aa04a46d46611a57c7a1f42",
