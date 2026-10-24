@@ -109,7 +109,10 @@ def _cmd_start(
         try:
             handler = configure_file_logging()
         except Exception:
-            print("agent-bridge: application diagnostics unavailable; startup continues", file=sys.stderr)
+            try:
+                print("agent-bridge: application diagnostics unavailable; startup continues", file=sys.stderr)
+            except Exception:
+                pass
     try:
         _run_start(
             args, required_runtime_environment=required_runtime_environment,
@@ -117,7 +120,10 @@ def _cmd_start(
         )
     finally:
         if handler is not None:
-            close_file_logging(handler)
+            try:
+                close_file_logging(handler)
+            except Exception:
+                pass  # diagnostic cleanup must not replace the primary outcome
 
 
 def _run_start(

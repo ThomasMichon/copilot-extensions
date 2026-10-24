@@ -54,7 +54,7 @@ def test_fresh_cli_discovery_is_json_only_read_only_and_names_native_fallbacks(t
                        AGENT_BRIDGE_INSTALL_DIR=str(root))
     result = subprocess.run(
         [sys.executable, "-m", "agent_bridge", "logs"], env=environment,
-        capture_output=True, timeout=20,
+        capture_output=True, timeout=25,  # functional cold-import smoke, within the runner's 30s item cap
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
@@ -338,6 +338,53 @@ def test_failed_logging_bootstrap_never_replaces_primary_startup_result(monkeypa
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "diagnostics unavailable" in captured.err
+
+
+@pytest.mark.parametrize("primary_error", [False, True])
+def test_broken_fallback_stderr_cannot_change_primary_startup(monkeypatch, primary_error):
+    from agent_bridge import service_start_cli
+
+    class BrokenStderr:
+        def write(self, _text):
+            raise OSError("synthetic closed stderr")
+
+        def flush(self):
+            pass
+
+    def unavailable():
+        raise OSError("synthetic diagnostics unavailable")
+
+    calls = []
+    def primary(*_args, **kwargs):
+        kwargs["logging_initializer"]()
+        calls.append("primary")
+        if primary_error:
+            raise ValueError("primary-result")
+
+    monkeypatch.setattr(logs, "configure_file_logging", unavailable)
+    monkeypatch.setattr(service_start_cli, "_run_start", primary)
+    monkeypatch.setattr(service_start_cli.sys, "stderr", BrokenStderr())
+    if primary_error:
+        with pytest.raises(ValueError, match="primary-result"):
+            service_start_cli._cmd_start(argparse.Namespace())
+    else:
+        service_start_cli._cmd_start(argparse.Namespace())
+    assert calls == ["primary"]
+
+
+def test_diagnostic_cleanup_failure_cannot_replace_primary_failure(monkeypatch):
+    from agent_bridge import service_start_cli
+
+    monkeypatch.setattr(logs, "configure_file_logging", lambda: object())
+    def broken_close(_handler):
+        raise OSError("synthetic diagnostic close failure")
+    monkeypatch.setattr(logs, "close_file_logging", broken_close)
+    def primary(*_args, **kwargs):
+        kwargs["logging_initializer"]()
+        raise ValueError("primary-result")
+    monkeypatch.setattr(service_start_cli, "_run_start", primary)
+    with pytest.raises(ValueError, match="primary-result"):
+        service_start_cli._cmd_start(argparse.Namespace())
 
 
 def test_retained_spool_api_preserves_shape_and_never_adopts_legacy_path(tmp_path):

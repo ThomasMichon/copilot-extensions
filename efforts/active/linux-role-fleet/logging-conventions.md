@@ -292,3 +292,14 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   queue offer and runs after normal batches as well as while idle. A regression
   fills the queue, proves the explicit maintenance offer is dropped, then verifies
   old records still expire while all 128 admitted new records are retained.
+- 2026-10-24 UTC — Follow-up review identified a secondary failure if the
+  fallback warning's stderr is closed/unwritable. Warning output and diagnostic
+  cleanup are now best-effort, with regressions preserving both successful and
+  failed primary startup outcomes. No native output handling, fixture or
+  protected wire source is changed.
+- 2026-10-24 UTC — The new fresh-state CLI functional smoke hit a transient
+  20-second cold-import timeout; the same isolated command plus fail-open
+  regressions then passed. Its child allowance is now 25 seconds inside the
+  unchanged 30-second runner item cap, explicitly not a CLI-startup latency
+  qualification. Controlled serving-thread contention/storage assertions and
+  production timeout/watchdog settings are unchanged.
