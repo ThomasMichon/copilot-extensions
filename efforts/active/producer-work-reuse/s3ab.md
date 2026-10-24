@@ -50,7 +50,7 @@ launch/recovery, production deployment or live venue probes.
   no production limits, policy, path resolution or control permissions.
 - [x] Independently review R1a and pass its targeted units and existing fast
   guards; no native qualification is implied.
-- [ ] Draft-publish R1a after pure units/fast guards;
+- [x] Draft-publish R1a after pure units/fast guards;
   retain all earlier runtime/performance/native gates.
 - [x] Implement immutable inventory and batch protocol with explicit wave adapter.
 - [x] Implement bounded concurrent probes, cancellation and atomic renewal fence.
@@ -325,8 +325,12 @@ defers to the next due wave, with no hidden per-venue refresh.
 - No actual OS lock/multiprocess/crash/Windows-sharing fixture, native
   performance sample, provider call or production activation ran. F1's native
   slot and all previous S3/performance/consumer gates remain separate.
-- Next: ordinary draft-only source publication, then retain R1b policy and
-  exact consumer/transport-owner admission. No storage checkpoint constitutes
+- Published the R1a implementation checkpoint to the existing draft #8143;
+  its description explicitly preserves earlier performance/native findings.
+  Current-head CI remains a separate gate, not a performance receipt. No new
+  competing PR, ready transition or merge was attempted.
+- Next: retain R1b policy and exact consumer/transport-owner admission.
+  No storage checkpoint constitutes
   a whole-cache, source-merge, performance, release or installed completion.
 
 ## Reproduction and remaining cells
