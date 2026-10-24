@@ -626,6 +626,56 @@ def test_legacy_staging_installer_revalidates_marketplace_opt_out(
 
 
 @pytest.mark.parametrize("damage", [
+    "none", "stage-content", "unselected", "stamped", "identity", "missing-provenance",
+])
+def test_native_staged_snapshot_requires_current_canonical_selection(legacy_staging, damage):
+    profile, origin, _, settings, environment = legacy_staging
+    captured = api.resolve_context(
+        payload_root=origin, plugin_id="agent-pull-requests",
+        copilot_home=profile / ".copilot", environment=environment,
+    )
+    installation = profile / ".agent-pull-requests"
+    snapshot = installation / "snapshots" / "1.0.0-retained"
+    shutil.copytree(origin, snapshot)
+    receipt = snapshot / "snapshot-provenance.json"
+    document = {
+        "schema": "copilot-extensions.legacy-snapshot-source", "version": 2,
+        "snapshotId": snapshot.name, "payloadVersion": "1.0.0", "resolution": captured,
+    }
+    receipt.write_text(json.dumps(document), encoding="utf-8")
+    (installation / "payload-dir").write_text(str(snapshot), encoding="utf-8")
+    (installation / "stamped-version").write_text("1.0.0", encoding="utf-8")
+    settings.write_text("{}", encoding="utf-8")
+    staged = installation / ".install-stage" / "request" / "agent-pull-requests"
+    shutil.copytree(snapshot, staged)
+    if damage == "stage-content":
+        (staged / "content.txt").write_text("changed stage", encoding="utf-8")
+    elif damage == "unselected":
+        (installation / "payload-dir").write_text(str(snapshot.with_name("other")), encoding="utf-8")
+    elif damage == "stamped":
+        (installation / "stamped-version").write_text("9.9.9", encoding="utf-8")
+    elif damage == "identity":
+        document["snapshotId"] = "other"
+        for path in (receipt, staged / receipt.name):
+            path.write_text(json.dumps(document), encoding="utf-8")
+    elif damage == "missing-provenance":
+        receipt.unlink()
+        (staged / receipt.name).unlink()
+    environment.update(
+        COPILOT_PLUGIN_ROOT=str(snapshot), COPILOT_PLUGIN_INSTALL_STAGED="1",
+        COPILOT_PLUGIN_STAGED_FROM=str(snapshot),
+    )
+    before = {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()}
+    result = native(staged / "scripts" / "payload-mode", environment=environment)
+    if damage == "none":
+        assert result.returncode == 0 and result.stdout.strip() == "legacy", result.stderr
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()} == before
+    assert not (profile / ".local").exists()
+
+
+@pytest.mark.parametrize("damage", [
     "none", "stage-content", "origin-content", "extra-stage-entry", "missing-origin",
     "missing-flag", "relative-origin", "noninstalled-origin", "governance", "settings",
     "ordinary-payload-hint", "linked-entry",

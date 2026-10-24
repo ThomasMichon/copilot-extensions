@@ -1,0 +1,21 @@
+{
+  "comment": "Preserve the exact selected Pull Requests legacy snapshot through the fixed installation driver and canonical staged-source admission.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

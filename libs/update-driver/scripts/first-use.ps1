@@ -46,11 +46,22 @@ switch -CaseSensitive ($plugin) {
     'agent-pull-requests' { $prefix = 'AGENT_PULL_REQUESTS' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
-if ($plugin -ceq 'agent-pull-requests' -and (
-    [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ine
-        (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
-    $RuntimeRoot -ine (Join-Path $env:USERPROFILE '.agent-pull-requests'))) {
-    throw 'Pull Requests first use requires its canonical installed payload and legacy root.'
+if ($plugin -ceq 'agent-pull-requests') {
+    $installed = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
+        (Join-Path $env:USERPROFILE '.copilot\installed-plugins')
+    $snapshot = [IO.Path]::GetDirectoryName($Payload) -ieq (Join-Path $RuntimeRoot 'snapshots')
+    if ($RuntimeRoot -ine (Join-Path $env:USERPROFILE '.agent-pull-requests') -or
+        -not ($installed -or $snapshot)) {
+        throw 'Pull Requests first use requires its canonical installed payload or selected legacy snapshot.'
+    }
+    if ($snapshot) {
+        $receiptPath = Join-Path $Payload 'snapshot-provenance.json'
+        $null = [CopilotExtensions.NativeFoundationState]::CheckPath($receiptPath, $false, $false)
+        $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
+        if ($receipt.schema -cne 'copilot-extensions.legacy-snapshot-source') {
+            throw 'Pull Requests first use requires canonical selected snapshot provenance.'
+        }
+    }
 }
 if ($ServiceMode -ceq 'client-only' -and $plugin -cne 'agent-vault') {
     throw 'Client-only selection is unsupported by the owning installer.'

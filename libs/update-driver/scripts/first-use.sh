@@ -60,11 +60,21 @@ case "$plugin" in
     agent-pull-requests) prefix=AGENT_PULL_REQUESTS ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
-[[ "$plugin" != agent-pull-requests || (
-    "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
-    "$runtime" == "$HOME/.agent-pull-requests" ) ]] || {
-    printf 'Pull Requests first use requires its canonical installed payload and legacy root.\n' >&2; exit 1;
-}
+if [[ "$plugin" == agent-pull-requests ]]; then
+    [[ "$runtime" == "$HOME/.agent-pull-requests" && (
+        "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" ||
+        "$(dirname -- "$payload")" == "$runtime/snapshots" ) ]] || {
+        printf 'Pull Requests first use requires its canonical installed payload or selected legacy snapshot.\n' >&2
+        exit 1
+    }
+    if [[ "$(dirname -- "$payload")" == "$runtime/snapshots" ]]; then
+        _native_foundation_plain "$payload/snapshot-provenance.json" file
+        receipt="$(cat -- "$payload/snapshot-provenance.json")"
+        [[ "$(query "$receipt" schema)" == copilot-extensions.legacy-snapshot-source ]] || {
+            printf 'Pull Requests first use requires canonical selected snapshot provenance.\n' >&2; exit 1;
+        }
+    fi
+fi
 [[ "$plugin" == agent-vault || "${#service_mode[@]}" == 0 ]] || {
     printf 'Client-only selection is unsupported by the owning installer.\n' >&2; exit 1;
 }

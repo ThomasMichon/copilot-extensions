@@ -99,11 +99,20 @@ def _inspect(
         raise ProvisionError("owning plugin self-provisioning is disabled")
     if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
-    if plugin == "agent-pull-requests" and (
-        payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
-        or runtime_root != Path.home() / ".agent-pull-requests"
-    ):
-        raise ProvisionError("Pull Requests first use requires its canonical installed payload and legacy root")
+    if plugin == "agent-pull-requests":
+        installed = payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
+        snapshot = payload.parent == runtime_root / "snapshots"
+        if runtime_root != Path.home() / ".agent-pull-requests" or not (installed or snapshot):
+            raise ProvisionError(
+                "Pull Requests first use requires its canonical installed payload or selected legacy snapshot"
+            )
+        if snapshot:
+            receipt_path = _path(payload / "snapshot-provenance.json")
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if not isinstance(receipt, dict) or receipt.get("schema") != (
+                "copilot-extensions.legacy-snapshot-source"
+            ):
+                raise ProvisionError("Pull Requests first use requires canonical selected snapshot provenance")
 
     sys.path.insert(0, str(scripts))
     import installer_engine as engine
@@ -259,7 +268,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         destination = inputs / custody.request_id
         if admission["plugin"] == "agent-pull-requests":
             # Keep legacy staging reapers off this live, queue-owned native tree.
-            destination = inputs / f"{custody.request_id}-{os.getpid()}" / payload.name
+            destination = inputs / f"{custody.request_id}-{os.getpid()}" / admission["plugin"]
         frozen = engine.freeze_inputs(payload, destination)
         if frozen.payload_hash != admission["input_hash"] or _inspect(
             payload, runtime_root, Path(admission["project"]), installer_action=installer_action,

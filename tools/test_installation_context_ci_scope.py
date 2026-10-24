@@ -234,7 +234,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert set(inputs) == {
         "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
-        "candidate_profiles",
+        "candidate_profiles", "ssh_snapshot",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -251,12 +251,14 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
+        "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
         assert job["if"] == (
             "${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service "
-            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles }}"
+            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
+            "&& !inputs.ssh_snapshot }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -271,6 +273,29 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         assert "-m " not in step["run"].rsplit("pytest", 1)[1]
         if runner == "windows-latest":
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+
+
+def test_foundation_snapshot_staging_is_disposable_and_bounded() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    for name, runner in (
+        ("foundation-linux", "ubuntu-latest"), ("foundation-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'"
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 25
+        step = next(
+            entry for entry in job["steps"]
+            if entry.get("name") == "Qualify selected snapshot staging and ordinary-copy refusal"
+        )
+        assert step["env"] == {"APR_NATIVE_OS_ACCOUNT_ACCEPTANCE": "1"}
+        assert step["run"].split() == [
+            "python", "tools/run-plugin-tests.py", "agent-pull-requests",
+            "--allow-host-state", "--test-file", "tests/test_cell_invocation.py",
+            "-k", '"native_staged_snapshot', "or", "legacy_staging_reentry", "or", 'frozen_input"',
+            "--test-timeout", "60", "--timeout", "300",
+        ]
 
 
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:

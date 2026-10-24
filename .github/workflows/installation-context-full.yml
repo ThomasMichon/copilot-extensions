@@ -113,6 +113,14 @@ jobs:
           python tools/run-plugin-tests.py agent-pull-requests
           --test-file tests/test_legacy_cli_health.py
           --test-timeout 60 --timeout 180
+      - name: Qualify selected snapshot staging and ordinary-copy refusal
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-host-state --test-file tests/test_cell_invocation.py
+          -k "native_staged_snapshot or legacy_staging_reentry or frozen_input"
+          --test-timeout 60 --timeout 300
       - name: Qualify Vault bootstrap routing and publication admission
         run: >-
           python tools/run-plugin-tests.py agent-vault
@@ -194,6 +202,14 @@ jobs:
           python tools/run-plugin-tests.py agent-pull-requests
           --test-file tests/test_legacy_cli_health.py
           --test-timeout 60 --timeout 180
+      - name: Qualify selected snapshot staging and ordinary-copy refusal
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-host-state --test-file tests/test_cell_invocation.py
+          -k "native_staged_snapshot or legacy_staging_reentry or frozen_input"
+          --test-timeout 60 --timeout 300
       - name: Qualify Vault bootstrap routing and publication admission
         run: >-
           python tools/run-plugin-tests.py agent-vault

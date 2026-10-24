@@ -4,6 +4,7 @@ $payload = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $legacy = Join-Path $env:USERPROFILE '.agent-pull-requests'
 $stageRoot = Join-Path $legacy '.install-stage'
 $stage = Split-Path -Parent $payload
+$snapshotOrigin = $false
 if ((Split-Path -Parent $stage) -eq $stageRoot) {
     # Staging hints locate evidence, never waive native governance admission.
     if ($env:COPILOT_PLUGIN_INSTALL_STAGED -cne '1' -or
@@ -14,9 +15,10 @@ if ((Split-Path -Parent $stage) -eq $stageRoot) {
     $origin = (Resolve-Path -LiteralPath $env:COPILOT_PLUGIN_STAGED_FROM).Path
     $marketplace = Split-Path -Parent $origin
     $installed = Join-Path $env:USERPROFILE '.copilot\installed-plugins'
-    if ((Split-Path -Parent $marketplace) -ne $installed -or
-        (Split-Path -Leaf $origin) -cne 'agent-pull-requests') {
-        throw 'Staged installer origin is not a canonical installed payload'
+    $snapshotOrigin = $marketplace -eq (Join-Path $legacy 'snapshots')
+    if (-not $snapshotOrigin -and ((Split-Path -Parent $marketplace) -ne $installed -or
+        (Split-Path -Leaf $origin) -cne 'agent-pull-requests')) {
+        throw 'Staged installer origin is not a canonical installed payload or selected legacy snapshot'
     }
     foreach ($root in @($payload, $origin)) {
         $cursor = $root
@@ -32,6 +34,13 @@ if ((Split-Path -Parent $stage) -eq $stageRoot) {
     foreach ($entry in @($entries + $originalEntries)) {
         if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
             throw 'Staged installer payload contains a link or mismatched entry'
+        }
+    }
+    if ($snapshotOrigin) {
+        $receipt = Get-Content -LiteralPath (Join-Path $origin 'snapshot-provenance.json') -Raw |
+            ConvertFrom-Json -ErrorAction Stop
+        if ($receipt.schema -cne 'copilot-extensions.legacy-snapshot-source') {
+            throw 'Staged installer origin requires canonical selected snapshot provenance'
         }
     }
     $completeCopy = $entries.Count -eq $originalEntries.Count
@@ -103,6 +112,9 @@ if ($env:COPILOT_EXTENSIONS_CONTEXT) {
 $raw = @(& $helper @forward)
 if ($LASTEXITCODE -ne 0) { throw 'Installation governance could not be resolved' }
 $status = ($raw -join "`n") | ConvertFrom-Json
+if ($snapshotOrigin -and $status.status -cne 'ready') {
+    throw 'Staged installer origin is not a valid selected legacy snapshot'
+}
 $legacyAllowed = (
     -not $env:COPILOT_EXTENSIONS_CONTEXT -and $status.status -ceq 'ready' -and
     $status.actualMode -ceq 'legacy' -and $status.desiredMode -ceq 'legacy'

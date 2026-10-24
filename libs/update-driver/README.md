@@ -679,11 +679,17 @@ Its installer has no service-selection option: client-only requests refuse
 before queue or plugin writes rather than passing Vault's `NoService` flag.
 The canonical installer-engine sync owner supplies its input freezer; the
 existing native installer remains the executor and publication authority.
-This recipe requires the canonical installed payload and default legacy root.
+This recipe requires the default legacy root and either its canonical installed
+payload or its exact selected legacy snapshot. Snapshot admission uses the
+existing snapshot-provenance reader, including the ordinary receipt, snapshot
+identity, `payload-dir`, `stamped-version` and canonical source fingerprint.
+It revalidates live publication policy and selection before queue acceptance
+and again under execution custody; changing selection never silently replaces
+the accepted snapshot with a newer installed payload.
 It freezes beneath that installation's existing `.install-stage` layout under
 the same outer queue custody. Arbitrary copied/out-of-layout directory payloads or custom-root
 recipes refuse before acquisition or queue/plugin writes. The native mode
-reader retains its canonical installed-origin and staging-location checks,
+reader retains its canonical installed/selected-snapshot origin and staging-location checks,
 then verifies the copied source bytes. A canonical frozen tree may omit
 generated artifacts and empty directories, but may not omit or alter an
 admitted file or add a cached/extraneous file. Complete legacy staging retains
@@ -829,7 +835,8 @@ the canonical primary/payload pointer, and proves no Vault venv, current-runtime
 selection or service artifact was created. Subsequent provisioning stays a
 separate request under the same authority.
 Pull Requests' corresponding actual-installer case uses its service-less
-canonical contract: cold stamp, provision, failed candidate preserving the
+canonical contract: cold stamp, provision from that exact retained snapshot
+with the installed payload unavailable, failed candidate preserving the
 healthy selection, and installed CLI/module origin after both source trees
 are removed. The caller-loss fixture runs with both fixed identities. The
 same portfolio does not switch any ordinary Pull Requests publisher.

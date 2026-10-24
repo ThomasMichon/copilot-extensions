@@ -6,6 +6,7 @@ payload="$(cd "$here/.." && pwd)"
 legacy="${HOME:?}/.agent-pull-requests"
 stage_root="$legacy/.install-stage"
 stage="$(dirname "$payload")"
+snapshot_origin=0
 if [[ "$(dirname "$stage")" == "$stage_root" ]]; then
     # Staging hints locate evidence, never waive native governance admission.
     [[ "${COPILOT_PLUGIN_INSTALL_STAGED:-}" == 1 &&
@@ -15,10 +16,13 @@ if [[ "$(dirname "$stage")" == "$stage_root" ]]; then
     }
     origin="$(cd -P -- "$COPILOT_PLUGIN_STAGED_FROM" && pwd)"
     marketplace="$(dirname "$origin")"
-    [[ "$(dirname "$marketplace")" == "$HOME/.copilot/installed-plugins" &&
-        "$(basename "$origin")" == agent-pull-requests ]] || {
-        printf '%s\n' 'Staged installer origin is not a canonical installed payload' >&2; exit 126;
-    }
+    if [[ "$marketplace" == "$legacy/snapshots" ]]; then
+        snapshot_origin=1
+    elif [[ "$(dirname "$marketplace")" != "$HOME/.copilot/installed-plugins" ||
+        "$(basename "$origin")" != agent-pull-requests ]]; then
+        printf '%s\n' 'Staged installer origin is not a canonical installed payload or selected legacy snapshot' >&2
+        exit 126
+    fi
     for root in "$payload" "$COPILOT_PLUGIN_STAGED_FROM"; do
         cursor="$root"
         while [[ "$cursor" != / ]]; do
@@ -32,6 +36,13 @@ if [[ "$(dirname "$stage")" == "$stage_root" ]]; then
     [[ -z "$links" ]] || {
         printf '%s\n' 'Staged installer payload differs from its origin or contains links' >&2; exit 126;
     }
+    if [[ "$snapshot_origin" == 1 ]]; then
+        snapshot_schema="$(LC_ALL=C awk -v mode=get -v query_path=schema \
+            -f "$here/installation-context/json-query.awk" "$origin/snapshot-provenance.json")"
+        [[ "$snapshot_schema" == copilot-extensions.legacy-snapshot-source ]] || {
+            printf '%s\n' 'Staged installer origin requires canonical selected snapshot provenance' >&2; exit 126;
+        }
+    fi
     if ! diff -qr "$payload" "$origin" >/dev/null; then
         # A frozen copy has exactly the canonical input files, without caches.
         frozen_files() {
@@ -93,6 +104,9 @@ query() {
         -f "$here/installation-context/json-query.awk"
 }
 field() { query "$1"$'\034'"$2"; }
+if [[ "$snapshot_origin" == 1 && "$(query status)" != ready ]]; then
+    printf '%s\n' 'Staged installer origin is not a valid selected legacy snapshot' >&2; exit 126
+fi
 legacy_allowed=false
 if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
     "$(query status)" == ready && "$(query actualMode)" == legacy &&

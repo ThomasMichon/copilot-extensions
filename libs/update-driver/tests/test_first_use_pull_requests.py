@@ -118,11 +118,14 @@ def test_pull_requests_empty_no_self_control_retains_presence_semantics(
 
 
 @pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+@pytest.mark.parametrize("owning_fixture", ["owning_pull_requests", "selected_pull_requests_snapshot"])
 def test_pull_requests_native_admission_selects_its_own_source_before_acquisition(
-    owning_pull_requests, area, installer_action,
+    request, area, installer_action, owning_fixture,
 ):
-    payload, installation, project = owning_pull_requests
+    payload, installation, project = request.getfixturevalue(owning_fixture)
     root = area / "cold"
+    existed = installation.exists()
+    before = {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()}
     command = native_command(root, payload, installation, project)
     command += (
         ["-Mode", "owner", "-ExpectedSource", "sha256:" + "0" * 64,
@@ -135,7 +138,8 @@ def test_pull_requests_native_admission_selects_its_own_source_before_acquisitio
     )
     assert result.returncode != 0
     assert "Owning source changed after native first-use admission" in result.stderr, result.stderr
-    assert not root.exists() and not installation.exists()
+    assert not root.exists() and installation.exists() is existed
+    assert {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()} == before
 
 
 def test_pull_requests_substituted_source_remains_interrupted(
@@ -150,6 +154,104 @@ def test_pull_requests_substituted_source_remains_interrupted(
     result = status(request.id, root=root)
     assert result.state == "interrupted" and result.exit_code is None
     assert not installation.exists()
+
+
+@pytest.fixture
+def selected_pull_requests_snapshot(owning_pull_requests):
+    payload, installation, project = owning_pull_requests
+    captured = primitive(payload).resolve_context(
+        payload_root=payload, plugin_id="agent-pull-requests", project_root=project,
+    )
+    snapshot = installation / "snapshots" / "1.0.0-retained"
+    shutil.copytree(payload, snapshot)
+    (snapshot / "snapshot-provenance.json").write_text(json.dumps({
+        "schema": "copilot-extensions.legacy-snapshot-source", "version": 2,
+        "snapshotId": snapshot.name, "payloadVersion": "1.0.0", "resolution": captured,
+    }), encoding="utf-8")
+    (installation / "payload-dir").write_text(str(snapshot), encoding="utf-8")
+    (installation / "stamped-version").write_text("1.0.0", encoding="utf-8")
+    payload.rename(payload.with_name("unavailable-installed-payload"))
+    return snapshot, installation, project
+
+
+@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+def test_pull_requests_selected_snapshot_keeps_exact_owning_source(
+    selected_pull_requests_snapshot, area, installer_action,
+):
+    payload, installation, project = selected_pull_requests_snapshot
+    root = area / "queue"
+    admission = provision.inspect(payload, installation, project, installer_action=installer_action)
+    request = provision.enqueue(
+        payload, installation, project, root=root, installer_action=installer_action,
+    )
+    assert json.loads(request.spec.source) == admission
+    assert admission["payload"] == str(payload)
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "completed" and result.exit_code == 7, result.log_path.read_text()
+    frozen = Path((installation / "source-path").read_text().strip()).parent
+    assert frozen.name == "agent-pull-requests"
+    assert frozen.parent.parent == installation / ".install-stage"
+    assert (frozen / "snapshot-provenance.json").read_bytes() == (
+        payload / "snapshot-provenance.json"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("reason", [
+    "unselected", "stamped", "identity", "fingerprint", "missing", "ordinary-copy",
+])
+def test_pull_requests_snapshot_refusal_precedes_acquisition_and_queue(
+    selected_pull_requests_snapshot, area, native, reason,
+):
+    payload, installation, project = selected_pull_requests_snapshot
+    receipt = payload / "snapshot-provenance.json"
+    document = json.loads(receipt.read_text())
+    if reason == "unselected":
+        (installation / "payload-dir").write_text(str(payload.with_name("other")), encoding="utf-8")
+    elif reason == "stamped":
+        (installation / "stamped-version").write_text("9.9.9", encoding="utf-8")
+    elif reason == "identity":
+        document["snapshotId"] = "other"
+        receipt.write_text(json.dumps(document), encoding="utf-8")
+    elif reason == "fingerprint":
+        document["resolution"]["sourceFingerprint"] = "sha256:" + "0" * 64
+        receipt.write_text(json.dumps(document), encoding="utf-8")
+    elif reason == "missing":
+        receipt.unlink()
+    elif reason == "ordinary-copy":
+        copied = area / "ordinary-copy"
+        shutil.copytree(payload, copied)
+        payload = copied
+    root = area / "cold"
+    before = {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()}
+    if native:
+        result = subprocess.run(
+            native_command(root, payload, installation, project),
+            env=dict(os.environ), cwd=project, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=60, **no_window_kwargs(),
+        )
+        assert result.returncode != 0, result.stdout + result.stderr
+    else:
+        with pytest.raises(provision.ProvisionError):
+            provision.enqueue(payload, installation, project, root=root)
+    assert not root.exists()
+    assert {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()} == before
+
+
+def test_pull_requests_snapshot_reselection_does_not_substitute_queued_input(
+    selected_pull_requests_snapshot, area,
+):
+    payload, installation, project = selected_pull_requests_snapshot
+    root = area / "queue"
+    request = provision.enqueue(payload, installation, project, root=root)
+    (installation / "payload-dir").write_text(str(payload.with_name("newer")), encoding="utf-8")
+    with pytest.raises(ParticipantError):
+        drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "interrupted" and result.exit_code is None
+    assert not (installation / "executed").exists()
+    assert not (installation / ".install-stage").exists()
 
 
 @pytest.fixture
@@ -204,6 +306,19 @@ def test_actual_pull_requests_materialized_admission_and_owned_stamp(
     assert not (installation / "current-version").exists()
     assert not list((installation / "versions").glob("*/pyvenv.cfg"))
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == before
+    payload.rename(payload.with_name("unavailable-installed-payload"))
+    retained = provision.enqueue(
+        pointer, installation, project, root=root, installer_action="stamp",
+    )
+    drain(root=root)
+    result = status(retained.id, root=root)
+    assert result.state == "completed" and result.exit_code == 0, result.log_path.read_text()
+    assert json.loads(result.spec.source)["payload"] == str(pointer)
+    selected = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    assert provision.inspect(selected, installation, project)["source_fingerprint"] == (
+        admission["source_fingerprint"]
+    )
+    assert not (installation / "current-version").exists()
 
 
 @native_genesis
@@ -236,8 +351,8 @@ def test_actual_pull_requests_cold_provision_preserves_selection_and_source_inde
             for path in root.rglob("*.log")
         )
 
-    def run_request(installer_action):
-        command = native_command(root, payload, installation, project, source=source)
+    def run_request(installer_action, owning_source=payload):
+        command = native_command(root, owning_source, installation, project, source=source)
         command += (
             ["-Wait", "-InstallerAction", installer_action] if os.name == "nt"
             else ["--wait", "--installer-action", installer_action]
@@ -250,13 +365,17 @@ def test_actual_pull_requests_cold_provision_preserves_selection_and_source_inde
     stamp = run_request("stamp")
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr + diagnostic()
     assert not (installation / "current-version").exists()
-    installed = run_request("provision")
+    snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    removed = payload.rename(payload.with_name("unavailable-installed-payload"))
+    installed = run_request("provision", snapshot)
     assert installed.returncode == 0, installed.stdout + installed.stderr + diagnostic()
+    removed.rename(payload)
     requests = status(root=root)
     assert len(requests) == 2 and all(
         item.state == "completed" and item.exit_code == 0 for item in requests
     ), diagnostic()
     assert {json.loads(item.spec.source)["plugin"] for item in requests} == {"agent-pull-requests"}
+    assert {json.loads(item.spec.source)["payload"] for item in requests} == {str(payload), str(snapshot)}
     assert {item.spec.argv for item in requests} == {(), ("--installer-action", "stamp")}
     version = (installation / "current-version").read_text().strip()
     slot = installation / "versions" / version

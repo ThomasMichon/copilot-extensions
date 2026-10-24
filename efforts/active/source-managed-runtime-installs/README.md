@@ -274,13 +274,20 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] **Agent-recommended bounded publisher adoption:** package the fixed standalone foundation through the existing canonical source/materialization owner and route the legacy Vault cold primary/payload command's admitted provisioning through its durable queue before holding any outer provisioning lock. Preserve healthy dispatch, managed/pinned/no-self-provision no-write refusal, exact owning source/root, ordinary service-enabled defaults and explicit nested/unsupported/recovery outcomes. Qualify the actual generated commands and applicable service effects in isolated native Windows/Linux before claiming production-path acceptance; do not infer adoption or namespaced support from the client-only adapter tests.
 - [x] **Agent-recommended bounded bootstrap adoption:** route Vault's legacy session bootstrap's first stamp and drift provisioning through the qualified fixed actions under the same execution authority. Preserve the native staging, source/publication admission, healthy and non-deployment hook behavior, originating project, normalized runtime identity and explicit unsupported outcomes. Qualify the actual hook deadline and output-free launch acknowledgement without treating it as durable acceptance; do not recursively submit behind existing custody, retain the age/PID installer guard, or reintroduce a foreground fallback. Explicit installer publishers remain separate.
 - [x] **Agent-recommended bounded stamp prerequisite:** qualify Vault's fixed canonical stamp action through the existing native supervisor and ordinary queue before routing its session bootstrap. Preserve provision request identity, distinct/coalesced stamp identity, source/publication/no-self/pinned/nested refusal and real native publication without a Vault runtime or service. Recipe support is not bootstrap or explicit-installer adoption.
-- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify Pull Requests'
-  fixed legacy stamp/provision recipes through the same native supervisor,
+- [x] **Agent-recommended bounded next-adopter prerequisite:** qualify Pull Requests'
+  fixed legacy stamp/provision recipes for its canonical installed payload and
+  default legacy root through the same native supervisor,
   canonical queue and frozen-input owner. Preserve its actual installer options,
   own context, publication/no-self/nested refusal, source-independent installed
   command, failed-candidate selection and native caller-loss outcomes before
   adopting any ordinary Pull Requests publisher. Do not infer service options,
   namespaced support or production command/bootstrap adoption from recipe proof.
+- [ ] **Agent-recommended bounded source handoff:** qualify Pull Requests'
+  exact selected legacy snapshot through the same fixed recipe and native
+  staged-origin reader before adopting its ordinary primary command. Preserve
+  canonical snapshot provenance, live publication policy, exact queued source,
+  ordinary-copy refusal and unavailable/reselected-source outcomes; do not
+  replace the retained snapshot with the currently installed payload.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
