@@ -352,7 +352,9 @@ class ScriptEvaluator:
     def evaluate(self, event: dict) -> list[Decision]:
         payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         try:
-            argv, cwd = resolve_execution_resources(self.argv, self.cwd)
+            argv, cwd = resolve_execution_resources(
+                self.argv, self.cwd, bind_relative_executable=True,
+            )
         except RegistrarError as exc:
             log.warning("script evaluator %s resource resolution failed: %s", self.name, exc)
             raise EvaluatorRuntimeError(f"script evaluator resource resolution failed: {exc}") from exc

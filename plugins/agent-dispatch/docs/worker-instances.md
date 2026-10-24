@@ -243,6 +243,8 @@ future evaluator process's context.
 Path-containing evaluator executables are checked and invoked relative to
 that admitted policy directory on both platforms, preserving parent traversal
 for native filesystem resolution rather than collapsing symlink-sensitive paths.
+This binding is evaluator-specific: script-forge retains its declaring-repository
+path resolution and still refuses relative scripts without a declaring root.
 Selected inline policies
 retain precedence over ignored file-policy fields, as in the evaluator owner.
 Policy files must be regular files before the owner loader is called.
