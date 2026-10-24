@@ -104,8 +104,9 @@ def test_header_construction_uses_unmangled_actual_value() -> None:
     assert b"*" * 6 not in (BASE / "probe.py").read_bytes()
 
 
+@pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-pop-v1"])
 @pytest.mark.parametrize("kind", ["prepare", "provider", "probe"])
-def test_closed_container_profile(tmp_path: Path, kind: str) -> None:
+def test_closed_container_profile(tmp_path: Path, kind: str, profile: str) -> None:
     for name in ("qualifier", "fixtures", "fixtures/client", "fixtures/provider"):
         (tmp_path / name).mkdir(mode=0o700)
     engine = RUN.QualifierEngine(tmp_path, {})
@@ -121,7 +122,7 @@ def test_closed_container_profile(tmp_path: Path, kind: str) -> None:
     with patch.object(engine, "call", call), patch.object(
         MODULES["engine"].os, "getuid", return_value=1001,
     ):
-        assert engine.create_fixture(IMAGE, kind) == CID
+        assert engine.create_fixture(IMAGE, kind, profile=profile) == CID
     assert engine.containers == [CID]
     expected_network = "none" if kind == "prepare" else NETWORK
     assert captured[captured.index("--network") + 1] == expected_network
@@ -139,6 +140,11 @@ def test_closed_container_profile(tmp_path: Path, kind: str) -> None:
         assert captured[-3:] == [IMAGE, "--config", "/config/configuration.yml"]
     if kind == "probe":
         assert all("/fixtures/provider," not in value for value in mounts)
+        if profile == "jwt-pop-v1":
+            assert captured[-2:] == [IMAGE, "/proof/probe.py"]
+        else:
+            assert captured[-4:] == [
+                IMAGE, "/proof/probe.py", "--profile", "enrolled-pop-v1"]
 
 
 @pytest.mark.parametrize("kind,image", [("arbitrary", IMAGE), ("provider", "latest")])
@@ -198,6 +204,138 @@ def outcome() -> dict:
             "proof_binding_present", "proof_binding_matches",
             "traits_are_unverified", "token_type_dpop"), True), "audience_shape": "string"},
     }
+
+
+def enrolled_outcome() -> dict:
+    result = outcome()
+    result.update(profile="enrolled-pop-v1", negative_checks={
+        "wrong_key_refused": True, "missing_proof_refused": True, "replay_refused": True,
+    })
+    result["traits"].update(
+        audience_shape="array", audience_exact=False, proof_binding_present=False,
+        proof_binding_matches=False, token_type_dpop=False, client_id_exact=True,
+        subject_exact=True, audience_allowed=True,
+    )
+    return result
+
+
+def test_enrolled_receipt_cannot_change_selected_profile_or_claim_issuer_dpop() -> None:
+    result = enrolled_outcome()
+    assert RUN.admit_outcome(result, profile="enrolled-pop-v1") == result
+    assert result["traits"]["proof_binding_present"] is False
+    assert result["traits"]["token_type_dpop"] is False
+    with pytest.raises(RUN.ProofError):
+        RUN.admit_outcome(result)
+    with pytest.raises(RUN.ProofError):
+        RUN.admit_outcome(outcome(), profile="enrolled-pop-v1")
+    assert PROBE.PROFILES == RUN.PROFILES == ("jwt-pop-v1", "enrolled-pop-v1")
+
+
+@pytest.mark.parametrize("field", [
+    "wrong_key_refused", "missing_proof_refused", "replay_refused",
+])
+@pytest.mark.parametrize("value", [False, "true", "never-persist", None])
+def test_enrolled_success_requires_exact_negative_proof_evidence(field: str, value: object) -> None:
+    result = enrolled_outcome()
+    result["negative_checks"][field] = value
+    with pytest.raises(RUN.ProofError):
+        RUN.admit_outcome(result, profile="enrolled-pop-v1")
+
+
+@pytest.mark.parametrize("field", [
+    "access_alg_es256", "access_type_at_jwt", "client_id_exact",
+    "subject_exact", "audience_allowed",
+])
+def test_enrolled_success_requires_exact_token_traits(field: str) -> None:
+    result = enrolled_outcome()
+    result["traits"][field] = False
+    with pytest.raises(RUN.ProofError, match="not-established"):
+        RUN.admit_outcome(result, profile="enrolled-pop-v1")
+    result.update(result="incompatible", identity_error="invalid-key-binding")
+    assert RUN.admit_outcome(result, profile="enrolled-pop-v1") == result
+
+
+@pytest.mark.parametrize("location", ["root", "traits", "negative_checks"])
+def test_enrolled_receipt_never_accepts_raw_claims_or_diagnostics(location: str) -> None:
+    result = enrolled_outcome()
+    target = result if location == "root" else result[location]
+    target["subject"] = "never-persist-unverified-subject"
+    with pytest.raises(RUN.ProofError):
+        RUN.admit_outcome(result, profile="enrolled-pop-v1")
+
+
+@pytest.mark.parametrize("profile", ["bearer", "", "ENROLLED-POP-V1", "jwt-pop-v2"])
+def test_closed_profile_refusal_precedes_files_or_effects(tmp_path: Path, profile: str) -> None:
+    with patch.object(RUN, "materialize_probe") as materialize, pytest.raises(RUN.ProofError):
+        RUN.run(ROOT, "a" * 40, tmp_path, 900, profile=profile)
+    materialize.assert_not_called()
+    engine = RUN.QualifierEngine(tmp_path, {})
+    with patch.object(engine, "call") as call, pytest.raises(RUN.ProofError):
+        engine.create_fixture(IMAGE, "probe", profile=profile)
+    call.assert_not_called()
+    with pytest.raises(PROBE.ProbeError, match="unsupported-qualification-profile"):
+        asyncio.run(PROBE.qualify(profile))
+    with patch.object(RUN, "private_root") as private, pytest.raises(SystemExit) as caught:
+        RUN.main(["--source-commit", "a" * 40, "--results-root", str(tmp_path),
+                  "--profile", profile])
+    assert caught.value.code == 2
+    private.assert_not_called()
+    with pytest.raises(SystemExit) as caught:
+        asyncio.run(PROBE.main(["--profile", profile]))
+    assert caught.value.code == 2
+
+
+@pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-pop-v1"])
+def test_run_receipts_and_fixed_probe_selection_without_docker(tmp_path: Path, profile: str) -> None:
+    calls = []
+    expected = outcome() if profile == "jwt-pop-v1" else enrolled_outcome()
+
+    class Engine:
+        def __init__(self, root, receipt):
+            assert root == tmp_path
+            assert receipt["profile"] == profile
+
+        def journal(self):
+            pass
+
+        def preflight(self):
+            pass
+
+        def build(self, commit, timeout):
+            assert commit == "a" * 40 and timeout == 900
+            return IMAGE
+
+        def provider_image(self):
+            return IMAGE
+
+        def create_network(self):
+            pass
+
+        def start(self, cid):
+            assert cid == "provider"
+
+        def create_fixture(self, image, kind, *, profile="jwt-pop-v1"):
+            assert image == IMAGE
+            calls.append((kind, profile))
+            return kind
+
+        def attached(self, cid, timeout):
+            if cid == "prepare":
+                assert timeout == 35
+                return {"result": "prepared", "credentials": "synthetic-files-only"}
+            assert cid == "probe" and timeout == 110
+            return expected
+
+        def cleanup(self):
+            return []
+
+    with (patch.object(RUN, "materialize_probe", return_value={"source_commit": "a" * 40}),
+          patch.object(RUN, "QualifierEngine", Engine)):
+        result = RUN.run(ROOT, "a" * 40, tmp_path, 900, profile=profile)
+    assert result["profile"] == profile and result["outcome"] == expected
+    assert result["result"] == "verified" and result["cleanup"] == "complete"
+    assert calls == [("prepare", "jwt-pop-v1"), ("provider", "jwt-pop-v1"), ("probe", profile)]
+    assert json.loads((tmp_path / "receipt.json").read_bytes()) == result
 
 
 @pytest.mark.parametrize("field,value", [
@@ -269,6 +407,132 @@ def test_real_tls_resource_calls_actual_verifier_with_synthetic_token(
     assert "synthetic-subject" not in json.dumps(traits)
 
 
+@pytest.mark.parametrize("claims,code", [
+    ({}, None),
+    ({"aud": [PREP.AUDIENCE]}, None),
+    ({"client_id": "unapproved-client"}, "invalid-key-binding"),
+    ({"client_id": None}, "invalid-credential"),
+    ({"sub": "unapproved-subject"}, "invalid-key-binding"),
+    ({"sub": PREP.ENROLLED_PRINCIPAL}, "invalid-key-binding"),
+    ({"aud": [PREP.AUDIENCE, "https://unapproved.fixture.test"]}, "invalid-credential"),
+    ({"aud": [PREP.AUDIENCE, PREP.AUDIENCE]}, "invalid-credential"),
+    ({"iss": "https://other.fixture.test"}, "invalid-credential"),
+    ({"exp": 1_000_000_001, "iat": 1_000_000_000}, "expired-credential"),
+    ({"cnf": {"jkt": "x" * 43}}, "invalid-key-binding"),
+])
+def test_enrolled_fixture_uses_fixed_approval_and_actual_tls_crypto(
+    prepared: Path, claims: dict, code: str | None,
+) -> None:
+    key = ECKey.import_key(json.loads((prepared / "client/inputs.json").read_bytes())["proof_key"])
+    issuer = ECKey.generate_key("P-256")
+    now = int(time.time())
+    original_claims = {
+        "iss": PREP.ISSUER, "aud": PREP.AUDIENCE, "sub": PREP.ENROLLED_SUBJECT,
+        "client_id": PREP.CLIENT, "iat": now, "exp": now + 120, **claims,
+    }
+    token = jwt.encode({"alg": "ES256", "typ": "at+jwt", "kid": PREP.SIGNING_KID},
+                       original_claims, issuer)
+    jwks = {"keys": [{**issuer.as_dict(private=False), "kid": PREP.SIGNING_KID}]}
+
+    async def exercise(profile="enrolled-pop-v1"):
+        tls = ssl.create_default_context(cafile=prepared / "client/ca.pem")
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=tls), trust_env=False,
+        ) as session:
+            return await PROBE.resource_check(
+                session, key, token, jwks, profile=profile)
+
+    with patch.object(PROBE, "ROOT", prepared / "client"):
+        result = asyncio.run(exercise())
+    assert result["resource_tls_verified"] is True
+    assert result["result"] == ("incompatible" if code else "verified")
+    assert result["negative_checks"] == dict.fromkeys((
+        "wrong_key_refused", "missing_proof_refused", "replay_refused"), code is None)
+    if code:
+        assert result["identity_error"] == code
+    traits = PROBE.token_traits(token, key, profile="enrolled-pop-v1")
+    assert traits["client_id_exact"] is (original_claims["client_id"] == PREP.CLIENT)
+    assert traits["subject_exact"] is (original_claims["sub"] == PREP.ENROLLED_SUBJECT)
+    assert traits["traits_are_unverified"] is True
+    assert set(PROBE.token_traits(token, key)) == set(outcome()["traits"]) - {"token_type_dpop"}
+    assert all(value not in json.dumps({**result, "traits": traits})
+               for value in (token, PREP.CLIENT, PREP.ENROLLED_PRINCIPAL, key.thumbprint()))
+    if original_claims["aud"] == [PREP.AUDIENCE] and code is None:
+        with patch.object(PROBE, "ROOT", prepared / "client"):
+            baseline = asyncio.run(exercise("jwt-pop-v1"))
+        assert baseline == {
+            "result": "incompatible", "resource_tls_verified": True,
+            "identity_error": "invalid-credential",
+        }
+
+
+@pytest.mark.parametrize("change,code", [
+    ("signature", "invalid-signature"), ("type", "invalid-credential"),
+    ("method", "invalid-proof"), ("target", "invalid-proof"),
+    ("hash", "invalid-token-binding"), ("nonce", "invalid-proof"),
+])
+def test_enrolled_tls_path_keeps_original_signature_and_request_proof_rules(
+    prepared: Path, change: str, code: str,
+) -> None:
+    key = ECKey.import_key(json.loads((prepared / "client/inputs.json").read_bytes())["proof_key"])
+    issuer = ECKey.generate_key("P-256")
+    now = int(time.time())
+    token = jwt.encode(
+        {"alg": "ES256", "typ": "JWT" if change == "type" else "at+jwt",
+         "kid": PREP.SIGNING_KID},
+        {"iss": PREP.ISSUER, "aud": [PREP.AUDIENCE], "sub": PREP.ENROLLED_SUBJECT,
+         "client_id": PREP.CLIENT, "iat": now, "exp": now + 120},
+        ECKey.generate_key("P-256") if change == "signature" else issuer)
+    jwks = {"keys": [{**issuer.as_dict(private=False), "kid": PREP.SIGNING_KID}]}
+    sign = PROBE.proof
+
+    def altered(proof_key, method, uri, *, token=None, nonce=None):
+        return sign(
+            proof_key, "POST" if change == "method" else method,
+            uri + "/other" if change == "target" else uri,
+            token="different-original-token" if change == "hash" else token,
+            nonce="wrong-nonce" if change == "nonce" else nonce)
+
+    async def exercise():
+        tls = ssl.create_default_context(cafile=prepared / "client/ca.pem")
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=tls), trust_env=False,
+        ) as session:
+            return await PROBE.resource_check(
+                session, key, token, jwks, profile="enrolled-pop-v1")
+
+    with (patch.object(PROBE, "ROOT", prepared / "client"),
+          patch.object(PROBE, "proof", altered)):
+        result = asyncio.run(exercise())
+    assert result["result"] == "incompatible" and result["identity_error"] == code
+    assert result["resource_tls_verified"] is True
+    assert not any(result["negative_checks"].values())
+
+
+def test_enrolled_success_is_withheld_if_a_negative_resource_check_accepts(prepared: Path) -> None:
+    key = ECKey.import_key(json.loads((prepared / "client/inputs.json").read_bytes())["proof_key"])
+    issuer = ECKey.generate_key("P-256")
+    now = int(time.time())
+    token = jwt.encode(
+        {"alg": "ES256", "typ": "at+jwt", "kid": PREP.SIGNING_KID},
+        {"iss": PREP.ISSUER, "aud": [PREP.AUDIENCE], "sub": PREP.ENROLLED_SUBJECT,
+         "client_id": PREP.CLIENT, "iat": now, "exp": now + 120}, issuer)
+    jwks = {"keys": [{**issuer.as_dict(private=False), "kid": PREP.SIGNING_KID}]}
+
+    async def exercise():
+        tls = ssl.create_default_context(cafile=prepared / "client/ca.pem")
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=tls), trust_env=False,
+        ) as session:
+            return await PROBE.resource_check(
+                session, key, token, jwks, profile="enrolled-pop-v1")
+
+    with (patch.object(PROBE, "ROOT", prepared / "client"),
+          patch.object(PROBE.ECKey, "generate_key", return_value=key),
+          pytest.raises(PROBE.ProbeError, match="resource-negative-check-failed")):
+        asyncio.run(exercise())
+
+
 class Response:
     def __init__(self, value: dict, status: int = 200, headers: dict | None = None):
         self.raw = json.dumps(value).encode()
@@ -285,14 +549,19 @@ class Response:
         yield self.raw
 
 
+@pytest.mark.parametrize("profile", ["jwt-pop-v1", "enrolled-pop-v1"])
 @pytest.mark.parametrize("mode", ["bound", "unbound", "nonce", "bad-grant", "bearer"])
-def test_provider_request_and_outcome_boundaries(prepared: Path, mode: str) -> None:
+def test_provider_request_and_outcome_boundaries(
+    prepared: Path, mode: str, profile: str,
+) -> None:
     inputs = json.loads((prepared / "client/inputs.json").read_bytes())
     key = ECKey.import_key(inputs["proof_key"])
     issuer = ECKey.generate_key("P-256")
     now = int(time.time())
     claims = {"iss": PREP.ISSUER, "aud": PREP.AUDIENCE, "sub": "synthetic-subject",
               "iat": now, "exp": now + 120}
+    if profile == "enrolled-pop-v1":
+        claims.update(aud=[PREP.AUDIENCE], sub=PREP.ENROLLED_SUBJECT, client_id=PREP.CLIENT)
     if mode != "unbound":
         claims["cnf"] = {"jkt": key.thumbprint()}
     token = jwt.encode({"alg": "ES256", "typ": "at+jwt", "kid": PREP.SIGNING_KID}, claims, issuer)
@@ -327,16 +596,20 @@ def test_provider_request_and_outcome_boundaries(prepared: Path, mode: str) -> N
                 "client_secret": inputs["client_secret"], "scope": "fixture.read",
                 "audience": PREP.AUDIENCE,
             }
-            signed = kwargs["headers"]["DPoP"]
-            decoded = jwt.decode(signed, key, algorithms=["ES256"])
-            assert decoded.header == {
-                "alg": "ES256", "typ": "dpop+jwt", "jwk": key.as_dict(private=False)}
-            assert decoded.claims["htu"] == uri and decoded.claims["htm"] == "POST"
-            assert "ath" not in decoded.claims
-            if calls:
-                assert decoded.claims["nonce"] == "fixture-nonce"
+            if profile == "enrolled-pop-v1":
+                assert kwargs["headers"] == {}
+                signed = None
             else:
-                assert "nonce" not in decoded.claims
+                signed = kwargs["headers"]["DPoP"]
+                decoded = jwt.decode(signed, key, algorithms=["ES256"])
+                assert decoded.header == {
+                    "alg": "ES256", "typ": "dpop+jwt", "jwk": key.as_dict(private=False)}
+                assert decoded.claims["htu"] == uri and decoded.claims["htm"] == "POST"
+                assert "ath" not in decoded.claims
+                if calls:
+                    assert decoded.claims["nonce"] == "fixture-nonce"
+                else:
+                    assert "nonce" not in decoded.claims
             calls.append(signed)
             if mode == "nonce" and len(calls) == 1:
                 return Response({"error": "use_dpop_nonce"}, 400, {"DPoP-Nonce": "fixture-nonce"})
@@ -345,32 +618,41 @@ def test_provider_request_and_outcome_boundaries(prepared: Path, mode: str) -> N
             return Response({"access_token": token, "token_type": "Bearer" if mode == "bearer"
                              else "DPoP"})
 
-    async def real_resource(_session, proof_key, access, selected):
+    async def real_resource(_session, proof_key, access, selected, *, profile="jwt-pop-v1"):
         # The acquisition fake still crosses the real serving verifier over strict TLS.
+        assert access == token
         tls = ssl.create_default_context(cafile=prepared / "client/ca.pem")
         async with original_session(
             connector=aiohttp.TCPConnector(ssl=tls),
             timeout=aiohttp.ClientTimeout(total=5), trust_env=False,
         ) as session:
-            return await real_check(session, proof_key, access, selected)
+            return await real_check(session, proof_key, access, selected, profile=profile)
 
     real_check = PROBE.resource_check
     with (patch.object(PROBE, "ROOT", prepared / "client"),
           patch.object(PROBE.aiohttp, "ClientSession", Session),
           patch.object(PROBE, "resource_check", real_resource)):
-        if mode == "bad-grant":
+        if mode == "bad-grant" or (profile == "enrolled-pop-v1" and mode == "nonce"):
             with pytest.raises(PROBE.ProbeError, match="provider-token-request-failed"):
-                asyncio.run(PROBE.qualify())
+                asyncio.run(PROBE.qualify(profile))
             assert len(calls) == 1
         else:
-            result = asyncio.run(PROBE.qualify())
-            assert result["result"] == ("incompatible" if mode in ("unbound", "bearer")
-                                        else "verified")
-            assert RUN.admit_outcome(result) == result
+            result = asyncio.run(PROBE.qualify(profile))
+            assert result["result"] == (
+                "incompatible" if profile == "jwt-pop-v1" and mode in ("unbound", "bearer")
+                else "verified")
+            assert RUN.admit_outcome(result, profile=profile) == result
             assert result["human_flow_exercised"] is False
             assert len(calls) == (2 if mode == "nonce" else 1)
             assert "never-echo" not in json.dumps(result)
-            if mode == "bearer":
+            assert token not in json.dumps(result)
+            if profile == "enrolled-pop-v1":
+                assert all(result["negative_checks"].values())
+                assert result["traits"]["client_id_exact"] is True
+                assert result["traits"]["subject_exact"] is True
+                assert result["traits"]["audience_allowed"] is True
+                assert PREP.CLIENT not in json.dumps(result)
+            if mode == "bearer" and profile == "jwt-pop-v1":
                 assert result["identity_error"] == "provider-token-type"
 
 

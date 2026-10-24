@@ -652,7 +652,27 @@ def retain_uv_install(
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
+    excluded_local_packages: tuple[str, ...] = (),
     _operation: str = "install",
+):
+    """Own the admitted graph and optional first-party exclusion constraints."""
+    with _configuration.retain_local_exclusions(
+        _retain_uv_install, uv, arguments, excluded_local_packages=excluded_local_packages,
+        error_type=DependencyPolicyError,
+        env=env, cwd=cwd, now=now, trusted_source_roots=trusted_source_roots,
+        retained_resource_roots=retained_resource_roots, _operation=_operation,
+    ) as transaction:
+        yield transaction
+
+
+@contextmanager
+def _retain_uv_install(
+    uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
+    cwd: Path | None = None, now: datetime | None = None,
+    trusted_source_roots: tuple[Path, ...] = (),
+    retained_resource_roots: tuple[Path, ...] = (),
+    _operation: str = "install",
+    _generated_constraints: tuple[Path, ...] = (),
 ):
     """Own the admitted graph until the caller's execution and health settle."""
     now = datetime.now(timezone.utc) if now is None else now
@@ -732,37 +752,11 @@ def retain_uv_install(
         if any(root.is_relative_to(path) for path in (*projects, *resources)):
             raise DependencyPolicyError("retained snapshot must be outside copied inputs")
         context_project = dict(_argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
-        pairs = list(_argument_pairs(arguments))
-        operands = [value for option, value in pairs if not option]
-        compact_sources = (
-            projects and operands and not files and not editables and not context_project
-            and not any(option in _FILE_OPTIONS | {"--group"} for option, _ in pairs)
-            and not any(environment.get(key) for key in (
-                "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE",
-            ))
-            and all(Path(value).is_absolute() for value in operands)
-            and not any(_metadata_needs_caller_layout(_toml(project / "pyproject.toml")) for project in projects)
-            and not any(_metadata_needs_caller_layout(_toml(path))
-                        for path, _ in _config_inputs(arguments, environment, base))
+        anchors, mirror = _configuration.retained_source_layout(
+            root, projects, files, resources, base, arguments, environment, editables,
+            argument_pairs=_argument_pairs, file_options=_FILE_OPTIONS,
+            toml=_toml, config_inputs=_config_inputs, generated_constraints=_generated_constraints,
         )
-        # An unrelated caller cwd must not force absolute build inputs to retain
-        # their entire checkout/staging ancestry. Relative-input layouts stay intact.
-        paths = [*projects, *files, *resources]
-        if not compact_sources:
-            paths.append(base)
-        if context_project:
-            paths.append((base / context_project).resolve())
-        anchors = {}
-        for path in paths:
-            anchor = path.anchor.lower()
-            members = [str(member) for member in paths if member.anchor.lower() == anchor]
-            common = Path(os.path.commonpath(members))
-            anchors[anchor] = common.parent if common.is_file() else common
-
-        def mirror(path):
-            path = Path(path).resolve()
-            anchor = hashlib.sha256(path.anchor.encode()).hexdigest()[:12]
-            return root / anchor / path.relative_to(anchors[path.anchor.lower()])
 
         def remap(value):
             if isinstance(value, list):
@@ -928,7 +922,9 @@ def run_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
-    retained_resource_roots: tuple[Path, ...] = (), _operation: str = "install", **run_options,
+    retained_resource_roots: tuple[Path, ...] = (),
+    excluded_local_packages: tuple[str, ...] = (),
+    _operation: str = "install", **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
     result = None
@@ -937,6 +933,8 @@ def run_uv_install(
             uv, arguments, env=env, cwd=cwd, now=now,
             trusted_source_roots=trusted_source_roots,
             retained_resource_roots=retained_resource_roots,
+            **({"excluded_local_packages": excluded_local_packages}
+               if excluded_local_packages != () else {}),
             **({"_operation": _operation} if _operation != "install" else {}),
         ) as transaction:
             run_options.setdefault("creationflags", _HEADLESS)

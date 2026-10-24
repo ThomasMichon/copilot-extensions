@@ -10,6 +10,7 @@ break-glass refusal unless `--force` is passed.
 from __future__ import annotations
 
 import argparse
+import json
 
 import pytest
 
@@ -59,6 +60,24 @@ def _args(target, *, force=False, json=False, strict=False):
 
 def _patch_client(monkeypatch, client):
     monkeypatch.setattr(m, "_get_client", lambda *a, **k: client)
+
+
+@pytest.fixture
+def resumed_session_metadata() -> dict[str, object]:
+    return {
+        "session_id": "owned-9",
+        "acp_session_id": "native-9",
+        "durable_session_id": "native-9",
+        "worktree_id": "wt-6b68",
+        "project": "example",
+        "target_dir": "/example",
+        "status": "idle",
+        "mode": "acp",
+        "read_only": False,
+        "at_rest": False,
+        "turn_count": 0,
+        "liveness": None,
+    }
 
 
 def test_owned_session_resume_wins(monkeypatch, capsys):
@@ -224,6 +243,7 @@ def test_singleton_alias_resume_crosses_actual_http_id_validation(monkeypatch, t
     session.acp_session_id = "singleton-native"
     session.status = SessionStatus.IDLE
     resume = AsyncMock(return_value=_session_info(session))
+    server_responses: list[dict[str, object]] = []
     monkeypatch.setattr(singleton_resume, "resume_singleton_anchor", resume)
     monkeypatch.setattr(
         "agent_bridge.resume_handoff_cli.find_singleton_repo",
@@ -241,7 +261,9 @@ def test_singleton_alias_resume_crosses_actual_http_id_validation(monkeypatch, t
             )
             if response.status_code >= 400:
                 raise BridgeClientError(response.status_code, response.json()["detail"])
-            return response.json()
+            result = response.json()
+            server_responses.append(result)
+            return result
 
         client = _FakeClient(
             session_resume=BridgeClientError(404, "not an owned session"),
@@ -253,7 +275,11 @@ def test_singleton_alias_resume_crosses_actual_http_id_validation(monkeypatch, t
     assert client.worktree_calls == [("example@anchor", False, False)]
     resume.assert_awaited_once()
     assert resume.call_args.args[0] == "example@anchor"
-    assert '"session_id": "singleton-session"' in capsys.readouterr().out
+    assert json.loads(capsys.readouterr().out) == {
+        **server_responses[0],
+        "verb": "loaded",
+        "requested_target": "example@host",
+    }
 
 
 class TestResumeJsonOutput:
@@ -261,6 +287,54 @@ class TestResumeJsonOutput:
     that `create --reclaim` is gone -- a caller (agent-dispatch) needs the
     session id back machine-readably, not scraped from a human summary line.
     """
+
+    @pytest.mark.parametrize("status", ["idle", "running"])
+    def test_owned_resume_preserves_server_identity_and_metadata(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        resumed_session_metadata: dict[str, object],
+        status: str,
+    ) -> None:
+        response = {**resumed_session_metadata, "status": status}
+        original = dict(response)
+        client = _FakeClient(session_resume=response)
+        _patch_client(monkeypatch, client)
+
+        m._cmd_resume(_args("session-alias", json=True))
+
+        assert json.loads(capsys.readouterr().out) == {**response, "verb": "resumed"}
+        assert response == original
+        assert client.session_calls == ["session-alias"]
+        assert client.worktree_calls == []
+
+    @pytest.mark.parametrize("force", [False, True])
+    @pytest.mark.parametrize("status", ["idle", "running", "starting"])
+    def test_worktree_resume_preserves_server_metadata(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        resumed_session_metadata: dict[str, object],
+        force: bool,
+        status: str,
+    ) -> None:
+        response = {**resumed_session_metadata, "status": status}
+        original = dict(response)
+        client = _FakeClient(
+            session_resume=BridgeClientError(404, "not an owned session"),
+            worktree_resume=response,
+        )
+        _patch_client(monkeypatch, client)
+
+        m._cmd_resume(_args("wt-6b68", force=force, strict=True, json=True))
+
+        assert json.loads(capsys.readouterr().out) == {
+            **response,
+            "verb": "took over" if force else "loaded",
+        }
+        assert response == original
+        assert client.session_calls == ([] if force else ["wt-6b68"])
+        assert client.worktree_calls == [("wt-6b68", force, True)]
 
     def test_force_take_over_emits_json_session_id(self, monkeypatch, capsys):
         client = _FakeClient(

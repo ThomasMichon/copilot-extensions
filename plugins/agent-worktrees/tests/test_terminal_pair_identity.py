@@ -25,7 +25,7 @@ def _pair(tmp_path: Path, *, versioned: bool):
         (records[0], records[1], "harness"), (records[1], records[0], "knowledge"),
     ):
         record.owner, record.kind, record.status, record.origin = (
-            "dispatcher", "bridge", "complete", "delegate",
+            "dispatcher", "bridge", "finalized" if role == "knowledge" else "complete", "delegate",
         )
         record.pair_id, record.pair_role, record.pair_kind = "pair", role, "worktree"
         record.pair_ref = tracking.format_claim_ref(
@@ -36,7 +36,8 @@ def _pair(tmp_path: Path, *, versioned: bool):
 
 
 @pytest.mark.parametrize("versioned", [False, True])
-def test_retained_pair_receipts_resume_and_allow_completed_discharge(tmp_path, versioned):
+def test_retained_pair_receipts_resume_and_allow_completed_discharge(tmp_path, monkeypatch, versioned):
+    monkeypatch.setattr(tracking.cfg, "project_dir", lambda project=None: tmp_path / str(project))
     primary, sibling = _pair(tmp_path, versioned=versioned)
     progress.publish(primary, sibling, sibling.yaml_path, primary_path=primary.yaml_path)
     receipt = json.loads(progress.receipt_path(sibling.yaml_path).read_text())

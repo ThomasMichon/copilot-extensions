@@ -872,6 +872,7 @@ def _load_config_uncached(
     path: Path | None = None,
     *,
     include_control_plane_related_pr: bool = True,
+    include_knowledge_preferences: bool = True,
     project: str | None = None,
     _machine_binding: dict[str, str] | None = None,
 ) -> Config:
@@ -912,6 +913,8 @@ def _load_config_uncached(
         include_control_plane_related_pr: Include foreign-repo PR overlays from
             active harness plugins. Related-index bootstrap disables this to
             avoid resolving the same active-plugin corpus twice.
+        include_knowledge_preferences: Load portable knowledge-repo preferences.
+            Disable only for readers that do not consume launch preferences.
         project: Explicit project identity. When supplied, it overrides legacy
             machine/global ``repo_name`` values for this load.
         _machine_binding: Internal per-load provenance capture; never a YAML
@@ -983,7 +986,7 @@ def _load_config_uncached(
     # the hot config path is unchanged off the stateless track.
     knowledge_raw = _load_knowledge_overlay_config(
         machine_raw, global_raw, repo_name, platform
-    )
+    ) if include_knowledge_preferences else {}
 
     machine_repos = machine_raw.get("repos") or {}
     if not isinstance(machine_repos, dict):
@@ -1184,6 +1187,7 @@ def load_config(
     path: Path | None = None,
     *,
     include_control_plane_related_pr: bool = True,
+    include_knowledge_preferences: bool = True,
     project: str | None = None,
 ) -> Config:
     """Load config; memoized inside ``cached_load_config_scope()`` (see
@@ -1192,6 +1196,7 @@ def load_config(
         return memoize_in_scope(
             _load_config_uncached, path,
             include_control_plane_related_pr=include_control_plane_related_pr,
+            include_knowledge_preferences=include_knowledge_preferences,
             project=project,
         )
 

@@ -16,6 +16,7 @@ PROJECT_ROOT="$(pwd -P)"
 MODE_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
 JSON_QUERY="$SCRIPT_DIR/installation-context/json-query.awk"
 RUNTIME_RESOLVER="$SCRIPT_DIR/resolve-runtime.sh"
+RUNTIME_ENVIRONMENT="$SCRIPT_DIR/runtime-environment.sh"
 INSTALLER="$SCRIPT_DIR/install.sh"
 LEGACY_ROOT="${AGENT_VAULT_HOME:-$HOME/.agent-vault}" # marketplace-isolation: allow legacy compatibility root
 SEP=$'\034'
@@ -63,36 +64,8 @@ scoped_identity_suffix() {
     printf '%s' "$normalized" | cksum | awk '{print $1}'
 }
 
-apply_runtime_env() {
-    export AGENT_VAULT_HOME="$RUNTIME_ROOT"
-    export AGENT_VAULT_VALIDATED_CONTEXT="$CONTEXT"
-    if [[ -n "$CONTEXT" ]]; then
-        export COPILOT_EXTENSIONS_CONTEXT="$CONTEXT"
-    else
-        unset COPILOT_EXTENSIONS_CONTEXT
-    fi
-    if [[ -n "$INSTALLATION_ID" ]]; then
-        export AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID"
-        export AGENT_VAULT_RUN_DIR="$RUNTIME_ROOT/run"
-        export AGENT_VAULT_CORE_RUN_DIR="$RUNTIME_ROOT/core"
-        export AGENT_VAULT_CACHE_DIR="$RUNTIME_ROOT/cache"
-        export AGENT_VAULT_SOCKET="$RUNTIME_ROOT/run/agent-vault.sock"
-        export AGENT_VAULT_PIPE="\\\\.\\pipe\\agent-vault-$SERVICE_SUFFIX"
-        export AGENT_VAULT_PID="$RUNTIME_ROOT/run/agent-vault-service.pid"
-        export AGENT_VAULT_LOG="$RUNTIME_ROOT/logs/agent-vault-service.log"
-        export AGENT_VAULT_PORT=0
-        export AGENT_VAULT_SYSTEMD_UNIT="agent-vault-$SERVICE_SUFFIX.service"
-        export AGENT_VAULT_TASK_NAME="AgentVault-$SERVICE_SUFFIX"
-    else
-        unset AGENT_VAULT_INSTALLATION_ID
-        unset AGENT_VAULT_RUN_DIR AGENT_VAULT_CORE_RUN_DIR AGENT_VAULT_CACHE_DIR
-        unset AGENT_VAULT_SOCKET AGENT_VAULT_PIPE AGENT_VAULT_PID AGENT_VAULT_LOG
-        unset AGENT_VAULT_PORT AGENT_VAULT_SYSTEMD_UNIT AGENT_VAULT_TASK_NAME
-    fi
-}
-
 run_runtime() {
-    apply_runtime_env
+    apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
     if [[ -n "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then
         local validated_cache
         validated_cache="$(
@@ -107,10 +80,12 @@ run_runtime() {
 }
 
 [[ -f "$MODE_RUNNER" && -f "$JSON_QUERY" && -f "$RUNTIME_RESOLVER" &&
-   -f "$INSTALLER" ]] || {
+   -f "$RUNTIME_ENVIRONMENT" && -f "$INSTALLER" ]] || {
     printf '[agent-vault] installation-context runtime support is unavailable.\n' >&2
     exit 126
 }
+# shellcheck source=runtime-environment.sh
+. "$RUNTIME_ENVIRONMENT"
 if ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$RUNTIME_RESOLVER"; then
     printf '[agent-vault] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.\n' >&2
     exit 126
@@ -272,7 +247,7 @@ if [[ ! -f "$FIRST_USE" ]]; then
 fi
 EXECUTION_ROOT="$HOME/.copilot-extensions/update-driver"
 printf '[agent-vault] submitting first-use provisioning to the installation driver: %s\n' "$EXECUTION_ROOT" >&2
-apply_runtime_env
+apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
 bash "$FIRST_USE" "$EXECUTION_ROOT" "$PAYLOAD_ROOT" "$RUNTIME_ROOT" "$PROJECT_ROOT" --wait || exit "$?"
 resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then

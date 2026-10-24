@@ -52,7 +52,7 @@ Ownership-transfer and serving-convergence follow-ups remain tracked by
    the state lock and attempts publisher/surface activation before lock
    publication; a permanently closed publisher can refuse it.
 
-The busy oracle has six categories:
+The busy oracle has eight categories:
 
 | Category | Work that prevents clean drain |
 |---|---|
@@ -62,6 +62,8 @@ The busy oracle has six categories:
 | `tracking-write` | Current/retired write handlers or an in-flight write computation remain. |
 | `worktrees-feed` | Feed handlers have not exited. |
 | `worktrees-read` | Current-roster control reads have not finished. |
+| `repos-map-read` | Registered-repository map control reads have not finished. |
+| `repos-map-producer` | The owned repository-map producer is refreshing. |
 
 The separate `lifecycle` count provides session-start context, **not a new gate**.
 `tracking-write` observations count handlers; `tracking-write-compute` separately
@@ -71,7 +73,7 @@ observations; `busy_reasons` records the actual oracle decision.
 Handler counts cover their server's tracked lifetime, not only successful
 mutations: a socket being read, a rejected/fallback request or a response being
 written can still be an active handler. Do not interpret them as task counts.
-The control server excludes the drain RPC itself from its current-roster-read
+The control server excludes the drain RPC itself from its inventory-read
 count; it must not wait for its own handler to finish.
 
 The nonstreaming control handler does not cancel its callback when a client

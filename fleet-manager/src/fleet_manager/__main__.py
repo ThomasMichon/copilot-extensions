@@ -28,6 +28,10 @@ def main(argv=None):
     planning.add_argument("--inventory", type=Path, required=True)
     planning.add_argument("--fleet-id", required=True)
     planning.add_argument("--machine-limit", type=int, required=True)
+    designer = commands.add_parser("design", help="Actualize loadout slots and named-host resource grid; never deploy")
+    designer.add_argument("--config", type=Path, required=True)
+    designer.add_argument("--inventory", type=Path, required=True)
+    designer.add_argument("--catalog", type=Path, help="Explicit additional non-secret contributed templates")
     inspection = commands.add_parser("inspect", help="Inspect explicit release snapshots; never probe or install")
     inspection.add_argument("--release", type=Path, required=True)
     inspection.add_argument("--observation", type=Path, help="Explicit installation observation; absent means unknown")
@@ -205,6 +209,13 @@ def main(argv=None):
                         )
                     else:
                         result = admit_client_release(args.root, identity, selection, staged, policy)
+        elif args.command == "design":
+            from .loadouts import design_loadout
+
+            result = design_loadout(
+                read(args.config, "config"), read(args.inventory, "inventory"),
+                read(args.catalog, "catalog") if args.catalog else None, now=time.time(),
+            )
         elif args.command == "doctor":
             from .client_diagnostics import diagnose_client
 

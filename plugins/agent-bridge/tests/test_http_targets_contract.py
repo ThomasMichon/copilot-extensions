@@ -11,11 +11,13 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+import agent_bridge_contract_registry as registry_codec
 from dropin_registry import EntryDecision, ScanAuthority
 from plugin_activation import ActivationReport, ActivePlugin
 
 from agent_bridge.agent_registry import AgentResolver
 from agent_bridge.client import BridgeClient, BridgeClientError
+from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 from agent_bridge.remote_acp_auth import RemoteCredentialPolicy
 from agent_bridge.remote_acp_catalog import RemoteAcpCatalog
 from agent_bridge.remote_acp_config import (
@@ -53,7 +55,7 @@ def _target():
 
 
 @pytest.mark.asyncio
-async def test_health_45_matches_independent_expected_vector(monkeypatch):
+async def test_health_retains_historical_target_capabilities(monkeypatch):
     monkeypatch.setattr(
         health_route, "get_default_manager",
         lambda: SimpleNamespace(carrier_diagnostics=lambda: {}),
@@ -61,10 +63,11 @@ async def test_health_45_matches_independent_expected_vector(monkeypatch):
     monkeypatch.setattr(health_route, "slot_descriptor", lambda *args, **kwargs: {})
     monkeypatch.setattr(health_route, "config_dir", lambda: Path("synthetic-unused"))
     body = await health_route.health(_request())
-    assert {key: body[key] for key in VECTOR["health"]} == VECTOR["health"]
+    expected = {**VECTOR["health"], "protocol_version": HTTP_PROTOCOL_VERSION}
+    assert {key: body[key] for key in expected} == expected
 
 
-@pytest.mark.parametrize("generation", [37, 38, 39, 40, 41, 42, 43, 44, 45])
+@pytest.mark.parametrize("generation", range(37, HTTP_PROTOCOL_VERSION + 1))
 @pytest.mark.parametrize("address", ["url", "named"])
 def test_client_target_negotiation_precedes_request(generation, address):
     client = BridgeClient.__new__(BridgeClient)
@@ -85,7 +88,7 @@ def test_client_target_negotiation_precedes_request(generation, address):
             expected["method"], expected["path"],
             {
                 "agent": VECTOR["client"][address],
-                "protocol_version": VECTOR["health"]["protocol_version"],
+                "protocol_version": HTTP_PROTOCOL_VERSION,
             },
         )
 
@@ -209,7 +212,7 @@ def _wire_generation(value, generation):
 
 @pytest.mark.parametrize(("generation", "reattested"), [(41, 40), (42, 42), (43, 42), (44, 45)])
 def test_reattestations_retain_independent_historical_expectations(generation, reattested):
-    registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
+    registry = registry_codec.load(REPO).materialized
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
     count = 0
     for registered in contract["fixtures"]:
@@ -234,7 +237,7 @@ def test_reattestations_retain_independent_historical_expectations(generation, r
 
 
 def test_generation_45_reattestations_preserve_independent_previous_vectors():
-    registry = json.loads((CONTRACT / "registry.json").read_text(encoding="utf-8"))
+    registry = registry_codec.load(REPO).materialized
     contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
     count = 0
     for registered in contract["fixtures"]:
@@ -261,7 +264,7 @@ OWNED = json.loads(
 )
 
 
-@pytest.mark.parametrize("generation", [38, 39, 40, 41, 42, 43, 44, 45])
+@pytest.mark.parametrize("generation", range(38, HTTP_PROTOCOL_VERSION + 1))
 @pytest.mark.parametrize("address", ["remote-acp:example-agent", "https://example.com/acp"])
 def test_owned_remote_client_refuses_before_sending_to_older_daemon(generation, address):
     from agent_bridge import protocol
@@ -281,7 +284,10 @@ def test_owned_remote_client_refuses_before_sending_to_older_daemon(generation, 
         client.start_session(**payload)
         client._request.assert_called_once_with(
             OWNED["request"]["method"], OWNED["request"]["path"],
-            {**OWNED["request"]["json"], "agent": address},
+            {
+                **OWNED["request"]["json"], "agent": address,
+                "protocol_version": HTTP_PROTOCOL_VERSION,
+            },
             request_timeout=None,
         )
 

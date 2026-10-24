@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "libs/agent-procutil/src"))
 import agent_bridge_contract_git as evidence  # noqa: E402
+import agent_bridge_contract_registry as registry_codec  # noqa: E402
+from agent_bridge_contract_publication import publish  # noqa: E402
 from agent_procutil.owned_process import run_caller_owned  # noqa: E402
 
 CONTRACT = "plugins/agent-bridge/contract/"
@@ -64,7 +66,11 @@ def main():
         raise ValueError("an actual full source commit is required")
     if evidence.integer_constant_at(commit, PREFIX + "protocol.py", "HTTP_PROTOCOL_VERSION") != 46:
         raise ValueError("selected source is not HTTP-46")
-    registry = read(REGISTRY)
+    if args.write:
+        from agent_bridge_contract_publication import recover_pending_links
+        recover_pending_links(ROOT, commit)
+    snapshot = registry_codec.load(ROOT)
+    registry = copy.deepcopy(snapshot.materialized)
     http = next(row for row in registry["contracts"] if row["id"] == "agent-bridge.http-wire")
     if http["declared_range"]["current"] not in (45, 46):
         raise ValueError("this capture owns only the HTTP-45 to HTTP-46 transition")
@@ -170,15 +176,8 @@ def main():
             "source_path": source, "source_git_blob": proof["source_git_blob"],
             "capture_method": " ".join(sorted(method)),
         }
-        existing = next((row for row in http["provenance"] if all(
-            row.get(key) == provenance[key] for key in (
-                "commit", "plugin_version", "generation", "source_path", "source_git_blob",
-            )
-        )), None)
-        if existing is None:
+        if provenance not in http["provenance"]:
             http["provenance"].append(provenance)
-        else:
-            existing.update(provenance)
     http["declared_range"].update(current=46, previous_generation=45)
     if 46 not in http["evidence_window"]["generations"]:
         http["evidence_window"]["generations"].append(46)
@@ -197,7 +196,7 @@ def main():
     }
     if any(row["semantic"] and path not in covered for path, row in source_rows.items()):
         raise ValueError("semantic source lacks current evidence")
-    outputs[REGISTRY] = encode(registry)
+    outputs.update(registry_codec.plan(ROOT, snapshot, registry))
     for path in outputs:
         safe(path)
     # Replay authored expectations before writing any proposed registry/fixture.
@@ -219,11 +218,18 @@ def main():
     for row in old_rows:
         if evidence.sha256_bytes(safe(row["path"]).read_bytes()) != row["sha256"]:
             raise ValueError(f"historical evidence changed during replay: {row['path']}")
+    snapshot.verify(ROOT)
+    if args.write:
+        publish(
+            ROOT, commit, outputs, validate=lambda: snapshot.verify(ROOT),
+            input_hashes={
+                row["path"]: registry_codec.digest(safe(row["path"]).read_bytes())
+                for row in old_rows
+            },
+        )
     for path, raw in outputs.items():
         target = safe(path)
-        if args.write:
-            target.write_bytes(raw)
-        elif not target.exists() or not evidence.sha256_bytes(target.read_bytes()) == evidence.sha256_bytes(raw):
+        if not target.exists() or not evidence.sha256_bytes(target.read_bytes()) == evidence.sha256_bytes(raw):
             raise ValueError(f"capture is not reproducible: {path}")
     print(f"HTTP-46 evidence: {len(outputs) - 1} fixtures; source {commit}; "
           f"registry SHA-256 {evidence.sha256_bytes(outputs[REGISTRY])}")

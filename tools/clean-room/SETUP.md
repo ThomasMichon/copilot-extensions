@@ -178,18 +178,17 @@ the rig doing its job. A setup problem looks different: the run doesn't start
 (Docker errors), or every phase-0 line is missing (auth/image failure). If phase 0
 captured the environment and the stages ran, your clean room is good.
 
-> **Governed / corp box (internal uv index).** Just as the *build* needs an
-> internal npm feed (§3), the reference scenario's provision stage installs a
-> runtime venv with **uv** — on a box where the public PyPI is TLS-blocked, add
-> the internal uv index so that stage doesn't jam:
+> **Runtime Python feed.** Normal runs use the anonymous public Microsoft
+> package feed; no host feed configuration or login is inherited. If that feed
+> is unavailable or an experiment requires another index, override it explicitly:
 > ```powershell
 > ./run.ps1 -UvIndex https://<internal-pypi-index>/ -TokenAccount <copilot-acct>
 > ```
 > ```bash
 > ./run.sh --uv-index https://<internal-pypi-index>/ --token-account <copilot-acct> run
 > ```
-> (`-UvIndex`/`--uv-index` is the run-time analog of `-NpmRegistry`; see
-> [`README.md`](README.md) for the full feed-governance notes.)
+> Use `-UvIndex ''` / `--uv-index ''` for an explicitly unconfigured-index
+> experiment. See [`README.md`](README.md) for precedence and feed-governance notes.
 
 Tear the container down when done:
 
@@ -231,7 +230,7 @@ handoff. Plain Tier-P scenarios (§5) do **not** need `agent-bridge`.
 | `docker` not found **inside WSL** | Enable WSL integration in Docker Desktop for the distro, or install Docker Engine inside the distro (§1). |
 | Build fails at `npm install -g @github/copilot` with a **TLS / handshake / could-not-connect** error | Governed box: public npm is blocked. Pass `-NpmRegistry` / `--npm-registry <internal-feed>` at build time (§3). |
 | Build fails **pulling `ubuntu:24.04`**, or fetching `deb.nodesource.com` / `astral.sh` | No outbound network to those hosts. Build on a box with access, or point Docker/apt/npm at internal mirrors. |
-| A scenario phase **jams on a `uv` / `pip` install** (TLS / handshake / could-not-resolve) at the provision stage | Governed box: public PyPI is blocked. Add the internal uv index at run time: `-UvIndex` / `--uv-index <internal-pypi-index>` (§5). |
+| A scenario phase **jams on a `uv` / `pip` install** (TLS / handshake / could-not-resolve) at the provision stage | Check the selected index and its reachability. Runtime uv defaults to the public Microsoft feed; use `-UvIndex` / `--uv-index` for an explicit alternative (§5). |
 | The reference scenario reports some `FAIL`s (e.g. dependency-not-pulled, bootstrap venv not deployed) | Usually **not** a setup problem — those are findings about the install flow under test (§5). Your clean room is fine if the run completed and wrote a `cr-report.json` with an `env{}` snapshot. |
 | **Linux:** `permission denied` on `/var/run/docker.sock` | Add your user to the `docker` group and re-login (`sudo usermod -aG docker $USER`), or prefix commands with `sudo`. |
 | The runner errors on `docker rm` / `docker exec` while Desktop is up | Ensure Docker is in **Linux containers** mode (Windows Docker Desktop can be switched to Windows containers — switch back). |

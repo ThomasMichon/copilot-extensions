@@ -168,6 +168,8 @@ def _load(path: Path, *, strict: bool = False) -> dict[str, Any]:
             for block in ("ssh", "dtssh"):
                 if entry.get(block) is not None and not isinstance(entry[block], dict):
                     raise ValueError(f"machine '{key}' {block} at {path} must be a mapping")
+            if type((entry.get("ssh") or {}).get("ready", False)) is not bool:
+                raise ValueError(f"machine '{key}' SSH readiness at {path} must be a boolean")
             dtssh_alias = (entry.get("dtssh") or {}).get("alias")
             if dtssh_alias is not None and not isinstance(dtssh_alias, str):
                 raise ValueError(f"machine '{key}' dtssh alias at {path} must be a string")

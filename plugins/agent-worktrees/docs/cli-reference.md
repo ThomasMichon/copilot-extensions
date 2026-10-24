@@ -272,6 +272,17 @@ state for the current project. `state-root --pair` is stricter: it resolves the
 task-specific sibling of the current tracked worktree and exits `3` when no
 pair is available.
 
+The unpaired state-root read keeps the normal layered binding configuration
+without composing foreign-repository PR overlays. Plain and JSON reads also
+omit the knowledge repo's portable launch-preference overlay (profiles, profile
+assignment, headless and auto-fast-forward preferences), which does not affect
+state-location resolution. Committed repository policy, the knowledge binding,
+registered checkout checks and binding errors remain unchanged. `--conduct`
+and `--pair` retain their existing preference loading; ordinary configuration
+and publication callers still load preferences by default. The state-location
+query does not enumerate enabled plugins; publication commands retain their
+normal PR-policy resolution.
+
 From a registered repository anchor, `--pair` exits `3` because the anchor does
 not identify one task-specific writable sibling. Its JSON result contains
 `"paired": false`, `"error": "current directory is not a tracked worktree"`,
@@ -1068,6 +1079,10 @@ read-only query. `--no-manager` still uses the same execution authority.
 `--recovery-status` reports restart-confirmed settlement availability;
 `--recover-after-restart` settles only old-boot interrupted work without
 replaying it. Both support `--json` and need no project.
+`--recover-for-repair [--json]` is a separate explicit operator authorization to
+release valid queue fences without historical cleanup proof; it runs no
+installation. The [shared recovery contract](../../../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+defines its scope and distinguishes authorization from native settlement.
 The [Manager reference](../../../worktree-manager/README.md#durable-update-execution)
 defines the shared lifetime, output, interruption and migration boundary.
 

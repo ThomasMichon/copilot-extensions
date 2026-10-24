@@ -13,11 +13,14 @@ installer text markers.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -750,6 +753,145 @@ def _extract_ps1_function(name: str) -> str:
 
 def _extract_ps1_functions(*names: str) -> str:
     return "\n\n".join(_extract_ps1_function(name) for name in names)
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+def test_sync_task_interpreter_probe_preserves_non_ascii_path(
+    tmp_path: Path, shell: str,
+) -> None:
+    exe = shutil.which(shell)
+    if os.name != "nt" or not exe:
+        pytest.skip("requires Windows and PowerShell")
+    probe_venv = tmp_path / "probe-venv"
+    venv.EnvBuilder(with_pip=False).create(probe_venv)
+    expected_json = json.dumps(str(tmp_path / "python-\u96ea" / "pythonw.exe"), ensure_ascii=True)
+    (probe_venv / "Lib" / "site-packages" / "agent_procutil.py").write_text(
+        "def windowless_python(*, require_windowless):\n"
+        "    assert require_windowless\n"
+        f"    return {expected_json}\n",
+        encoding="ascii",
+    )
+    launcher = tmp_path / "task.ps1"
+    launcher.write_text("exit 0\n", encoding="ascii")
+    harness = tmp_path / "probe.ps1"
+    harness.write_text(
+        _extract_ps1_function("New-SyncTaskAction")
+        + """
+function Write-SyncTaskLauncher {}
+function New-ScheduledTaskAction {
+    param($Execute, $Argument)
+    [pscustomobject]@{Execute=$Execute; Arguments=$Argument}
+}
+[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437)
+"""
+        + f"$TaskLauncher = '{launcher}'\n"
+        + f"$VenvPython = '{probe_venv / 'Scripts' / 'python.exe'}'\n"
+        + f"$expected = '{expected_json}' | ConvertFrom-Json\n"
+        + "$action = New-SyncTaskAction\n"
+        + "if ($action.Execute -cne $expected) { throw 'interpreter path was corrupted' }\n"
+        + "[Console]::Out.Write('path preserved')\n",
+        encoding="ascii",
+    )
+    result = subprocess.run(
+        [exe, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "path preserved"
+
+
+@pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_sync_task_action_is_headless_and_preserves_exit_code(
+    tmp_path: Path, shell: str, exit_code: int,
+) -> None:
+    exe = shutil.which(shell)
+    if os.name != "nt" or not exe:
+        pytest.skip("requires Windows and PowerShell")
+    (tmp_path / "bin").mkdir()
+    launcher = tmp_path / "bin" / "task launcher.ps1"
+    result_file = tmp_path / "console-visible.txt"
+    descendant_result = tmp_path / "descendant-visible.txt"
+    descendant = tmp_path / "console child.py"
+    descendant.write_text(
+        "import ctypes, sys, time\n"
+        "from ctypes import wintypes\n"
+        "from pathlib import Path\n"
+        "kernel = ctypes.WinDLL('kernel32')\n"
+        "user = ctypes.WinDLL('user32')\n"
+        "kernel.GetConsoleWindow.restype = wintypes.HWND\n"
+        "user.IsWindowVisible.argtypes = [wintypes.HWND]\n"
+        "Path(sys.argv[1]).write_text(str(bool("
+        "user.IsWindowVisible(kernel.GetConsoleWindow()))))\n"
+        "time.sleep(0.2)\n",
+        encoding="utf-8",
+    )
+    real_python = _venv_python_path(_resolve_test_venv_root())
+    launcher.write_text(
+        """
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ConsoleProbe {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
+}
+'@
+"""
+        + "[ConsoleProbe]::IsWindowVisible([ConsoleProbe]::GetConsoleWindow()) | "
+        + f"Set-Content -LiteralPath '{result_file}'\n"
+        + f"& '{real_python}' '{descendant}' '{descendant_result}'\n"
+        + "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
+        + "[Console]::Error.WriteLine('synthetic diagnostic')\n"
+        + f"exit {exit_code}\n",
+        encoding="utf-8",
+    )
+    harness = tmp_path / "action.ps1"
+    harness.write_text(
+        _extract_ps1_function("New-SyncTaskAction")
+        + """
+function Write-SyncTaskLauncher {}
+function New-ScheduledTaskAction {
+    param($Execute, $Argument)
+    [pscustomobject]@{Execute=$Execute; Arguments=$Argument}
+}
+"""
+        + f"$TaskLauncher = '{launcher}'\n"
+        + f"$VenvPython = '{real_python}'\n"
+        + "$action = New-SyncTaskAction\n"
+        + "$action | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW}
+    result = subprocess.run(
+        [exe, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        capture_output=True, text=True, check=True, timeout=20, **flags,
+    )
+    action = json.loads(result.stdout)
+    assert Path(action["Execute"]).name.lower() == "pythonw.exe"
+    assert action["Arguments"].startswith('-I "')
+    observer_api = runpy.run_path(str(
+        PLUGIN.parents[1] / "libs" / "agent-procutil" / "tests"
+        / "test_spawn_daemon_windows_integration.py"
+    ))
+    observer_api["_SURFACED_PROCESS_NAMES"].add("pwsh.exe")
+    with observer_api["_WindowObserver"](*observer_api["_configure_win32"]()) as observer:
+        for _ in range(2):
+            result_file.unlink(missing_ok=True)
+            descendant_result.unlink(missing_ok=True)
+            child = subprocess.run(
+                f'"{action["Execute"]}" {action["Arguments"]}',
+                capture_output=True, text=True, timeout=20, **flags,
+            )
+            assert child.returncode == exit_code, child.stdout + child.stderr
+            assert result_file.read_text(encoding="utf-8-sig").strip() == "False"
+            assert descendant_result.read_text(encoding="utf-8") == "False"
+            assert "synthetic diagnostic" in (
+                tmp_path / "logs" / "session-sync.log"
+            ).read_text(encoding="utf-8")
+    assert not observer.surfaced
+    assert not observer.focus_changes
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])

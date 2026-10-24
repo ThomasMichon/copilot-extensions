@@ -67,6 +67,7 @@ composition; content integrity does not reduce to trusting a source marker.
 | Operator + driving agent | Design, build tooling, drive phases | `copilot-extensions` worktree on this machine |
 | Baseline prevention driver | Historical Phase 8 proposal/evidence; remaining activation transferred to the canonical campaign | #6430 / main-owned-workflow-control Phase 5 |
 | Regression admission contributor | First bounded contributor-regression unit cohort; existing broad periodic ownership retained | Managed source `chugging-wrench`; #3336 |
+| Stamped-candidate contributor | Bounded Phase 9c ordering and coverage-provenance correction; other campaign and control owners retained | Managed source `faded-washer`; #8390 |
 
 _Expand this table if/when work is split across additional participants
 (e.g. a dedicated worktree for the CI pipeline vs. one for CONTRIBUTING/AGENTS.md
@@ -109,6 +110,16 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-23 stamping, testing and coverage direction (verbatim):**
+
+> We need to enforce an ordering between version-stamping and testing. It probably makes most sense to test on vendored-and-stamped code, which basically acts as the "release candidate". Of course, doing so risks mangling code-coverage collection, unless we carefully source-map it back to original dev code.
+
+**Scope:** Phase 9c below proposes the composed-candidate execution boundary and
+development-coverage attribution for #8390. It preserves the unit-only policy,
+existing test budgets, development-owned release identity, and separately
+governed Main activation. It does not revive the superseded full/native draft
+profile or transfer other participants' unfinished work.
 
 **2026-10-21 captured regression-led capacity request (verbatim):**
 
@@ -908,6 +919,15 @@ periodic corpus and broader tournament ownership remain intact.)_
       then verify an ordinary promotion reuses the exact expanded unit proof
       and remains under thirty minutes through publication, merge and tag.
 
+### Phase 9c - Stamped-candidate tests and development coverage
+
+_(Agent-recommended realization of the 2026-10-23 operator direction.
+Participant: Stamped-candidate contributor; bounded tracker: #8390.)_
+
+- [x] Review this ordering and coverage amendment before runtime/helper changes.
+- [ ] Execute the [bounded ordering and coverage plan](promotion-burndown.md#stamped-candidate-ordering-and-coverage),
+      retaining other Phase 9 and independently governed control owners.
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
@@ -1109,6 +1129,13 @@ test witnesses run periodically and cannot hold promotion.
       queue/execution timing and periodic integration failures separately.
       Periodic failures remain attributable but cannot silently regrow the gate.
 
+### Phase 9c validation
+
+- [ ] Resolve the [ordering, mapping and mutation regressions](promotion-burndown.md#stamped-candidate-validation),
+      without weakening the admitted unit/effect/time contract.
+- [ ] Verify the containing qualified release and coverage readback within the
+      existing cadence gate before completing this bounded slice.
+
 ## Proposal
 
 Phase 9 extends the existing source marker, generator, artifact identity and
@@ -1129,6 +1156,112 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-23 - Composed-candidate ordering amendment
+
+Captured the operator's complete stamping/testing and source-map direction
+verbatim above. #8390 exposes the concrete seam: source units admit an earlier
+Python version assignment while release composition changes that assignment
+before candidate qualification. The proposed correction tests the frozen
+vendored-and-stamped composition rather than weakening source-byte comparison.
+
+Phase 9c and the release vision now distinguish actual candidate execution
+from its attributable development-coverage projection. Existing composition,
+positive-unit admission, packet verification and governed control owners are
+the integration points; this is not a second release pipeline or revival of
+the superseded full/native profile. Plan review precedes implementation and
+separate Main activation; no release, activation or completion is claimed.
+
+The plan merged as #8426 at
+`47b1207880503250404f7d1ebf5917e81e790574` after current-head Copilot approval
+and every required check. The source worktree is pulled forward onto that
+reviewed contract. Next: implement the frozen-composition unit/receipt boundary
+and validated coverage projection, then satisfy the Phase 9c validation and
+independently governed activation gates. Phase 9 and this bounded slice remain
+open; a plan merge is not release or implementation completion.
+
+### 2026-10-23 - Phase 9c Source implementation in progress
+
+The source implementation freezes the composer's candidate Git object before
+units/builds and consumes it through validation/publication without restamping.
+Candidate-specific admission retains the Dev node inventory and budget while
+binding stamped bytes and declared vendor copies. The v3 qualifier preserves
+the original producer/upload/archive checks and verifies raw coverage plus its
+separate Dev projection against both source roots. Historical profiles are
+not reinterpreted.
+
+The changed pure slice passed its actual effect-observed, coverage-producing
+packet: 175 units, zero prohibited effects, 18.109 seconds whole execution.
+Separate workflow dependency/profile tests and focused packet, mapping and
+qualification cases pass. The full local Windows attempt correctly refused an
+existing native-loader path in activation-preservation tests; it is not reported
+as a full-portfolio pass or used to relax the unit observer. Hosted Linux
+Source CI, actual frozen-candidate execution, review, independently governed
+Main activation and natural-release/mapped-coverage readback remain outstanding.
+No active Main pin, pause state or adopter runtime was changed.
+
+The no-push production composition/transport check subsequently imported the
+exact frozen Git object and derived 409 admitted files, including 288 declared
+vendor copies. Its actual candidate packet passed 193 units in 36.625 seconds,
+with zero prohibited effects. Independent packet verification confirms the
+real chat fallback module was imported from candidate bytes that differ from
+Dev; its version statement is classified as a known stamp and remains
+unattributed. The raw-plus-projected coverage file is 10,569,616 bytes, below
+the unchanged sixteen-MiB bound. This is a focused Windows development check,
+not full-portfolio or hosted critical-path qualification. Local first-touch
+composition exceeded five minutes; the hosted compose and under-thirty-minute
+release budgets are still unproven and must not be increased to accommodate
+that result.
+
+The implementation subsequently limits coordinate maps to measured production
+files, while retaining full-closure byte checks in the manifest. This avoids
+spending the packet bound on unexecuted vendor-copy line tables. The real chat
+fallback module is now an explicit coverage target so its changed assignment
+also appears in raw evidence. The combined focused contract suite passes all
+300 cases after that refinement; containing hosted release evidence is still
+required.
+
+Source implementation PR #8454 is open. Its first CI pass found the composer
+over the module cap and three obsolete selectors inadvertently retained during
+pull-forward reconciliation. The frozen-publication path now lives with its
+transport owner, message formatting remains available through its existing
+public API, and retired selectors stay retired. Review also found that frozen
+artifact consumers supplied the full commit index to the content-only validator.
+Two new in-process regressions reproduced that refusal in both publication and
+attestation validation, then passed after each disposable index explicitly
+loaded the recorded content tree. No frozen commit is changed. The focused
+cohort passes 128 cases and the composer is below the unchanged module cap;
+renewed hosted CI and current-head review remain required.
+The resulting local effect-observed slice, including the original historical
+controls, passes 214 units in 21.406 seconds with zero prohibited effects.
+
+Hosted Source CI passed the reconciled 1,384-node inventory in 34.070 seconds
+with coverage collected once and all guards green. Follow-up review identified
+stale v2-only prepared-controller fixtures. Those fixtures now explicitly
+support the declared v2/v3 profiles and frozen graph, including a graceful
+no-content result. The actual v3 snippets pass 67 tests plus 214 subtests under
+the existing process-tree supervisor; matching historical v2 snapshots pass
+42 merge tests and 25 publication tests. These remain local development
+rehearsals, not new promotion dependencies. Current-head review and renewed CI
+for the fixture update still precede Source merge.
+
+Final input-boundary inspection also connected every frozen-object consumer to
+the composition job's exported candidate SHA. Dev/Main identity and a
+self-consistent transport alone cannot select a replacement candidate. A
+negative unit verifies rejection before Git import; real-workflow assertions
+verify the trusted output reaches units, build, validation and publication.
+The record schema and Dev-owned release identity are unchanged.
+
+The remaining directly coupled checkout, artifact-validator and clock fixtures
+now exercise the frozen path as well. The source-checkout regression proves a
+valid baseline before mutating negative cases, admits the declared pinned helper
+checkout and retains history needed to import the recorded Git object.
+Seventeen bounded development checks pass, including real Git/bundle transport,
+artifact refusal and successful validation, temporary-root aliases and immutable
+creation-time propagation. Their first deeply nested Windows fixture path
+exceeded Git's path limit; the same cases pass in the verified private short
+scratch root without changing production behavior or any deadline. These tests
+remain outside promotion dependencies.
 
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as

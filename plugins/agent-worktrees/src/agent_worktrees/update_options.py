@@ -49,13 +49,14 @@ def validate_auth_flags(args: argparse.Namespace) -> None:
     if getattr(args, "auth_report", False) and any(
         getattr(args, name, False) for name in (
             "detach", "supervised_debug", "request_status", "recovery_status", "recover_after_restart",
+            "recover_for_repair",
         )
     ):
         argparse.ArgumentParser(prog="update").error(
             "--auth-report cannot select an installation execution mode or request status"
         )
     driver_json = any(getattr(args, name, False) for name in (
-        "detach", "request_status", "recovery_status", "recover_after_restart",
+        "detach", "request_status", "recovery_status", "recover_after_restart", "recover_for_repair",
     ))
     report_only = [
         "--" + name.replace("_", "-")
