@@ -15,8 +15,12 @@ The existing manual `installation-context-full.yml` workflow additionally accept
 `portfolio: foundation` for bounded Windows/Ubuntu foundation construction and
 custody qualification. Its scheduled/default `context` portfolio is unchanged;
 the two portfolios do not run together. This explicit integration lane has a
-15-minute per-host job deadline and is not a required unit-only PR or promotion
-job. It does not qualify Python-free genesis or authorize a host rollout.
+25-minute per-host job deadline and is not a required unit-only PR or promotion
+job. Separate bounded foundation/adapter and actual cold first-use portfolios
+qualify Windows/Linux Python-free genesis and the adopted Vault command/bootstrap
+paths. Each keeps the runner's 900-second aggregate and storage caps; one-file
+sub-suites release private acquisition/runtime fixtures between modules.
+This does not qualify macOS or authorize a host rollout.
 
 Source CI contains three jobs: operational `checks`, combined impact/execution
 in `unit-tests`, and the fixed-name `PR gate (required check)`. The unit job
@@ -65,6 +69,16 @@ The nonblocking marketplace-isolation inventory runs on pushes and manual CI,
 not again on each PR update. Admitted Dev-push executions retain that diagnostic;
 strict source guards and required validation remain in PR CI. A cancelled or
 superseded execution is not diagnostic or test evidence.
+
+Before the Agent Bridge contract guard, CI explicitly acquires the HTTP-47
+packet's exact captured source commit from the CI-selected, credential-free
+HTTPS repository URL when it is not already available. The separate bounded
+`tools/prepare_bridge_contract_evidence.py` step accepts only a full commit ID,
+does not change checkout, refs or `FETCH_HEAD`, and fails visibly if acquisition
+or verification fails. A normal full branch checkout can omit a squash-orphaned
+capture checkpoint. The checker itself remains offline: it still validates
+complete historical inventory and content-addressed blobs, never regenerates
+capture evidence, and does not waive a changed or unprovable closure.
 
 The checks job independently selects its tracking-write, headless-launch and
 asyncio-timeout AST scans from the pinned diff. Known narrative PRs and changes
