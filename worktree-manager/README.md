@@ -780,6 +780,13 @@ iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/
 curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/worktree-manager/bootstrap.sh | bash
 ```
 
+Windows retains UV's successful Python selection. If that lookup instead fails
+with RedirectionGuard error 448, bootstrap resolves existing `python3`/`python`
+application paths to physical executables and verifies a base interpreter at
+Python 3.11 or newer. Store aliases, virtual environments and invalid probe
+responses are not accepted. With no qualified candidate, the original UV
+acquisition path still applies; mitigation and dependency policy are unchanged.
+
 The bootstrap fetches this `worktree-manager/` payload and **version-installs** it
 under the same convention as the harness's other installers — an immutable
 `~/.worktree-manager/versions/<version>/` slot, a plain-text
