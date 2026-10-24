@@ -91,7 +91,7 @@
       "status": 401
     }
   },
-  "execution_closure_sha256": "7d90cbe759817d392e16cfd3ffc040108903045404ca9801a9dd521b11714539",
+  "execution_closure_sha256": "1b4b107fe23fff4da0676d549b4d4548c88bebf4079b2abcb322b9d7ec7ac648",
   "execution_closure": {
     "libs/agent-procutil/src/agent_procutil/__init__.py": {
       "blob": "055e20131efdc966b58de8ad46699d9ba31305b2",
@@ -2262,8 +2262,8 @@
       "sha256": "a4fc42f91705658ab43fb9a538cefec6701b5cd595a106b7d9236d76e0ad8e55"
     },
     "tools/bridge_http47_evidence.py": {
-      "blob": "8948d38c79216f4d72ecdd24fa50bbc30f64854c",
-      "sha256": "afee8c5e97386c5fe02cd8f58b9294784edc09d946916993b2cb29cd4ecdddc8"
+      "blob": "4fe6e33227cb9280ae8b55f52b4edd7ced6225c6",
+      "sha256": "710aee7b97ff26089ac127e252e1c80cbc9a3efc04ef32b64806f1fb828e0fe4"
     },
     "tools/bridge_http47_runtime.py": {
       "blob": "7e27a8dfed6876fee91ed9c696025737dabfa328",
@@ -3239,7 +3239,7 @@
   },
   "scope": "model-free ASGI and owned stdio fixtures; not real Copilot, deployment or host qualification",
   "captured_from": {
-    "commit": "7e6dda368be00f76f4245bbc27825200969f239e",
+    "commit": "c1c1a57433d37c4c915aa97e0bd122333962dbf4",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
