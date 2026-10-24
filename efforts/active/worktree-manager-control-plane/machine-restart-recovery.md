@@ -172,9 +172,10 @@ means of fulfilling the operator's request. They require normal source review.
   owner intent. Task/profile-bound worktrees and unqualified claims refuse; it is
   not wired to automatic startup. Actual native readiness/identity/seed
   acknowledgement and surviving-session adoption remain unresolved.
-  An explicit source-only survivor inspection now binds fresh owner hosting
-  to the retained exact original without attachment, launch or seed authority;
-  it awaits review/merge and does not complete adoption or native qualification.
+  [#7358](https://github.com/ThomasMichon/copilot-extensions/pull/7358)
+  binds explicit current survivor inspection to the retained exact original
+  without attachment, launch or seed authority. It does not complete adoption
+  or native qualification.
 - [ ] Persist recovery attempt and outcome; reconcile a crash between launch
   and receipt, concurrent startup, seed timeout and delayed registration before
   retrying. Do not claim exactly-once delivery merely from a pre-launch flag.
@@ -1209,3 +1210,25 @@ The umbrella effort remains Active independently of this slice's completion.
   architectural authority. Source awaits review and merge. Actual adoption,
   STATUS FIRST pickup, action-time task/profile policy, platform
   startup/enrollment and the full focused gate remain open.
+
+### 2026-10-20 - Survivor inspection merged; owner-mediated reuse seam next
+
+- [#7358](https://github.com/ThomasMichon/copilot-extensions/pull/7358)
+  squash-merged to `dev` as `80cc16b5e3` after genuine current-head approval
+  `f4cca96163`, no open findings and required green checks. The final bounded
+  disconnected owner/Manager lane passed 384 contracts without skips; native
+  process, mux and epoch observations remain synthetic.
+- Immediately re-read this Plan, Validation Plan and completion gate.
+  Exact-original survivor inspection is delivered as read-only evidence,
+  distinct from historical receipts. No combined recovery/adoption or native
+  qualification item is closed. The full focused gate and umbrella remain
+  active; actual native readiness/seed consumption, action-time task/profile
+  policy and platform startup/enrollment remain unresolved.
+- Next permitted source-only stretch: trace the existing native pending-seed
+  delivery and acknowledgement owners to define the smallest safe
+  survivor-reuse seam. Preserve exact-current hosting and action-time fences;
+  never equate inspection with STATUS FIRST pickup, inject into an unqualified
+  prompt, or start a replacement conversation.
+- No native fixture, installation, enrollment, host startup change or live
+  rollout is authorized by this merge. Actual native qualification still needs
+  a separately approved isolated venue, profile and authentication boundary.
