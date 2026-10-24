@@ -17,6 +17,8 @@ test_config_and_state_must_be_outside_runtime_root
 test_persisted_context_must_match_the_journaled_baseline
 test_unsafe_root_ancestor_is_refused_before_directory_creation
 test_foreign_replacement_between_validation_and_capture_is_preserved
+test_unmanageable_slot_names_refuse_before_installation
+test_maximum_slot_name_remains_manageable
 """,
     "test_construction.py": """
 test_construction_floor_refuses_before_resource_loading
@@ -209,6 +211,7 @@ PARAMETER_COUNTS.update({
     "test_setup.py::test_failure_retains_old_selection_and_explicitly_settles_recovery": 2,
     "test_setup.py::test_persisted_context_must_match_the_journaled_baseline": 3,
     "test_setup.py::test_foreign_replacement_between_validation_and_capture_is_preserved": 2,
+    "test_setup.py::test_unmanageable_slot_names_refuse_before_installation": 7,
     "test_workspace.py::test_workspace_deadline_rounding_never_exceeds_original_budget": 2,
     "test_construction.py::test_occupied_import_scope_is_not_replaced": 6,
     "test_construction.py::test_installed_health_refuses_bootstrap_drift": 3,

@@ -84,7 +84,11 @@ unchanged declared local library layout; the adapter does not fetch a release
 or infer a source from PATH. `update` takes the same inputs and converges through
 the same implementation. A repeat with the same completed source/role selection
 does not republish selectors. A different-code update needs a distinct immutable
-slot. Construction health and exact role closure finish before selection.
+slot. Slot names are 1-128 ASCII letters/digits plus `.`, `+`, `_` and `-`,
+begin with a letter/digit, and cannot be `dev`; setup validates this before
+creating the installation. Publication inputs/selectors use explicit private
+file modes independently of the caller's umask. Construction health and exact
+role closure finish before selection.
 Configuration drift is an explicit refusal, not permission to migrate state or
 rewrite configuration.
 

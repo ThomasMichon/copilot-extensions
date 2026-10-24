@@ -483,6 +483,27 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-24 - Selected setup review corrections
+
+- The first review of #8696 identified two real post-install manageability
+  defects: constructor-admitted slot names could exceed the selection reader's
+  128-character bound, and POSIX `umask 002` could make copied selected metadata
+  group-writable and therefore unreadable under its own private-file policy.
+- One slot-name validator now guards both install/update admission and selected
+  reads. Invalid inputs refuse before root creation or candidate construction;
+  the maximum supported name remains manageable through status and removal.
+  Every publication input is created explicitly with mode `0600`.
+- The complete setup/inventory packet passed 29 controls. The independently
+  installed lifecycle regression now sets `umask 002` in its isolated process
+  and verifies private selectors on POSIX; fresh native requalification and
+  current-head review remain required. The inventory expands to 486 nodes,
+  without narrowing the unchanged acceptance lane or raising any timeout.
+- The earlier head `b9201483a385d06ee8e19a76d170d4ea0c45ed95` had passed
+  all four Linux/Windows Python3.10/3.11 cells in
+  [run40134290164](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40134290164),
+  with complete identical 478-node inventories. Those results are retained
+  as earlier-head evidence, not claimed as qualification of these corrections.
+
 ### 2026-10-24 - Selected manual-client implementation and recovery qualification
 
 - Implemented the Chat-owned installed setup module over the existing exact

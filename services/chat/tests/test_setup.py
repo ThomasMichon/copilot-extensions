@@ -263,3 +263,22 @@ def test_foreign_replacement_between_validation_and_capture_is_preserved(
     with pytest.raises(ClientError, match="physically replaced|Foreign selectors appeared"):
         setup.install(case.root, "example", **{**case.arguments, "version": "2.0.0"})
     assert case.publication.state_path(case.root / "current-version") == captured["state"]
+
+
+@pytest.mark.parametrize("version", [
+    "", "a" * 129, "dev", "../outside", "white space", "non-ascii-\N{SNOWMAN}", None,
+])
+def test_unmanageable_slot_names_refuse_before_installation(installation, version):
+    case = installation
+    with pytest.raises(ClientError, match="1-128 ordinary ASCII"):
+        setup.install(case.root, "example", **{**case.arguments, "version": version})
+    assert not case.root.exists() and not case.calls
+
+
+def test_maximum_slot_name_remains_manageable(installation):
+    case = installation
+    version = "a" * 128
+    result = setup.install(case.root, "example", **{**case.arguments, "version": version})
+    assert result["selection"]["slot"] == version
+    assert setup.status(case.root, "example")["selection"]["slot"] == version
+    assert setup.uninstall(case.root, "example")["state"] == "unselected"

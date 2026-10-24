@@ -26,6 +26,14 @@ def _refuse(message: str) -> None:
     raise ClientError("setup_refused", message)
 
 
+def _slot_name(value: str) -> str:
+    if (not isinstance(value, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,127}", value)
+            or value == "dev"):
+        _refuse("Provide a numbered slot name of 1-128 ordinary ASCII characters.")
+    return value
+
+
 def _publication():
     _engine()
     return importlib.import_module("agent_chat_service.versioned_runtime_publication")
@@ -204,14 +212,12 @@ def _owned(root: Path, data: dict, publication):
         } or selected["schema"] != "agent-chat.selection" or type(selected["version"]) is not int
             or selected["version"] != 1 or selected["installation_id"] != data["installation_id"]
             or selected["role"] != "manual-client"
-            or not isinstance(selected["slot"], str)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+_-]{0,127}", selected["slot"])
-            or selected["slot"] == "dev"
             or any(not isinstance(selected[key], str)
                    or not re.fullmatch("[0-9a-f]{64}", selected[key])
                    for key in ("payload_hash", "config_sha256"))
             or any(not isinstance(selected[key], str) for key in ("source", "config"))):
         _refuse("Invalid selected manual-client identity.")
+    _slot_name(selected["slot"])
     for name in _TARGETS[:2]:
         if (root / name).read_bytes() != (selected["slot"] + "\n").encode():
             _refuse("Runtime selectors do not match the selected manual client.")
@@ -314,6 +320,7 @@ def catalog(root: Path, installation_id: str) -> dict:
 
 def install(root: Path, installation_id: str, *, config: Path, version: str,
             project: Path, uv: Path, python: Path) -> dict:
+    version = _slot_name(version)
     publication = _publication()
     root = _absolute(root)
     project, uv, python = (_absolute(path) for path in (project, uv, python))
@@ -351,7 +358,8 @@ def install(root: Path, installation_id: str, *, config: Path, version: str,
             bindings = []
             for index, (name, value) in enumerate(zip(_TARGETS, contents)):
                 source = workspace / f"input-{index}"
-                with source.open("xb") as stream:
+                fd = os.open(source, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                with os.fdopen(fd, "wb") as stream:
                     stream.write(value)
                 bindings.append(publication.CopyBinding(
                     source, root / name, hashlib.sha256(value).hexdigest(),

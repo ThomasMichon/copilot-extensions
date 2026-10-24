@@ -244,6 +244,8 @@ config.write_text(json.dumps({
     "state_dir":str(state),"endpoint":"https://example.invalid",
     "token_command":[sys.executable,"-c","raise AssertionError('no credentials')"],
 }),encoding="utf-8")
+config.chmod(0o600)
+os.umask(0o002)
 if sys.version_info<(3,11):
     try:
         setup.status(root,"example")
@@ -257,6 +259,8 @@ if sys.version_info<(3,11):
 args=dict(config=config,project=project,uv=uv,python=Path(sys.executable),version="0.1.0+first")
 assert setup.status(root,"example")["state"]=="absent" and not root.exists()
 assert setup.install(root,"example",**args)["state"]=="selected"
+if os.name!="nt":
+    assert all((root/name).stat().st_mode & 0o777 == 0o600 for name in setup._TARGETS)
 first=setup.catalog(root,"example")
 assert not first["release_selection_verified"] and not first["remote_verified"]
 assert first["commands"][0]["argv"][:4]==[
