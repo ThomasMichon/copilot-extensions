@@ -42,6 +42,13 @@ def _release_payload(destination: Path, plugin: str) -> Path:
     finally:
         sys.path[:] = previous_path
     assert not any(message.startswith("SKIP ") for message in messages), messages
+    # Match the top-level fixture exclusion without pruning runtime/native assets.
+    libraries = payload / "libs"
+    if libraries.is_dir():
+        for library in libraries.iterdir():
+            tests = library / "tests"
+            if tests.is_dir():
+                shutil.rmtree(tests)
     return payload
 
 

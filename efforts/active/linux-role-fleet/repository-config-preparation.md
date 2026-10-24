@@ -73,6 +73,12 @@ new bus, daemon or reporter. The existing legacy spool callback is synchronous;
 it is an explicit low-volume debug baseline, not proof of bounded hot-path
 overhead or a replacement for the existing bounded-adapter work.
 
+The [diagnostic logging amendment](logging-conventions.md) also covers these
+buckets: the current append-only baseline does not satisfy its elapsed
+30-day retention requirement. Local inspection remains independent of Grafana;
+diagnostic retention and attribution are not deferred merely because the
+hosted dashboard is deferred.
+
 ## Validation
 
 - Controller fetches declared sources and resolves the same prepared

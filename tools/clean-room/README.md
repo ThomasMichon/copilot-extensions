@@ -28,12 +28,24 @@ to the Linux starts in both host wrappers, not the Windows container arm.
 | Image | Toolchain present | Use |
 |-------|-------------------|-----|
 | `base` (default) | git, python3, node, uv | Plugin-install checks where a stock dev toolchain is assumed. |
-| `pristine` | **Copilot + git only** — a system `python3` exists (as on any real box) but **no venv module, no pip, no uv, no `~/.local/bin`, no feed governance** | The harshest fresh **internal** machine: forces the harness to provision its own toolchain, so uv/venv/pip-feed jams **surface** instead of being hidden. Select with `-Image pristine`. |
+| `pristine` | **Copilot + git only** — a system `python3` exists (as on any real box) but **no venv module, no pip, no uv, no `~/.local/bin`, no baked feed configuration** | Forces the harness to provision its own toolchain. Select with `-Image pristine`; add `-UvIndex ''` when testing missing feed governance. |
 
-Feed governance is injected per-scenario at run time, never baked into an image.
+Runtime Python installs default to the anonymous public Microsoft feed,
+`https://packagefeedproxy.microsoft.io/pypi/simple/`. The runners supply
+`UV_DEFAULT_INDEX` to the container, not host-specific configuration or credentials.
+This also works for ordinary `uv` calls that do not consume the scenario helper.
+The image itself retains no baked index configuration.
+
+Selection is explicit CLI `-UvIndex` / `--uv-index`, then `CR_UV_INDEX`, then
+the public default. Pass `-UvIndex ''` or `--uv-index ''` to leave the index
+unconfigured when testing first-touch feed governance. TLS validation and
+installer dependency-age checks are unchanged; an unavailable mirror fails
+normally rather than silently switching feeds.
+
 The realistic corp-box case to reproduce is an **asymmetry**: a policy sets
 **pip's** internal feed but not **uv**, so `uv`/`uv pip install` still hit the
-TLS-blocked public index while pip works.
+TLS-blocked public index while pip works. Use the explicit empty override for
+that negative control.
 
 Both images also carry a distro `rg` in `/opt/copilot-cleanroom/bin`, outside
 the stock PATH. Only the driven Tier-E Copilot process tree sees it, with
@@ -90,7 +102,8 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 > **Reproducing a network-blocked machine from an unrestricted dev box.**
 > `-BlockPublicFeeds` (`--block-public-feeds` on `run.sh`, or
 > `$env:CR_BLOCK_PUBLIC_FEEDS=1`) null-routes `pypi.org`,
-> `files.pythonhosted.org`, `registry.npmjs.org`, and `download.pytorch.org` at
+> `files.pythonhosted.org`, `registry.npmjs.org`, `download.pytorch.org`, and
+> `packagefeedproxy.microsoft.io` at
 > the container network layer (Docker `--add-host`), regardless of what the
 > HOST machine can actually reach. This lets a fully-connected dev box exercise
 > the same "public feed genuinely unreachable" condition a governed machine
@@ -114,7 +127,8 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.ps1 -Image pristine -Mode shell    # drop into a pristine fresh box (headed copilot)
 ./run.ps1 -Image base -NameSuffix agc    # a SECOND concurrent base clean-room (container cr-base-agc) -- won't clobber another agent's cr-base
 ./run.ps1 -Until 1 -Then shell           # prepare up to stage 1, then hand off to a shell
-./run.ps1 -UvIndex https://…/pypi/simple/  # opt-in uv-index fixture (governed box)
+./run.ps1 -UvIndex https://…/pypi/simple/  # override the public default
+./run.ps1 -UvIndex ''                    # explicit unconfigured-index control
 ./run.ps1 -BlockPublicFeeds -UvIndex https://…  # reproduce a network-blocked machine from an unrestricted dev box
 ./run.ps1 -Mode bridge-register          # expose the box as an agent-bridge agent
 ./run.ps1 -Scenario context-handoff-eval -Mode eval  # handoff speed/fidelity/lifecycle witness
@@ -130,6 +144,7 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.sh --image base --name-suffix agc   # a SECOND concurrent base clean-room (container cr-base-agc)
 ./run.sh --until 1 --then shell run
 ./run.sh --uv-index https://…/pypi/simple/ run
+./run.sh --uv-index '' run               # explicit unconfigured-index control
 ./run.sh --block-public-feeds --uv-index https://… run   # reproduce a network-blocked machine from an unrestricted dev box
 ./run.sh --scenario agent-vault-eval eval        # Tier-E agent-driven eval (mirrors run.ps1 -Mode eval)
 ./run.sh --scenario context-handoff-eval eval    # handoff speed/fidelity/lifecycle witness
@@ -479,7 +494,7 @@ Override via `run.ps1` params or `CR_*` env (see the `scenarios/generic-single-p
 header): `CR_MARKETPLACE_REPO` (a GitHub `owner/repo`, or a container-local
 marketplace directory mounted with `-HarnessMount` for uncommitted-worktree
 validation), `CR_MARKETPLACE_NAME`, `CR_PRIMARY_PLUGIN`,
-`CR_EXPECT_DEPS`, `CR_UV_INDEX` (opt-in uv-index fixture),
+`CR_EXPECT_DEPS`, `CR_UV_INDEX` (runtime Python index override),
 `CR_BLOCK_PUBLIC_FEEDS` (null-route public feeds at the container network
 layer), `CR_UNTIL` (stop after
 stage N). The scenario name + stage list live in `manifest.json`.

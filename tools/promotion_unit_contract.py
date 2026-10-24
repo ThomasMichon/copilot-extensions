@@ -144,19 +144,18 @@ def requires_units(changed_paths: list[str]) -> bool:
             or any(part in ("", ".", "..") for part in path.split("/"))
         ):
             raise UnitEvidenceError("invalid changed-input path")
-        narrative = (
-            path.startswith(("docs/", "visions/", "efforts/"))
-            and path.endswith(".md")
-        ) or path in {"README.md", "CONTRIBUTING.md", "TESTING.md", "REVIEW.md"}
-        if not narrative:
+        if not path.casefold().endswith(".md"):
             return True
     return False
 
 
-def changed_paths(base: str, head: str, read_diff: Callable[[list[str]], bytes]) -> list[str]:
+def changed_paths(
+    base: str, head: str, read_diff: Callable[[list[str]], bytes], *, merge_base: bool = False,
+) -> list[str]:
     """Preserve deletions as well as additions, including source-to-doc renames."""
     arguments = [
         "git", "diff", "--no-renames", "--name-only", "-z",
+        *(["--merge-base"] if merge_base else []),
         source_sha(base), source_sha(head),
     ]
     raw = read_diff(arguments)
@@ -173,7 +172,7 @@ def ci_requires_units(
         return False
     if event != "pull_request":
         return True
-    return requires_units(changed_paths(base, head, read_diff))
+    return requires_units(changed_paths(base, head, read_diff, merge_base=True))
 
 
 def ci_requires_source_ast_guards(
@@ -182,7 +181,7 @@ def ci_requires_source_ast_guards(
     """Omit only PR inputs outside the three full scanners' source/policy roots."""
     if event != "pull_request":
         return True
-    paths = changed_paths(base, head, read_diff)
+    paths = changed_paths(base, head, read_diff, merge_base=True)
     if not paths:
         return True
     relevant = [
@@ -193,3 +192,14 @@ def ci_requires_source_ast_guards(
         )
     ]
     return requires_units(relevant) if relevant else False
+
+
+def ci_requires_code_checks(
+    event: str, base: str, head: str, read_diff: Callable[[list[str]], bytes],
+) -> bool:
+    """Share unit impact for source guards; unknown or unavailable inputs cannot skip."""
+    if event not in ("pull_request", "push"):
+        return True
+    if not _SHA.fullmatch(base) or not _SHA.fullmatch(head) or base == "0" * 40:
+        return True
+    return requires_units(changed_paths(base, head, read_diff, merge_base=event == "pull_request"))

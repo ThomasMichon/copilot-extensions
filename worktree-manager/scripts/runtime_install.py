@@ -246,8 +246,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--recover-adopted", type=Path)
     parser.add_argument("--describe-recovery", action="store_true")
     parser.add_argument("--repair-update", action="store_true")
+    parser.add_argument("--recover-for-repair", action="store_true")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.recover_for_repair:
+        if args.recover_adopted or args.describe_recovery or args.repair_update or args.command:
+            parser.error("Repair recovery cannot be combined with installation or application commands")
+        if args.payload.resolve() != SCRIPTS.parent:
+            parser.error("Repair recovery uses only this executing source's payload")
+        from repair_recovery import recover
+
+        return recover(SCRIPTS.parent, as_json=args.json)
+    if args.json:
+        parser.error("--json requires --recover-for-repair")
     if args.describe_recovery:
         print(json.dumps({
             "schema": "copilot-extensions.manager-recovery-entry", "version": 1,

@@ -1,0 +1,61 @@
+{
+  "schema": "http47-cold-drain-cases-v1",
+  "generation": 47,
+  "requests": {
+    "legacy": {"timeout": 0},
+    "compatible": {"timeout": 0, "drain_contract": {"minimum": 1, "maximum": 1}},
+    "strict": {"timeout": 0, "drain_contract": {"minimum": 2, "maximum": 2}, "on_incompatible": "refuse"},
+    "cold": {"timeout": 10, "poll": 0.05, "drain_contract": {"minimum": 2, "maximum": 2}},
+    "invalid": [
+      {"drain_contract": {"minimum": true, "maximum": 2}},
+      {"drain_contract": {"minimum": 3, "maximum": 2}},
+      {"on_incompatible": "refuse", "force": true},
+      {"timeout": "0"}
+    ]
+  },
+  "expected": {
+    "advertised": {"protocol_version": 47, "min_protocol_version": 1, "drain_contract": {"minimum": 1, "maximum": 1}},
+    "legacy": {"status": 200, "mode": "graceful", "contract_status": "legacy-unnegotiated", "native_alive": true},
+    "compatible": {"status": 200, "mode": "graceful", "clean": true, "forced": false, "native_alive": true},
+    "strict": {"status": 409, "gate_closed": true, "native_alive": true, "outages": 0},
+    "unauthenticated": {"status": 401, "gate_closed": true},
+    "invalid_statuses": [422, 422, 422, 422],
+    "cold": {
+      "status": 200,
+      "mode": "incompatible-contract-cold",
+      "drained": true,
+      "clean": false,
+      "forced": true,
+      "interrupted": ["cold-session"],
+      "nonresumable": [],
+      "preserved": [],
+      "failures": [],
+      "busy_sessions": [],
+      "live_host_count": 0,
+      "timeout": 10.0,
+      "contract_status": "incompatible",
+      "drain_contract": 1
+    },
+    "original_exit": {"host": true, "child": true},
+    "post_cold_graceful_refusal": {
+      "status": 200, "drained": false, "clean": false, "forced": true,
+      "mode": "incompatible-contract-cold"
+    },
+    "cold_watchdog_disabled": true,
+    "recovery": {
+      "same_bridge": true,
+      "same_native": true,
+      "same_target": true,
+      "same_loaded_native": true,
+      "native_boots": 2,
+      "new_session_calls": 0,
+      "sdk_prompts": ["Resume. Host agent-bridge updated."],
+      "journal_turns": 1,
+      "reconnect_keys": 1,
+      "provider_evidence_kind": "provider-prompt-response",
+      "provider_stop_reason": "end_turn",
+      "repeated_recovery": 0
+    },
+    "allocated": {"unchanged": true, "sessions": 0, "outages": 0, "state": "allocated"}
+  }
+}

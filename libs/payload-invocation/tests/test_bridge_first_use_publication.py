@@ -98,7 +98,9 @@ def _run(fixture: dict, environment: dict, command: list[str], host):
     )
 
 
-def _initialize_shell_profiles(fixture: dict, environment: dict) -> set[str]:
+def _initialize_shell_profiles(
+    fixture: dict, environment: dict, *, engines: tuple[str | None, ...] | None = None,
+) -> set[str]:
     if os.name != "nt":
         return set()
     profiles = {
@@ -110,7 +112,8 @@ def _initialize_shell_profiles(fixture: dict, environment: dict) -> set[str]:
         allowed.update(parent.as_posix() for parent in Path(name).parents)
         allowed.add(name)
     before = _snapshot(fixture["home"])
-    for engine in dict.fromkeys(filter(None, (POWERSHELL, shutil.which("pwsh")))):
+    selected = (POWERSHELL, shutil.which("pwsh")) if engines is None else engines
+    for engine in dict.fromkeys(filter(None, selected)):
         control = subprocess.run(
             [engine, "-NoLogo", "-NoProfile", "-Command",
              "[System.Runtime.ProfileOptimization]::StartProfile($null)"],

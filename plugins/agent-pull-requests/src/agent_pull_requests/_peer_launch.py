@@ -29,6 +29,7 @@ PEERS = {
 OWNERS = {
     "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
     "agent-logger", "agent-index", "agent-machines", "agent-worktrees", "agent-pull-requests",
+    "agent-ssh",
 }
 
 

@@ -16,11 +16,10 @@ def standalone_build_resources(component: str, *, source_root: Path) -> tuple[Pa
     if component not in STANDALONE_CONSUMERS:
         raise ValueError(f"unknown standalone component: {component}")
     resources = (source_root / "libs" / "versioned-runtime",)
+    if component in {"fleet-manager", "services/pr", "services/chat"}:
+        resources += (source_root / "libs" / "installer-engine",)
     if component in {"fleet-manager", "services/pr"}:
-        resources += (
-            source_root / "libs" / "installer-engine",
-            source_root / "libs" / "agent-procutil" / "src" / "agent_procutil",
-        )
+        resources += (source_root / "libs" / "agent-procutil" / "src" / "agent_procutil",)
     return resources
 
 

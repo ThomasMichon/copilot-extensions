@@ -66,6 +66,9 @@ def capture_usage(source: Path, include: set[str] | None) -> CaptureResult:
                         raise UsageEvidenceError("session enumeration limit exceeded")
                     if include is not None and entry.name not in include:
                         continue
+                    # Dot-prefixed siblings hold internal locks, not sessions.
+                    if entry.name.startswith("."):
+                        continue
                     if not stat.S_ISDIR(entry.stat(follow_symlinks=False).st_mode):
                         if entry.is_symlink():
                             raise UsageEvidenceError("redirected session directory refused")

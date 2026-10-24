@@ -19,3 +19,9 @@ to illustrate a change tends to smuggle consumer-side detail. Per category:
   in this repo) — never an internal tracker, private doc, or session/task ID.
   Attach the concrete internal artifact to the driver's **private** plan and
   link the public issue to that; never the reverse.
+
+The standard `Copilot-Session: <session-id>` commit trailer is an allowed
+provenance exception: preserve it when supplied by the runtime or operator,
+without asking to strip its identifier. It does not authorize publishing
+private session content, paths, links, other identifiers, or raw fields in
+source-attribution comments.
