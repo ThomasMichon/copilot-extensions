@@ -22,6 +22,7 @@ while retaining installation, ownership, policy and health contracts.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Coordinator | Owns synthesis, shared contracts, integration, review and completion | The source worktree associated with #6812 |
+| Launch compatibility implementer | Only #8702's normal launch defaults, supported version-drift adapter and directly dependent regressions; no journal-campaign takeover or installed recovery authority | Source-only workspace `curious-latch`; public coordination on #8702 and #8375 |
 | Orchestration evidence reader | Audits unified update and launch-maintenance ordering | Coordinator's bounded read-only delegation |
 | Installer evidence reader | Audits runtime construction, activation and healthy no-op work | Coordinator's bounded read-only delegation |
 | Output evidence reader | Audits existing output helpers, protocols and formatting ownership | Coordinator's bounded read-only delegation |
@@ -60,6 +61,11 @@ while retaining installation, ownership, policy and health contracts.
   installer-engine convergence; seasoned-dependencies-and-transactional-installs
   owns its dependency and transaction changes. Existing open repair PRs are
   not superseded. Coordinate any necessary overlapping change before editing.
+- **Launch compatibility detour:** #8702 restores the existing version-skew
+  tolerant Manager/engine boundary. #8375 retains journal storage, native
+  outcomes and retention; #6057 retains remote prompt admission. Compatibility
+  must preserve those contracts, not manufacture target-owned evidence or
+  reinterpret an uncertain launch as permission to repeat it.
 
 ## Context
 
@@ -89,6 +95,12 @@ while retaining installation, ownership, policy and health contracts.
 The operator confirmed the slug `update-flow-observability` and requested:
 
 > Audit every line of that update flow and identify why it's needed and figure out how we can speed things up. We likely should prefix every line of the install/update flow with the time, and post-fix with the duration, ideally using some consistent, elegant formatting. There's also mixes of formatting, messaging, and status reporting which need cleanup now that we report more overall update progress.
+
+On 2026-10-24, the operator added the following compatibility requirements:
+
+> We should never let ourselves get into a state where we reject a current installation of agent-* plugins. We need backwards-compatibility to account for version-drift.
+
+> Flags like `--require-launch-attempt` and `--launch-attempt-id` also seem odd, like we're adding opt-in flags which should be the norm. I guess `launch-attempt-id` is good to maintain a contract with a programmatic caller, but we should avoid needing too many speciality arguments to launch a worktree from worktree manager.
 
 ## Plan
 
@@ -262,6 +274,33 @@ held #6859 / #7833 lifetime work remain independently owned.
 - [ ] Drive required review, CI and normal containing release; keep authorized
   installed rollout and parent-effort completion separate from source merge.
 
+### Compatibility detour - Keep normal launches usable across version drift
+
+The following decomposition is _(agent-recommended)_; the two compatibility
+requirements above are operator-requested. This slice closes the existing
+version-skew-tolerant process boundary and Picker's durable-launch-attempt
+intent without changing session, seed or publication authority.
+
+- [ ] Reproduce the newer Manager/older engine parser failure through a real
+  process boundary, including ordinary New and the local re-resolve.
+- [ ] Negotiate the supported launch contract before resolution effects.
+  Make normal hosting and attempt retention defaults, keep useful caller
+  correlation, and adapt supported older/current installations without
+  requiring speciality safety flags or a forced whole-runtime update.
+- [ ] Reuse canonical repository policy and the existing durable Manager
+  intent when bridging a legacy local contract. Distinguish caller
+  observations from unavailable engine-owned receipts; never fabricate
+  proof, weaken negative policy or retry an allocating call after an
+  ambiguous outcome. Preserve existing remote/native prompt capability
+  refusals where the requested primitive is genuinely unavailable.
+- [ ] Route both native shell re-resolves through the same compatibility
+  owner, using the Manager payload's existing runtime invocation helper.
+  Preserve the selected worktree and staged seed identity rather than
+  repeating New or changing the launcher's native control boundary.
+- [ ] Land the reviewed source fix and its changefiles, confirm its containing
+  release, and report installed adoption separately. This source slice grants
+  no host update, original operator-launch replay or lock-recovery authority.
+
 ### Phase 4 - Land, prove and finish
 
 - [x] Land #8411's bounded source-only compatibility repair in #8462,
@@ -286,6 +325,15 @@ held #6859 / #7833 lifetime work remain independently owned.
 - [x] Qualify #8409's complete native repair/scoped/snapshot and interpreter
   controls on Windows and Linux, recording temporary congested-CPU
   watchdogs separately from original-limit performance evidence.
+- [ ] Qualify #8702 against older/current real parsers and programmatic
+  callers, with ordinary defaults and explicit attempt correlation.
+  Preserve current receipt validation, policy/marketplace denial, durable
+  pre-effect intent, local seed fencing and honest unknown outcomes.
+- [ ] Exercise both PowerShell and Bash local second hops with the existing
+  Manager runtime helper, showing no duplicate New, no unsupported flags sent
+  to an older receiver and no weaker retry after possible resolution effects.
+  Record clean-room, native and live-lane coverage or explicit reasons that
+  those lanes remain unavailable.
 - [ ] Cover Windows and POSIX installer entrypoints and synchronized vendored
   formatter copies; run the relevant install-contract and formatting guards.
 - [ ] Exercise real unchanged, changed-version and first-touch consumer
@@ -345,6 +393,25 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-24 - Review the launch-version compatibility correction
+
+- The operator reported ordinary New failing because a newer Manager
+  unconditionally sends hosting/attempt capability fences to an older
+  installed engine. The Manager then refuses the installation rather than
+  using a supported version-skew contract. #8702 owns only this correction;
+  its source-only participant is reserved and the #8375 owner has been
+  notified before overlapping call sites change.
+- The operator additionally required normal launch guarantees to be defaults,
+  not a growing collection of opt-in flags. Explicit programmatic attempt
+  correlation remains useful. Canonical repository policy already exists as
+  a shared library; Manager intent and boundary observations already have
+  their own durable owner. A bridge must preserve those actual guarantees
+  without pretending the older engine produced new receipts.
+- This is the compatibility proposal, not an implementation or an installed
+  recovery result. Source changes follow review of this amendment. The
+  normal update/no-op and parent launch-validation gates remain open, and
+  unrelated native ownership or recovery restrictions remain unchanged.
 
 ### 2026-10-24 - Containing release verified; installed gates remain held
 
