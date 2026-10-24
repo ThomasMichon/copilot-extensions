@@ -6,7 +6,7 @@ import pytest
 from agent_ssh_service.config import ServiceConfig, SSHServiceError
 from agent_ssh_service.gateway import SSHService
 from agent_ssh_service.hosting import registered_lifetime
-from agent_ssh_service.relay import authorization, native_config
+from agent_ssh_service.relay import authorization, native_config, verify_host_pin
 from agent_ssh_service.store import DirectoryStore
 from fleet_manager.planning import canonical, decode
 
@@ -31,6 +31,20 @@ def relay_document(config):
 
 def join(index=0):
     return {**enrollment(index), "relay_public_key": key(30 + index)}
+
+
+@pytest.mark.parametrize("comment", ["", " owner@disposable", " comment with spaces"])
+def test_derived_host_pin_compares_identity_not_openssh_comment(comment):
+    verify_host_pin(key(50) + comment + "\n", key(50))
+
+
+@pytest.mark.parametrize("derived", [
+    "", "comment only", key(51), key(50).replace("ssh-ed25519", "ssh-rsa"),
+    key(50) + "\n" + key(51), key(50) + "\ncomment",
+])
+def test_derived_host_pin_refuses_wrong_identity_or_multiple_lines(derived):
+    with pytest.raises(SSHServiceError, match="native-relay-host-pin-mismatch"):
+        verify_host_pin(derived, key(50))
 
 
 def test_native_projection_is_forward_only_and_separates_peer_key_roles(config, tmp_path):

@@ -89,6 +89,12 @@ def native_config(selected: dict, root: Path) -> bytes:
     ))).encode("utf-8")
 
 
+def verify_host_pin(derived: str, expected: str) -> None:
+    lines = derived.strip().splitlines()
+    check(len(lines) == 1 and " ".join(lines[0].split()[:2]) == expected,
+          "native-relay-host-pin-mismatch")
+
+
 def owns_listener(pid: int, host: str, port: int) -> bool:
     """Observe this unreaped child's actual listening socket, never a banner."""
     expected = ("0100007F" if host == "127.0.0.1" else "00000000") + f":{port:04X}"
@@ -129,8 +135,8 @@ class NativeRelay:
             [selected["ssh_keygen"], "-y", "-P", "", "-f", selected["host_key_file"]],
             timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
         )
-        check(key.returncode == 0 and key.stdout.strip() == selected["host_public_key"],
-              "native-relay-host-pin-mismatch")
+        check(key.returncode == 0, "native-relay-host-pin-mismatch")
+        verify_host_pin(key.stdout, selected["host_public_key"])
         if not self.root.exists():
             self.root.mkdir(mode=0o700)
         private(self.root, directory=True)
