@@ -309,6 +309,15 @@ dependencies. Context-only argument/environment/ambient project mappings refuse
 for direct, recursive and project-metadata inputs. Ordinary compile keeps its directory-dependency boundary. These are
 candidate-export controls, not source-origin approval or real-feed admission.
 
+`tools/test_runtime_source_lock.py` composes the real installation-owned planner,
+existing source receipt validator and retained compiler. Fresh offline sources
+prove the empty third-party case; a dated synthetic loopback feed proves a
+nonempty exact hashed candidate. Independent selection mismatch, source mutation,
+wrong interpreter target, malformed/inapplicable output, byte-limit exhaustion,
+child failure, timeout and cancellation refuse and clean up. The same optional
+`dependency_compile=true` Linux/Windows lane runs these controls, not required
+unit CI. They do not qualify private-feed policy, wheel admission or deployment.
+
 `python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
 synthetic wheel archives, streamed digest/RECORD checks, independent selected
 metadata mutations, ambiguous/linked/encrypted members, compressed metadata

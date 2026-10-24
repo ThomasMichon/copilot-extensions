@@ -257,6 +257,11 @@ refusals and the installation authority's explicit path selection.
       in the repository-only planner (#8586). Only explicit or typed approved
       record absence can request permitted source fallback; source verification,
       exact locking and feed admission remain prerequisites to construction.
+- [x] Provide explicit retained source-graph candidate export (#8600).
+      Only unconditional locally mapped dependencies may be omitted from
+      third-party output; ordinary compile retains its directory refusal.
+      Selected-source identity binding, exact installation receipt, actual
+      governed acquisition and consumer realization remain open.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -507,6 +512,13 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the bounded source compiler with native dated-feed retention,
+      transitive seasoning/hashes, recursive local mappings, root-metadata
+      registry identity preservation, inactive marker/extra and context-only
+      ambiguity refusal. #8600 passes 421 development controls (one POSIX-only
+      Windows skip), the current 1509-unit packet, final-head required CI,
+      native Linux/Windows compiler jobs and clean approving review.
+      This is candidate export, not source-origin or governed-feed admission.
 - [x] Qualify the bounded policy/release planning composition with the real
       installation owner, fresh no-file defaults and isolated Python first
       touch. Malformed preferences, foreign/invalid/pending owners and supplied
@@ -687,6 +699,57 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Selected source/lock candidate binding
+
+- Added repository-only `retain_source_lock` composition of the actual
+  installation-owned planner, existing `SourceIdentity` receipt/assembly
+  validator and #8600's retained compiler. The existing authority supplies
+  the independent source selection; a self-consistent receipt alone is not
+  origin approval. The adapter never discovers another release or needs an
+  artifact manifest.
+- The selected source is compared before and after retained resolution. A
+  native isolated probe reuses the existing toolchain marker-query script to
+  verify the exact selected interpreter's environment. The candidate freezes
+  source identity, policy, target/capability, declared extras, source trigger,
+  exact applicable pins/hashes and requirements digest while retaining payload
+  custody through consumption. Unknown extras cannot silently become base.
+- Positive controls exercise real source receipt validation and UV with fresh
+  offline inputs and a nonempty dated loopback feed. The focused packet passes
+  194 controls across source binding, real policy composition, compiler and
+  optional-lane contracts. Inclusive byte limits, independent-selection/source/
+  target refusal, child failure, timeout and cancellation cleanup are covered.
+  The feed fixture required HEAD as well as GET; its correction changed no
+  production resolution policy.
+- This realizes the reviewed source-fallback input-binding seam, not a complete
+  inspected-wheel profile, governed acquisition, reusable admission receipt or
+  deployed constructor. Private installation policy stays in the local
+  candidate, not public release records. No runtime entrypoint is enabled.
+  The existing optional Linux/Windows compiler lane includes the new controls;
+  no effectful matrix or new node joins required unit-only CI. Publication,
+  native qualification and review remain open; the parent stays **Active**.
+
+### 2026-10-24 - Retained source compiler merged; identity/lock binding next
+
+- #8600 merged as `83e229b971603bacf09e82bf3abfd859993624cc` after
+  review `5640072155` approved final head
+  `df26db14fa9f8da90639c846d787ba0a7e121bdd` with no open issues.
+  Both fixed review threads are resolved. Required CI `40133369446` and
+  native compiler acceptance `40133469410` pass; both selected Linux and
+  Windows jobs are green. The managed merge used the existing Maintainer
+  CODEOWNER exception, not a CI override.
+- Re-read this Plan and Validation Plan after merge. Marked only the bounded
+  export component complete; the parent remains **Active** and #4876 is open.
+  Pulled the owned worktree onto the actual squash merge without retaining
+  duplicated upstreamed changes. No production consumer or rollout is enabled.
+- Next bind independently selected source identity, fallback trigger, target/
+  capability and exact candidate output through the retained transaction.
+  The existing source receipt validator establishes byte consistency, not
+  origin approval. Retained metadata remaps paths, so compare the selected
+  original source through existing snapshot custody rather than treating a
+  transformed assembly hash as a second source authority. Exact wheel-profile
+  closure and governed acquisition remain separate gates. Preserve #6941's
+  contributor-owned candidate-input generation.
 
 ### 2026-10-24 - Independent retained source-graph export
 
