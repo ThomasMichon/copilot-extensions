@@ -127,7 +127,7 @@ def test_unstarted_complete_admission_conflict_never_reformats_allocation(
         )
     monkeypatch.setattr(launch_request, "_dispatch", dispatch)
     monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a: pytest.fail("must not allocate"))
-    with pytest.raises((ValueError, RuntimeError), match="allocation|identity|execution|platform"):
+    with pytest.raises((ValueError, RuntimeError), match="allocation|identity|execution|platform|authority"):
         launch_request.execute(config, intent, identity_mode="legacy")
     assert path.read_bytes() == before
     assert not json.loads(before).get("creation_started")
@@ -162,6 +162,7 @@ def test_completed_admission_validates_retained_record_before_seed_write(
 def test_admission_writer_ignores_caller_allocation_spelling(tmp_path, monkeypatch, authority):
     config = _setup(tmp_path, monkeypatch)
     result = launch_request._dispatch("launch_request_admit", {
+        "project": config.repo_name,
         "tracking_dir": str(tmp_path / "tracking"), "request_id": "a" * 32,
         "fingerprint": "f" * 64, "kind": "new", "worktree_id": "attacker-selected",
         "timestamp": "20261021-010203", "suffix": "abcd",
@@ -315,12 +316,14 @@ def test_direct_stage_cannot_accept_an_incomplete_allocation(tmp_path, monkeypat
     config = _setup(tmp_path, monkeypatch)
     directory = tmp_path / "tracking"
     receipt = launch_request._dispatch("launch_request_admit", {
+        "project": config.repo_name,
         "tracking_dir": str(directory), "request_id": "a" * 32,
         "fingerprint": "f" * 64, "kind": "new", "worktree_id": "ignored",
         "timestamp": "20261021-010203", "suffix": "abcd",
         "allocation_request": {"project": config.repo_name, "identity_mode": "tuple-v1"},
     })
     allocation = creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
+    Path(allocation.path).mkdir(parents=True)
     tracking.create_new_record(
         allocation.worktree_id, allocation.branch, allocation.path, allocation.project,
         allocation.machine, allocation.platform, directory, machine_identity=allocation.machine_identity,

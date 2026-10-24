@@ -316,7 +316,7 @@ transaction execution from the existing recurring-maintenance assignment.
   nested/unsupported refusal on native Windows/Linux. Command/bootstrap,
   explicit installer, namespaced and retained-source #5379 qualification remain
   separate unless directly exercised.
-- [ ] **Agent-recommended bounded bootstrap adoption:** route SSH's legacy
+- [x] **Agent-recommended bounded bootstrap adoption:** route SSH's legacy
   session bootstrap's first stamp and drift provisioning through its qualified
   fixed native actions, packaged foundation and the same canonical queue.
   Preserve the actual service-less installer, source/root/project and control
@@ -329,6 +329,20 @@ transaction execution from the existing recurring-maintenance assignment.
   preparation may use the already-qualified fixed recipe; it does not credit
   unadopted command publishers. Retained-source #5379, primary/payload commands,
   explicit installers and namespaced/custom-root publication remain separate.
+- [ ] **Agent-recommended bounded source handoff:** qualify SSH's exact
+  selected legacy snapshot through the same fixed native recipe and canonical
+  staged-origin reader before adopting its ordinary primary command. Retain
+  SSH's actual snapshot provenance, payload selection/version and complete
+  dependency graph, publication controls, request-bound source and service-less
+  options. Prove native Windows/Linux materialized stamp, selected-snapshot
+  provision with the installed payload unavailable, installed CLI/metadata/module
+  identity and failed-candidate preservation. Refuse missing, malformed,
+  unselected, substituted or ordinary-copy sources before acquisition/queue/
+  installation writes; do not replace the retained source with a newer payload.
+  Preserve the bootstrap's already-qualified canonical-installed-source boundary
+  rather than incidentally admitting a new bootstrap publisher. Ordinary
+  primary/payload commands, explicit installers, custom roots/cells, rollout
+  and the separately bounded network-backed #5379 acceptance remain open.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

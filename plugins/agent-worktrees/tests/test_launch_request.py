@@ -722,11 +722,14 @@ def test_remote_admission_sends_text_only_in_encoded_request(shell, monkeypatch)
     assert plan["seed_pending"] and plan["seed_kind"] == "resume"
 
 
-def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_real_powershell_transport_preserves_encoded_intent(tmp_path, version):
     pwsh = shutil.which("pwsh")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     intent = _intent()
+    if version == 2:
+        intent.update(version=2, attempt_id="b" * 32, native_seed_required=True)
     intent["text"] += "x" * (
         request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
     )
@@ -735,10 +738,11 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
     # platform's preferred encoding (cp1252 on many Windows hosts), which
     # cannot represent the intent's non-ASCII text.
     script = (
-        "import base64,json,sys;"
+        "import json,sys;"
+        "from agent_worktrees.launch_request import decode;"
         "assert sys.flags.utf8_mode == 1;"
         "sys.stdout.reconfigure(encoding='utf-8');"
-        "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
+        "print(json.dumps(decode(sys.argv[1]),ensure_ascii=False))"
     )
     command = remote_seed_launch.shell_command(
         "pwsh", [sys.executable, "-X", "utf8", "-c", script, encoded],
@@ -753,20 +757,24 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
     assert json.loads(result.stdout) == intent
 
 
-def test_real_posix_transport_preserves_encoded_intent():
+@pytest.mark.parametrize("version", [1, 2])
+def test_real_posix_transport_preserves_encoded_intent(version):
     if sys.platform == "win32":
         pytest.skip("Native POSIX shell invocation is validated in the SSH lane")
     bash = shutil.which("bash")
     if not bash:
         pytest.skip("Bash is unavailable")
     intent = _intent()
+    if version == 2:
+        intent.update(version=2, attempt_id="b" * 32, native_seed_required=True)
     intent["text"] += "x" * (
         request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
     )
     encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
     script = (
-        "import base64,json,sys;"
-        "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
+        "import json,sys;"
+        "from agent_worktrees.launch_request import decode;"
+        "print(json.dumps(decode(sys.argv[1]),ensure_ascii=False))"
     )
     command = remote_seed_launch.shell_command("bash", [sys.executable, "-c", script, encoded])
     result = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=20)

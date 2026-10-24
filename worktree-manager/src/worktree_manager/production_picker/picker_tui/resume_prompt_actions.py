@@ -15,10 +15,6 @@ from .engine_prompt_dialog import PromptDlgScreen
 
 def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
     """Compose a retry-staged prompt for a stopped worktree's resume."""
-    if not rec.get("is_local", True):
-        screen.debug = "Resume prompt requires a local native target; use ordinary Resume."
-        return
-
     def _eligible():
         wt_id = (rec.get("raw") or {}).get("id")
         current, _error = screen._find_internal_worktree(wt_id, rec.get("source_id"))

@@ -619,12 +619,18 @@ visible but refuses automatic resubmission, avoiding a duplicate turn.
 A later explicitly supplied prompt replaces the pending intent; a stale
 handoff acknowledgement cannot discard that replacement.
 
-The engine's structured SSH launch-request boundary is separate from the
-Manager's local-native prompt composer. A caller sends a bounded structured
+Local and remote New/cold Resume use the same host-rendered prompt composer.
+For SSH targets the Manager requires the engine's negotiated native-seed
+launch-request boundary. A caller sends a bounded structured
 request to the target engine before opening its interactive SSH launch.
 The target daemon admits the request, allocates at most one New
 worktree, and stages the prompt in that target's worktree state. The launch then
-carries only the target worktree and seed identity. Arbitrary prompt text is
+carries only the target worktree and seed identity plus the native capability
+fence. Version-2 admission binds the saved Manager attempt ID to the target's
+durable receipt; the host verifies that echo before launching. Missing capability
+or mismatched identity fails visibly, never by retrying a weaker request.
+The attempt ID is audit correlation, not authority to replay an uncertain New.
+Arbitrary prompt text is
 encoded, not interpolated into the remote shell. Requests are limited to an
 7 KiB UTF-8 envelope, including JSON metadata, to stay within remote command
 limits after PowerShell's UTF-16LE/Base64 wrapping. Oversized envelopes or shell
@@ -643,7 +649,8 @@ ordinary seedless launches retain older-engine compatibility. The engine
 serializes native prompt staging and hosted-provider activation under the same
 worktree record lock. A provider that wins first refuses staging; a staged seed
 that wins first blocks provider activation until its native handoff finishes.
-The Manager's early execution-leg read is only a preflight, not that fence.
+The Manager's early local execution-leg read is only a preflight, not that fence;
+remote prompts rely on the selected target's authoritative checks.
 Accepted recovery history survives either refusal and does not itself reserve
 an execution leg. Uninstrumented legacy/custom
 prompt launchers refuse without consuming the seed; use normalized setup or

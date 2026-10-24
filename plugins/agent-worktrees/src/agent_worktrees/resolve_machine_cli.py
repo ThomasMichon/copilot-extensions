@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from machine_transport import default_shell_for_env_name as _default_shell_for_env_name
 from machine_transport import find_machine_entry
@@ -13,6 +14,50 @@ from machine_transport import wrap_remote_command as _wrap_remote_command  # noq
 
 from . import config as cfg
 from . import machine_identity, output
+
+if TYPE_CHECKING:
+    from .resolve_cli import ResolveCommandState
+
+
+def remote_selector_args(state: ResolveCommandState) -> list[str]:
+    if getattr(state.args, "require_native_seed", False) and not (
+        state.use_json and getattr(state.args, "seed", None)
+        and not getattr(state.args, "dry_run", False)
+    ):
+        raise ValueError("Remote --require-native-seed requires structured JSON prompt admission.")
+    if getattr(state.args, "owner_ref", None):
+        raise ValueError("Remote --owner-ref is unsupported; create owned worktrees on the target.")
+    if getattr(state.args, "copilot_args", None):
+        raise ValueError("Remote Copilot arguments are unsupported; pass them on the target.")
+    args = (
+        ["--base"] if state.use_base else ["--new"] if state.use_new else
+        ["--worktree-id", str(state.worktree_id)] if state.worktree_id else []
+    )
+    for name in ("bare_resume", "restore"):
+        if getattr(state.args, name, False):
+            args.append("--" + name.replace("_", "-"))
+    if getattr(state.args, "target_no_mux", False) or (
+        not state.use_json and getattr(state.args, "no_mux", False)
+    ):
+        args.append("--no-mux")
+    for name in (
+        "dry_run", "no_resume", "no_fast_forward", "recovery", "defer_projections",
+        "bridge", "defer_new_seed", "stage_launch_seed",
+    ):
+        if getattr(state.args, "seed", None) and name in ("defer_new_seed", "stage_launch_seed"):
+            continue  # Structured admission already guarantees queued seed staging.
+        if getattr(state.args, name, False):
+            args.append("--" + name.replace("_", "-"))
+    for name in ("profile", "parent_session", "caller_worktree", "native_resume_session"):
+        value = getattr(state.args, name, None)
+        if value is not None:
+            args.append("--" + name.replace("_", "-") + "=" + str(value))
+    args.append("--require-agent-hosting")
+    if getattr(state.args, "require_native_seed", False):
+        args.append("--require-native-seed")
+    if getattr(state.args, "launch_attempt_id", None) is not None:
+        args.append("--launch-attempt-id=" + state.args.launch_attempt_id)
+    return args
 
 
 def _core():

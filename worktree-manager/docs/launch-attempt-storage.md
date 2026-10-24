@@ -2,9 +2,11 @@
 
 `worktree_manager.launch_attempts.LaunchAttempts` is an internal, local evidence
 store. Current source wires Picker confirmation before effects and Manager-owned
-resolution/launcher observations. Engine/native outcome correlation, inspection
+resolution/launcher observations and negotiated remote prompted admission.
+Full engine/native outcome correlation, inspection
 commands and machine sweeps remain incomplete.
-This does not enable remote prompts or qualify an installed prompt-loss repair.
+Source-level remote New/cold Resume prompts require the negotiated target-native
+contract below; this does not qualify an installed prompt-loss repair.
 The implementation and remaining integration are
 tracked by the [launch-attempt effort](../../efforts/active/worktree-launch-attempt-journal/README.md).
 
@@ -20,8 +22,9 @@ and a structured `locality-unresolved` refusal. They neither exit nor start
 embodiment or launch. Opening an unavailable Resume prompt editor is not a
 confirmation and records nothing. A deferred continuation already carrying an
 attempt ID never creates a replacement intent.
-The attempt ID remains on the Manager decision and `LaunchRequest`; it is not
-yet an engine or native-receipt correlation contract.
+The attempt ID remains on the Manager decision and `LaunchRequest`. Remote
+prompted New/Resume also pass it through the engine to the selected target's
+durable admission. Local and seedless engine/native correlation remain incomplete.
 
 Confirmation immediately shows a saving modal. The existing Picker
 `Inbox`/background-worker mechanism performs private storage work off the
@@ -77,9 +80,28 @@ reports a sanitized error. After a launcher or embodiment has already
 returned, a failed outcome write warns without changing its actual result
 into a retry-shaped failure. Exceptions retain a bounded reason code and
 propagate through existing error handling, not into journal free text.
-No engine/native receipt is authenticated or manufactured by these Manager
-observations. Cross-process attempt-ID transport and target-owner correlation
-remain separate, incomplete work.
+These observations do not manufacture native-start or prompt-acceptance receipts.
+
+## Negotiated remote prompted admission
+
+Remote New and stopped Resume composers use the same confirmation gate, without
+reading a remote worktree's execution leg from host-local state. The selected
+target enforces its own native-provider and cold-start checks. AHP, live-session
+prompt injection, bare Resume and unsupported option combinations remain refused.
+
+For a nonempty remote prompt the engine client requires version-2 admission,
+the native-seed capability and an exact echo of the saved attempt ID. The target
+persists this correlation with its existing request/worktree/seed receipt.
+The host records those identities only after verification. The interactive SSH
+launch carries the target identities and native fence, not another prompt copy.
+An older receiver, missing capability or mismatched receipt has no weaker retry.
+The attempt ID does not become an idempotency key: the target's request ID remains
+the recovery authority. On an uncertain response, inspect that request on the
+target rather than confirming another New or automatically replaying.
+
+This binds remote prompted admission, not every local/seedless engine operation,
+Copilot process start or actual prompt handoff. Open behavior and the native
+handoff/duplicate-delivery fences are unchanged.
 
 ## API and durability
 

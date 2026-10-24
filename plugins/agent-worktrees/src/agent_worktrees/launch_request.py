@@ -23,6 +23,25 @@ from .worktree_naming import parse_session_worktree_id, session_worktree_id
 MAX_REQUEST_BYTES = 7 * 1024
 
 
+def _protocol_fields(value: dict) -> dict:
+    version = value.get("version", 1)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("Invalid launch request protocol")
+    if version == 1:
+        if "attempt_id" in value or "native_seed_required" in value:
+            raise ValueError("Legacy launch requests cannot claim native correlation")
+        return {"version": 1}
+    attempt_id = value.get("attempt_id")
+    if (
+        "attempt_id" not in value or value.get("native_seed_required") is not True
+        or (attempt_id is not None and (
+            not isinstance(attempt_id, str) or re.fullmatch(r"[0-9a-f]{32}", attempt_id) is None
+        ))
+    ):
+        raise ValueError("Invalid native launch request correlation")
+    return {"version": 2, "attempt_id": attempt_id, "native_seed_required": True}
+
+
 def decode(encoded: str) -> dict:
     if len(encoded) > MAX_REQUEST_BYTES * 2:
         raise ValueError("Launch request exceeds the transport limit")
@@ -40,9 +59,12 @@ def decode(encoded: str) -> dict:
             result[key] = value
         return result
     request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
+    if not isinstance(request, dict):
+        raise ValueError("Invalid launch request")
+    protocol = _protocol_fields(request)
+    fields = {"version", "request_id", "kind", "worktree_id", "text", "no_mux"} | set(protocol)
     if (
-        not isinstance(request, dict) or type(request.get("version")) is not int or request["version"] != 1
-        or set(request) != {"version", "request_id", "kind", "worktree_id", "text", "no_mux"}
+        set(request) != fields
         or not isinstance(request["request_id"], str)
         or re.fullmatch(r"[0-9a-f]{32}", request["request_id"]) is None
         or request["kind"] not in ("new", "resume")
@@ -72,7 +94,6 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
     }
     if (
         not isinstance(receipt, dict) or not required.issubset(receipt)
-        or type(receipt["version"]) is not int or receipt["version"] != 1
         or receipt["request_id"] != request_id or receipt["seed_id"] != request_id
         or not isinstance(receipt["suffix"], str)
         or (
@@ -91,6 +112,7 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
         )
     ):
         raise ValueError("Invalid stored launch admission")
+    _protocol_fields(receipt)
     wid = receipt["worktree_id"]
     if (
         not isinstance(wid, str) or not wid or "\0" in wid
@@ -132,7 +154,8 @@ def _read_admission(directory: Path, request_id: str) -> dict:
 
 def _require_replay_identity(receipt: dict, args: dict) -> None:
     if (
-        receipt["fingerprint"] != args["fingerprint"]
+        _protocol_fields(receipt) != _protocol_fields(args)
+        or receipt["fingerprint"] != args["fingerprint"]
         or receipt["kind"] != args["kind"]
         or (args["kind"] == "resume" and receipt["worktree_id"] != args["worktree_id"])
     ):
@@ -153,6 +176,7 @@ def _require_complete_record(receipt: dict, record: tracking.WorktreeRecord) -> 
 def _apply_admit(args: dict) -> dict:
     from . import agent_policy
 
+    protocol = _protocol_fields(args)
     if args["kind"] == "resume":
         target = tracking.load_record(
             Path(args["tracking_dir"]) / f"{args['worktree_id']}.yaml"
@@ -172,7 +196,7 @@ def _apply_admit(args: dict) -> dict:
             receipt = _read_admission(directory, args["request_id"])
         except FileNotFoundError:
             receipt = {
-                "version": 1, "request_id": args["request_id"],
+                **protocol, "request_id": args["request_id"],
                 "fingerprint": args["fingerprint"], "kind": args["kind"],
                 "worktree_id": args["worktree_id"], "timestamp": args["timestamp"],
                 "suffix": args.get("suffix", args["request_id"]), "seed_id": args["request_id"],
@@ -241,6 +265,7 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
         json.dumps(request, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     admission_args = {
+        **_protocol_fields(request),
         "project": config.repo_name,
         "tracking_dir": str(directory), "request_id": request_id,
         "fingerprint": fingerprint, "kind": request["kind"],
@@ -317,7 +342,7 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
             "fingerprint": fingerprint, "text": request["text"],
         })
         return {
-            "version": 1, "request_id": request_id, "worktree_id": wid,
+            **_protocol_fields(receipt), "request_id": request_id, "worktree_id": wid,
             "seed_id": request_id, "seed_kind": request["kind"],
         }
 
@@ -418,7 +443,7 @@ def cmd_request(args) -> int:
     try:
         protocol_options = {
             "command", "json", "launch_request_b64", "launch_request_status",
-            "require_agent_hosting",
+            "require_agent_hosting", "require_native_seed",
         }
         if not args.json or any(
             value is not None and value is not False and value != []
@@ -430,6 +455,8 @@ def cmd_request(args) -> int:
         if admission_present == status_present:
             raise ValueError("Specify admission or status, not both")
         if status_present:
+            if getattr(args, "require_native_seed", False):
+                raise ValueError("Native seed capability requires a launch request envelope")
             if not args.launch_request_status:
                 raise ValueError("Launch request identity must not be empty")
             request_id = args.launch_request_status
@@ -439,6 +466,8 @@ def cmd_request(args) -> int:
             raise ValueError("Launch request envelope must not be empty")
         request = decode(args.launch_request_b64)
         request_id = request["request_id"]
+        if bool(getattr(args, "require_native_seed", False)) != (request["version"] == 2):
+            raise ValueError("Native seed capability and launch request protocol must agree")
         config = cfg.load_config()
         # Creation helpers have human-readable output; stdout is this protocol only.
         with contextlib.redirect_stdout(sys.stderr):
@@ -467,7 +496,7 @@ def inspect(request_id: str) -> dict:
         and seed.seed_id == receipt["seed_id"] and seed.kind == receipt["kind"]
     )
     return {
-        "version": 1, "request_id": request_id, "worktree_id": receipt["worktree_id"],
+        **_protocol_fields(receipt), "request_id": request_id, "worktree_id": receipt["worktree_id"],
         "seed_id": receipt["seed_id"], "seed_kind": receipt["kind"],
         "ready": available and not seed.handoff_id,
         "state": (
@@ -481,7 +510,7 @@ def inspect(request_id: str) -> dict:
 
 def _dispatch(verb: str, args: dict) -> dict:
     result = launch_seed_state._dispatch(
-        verb, args, min_version=7,
+        verb, args, min_version=8,
     )
     if result.get("error"):
         raise ValueError(result["error"])
@@ -498,7 +527,7 @@ def _guard(handler):
     return apply
 
 
-tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=7)
-tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=7)
-tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=7)
-tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=7)
+tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=8)
+tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=8)
+tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=8)
+tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=8)
