@@ -10,7 +10,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** source-only intent and implementation PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; enforcement merged, source marker review and release/adoption open
+- **Status:** Active; enforcement and source marker merged; release blocked, adoption gated
 - **Vision:** extends [agent-worktrees](../../../visions/plugins/agent-worktrees/README.md)
   repository identity/contribution posture and
   [agent-bridge](../../../visions/plugins/agent-bridge/README.md)
@@ -59,8 +59,8 @@ vendor CLI.
 The current machine-local `projects.yaml` field `expose_agent` filters Bridge
 discovery; `repos.yaml` uses `agent` when projecting local exposure into project
 registration. These are not already a repository-owned, consistently enforced
-hosting veto. The reviewed implementation adds that contract; the source marker, release and
-running adopter enforcement remain separate gates.
+hosting veto. The reviewed implementation and repository marker add that
+contract; release and running adopter enforcement remain separate gates.
 
 Use the existing repository configuration and resolution rules documented in
 [configuration](../../../docs/configuration.md#in-repo-committed), including
@@ -160,8 +160,9 @@ _Agent-recommended follow-through; live changes require separate authorization._
 
 - [x] Add the source-only repository's explicit denial after generic enforcement
   and source-operation compatibility are qualified. Do not add an inert marker
-  and claim that hosting is already prevented. Keep this repository worktree-class
-  related only, with no advertised agent; preserve existing state until any
+  and claim that installed hosting is already prevented.
+- [ ] Complete the worktree-class, related-only posture with no advertised agent
+  on authorized adopters. Preserve existing registrations and other state until
   necessary reconciliation is explicitly approved.
 - [x] Provide a supported preview/reconciliation path for conflicting existing
   project registrations. Preserve sessions, history, tracking and claims; no
@@ -169,6 +170,11 @@ _Agent-recommended follow-through; live changes require separate authorization._
 - [ ] Update authoritative configuration, adoption and launch documentation;
   publish through the normal release flow and validate authorized adoption.
   Keep release, installation and actual enforced behavior distinct.
+
+Release is blocked by the existing coverage-packet defect tracked in #8500 and
+#8516. The existing fix #8508 and its governed Main helper adoption retain their
+release owner; this effort does not fork that fix, widen its evidence cap, retry
+past the gate or claim that a merged source change is installed.
 
 ## Validation Plan
 
@@ -187,7 +193,7 @@ _Agent-recommended proofs; record results as implementation proceeds._
   session/process/mux creation or seed submission for each inventoried managed
   entry point. Test caller and receiver boundaries, including remote/provider
   routing and unsupported enforcing receivers.
-- [ ] Prove source worktree allocation, edits, bounded tests, PR creation and
+- [x] Prove source worktree allocation, edits, bounded tests, PR creation and
   completion remain usable under an external harness; externally hosted
   Copilot Code Review remains usable. Agent/review files confer no hosting
   permission and a generic review-purpose parameter cannot bypass denial.
@@ -204,7 +210,7 @@ _Agent-recommended proofs; record results as implementation proceeds._
 
 ## Proposal
 
-Qualified candidate configuration; **not yet released or installed**:
+Merged repository configuration; **not yet released or installed**:
 
 ```yaml
 expose_agent: false
@@ -452,3 +458,22 @@ daemon or separately resolved Worktrees owner has upgraded.
   without recapture because no runtime producer changed. The marker's own
   external-harness contribution and review remain the next acceptance witness;
   the older clean room already proves real source allocation under denial.
+- Source marker #8520 merged at `8647ec5cd5` after current-head Copilot approval
+  with no findings and green required CI. Its source edits, bounded tests,
+  managed publication, externally hosted review and normal merge all ran under
+  the actual denial marker from an external harness. Five additional
+  actual-checkout marker cases pass on native Windows with verified cleanup.
+- Read-only adopter previews remain previews: existing registered anchor
+  checkouts can still lack the new marker, so eligibility there is not proof
+  of installed enforcement. Existing registrations, visibility settings,
+  sessions and custody remain unchanged pending release and explicit adoption.
+- Natural promotion run
+  [40075117367](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40075117367)
+  executed the merged implementation source. All 1,414 admitted units passed
+  in 31.37 seconds, but packet admission refused `coverage.json` at 66,304,392
+  bytes against the unchanged 16,777,216-byte cap. The only failed job was
+  source-unit evidence; downstream qualification/publication was skipped.
+  This matches existing #8500/#8516 and active fix #8508. Attached the current
+  evidence to that owner rather than creating a competing fix or bypassing
+  the cap. Release, installed enforcement and approved catalog reconciliation
+  remain unresolved completion gates.
