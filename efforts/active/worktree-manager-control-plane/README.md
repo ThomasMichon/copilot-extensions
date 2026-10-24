@@ -2093,6 +2093,15 @@ claiming discipline alone.
   its Phase 5 binding is released back to this canonical effort for a separately
   claimed continuation. No rollout, service or pool activation is claimed.
 
+- **2026-10-20** - Explicit exact-original survivor inspection merged in
+  [#7358](https://github.com/ThomasMichon/copilot-extensions/pull/7358) after
+  genuine exact-head approval, no open findings and required green checks.
+  Re-read the [focused recovery gate](machine-restart-recovery.md); it remains
+  active. Next is the owner-mediated pending-seed/acknowledgement seam for
+  safe survivor reuse, not automatic attachment or prompt injection.
+  Actual native qualification, task/profile policy and platform
+  startup/enrollment remain open; no fixture or live rollout is implied.
+
 - **2026-10-20** - Implemented explicit exact-original survivor inspection in
   the owner and Manager for the [focused recovery slice](machine-restart-recovery.md).
   Fresh hosting remains distinct from launch/seed receipts; no adoption,
