@@ -707,14 +707,16 @@ class RegisteredPivotRuntime:
         if not argv:
             return ("error", [], "empty list command", {})
         try:
-            argv = (
-                picker_review.list_command(self.pivot, argv) if picker_review.active()
-                else _resolve_command(argv)
-            )
+            environment = _child_process_env()
+            if picker_review.active():
+                argv, binding = picker_review.list_command(self.pivot, argv)
+                environment.update(binding)
+            else:
+                argv = _resolve_command(argv)
             execute = picker_review.run_read if picker_review.active() else subprocess.run
             proc = execute(
                 argv, capture_output=True, text=True, timeout=LIST_TIMEOUT,
-                check=False, env=_child_process_env(), creationflags=no_window_flags(),
+                check=False, env=environment, creationflags=no_window_flags(),
             )
         except FileNotFoundError:
             return ("error", [], f"{argv[0]} not found on PATH", {})

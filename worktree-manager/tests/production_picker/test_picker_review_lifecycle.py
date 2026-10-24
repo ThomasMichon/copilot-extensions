@@ -21,19 +21,20 @@ from worktree_manager.production_picker import engine_group_b
 from worktree_manager.production_picker.picker_tui import tasks
 
 
-def test_source_launcher_uses_normal_shutdown_workaround(monkeypatch):
+@pytest.mark.parametrize("candidate", [["--candidate", "test"], ["--candidate=test"]])
+def test_source_launcher_uses_normal_shutdown_workaround(monkeypatch, candidate):
     from worktree_manager import _shutdown_exit, picker_review_cli
 
     calls = []
     script = Path(__file__).resolve().parents[2] / "scripts" / "picker-review.py"
     monkeypatch.setattr(sys, "dont_write_bytecode", sys.dont_write_bytecode)
     monkeypatch.setattr(sys, "path", list(sys.path))
-    monkeypatch.setattr(sys, "argv", [str(script), "example", "--candidate", "test"])
+    monkeypatch.setattr(sys, "argv", [str(script), "example", *candidate])
     monkeypatch.setattr(picker_review_cli, "main", lambda args: calls.append(("main", args)) or 0)
     monkeypatch.setattr(_shutdown_exit, "run_and_exit",
                         lambda main: calls.append(("exit", main())))
     runpy.run_path(str(script), run_name="__main__")
-    assert calls == [("main", ["example", "--candidate", "test"]), ("exit", 0)]
+    assert calls == [("main", ["example", *candidate]), ("exit", 0)]
 
 
 @pytest.mark.parametrize("kind", ["bootstrap", "catalog"])
@@ -54,8 +55,10 @@ def test_teardown_cancels_and_drains_real_read_descendants(tmp_path, monkeypatch
     monkeypatch.setattr(picker_review, "_review", None)
     monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_slot",
                         lambda plugin: tmp_path / "owner" / "versions" / "test")
-    monkeypatch.setattr(engine_client, "installed_engine_command", lambda: command)
-    monkeypatch.setattr(picker_review, "list_command", lambda *args: command)
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation",
+                        lambda plugin: (command, tmp_path / "owner"))
+    monkeypatch.setattr(picker_review, "list_command",
+                        lambda *args: (command, {"AGENT_DISPATCH_INSTALL_DIR": str(tmp_path / "owner")}))
     results = []
 
     def read():
@@ -91,7 +94,7 @@ def test_teardown_cancels_and_drains_real_read_descendants(tmp_path, monkeypatch
 
 def test_posix_stderr_survives_owned_transport_and_legacy_bootstrap_fallback(tmp_path, monkeypatch):
     monkeypatch.setattr(picker_review, "_review", picker_review.Review(
-        tmp_path / "ui", tmp_path / "owner", "posix-transport",
+        tmp_path / "ui", tmp_path / "owner", "posix-transport", ("installed-engine",),
     ))
     monkeypatch.setattr(engine_process, "_WINDOWS", False)
     monkeypatch.setattr(engine_process, "contained_test_mode", lambda: False)
@@ -127,3 +130,41 @@ def test_posix_stderr_survives_owned_transport_and_legacy_bootstrap_fallback(tmp
         ["installed-engine", "--project", "example", "picker-bootstrap", "--json", "--project-config"],
         ["installed-engine", "--project", "example", "picker-bootstrap", "--json"],
     ]
+
+
+@pytest.mark.parametrize("inherited_override", [False, True])
+def test_catalog_consumer_reads_selected_nondefault_root(tmp_path, monkeypatch, inherited_override):
+    module = (
+        Path(__file__).resolve().parents[3] / "plugins" / "agent-dispatch" / "src"
+        / "agent_dispatch" / "install_paths.py"
+    )
+    selected = tmp_path / "selected-owner"
+    selected.mkdir()
+    (selected / "catalog.json").write_text('[{"id":"selected"}]', encoding="utf-8")
+    legacy = Path.home() / ".agent-dispatch"
+    legacy.mkdir(exist_ok=True)
+    (legacy / "catalog.json").write_text('[{"id":"wrong"}]', encoding="utf-8")
+    if inherited_override:
+        monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(legacy))
+    else:
+        monkeypatch.delenv("AGENT_DISPATCH_INSTALL_DIR", raising=False)
+    previous = os.environ.get("AGENT_DISPATCH_INSTALL_DIR")
+    script = (
+        "import importlib.util\n"
+        f"s=importlib.util.spec_from_file_location('owner_paths',{str(module)!r})\n"
+        "m=importlib.util.module_from_spec(s);s.loader.exec_module(m)\n"
+        "print((m.install_dir()/'catalog.json').read_text())\n"
+    )
+    command = [sys.executable, "-c", script]
+    monkeypatch.setattr(picker_review, "_review", picker_review.Review(
+        tmp_path / "ui", tmp_path / "worktrees", "state-root-test", ("unused",),
+    ))
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation",
+                        lambda plugin: (command, selected))
+    runtime = tasks.RegisteredPivotRuntime(type("Pivot", (), {
+        "list_cmd": ["agent-dispatch", "workers", "catalog"],
+        "source_owner": "agent-dispatch@example", "stream": False,
+    })())
+    state, rows, error, _summary = runtime._exec_list({})
+    assert (state, rows, error) == ("ready", [{"id": "selected"}], "")
+    assert os.environ.get("AGENT_DISPATCH_INSTALL_DIR") == previous

@@ -55,7 +55,10 @@ This initial lane is **local-only**. Profiles reads the local saved column;
 remote columns remain unavailable. Plugin contributions are discovered without
 materializing registry pointers. The qualified Workers catalog uses the
 complete installed Dispatch runtime with coordinator autostart disabled, not
-its self-provisioning payload shim. Other contributed reads and streaming
+its self-provisioning payload shim. Its command and state root come from the
+same selection and are bound in that call's environment, never by changing
+the parent process environment. The Worktrees command is retained with its
+owner root for the review session. Other contributed reads and streaming
 providers show an explicit unqualified/unavailable error rather than running
 arbitrary declared commands. Missing or outdated owners remain unavailable;
 the candidate does not repair them or fabricate a healthy empty result.

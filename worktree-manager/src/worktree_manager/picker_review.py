@@ -48,6 +48,7 @@ class Review:
     state_dir: Path
     owner_root: Path
     candidate: str
+    engine: tuple[str, ...]
     reads: _Reads = field(default_factory=_Reads)
 
 
@@ -72,7 +73,7 @@ def require_writable() -> None:
 def engine_command(args: list[str], ordinary):
     if not active():
         return ordinary()
-    from .engine_client import EngineError, installed_engine_command
+    from .engine_client import EngineError
 
     if args not in (
         ["picker-bootstrap", "--json", "--project-config"],
@@ -80,7 +81,7 @@ def engine_command(args: list[str], ordinary):
         ["picker-paths", "--json"],
     ):
         raise EngineError(MESSAGE)
-    return installed_engine_command()
+    return list(current().engine)
 
 
 def run_read(argv, **kwargs):
@@ -110,12 +111,13 @@ def session(candidate: str):
         raise RuntimeError("Picker review requires a fresh process")
     from . import agent_plugin_runtime
 
-    slot = agent_plugin_runtime.resolve_installed_plugin_slot("agent-worktrees")
-    if slot is None:
+    invocation = agent_plugin_runtime.resolve_installed_plugin_invocation("agent-worktrees")
+    if invocation is None:
         raise ReadOnlyError("Read-only candidate: installed Worktrees owner is unavailable; no provisioning attempted.")
+    command, owner_root = invocation
     prefix = "worktree-manager-review-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-")
     with tempfile.TemporaryDirectory(prefix=prefix) as directory:
-        _review = Review(Path(directory), slot.parent.parent, candidate)
+        _review = Review(Path(directory), owner_root, candidate, tuple(command))
         try:
             yield _review
         finally:
@@ -165,7 +167,7 @@ def worktree_rows(project: str, *, worktree_id: str | None = None) -> list[dict]
     raise FeedUnavailable("Read-only candidate: owner feed closed before publication")
 
 
-def list_command(pivot, argv: list[str]) -> list[str]:
+def list_command(pivot, argv: list[str]) -> tuple[list[str], dict[str, str]]:
     """Only qualified, non-provisioning contributed reads are admitted."""
     from . import agent_plugin_runtime
 
@@ -188,7 +190,8 @@ def list_command(pivot, argv: list[str]) -> list[str]:
             raise ReadOnlyError("Read-only candidate: unsupported catalog read arguments.")
         seen.add(remaining[0])
         remaining = remaining[2:]
-    command = agent_plugin_runtime.resolve_installed_plugin_command("agent-dispatch")
-    if command is None:
+    invocation = agent_plugin_runtime.resolve_installed_plugin_invocation("agent-dispatch")
+    if invocation is None:
         raise ReadOnlyError("Read-only candidate: installed Dispatch owner is unavailable.")
-    return [*command, *args]
+    command, owner_root = invocation
+    return [*command, *args], {"AGENT_DISPATCH_INSTALL_DIR": str(owner_root)}

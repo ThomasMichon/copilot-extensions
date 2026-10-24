@@ -105,7 +105,7 @@ def test_review_reads_real_socket_snapshot_and_closes(tmp_path, monkeypatch):
     from worktree_manager import picker_review
 
     monkeypatch.setattr(picker_review, "_review", picker_review.Review(
-        tmp_path / "candidate", tmp_path, "native-test",
+        tmp_path / "candidate", tmp_path, "native-test", ("unused",),
     ))
     with server(tmp_path, values=transactions()[:3]) as (requests, _, _):
         rows = picker_review.worktree_rows("sample")

@@ -88,6 +88,12 @@ fallback through the POSIX owned adapter. The Windows packet passed 157 tests
 with three native POSIX skips. A separate native Linux adapter check preserved
 340,000 stderr bytes without pipe deadlock and cancelled/drained an active
 read with its grandchild heartbeat stopped and temporary state removed.
+Additional review controls preserve equals-form candidate labels, refuse both
+bulk maintenance confirmations before any mock progress is created, and bind a
+catalog command and its selected state root atomically. Real child reads using
+the provider's own path resolver select the non-default root both without an
+inherited override and with a conflicting override; the parent environment is
+unchanged.
 
 This developer mode does not change installation/bootstrap, so a fresh-machine
 installation lane is not applicable; absent-owner refusal is tested instead.

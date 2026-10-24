@@ -13,7 +13,7 @@ from worktree_manager._shutdown_exit import run_and_exit  # noqa: E402
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if "--candidate" not in args:
+    if not any(value == "--candidate" or value.startswith("--candidate=") for value in args):
         source = Path(__file__).resolve().parents[1] / "src" / "worktree_manager"
         digest = hashlib.sha256()
         for path in sorted(source.rglob("*.py")):

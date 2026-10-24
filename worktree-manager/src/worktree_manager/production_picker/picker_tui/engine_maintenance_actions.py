@@ -17,6 +17,8 @@ class PickerScreenMaintenanceActionsMixin:
     def _confirm_cleanup(self, dlg):
         """Confirmed Clean/Sync scope -> build (and, when armed, start) the
         per-worktree maintenance progress run (#88 F4)."""
+        if picker_review.refuse(self):
+            return
         picked = [o["label"] for o in dlg["opts"] if o["on"]]
         verb = dlg.get("verb", "Clean up")
         op = "sync" if verb.lower().startswith("sync") else "cleanup"

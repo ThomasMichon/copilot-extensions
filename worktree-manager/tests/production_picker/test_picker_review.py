@@ -17,7 +17,10 @@ from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
 @pytest.fixture
 def review(monkeypatch, tmp_path):
-    value = picker_review.Review(tmp_path / "candidate", tmp_path / "owner", "candidate-123")
+    value = picker_review.Review(
+        tmp_path / "candidate", tmp_path / "owner", "candidate-123",
+        ("installed-python", "-m", "agent_worktrees"),
+    )
     monkeypatch.setattr(picker_review, "_review", value)
     return value
 
@@ -48,8 +51,7 @@ def test_passthroughs_cannot_bypass_refusal(review, monkeypatch):
 
 def test_only_bootstrap_read_uses_complete_installed_engine(review, monkeypatch):
     monkeypatch.setattr(engine_client, "engine_base_command", forbidden)
-    monkeypatch.setattr(engine_client, "installed_engine_command",
-                        lambda: ["installed-python", "-m", "agent_worktrees"])
+    monkeypatch.setattr(engine_client, "installed_engine_command", forbidden)
     seen = []
 
     def run(argv, timeout):
@@ -99,12 +101,13 @@ def test_unqualified_list_and_dynamic_options_cannot_spawn(review, monkeypatch):
 
 def test_catalog_uses_complete_installed_owner_not_payload_shim(review, monkeypatch):
     pivot = SimpleNamespace(source_owner="agent-dispatch@example", stream=False)
-    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_command",
-                        lambda plugin: ["installed-python", "-m", "agent_dispatch"])
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation",
+                        lambda plugin: (["installed-python", "-m", "agent_dispatch"], review.owner_root))
     argv = ["agent-dispatch", "workers", "catalog", "--repo", "example"]
-    assert picker_review.list_command(pivot, argv) == [
-        "installed-python", "-m", "agent_dispatch", *argv[1:],
-    ]
+    assert picker_review.list_command(pivot, argv) == (
+        ["installed-python", "-m", "agent_dispatch", *argv[1:]],
+        {"AGENT_DISPATCH_INSTALL_DIR": str(review.owner_root)},
+    )
     assert tasks._child_process_env()["AGENT_DISPATCH_NO_AUTOSTART"] == "1"
     for tail in (["--activate"], ["--repo", "example", "--repo", "other"], ["--toggle", "enable"]):
         with pytest.raises(picker_review.ReadOnlyError):
@@ -118,7 +121,9 @@ def test_qualified_catalog_uses_bounded_descendant_owner(review, monkeypatch):
         source_owner="agent-dispatch@example", stream=False,
         list_cmd=["agent-dispatch", "workers", "catalog"],
     )
-    monkeypatch.setattr(picker_review, "list_command", lambda *a: ["installed", "catalog"])
+    monkeypatch.setattr(picker_review, "list_command", lambda *a: (
+        ["installed", "catalog"], {"AGENT_DISPATCH_INSTALL_DIR": str(review.owner_root)},
+    ))
     monkeypatch.setattr(tasks, "_resolve_command", forbidden)
     seen = []
     monkeypatch.setattr(engine_process, "run", lambda argv, **kw: (
@@ -181,7 +186,7 @@ def test_drafts_and_diagnostics_cannot_use_live_paths(review, monkeypatch, tmp_p
 def test_session_cleans_state_and_retains_late_callback_fence(monkeypatch, tmp_path):
     monkeypatch.setattr(picker_review, "_review", None)
     slot = tmp_path / "owner" / "versions" / "1"
-    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_slot", lambda plugin: slot)
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_slot", lambda plugin, **kw: slot)
     with picker_review.session("test") as state:
         (state.state_dir / "draft").write_text("private test draft", encoding="utf-8")
         assert state.owner_root == slot.parent.parent
@@ -196,7 +201,7 @@ def test_session_cleans_state_and_retains_late_callback_fence(monkeypatch, tmp_p
 
 def test_unavailable_owner_never_provisions(monkeypatch):
     monkeypatch.setattr(picker_review, "_review", None)
-    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_slot", lambda plugin: None)
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_slot", lambda plugin, **kw: None)
     with pytest.raises(picker_review.ReadOnlyError, match="no provisioning"):
         with picker_review.session("missing"):
             forbidden()
@@ -258,6 +263,23 @@ def test_normal_actions_keep_existing_behavior(monkeypatch):
     runtime = tasks.RegisteredPivotRuntime(SimpleNamespace())
     assert runtime.run_resolved(["ordinary", "action"]) == (True, "done")
     assert seen == [["ordinary", "action"]]
+
+
+@pytest.mark.parametrize("verb", ["Clean up", "Sync"])
+def test_bulk_confirmation_refuses_before_creating_mock_progress(review, verb):
+    from worktree_manager.production_picker.picker_tui.engine_maintenance_actions import (
+        PickerScreenMaintenanceActionsMixin,
+    )
+
+    screen = SimpleNamespace(
+        progress=None, executor=None, debug="", refresh=lambda: None,
+        _scope_union=forbidden, _start_progress=forbidden, _open_progress=forbidden,
+    )
+    PickerScreenMaintenanceActionsMixin._confirm_cleanup(screen, {
+        "verb": verb, "scope": "All", "opts": [{"label": "All eligible", "on": True}],
+    })
+    assert screen.progress is None and screen.executor is None
+    assert screen.debug == picker_review.MESSAGE
 
 
 def test_cli_discards_launch_result_instead_of_dispatching(review, monkeypatch):
