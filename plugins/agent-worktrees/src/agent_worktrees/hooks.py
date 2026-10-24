@@ -17,9 +17,10 @@ Hooks fire only when ``AGENT_WORKTREES_HOOKS=1`` is set in the environment;
 the shim short-circuits otherwise, so recovery mode (slim environment) and
 external git operations are inert by default.
 
-All logic lives here in Python -- the installed shims are one-liners that
-delegate to ``agent-worktrees hook <name>``, so behavior updates with the
-plugin and never needs a hook reinstall.
+Guard decisions live here in Python. The shim skips runtime startup for the
+existing authorized pre-push no-op, while always chaining local hooks.
+Normal hook installation refreshes managed shims; a payload update alone
+does not prove that an existing shim has been refreshed.
 """
 
 from __future__ import annotations
@@ -43,7 +44,9 @@ _SHIM_TEMPLATE = (
     "#!/bin/sh\n"
     "# agent-worktrees PR-workflow hook shim -- managed; do not edit.\n"
     'if [ "$AGENT_WORKTREES_HOOKS" = "1" ]; then\n'
-    '  agent-worktrees hook {name} "$@" || exit $?\n'
+    '  if [ "{name}" != "pre-push" ] || [ "$AGENT_WORKTREES_PR_PUSH" != "1" ]; then\n'
+    '    agent-worktrees hook {name} "$@" || exit $?\n'
+    "  fi\n"
     "fi\n"
     'if [ -x "$(dirname "$0")/{name}.local" ]; then\n'
     '  exec "$(dirname "$0")/{name}.local" "$@"\n'

@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid redundant runtime startup for already-authorized pre-push hooks while preserving local hook chaining and guard refusals.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
