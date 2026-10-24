@@ -29,7 +29,7 @@ startup. An already-current incomplete custody layout refuses instead of
 silently recreating potentially missing closure state. These checks do not
 qualify complete custody or retained-target compatibility.
 
-Actual `create_session` and `create_turn` writes accept an optional retained
+Actual `create_session`, `create_turn` and live-message insertion writes accept an optional retained
 producer association. SQLite checks it against the open installation/epoch and
 enrolled frontend in the same insertion transaction. The ordered insertion
 trigger also refuses unassociated legacy inserts after explicit DB closure.
@@ -41,11 +41,52 @@ does not reopen it. There is no handback or reopening API in this foundation.
 Queued-prompt consumption and turn creation retain their existing atomic
 transaction. Refused admission rolls back queue consumption. Native keyed
 invocation identity/replay continues to use the existing turn journal.
-Association is immutable; associated session/turn history is protected from
+Association is immutable; associated session/turn/inbox history is protected from
 deletion and GC until its actual outcome can be reconciled by a future owner.
 Terminal status or a completed turn alone cannot establish native settlement.
 Ordinary unassociated writes/deletion remain unchanged while admission is open
 or the installation has never been bound.
+
+## Internal inbox handoff owner
+
+Schema 30 adds custody fields to the existing `live_messages` rows. The writable
+migration prepares the fields and exact guards before publishing the version.
+Read-only preparation, existing-only writable adoption and an already-current
+writable open reject missing/changed inbox fields or guards instead of repairing
+away possible handoff history. Migrated legacy rows retain null associations;
+they do not acquire evidence that an earlier poll returned no body.
+
+`poll_live_message_handoffs` requires the original installation/producer
+admission and exact native-session, consumer-incarnation and process-birth
+observations. In one short DB transaction it retains a single immutable handoff
+on each original message before returning its body. An unassociated/foreign
+message or consumer refuses the whole batch. Repeated polls observe the original
+attempt and outcome; they never renew send permission.
+
+`begin_live_message_handoff` is the DB owner's one-shot final-admission primitive.
+It rechecks the open epoch, enrolled frontend and exact live registration, then
+commits the original attempt's outstanding state. Alias resolution, another
+consumer incarnation and an expired/missing registration cannot supply that
+authority. A second call is not admitted, including after restart or a lost
+first reply. The interval after this DB commit and any future SDK call remains
+outstanding custody, not proof of send or non-delivery.
+
+`record_live_message_handoff` can record the original SDK acceptance, attributed
+consumption or unknown outcome after closure or registration cleanup. Acceptance
+and consumption retain separate timestamps; neither certifies semantic
+completion. An unknown attempt cannot return to an offered state. Handoff
+identity/input and recorded timestamps cannot be erased to mint a retry.
+Legacy poll/ACK/consumption methods do not send or settle retained handoffs.
+Registration deregistration, takeover and reaping preserve associated inbox
+history even when the registration itself goes away.
+
+These are internal owner methods, **not consumer authentication or an SDK
+integration**. A future transport must authenticate/enroll the actual consumer,
+negotiate the handoff contract, bind its current native context and call the
+final primitive at its actual SDK boundary. It must not cache a true result as
+reusable permission, interpret false/timeout as non-delivery, downgrade to legacy
+delivery, or rebuild an independent outbox. No public route, ordinary extension
+poller, startup or installer currently activates these methods.
 
 ## Inventory is observation, not qualification
 
@@ -56,8 +97,8 @@ truncate terminal rows or create missing lazy tables. A missing table/field is
 reported as unknown (`None`), not an empty list; unknown tables and unassociated
 history are explicit blockers.
 
-The DB revision covers session/turn writes, producer enrollment and the epoch
-only. It is not a cross-owner revision for acquisition, SDK consumers, native
+The DB revision covers session/turn/inbox writes, producer enrollment and the epoch
+only. It is not a cross-owner revision for acquisition, actual SDK consumers, native
 hosts or arbitrary SQLite writers. An expected-epoch/revision read detects
 intervening covered-owner writes but is not a global quiescence certificate.
 The report explicitly identifies unmediated cohorts and sets
@@ -81,7 +122,7 @@ host admission epochs or verified native host receipts; they always retain
 Final acquisition/start/resume/background admission, SDK poll/send/ACK custody,
 native-send settlement, host/remote enrollment, cross-owner revision closure,
 target-declared state compatibility and continuing installer retention remain
-unimplemented. No existing drain, SDK consumer or installer path is switched to
+unimplemented beyond the internal inbox primitives above. No existing drain, SDK consumer or installer path is switched to
 this foundation. No Dispatch database or adopter effect owner is involved.
 
 The focused tests cover real SQLite serial ordering, queue rollback, original

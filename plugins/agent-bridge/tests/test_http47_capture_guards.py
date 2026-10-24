@@ -43,7 +43,7 @@ def test_http47_registry_encoding_is_lossless_and_bounded() -> None:
     compact = evidence.encode(registry, indent=None)
     assert json.loads(compact) == registry
     assert len(compact) <= 1024 * 1024
-    assert len(compact) < len(evidence.encode(registry))
+    assert len(compact) < len(evidence.encode(registry, indent=1))
 
 
 @pytest.fixture(scope="module")

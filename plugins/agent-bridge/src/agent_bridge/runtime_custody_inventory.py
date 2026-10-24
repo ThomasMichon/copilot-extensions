@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 from .runtime_custody import RuntimeCustodyError
+from .inbox_custody import decode_handoff
 
 
 COHORTS = {
@@ -20,7 +21,8 @@ COHORTS = {
     "acquisition_launch_gates": ("worktree_id", "delivery_id", "mode", "session_id"),
     "pending_prompts": ("id", "session_id"),
     "live_sessions": ("session_id", "pid", "process_started_at", "status"),
-    "live_messages": ("id", "session_id", "kind", "claimed_at", "outcome", "delivered_at", "consumed_at"),
+    "live_messages": ("id", "session_id", "kind", "claimed_at", "outcome", "delivered_at", "consumed_at",
+                      "runtime_custody_json", "handoff_json", "handoff_started_at"),
     "cli_mode_reservations": ("worktree_id", "reservation_id", "claimed_by_session_id"),
     "worktree_ownership": ("worktree_id", "session_id"),
     "remote_acp_relationships": ("id", "session_id", "phase", "uncertain"),
@@ -79,9 +81,13 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
             f"SELECT {','.join(columns)} FROM {table} ORDER BY {','.join(columns[:2])}"
         )]
         rows_by_table[table] = rows
-        if table in ("sessions", "turns"):
+        if table in ("sessions", "turns", "live_messages"):
             for row in rows:
                 association = row["runtime_custody_json"]
+                if table == "live_messages" and row["handoff_json"] is not None:
+                    handoff = decode_handoff(row["handoff_json"])
+                    if handoff["message_id"] != row["id"] or handoff["admission"] != association:
+                        raise RuntimeCustodyError("Inbox handoff disagrees with its original admission")
                 if association is None:
                     blockers.append(f"unassociated:{table}:{row[columns[0]]}")
                     continue
@@ -107,9 +113,9 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
     blockers.extend(f"missing-or-legacy-table:{name}" for name in sorted(set(missing)))
     blockers.extend(f"unknown-table:{name}" for name in unknown)
     return {
-        "version": 1, "coverage": "bridge-db-session-turn-foundation-v1",
+        "version": 1, "coverage": "bridge-db-session-turn-inbox-foundation-v1",
         "epoch": epoch, "producers": producers, "rows": rows_by_table,
-        "revision_coverage": ["sessions", "turns", "producer-enrollment", "epoch"],
+        "revision_coverage": ["sessions", "turns", "live_messages", "producer-enrollment", "epoch"],
         "storage_inventory_complete": not missing and not unknown,
         "unmediated_cohorts": list(UNMEDIATED), "blockers": blockers,
         "restore_qualified": False, "acknowledged": False,

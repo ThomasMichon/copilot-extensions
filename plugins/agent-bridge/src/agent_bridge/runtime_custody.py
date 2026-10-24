@@ -123,8 +123,13 @@ def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
         "id TEXT PRIMARY KEY, installation TEXT NOT NULL, epoch INTEGER NOT NULL,"
         "producer_json TEXT NOT NULL)",
     }
+    return tables, operation_triggers(("sessions", "turns"))
+
+
+def operation_triggers(tables: tuple[str, ...]) -> dict[str, tuple[str, str]]:
+    """Canonical admission, association and history guards for DB-owned operations."""
     triggers = {}
-    for table in ("sessions", "turns"):
+    for table in tables:
         triggers[f"{table}_runtime_admission"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_admission "
             f"BEFORE INSERT ON {table} BEGIN "
@@ -162,7 +167,7 @@ def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
                 f"AFTER {operation} ON {table} BEGIN "
                 "UPDATE bridge_runtime_epoch SET revision=revision+1 WHERE singleton=1; END"
             )
-    return tables, triggers
+    return triggers
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

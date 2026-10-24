@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; DB foundation and provenance implementation merged; historical capture-owner qualification and inbox source remain open, full Phase 1 open
+- **Status:** Active; DB foundation, provenance implementation and historical capture qualification merged; inbox source in progress, full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -83,10 +83,11 @@ Unsupported predecessors or participants refuse honestly.
 Source implementation is authorized, with architecture acceptance and normal
 proposal review required before executing the widened protocol design. Local
 architecture acceptance and proposal review/landing are complete.
-The Integration owner assigned the first bounded Phase 1 DB epoch/producer
-association and strict-inventory foundation. Broader producer, SDK, native and
-installer wiring remain paused pending review and another specific source-slice
-assignment. Source authorization is
+The first bounded Phase 1 DB epoch/producer association and strict-inventory
+foundation merged in #8203. The Integration owner has assigned the next bounded
+internal DB inbox-admission/handoff slice. Actual authenticated producer/consumer
+enrollment, public poll/SDK integration, native and installer wiring remain
+separate source slices under this same contract. Source authorization is
 not permission for deployment, process stops, protected-owner operations,
 credential work or production capture. No private permission record or
 operational evidence is incorporated into this public effort.
@@ -123,6 +124,14 @@ require their own review and qualification.
       handoffs, wake/redrive and host/lifecycle mutations at their effect owners.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
+
+### Phase 1a - Retain internal DB inbox handoffs
+- [x] Extend existing inbox rows with producer association, immutable original
+      handoff/consumer observations and a one-shot final-admission primitive.
+- [x] Retain distinct SDK acceptance/consumption/unknown outcomes through
+      registration cleanup, closure and restart; preserve legacy uncertainty.
+- [x] Validate the bounded owner methods and normal migration/passive adoption.
+      This slice does not close actual transport/SDK integration or Phase 1.
 
 ### Phase 2 - Reconcile custody and negotiate state compatibility
 - [ ] Settle or transfer accepted work under its original identity, including
@@ -292,6 +301,27 @@ historical capture-owner closure and dependent-source qualification remain open.
 - Record a bounded versioned-layout proposal and complete reader/writer and
   validation obligations before implementation. This plan does not alter
   runtime protocols, installation, active custody or operational permission.
+
+### 2026-10-23 - Assign the internal inbox custody owner slice
+- #8203 merged the bounded DB/storage foundation to `dev` as
+  `ca1602f0f9e4717fc3836bc164966ca44b900ed2`. Full Phase 1 remains open.
+- The Integration owner selected the existing DB inbox owner for the next
+  bounded source slice: original-row producer admission, retained consumer
+  handoff, one-shot final admission, separate outcome reports and history
+  retention. It refines the reviewed contract without widening operational
+  authority or adding a competing service, queue or operation ledger.
+- The current public poll returns bodies without durable handoff; the extension
+  sends and ACKs afterward, with in-memory interrupt replay. Those ordinary
+  paths are not switched to the internal primitives by this slice. Actual
+  authenticated consumer enrollment, negotiated transport/SDK integration,
+  native custody and installer qualification remain open.
+- Schema 30 and the DB owner methods passed the affected isolated development
+  cohort: 314 tests, with two unrelated collection skips. This includes an
+  independent child exiting after committed final admission, two-owner SQLite
+  ordering, registration cleanup and legacy/passive-adoption controls. The old
+  receipt migration fixture now starts from frozen pre-custody SQL instead of
+  dropping a column required by today's retention trigger. No production guard
+  was removed. These results are not actual SDK, Windows or live qualification.
 
 ### 2026-10-23 - Require prepared custody storage and finite host metadata
 - Schema 28 explicitly versions the required storage. The canonical writable

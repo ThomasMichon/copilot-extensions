@@ -24,6 +24,8 @@ class _SchemaMixin:
     def _init_schema(self) -> None:
         """Create tables if they don't exist, run migrations."""
         from .runtime_custody import ensure_schema, validate_schema
+        from .inbox_custody import ensure_schema as ensure_inbox_schema
+        from .inbox_custody import validate_schema as validate_inbox_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -33,13 +35,17 @@ class _SchemaMixin:
                 recorded = conn.execute("SELECT version FROM schema_version").fetchone()
                 if recorded is not None and recorded["version"] >= 28:
                     validate_schema(conn)
+                if recorded is not None and recorded["version"] >= 30:
+                    validate_inbox_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
             if row is None:
                 self._ensure_current_columns(conn)
                 ensure_schema(conn)
+                ensure_inbox_schema(conn)
                 validate_schema(conn)
+                validate_inbox_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -51,6 +57,7 @@ class _SchemaMixin:
                     self._migrate(conn, current)
             self._ensure_current_columns(conn)
             validate_schema(conn)
+            validate_inbox_schema(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -707,3 +714,12 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (29,))
             conn.commit()
             log.info("Schema migrated to version 29: durable cold-recovery stop gate")
+
+        if from_version < 30:
+            from .inbox_custody import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (30,))
+            conn.commit()
+            log.info("Schema migrated to version 30: retained inbox handoff storage")
