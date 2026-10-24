@@ -7,3 +7,7 @@
 const envOverride = Number(process.env.AGENT_WORKTREES_QUERY_TIMEOUT_MS);
 export const AGENT_WORKTREES_QUERY_TIMEOUT_MS =
   Number.isFinite(envOverride) && envOverride > 0 ? envOverride : 45_000;
+
+// Observation must not inherit interactive identity/provisioning allowances.
+export const PROMPT_RECEIPT_TIMEOUT_MS = 2000;
+export const PROMPT_RECEIPT_RETRY_MS = 30_000;
