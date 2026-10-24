@@ -48,6 +48,12 @@ or adding this lane do not constitute native macOS PASS. A successful packet
 qualifies only its recorded source/interpreter/OS and selected contracts, not a
 full plugin corpus, performance benchmark, installation rollout or fleet.
 
+Worktrees' `test_terminal_conclusion.py -k "lifecycle_lock or stale_pid_claim"`
+also covers retained live-owner refusal and PID-reuse reclamation with both
+integer and macOS `seconds:microseconds` birth identities. The native
+companion-lifecycle node above exercises that same lock through concurrent
+creation recovery and launch, rather than replacing it with a test double.
+
 ## Optional SSH session snapshot
 
 The manual `installation-context-acceptance.yml` selector `ssh_snapshot=true`

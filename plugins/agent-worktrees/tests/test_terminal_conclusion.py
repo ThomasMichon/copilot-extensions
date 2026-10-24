@@ -1396,16 +1396,45 @@ def test_short_wait_does_not_break_a_fresh_lifecycle_lock(
     assert captured.out == ""
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("identity", ["111", "1750000000:123456"])
+def test_live_start_identity_does_not_break_a_retained_lifecycle_lock(
+    tmp_path, monkeypatch, identity,
+):
+    lock_path = tmp_path / ".finalize.lock"
+    token = f"123:{identity}:retained-owner"
+    lock_path.write_text(token, encoding="utf-8")
+    monkeypatch.setattr("agent_worktrees.finalize_lock.locks.pid_alive", lambda _pid: True)
+    monkeypatch.setattr(
+        "agent_worktrees.finalize_lock.locks.process_start_time", lambda _pid: identity,
+    )
+    contender = tc.finalize.FinalizeLock(lock_path, timeout=0.01, stale_after=3600)
+    with pytest.raises(TimeoutError):
+        contender.acquire()
+    assert not contender.held
+    assert lock_path.read_text(encoding="utf-8") == token
+    contender.release()
+    assert lock_path.read_text(encoding="utf-8") == token
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("recorded,current", [
+    ("111", "222"),
+    ("1750000000:123456", "1750000000:654321"),
+    ("1750000000:123456", "1750000001:123456"),
+])
 def test_reused_pid_does_not_keep_a_stale_lifecycle_lock(
     tmp_path,
     monkeypatch,
+    recorded,
+    current,
 ):
     lock_path = tmp_path / ".finalize.lock"
-    lock_path.write_text("123:111:token", encoding="utf-8")
+    lock_path.write_text(f"123:{recorded}:token", encoding="utf-8")
     monkeypatch.setattr("agent_worktrees.finalize_lock.locks.pid_alive", lambda _pid: True)
     monkeypatch.setattr(
         "agent_worktrees.finalize_lock.locks.process_start_time",
-        lambda _pid: "222",
+        lambda _pid: current,
     )
     lock = tc.finalize.FinalizeLock(
         lock_path,

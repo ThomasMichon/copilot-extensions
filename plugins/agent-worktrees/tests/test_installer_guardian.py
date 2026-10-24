@@ -76,6 +76,33 @@ def test_guardian_reaps_only_after_group_settlement(guardian, monkeypatch, code,
     assert events == ["settled", ("closed", 17)]
 
 
+@pytest.mark.parametrize("live_member", [False, True])
+def test_zombie_only_group_eperm_settles_via_process_observation(guardian, monkeypatch, live_member):
+    waits = []
+    process = SimpleNamespace(pid=123, returncode=None, wait=lambda timeout: waits.append(timeout))
+
+    def killpg(pgid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    rows = "  123   123 Z\n" + ("  124   123 S\n" if live_member else "")
+    clock = iter([0.0, 0.0, 11.0])
+    monkeypatch.setattr(guardian, "os", SimpleNamespace(killpg=killpg))
+    monkeypatch.setattr(guardian, "signal", SimpleNamespace(SIGKILL=9))
+    monkeypatch.setattr(guardian, "subprocess", SimpleNamespace(
+        run=lambda *a, **k: SimpleNamespace(stdout=rows), DEVNULL=subprocess.DEVNULL,
+    ))
+    monkeypatch.setattr(guardian, "time", SimpleNamespace(
+        monotonic=lambda: next(clock), sleep=lambda seconds: None,
+    ))
+    if live_member:
+        with pytest.raises(TimeoutError, match="live writers"):
+            guardian._terminate_group(process)
+        assert waits == []
+    else:
+        guardian._terminate_group(process)
+        assert waits == [10]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX ps/process-group guardian")
 def test_real_guardian_without_waitid_preserves_child_exit(guardian, tmp_path):
     script = (
