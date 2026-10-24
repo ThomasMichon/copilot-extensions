@@ -560,6 +560,13 @@ checks the real controller proposal's dependencies and explicit profiles; it is
 not a second runtime test gate. Actual composition/transport exercises belong
 to bounded development validation, not the required in-process unit packet.
 
+Prepared-controller rehearsals in `tools/test_promotion_merge_wait.py` and
+`tools/test_release_publication_boundary.py` select the declared v2 or v3 unit
+profile and dependency graph explicitly. Stage the controller together with its
+matching `ci.yml` and admission workflow when testing a historical snapshot.
+The existing bounded process-tree supervisor contains those local rehearsals;
+they do not become additional promotion or required-PR test dependencies.
+
 Source PR CI has a separate exact-input reuse boundary in
 `tools/ci_pr_unit_reuse.py`. It binds the current source/merge/base, workflow,
 manifest/source closure, hosted image, Python identity, actual installed

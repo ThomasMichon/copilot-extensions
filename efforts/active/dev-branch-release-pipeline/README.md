@@ -1235,6 +1235,16 @@ renewed hosted CI and current-head review remain required.
 The resulting local effect-observed slice, including the original historical
 controls, passes 214 units in 21.406 seconds with zero prohibited effects.
 
+Hosted Source CI passed the reconciled 1,384-node inventory in 34.070 seconds
+with coverage collected once and all guards green. Follow-up review identified
+stale v2-only prepared-controller fixtures. Those fixtures now explicitly
+support the declared v2/v3 profiles and frozen graph, including a graceful
+no-content result. The actual v3 snippets pass 67 tests plus 214 subtests under
+the existing process-tree supervisor; matching historical v2 snapshots pass
+42 merge tests and 25 publication tests. These remain local development
+rehearsals, not new promotion dependencies. Current-head review and renewed CI
+for the fixture update still precede Source merge.
+
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as
   `a1f431264eede9764c1e051112b0869b0351d88a` after exact-head approval
