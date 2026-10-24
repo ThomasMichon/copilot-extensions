@@ -4,6 +4,10 @@ from __future__ import annotations
 
 RUNTIME_DEPLOYMENT_SCHEMA = "copilot-extensions.runtime-deployment"
 RUNTIME_DEPLOYMENT_FILE = "runtime-deployment.json"
+RUNTIME_PROFILE_RECOVERY = (
+    "Runtime profile intent requires a profile-aware construction lifecycle; "
+    "ordinary plugin publication cannot ignore it."
+)
 
 
 def _runtime_profile_settings(value: Any) -> dict[str, Any]:
@@ -143,13 +147,18 @@ def _deployment_policy(
         if not isinstance(owner, Mapping) or dict(owner) != expected:
             _fail("Runtime deployment policy belongs to another installation or environment.")
         result.update(
-            state="valid", managed=managed, allowPluginPublication=not managed,
-            reason="deployment-managed" if managed else "deployment-explicit-standalone",
+            state="valid", managed=managed,
+            allowPluginPublication=not managed and profiles is None,
+            reason=(
+                "deployment-managed" if managed else
+                "runtime-profile-consumer-required" if profiles is not None else
+                "deployment-explicit-standalone"
+            ),
             owner=expected,
             recovery=(
                 "Use explicit installation management to install or update this runtime; "
                 "plugin bootstrap and first use may not publish it."
-                if managed else None
+                if managed else RUNTIME_PROFILE_RECOVERY if profiles is not None else None
             ),
         )
         if profiles is not None:
@@ -204,6 +213,7 @@ def resolve_runtime_profile_policy(
         "schema": "copilot-extensions.runtime-profile-policy", "version": 1,
         "owner": owner, "selection": selection,
         "managed": deployment["managed"],
+        "allowPluginPublication": deployment["allowPluginPublication"],
     }
     digest = hashlib.sha256(json.dumps(
         identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True,

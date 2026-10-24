@@ -3125,7 +3125,10 @@ and explicit unprofiled migration remain distinct. See the
 [library contract](../libs/installation-context/README.md) for fields and
 readiness/refusal behavior. Its owner/effective-policy digest is an invalidation
 input, not whole-record approval, source-byte authentication, a feed permission
-or an admission receipt. Native constructors do not yet consume this new API;
+or an admission receipt. Explicit profile settings therefore hold ordinary
+publication until a profile-aware lifecycle enforces them; a valid configuration
+cannot silently be ignored by an older construction path.
+Native constructors do not yet consume this new API;
 the actual closure, authority composition and constructor acceptance stay open.
 
 `tools/runtime_profile_wheels.py` adds repository-only actual-byte verification,

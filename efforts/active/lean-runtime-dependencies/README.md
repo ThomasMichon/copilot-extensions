@@ -828,3 +828,17 @@ profile-record API or a competing admission constructor.
   The optional reader lane now uses explicit hosted Linux/Windows jobs with
   the same shared steps; the trusted-CI contract passes locally. Current-head
   hosted native acceptance, full required CI and a fresh review remain gates.
+- Follow-up review caught a known key plus a newline-suffixed alias that the
+  count-only correction still accepted. Removed line-oriented key enumeration:
+  Bash now queries only the two permitted literal properties and compares
+  their presence with the complete object size. Added prefix/suffix alias
+  parity controls; all 41 pure controls pass. The previous corrected head's
+  complete required CI and Linux/Windows reader acceptance passed, but its
+  review was not a passing verdict and is not reused as approval.
+- Self-review also closed a compatibility hazard: valid explicit profile
+  settings must not be parsed and then ignored by ordinary publication.
+  Such settings now retain a profile-aware-consumer-required hold, including
+  for a valid empty object. The no-file standalone baseline is unchanged;
+  policy identity also binds the publication hold. Those API and actual
+  Python/PowerShell controls passed 90 and 38 cases respectively before the
+  additional alias fixtures; current-head hosted acceptance remains required.

@@ -69,6 +69,8 @@ def test_stock_bash_management_retains_modern_shell_floor(tmp_path: Path) -> Non
     "profile-invalid-boolean", "profile-unknown", "profile-array", "profile-array-backend",
     "profile-wrong-case", "profile-multiline-backend", "profile-url-backend",
     "profile-empty-key", "profile-newline-key", "profile-known-and-empty-key",
+    "profile-known-and-suffixed-key", "profile-known-and-prefixed-key",
+    "profile-known-fallback-and-suffixed-key",
 ])
 def test_native_policy_decision_matches_reference(
     tmp_path: Path, runner: str, case: str,
@@ -126,6 +128,11 @@ def test_native_policy_decision_matches_reference(
             "profile-empty-key": {"": False},
             "profile-newline-key": {"\n": False},
             "profile-known-and-empty-key": {"backend": "cpu", "": False},
+            "profile-known-and-suffixed-key": {"backend": "cpu", "backend\n": False},
+            "profile-known-and-prefixed-key": {"backend": "cpu", "\nbackend": False},
+            "profile-known-fallback-and-suffixed-key": {
+                "allowSourceFallback": False, "allowSourceFallback\n": True,
+            },
         }[case]
         policy["managed"] = False
     if case not in {"missing", "directory"}:

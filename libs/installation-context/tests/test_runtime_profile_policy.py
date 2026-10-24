@@ -98,7 +98,8 @@ def test_owner_bound_optional_policy_can_disable_source_and_select_accelerator(a
         "allowSourceFallback": False,
         "backend": "cuda12",
     }
-    assert result["deployment"]["allowPluginPublication"] is True
+    assert result["deployment"]["allowPluginPublication"] is False
+    assert result["deployment"]["reason"] == "runtime-profile-consumer-required"
     assert path.read_bytes() == before
 
 
@@ -106,10 +107,12 @@ def test_policy_identity_changes_for_effective_policy_and_owner_not_file_format(
     module, arguments, _ = adopter
     first = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
     path, policy = owned_policy(module, arguments)
+    policy.pop("runtimeProfiles")
+    _write_json(path, policy)
     assert module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"] == first
     path.write_text(json.dumps(policy, separators=(",", ":")), encoding="utf-8")
     assert module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"] == first
-    policy["runtimeProfiles"]["allowSourceFallback"] = False
+    policy["runtimeProfiles"] = {"allowSourceFallback": False}
     _write_json(path, policy)
     changed = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
     assert changed["policyId"] != first["policyId"]

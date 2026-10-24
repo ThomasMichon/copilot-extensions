@@ -95,6 +95,9 @@ def test_ambiguous_invalid_or_unprofiled_intent_refuses(
         {"Backend": "cpu"},
         {"": False},
         {"\n": False},
+        {"backend": "cpu", "backend\n": False},
+        {"backend": "cpu", "\nbackend": False},
+        {"allowSourceFallback": False, "allowSourceFallback\n": True},
     ],
 )
 def test_configuration_is_not_a_self_approved_record(context_module, value):
@@ -119,7 +122,7 @@ def test_optional_fallback_policy_is_detached_and_exact(context_module, fallback
 def policy_owner(context_module, monkeypatch):
     resolution = {
         "status": "ready",
-        "deployment": {"state": "missing", "managed": False},
+        "deployment": {"state": "missing", "managed": False, "allowPluginPublication": True},
     }
     owner = {
         "sourceFingerprint": "sha256:" + "1" * 64,
@@ -197,6 +200,13 @@ def test_effective_policy_change_invalidates_identity_without_widening_publicati
 ):
     resolution, _, _ = policy_owner
     original = context_module.resolve_runtime_profile_policy()["runtimeProfiles"]["policyId"]
+    resolution["deployment"].update(
+        state="valid", allowPluginPublication=False, runtimeProfiles={},
+    )
+    held = context_module.resolve_runtime_profile_policy()
+    assert held["runtimeProfiles"]["policyId"] != original
+    assert held["runtimeProfiles"]["selection"]["backend"] == "cpu"
+    assert held["deployment"]["allowPluginPublication"] is False
     resolution["deployment"].update(
         state="valid",
         managed=True,

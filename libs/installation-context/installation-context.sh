@@ -4856,9 +4856,9 @@ deployment_policy_snapshot() {
         [[ "$profile_type" == object ]] || fail "runtimeProfiles must be a JSON object."
         profile_count="$(json_length_path "$document" runtimeProfiles)"
         profiles="{"
-        while IFS= read -r field; do
-            [[ -n "$field" ]] || continue
+        for field in allowSourceFallback backend; do
             profile_type="$(json_type_path "$document" "$(path_join runtimeProfiles "$field")")"
+            [[ -n "$profile_type" ]] || continue
             case "$field" in
                 allowSourceFallback)
                     [[ "$profile_type" == boolean ]] ||
@@ -4878,7 +4878,7 @@ deployment_policy_snapshot() {
             profiles="$profiles$separator$(json_quote "$field"):$profile_value"
             separator=","
             recognized=$((recognized + 1))
-        done < <(json_object_keys "$document" runtimeProfiles)
+        done
         [[ "$recognized" == "$profile_count" ]] ||
             fail "runtimeProfiles supports only allowSourceFallback and backend."
         profiles="$profiles}"
@@ -4942,6 +4942,9 @@ deployment_policy_snapshot() {
     if [[ "$managed" == true ]]; then
         emit_deployment_json "$path" valid true false deployment-managed "$owner" "" \
             "Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it." "$profiles"
+    elif [[ -n "$profiles" ]]; then
+        emit_deployment_json "$path" valid false false runtime-profile-consumer-required "$owner" "" \
+            "Runtime profile intent requires a profile-aware construction lifecycle; ordinary plugin publication cannot ignore it." "$profiles"
     else
         emit_deployment_json "$path" valid false true deployment-explicit-standalone "$owner" "" "" "$profiles"
     fi

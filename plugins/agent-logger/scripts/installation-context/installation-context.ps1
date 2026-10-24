@@ -4403,11 +4403,15 @@ function Read-RuntimeDeploymentPolicy(
         }
         $deployment.state = 'valid'
         $deployment.managed = $managed
-        $deployment.allowPluginPublication = -not $managed
-        $deployment.reason = $(if ($managed) { 'deployment-managed' } else { 'deployment-explicit-standalone' })
+        $deployment.allowPluginPublication = -not $managed -and -not $hasProfiles
+        $deployment.reason = $(if ($managed) { 'deployment-managed' }
+            elseif ($hasProfiles) { 'runtime-profile-consumer-required' }
+            else { 'deployment-explicit-standalone' })
         $deployment.owner = $expected
         $deployment.recovery = $(if ($managed) {
             'Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it.'
+        } elseif ($hasProfiles) {
+            'Runtime profile intent requires a profile-aware construction lifecycle; ordinary plugin publication cannot ignore it.'
         } else { $null })
         if ($hasProfiles) {
             $deployment | Add-Member -NotePropertyName runtimeProfiles -NotePropertyValue $profiles
