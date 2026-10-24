@@ -4,11 +4,36 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Awaitable, Callable
+from functools import wraps
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .models import SessionStatus
 from .session_manager import DaemonDrainingError, Session, _workspace_key, log
+
+if TYPE_CHECKING:
+    from .session_manager import SessionManager
+
+
+def _exclude_native_enrollment(
+    method: Callable[..., Awaitable[Session]],
+) -> Callable[..., Awaitable[Session]]:
+    @wraps(method)
+    async def run(manager: SessionManager, session_id: str, **kwargs: Any) -> Session:
+        resolved = manager._resolve_ref(session_id) or session_id
+        session = manager._sessions.get(resolved)
+        if session is None:
+            raise KeyError(f"Session {resolved} not found")
+        if session._handoff_in_progress:
+            raise ValueError(f"Session {resolved} handoff is already in progress")
+        session._handoff_in_progress = True
+        try:
+            return await method(manager, resolved, **kwargs)
+        finally:
+            session._handoff_in_progress = False
+
+    return run
 
 
 class _SessionHandoffMixin:
@@ -224,6 +249,7 @@ class _SessionHandoffMixin:
         )
         return text
 
+    @_exclude_native_enrollment
     async def handoff_session(
         self,
         session_id: str,

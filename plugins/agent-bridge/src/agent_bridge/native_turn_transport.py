@@ -70,6 +70,7 @@ class NativeTurnTransport:
             or not client.acp_session_id or client.acp_session_id != session.acp_session_id
             or client._native_turn_transport is not None
             or session.status != SessionStatus.IDLE
+            or session._handoff_in_progress
             or client._prompt_lock.locked() or client._prompt_in_flight
             or client._idle_operations
             or session._prompt_task is not None and not session._prompt_task.done()

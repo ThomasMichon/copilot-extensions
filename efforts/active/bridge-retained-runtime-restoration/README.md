@@ -273,7 +273,7 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   clients refuse unretained direct sends, implicit resume and unenrolled
   lifecycle handoff. Host, remote, command/provider and private idle-continuation
   cohorts remain explicitly unsupported by this selection.
-- The bounded coupled source lane passes 641 controls. Two cases use the actual
+- The bounded coupled source lane passes 645 controls. Two cases use the actual
   ACP SDK and stdio to separate synthetic children: each independently reads
   the original committed SQLite handoff before observing the exact prompt;
   one exits without replying. The fixture advertises and verifies synthetic
@@ -294,6 +294,13 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   The remote regression's old fixed acquisition count is updated to the
   actual contract: at least one outstanding admission blocks drain, and all
   nested admissions must release back to zero.
+- Independent source review found concurrent enrollment could cross the
+  entry-only lifecycle handoff check while hosting policy or successor launch
+  awaited. Exclude enrollment for the full existing handoff scope, releasing
+  it on failure/cancellation, and add both-boundary race controls. The
+  synthetic lost-reply test catches `asyncio.TimeoutError` for the declared
+  Python 3.10 minimum; the development-container run is not native 3.10
+  qualification.
 
 ### 2026-10-24 - Original-turn DB foundation merged; native owner wiring next
 - #8713 merged as `24f4d66d63a679f7bd8f6ee1e34e4fc66a40d863` at

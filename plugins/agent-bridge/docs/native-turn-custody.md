@@ -45,6 +45,10 @@ The child and frontend births are observed through the existing process helper;
 the consumer receives a fresh in-memory incarnation. Repeated selection is
 idempotent only while that original owner remains current. No inbox
 negotiation, ordinary construction, HTTP route or environment setting selects it.
+Enrollment refuses while an existing lifecycle handoff is in progress, across
+all its awaits through successor launch, seeding and predecessor retirement.
+The handoff scope releases on completion, failure and cancellation; an
+entry-only selected-consumer check would not cover concurrent enrollment.
 
 New direct, queued-to-turn and keyed turns atomically retain this consumer
 through the existing `create_turn` owner. `_run_prompt` carries the original

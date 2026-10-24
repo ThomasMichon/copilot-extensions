@@ -788,6 +788,7 @@ class Session:
             migrate_selected_instance(target)
         self.client: AcpClient | None = None
         self._native_turn_transport: NativeTurnTransport | None = None
+        self._handoff_in_progress = False
         self._remote_affinity_cookies: Any = None
         self._remote_requested_session_id: str | None = None
         self.status = SessionStatus.CREATED

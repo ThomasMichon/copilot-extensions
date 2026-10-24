@@ -55,7 +55,7 @@ async def test_native_turn_transport_real_stdio_independent_original_readback(
         await session_manager.submit_prompt("synthetic", "original synthetic prompt")
         try:
             await asyncio.wait_for(session._prompt_task, 3)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             assert mode == "drop-reply"
         received = [json.loads(line) for line in audit.read_text().splitlines()]
         row = db.get_turn("synthetic", 0)
