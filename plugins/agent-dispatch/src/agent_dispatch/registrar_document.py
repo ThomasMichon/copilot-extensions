@@ -92,6 +92,7 @@ def expand_declaration_document(
     directory: Path,
     repo_root: str | Path | None = None,
     allow_plugin_companion: bool = False,
+    activation=None,
 ) -> tuple[ProfileDeclaration, ...]:
     """Validate/expand decoded data without persisting or activating it."""
     from .registrar_discovery import (
@@ -119,6 +120,7 @@ def expand_declaration_document(
                     field, data.get("extends"),
                     base_dir=this_repo_root, repo_root=this_repo_root,
                     snapshot=snapshot,
+                    activation=activation,
                 ):
                     inherited_script_fields.add(field)
         except (OSError, RuntimeError, ValueError, RegistrarError):
@@ -130,6 +132,7 @@ def expand_declaration_document(
         base_dir = Path(repo_root).expanduser() if repo_root is not None else directory
         data = resolve_extends(
             data, base_dir=base_dir, snapshot=snapshot, path_origins=path_origins,
+            activation=activation,
         )
     if data.get("kind") == "reviewer-loop":
         from .registrar_recipes import _absolutize_emitter_cwd

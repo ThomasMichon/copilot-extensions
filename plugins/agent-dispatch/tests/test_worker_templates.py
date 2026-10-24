@@ -94,8 +94,8 @@ def test_multi_root_templates_keep_identity_scope_revision_and_no_executables(tm
     assert summary["state"] == "complete" and summary["provider_templates"] == 2
     assert len({row["id"] for row in rows}) == len({row["revision"] for row in rows}) == 2
     assert [row["repo_scopes"] for row in rows] == [["global"], ["project:sample"]]
-    assert all(row["instantiable"] == row["editable"] == "false" for row in rows)
-    assert all(row["dependency_status"] == "not-resolved" for row in rows)
+    assert all(row["instantiable"] == "true" and row["editable"] == "false" for row in rows)
+    assert all(row["dependency_status"] == "inputs-required" for row in rows)
     assert "never-execute" not in json.dumps(rows)
     assert rows == wt.discover_templates(report)[0]
     assert before == bytes_at(tmp_path)
@@ -400,9 +400,10 @@ runpy.run_module('agent_dispatch', run_name='__main__')
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
     row = next(row for row in data["entries"] if row["id"].startswith("template:provider:"))
-    assert row["instantiable"] == row["editable"] == "false"
-    assert row["resolution"] == "discovered-only" and "fields" not in row
-    assert "safe local instantiation is not supported" in row["card"]["body"]
+    assert row["instantiable"] == "true" and row["editable"] == "false"
+    assert row["resolution"] == "recipe-resolved" and row["fields"]
+    assert row["fields"][1]["default"] == "{}"
+    assert "Save alone never publishes" in row["card"]["body"]
     assert bytes_at(tmp_path) == before
 
 

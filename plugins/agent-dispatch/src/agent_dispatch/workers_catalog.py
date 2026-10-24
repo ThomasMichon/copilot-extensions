@@ -418,6 +418,11 @@ def catalog() -> dict:
             if "pool_toggleable" in row:
                 row["pool_toggleable"] = "false"
     provider_rows, template_discovery = discover_templates(activation())
+    for row in provider_rows:
+        if row["instantiable"] == "true":
+            row["fields"] = _fields("", {}, row["source"]["root"])
+            row["fields"][1]["label"] = "Declaration overrides JSON (recipe params supported)"
+            _cards(row, row["card"]["body"])
     rows.extend(provider_rows)
     for index, finding in enumerate(template_discovery["findings"]):
         detail = f"{finding['source']}: {finding['reason']}: {finding['detail']}"

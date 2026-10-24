@@ -1,0 +1,9 @@
+{
+  "comment": "Materialize qualified provider templates through the existing local-instance save lifecycle with fresh recipe revisions and source-context preservation.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

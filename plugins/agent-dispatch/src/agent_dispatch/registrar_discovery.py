@@ -413,6 +413,7 @@ def _field_defining_hop_is_cross_repo(
     _chain: tuple[str, ...] = (),
     snapshot: RepositoryResourceSnapshot | None = None,
     _base_resource: str | None = None,
+    activation=None,
 ) -> bool:
     """Walk an ``extends:`` chain to find the *nearest* hop that actually
     defines ``field`` in its own raw ``forge`` mapping, and report whether
@@ -445,7 +446,9 @@ def _field_defining_hop_is_cross_repo(
     ):
         ref = relative_repository_resource(_base_resource, ref)
     snapshot = snapshot or RepositoryResourceSnapshot(execution=False)
-    identity, ref_path = _ref_identity(ref, base_dir=base_dir, snapshot=snapshot)
+    identity, ref_path = _ref_identity(
+        ref, base_dir=base_dir, snapshot=snapshot, activation=activation,
+    )
     if identity in _chain or len(_chain) >= _MAX_CHAIN_DEPTH:
         # A cyclic/too-deep chain is `resolve_extends`'s own error to
         # raise later -- don't manufacture a different one here.
@@ -480,6 +483,7 @@ def _field_defining_hop_is_cross_repo(
         _chain=(*_chain, identity),
         snapshot=snapshot,
         _base_resource=next_base_resource,
+        activation=activation,
     )
 
 

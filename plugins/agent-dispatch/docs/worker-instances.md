@@ -18,8 +18,9 @@ The table distinguishes:
 - **Source declarations**: discovered repository/plugin declarations, read-only
   here. Ownership/provenance identifies their configuration flow.
 - **Available templates**: built-in recipes plus a bounded worker-pool template,
-  with **Instantiate** actions; provider-owned fragments are discoverable but
-  have no Instantiate action. Recipe fragments are not complete instances.
+  and provider-owned fragments with owner-reported **Instantiate** capabilities.
+  Unsupported fragments retain Details and a reason, not a Save action.
+  Recipe fragments are not complete instances.
 
 ### Shared catalog metadata
 
@@ -106,7 +107,7 @@ Select **Edit — Save only**, **Edit — Save and Activate**, or the correspond
 | Field | Meaning |
 |---|---|
 | `name` | Unique local instance name; immutable after creation |
-| `declaration` | Complete JSON declaration, prefilled with current values or a recipe scaffold |
+| `declaration` | Complete JSON for edits/built-ins; declaration overrides (including existing recipe `params`) for a provider template |
 | `repo_root` | Existing absolute repository root, required by issue/effort loops |
 
 The declaration uses the existing registrar's schema, filters, capacities, body,
@@ -145,6 +146,7 @@ overlay. They are reported separately, not merged using a new local-wins rule.
 Registering an active registrar pointer is not required to discover templates
 from an already registered repository. A legacy repository pointer retains its
 pointer attribution; its label/path basename is not a registered repo identity.
+It remains browse-only until a canonical repository identity is available.
 Arbitrary directory pointers are not additional template roots.
 
 ```json
@@ -181,23 +183,45 @@ without a top-level kind.
 New rows qualify the provider's local ID with its source/root/layer context.
 The ID is stable while that context is stable; relocating a provider root
 produces a distinct variant. Revisions fingerprint the index entry, raw
-declaration object and resolution context, not unresolved inherited resources.
+declaration object, resolved inherited recipe documents and resolution context.
 Equal bytes at different relative dependency roots are distinct contributions.
 Details retain all provider-reported applicability scopes, root kind, index,
 declaration path, requirements and revision. Raw commands/specs/environment
 values are not returned by this discovery projection.
 
-Provider rows report `resolution: discovered-only`,
-`dependency_status: not-resolved`, `instantiable: "false"` and an explicit
-`unsupported_reason`. Only Details is available through the existing Manager
-contribution. The current `workers save` command still refuses these new IDs:
-safe external recipe materialization is not implemented. Do not treat declared
-requirements as evaluated prerequisites or copy relative references into the
-local-instance directory. Built-in IDs, recipe references and their existing
-save/activation actions are unchanged.
+Resolvable provider rows report `resolution: recipe-resolved`,
+`dependency_status: inputs-required` and `instantiable: "true"`. Their form keeps
+the existing name, advanced declaration and repository-root fields. The
+declaration field starts as `{}`: supply overrides and the existing recipe's
+`params`, rather than copying the source and accidentally overriding its path
+origins. The repository-root default is the selected provider root; an
+execution-repository selector remains an ordinary declaration field.
+
+`workers save` re-discovers the qualified source using current activation and
+checks its revision, materializes it through the existing `extends` parameter/
+deep-merge authority, validates dependencies, and compares its expanded
+registrations before and after relocation. It rechecks source closure after
+collision validation before persistence. Inherited emitter/reviewer cwd values
+retain their defining directories. Registered repository references remain
+`repo:` resources through persistence and publication, retaining their owner's
+execution admission (including refusal of a reference-only checkout).
+A worker identity must retain its defining
+repository context; a changed execution root is not permission to select an
+unrelated identity. The existing cross-repository relative script-forge guard
+is applied before flattening and remains a refusal, not a solved limitation.
+Relative evaluator script contexts or other dependencies whose meaning cannot
+be preserved refuse explicitly. A `composite` fragment without a supported
+ordinary declaration shape remains unsupported. Ambiguous multi-root `plugin:`
+dependencies also refuse; browsing each distinct provider root remains valid.
+
+Unavailable recipe dependencies expose an explicit `unsupported_reason`, no
+form and no Instantiate action. Missing required user inputs or dependencies
+fail Save without a record. Requirements prose is not executable policy.
+Provider commands never run while browsing or saving. Built-in IDs, recipe
+references and their existing save/activation actions are unchanged.
 
 `summary.template_discovery` reports `state` (`complete` or `partial`),
-`provider_templates`, `findings` and `instantiation: builtin-only`. Its findings
+`provider_templates`, `findings` and `instantiation: existing-local-save`. Its findings
 also appear as read-only Discovery errors rows labelled Template discovery
 requires attention, with `finding_scope: templates`. Missing optional
 indexes are normal; broken canonical, fallback or active marketplace template
@@ -252,7 +276,8 @@ Roots come from the active installation's `registrar_dir()` resolver, including
 `AGENT_DISPATCH_REGISTRAR_DIR`; no operational machine or legacy home is baked in.
 
 - `worker-instances/<name>.json`: atomic draft record, immutable source ID and
-  template revision, current configuration revision, and last submission baseline.
+  template revision (plus provider/root/index/declaration provenance for provider
+  templates), current configuration revision, and last submission baseline.
 - `worker-instances-active/<name>.json`: atomically published declaration snapshot.
 - `pointers.json`: one exact `dir` pointer named `user-worker-instances`, owned by
   `user-local:workers`. A conflicting pointer is never silently retargeted.

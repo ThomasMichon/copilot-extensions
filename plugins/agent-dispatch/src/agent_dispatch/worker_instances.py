@@ -272,7 +272,15 @@ def save_instance(
     if not isinstance(repo_root, str):
         raise RegistrarError("repo_root must be text")
     source = source_id.removeprefix("template:")
-    if source_id.startswith("template:"):
+    provider = None
+    if source_id.startswith("template:provider:"):
+        from .worker_template_materialization import materialize_template, selected_template
+
+        provider = selected_template(source_id, revision)
+        if not isinstance(document, dict):
+            raise RegistrarError("declaration: expected a JSON object")
+        document = materialize_template(provider, document, name, repo_root)
+    elif source_id.startswith("template:"):
         if source not in templates() or revision != digest(templates()[source]):
             raise RegistrarError("template is absent or changed; refresh the catalog")
         if not isinstance(document, dict):
@@ -306,11 +314,19 @@ def save_instance(
             ):
                 raise RegistrarError("stale or missing instance; refresh before editing")
         _check_collisions(name, declarations, existing)
+        if provider is not None:
+            # Recheck source closure/activation after validation and collision reads.
+            selected_template(source_id, revision)
         record = {
             "id": f"instance:{name}", "name": name, "configuration": configuration,
             "revision": wanted_revision,
             "source": existing["source"] if existing else {
-                "id": source_id, "revision": revision, "provider": "agent-dispatch",
+                "id": source_id, "revision": revision,
+                **({
+                    "provider": provider["row"]["provenance"],
+                    "context": provider["row"]["source"],
+                    "declaration": str(provider["path"]),
+                } if provider is not None else {"provider": "agent-dispatch"}),
             },
             "last_request": {"id": source_id, "revision": revision},
             "saved_at": existing["saved_at"] if retry else time.time(),
