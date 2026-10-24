@@ -56,7 +56,11 @@ def _read_file(directory: Path, name: str) -> tuple[bytes, dict]:
     try:
         before = path.lstat()
         if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_PACKET_FILE_BYTES:
-            raise UnitEvidenceError(f"packet file must be regular, unlinked and bounded: {name}")
+            raise UnitEvidenceError(
+                f"packet file must be regular, unlinked and bounded: {name} "
+                f"(mode={stat.S_IFMT(before.st_mode)}, bytes={before.st_size}, "
+                f"limit={MAX_PACKET_FILE_BYTES})",
+            )
         with path.open("rb") as stream:
             opened = os.fstat(stream.fileno())
             if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
