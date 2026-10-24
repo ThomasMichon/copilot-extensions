@@ -98,7 +98,10 @@ def test_bootstrap_observer_waits_for_committed_receipt_without_masking_bad_stat
 
 
 @contextmanager
-def owned_hook(command, *, env, project, directory, timeout, diagnostic):
+def owned_hook(
+    command, *, env, project, directory, timeout, diagnostic,
+    acknowledgement_prefix=ACKNOWLEDGEMENT,
+):
     directory.mkdir()
     output = directory / "stdout"
     errors = directory / "stderr"
@@ -152,8 +155,8 @@ def owned_hook(command, *, env, project, directory, timeout, diagnostic):
             elapsed = time.monotonic() - started
             text = errors.read_text(encoding="utf-8", errors="replace")
             frame = next(
-                (line.partition(ACKNOWLEDGEMENT)[2] for line in text.splitlines()
-                 if line.startswith(ACKNOWLEDGEMENT)), "",
+                (line.partition(acknowledgement_prefix)[2] for line in text.splitlines()
+                 if line.startswith(acknowledgement_prefix)), "",
             )
             assert frame, diagnostic()
             if os.name == "nt":
