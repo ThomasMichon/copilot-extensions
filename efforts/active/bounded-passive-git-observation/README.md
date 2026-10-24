@@ -198,6 +198,11 @@ The blocking POSIX per-probe census finding has an
 It is a design-only request for narrow shared-owner agreement, not admission
 to alter procutil or a waiver of the Medium finding.
 
+The [caller-custody and Windows-first design](caller-custody-and-platform-slice.md)
+maps the exact cache/background/roster/owner-loss gates. It rejects implementing
+the unproved POSIX anchor-lifetime candidate and proposes an explicitly
+review-gated platform slice, not disabling ordinary POSIX classification.
+
 ## Journal
 
 ### 2026-10-28 - Direct retained acceptance and bounded-admission reconciliation
@@ -261,3 +266,13 @@ to alter procutil or a waiver of the Medium finding.
   proposal records those separately owned caller gates and the unresolved
   caller-death/lifetime boundary. Neither that High nor the Medium is waived;
   no unadmitted callback or shared-library implementation was changed.
+- Bounded follow-up design traced the actual segment cache, snapshot, bundle
+  request/background cache, classify, warm-roster/list and drain continuations.
+  The concrete common carrier is the monitor's existing segment-cache instance,
+  with frame-local custody for the standalone updater. The design names exact
+  typed catches, next-tick settlement, stale-data/fallback gates and lifecycle
+  amendments rather than treating two callback catches as a complete fix.
+- No proved universal POSIX outer-lifetime boundary was established. Do not
+  implement the anchor candidate. The proposed Windows-first amendment retains
+  ordinary POSIX behavior and its open #7944 work; neither alternative nor
+  caller/native-API hunk is implemented or admitted by this design checkpoint.

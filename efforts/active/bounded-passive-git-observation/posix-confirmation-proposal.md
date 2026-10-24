@@ -5,6 +5,12 @@ Back to [the effort](README.md) and [the contract](contract.md).
 Medium finding `discussion_r4365960075` on #8458. The three High fixes do not
 resolve it. Do not mark the PR ready or merge while it remains open.
 
+**Feasibility disposition:** do not implement this candidate on the unproved
+anchor-lifetime assumption. The bounded
+[caller-custody and Windows-first alternative](caller-custody-and-platform-slice.md)
+identifies the actual continuation paths and a smaller conditional amended
+scope, retaining ordinary POSIX behavior and its open #7944 work.
+
 ## Established limitation
 
 Current `push_timeout._run_observation` invokes `_confirm_group` for every
