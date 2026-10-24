@@ -218,6 +218,15 @@ original order: 2,006 HTTP and 51 preference records. The five published chunks
 remain byte-identical; the index is 300,305 bytes, below the unchanged cap.
 Only current-generation capture metadata conflicts selected the actual reviewed
 upstream packet hashes; operation bodies are unchanged and both historical
-capture lineages remain retained. Fresh capture from the complete merged inbox
-source, checker validation and current-head review are still owed. No native,
-release, installed or serving-route qualification is implied.
+capture lineages remain retained.
+
+The complete merged inbox source
+`c0b3a2a09a67d93c7ceb8d4cc936254ba2444beb` was retained through managed
+publication, then completed the genuine HTTP-47 write and same-source no-write
+entrypoints. Both passed all 117 required cases with complete
+interpreter/entrypoint receipts and 68 outputs. The capture appends 67 HTTP
+records, preserving every prior record in order: 2,073 HTTP plus 51 preference
+records, five unchanged chunks and a 323,955-byte index. The canonical checker
+accepts both contracts and all 583 fixtures against the reviewed base.
+Review and merge of the final evidence head remain owed. No native, release,
+installed or serving-route qualification is implied.

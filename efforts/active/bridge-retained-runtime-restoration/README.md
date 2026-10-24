@@ -204,9 +204,26 @@ The source-format implementation merged in
 [#8469](https://github.com/ThomasMichon/copilot-extensions/pull/8469);
 historical capture-owner qualification merged in
 [#8503](https://github.com/ThomasMichon/copilot-extensions/pull/8503).
-Dependent-source capture and current-head review remain open.
+Dependent-source capture is complete; current evidence-head review remains open.
 
 ## Journal
+
+### 2026-10-23 - Capture the reconciled inbox source
+- Genuine committed source `c0b3a2a09a67d93c7ceb8d4cc936254ba2444beb`,
+  retained through managed publication before capture, completed the actual
+  HTTP-47 write and same-source no-write entrypoints. Both passed all 117
+  selected model-free cases and checked the complete interpreter/entrypoint
+  receipts before accepting 68 outputs.
+- The capture appends 67 HTTP records while retaining all 2,057 prior records
+  in exact order. The complete history now contains 2,073 HTTP records and
+  51 preference records. All five published chunks remain byte-identical;
+  the index is 323,955 bytes under the unchanged 1 MiB guard.
+- The canonical checker accepts both contracts and all 583 fixtures against
+  the reviewed base. Only current HTTP-47 packets and their registry bindings
+  change; older packets, generation and capability floors remain unchanged.
+- Review of the final evidence head and normal merge remain required.
+  This source capture does not qualify an installed receiver, native START,
+  actual SDK delivery, complete runtime custody or guarded restoration.
 
 ### 2026-10-23 - Return to the inbox source with both complete histories
 - #8503 merged as `17bec8794444148b65e0b78f1279d51df6a5f30b` after
