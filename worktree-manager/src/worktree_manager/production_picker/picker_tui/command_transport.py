@@ -3,9 +3,42 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 from collections.abc import Sequence
 from pathlib import Path
+
+from ... import picker_review
+from ...engine_environment import _engine_environment
+
+_CHILD_ENV_UNSET = (
+    "COPILOT_EXTENSIONS_CONTEXT",
+    "COPILOT_PLUGIN_INSTALL_STAGED",
+    "COPILOT_PLUGIN_ROOT",
+    "COPILOT_PLUGIN_STAGED_FROM",
+    "PYTHONPATH",
+)
+
+
+def child_process_env() -> dict[str, str]:
+    """Remove parent-plugin identity before crossing a contributed CLI boundary."""
+    env = _engine_environment()
+    for key in _CHILD_ENV_UNSET:
+        env.pop(key, None)
+    if picker_review.active():
+        env["AGENT_DISPATCH_NO_AUTOSTART"] = "1"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+def parse_action_json(raw):
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("embody did not print JSON")
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("embody did not print JSON")
+    return json.loads(text[start:])
 
 
 def command_result(proc, *, preserve_output: bool = False) -> tuple[bool, str]:

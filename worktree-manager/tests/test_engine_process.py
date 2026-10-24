@@ -81,6 +81,26 @@ def test_real_plan_timeout_kills_renderer_and_grandchild(tmp_path, monkeypatch):
         f"Path({str(ready)!r}).write_text('ready')\n"
         "time.sleep(60)\n"
     )
+    spawn = ep.spawn_sync_in_kill_on_close_job
+
+    def spawn_ready(*args, **kwargs):
+        process, job = spawn(*args, **kwargs)
+        try:
+            # Start the cleanup deadline only after the descendant is observable.
+            deadline = time.monotonic() + 10
+            while not evidence.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert evidence.exists(), "fixture grandchild did not become ready"
+        except BaseException:
+            if job is not None:
+                job.close()
+            else:
+                process.kill()
+            process.communicate(timeout=5)
+            raise
+        return process, job
+
+    monkeypatch.setattr(ep, "spawn_sync_in_kill_on_close_job", spawn_ready)
     monkeypatch.setattr(ec, "engine_base_command", lambda: [sys.executable, "-c", engine])
     with pytest.raises(ec.EngineError, match="timed out"):
         ec.resolve_launch_plan("demo", new=True, timeout=3)

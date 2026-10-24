@@ -2,28 +2,21 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
-import json
 import subprocess
 import threading
 
 from worktree_identity import WorktreeMachineIdentityError
+from ... import picker_review
 
 from .engine_dialogs import SubMenuScreen, WtDetailsScreen
 from .controller_workspaces import target_row
 from .engine_live_screens import MsgViewScreen
 from .resume_prompt_actions import open_resume_prompt
 from .worktree_action_context import build_worktree_action_context
+from .command_transport import parse_action_json
 
 class PickerScreenWorktreeActionsMixin:
-    @staticmethod
-    def _parse_action_json(raw):
-        text = str(raw or "").strip()
-        if not text:
-            raise ValueError("embody did not print JSON")
-        start = text.find("{")
-        if start < 0:
-            raise ValueError("embody did not print JSON")
-        return json.loads(text[start:])
+    _parse_action_json = staticmethod(parse_action_json)
     @staticmethod
     def _cleanable(rec):
         """Whether a worktree's cleanup bucket is one the Cleanup flow offers."""
@@ -380,6 +373,9 @@ class PickerScreenWorktreeActionsMixin:
         if result is None:
             return
         cur, no_mux, ahp = result
+        if cur not in {"View details", "Jump to host", "Jump to caller", "Go to controller"}:
+            if picker_review.refuse(self):
+                return
         if (
             rec.get("managed_child")
             and cur in ("Open", "Resume", "Bare resume", "Resume prompt…", "Launch in new window")
@@ -765,6 +761,8 @@ class PickerScreenWorktreeActionsMixin:
         Phase 3) opens a remote venue row (a CodeSpace or fleet container) into
         a live/dormant Copilot session via the venue's own `copilot` verb, the
         same exit-and-launch plumbing."""
+        if picker_review.active() and verb not in {"jump-host", "recover-forms"}:
+            return False, picker_review.MESSAGE
         if verb == "jump-host":
             return self._jump_to_worktree(
                 ctx.get("worktree_id") or ctx.get("worktree") or ctx.get("id"),
@@ -832,6 +830,8 @@ class PickerScreenWorktreeActionsMixin:
             return False, self.debug
         return True, f"opening …{str(wid)[-4:]} into a CLI session"
     def _embody_task_cli(self, ctx):
+        if picker_review.refuse(self):
+            return False, picker_review.MESSAGE
         """Persist the task Open before off-thread embodiment and normal resume."""
         from ... import launch_observations
         from . import tasks as _tasks

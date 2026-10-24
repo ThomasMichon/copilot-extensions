@@ -48,6 +48,10 @@ def _timestamp() -> str:
 
 
 def _launch_trace_path() -> Path | None:
+    from ... import picker_review
+
+    if picker_review.active():
+        return None
     raw = os.environ.get("AGENT_WORKTREES_LAUNCH_TRACE", "").strip()
     if not raw or raw.lower() in ("0", "false", "no", "off"):
         return None
@@ -118,6 +122,10 @@ class FrameHealthReporter:
 
     @classmethod
     def from_env(cls) -> FrameHealthReporter | None:
+        from ... import picker_review
+
+        if picker_review.active():
+            return None
         if _source_reporter is not None:
             return _source_reporter
         if _last_source_reporter is not None:

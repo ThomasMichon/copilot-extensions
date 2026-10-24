@@ -195,6 +195,10 @@ _STEER_DRAFTS_ENV = "AGENT_WORKTREES_STEER_DRAFTS"
 def _steer_drafts_dir() -> Path:
     """Directory holding saved steer drafts (partial answers). Overridable via
     ``AGENT_WORKTREES_STEER_DRAFTS``; defaults to ``~/.agent-worktrees/steer-drafts``."""
+    from ... import picker_review
+
+    if picker_review.active():
+        return picker_review.current().state_dir / "drafts"
     override = os.environ.get(_STEER_DRAFTS_ENV)
     return Path(override) if override else Path.home() / ".agent-worktrees" / "steer-drafts"
 

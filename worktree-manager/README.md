@@ -21,6 +21,10 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## Set up the harness
 
+For UI development without installing or promoting a candidate, use the
+[read-only source Picker review loop](docs/source-review.md). It renders the
+production Picker over existing local owner data while refusing live effects.
+
 Managed authoring launch honors the target repository's
 [`expose_agent` hosting veto](../plugins/agent-worktrees/docs/repository-agent-policy.md).
 The Manager uses the engine's read-only policy API, never imports the plugin,

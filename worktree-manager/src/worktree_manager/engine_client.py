@@ -26,7 +26,7 @@ from pathlib import Path
 
 from worktree_identity import parse_machine_identity
 
-from . import agent_plugin_runtime
+from . import agent_plugin_runtime, picker_review
 from .engine_environment import (
     _PYTHON_PARENT_ENV as _PYTHON_PARENT_ENV,
     _engine_environment as _engine_environment,
@@ -205,7 +205,7 @@ def _run(
     the process fails, or times out. A non-zero exit whose stdout is a JSON
     error envelope surfaces the engine's own ``error`` message. ``cwd``, when
     given, runs the engine from that directory (cwd-scoped verbs)."""
-    base = engine_base_command()
+    base = picker_review.engine_command(args, engine_base_command)
     if base is None:
         raise EngineError(
             f"the {ENGINE_BIN} engine is not installed", install_hint=True)
@@ -237,7 +237,8 @@ def _run(
                     if detail:
                         proc.stderr = detail
             else:
-                proc = subprocess.run(cmd, **kwargs)
+                execute = picker_review.run_read if picker_review.active() else subprocess.run
+                proc = execute(cmd, **kwargs)
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
@@ -309,6 +310,7 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     A supplied environment is the complete call-scoped selection and child
     environment; it bypasses stale inherited command handles.
     """
+    picker_review.require_writable()
     base = engine_base_command() if environment is None else installed_engine_command(environment)
     if base is None:
         raise EngineError(
@@ -353,6 +355,7 @@ def run_project_passthrough(
     timeout: int | None = None,
 ) -> int:
     """Run one installed project binstub with inherited stdio."""
+    picker_review.require_writable()
     command = project_binstub_command(project)
     argv = [str(command), *args]
     if os.name == "nt":
@@ -751,6 +754,10 @@ def list_worktree_rows(
     Current-roster authority is mandatory by default. Optional presentation
     flags may be dropped for compatibility; authority is never downgraded.
     """
+    if picker_review.active():
+        if not current or refresh:
+            raise EngineError(picker_review.MESSAGE)
+        return picker_review.worktree_rows(project, worktree_id=worktree_id)
     args = ["list", "--json"]
     if current:
         args.append("--current")
