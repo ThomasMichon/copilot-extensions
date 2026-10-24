@@ -108,6 +108,22 @@ matrix or required release enforcement. The
 [feed-construction effort](efforts/active/feed-construction-release-gate/README.md)
 retains those open acceptance gates.
 
+The independent `chat_construction=true` selector runs both the 180-second
+acceptance and 600-second complete contained Chat lanes on the same candidate
+on Linux and Windows with Python 3.10 and 3.11. Preparation explicitly binds
+`UV_PYTHON` to the setup step's interpreter rather than allowing an unrelated
+managed Python to change the advertised floor. Python 3.11
+constructs the actual client role from independent Chat/library source
+distributions using the wheel's unchanged canonical engine, verifies the exact
+installed closure and immutable reuse, then invokes the slot-local canonical
+retention launcher after deleting source inputs. Python 3.10 retains core/client
+qualification and explicitly refuses construction before creating a runtime.
+Foreign import scopes and attempts to prepare a completed slot must refuse.
+This optional lane does not publish a selected installation, create a host,
+prove a governed feed or qualify native subscription/adoption.
+`tools/test_standalone_qualification.py` checks its explicit opt-in, retained
+default-lane exclusions, interpreter binding and exact acceptance/full commands.
+
 ## Wheel-input inspection
 
 `python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
@@ -2184,23 +2200,34 @@ console-death fault; cold startup is not part of its five-second read barrier.
 
 Finite artifact/CLI fixture commands use the published caller-owned process
 API with their unchanged 20/30-second bounds and separate raw capture limits.
-Its API has no CWD/environment parameters, so the artifact fixture's finite
-child adapter sets its own CWD and removes `PYTHONPATH`, explicitly forwards
-stdin/stdout/stderr, and waits for the actual target. It does not change the
-test process's global CWD/environment or implement another cleanup authority.
-The canonical helper owns the entire bounded tree; the explicit console-death
+The artifact fixture passes the supported CWD/environment inputs directly,
+removes `PYTHONPATH` and preserves stdin plus separate stdout/stderr without
+another Python child adapter. It does not change the test process's global
+CWD/environment or implement another cleanup authority. The canonical helper
+owns the entire bounded tree; the explicit console-death
 test still performs its fault and pinned observations before external cleanup.
+The shared first-party library wheels and independent base Chat sdist are built
+once in parallel. Metadata-only version variants each receive a fresh wheel
+and core/client/service environment set; returning to a previously qualified
+version reuses only that exact version's artifacts. The promoted-version
+control checks the requested version explicitly. Independent library sdists
+are built only when the full construction control requests them. No collected
+case or real installed boundary is removed by this fixture reuse.
 
 Chat qualification requires **both lanes on the same immutable candidate**:
 
 ```text
-python tools/run-standalone-tests.py services/chat --prepare --chat-suite acceptance --timeout 120
+python tools/run-standalone-tests.py services/chat --prepare --chat-suite acceptance --timeout 180
 python tools/run-standalone-tests.py services/chat --chat-suite full --timeout 600
 ```
 
-Chat defaults to the acceptance lane and its 120-second allowance; `full`
+Chat defaults to the acceptance lane and its 180-second allowance; `full`
 defaults to 600 seconds. Other consumers keep their existing 600-second
-defaults. Neither lane substitutes for the other. The acceptance packet runs
+defaults. The expanded artifact/version portfolio exceeded the previous
+120-second acceptance allowance; the measured increase retains the entire
+acceptance inventory rather than moving cases out of the lane. Per-operation
+deadlines, capture bounds and the full allowance are unchanged.
+Neither lane substitutes for the other. The acceptance packet runs
 the real source-removed installed client, native caller/provider/descendant
 death, protocol, authentication, durable data/progress, deadlines and raw
 capture contracts, plus explicit local rendezvous refusal, TCP rebinding and
@@ -2250,8 +2277,8 @@ existing unit manifest. These units create no store, provider, process or
 listener. Database atomicity, non-consuming pending/thread pages, unchanged
 reader progress, strict receipts, lost-response recovery and actual source-removed
 installed commands stay in the existing Chat acceptance/full portfolio.
-Its family and parameter inventory expands additively; neither the 120/600-second
-allowances nor any original family is relaxed.
+Its family and parameter inventory expands additively. Every original family
+remains; the current whole-lane allowances are the 180/600-second bounds above.
 The empty-inbox and sparse-thread regressions compare actual SQLite instruction
 counts with100 versus5000 unrelated questions/messages, including the viewer's
 own ambient traffic and correspondence in another channel. They allow at most1000 extra instructions

@@ -377,7 +377,7 @@ def test_service_alias_uses_canonical_preparation_lease_and_tests(
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
         assert all(Path(path).is_relative_to(root / "tests") for path in command[5:-2])
         assert command[5] == str(root / "tests")
-        assert kwargs["limits"].wall_seconds == (120 if canonical == "services/chat" else 600)
+        assert kwargs["limits"].wall_seconds == (180 if canonical == "services/chat" else 600)
         assert kwargs["env"].get("AGENT_CHAT_TEST_SUITE") == (
             "acceptance" if canonical == "services/chat" else None
         )

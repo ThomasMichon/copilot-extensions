@@ -35,6 +35,10 @@ on:
         description: Exercise role-selectable candidate construction and immutable reuse with real UV
         type: boolean
         default: false
+      chat_construction:
+        description: Qualify standalone Chat construction, retained invocation and Python floors
+        type: boolean
+        default: false
       ssh_snapshot:
         description: Run read-only SSH snapshot, native session writer and same-cell peer acceptance
         type: boolean
@@ -53,7 +57,7 @@ permissions:
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -74,7 +78,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -273,6 +277,34 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps: *candidate-profile-steps
+
+  chat-construction:
+    if: ${{ inputs.chat_construction }}
+    name: Chat construction (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        id: chat-python
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Independent artifacts and native Chat acceptance
+        env:
+          UV_PYTHON: ${{ steps.chat-python.outputs.python-path }}
+        run: >-
+          python tools/run-standalone-tests.py services/chat --prepare
+          --chat-suite acceptance --timeout 180
+      - name: Complete native Chat portfolio on the same candidate
+        run: >-
+          python tools/run-standalone-tests.py services/chat
+          --chat-suite full --timeout 600
 
   ssh-snapshot-native-linux:
     if: ${{ inputs.ssh_snapshot }}

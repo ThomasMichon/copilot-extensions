@@ -1,0 +1,9 @@
+{
+  "comment": "Consume installed canonical construction for exact Chat client candidates and retained source-independent invocation",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

@@ -7,6 +7,13 @@ from collections import Counter
 
 
 FAMILIES = {
+    "test_construction.py": """
+test_construction_floor_refuses_before_resource_loading
+test_occupied_import_scope_is_not_replaced
+test_client_policy_delegates_one_canonical_candidate
+test_completed_slot_cannot_prepare_bootstrap
+test_installed_health_refuses_bootstrap_drift
+""",
     "test_collaboration.py": """
 test_metadata_refuses_invalid_fields_and_bounds
 test_structured_identity_recovery_and_legacy_shapes
@@ -97,6 +104,8 @@ test_fresh_installed_host_source_removed_independent_participants_and_crash_rest
     "test_setup_distribution.py": """
 test_independent_sdist_refuses_missing_construction_input
 test_installed_constructor_preserves_the_separate_bootstrap_floor
+test_installed_construction_refuses_foreign_imports_without_mutation
+test_installed_constructor_builds_chat_client_from_independent_inputs
 """,
     "test_local_endpoint.py": """
 test_local_endpoint_offline_status_never_resolves_or_executes
@@ -181,6 +190,8 @@ EXPECTED = {
 
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
+    "test_construction.py::test_occupied_import_scope_is_not_replaced": 4,
+    "test_construction.py::test_installed_health_refuses_bootstrap_drift": 3,
     "test_collaboration.py::test_metadata_refuses_invalid_fields_and_bounds": 22,
     "test_collaboration.py::test_annotated_pending_requires_complete_receipt_before_recovery": 6,
     "test_collaboration.py::test_client_refuses_invalid_views_without_mutating_semantic_progress": 13,
@@ -201,7 +212,7 @@ PARAMETER_COUNTS.update({
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_collaboration_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_refuses_unusable_installed_evidence": 17,
-    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 9,
+    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 11,
     "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 9,
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
     "test_cli.py::test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic": 2,
