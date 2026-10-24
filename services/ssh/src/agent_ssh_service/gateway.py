@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from fleet_manager.gateway_service_handler import HandlerBinding, ServiceRequest, ServiceResponse
@@ -16,8 +17,10 @@ from .store import DirectoryStore
 
 
 class SSHService:
-    def __init__(self, store: DirectoryStore):
+    def __init__(self, store: DirectoryStore, *,
+                 reconcile_relay: Callable[[], None] | None = None):
         self.store = store
+        self.reconcile_relay = reconcile_relay
         self.changed = asyncio.Condition()
         self.waiters = 0
         self.closed = False
@@ -90,6 +93,14 @@ class SSHService:
                     self.store.enroll, request.context.principal, value,
                     checkpoint=lambda: self._checkpoint(request),
                 )
+                if self.reconcile_relay is not None:
+                    # Even an original-ID retry reconciles an already committed join.
+                    try:
+                        await self._disk(self.reconcile_relay)
+                    except (OSError, SSHServiceError) as exc:
+                        logging.getLogger(__name__).error(
+                            "ssh-native-relay-reconcile-failed code=local-authorization-unavailable")
+                        raise SSHServiceError("native-relay-unavailable") from exc
                 if changed:
                     async with self.changed:
                         self.changed.notify_all()
@@ -98,7 +109,9 @@ class SSHService:
             return ServiceResponse(404)
         except SSHServiceError as exc:
             code = str(exc)
-            status = 503 if code in {"service-draining", "notification-waiter-limit"} else 403
+            status = 503 if code in {
+                "service-draining", "notification-waiter-limit", "native-relay-unavailable",
+            } else 403
             return ServiceResponse(status, (), canonical({"error": code}))
         except (PlanError, UnicodeError, ValueError, RecursionError):
             return ServiceResponse(400, (), canonical({"error": "invalid-request"}))

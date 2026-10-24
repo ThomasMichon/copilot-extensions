@@ -15,6 +15,7 @@ requires-python = ">=3.10"
 dependencies = [
     "fleet-manager[service-gateway]>=0.1.0.dev1",
     "agent-single-instance-lease",
+    "agent-procutil",
 ]
 
 [project.optional-dependencies]
