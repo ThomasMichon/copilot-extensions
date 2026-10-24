@@ -1674,6 +1674,8 @@ def _reconcile_pr(
     except pr_authority.PublicationAuthorityBusy:
         if best_effort:
             return
+        if tracking._thread_sidecar_counts():
+            raise
         # Never wait for publication authority while holding a record lock.
         # Reload and revalidate the observation's authority after admission.
         with pr_authority.guard(timeout=publication_deadline.lock_wait(publication_deadline.configured(prcfg))):

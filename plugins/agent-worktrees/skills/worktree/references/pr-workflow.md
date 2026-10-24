@@ -1084,8 +1084,10 @@ On publication-authority contention it releases the record lock, waits within
 the configured deadline-derived publication lock budget, then reloads and
 revalidates the exact PR association before persisting the observation. Provider
 reads happen outside this wait; best-effort background reconciliation skips a
-contended write rather than waiting. Unchanged observations need no authority
-wait.
+contended write rather than waiting. Fenced finalization also uses this
+nonwaiting mode: its outer record lock must never wait for publication
+authority. Foreground reconciliation refuses to wait while any outer record
+sidecar remains held. Unchanged observations need no authority wait.
 
 If the budget expires, `pr-status --json` returns a nonzero exit with
 `error_code: pr_authority_busy`, `retryable: true`, `retry_after_seconds: 2`

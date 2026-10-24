@@ -244,3 +244,46 @@ def test_authority_timeout_is_typed_with_specific_recovery(observation, monkeypa
     assert result["error_code"] == "pr_authority_busy" and result["retryable"]
     assert "installation-wide" in str(raised.value)
     assert "generic shared lock message" not in str(raised.value)
+
+
+def test_fenced_finalize_skips_busy_observation_and_preserves_obligation(observation, monkeypatch):
+    from agent_worktrees import claim_handoffs, finalize
+
+    config, rec, _provider, events = observation
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
+    monkeypatch.setattr(claim_handoffs, "active_bundle_ids_for_source", lambda *a: [])
+    attempts = []
+
+    @contextmanager
+    def busy(*, timeout=None):
+        assert tracking._thread_sidecar_counts(), "finalization lost its outer record fence"
+        assert timeout == 0, "fenced finalization must never wait for publication authority"
+        attempts.append(timeout)
+        raise pr_authority.PublicationAuthorityBusy()
+        yield
+
+    monkeypatch.setattr(pr_authority, "guard", busy)
+    assert finalize.validate_and_finalize(rec.worktree_id, config) is False
+    assert attempts == [0]
+    fresh = tracking.load_record(rec.yaml_path)
+    assert fresh.pr.state == "open" and fresh.resources[0].state == "active"
+    assert events == []
+
+
+def test_foreground_reconcile_never_waits_with_an_outer_record_lock(observation, monkeypatch):
+    config, rec, _provider, events = observation
+    attempts = []
+
+    @contextmanager
+    def busy(*, timeout=None):
+        attempts.append(timeout)
+        raise pr_authority.PublicationAuthorityBusy()
+        yield
+
+    monkeypatch.setattr(pr_authority, "guard", busy)
+    with tracking._RecordLock(rec.yaml_path, require_sidecar=True):
+        with pytest.raises(pr_authority.PublicationAuthorityBusy):
+            pr_ops._reconcile_active_pr(rec, config)
+    assert attempts == [0]
+    assert tracking.load_record(rec.yaml_path).pr.state == "open"
+    assert events == []
