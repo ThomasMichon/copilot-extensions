@@ -119,12 +119,13 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
         machine = task.get("target_machine")
         worktree_id = task.get("target_worktree")
     acquisition_reservation = reservations[0] if reservations else None
-    if (
+    active_allocation = (
         isinstance(acquisition_reservation, dict)
         and status in {"queued", "claimed", "started", "suspended"}
         and acquisition_reservation.get("state") in {"reserving", "spawned"}
         and not acquisition_reservation.get("release_requested")
-    ):
+    )
+    if active_allocation:
         worktree_id = worktree_id or acquisition_reservation.get("worktree")
 
     if not worktree_id:
@@ -213,6 +214,13 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
             "acquisition_reservation_history": reservation_history,
         },
     }
+    if active_allocation and acquisition_reservation.get("worktree") == worktree_id:
+        project = acquisition_reservation.get("allocation_project")
+        if project is not None:
+            if not isinstance(project, str) or not project.strip():
+                print(f"dispatch task {task_id} has an invalid execution project", file=sys.stderr)
+                return _NS_BAD_STATE_EXIT
+            spec["project"] = project
     print(json.dumps(spec))
     return 0
 

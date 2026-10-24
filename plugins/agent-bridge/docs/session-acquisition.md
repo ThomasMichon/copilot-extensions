@@ -208,6 +208,14 @@ provider: current task generation/status/hold, latest active reservation,
 worktree ownership and retirement. Generation is the **current admission
 fence**, not immutable conversation lineage: claim/adoption increments it.
 
+An active Dispatch worktree reference carries its recorded execution `project`,
+not the queue lane. The namespace consumer preserves and validates that optional
+identity so hosting admission can read the actual worktree owner before
+readiness or plugin staging. It does not treat the provider's predicted `cwd`
+as permission. Missing legacy identity still grants no hosting authority;
+inactive, released or differently bound allocations cannot supply it. Fresh
+owner, repository policy and acquisition-fence checks remain independent.
+
 Worktree-owner resolution does not require an interactive shell's `PATH`.
 A legacy bridge uses its installed canonical versioned-runtime resolver to
 select a completed worktree-owner interpreter. Its execution trampoline rechecks

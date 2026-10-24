@@ -12,7 +12,7 @@ import pytest
 from repository_policy import AgentHostingError
 
 from agent_bridge import hosting_policy, local_launch_preparation, provider_creation, transport
-from agent_bridge.agent_registry import AgentConfig, AgentResolver
+from agent_bridge.agent_registry import AgentConfig, AgentResolver, CliNamespaceResolver
 from agent_bridge.connect import ConnectTracker
 from agent_bridge.session_host import agent_runner, launcher
 from agent_bridge.session_host_connection import _SessionHostConnectionMixin
@@ -181,6 +181,47 @@ async def test_namespace_refuses_before_readiness_can_cold_start(
         await resolver.resolve_async(address)
     provider.ensure_ready.assert_not_awaited()
     resolved.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("denied_at", [None, "before-readiness", "after-readiness"])
+async def test_worktree_namespace_checks_fresh_owner_path_before_staging(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, denied_at: str | None,
+) -> None:
+    resolver = AgentResolver({}, {})
+    provider = CliNamespaceResolver("dispatch", "agent-dispatch")
+    resolver.register_namespace_resolver(provider)
+    monkeypatch.setattr(resolver, "refresh_provider_resolvers", lambda: None)
+    monkeypatch.setattr(provider, "_run", AsyncMock(return_value=(0, json.dumps({
+        "type": "worktree", "worktree_id": "workspace", "project": "execution-project",
+        "cwd": "/unverified/provider/path",
+    }), "")))
+    owner = AsyncMock(return_value={"path": str(repo)})
+    monkeypatch.setattr("agent_bridge.acquisition_authority.read_worktree_record", owner)
+    related = AsyncMock(return_value=[])
+    monkeypatch.setattr(resolver, "_related_plugins_for", related)
+
+    async def ready(_name):
+        if denied_at == "after-readiness":
+            deny(repo)
+
+    provider.ensure_ready = AsyncMock(side_effect=ready)
+    if denied_at == "before-readiness":
+        deny(repo)
+    if denied_at is None:
+        target = await resolver.resolve_async("dispatch:task")
+        assert target.project == "execution-project" and target.worktree_id == "workspace"
+        related.assert_awaited_once()
+    else:
+        with pytest.raises(AgentHostingError, match="expose_agent: false"):
+            await resolver.resolve_async("dispatch:task")
+        related.assert_not_awaited()
+    if denied_at == "before-readiness":
+        provider.ensure_ready.assert_not_awaited()
+    else:
+        provider.ensure_ready.assert_awaited_once_with("task")
+    assert owner.await_args_list
+    assert all(call.args == ("workspace", "execution-project") for call in owner.await_args_list)
 
 
 @pytest.mark.asyncio

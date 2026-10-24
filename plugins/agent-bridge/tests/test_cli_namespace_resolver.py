@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -460,6 +461,43 @@ async def test_resolve_worktree_type_with_host_becomes_ssh_target():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("host", [None, "receiver"])
+async def test_resolve_worktree_preserves_execution_project(host):
+    fb = _Fallback()
+    payload = {
+        "type": "worktree", "worktree_id": "workspace",
+        "project": "execution-project", "host": host,
+    }
+    with patch("shutil.which", _which), patch(
+        "subprocess.run", return_value=_cp(0, json.dumps(payload)),
+    ):
+        target = await CliNamespaceResolver("dispatch", "agent-dispatch", fb).resolve("task")
+    assert target.project == "execution-project"
+    assert target.worktree_id == "workspace"
+    assert target.cwd is None
+    assert target.explicit_cwd is False
+    assert target.type == ("ssh" if host else "local")
+    assert fb.calls == []
+
+
+@pytest.mark.asyncio
+async def test_worktree_project_crosses_native_provider_boundary(tmp_path):
+    payload = {
+        "type": "worktree", "worktree_id": "workspace", "project": "execution-project",
+    }
+    provider = tmp_path / "provider.py"
+    provider.write_text(
+        f"import json\nprint(json.dumps({payload!r}))\n", encoding="utf-8",
+    )
+    target = await CliNamespaceResolver(
+        "dispatch", "synthetic-provider", command=[sys.executable, str(provider)],
+    ).resolve("task")
+    assert target.project == "execution-project"
+    assert target.worktree_id == "workspace"
+    assert target.cwd is None and not target.explicit_cwd
+
+
+@pytest.mark.asyncio
 async def test_resolve_session_type_carries_venue_unspawnable():
     """A provider with no spawnable target at all (e.g. agent-dispatch's
     `dispatch:` namespace resolving a completed headless task, #3389
@@ -497,6 +535,10 @@ async def test_resolve_session_type_carries_venue_unspawnable():
         ({"type": "worktree", "worktree_id": ""}, "invalid worktree_id"),
         ({"type": "worktree", "worktree_id": "  "}, "invalid worktree_id"),
         ({"type": "worktree", "worktree_id": "wt-1", "host": ""}, "invalid host"),
+        ({"type": "worktree", "worktree_id": "wt-1", "project": ""}, "invalid project"),
+        ({"type": "worktree", "worktree_id": "wt-1", "project": " "}, "invalid project"),
+        ({"type": "worktree", "worktree_id": "wt-1", "project": True}, "invalid project"),
+        ({"type": "worktree", "worktree_id": "wt-1", "project": []}, "invalid project"),
     ],
 )
 async def test_resolve_worktree_type_rejects_invalid_shape(payload, message):

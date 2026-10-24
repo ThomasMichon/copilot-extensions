@@ -136,6 +136,9 @@ def digest(data: bytes) -> str:
 
 def git(root: Path, *args: str) -> bytes:
     git_evidence.require_local_object_reads()
+    # Object expressions must not trigger Windows filesystem disambiguation.
+    if args[:1] == ("show",) and "--" not in args:
+        args = (*args, "--")
     result = subprocess.run(
         ["git", "-c", f"safe.directory={root}", "-C", str(root), *args],
         capture_output=True,
