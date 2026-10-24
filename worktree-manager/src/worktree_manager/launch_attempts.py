@@ -18,6 +18,8 @@ from .private_state import protect, reject_links, verify_private
 from .self_install import default_root
 
 RETENTION_SECONDS = 90 * 24 * 60 * 60
+_SCHEMA_VERSION = 2
+_UNKNOWN_LOCALITY = -1
 _APPLICATION_ID = 0x574C4131
 _ACTIONS = {"new", "resume", "open", "restore", "base", "bare-resume", "open-venue"}
 _PHASES = {
@@ -25,7 +27,10 @@ _PHASES = {
     "target-admitted", "allocated", "copilot-started", "prompt-handoff", "unknown",
 }
 _OWNERS = {"manager", "engine", "daemon", "native"}
-_CODES = {"unsupported", "engine-error", "transport-error", "storage-error", "interrupted"}
+_CODES = {
+    "unsupported", "locality-unresolved", "engine-error", "transport-error", "storage-error",
+    "interrupted",
+}
 _TABLES = {
     "attempts": (
         "CREATE TABLE attempts (attempt_id TEXT PRIMARY KEY, submitted_at REAL NOT NULL, "
@@ -72,20 +77,25 @@ def _timestamp() -> float:
     return value
 
 
-def _metadata(row: sqlite3.Row) -> dict:
+def _metadata(row: sqlite3.Row, *, version: int) -> dict:
     result = dict(row)
     _identity(result["attempt_id"])
     if (
         result["action"] not in _ACTIONS or not _text(result["project"]) or not _text(result["surface"])
         or not isinstance(result["submitted_at"], (int, float))
         or not math.isfinite(result["submitted_at"]) or result["submitted_at"] < 0
-        or result["is_local"] not in (0, 1) or result["inputs_available"] not in (0, 1)
+        or result["is_local"] not in ((0, 1, _UNKNOWN_LOCALITY) if version == 2 else (0, 1))
+        or result["inputs_available"] not in (0, 1)
         or not all(_text(result[key], optional=True) for key in (
             "machine", "environment", "provider", "venue_id", "worktree_id",
         ))
     ):
         raise ValueError("Invalid stored launch metadata")
-    return {**result, "is_local": bool(result["is_local"]), "inputs_available": bool(result["inputs_available"])}
+    return {
+        **result,
+        "is_local": None if result["is_local"] == _UNKNOWN_LOCALITY else bool(result["is_local"]),
+        "inputs_available": bool(result["inputs_available"]),
+    }
 
 
 def _validate_observation(owner: str, phase: str, details: dict) -> None:
@@ -153,13 +163,13 @@ class LaunchAttempts:
         if header[18:20] != b"\x01\x01":
             raise LaunchAttemptError("Launch journal requires DELETE journaling.")
         if (
-            int.from_bytes(header[60:64], "big") != 1
+            int.from_bytes(header[60:64], "big") not in (1, _SCHEMA_VERSION)
             or int.from_bytes(header[68:72], "big") != _APPLICATION_ID
         ):
             raise LaunchAttemptError("Launch journal has an incompatible database schema.")
 
     @staticmethod
-    def _schema(connection: sqlite3.Connection) -> None:
+    def _schema(connection: sqlite3.Connection) -> int:
         objects = [tuple(row) for row in connection.execute(
             "SELECT type, name, sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' "
             "ORDER BY type, name, sql"
@@ -168,12 +178,24 @@ class LaunchAttempts:
             *(("table", name, sql) for name, sql in _TABLES.items()),
             *(("index", name, sql) for name, sql in _INDEXES.items()),
         ])
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
         if (
             connection.execute("PRAGMA application_id").fetchone()[0] != _APPLICATION_ID
-            or connection.execute("PRAGMA user_version").fetchone()[0] != 1
+            or version not in (1, _SCHEMA_VERSION)
             or objects != expected
         ):
             raise LaunchAttemptError("Launch journal has an incompatible database schema.")
+        return version
+
+    @staticmethod
+    def _upgrade(connection: sqlite3.Connection) -> None:
+        # V2 retains V1's rows/schema, adding -1 for explicitly unknown locality.
+        # Validate before admitting that value so a corrupt V1 row cannot gain meaning.
+        for row in connection.execute(
+            f"SELECT {_METADATA}, 0 AS inputs_available FROM attempts"
+        ):
+            _metadata(row, version=1)
+        connection.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
 
     def _initialize(self) -> None:
         if self._exists():
@@ -186,7 +208,7 @@ class LaunchAttempts:
                 for statement in (*_TABLES.values(), *_INDEXES.values()):
                     connection.execute(statement)
                 connection.execute(f"PRAGMA application_id={_APPLICATION_ID}")
-                connection.execute("PRAGMA user_version=1")
+                connection.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             protect(staged)
             try:
                 os.link(staged, self.path)
@@ -220,14 +242,16 @@ class LaunchAttempts:
                 connection.execute("PRAGMA secure_delete=ON")
                 connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-            self._schema(connection)
+            version = self._schema(connection)
             if connection.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
                 raise LaunchAttemptError("Launch journal requires DELETE journaling.")
+            if write and version == 1:
+                self._upgrade(connection)
             yield connection
 
     def record_intent(
         self, attempt_id: str, *, action: str, project: str, surface: str,
-        is_local: bool, machine: str | None = None, environment: str | None = None,
+        is_local: bool | None, machine: str | None = None, environment: str | None = None,
         provider: str | None = None, venue_id: str | None = None,
         worktree_id: str | None = None, prompt: str = "", options: dict | None = None,
     ) -> None:
@@ -236,7 +260,7 @@ class LaunchAttempts:
             _identity(attempt_id)
             if (
                 action not in _ACTIONS or not _text(project) or not _text(surface)
-                or type(is_local) is not bool
+                or is_local is not None and type(is_local) is not bool
                 or not all(_text(value, optional=True) for value in (
                     machine, environment, provider, venue_id, worktree_id,
                 ))
@@ -250,7 +274,7 @@ class LaunchAttempts:
             )
             metadata = (
                 action, project, surface, machine, environment, provider, venue_id,
-                int(is_local), worktree_id,
+                _UNKNOWN_LOCALITY if is_local is None else int(is_local), worktree_id,
             )
             now = _timestamp()
             with self._connect(write=True) as connection:
@@ -322,7 +346,8 @@ class LaunchAttempts:
                     f"FROM attempts{where} ORDER BY submitted_at DESC, attempt_id DESC LIMIT ?",
                     (_timestamp() - RETENTION_SECONDS, *values, limit),
                 ).fetchall()
-                return [_metadata(row) for row in rows]
+                version = connection.execute("PRAGMA user_version").fetchone()[0]
+                return [_metadata(row, version=version) for row in rows]
         except (OSError, sqlite3.Error, ValueError, TypeError, OverflowError) as exc:
             raise LaunchAttemptError("Could not read launch-attempt metadata.") from exc
 
@@ -350,7 +375,8 @@ class LaunchAttempts:
                 ).fetchone()
                 if row is None:
                     raise LaunchAttemptError("Launch attempt was not found.")
-                result = _metadata(row)
+                version = connection.execute("PRAGMA user_version").fetchone()[0]
+                result = _metadata(row, version=version)
                 events = []
                 for event in connection.execute(
                     "SELECT sequence, observed_at, owner, phase, details FROM events "

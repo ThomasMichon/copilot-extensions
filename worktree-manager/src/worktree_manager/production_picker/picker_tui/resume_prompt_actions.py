@@ -31,7 +31,8 @@ def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
         return
     decision = screen._resume_decision(rec, no_mux=no_mux, ahp=ahp)
     if decision.get("deferred"):
-        screen._decide(decision)
+        screen.debug = decision.get("reason") or "Locality is not ready; refresh and retry."
+        screen.refresh()
         return
     leg = rec.get("execution_leg") or (rec.get("raw") or {}).get("execution_leg")
     refusal: str | None = None

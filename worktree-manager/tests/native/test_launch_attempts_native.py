@@ -7,6 +7,7 @@ import json
 import math
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -79,6 +80,39 @@ def test_crash_between_intent_and_first_event_does_not_leave_partial_confirmatio
         recovery_id, action="open", project="example", surface="native", is_local=True,
     )
     assert [row["attempt_id"] for row in store.entries()] == [recovery_id]
+
+
+@pytest.mark.parametrize("boundary", ["before-first-event", "after-commit"])
+def test_v1_upgrade_crash_retains_original_and_never_leaves_partial_unknown_intent(
+    tmp_path, boundary,
+):
+    store = journal.LaunchAttempts(tmp_path)
+    original_id, upgrade_id = uuid4().hex, uuid4().hex
+    store.record_intent(
+        original_id, action="open", project="example", surface="native", is_local=True,
+    )
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("PRAGMA user_version=1")
+    original = store.detail(original_id, include_input=True)
+    writer = _WRITER.replace("is_local=True", "is_local=None")
+    result = _run(writer, str(tmp_path), upgrade_id, boundary)
+    assert result.returncode == 71, result.stderr
+    if boundary == "before-first-event":
+        recovery_id = uuid4().hex
+        store.record_intent(
+            recovery_id, action="open", project="example", surface="native", is_local=None,
+        )
+        assert {row["attempt_id"] for row in store.entries()} == {original_id, recovery_id}
+    else:
+        reader = _READER.replace(
+            'detail = store.detail(sys.argv[2], include_input=True)',
+            'detail = store.detail(sys.argv[2], include_input=True)\nassert detail["is_local"] is None',
+        )
+        result = _run(reader, str(tmp_path), upgrade_id)
+        assert result.returncode == 0, result.stderr
+        assert {row["attempt_id"] for row in store.entries()} == {original_id, upgrade_id}
+    assert store.detail(original_id, include_input=True) == original
+    assert int.from_bytes(store.path.read_bytes()[60:64], "big") == 2
 
 
 _UI_WRITER = """

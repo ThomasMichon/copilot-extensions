@@ -54,6 +54,7 @@ def confirm_before_effect(
     saved: Callable[[dict], None],
     prompt: str | None = None,
     refusal: str | None = None,
+    refusal_code: str = "unsupported",
     history: SeedHistory | None = None,
     enabled: bool = True,
 ) -> bool:
@@ -86,7 +87,7 @@ def confirm_before_effect(
         action = "bare-resume"
     intent = {
         "action": action, "project": project, "surface": surface,
-        "is_local": snapshot.get("is_local", True),
+        "is_local": snapshot.get("is_local"),
         "machine": snapshot.get("machine"), "environment": snapshot.get("env"),
         "provider": snapshot.get("provider"), "venue_id": snapshot.get("venue"),
         "worktree_id": snapshot.get("worktree_id"),
@@ -119,7 +120,9 @@ def confirm_before_effect(
         result["attempt_id"] = confirmation.attempt_id
         saved(result)
 
-    app.push_screen(_SavingLaunch(confirmation, refusal=refusal, history=history), after)
+    app.push_screen(_SavingLaunch(
+        confirmation, refusal=refusal, refusal_code=refusal_code, history=history,
+    ), after)
     return True
 
 
@@ -133,11 +136,13 @@ class _SavingLaunch(ModalScreen[str | None]):
     """
 
     def __init__(
-        self, confirmation: _Confirmation, *, refusal: str | None, history: SeedHistory | None,
+        self, confirmation: _Confirmation, *, refusal: str | None, refusal_code: str,
+        history: SeedHistory | None,
     ) -> None:
         super().__init__()
         self._confirmation = confirmation
         self._refusal = refusal
+        self._refusal_code = refusal_code
         self._history = history
         self._inbox = Inbox(self)
         self._threads: set[threading.Thread] = set()
@@ -148,6 +153,7 @@ class _SavingLaunch(ModalScreen[str | None]):
 
     def on_mount(self) -> None:
         confirmation, refusal, history = self._confirmation, self._refusal, self._history
+        refusal_code = self._refusal_code
 
         def work() -> str | None:
             try:
@@ -156,7 +162,7 @@ class _SavingLaunch(ModalScreen[str | None]):
                 if refusal:
                     store.append(
                         confirmation.attempt_id, owner="manager", phase="refused",
-                        code="unsupported",
+                        code=refusal_code,
                     )
                 elif history is not None:
                     history.remember(confirmation.intent["prompt"])

@@ -141,6 +141,144 @@ def test_unicode_multiline_input_and_option_text_round_trip_without_normalizatio
     }
 
 
+@pytest.mark.parametrize("locality", [True, False, None])
+def test_locality_is_an_explicit_boolean_or_unknown_in_v2(tmp_path, locality):
+    store = journal.LaunchAttempts(tmp_path)
+    attempt_id = record(store, is_local=locality)
+    assert store.entries()[0]["is_local"] is locality
+    assert store.detail(attempt_id)["is_local"] is locality
+    assert int.from_bytes(store.path.read_bytes()[60:64], "big") == 2
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT is_local FROM attempts").fetchone()[0] == (
+            -1 if locality is None else int(locality)
+        )
+    record(store, attempt_id=attempt_id, is_local=locality)
+    with pytest.raises(journal.LaunchAttemptError, match="reused"):
+        record(store, attempt_id=attempt_id, is_local=not locality)
+
+
+@pytest.mark.parametrize("locality", [-1, 0, 1, "unknown", [], {}])
+def test_locality_api_refuses_non_boolean_values_without_publishing(tmp_path, locality):
+    store = journal.LaunchAttempts(tmp_path)
+    with pytest.raises(journal.LaunchAttemptError):
+        record(store, is_local=locality)
+    assert not store.path.exists()
+
+
+def legacy_store(tmp_path):
+    """Build the exact released V1 shape, independently of the current writer."""
+    store = journal.LaunchAttempts(tmp_path)
+    store.path.parent.mkdir()
+    journal.protect(store.path.parent, directory=True)
+    attempt_id = uuid4().hex
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "CREATE TABLE attempts (attempt_id TEXT PRIMARY KEY, submitted_at REAL NOT NULL, "
+            "action TEXT NOT NULL, project TEXT NOT NULL, surface TEXT NOT NULL, "
+            "machine TEXT, environment TEXT, provider TEXT, venue_id TEXT, "
+            "is_local INTEGER NOT NULL, worktree_id TEXT, inputs TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE events (sequence INTEGER PRIMARY KEY, attempt_id TEXT NOT NULL "
+            "REFERENCES attempts(attempt_id), observed_at REAL NOT NULL, "
+            "owner TEXT NOT NULL, phase TEXT NOT NULL, details TEXT NOT NULL)"
+        )
+        connection.execute("CREATE INDEX attempts_time ON attempts(submitted_at)")
+        connection.execute("CREATE INDEX events_attempt ON events(attempt_id, sequence)")
+        connection.execute(f"PRAGMA application_id={journal._APPLICATION_ID}")
+        connection.execute("PRAGMA user_version=1")
+        connection.execute(
+            "INSERT INTO attempts VALUES (?, ?, 'new', 'example', 'new-dialog', "
+            "NULL, NULL, NULL, NULL, 1, NULL, ?)",
+            (attempt_id, journal.time.time(), json.dumps({"prompt": "exact legacy\n", "options": {}})),
+        )
+        connection.execute(
+            "INSERT INTO events VALUES (1, ?, ?, 'manager', 'confirmed', '{}')",
+            (attempt_id, journal.time.time()),
+        )
+    journal.protect(store.path)
+    return store, attempt_id
+
+
+def test_v1_reads_preserve_bytes_version_and_input_without_migration(tmp_path):
+    store, attempt_id = legacy_store(tmp_path)
+    before = store.path.read_bytes()
+    assert store.entries()[0]["is_local"] is True
+    assert store.detail(attempt_id, include_input=True)["input"]["prompt"] == "exact legacy\n"
+    assert store.path.read_bytes() == before
+    assert int.from_bytes(before[60:64], "big") == 1
+
+
+@pytest.mark.parametrize("operation", ["record", "append", "expire"])
+def test_first_v1_write_upgrades_without_replacing_prior_evidence(tmp_path, operation):
+    store, attempt_id = legacy_store(tmp_path)
+    original = store.detail(attempt_id, include_input=True)
+    if operation == "record":
+        added = record(store, is_local=None)
+        assert store.detail(added)["is_local"] is None
+    elif operation == "append":
+        store.append(attempt_id, owner="manager", phase="unknown")
+    else:
+        assert store.expire() == 0
+    assert int.from_bytes(store.path.read_bytes()[60:64], "big") == 2
+    retained = store.detail(attempt_id, include_input=True)
+    events = retained.pop("events")
+    assert events[:1] == original.pop("events")
+    assert retained == original
+
+
+@pytest.mark.parametrize("invalid", [-1, 3])
+def test_corrupt_v1_locality_cannot_acquire_valid_unknown_meaning(tmp_path, invalid):
+    store, attempt_id = legacy_store(tmp_path)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("UPDATE attempts SET is_local=?", (invalid,))
+    before = store.path.read_bytes()
+    for operation in (
+        store.entries, lambda: store.detail(attempt_id), lambda: record(store, is_local=None),
+        lambda: store.append(attempt_id, owner="manager", phase="unknown"), store.expire,
+    ):
+        with pytest.raises(journal.LaunchAttemptError):
+            operation()
+        assert store.path.read_bytes() == before
+
+
+def test_v1_migration_and_first_mutation_share_one_rollback_boundary(tmp_path, monkeypatch):
+    store, attempt_id = legacy_store(tmp_path)
+    original = store.detail(attempt_id, include_input=True)
+    connect = sqlite3.connect
+
+    class FailedFirstMutation(sqlite3.Connection):
+        def execute(self, sql, parameters=(), /):
+            if sql.startswith("INSERT INTO events"):
+                raise sqlite3.OperationalError("disk full")
+            return super().execute(sql, parameters)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            journal.sqlite3, "connect",
+            lambda *args, **kwargs: connect(*args, **kwargs, factory=FailedFirstMutation),
+        )
+        with pytest.raises(journal.LaunchAttemptError):
+            record(store, is_local=None)
+    assert int.from_bytes(store.path.read_bytes()[60:64], "big") == 1
+    assert store.detail(attempt_id, include_input=True) == original
+    assert len(store.entries()) == 1
+    assert list(store.path.parent.iterdir()) == [store.path]
+
+
+def test_concurrent_v1_upgrades_preserve_original_and_all_confirmations(tmp_path):
+    store, attempt_id = legacy_store(tmp_path)
+
+    def submit(_):
+        return record(journal.LaunchAttempts(tmp_path), is_local=None)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        ids = set(pool.map(submit, range(8)))
+    assert {row["attempt_id"] for row in store.entries()} == ids | {attempt_id}
+    assert store.detail(attempt_id, include_input=True)["input"]["prompt"] == "exact legacy\n"
+    assert all(store.detail(ident)["is_local"] is None for ident in ids)
+
+
 def test_concurrent_first_writers_publish_one_complete_database_and_all_intents(tmp_path):
     def submit(index):
         return record(journal.LaunchAttempts(tmp_path), prompt=f"private-{index}")

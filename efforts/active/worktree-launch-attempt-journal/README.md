@@ -47,11 +47,13 @@ or permission to replay an ambiguous creation or prompt.
 
 ## Context
 
-Current Manager source saves prompt-only history from the confirmation widget.
-It lacks a universal initial attempt record joining action, options, venue and
-outcome. Engine activity has rolling lifecycle and preparation-phase events,
-but attempts before allocation lack a worktree identity, prompt text is
-deliberately absent, and phase step IDs are not a whole-attempt ID.
+At effort start, Manager saved prompt-only history from the confirmation widget.
+Storage #8505 and confirmation #8542 now preserve known-target intent before
+effects. Truthful unresolved-locality refusal recording is implemented for
+review; comprehensive outcome correlation remains incomplete. Engine activity
+has rolling lifecycle and preparation-phase events, but attempts before
+allocation lack a worktree identity, prompt text is
+deliberately absent there, and phase step IDs are not a whole-attempt ID.
 
 The October 23 report is not resolved by the older source merges. Inspected
 Manager and engine versions are newer than the initial parity release.
@@ -90,18 +92,17 @@ The following decomposition and detailed evidence rules are agent-recommended.
 
 - [x] Implement the protected, versioned storage foundation independently of
   launch/replay authority; reviewed storage scope merged in #8505.
-- [ ] Wire the shared append path using existing private-state protections
+- [x] Wire the shared append path using existing private-state protections
   and transaction conventions. Persist action, exact submitted prompt/options,
-  project, selected venue and attempt ID before dismissal or allocation.
-  The protected storage foundation is implemented; confirmation wiring and its
-  responsive durability wait remain pending.
-- [ ] Cover empty prompts, rejected unsupported choices and cancellation without
+  project, selected venue and attempt ID before dismissal or allocation for
+  resolved targets; #8542 merged the responsive confirmation gate.
+- [x] Cover empty prompts, rejected unsupported composer choices and cancellation without
   treating draft text or cancellation as accepted launch intent.
-- [ ] Represent confirmed refusals with unresolved target locality truthfully;
+- [x] Represent confirmed refusals with unresolved target locality truthfully;
   never coerce an unknown target into a local or remote metadata claim.
-- [ ] Record failures explicitly. If required intent persistence fails, preserve
+- [x] Record failures explicitly. If required intent persistence fails, preserve
   the dialog/draft and refuse mutation rather than silently dropping the audit.
-- [ ] Keep audit history separate from daemon-owned pending intent; retain
+- [x] Keep audit history separate from daemon-owned pending intent; retain
   New/Resume provenance and never manufacture a replacement request on retry.
 
 ### Phase 3 -- Existing-owner outcome correlation
@@ -326,3 +327,57 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 - Legacy history copies, comprehensive outcome correlation, selected-machine
   readers/sweeps, negotiated SSH prompts and installed acceptance stay open.
   This implementation is not yet merged and is not parent-effort completion.
+
+### 2026-10-24 -- Confirmation gate merged; unresolved targets next
+
+- #8542 merged as `e049c2d2114e5e80f3a414bdd3f77cd53a7da833` after current-head
+  approval with no unresolved findings and all required CI, attribution and
+  workflow checks passing. Parent issues #8375 and #6057 remain open.
+- Review found two genuine persistence-boundary omissions. Compact-Picker tests
+  now force per-test private roots even under direct pytest and explicitly
+  await saving. Mock cold Resume now forwards the same no-persistence boundary
+  as mock New, through one shared gate; neither creates history/journal entries.
+- Final affected coverage passes 493 cases with four platform/privilege skips.
+  Current-source Windows and POSIX native crash/acknowledgement controls each
+  pass three cases. Both 20-sample handler checks remain below 100ms with 200ms
+  injected storage delay; this is still not physical-key or installed evidence.
+- Pulled the continuing source worktree forward without discarding unmerged
+  work. The three replay candidates were independently listed by the merged
+  provider PR, and the whole source patch matched the merge patch before a
+  zero-replay rebase. Native recovery refs remain intact.
+- Next, represent unresolved target locality without inventing a local/remote
+  value and journal confirmed refusals before proceeding to owner outcome
+  correlation. Keep all retention, inspection/sweep, negotiated SSH, release,
+  installed-conversation and cleanup gates open; do not finalize this worktree.
+
+### 2026-10-24 -- Unknown-locality refusal slice prepared for review
+
+- Journal version 2 exposes locality as true, false or unknown. Its internal
+  sentinel preserves the existing table/index shape without copying private
+  inputs. Readers retain version-1 compatibility without migration; the first
+  writer validates original metadata under the old rules and advances the
+  version atomically with its mutation. Invalid old values cannot gain meaning.
+- Confirmed ordinary Open/Resume, Bare Resume, new-window and task Open retain
+  selected target, title and options before a structured locality refusal.
+  They do not exit, embody or launch. Unavailable Resume prompt editor entry is
+  not confirmation; mock mode and already-correlated deferred continuations
+  never create a new intent.
+- Focused storage, confirmation and existing action regressions pass 130 cases
+  with four platform/privilege skips. Two native Windows process-crash cases
+  cover upgrade before the first event and after commit, preserving original
+  evidence and refusing partial intent. Ruff and the 13-plugin install contract
+  pass. Current-version POSIX and installed-local/SSH acceptance remain open;
+  previous source qualification is not silently treated as version-2 proof.
+- This closes the remaining Phase 2 implementation item, not the parent gate.
+  Review/merge, existing-owner outcome correlation, retention/history migration,
+  selected-machine readers/sweeps, negotiated SSH admission and delivered
+  conversation evidence remain owed.
+- Required CI on the first published head found three stale installer guardian
+  copies inherited during the managed publication rebase. The canonical owner
+  had already gained zombie-only process-group handling, but the vault,
+  pull-request runtime and shared updater copies had not been synchronized.
+  Ran the existing generator, retained the exact canonical bytes, added release
+  changefiles for every affected updater consumer and revalidated the install
+  contract. Both canonical zombie/live-member refusal controls pass; this is a
+  generated-copy consistency repair, not a new guardian design or native macOS
+  qualification. No failing CI gate was bypassed.
