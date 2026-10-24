@@ -291,6 +291,42 @@ false settled success; no indefinite higher-priority optimistic overlay.
 
 ## Staged PR graph and exact ownership
 
+### Private F3 model checkpoint
+
+The independently staged `source_publications.py` candidate has no production
+importer. Its underscore-prefixed types are not a public adapter API. It reuses
+the actual merged F1 `parse_current_rows`, `CurrentFeed` and observation
+advance validators, including optional `derivations.closure`; it does not
+import the Worktrees runtime. This candidate accepts negotiated v2 only and
+explicitly rejects v1/unknown envelopes rather than changing existing v1
+consumers.
+
+The caller supplies selected source, project and requested point identity;
+reply labels never select a partition. `begin_epoch` is a pure cancellation
+operation. Only a complete current-quality full source/project snapshot
+(`selected_count == roster_count`), explicitly admitted as fresh, may select
+a different opaque generation. A filtered point envelope cannot replace the
+roster. Same-generation reconnect cannot rewind the complete-feed cursor;
+an equal-cursor reconnect preserves higher row floors. Feed transactions use
+the F1 wire frames and their own cursor, never a point floor as their base.
+Incomplete transactions fail without changing either view. Retained point
+rows absent from an older complete feed remain in their prior relative order
+after that feed's committed order until newer authoritative evidence arrives.
+
+`_Receipt` is an optional **private intent**, not an F2 response decoder or
+evidence that any owner endpoint exists. A future adapter would have to prove
+request/source/identity correlation and supply its durable exact-row
+observation fence. The model checks actual covered F1 fact revisions, not a
+larger project cursor or heartbeat; pending/degraded intents prove nothing.
+Pending/degraded intents may receive a later confirmed intent for the same
+request; conflicting confirmed intents require a new request. Generation
+replacement invalidates old intents. There is no effect execution or replay
+path. Absence confirmation requires a committed revision-qualified tombstone.
+Returned records/status are recursively read-only detached values.
+
+These are model admission choices for review, not production wiring admission.
+F2, production F3, F4, F5 and their native/installed gates remain open.
+
 No participant is authorized to implement merely by being listed here.
 
 | PR slice | Owned functional files (all relative to prefixes above) | Dependency / collision |
