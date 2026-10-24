@@ -38,6 +38,7 @@ from .claim_handoff_accept_support import (
     owner_worktree_ref,
 )
 from .lease_config import load_lease_settings
+from . import paired_claims
 from .lease_store import GitLeaseStore, LeaseLost
 
 REGISTRY_VERSION = 1
@@ -328,6 +329,7 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
                 raise ClaimHandoffError(f"source worktree not found: {bundle.source}")
             with tracking._RecordLock(source_path, require_sidecar=True):
                 source_record = _load_record_from_path(source_path, role="source")
+                paired_claims.require_transferable(source_record, (c["ref"] for c in bundle.claims), error_type=ClaimHandoffError)
                 if bundle.state == "offered":
                     bundle = _bundle_state(bundle, "accepting")
                     bundles[index] = bundle
@@ -568,6 +570,7 @@ def offer(
                         "source does not own claims: " + ", ".join(sorted(missing))
                     )
                 from .claim_handoff_admission import validate_producer_offer
+                paired_claims.require_transferable(source_record, refs, error_type=ClaimHandoffError)
                 validate_producer_offer(
                     [by_ref[ref] for ref in refs], source_ref, consumer_ref,
                     machine=machine, error_type=ClaimHandoffError,

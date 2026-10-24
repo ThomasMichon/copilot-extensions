@@ -292,7 +292,7 @@ def _admit_queue(root: Path, custody: OperationLock | BorrowedCustody) -> None:
             "SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')",
         ):
             request = core._request(row, root)
-            if request.settled_at is not None:
+            if not request.unresolved:
                 continue
             if enclosing and request == current.request and request.state == "running":
                 current.assert_owned()

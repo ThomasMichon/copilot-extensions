@@ -2098,6 +2098,8 @@ class SupervisorDaemon(BoundedReconciliation):
         daemon_audit(self, "start", "singleton-acquired" if single_instance else "unguarded-run", outcome="ok")
         try:
             while True:
+                from .diagnostic_logs import maintain_file_logging
+                maintain_file_logging()
                 boundary = self._recheck_governance("iteration-boundary")
                 if boundary is not None and boundary.get("status") != "ready":
                     log.warning(

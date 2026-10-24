@@ -19,6 +19,7 @@ from .client_session_start import SessionStartClientMixin
 from .client_answers import AnswerClientMixin
 from .client_prompt import PromptClientMixin
 from .client_cli_mode import CliModeClientMixin
+from .client_drain import DrainClientMixin
 from .client_live_results import LiveResultsClientMixin
 from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
@@ -149,7 +150,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin, CliModeClientMixin, LiveResultsClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin):
+class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin, CliModeClientMixin, LiveResultsClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin, DrainClientMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -1162,44 +1163,6 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
     def gc(self) -> dict[str, Any]:
         """POST /api/v1/gc -- prune aged terminal sessions and compact the DB."""
         return self._request("POST", "/api/v1/gc") or {}
-
-    def drain(
-        self,
-        *,
-        timeout: float = 300.0,
-        poll: float = 1.0,
-        force: bool = False,
-        source: str | None = None,
-        reason: str | None = None,
-    ) -> dict[str, Any]:
-        """POST /api/v1/drain -- stop accepting new work and wait for in-flight
-        sessions to settle (the zero-downtime pre-swap step).
-
-        If this process is a descendant of a Copilot session (its
-        ``AGENT_BRIDGE_SESSION_ID`` env is set -- e.g. an agent running an
-        in-session ``test-chamber services agent-bridge update``), that session
-        is passed as ``exclude_session_id`` so the redeploy's graceful-cancel
-        does not cancel the very turn driving the update (#1790).
-        """
-        import os as _os
-
-        body: dict[str, Any] = {"timeout": timeout, "poll": poll, "force": force}
-        if source:
-            body["source"] = source
-        if reason:
-            body["reason"] = reason
-        self_sid = _os.environ.get("AGENT_BRIDGE_SESSION_ID")
-        if self_sid:
-            body["exclude_session_id"] = self_sid
-        return self._request(
-            "POST", "/api/v1/drain",
-            body=body,
-            request_timeout=timeout + 30.0,
-        ) or {}
-
-    def undrain(self) -> dict[str, Any]:
-        """POST /api/v1/undrain -- release the drain gate (rollback)."""
-        return self._request("POST", "/api/v1/undrain") or {}
 
     def adopt_relay(self) -> dict[str, Any]:
         """POST /api/v1/relay/adopt -- bind the shared credential relay here."""

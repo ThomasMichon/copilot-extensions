@@ -16,6 +16,9 @@ finite authenticated caller and accepts a code-registered provider-neutral
 public-trust adapter. Vendor implementation,
 login and trust acquisition stay downstream; the existing `jwt-pop-v1` request
 verifier and ordinary CLI/default identity behavior remain unchanged.
+Its separately selected [enrolled-key profile](docs/gateway-enrolled-identity.md)
+accepts original application tokens plus explicitly mapped independent proof
+keys, without automatic enrollment or vendor-compatibility claims.
 
 ```text
 fleet-manager plan --template recommended.json --config adopter.json --inventory live.json --fleet-id example --machine-limit 5

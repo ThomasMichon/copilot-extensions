@@ -264,6 +264,16 @@ verbatim public-safe extracts, an explicitly labeled provider-neutral summary,
 and **agent-recommended implementation/validation decomposition**. It does not
 authorize provider changes, deploy anything or assign another owner's source.
 
+**Further operator clarification, public-safe summary:** a minimally privileged
+fleet application resource has its own identity/session lifetime, independently
+of more tightly governed downstream source credentials. Relay redundancy is
+intended to preserve availability through independently eligible producers,
+not override tenant/resource policy or silently substitute accounts. Frequent
+application-imposed MFA and forced periodic sign-out are not requested. The
+[resource-specific continuity boundary](runtime-authentication.md#resource-specific-credential-continuity)
+captures the distinction; no tenant-policy exemption or fixed interaction
+allowance is assumed.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -307,7 +317,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   including independent slow-sync refresh and initial exact-plan confirmation
   for ordinary as well as major deployment changes.
 - [ ] Supply Gateway configuration subscription and approved self-update,
-  with local validation/approval of major changes rather than private-repo CI.
+  with paired-source refresh, deployment notifications and initial exact-plan
+  confirmation for ordinary as well as major changes, rather than relying on
+  private-repo CI or treating a source merge as activation consent.
 - [ ] Compose an installed authenticated credential responder through the
   existing credential owner's lifecycle; maintain its channel independently
   of an interactive client invocation.
@@ -481,8 +493,65 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 
 ## Journal
 
+### 2026-10-24 - Real silent broker renewal observed
+
+- The resource-continuity clarification actually merged in #8441 as
+  `38c581f99c24dfa3237188918cdffa5f13dd05f5`, after exact-head approval
+  and required CI. Reconciled terminal PR tracking before the ordinary
+  managed pull-forward; no branch reset, force push or lifecycle change.
+- Completed the bounded real-provider observation rather than interpreting
+  `force_refresh` or cache reuse as a newly issued credential. Eight samples
+  each passed the same 26 maintained-verifier expectations. As the prior
+  token approached expiry, a verified token with both a later issue time
+  and later expiry replaced it: the last old sample had 368 seconds
+  remaining; the renewed sample had 4,927 seconds remaining.
+- Acquisition used the same explicitly selected native credential owner and
+  configured account, with no interactive acquisition API. This proves one
+  actual silent provider renewal for the selected API, not a weekly MFA
+  allowance, universal resource policy or installed responder continuity.
+  The observer exited successfully and left no resident process or new
+  service registration.
+- Linux application/TLS interoperability, actual challenge/revocation,
+  separately governed source resources, redundant producer delivery,
+  production profile selection and installed lifecycle remain open.
+  No remaining parent Plan or Validation Plan item is closed by this
+  bounded local result.
+
+### 2026-10-24 - Actual broker compatibility and resource-specific continuity
+
+- Captured the operator's independent fleet/source-resource session boundary
+  without promising an exemption from tenant-wide policy. Relay redundancy
+  retains exact account/resource/permission/recipient eligibility and current
+  revocation; an affected resource's challenge is not fleet-wide sign-out.
+- An isolated Windows probe reused an existing approved API/client through
+  its native credential owner. MSAL `1.39.0` and broker runtime `0.20.6`
+  silently acquired actual RS256 SHR, not the existing `jwt-pop-v1`
+  ES256/DPoP format. A fresh empty client cache initially found no account;
+  that observation did not establish an unavailable Windows session.
+- The maintained Microsoft SignedHttpRequest validator `8.14.0` verified the
+  actual embedded issuer token, sender-key binding, proof signature, route
+  and nonce. Two local matrices passed 26 expectations, including stolen
+  access alone, an attacker-signed proof over the stolen access credential,
+  tampered proof, wrong issuer/audience/client/role/method/host/path/nonce
+  and duplicate-proof denial. The single-use nonce fence is explicit
+  diagnostic code, not a library-supplied or production replay store.
+- A silent request with `force_refresh` still returned the same valid
+  embedded credential. This proves cache reuse, not renewal. Actual
+  provider renewal remains under bounded observation; no weekly
+  interaction cadence, real challenge/revocation, Linux TLS exchange,
+  hardware-key attestation or installed responder lifetime is proven.
+- The diagnostic uses in-memory credential handoff and no interactive
+  acquisition, credential export, application registration, consent or
+  live service activation. It does not broaden the existing DPoP verifier
+  or select a production SHR profile. Provider/profile source allocation,
+  retained-owner review and every remaining parent gate stay open.
+
 ### 2026-10-23 - Interactive bootstrap and source-authority clarification
 
+- The intent amendment actually merged in #8353 as
+  `c4a6e79943d0756766a8562c32e882958b7f766b` after current-head approval
+  and required CI. Runtime implementation and every new bootstrap validation
+  obligation remain open; this is reviewed intent, not delivered setup.
 - Captured the operator's revised authority model in
   [the bootstrap amendment](bootstrap-and-authority.md), with provider-specific
   adapter names abstracted for this public repository. Public-safe wording is

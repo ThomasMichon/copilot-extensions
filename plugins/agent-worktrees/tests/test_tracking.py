@@ -2809,12 +2809,12 @@ class TestRetireRecord:
         )
 
         harness = self._rec(
-            "wt-harness", pair_id="p1", pair_role="harness",
+            "wt-harness", repo="citadel-harness", pair_id="p1", pair_role="harness",
             pair_ref="test/citadel-knowledge/wt-k", pair_kind="worktree",
             status="finalized",
         )
         knowledge = self._rec(
-            "wt-k", pair_id="p1", pair_role="knowledge",
+            "wt-k", repo="citadel-knowledge", pair_id="p1", pair_role="knowledge",
             pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
             status="active",
         )
@@ -2862,12 +2862,12 @@ class TestRetireRecord:
 
         now = "2026-06-01T12:00:00"
         harness = self._rec(
-            "wt-harness", pair_id="p1", pair_role="harness",
+            "wt-harness", repo="citadel-harness", pair_id="p1", pair_role="harness",
             pair_ref="test/citadel-knowledge/wt-k", pair_kind="worktree",
             status="finalized", completed_at=now, reaped_at=now,
         )
         knowledge = self._rec(
-            "wt-k", pair_id="p1", pair_role="knowledge",
+            "wt-k", repo="citadel-knowledge", pair_id="p1", pair_role="knowledge",
             pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
             status="finalized", completed_at=now, reaped_at=now,
         )
@@ -2913,12 +2913,12 @@ class TestRetireRecord:
 
         now = "2026-06-01T12:00:00"
         harness = self._rec(
-            "wt-harness", pair_id="p1", pair_role="harness",
+            "wt-harness", repo="citadel-harness", pair_id="p1", pair_role="harness",
             pair_ref="test/citadel-knowledge/wt-k", pair_kind="worktree",
             status="finalized", completed_at=now, reaped_at=now,
         )
         knowledge = self._rec(
-            "wt-k", pair_id="p1", pair_role="knowledge",
+            "wt-k", repo="citadel-knowledge", pair_id="p1", pair_role="knowledge",
             pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
             status="finalized", completed_at=now, reaped_at=now,
         )

@@ -19,11 +19,12 @@ class ProjectSelectionError(RuntimeError):
 
 def _prepare(project: str, *, heal: bool = True) -> bool:
     """Activate ``project`` and return the engine-owned default live mode."""
+    from . import project_config
+
     context.set_project(project)
     try:
-        bootstrap = context.bind_project_bootstrap(
-            engine_group_b.picker_bootstrap(project)
-        )
+        payload = engine_group_b.picker_bootstrap(project)
+        bootstrap = context.bind_project_bootstrap(payload)
     except engine_client.EngineFeatureUnavailable as error:
         raise RuntimeError(
             "the installed agent-worktrees engine predates "
@@ -32,6 +33,7 @@ def _prepare(project: str, *, heal: bool = True) -> bool:
         ) from error
     if bootstrap.should_switch_cwd and bootstrap.cwd is not None:
         os.chdir(bootstrap.cwd)
+    project_config.bind_bootstrap(bootstrap.project, payload.get("project_config"))
     if heal:
         _start_anchor_heal_check(bootstrap.project)
     return bootstrap.default_live

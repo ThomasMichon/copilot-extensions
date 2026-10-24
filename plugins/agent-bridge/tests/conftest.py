@@ -10,11 +10,21 @@ import time
 
 import pytest
 
+import http47_binding_validation
+from bridge_http47_runtime import install as _install_capture_guard
+
+http47_binding_validation.start()
+_install_capture_guard(observer=True)
+
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.models import ServiceConfig
 from agent_bridge.session_manager import SessionManager
 from agent_bridge.transport import SpawnTarget
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    http47_binding_validation.finish()
 
 
 @pytest.fixture(autouse=True)

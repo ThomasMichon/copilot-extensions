@@ -73,6 +73,47 @@ def _cfg(tmp_path: Path) -> Config:
     return Config(data, tmp_path / "home")
 
 
+@pytest.mark.parametrize("include", [None, {"s1"}])
+def test_usage_ignores_internal_metadata_directories(tmp_path: Path, include) -> None:
+    session = _session(tmp_path)
+    _db(tmp_path)
+    metadata = [
+        tmp_path / "session-state" / name
+        for name in (".agent-worktrees-locks", ".agent-worktrees-tmp", ".session-operation-locks")
+    ]
+    for directory in metadata:
+        directory.mkdir()
+        (directory / "sentinel").write_bytes(b"retained")
+
+    result = capture_usage(tmp_path, include)
+
+    assert result.complete
+    assert result.updated == 1
+    assert (session / ARTIFACT).is_file()
+    for directory in metadata:
+        assert list(directory.iterdir()) == [directory / "sentinel"]
+        assert (directory / "sentinel").read_bytes() == b"retained"
+
+
+def test_usage_invalid_session_identity_still_fails(tmp_path: Path) -> None:
+    session = _session(tmp_path)
+    (session.parent / "invalid session").mkdir()
+    result = capture_usage(tmp_path, None)
+    assert result.failures == ("session enumeration: invalid session directory identity",)
+    assert not (session / ARTIFACT).exists()
+
+
+def test_sync_with_internal_metadata_preserves_accounting_and_succeeds(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    session = _session(cfg.sync_source)
+    _db(cfg.sync_source)
+    (session.parent / ".session-operation-locks").mkdir()
+
+    assert engine.run_sync(cfg) == 0
+    published = tmp_path / "dest" / "synthetic" / "session-state" / "s1"
+    assert (published / ARTIFACT).read_bytes() == (session / ARTIFACT).read_bytes()
+
+
 @pytest.mark.guard
 def test_usage_transcript_allowlist_and_token_composition(tmp_path: Path) -> None:
     session = _session(tmp_path)

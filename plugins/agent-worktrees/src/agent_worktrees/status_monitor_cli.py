@@ -158,7 +158,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
     from . import resident_push, self_retire, status_monitor_cutover, status_monitor_runtime, status_updater_cli
-    from . import tracking_write
+    from . import repository_map, tracking_write
     from . import handoff_prompt_receipt_control as receipt_control
     from . import worktree_status_daemon
     from .status_monitor_drain import DrainTrace, drain_with_diagnostics
@@ -342,6 +342,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     segment_cache = status_segment_cache_type(cache_ttl)
     wake_event = threading.Event()
+    repositories_runtime = repository_map.RepositoryMapRuntime(
+        status_monitor_runtime._aw_runtime_home()
+    )
     worktrees_runtime = WorktreesRuntime(
         status_monitor_runtime._aw_runtime_home() / "worktrees-current.sqlite3",
         wake=wake_event,
@@ -466,6 +469,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         except (ProjectionError, ProjectionUnavailable, OSError) as exc:
             print(f"current-roster authority unavailable: {exc}", file=sys.stderr)
             return False
+        repositories_runtime.activate()
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(_decide)
@@ -539,6 +543,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         published_lock = False
         receipts.close_admission()
         worktrees_runtime.close_admission("draining")
+        repositories_runtime.close_admission("draining")
         _close_request_surface_admission()
         # Stop admitting new managed-mux push observations too (a genuine
         # "new source" admission vector, distinct from worktree_status_runtime's
@@ -632,6 +637,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("worktrees-feed")
         if control_server.current_read_count():
             reasons.append("worktrees-read")
+        if control_server.current_read_count(repository_map.READ_ACTION):
+            reasons.append("repos-map-read")
+        if repositories_runtime.health()["repositories"]["refreshing"]:
+            reasons.append("repos-map-producer")
         if receipts.active_count():
             reasons.append("prompt-receipt")
         return reasons
@@ -650,6 +659,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             "tracking-write-compute": int(tracking_write.has_inflight_write()),
             "worktrees-feed": worktrees_runtime.feed.active_count(),
             "worktrees-read": control_server.current_read_count(),
+            "repos-map-read": control_server.current_read_count(repository_map.READ_ACTION),
+            "repos-map-producer": int(repositories_runtime.health()["repositories"]["refreshing"]),
             "prompt-receipt": receipts.active_count(),
             "lifecycle": lifecycle_count,
         }
@@ -669,8 +680,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if action == "health":
             roster_health = worktrees_runtime.health()
             receipt_health = receipts.health()
+            repository_health = repositories_runtime.health()
             roster_health["capabilities"] = [
                 *roster_health["capabilities"], *receipt_health["capabilities"],
+                *repository_health["capabilities"],
             ]
             if shutdown_requested.is_set():
                 roster_health["worktrees"]["status"] = "shutdown"
@@ -683,6 +696,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 "pid": os.getpid(),
                 **roster_health,
                 "promptReceipt": receipt_health["promptReceipt"],
+                "repositories": repository_health["repositories"],
                 "runtime_generation": PROCESS_GENERATION,
                 "version": PROCESS_VERSION,
                 "runtime_slot": os.path.basename(my_prefix),
@@ -693,6 +707,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
                 worktrees_runtime.close_admission("superseded")
             return worktrees_runtime.handle(payload)
+        if action == repository_map.READ_ACTION:
+            if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
+                repositories_runtime.close_admission("superseded")
+            return repositories_runtime.read(payload)
         if action == "promote":
             trace = DrainTrace(
                 status_monitor_cutover.routing_dir(), role="daemon",
@@ -722,6 +740,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 shutdown_requested.set()
                 _enter_drain_only_state()
                 worktrees_runtime.close_admission("shutdown")
+                repositories_runtime.close_admission("shutdown")
             wake_event.set()
             return {"shutdown": True}
         if action == "undrain":
@@ -769,15 +788,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         _locks.write_lock(lock, extra=_lock_extra())
 
     try:
+        repositories_runtime.start(interval)
         while True:
             _cleanup_retired_request_surfaces()
             active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
-            roster_ready = worktrees_runtime.health()["worktrees"]["status"] == "ready"
-            if active_generation is not None and (not published_lock or not roster_ready):
+            readers_ready = (
+                worktrees_runtime.health()["worktrees"]["status"] == "ready"
+                and repositories_runtime.health()["repositories"]["admitting"]
+            )
+            if active_generation is not None and (not published_lock or not readers_ready):
                 with state_lock:
                     if (
                         not admission_closed and not shutdown_requested.is_set()
-                        and (not published_lock or not roster_ready)
+                        and (not published_lock or not readers_ready)
                     ):
                         published_lock = True
                         published_lock = _start_request_surfaces()
@@ -905,6 +928,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 and not worktree_status_runtime.has_active_demand()
                 and not managed_mux_runtime.has_active_demand()
                 and not worktrees_runtime.demand_projects()
+                and not repositories_runtime.has_active_demand()
                 and not _tracking_write_busy()
             ):
                 empty_strikes += 1
@@ -922,6 +946,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         or worktree_status_runtime.has_active_demand()
                         or managed_mux_runtime.has_active_demand()
                         or worktrees_runtime.demand_projects()
+                        or repositories_runtime.has_active_demand()
                         or _tracking_write_busy()
                     ):
                         empty_strikes = 0
@@ -935,6 +960,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             shutdown_requested.set()
             _enter_drain_only_state()
             worktrees_runtime.close_admission("shutdown")
+            repositories_runtime.close_admission("shutdown")
+        repositories_runtime.shutdown()
         worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
         _close_request_surfaces()
         control_server.close()

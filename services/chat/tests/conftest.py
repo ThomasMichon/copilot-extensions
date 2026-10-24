@@ -149,6 +149,25 @@ def installed_chat(tmp_path_factory):
                                          ".venv", ".pytest_cache"),
         )
         sources.append(source)
+    resources = root / "libs"
+    for name in ("versioned-runtime", "installer-engine"):
+        shutil.copytree(
+            project.parents[1] / "libs" / name, resources / name,
+            ignore=shutil.ignore_patterns("__pycache__", "tests", ".pytest_cache", ".ruff_cache"),
+        )
+    artifacts = root / "sdist"
+    artifacts.mkdir()
+    run_artifact([
+        sys.executable, "-I", "-c",
+        "from setuptools.build_meta import build_sdist; import sys; build_sdist(sys.argv[1])",
+        str(artifacts),
+    ], cwd=sources[0])
+    archives = list(artifacts.glob("agent_chat_service-*.tar.gz"))
+    assert len(archives) == 1
+    unpacked = root / "sdist-build"
+    shutil.unpack_archive(archives[0], unpacked, "gztar")
+    extracted, = unpacked.iterdir()
+    shutil.rmtree(resources)
 
     def build(source):
         run_artifact([
@@ -158,7 +177,7 @@ def installed_chat(tmp_path_factory):
         ], cwd=source)
 
     with ThreadPoolExecutor(max_workers=4) as workers:
-        list(workers.map(build, sources))
+        list(workers.map(build, [extracted, *sources[1:]]))
     built = list(wheels.glob("agent_chat_service-*.whl"))
     assert len(built) == 1 and len(list(wheels.glob("*.whl"))) == 4
     assert all(len(list(wheels.glob(prefix + "-*.whl"))) == 1 for prefix in (
@@ -186,6 +205,7 @@ def installed_chat(tmp_path_factory):
     for source in sources:
         shutil.rmtree(source)
         assert not source.exists()
+    shutil.rmtree(unpacked)
     target, scripts, interpreter = installations["client-installed"]
     assert json.loads(run_artifact([
         str(interpreter), "-I", "-c",
@@ -209,6 +229,7 @@ def installed_chat(tmp_path_factory):
         service_console=service_scripts / (
             "agent-chat-service.exe" if os.name == "nt" else "agent-chat-service"
         ),
+        sdist=archives[0],
     )
 
 

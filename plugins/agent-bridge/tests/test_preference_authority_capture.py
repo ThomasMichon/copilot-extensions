@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import importlib
 import json
 import os
@@ -61,6 +62,39 @@ def test_preference_authority_capture_replays_terminal_and_host(capture_tool) ->
     frame["proof"]["nonce"] = "wrong"
     events, accepted = asyncio.run(capture_tool.host_probe(a, host, frame, expected))
     assert not accepted and "consent" not in events
+
+
+@pytest.mark.parametrize("indent", [1, 2, None])
+def test_preference_authority_capture_retains_registry_indentation(
+    capture_tool, monkeypatch: pytest.MonkeyPatch, indent: int | None,
+) -> None:
+    root = capture_tool.REPO
+    original = json.loads((root / capture_tool.REGISTRY).read_text(encoding="utf-8"))
+    registry_text = json.dumps(original, indent=indent) + "\n"
+
+    def committed(_commit: str, path: str) -> str:
+        return registry_text if path == capture_tool.REGISTRY else (
+            root / path
+        ).read_text(encoding="utf-8")
+
+    monkeypatch.setattr(capture_tool, "committed", committed)
+    monkeypatch.setattr(capture_tool, "unchanged", lambda *_args: None)
+    monkeypatch.setattr(capture_tool.evidence, "ensure_commit_available", lambda _commit: True)
+    monkeypatch.setattr(capture_tool.evidence, "plugin_version_at", lambda _commit: "1.0.0")
+    monkeypatch.setattr(capture_tool.evidence, "git_blob", lambda *_args: "b" * 40)
+    monkeypatch.setattr(
+        capture_tool.evidence, "git_file_sha256",
+        lambda _commit, path: hashlib.sha256(committed("", path).encode()).hexdigest(),
+    )
+
+    output = capture_tool.capture("a" * 40)
+
+    registry = json.loads(output[capture_tool.REGISTRY])
+    assert output[capture_tool.REGISTRY] == json.dumps(registry, indent=indent) + "\n"
+    assert registry["contracts"][0] == original["contracts"][0]
+    assert set(output) == {capture_tool.REGISTRY, *(
+        capture_tool.CURRENT + name for name in capture_tool.FILES
+    )}
 
 
 def test_preference_authority_capture_without_home_environment(
