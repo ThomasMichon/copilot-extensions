@@ -53,7 +53,8 @@ def test_ssh_alias_binding_conflicts_and_acp_command_are_preserved(monkeypatch):
     monkeypatch.setattr("socket.gethostname", lambda: "elsewhere")
     machines = _machines()
     agents = parse_agent_registry({"worker": {
-        "host": "BOX-LINUX", "cwd": "/home/dev/work", "env": {"FLAG": "yes"},
+        "host": "BOX-LINUX", "project": "example-project",
+        "cwd": "/home/dev/work", "env": {"FLAG": "yes"},
     }})
     resolver = AgentResolver(agents, machines)
     target = resolver.resolve("worker")
@@ -65,7 +66,7 @@ def test_ssh_alias_binding_conflicts_and_acp_command_are_preserved(monkeypatch):
         "env": {"PORT": "8001"},
     }]
     canonical = AgentResolver(parse_agent_registry({"worker": {
-        "host": "box", "ssh_environment": "linux",
+        "host": "box", "project": "example-project", "ssh_environment": "linux",
         "cwd": "/home/dev/work", "env": {"FLAG": "yes"},
     }}), machines).resolve("worker")
     assert _build_remote_cmd(target, "session-test") == _build_remote_cmd(canonical, "session-test")
