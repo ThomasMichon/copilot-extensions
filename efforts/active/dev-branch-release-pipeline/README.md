@@ -924,7 +924,7 @@ periodic corpus and broader tournament ownership remain intact.)_
 _(Agent-recommended realization of the 2026-10-23 operator direction.
 Participant: Stamped-candidate contributor; bounded tracker: #8390.)_
 
-- [ ] Review this ordering and coverage amendment before runtime/helper changes.
+- [x] Review this ordering and coverage amendment before runtime/helper changes.
 - [ ] Execute the [bounded ordering and coverage plan](promotion-burndown.md#stamped-candidate-ordering-and-coverage),
       retaining other Phase 9 and independently governed control owners.
 
@@ -1171,6 +1171,55 @@ positive-unit admission, packet verification and governed control owners are
 the integration points; this is not a second release pipeline or revival of
 the superseded full/native profile. Plan review precedes implementation and
 separate Main activation; no release, activation or completion is claimed.
+
+The plan merged as #8426 at
+`47b1207880503250404f7d1ebf5917e81e790574` after current-head Copilot approval
+and every required check. The source worktree is pulled forward onto that
+reviewed contract. Next: implement the frozen-composition unit/receipt boundary
+and validated coverage projection, then satisfy the Phase 9c validation and
+independently governed activation gates. Phase 9 and this bounded slice remain
+open; a plan merge is not release or implementation completion.
+
+### 2026-10-23 - Phase 9c Source implementation in progress
+
+The source implementation freezes the composer's candidate Git object before
+units/builds and consumes it through validation/publication without restamping.
+Candidate-specific admission retains the Dev node inventory and budget while
+binding stamped bytes and declared vendor copies. The v3 qualifier preserves
+the original producer/upload/archive checks and verifies raw coverage plus its
+separate Dev projection against both source roots. Historical profiles are
+not reinterpreted.
+
+The changed pure slice passed its actual effect-observed, coverage-producing
+packet: 175 units, zero prohibited effects, 18.109 seconds whole execution.
+Separate workflow dependency/profile tests and focused packet, mapping and
+qualification cases pass. The full local Windows attempt correctly refused an
+existing native-loader path in activation-preservation tests; it is not reported
+as a full-portfolio pass or used to relax the unit observer. Hosted Linux
+Source CI, actual frozen-candidate execution, review, independently governed
+Main activation and natural-release/mapped-coverage readback remain outstanding.
+No active Main pin, pause state or adopter runtime was changed.
+
+The no-push production composition/transport check subsequently imported the
+exact frozen Git object and derived 409 admitted files, including 288 declared
+vendor copies. Its actual candidate packet passed 193 units in 36.625 seconds,
+with zero prohibited effects. Independent packet verification confirms the
+real chat fallback module was imported from candidate bytes that differ from
+Dev; its version statement is classified as a known stamp and remains
+unattributed. The raw-plus-projected coverage file is 10,569,616 bytes, below
+the unchanged sixteen-MiB bound. This is a focused Windows development check,
+not full-portfolio or hosted critical-path qualification. Local first-touch
+composition exceeded five minutes; the hosted compose and under-thirty-minute
+release budgets are still unproven and must not be increased to accommodate
+that result.
+
+The implementation subsequently limits coordinate maps to measured production
+files, while retaining full-closure byte checks in the manifest. This avoids
+spending the packet bound on unexecuted vendor-copy line tables. The real chat
+fallback module is now an explicit coverage target so its changed assignment
+also appears in raw evidence. The combined focused contract suite passes all
+300 cases after that refinement; containing hosted release evidence is still
+required.
 
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as

@@ -534,6 +534,32 @@ refusals. Identical source bytes remain reusable. These unit controls do not
 claim that raw-Dev execution qualifies a transformed candidate; candidate-first
 execution and attributable coverage retain their separately owned implementation.
 
+For the composed-candidate controller proposal, invoke the runner from the
+imported frozen candidate, adding `--development-root <immutable-Dev-checkout>`
+and `--candidate-tree <full-frozen-tree>`. These arguments are a pair. The
+runner validates the original Dev inventory, derives the candidate-specific
+manifest without adding test nodes, and observes the composed import closure.
+Declared uv vendor copies are admitted only for already-admitted origins and
+must match their composed canonical bytes.
+
+Candidate packets retain the same three filenames but use
+`copilot-extensions.promotion-candidate-units/v1` and require explicit
+`candidate-units-v3` qualification. `coverage.json` preserves raw candidate
+`files` and adds `development_mapping` plus `development_projection`. The
+packet verifier recomputes both from authoritative Dev and candidate bytes;
+self-declared hashes or path relabeling do not qualify them. Version-stamped
+statements and unsupported/generated regions remain explicitly unattributed.
+The projection retains per-copy hits before combining mapped Dev coordinates
+and never claims branch/function coverage or raw-Dev execution.
+
+Focused regression files are `test_candidate_units.py`,
+`test_frozen_candidate.py`, `test_development_map.py` and the v3 cases in
+`test_qualification.py` under `tools/promotion_unit_tests`. They use synthetic
+bytes and mocked Git/provider boundaries. `test_candidate_workflow.py` separately
+checks the real controller proposal's dependencies and explicit profiles; it is
+not a second runtime test gate. Actual composition/transport exercises belong
+to bounded development validation, not the required in-process unit packet.
+
 Source PR CI has a separate exact-input reuse boundary in
 `tools/ci_pr_unit_reuse.py`. It binds the current source/merge/base, workflow,
 manifest/source closure, hosted image, Python identity, actual installed

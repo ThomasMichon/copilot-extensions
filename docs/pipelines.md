@@ -125,20 +125,45 @@ state and qualification rather than inferring either pause or activation from
 the source-CI layout. Historical full-candidate descriptions below are not
 instructions to reactivate those integration gates.
 
-### Source-unit promotion receipt
+### Composed-candidate promotion receipt
 
 The source promotion declaration owns its independent source-unit transaction.
 Its governed Main control must pin reviewed helpers and qualification evidence;
 combining source-CI jobs changes neither that transaction nor its authority.
 
-After source admission, `source-units` runs the full admitted packet once with
-coverage while the credential-free artifact build proceeds independently.
-Attestation requires both successful units and the unsigned build. Candidate
-preparation retains the source/version, package/lock, signer, source-byte and
-freshness safeguards, but no longer downloads separate full-suite baselines.
-`qualify-candidate` requires the explicit `source-units-v2` profile and proves
-Dev/candidate input equivalence against the original successful unit job,
-upload step and immutable archive. It never dispatches candidate CI.
+The Source controller proposal freezes the stamped, vendored candidate before
+release execution. `compose-candidate` runs the existing composer once and
+retains its exact Git commit, content tree, admitted Dev/Main inputs and
+preparation time in a bounded `candidate.bundle` / `candidate.json` transport.
+Units and the unsigned artifact build independently import those objects.
+Artifact validation and publication consume the same frozen object; they do
+not recompute version allocation or vendoring after tests. A changed Main base
+requires a new admission, not a silent restamp.
+
+`source-units` retains its provider job identity but executes the fixed Dev
+inventory on candidate bytes using the explicit
+`copilot-extensions.promotion-candidate-units/v1` manifest. Declared materialized
+uv copies extend the admitted import closure, never the test-node inventory or
+five-minute budget. Attestation still requires successful units and the
+unsigned build. `qualify-candidate` uses `candidate-units-v3`, validates the
+candidate hashes and development correspondence against both authoritative
+source roots, and checks the original successful job/upload/immutable archive.
+It never dispatches candidate CI.
+
+Raw candidate line coverage remains in the three-file packet. Its separate
+development projection is bound to Dev bytes, candidate bytes, tree and copy
+origins. Exact copies map directly; recognized same-line version assignments
+leave the changed statement unattributed. Unsupported rewrites and shifted
+regions remain explicitly unmapped. Copy contributions are retained before
+unioning Dev coordinates. No projection asserts that raw Dev bytes, branches
+or functions executed.
+The manifest binds the entire admitted closure, but coordinate maps cover
+observed production files only, not every unexecuted vendor copy or test file.
+
+This is Source support, not Main activation. The existing governed Main
+controller retains `source-units-v2` until its independent reviewed activation.
+Historical raw-source and legacy-CI packets retain their original verification;
+neither can be relabeled as candidate execution.
 
 Job-only retries retain the original producing attempt and archive rather than
 rerunning units or demanding that the still-executing controller already be

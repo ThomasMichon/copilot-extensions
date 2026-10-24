@@ -78,6 +78,7 @@ def _git(
 ) -> str:
     result = subprocess.run(
         ["git", *args], cwd=str(cwd or REPO), capture_output=True, text=True, env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if check and result.returncode != 0:
         raise PromotionError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
@@ -99,6 +100,7 @@ def _is_ancestor(ancestor: str, descendant: str, *, cwd: Path | None = None) -> 
         cwd=str(cwd or REPO),
         capture_output=True,
         text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     return result.returncode == 0
 
@@ -137,6 +139,7 @@ def _changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
     result = subprocess.run(
         ["git", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
         cwd=str(repo), capture_output=True, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     return result.returncode == 0
 
@@ -231,6 +234,7 @@ def _sync_instruction_projections(
     proc = subprocess.run(
         [sys.executable, str(script), "sync", str(scratch), "--json"],
         capture_output=True, text=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     try:
         payload = json.loads(proc.stdout) if proc.stdout.strip() else None
@@ -616,19 +620,23 @@ def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
         subprocess.run(
             ["git", "read-tree", tree_sha], cwd=str(repo), env=env,
             check=True, capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         subprocess.run(
             ["git", "rm", "--cached", "-f", "-q", "--ignore-unmatch", PIPELINE_STATE_PATH],
             cwd=str(repo), env=env, check=True, capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         subprocess.run(
             ["git", "rm", "--cached", "-f", "-q", "-r", "--ignore-unmatch",
              COVERAGE_BASELINES_DIR],
             cwd=str(repo), env=env, check=True, capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         result = subprocess.run(
             ["git", "write-tree"], cwd=str(repo), env=env,
             capture_output=True, text=True, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         return result.stdout.strip()
 
@@ -650,6 +658,8 @@ def promote(
     promotion_time: str | None = None,
     qualification_only: bool = False,
     reuse_artifacts_repository: str | None = None,
+    prepare_candidate_dir: Path | None = None,
+    frozen_candidate_dir: Path | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
     "nothing to promote" (reported via ``report["promoted"] is False``).
@@ -685,6 +695,11 @@ def promote(
     -- with no real `dev` content change -- never forces a vacuous
     promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
+    if prepare_candidate_dir is not None and (
+        push or build_python_artifacts_dir is not None or python_artifacts_dir is not None
+        or frozen_candidate_dir is not None
+    ):
+        raise PromotionError("candidate freezing must precede builds and publication")
     if qualification_only and push and not candidate_branch:
         raise PromotionError("qualification-only publication requires the normal candidate PR path")
     if build_python_artifacts_dir is not None and (
@@ -706,11 +721,7 @@ def promote(
             "run tools/rollback_release.py resume once safe to continue"
         )
     last_rollback = state.get("last_rollback")
-    if (
-        last_rollback
-        and not force
-        and last_rollback.get("reverted_dev_head") == dev_head
-    ):
+    if last_rollback and not force and last_rollback.get("reverted_dev_head") == dev_head:
         raise NonIncrementalPromotion(
             f"refusing to re-promote dev@{dev_head[:12]}: this exact dev state "
             "was already rolled back "
@@ -718,9 +729,48 @@ def promote(
             "dev must move forward with an actual fix before promoting again "
             "-- or pass --force to override this guard deliberately."
         )
-
     last_promotion = state.get("last_promotion") or {}
     last_dev_head = last_promotion.get("dev_head")
+    if last_dev_head and last_dev_head != dev_head and not _is_ancestor(last_dev_head, dev_head, cwd=repo):
+        raise StaleCandidatePromotion(
+            f"refusing to promote dev@{dev_head[:12]}: it is not a descendant "
+            f"of the already-promoted dev@{last_dev_head[:12]} -- this looks "
+            "like an out-of-order/stale candidate (a newer dev commit was "
+            "already promoted while this one was still validating). No "
+            "action needed: dev has already moved forward past this "
+            "candidate's own content."
+        )
+    if frozen_candidate_dir is not None:
+        from promotion_frozen_candidate import import_candidate
+
+        if prepare_candidate_dir is not None or build_python_artifacts_dir is not None:
+            raise PromotionError("a frozen candidate cannot be recomposed")
+        record = import_candidate(
+            frozen_candidate_dir, repo=repo, dev_sha=dev_head, main_before=main_head,
+        )
+        if promotion_time is not None and promotion_time != record["prepared_at"]:
+            raise PromotionError("frozen candidate preparation time changed")
+        if python_artifacts_dir is None:
+            raise PromotionError("frozen publication requires validated candidate artifacts")
+        from promotion_python_artifacts import validate_composed_artifacts
+
+        scratch = add_scratch_worktree(record["candidate_sha"], repo=repo)
+        try:
+            validate_composed_artifacts(
+                python_artifacts_dir, scratch=scratch, content_tree=record["content_tree"],
+                dev_head=dev_head, main_before=main_head,
+            )
+            if push:
+                if not candidate_branch:
+                    raise PromotionError("frozen publication requires the normal candidate PR path")
+                push_candidate(record["candidate_sha"], candidate_branch, cwd=scratch, git=_git)
+        finally:
+            remove_scratch_worktree(scratch, repo=repo)
+        return {
+            **record["report"], "pushed": push,
+            "candidate_branch": candidate_branch if push else None,
+        }
+
     # Monotonic stale-candidate guard (added after a live review catch,
     # 2026-09-29 -- see the dev-branch-release-pipeline effort Journal):
     # `validate-and-promote.yml`'s own concurrency group only serializes
@@ -736,20 +786,6 @@ def promote(
     # already promoted: either the identical commit (a legitimate re-run,
     # e.g. a retried dispatch -- falls through to the ordinary "no content
     # change vs. main" no-op below) or a strict descendant of it.
-    if (
-        last_dev_head
-        and last_dev_head != dev_head
-        and not _is_ancestor(last_dev_head, dev_head, cwd=repo)
-    ):
-        raise StaleCandidatePromotion(
-            f"refusing to promote dev@{dev_head[:12]}: it is not a descendant "
-            f"of the already-promoted dev@{last_dev_head[:12]} -- this looks "
-            "like an out-of-order/stale candidate (a newer dev commit was "
-            "already promoted while this one was still validating). No "
-            "action needed: dev has already moved forward past this "
-            "candidate's own content."
-        )
-
     scratch = add_scratch_worktree(dev_head, repo=repo)
     try:
         summary = consume_pending_changes(
@@ -827,7 +863,7 @@ def promote(
             tag_name = None
             push_candidate(commit, candidate_branch, cwd=scratch, git=_git)
         else:
-            if build_python_artifacts_dir is None and not qualification_only:
+            if build_python_artifacts_dir is None and prepare_candidate_dir is None and not qualification_only:
                 from tag_promotion import _same_source_release
 
                 existing = _git(
@@ -846,7 +882,7 @@ def promote(
                 _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
                 _git(["push", "origin", tag_name], cwd=scratch)
 
-        return {
+        report = {
             "promoted": True,
             "commit": commit,
             "tag": tag_name,
@@ -860,6 +896,16 @@ def promote(
             "python_artifacts_exported": build_python_artifacts_dir is not None,
             **summary,
         }
+        if prepare_candidate_dir is not None:
+            if push or build_python_artifacts_dir is not None:
+                raise PromotionError("candidate freezing must precede builds and publication")
+            from promotion_frozen_candidate import export_candidate
+
+            export_candidate(
+                prepare_candidate_dir, repo=repo, report=report,
+                content_tree=content_tree, prepared_at=prepared_at,
+            )
+        return report
     except CandidateIdentityError as exc:
         raise PromotionError(str(exc)) from exc
     finally:
@@ -900,6 +946,8 @@ def main(argv: list[str] | None = None) -> int:
     artifacts = ap.add_mutually_exclusive_group()
     artifacts.add_argument("--build-python-artifacts-dir", type=Path)
     artifacts.add_argument("--python-artifacts-dir", type=Path)
+    ap.add_argument("--prepare-candidate-dir", type=Path)
+    ap.add_argument("--frozen-candidate-dir", type=Path)
     ap.add_argument("--reuse-artifacts-repository", help="reuse the admitted immutable development artifact set")
     ap.add_argument(
         "--toolchain-source", choices=("governed", "seasoned-public"), default="governed"
@@ -922,6 +970,8 @@ def main(argv: list[str] | None = None) -> int:
             coverage_baselines_dir=args.coverage_baselines_dir,
             build_python_artifacts_dir=args.build_python_artifacts_dir,
             python_artifacts_dir=args.python_artifacts_dir,
+            prepare_candidate_dir=args.prepare_candidate_dir,
+            frozen_candidate_dir=args.frozen_candidate_dir,
             toolchain_source=args.toolchain_source,
             toolchain_min_age_days=args.toolchain_min_age_days,
             promotion_time=args.promotion_time,
