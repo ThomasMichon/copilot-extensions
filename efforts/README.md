@@ -17,7 +17,6 @@ that pattern to this repository.
 | [Bounded Passive Git Observation](active/bounded-passive-git-observation/README.md) | Draft; reviewed R1 deadline/R2 passive fsmonitor proposal, implementation admission pending | #7944/#7945; preserves roster/publication, resident-control/storage and broader #2619/#6086 ownership; no rollout |
 | [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Draft; reviewed shared launch, finite test lifetime and install/update cleanup contract before implementation | #8403; production cutover and existing custody remain authoritative; no rollout |
 | [Worktree Launch Attempt Journal](active/worktree-launch-attempt-journal/README.md) | Active; deferred process receipts #8627 merged; native association, readers/retention and installed proof open | #8375; protected 90-day prompts, attempt/outcome correlation, selected-machine inspection; preserves #6057 |
-| [Repository Agent Exposure Policy](active/repository-agent-exposure-policy/README.md) | Active; implementation authorized, standing-intent review first | #8332; repository-owned hosting veto, source-only workflows and external Code Review preserved |
 | [Ready Resident Prompt Receipt](active/ready-resident-prompt-receipt/README.md) | Active; delivery/control source slice, qualified backend and subject delivery remain gated | #7942; preserves receipt/roster owners and prohibits helper/lifecycle fallbacks |
 | [Bridge Retained Runtime Restoration](active/bridge-retained-runtime-restoration/README.md) | Active; local producer/recovery and opt-in SDK source merged; remaining custody, native qualification and restoration open | #8063; specializes #7268 without substituting for Dispatch/adopter acknowledgement; no rollout |
 | [Actions Dialog Isolation](active/actions-dialog-isolation/README.md) | Done (source scope); configuration and caller-refusal #8286 merged after approval and required CI | #7940 source complete; #7939 release/installed and #7935 native gates remain |
@@ -167,6 +166,7 @@ that pattern to this repository.
 | [Mux Child Window Suppression](2026/10/12%20mux-child-window-suppression/README.md) | Done; published repair, verified reachable rollout, remaining adopter verification transferred | #6040 |
 | [Vision Backport Sweep](2026/10/09%20vision-backport-sweep/README.md) | Done; 35-vision source reconciliation, implementation owners retained | #5456 |
 | [Mutable dev slot](2026/10/22%20mutable-dev-slot/README.md) | Done; mutable/editable premise abandoned, not portfolio delivered | [Immutable Dev Slot](active/immutable-dev-slot/README.md), #5472; direct merged Dev deployment #7028/#7029 |
+| [Repository Agent Exposure Policy](2026/10/24%20repository-agent-exposure-policy/README.md) | Done; released intrinsic hosting enforcement and selected installed acceptance verified | #8332; source-only workflows and external Code Review preserved |
 
 ## Local conventions
 
