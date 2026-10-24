@@ -344,6 +344,61 @@ def test_closure_observation_reconstruction_drops_removed_timestamp(
         owner.shutdown()
 
 
+@pytest.mark.parametrize("clear_final", [False, True])
+def test_publication_snapshots_reusable_row_generator(tmp_path, manager_contract, clear_final):
+    owner = WorktreesRuntime(tmp_path / "generator.sqlite3")
+    owner.activate()
+    receivers = {version: FeedReceiver(request(version)) for version in (1, 2)}
+    managers = {version: manager_contract[0]() for version in (1, 2)}
+    previous = {1: None, 2: None}
+
+    def batch(at):
+        shared = row()
+        shared["closure"] = {"eligible": False}
+        for index, wid in enumerate(("one", "two"), start=1):
+            shared["id"] = wid
+            shared["title"] = f"Title-{wid}"
+            shared["fact_provenance"]["session"]["observed_at"] = at + index
+            shared["closure"]["computed_at"] = f"2026-10-24T00:00:{at + index:02d}Z"
+            yield shared
+        if clear_final:
+            shared.clear()
+
+    try:
+        for wave, at in enumerate((10, 20), start=1):
+            owner.publish("project", batch(at), observed_at=at)
+            for version in (1, 2):
+                result = validate_result(owner.handle(request(version)), request(version))
+                assert [value["id"] for value in result["worktrees"]] == ["one", "two"]
+                if version == 1:
+                    assert [value["fact_provenance"]["session"]["observed_at"]
+                            for value in result["worktrees"]] == [at + 1, at + 2]
+                    assert [value["closure"]["computed_at"] for value in result["worktrees"]] == [
+                        f"2026-10-24T00:00:{at + index:02d}Z" for index in (1, 2)
+                    ]
+                else:
+                    assert [value["id"] for value in result["observations"]] == ["one", "two"]
+                    assert [value["facts"]["session"]["observed_at"]
+                            for value in result["observations"]] == [at + 1, at + 2]
+                    assert [value["semantic_revision"] for value in result["worktrees"]] == [1, 1]
+                frames = collect(receivers[version], result, previous[version])
+                for frame in frames:
+                    managers[version].receive(json.loads(json.dumps(frame)))
+                assert [value["id"] for value in managers[version].rows] == ["one", "two"]
+                assert read_advisory(owner.store.db_path, "project", contract_version=version)[
+                    "worktrees"
+                ] == result["worktrees"]
+                if wave == 2 and version == 2:
+                    assert sum(frame["type"] == "worktree" for frame in frames) == 0
+                    assert sum(frame["type"] == "observation" for frame in frames) == 2
+                previous[version] = result
+            if wave == 1:
+                audit_semantic_writes(owner.store.db_path)
+        assert writes(owner.store.db_path) == []
+    finally:
+        owner.shutdown()
+
+
 @pytest.mark.timeout(180)
 def test_real_producer_thousand_rows_ten_observations_and_one_title(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"

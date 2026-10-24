@@ -154,6 +154,22 @@ it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
 
+### 2026-10-24 — Refreshed draft and reusable-generator correction
+- Normal owned-branch sync retained `f3610e0f` and replayed the source on the
+  merged #8392 owner repair. Its relevant HTTP47 bytes match, and the repair
+  is an ancestor. No competing repair or history override was used.
+- The push client timed out, but a fresh provider read independently confirmed
+  actual draft head `81dedbf3` and green required CI `40053692459`.
+- Fresh review `5636432797` identified a High in retained input aliases.
+  Reproduced wrong v1 observation times and failure after a generator clears
+  its reused dictionary. Each admitted row is now snapshotted by decoding its
+  already-validated encoding, including nested fact values.
+- Twenty-seven focused in-process wire/closure/generator cases pass.
+  Correct row/observation IDs, live/advisory v1/v2 data, actual Manager feed
+  admission and zero semantic writes/deltas on reobservation are covered.
+- The prior Manager deadline failures and unchanged Worktrees native hold
+  remain unresolved. No timing rerun, readiness, merge or rollout occurred.
+
 ### 2026-10-24 — Closure-observation review correction; qualification still blocked
 - `6dce27dc` is actually published on draft #8217 with required green CI.
   Fresh review confirmed the complete-wire budget correction but identified

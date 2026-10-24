@@ -674,3 +674,44 @@ schema, writer, entrypoint or installed behavior. Documentation now states
 that v1 output is reconstructed from semantic fields plus current observation
 metadata. Draft review/required-CI publication may proceed under the explicit
 qualification holds; source completion, readiness, merge and rollout may not.
+
+### Reusable input dictionaries
+
+After normal backed refresh, `81dedbf3` included merged #8392's repair as an
+ancestor with identical relevant HTTP47 registry/fixture bytes. A fresh scoped
+read confirmed that this exact head was actually published despite the push
+client's 30-second timeout; required CI `40053692459` passed. No push retry,
+CI retry or increased transport deadline was used to establish that result.
+
+Fresh review `5636432797` found a High at
+`worktrees_projection.py:317`: the encoder captures separate payloads, but
+retained raw input references can alias the final object yielded by a reusable
+dictionary generator. The reproduced cases fail with v1 observation times
+`[12, 12]` instead of `[11, 12]`, and `KeyError` when the valid generator
+clears its dictionary after the last yield.
+
+The narrow correction decodes the already-validated payload before retaining
+the row and computing its other captured fields. It snapshots nested values,
+not only the outer dictionary. Two regression cases cover reuse and final
+clearing across two real publication waves, live/advisory v1/v2 output,
+observation IDs/timestamps, serialized engine/Manager feed admission and zero
+semantic writes/deltas on unchanged semantic rows.
+
+The focused source selector is:
+
+```powershell
+python tools\run-plugin-tests.py agent-worktrees `
+  --test-file tests/test_worktrees_observations.py `
+  -k "complete_wire_budget or closure_observation_reconstruction or publication_snapshots_reusable"
+```
+
+It reports **27 passed, 12 deselected**, with actual JUnit retained.
+The unchanged native/Manager timing controls were not rerun. Their prior
+failures remain qualification blockers, not assumed fixed by upstream refresh
+or by a green pure-unit CI gate.
+
+Documentation impact: the engine contract specifies per-row snapshot ownership.
+The additional cost is one bounded decode of each already-encoded candidate;
+no process, history scan, second publication writer or schema change is added.
+Fresh publication, review and required CI remain necessary for this correction,
+while readiness, merge, native retry and rollout remain unauthorized.

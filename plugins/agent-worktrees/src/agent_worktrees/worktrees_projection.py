@@ -314,6 +314,8 @@ class WorktreesProjection:
             if wid in encoded:
                 raise ProjectionError("duplicate current worktree identity")
             encoded[wid] = payload
+            # Iterators may reuse the row dictionary and its nested fact values.
+            row = json.loads(payload)
             raw_rows[wid] = row
             semantic_rows[wid] = json.dumps(
                 observations.semantic_row(row), sort_keys=True, ensure_ascii=False,

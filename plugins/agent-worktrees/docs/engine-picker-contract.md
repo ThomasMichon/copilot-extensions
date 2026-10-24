@@ -166,6 +166,11 @@ observation entry. Removing an optional closure observation therefore removes
 its `computed_at` from live and advisory v1 output, even when the unchanged
 semantic payload is retained without a row write.
 
+Publication snapshots each input row from its validated encoding before
+advancing the input iterable. Reusing or clearing an iterator-owned dictionary,
+including its nested fact values, cannot alter earlier row identities or
+observations in the atomic wave.
+
 ```json
 {
   "id": "tree",
