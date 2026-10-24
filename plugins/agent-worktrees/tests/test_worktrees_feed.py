@@ -20,6 +20,28 @@ from agent_worktrees.worktrees_projection_index import ProjectionUnavailable
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
 
+def _test_budget_factor():
+    value = os.environ.get("WORKTREES_TEST_BUDGET_FACTOR", "1")
+    if value not in {"1", "2", "3"}:
+        raise ValueError("WORKTREES_TEST_BUDGET_FACTOR must be 1, 2 or 3")
+    return int(value)
+
+
+@pytest.mark.parametrize("value,expected", [(None, 1), ("1", 1), ("2", 2), ("3", 3)])
+def test_test_budget_factor_explicit_values(monkeypatch, value, expected):
+    monkeypatch.delenv("WORKTREES_TEST_BUDGET_FACTOR", raising=False)
+    if value is not None:
+        monkeypatch.setenv("WORKTREES_TEST_BUDGET_FACTOR", value)
+    assert _test_budget_factor() == expected
+
+
+@pytest.mark.parametrize("value", ["", "0", "4", "-1", "1.5", "nan", "2.0"])
+def test_test_budget_factor_rejects_other_values(monkeypatch, value):
+    monkeypatch.setenv("WORKTREES_TEST_BUDGET_FACTOR", value)
+    with pytest.raises(ValueError, match="must be 1, 2 or 3"):
+        _test_budget_factor()
+
+
 # The documented meta-path protocol requires find_spec, not ABC inheritance.
 # https://docs.python.org/3/reference/import.html#the-meta-path
 _GUARDED_MODULE_SCRIPT = """
@@ -527,6 +549,10 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(
 
     from agent_worktrees import config as cfg
 
+    factor = _test_budget_factor()
+    initial_budget = 2.0 * factor
+    step_budget = 2.0 * factor
+    cleanup_budget = 1.0 * factor
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "agent-home"))
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -620,15 +646,20 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(
     reader.start()
     error_reader.start()
     qualified = False
+    contended_checks_completed = False
+    elapsed = None
+    cleanup_failure = None
     try:
         initial = []
         try:
             while not initial or initial[-1]["type"] != "done":
-                initial.append(frames.get(timeout=max(0.001, 2 - (time.monotonic() - started))))
+                initial.append(frames.get(
+                    timeout=max(0.001, initial_budget - (time.monotonic() - started)),
+                ))
         except queue.Empty:
             missed_frames = len(initial)
-            # Diagnostic collection never changes the original two-second verdict.
-            diagnostic_deadline = started + 10
+            # Eventual diagnostic completion never changes the admitted verdict.
+            diagnostic_deadline = started + 10 * factor
             while proc.poll() is None and time.monotonic() < diagnostic_deadline:
                 try:
                     item = frames.get(timeout=0.1)
@@ -639,8 +670,8 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(
             exited = proc.poll()
             if exited is None:
                 proc.terminate()
-                proc.wait(timeout=2)
-            error_reader.join(timeout=1)
+                proc.wait(timeout=step_budget)
+            error_reader.join(timeout=cleanup_budget)
             import_times = []
             for line in stderr_lines:
                 if line.startswith("import time:"):
@@ -650,13 +681,14 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(
             ranked = sorted(import_times, reverse=True)[:12]
             f1_imports = [item for item in import_times if "worktrees_observation" in item[2]]
             pytest.fail(
-                f"CLI initial roster missed 2s: {missed_frames} frames, exit={exited}, "
+                f"CLI initial roster missed {initial_budget:g}s "
+                f"(nominal 2s, factor {factor}): {missed_frames} frames, exit={exited}, "
                 f"requests={received_requests!r}, import_cumulative_self_us={ranked!r}, "
                 f"F1_imports={f1_imports!r}, "
                 f"stderr={''.join(line for line in stderr_lines if not line.startswith('import time:'))[-8192:]!r}",
             )
         elapsed = time.monotonic() - started
-        assert elapsed < 2
+        assert elapsed < initial_budget
         receiver = client.FeedReceiver(request())
         current = apply(receiver, initial)
         assert len(current["worktrees"]) == 1100
@@ -666,29 +698,38 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(
         runtime.publish("project", rows, observed_at=2)
         changed = []
         while not changed or changed[-1]["type"] != "commit":
-            changed.append(frames.get(timeout=2))
+            changed.append(frames.get(timeout=step_budget))
         assert len([f for f in changed if f["type"] == "worktree"]) == 1
         assert apply(receiver, changed)["worktrees"][-1]["dirty"] == 9
         runtime.close_admission("update")
-        notice = frames.get(timeout=2)
+        notice = frames.get(timeout=step_budget)
         assert notice["type"] == "going-away" and notice["reason"] == "update"
-        proc.wait(timeout=2)
-        reader.join(timeout=1)
+        proc.wait(timeout=step_budget)
+        reader.join(timeout=cleanup_budget)
         assert proc.returncode == 0 and not reader.is_alive()
-        assert runtime.feed.wait_closed(1)
-        print(f"actual CLI full current roster: 1100 rows in {elapsed * 1000:.2f}ms")
-        qualified = True
+        assert runtime.feed.wait_closed(cleanup_budget)
+        print(
+            f"actual CLI full current roster: 1100 rows in {elapsed * 1000:.2f}ms, "
+            f"test factor {factor}; nominal qualification is separate"
+        )
+        contended_checks_completed = True
+        qualified = factor == 1
     finally:
         failure = sys.exc_info()[1]
         try:
             runtime.close_admission()
             if proc.poll() is None:
                 proc.terminate()
-                proc.wait(timeout=2)
-            reader.join(timeout=1)
-            error_reader.join(timeout=1)
+                proc.wait(timeout=step_budget)
+            reader.join(timeout=cleanup_budget)
+            error_reader.join(timeout=cleanup_budget)
             server.close()
             runtime.shutdown()
+            if contended_checks_completed:
+                assert not reader.is_alive() and not error_reader.is_alive()
+        except BaseException as exc:
+            cleanup_failure = exc
+            raise
         finally:
             if report_dir := os.environ.get("F1_NATIVE_REPORT_DIR"):
                 import hashlib
@@ -699,18 +740,37 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(
                 assert report.is_relative_to(repo / ".test-venvs") and report.is_dir()
                 (report / f"native-{entry_mode}.json").write_text(json.dumps({
                     "source_commit": os.environ.get("F1_SOURCE_COMMIT"),
+                    "production_ancestor": os.environ.get("F1_PRODUCTION_ANCESTOR"),
+                    "environment_reference": os.environ.get("F1_ENVIRONMENT_REFERENCE"),
                     "test_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                     "entry_mode": entry_mode, "argv": proc.args,
                     "console_declaration": declared[0].value if entry_mode == "console" else None,
                     "interpreter": sys.executable, "python_version": sys.version,
                     "started_monotonic": started,
-                    "initial_deadline_seconds": 2.0,
+                    "budget_factor": factor,
+                    "nominal_initial_deadline_seconds": 2.0,
+                    "initial_deadline_seconds": initial_budget,
+                    "step_budget_seconds": step_budget,
+                    "cleanup_budget_seconds": cleanup_budget,
+                    "diagnostic_window_seconds": 10 * factor,
+                    "initial_elapsed_seconds": elapsed,
+                    "nominal_initial_threshold_met": elapsed is not None and elapsed < 2.0,
+                    "nominal_run_exercised": factor == 1,
                     "fixture_row_count": 1100,
-                    "qualified": qualified,
+                    "qualified": qualified and cleanup_failure is None,
+                    "nominal_qualified": qualified and cleanup_failure is None,
+                    "contended_checks_completed": contended_checks_completed,
+                    "contended_test_pass": (
+                        contended_checks_completed and failure is None
+                        and cleanup_failure is None
+                    ),
                     "failure": None if failure is None else {
                         "type": type(failure).__name__, "message": str(failure),
                     },
                     "phases": received_requests,
+                    "cleanup_failure": None if cleanup_failure is None else {
+                        "type": type(cleanup_failure).__name__, "message": str(cleanup_failure),
+                    },
                     "stdout": "".join(raw_stdout), "stderr": "".join(stderr_lines),
                     "returncode": proc.returncode,
                     "readers_joined": not reader.is_alive() and not error_reader.is_alive(),
