@@ -206,6 +206,9 @@ not replace the held #6859 / #7833 lifetime repair.
 - [x] Avoid the extra PowerShell hop in selected-context validation while
   retaining fresh payload-owned checks, native compatibility and UTF-8 root
   decoding (#7919).
+- [x] Remove the duplicate missing-bin repair lifecycle and pair consecutive
+  initial Windows context reads through their existing owners, retaining
+  full staging inputs and later fresh publication checks (#8409).
 - [ ] Implement the reviewed, evidence-backed reductions in repeated planning,
   probing, building or reconciliation, retaining all actual safety gates.
 - [ ] Make unchanged healthy work a genuine no-op; retain fresh, changed,
@@ -229,6 +232,9 @@ not replace the held #6859 / #7833 lifetime repair.
   failure, nesting, multiline output, empty output and clock movement.
 - [x] Prove clean JSON/stdout and diagnostic stderr at real subprocess
   boundaries, including a failed installer and preserved exit status.
+- [x] Qualify #8409's complete native repair/scoped/snapshot and interpreter
+  controls on Windows and Linux, recording temporary congested-CPU
+  watchdogs separately from original-limit performance evidence.
 - [ ] Cover Windows and POSIX installer entrypoints and synchronized vendored
   formatter copies; run the relevant install-contract and formatting guards.
 - [ ] Exercise real unchanged, changed-version and first-touch consumer
@@ -288,6 +294,34 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-23 - Repair source merged; release remains blocked
+
+- #8409 merged to `dev` at `fac9cd17b954f9acaead05191ade07a4a0c06823`
+  after Copilot approved its current head and required CI passed. Review
+  discussions were empty. The managed completion path verified the merge;
+  this is source delivery, not installed or serving-state acceptance.
+- Publication synchronization preserved independent upstream changes.
+  Nine additional controls passed for the newly integrated optional-profile
+  engine, including unchanged base identity and real default-profile UV
+  construction. These complement, rather than replace, the 175 Windows and
+  126 Linux consumer controls recorded below.
+- Natural promotion is blocked by #8411. Run `40053757845` passed its
+  source units, artifact build/attestation and candidate composition, then
+  refused exact candidate source-unit reuse at
+  `services/chat/src/agent_chat_service/__init__.py`. The admitted source
+  contains version `0.1.0-dev1`; the candidate contains `0.1.20-dev1`.
+  This is a verified byte difference, not a flaky test or release success.
+- The existing #3336 controller/source-qualification owner retains shared
+  release authority. Coordinate the smallest version/source compatibility
+  repair without omitting the source file, weakening exact-byte proof,
+  forcing a rerun or changing Main control. No installed update,
+  administrative merge or publisher change is authorized by this slice.
+- The effort and parent objectives stay Active. Remaining gates include
+  qualified containing release, separately authorized installed acceptance,
+  normal-load before/after comparison and the other output boundaries.
+  Keep the active source worktree; do not finalize it as if this PR
+  completed the whole objective.
 
 ### 2026-10-23 - Qualify current consumers with temporary CPU allowances
 
