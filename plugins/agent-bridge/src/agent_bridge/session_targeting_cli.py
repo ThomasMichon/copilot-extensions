@@ -108,8 +108,11 @@ def _send(args: argparse.Namespace) -> None:
     core = _core()
     if getattr(args, "native_invocation_file", None) is not None:
         from .native_keyed_client import send, validate_options
+        from .hosting_admission_cli import configure_client as configure_hosting
         validate_options(args)
-        send(args, core._get_client())
+        client = core._get_client()
+        configure_hosting(client, args)
+        send(args, client)
         return
     if getattr(args, "new", False):
         print(
@@ -127,6 +130,8 @@ def _send(args: argparse.Namespace) -> None:
                           error="--receipt-only requires --native-invocation-file")
     client = core._get_client()
     configure_client(client, args)
+    from .hosting_admission_cli import configure_client as configure_hosting
+    configure_hosting(client, args)
     min_protocol = getattr(args, "min_daemon_protocol", None)
     if min_protocol and not client.daemon_supports(min_protocol):
         if getattr(args, "plugin_context_stdin", False):
@@ -229,7 +234,9 @@ def _send(args: argparse.Namespace) -> None:
         raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
                           target=target, error="prepared startup cannot fall back to ACP or create a session")
     caller_id = core._caller_id_for(args)
-    session_id = core._resolve_target(client, target, force=getattr(args, "force", False))
+    session_id = core._resolve_target(
+        client, target, force=getattr(args, "force", False), caller_id=caller_id,
+    )
     if not getattr(args, "full_history", False):
         _mark_resume_if_behind(client, session_id, caller_id=caller_id)
     core._submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
@@ -454,7 +461,9 @@ def _busy_session_message(client, session_id: str, agent_name: str, caller_id: s
     return "\n".join(lines)
 
 
-def _resolve_known_session(client, session_id: str, session: dict, *, force: bool) -> str:
+def _resolve_known_session(
+    client, session_id: str, session: dict, *, force: bool, caller_id: str | None = None,
+) -> str:
     """Given an already-fetched session record, apply the shared idle/stopped/
     busy dispatch and return the session id to operate on (which the caller
     delivers to). Exits on an unrecoverable busy-without-force conflict."""
@@ -480,23 +489,26 @@ def _resolve_known_session(client, session_id: str, session: dict, *, force: boo
             file=sys.stderr,
         )
         sys.exit(core._SEND_BUSY_EXIT)
-    from .session_start_cli import _prepare_sender_preference
+    if not agent:
+        print(
+            f"[FAIL] Session {session_id} has no agent recorded; cannot create a "
+            "replacement. The existing session is retained.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    from .session_start_cli import _prepare_caller_context, _prepare_sender_preference
 
-    sender_preference = _prepare_sender_preference(client, agent) if agent else None
+    sender_preference = _prepare_sender_preference(client, agent)
+    caller_context = _prepare_caller_context(client, agent, caller_id)
     print(f"[>] --force: ending busy session {session_id} to take over...")
     try:
         client.end_session(session_id)
     except Exception:
         pass
-    if agent:
-        return core._start_agent_session(
-            client, agent, force=False, sender_preference=sender_preference,
-        )
-    print(
-        f"[FAIL] Session {session_id} ended; no agent recorded -- re-send to the agent name to start a fresh session.",
-        file=sys.stderr,
+    return core._start_agent_session(
+        client, agent, force=False, sender_preference=sender_preference,
+        caller_id=caller_context.caller_id, caller_context=caller_context,
     )
-    sys.exit(1)
 
 
 def _resolve_target(
@@ -511,6 +523,7 @@ def _resolve_target(
     charter: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    caller_id: str | None = None,
 ) -> str:
     core = _core()
     from .client import BridgeClientError
@@ -518,7 +531,7 @@ def _resolve_target(
     try:
         session = client.get_session(target)
         if session:
-            return _resolve_known_session(client, target, session, force=force)
+            return _resolve_known_session(client, target, session, force=force, caller_id=caller_id)
     except BridgeClientError as exc:
         if exc.status != 404:
             raise
@@ -551,7 +564,9 @@ def _resolve_target(
                 raise
             session = None
         if session:
-            return _resolve_known_session(client, worktree_session_id, session, force=force)
+            return _resolve_known_session(
+                client, worktree_session_id, session, force=force, caller_id=caller_id,
+            )
 
     from .session_start_cli import _read_agent_inventory
 
@@ -580,6 +595,7 @@ def _resolve_target(
             target_dir=target_dir,
             worktree_id=worktree_id,
             agent_inventory=agents,
+            caller_id=caller_id,
         )
 
     try:
@@ -595,6 +611,7 @@ def _resolve_target(
             target_dir=target_dir,
             worktree_id=worktree_id,
             agent_inventory=agents,
+            caller_id=caller_id,
         )
     except BridgeClientError as exc:
         if exc.status != 404:
@@ -749,6 +766,9 @@ def _cmd_create(args: argparse.Namespace) -> None:
         print("[FAIL] --detach requires --cli", file=sys.stderr)
         sys.exit(2)
     if getattr(args, "cli", False):
+        if getattr(args, "require_agent_hosting", False):
+            print("[FAIL] --require-agent-hosting is not supported with --cli", file=sys.stderr)
+            sys.exit(2)
         if getattr(args, "charter", None):
             print(
                 "[FAIL] --charter is not supported with --cli: the CLI-mode "
@@ -766,6 +786,8 @@ def _cmd_create(args: argparse.Namespace) -> None:
         return
     core = _core()
     client = core._get_client()
+    from .hosting_admission_cli import configure_client as configure_hosting
+    configure_hosting(client, args)
     target = args.target
     caller_id = core._caller_id_for(args)
 
@@ -805,6 +827,7 @@ def _cmd_create(args: argparse.Namespace) -> None:
             charter=getattr(args, "charter", None),
             target_dir=getattr(args, "target_dir", None),
             worktree_id=getattr(args, "worktree_id", None),
+            caller_id=caller_id,
         )
     except _AgentSessionConflict as conflict:
         sid = conflict.existing_session_id
@@ -908,6 +931,8 @@ def _mark_resume_if_behind(client, session_id: str, *, caller_id: str | None) ->
 def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None:
     core = _core()
     send_p = sub.add_parser("send", help="Send a prompt to an agent or session (reuses/resumes this caller's existing session)")
+    from .hosting_admission_cli import add_argument as add_hosting_argument
+    add_hosting_argument(send_p)
     send_p.add_argument("target", help="Agent name, session ID, or a live session's worktree handle (a worktree handle resolves to whichever session is live now)")
     send_p.add_argument("prompt", nargs="?", default=None, help="Prompt text to send (omit and use --prompt-file for multi-line prompts that shouldn't transit the shell's argv)")
     send_p.add_argument("--prompt-file", dest="prompt_file", default=None, metavar="PATH", help="Read the prompt from PATH (or '-' for stdin) instead of the positional argument. Use this for multi-line prompts to avoid shell argv mangling (e.g. PowerShell word-splitting a prompt at the first embedded double-quote). Mutually exclusive with the positional prompt.")
@@ -942,6 +967,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.set_defaults(func=_cmd_send)
 
     create_p = sub.add_parser("create", help="Create a fresh session for an agent (optionally send a first prompt). Refuses if a one-session-per-CodeSpace agent is busy.")
+    add_hosting_argument(create_p)
     create_p.add_argument("target", help="Agent name (not a session ID)")
     create_p.add_argument("prompt", nargs="?", default=None, help="Optional first prompt to send to the new session")
     create_p.add_argument("--prompt-file", dest="prompt_file", default=None, metavar="PATH", help="Read the first prompt from PATH (or '-' for stdin) instead of the positional argument. Use this for multi-line prompts to avoid shell argv mangling (e.g. PowerShell word-splitting a prompt at the first embedded double-quote). Mutually exclusive with the positional prompt.")

@@ -44,6 +44,48 @@ run a local indexer daemon; project-aware read commands execute the same
 `agent-index` CLI on the designated indexer over SSH. The dynamic service port
 stays on the host and is resolved there.
 
+### Authenticated HTTP read endpoints
+
+An explicitly configured HTTP client can use a provider-owned bearer credential
+command without changing native hosting or SSH routing. Select the HTTP endpoint
+in the repository's indexer designation, and put the credential reference only
+in the client's machine-local `~/.agent-index/config.yaml`:
+
+```yaml
+role: client
+endpoint: https://index.example.com/api/index
+http_auth:
+  endpoint: https://index.example.com/api/index
+  installation_id: expected-remote-installation
+  token_command:
+    - /absolute/path/to/credential-provider
+    - access-token
+```
+
+The command must emit only the credential on stdout; it owns provider selection
+and noninteractive refresh. The CLI never starts a login, persists the token,
+or reports provider output. Acquisition is headless with a 30-second deadline,
+caller-owned process-tree cleanup, and capture-time limits of 16,386 stdout
+bytes and 4,096 stderr bytes. Credentials are limited to 16,384 ASCII characters.
+The exact endpoint binding, remote installation identity, HTTPS verification
+(or explicitly selected loopback transport), disabled ambient proxies and
+redirect refusal prevent credential forwarding to another destination.
+Do not put a token in configuration or command arguments.
+
+This mode supports the existing `/health`, `/status`, `/search`, `/similar`
+and `/clusters` read contracts under the selected endpoint prefix. An adapter
+may explicitly refuse unsupported reads; it must not fabricate an empty result.
+Remote status checks the configured service identity, not local process custody.
+Lifecycle operations cannot use the authenticated read client. This is not an
+alternate path or fallback for the separate signed-grant scoped fleet protocol.
+
+The focused native consumer test exercises an actual credential subprocess,
+HTTP request and CLI process with isolated configuration. The optional Windows
+desktop lane is selected with
+`python tools/run-plugin-tests.py agent-index --allow-explicit-tiers --test-file tests/native/test_http_auth_windows.py`
+and `COPILOT_EXTENSIONS_NATIVE_WINDOWS=1`. It observes two acquisitions from a
+real windowless parent and refuses visible windows or foreground transitions.
+
 ## Install and runtime layout
 
 | Area | Location | Owner |

@@ -121,6 +121,15 @@ class _FakeManager:
         return SimpleNamespace(config=SimpleNamespace(ssh_target="cs-one"))
 
     async def exec_command(self, *_args, **_kwargs):
+        if "agent-policy check" in _args[1]:
+            self.calls.append("hosting")
+            return SimpleNamespace(
+                stdout=json.dumps({
+                    "version": 1, "allowed": True, "repository": "/workspaces/product",
+                    "expose_agent": None, "sources": [], "denied_by": [],
+                }),
+                stderr="", exit_code=0, timed_out=False,
+            )
         self.calls.append("exec_command")
         return _FakeCommandResult()
 
@@ -143,6 +152,7 @@ def _fake_config():
         dotfiles_repo="example/dotfiles",
         harness_repo="example/harness",
         repos={},
+        resolved_workspace_folder_for=lambda _repo: "/workspaces/product",
         source_paths=[],
         codespace_plugins=[],
         provision_for_repo=lambda _repo: SimpleNamespace(
@@ -175,6 +185,15 @@ def _patch_ssh_dependencies(monkeypatch, tmp_path, manager):
         lambda _name: None,
     )
     monkeypatch.setattr(cli, "load_merged_config", _fake_config)
+    monkeypatch.setattr("agent_codespaces.config.load_merged_config", _fake_config)
+    monkeypatch.setattr(cli, "_lookup_codespace_repo", lambda _name: "example/product")
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.list_codespaces",
+        lambda: [SimpleNamespace(
+            name="cs-dispatch", display_name="cs-dispatch", repository="example/product",
+            state="Available", account="",
+        )],
+    )
     monkeypatch.setattr(cli, "_clear_status_quietly", lambda _name: None)
     monkeypatch.setattr(cli, "_relay_listening", lambda _port: True)
     monkeypatch.setattr("agent_codespaces.relay_token.token_for", lambda _name, **kw: "tok")
@@ -264,6 +283,7 @@ class TestDiagnosticRemoteCmd:
         assert "warm" in calls
         assert len(hook_environment) == 1
         assert "LC_GIT_CREDENTIAL_RELAY" in hook_environment[0]
+        assert calls.index("hosting") < calls.index("relay") < calls.index("hooks")
         assert calls.index("hooks") < calls.index("register") < calls.index("open_stdio_channel")
         assert calls.index("auth") < calls.index("warm") < calls.index("open_stdio_channel")
 

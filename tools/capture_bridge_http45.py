@@ -15,6 +15,8 @@ import uuid
 from unittest.mock import patch
 
 import agent_bridge_contract_git as evidence
+import agent_bridge_contract_registry as registry_codec
+from agent_bridge_contract_publication import publish
 from bridge_http45_evidence import advertised, validate_families
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,7 +62,11 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
         raise ValueError("capture requires an actual full source commit")
-    registry = read(REGISTRY)
+    if args.write:
+        from agent_bridge_contract_publication import recover_pending_links
+        recover_pending_links(ROOT, args.source_commit)
+    snapshot = registry_codec.load(ROOT)
+    registry = copy.deepcopy(snapshot.materialized)
     http = registry["contracts"][0]
     if http["declared_range"]["current"] != 45:
         raise ValueError("this capture owns only HTTP generation 45")
@@ -70,6 +76,7 @@ def main():
     deleted = set()
     source_rows = {row["path"]: row for row in http["source_paths"]}
     current_proof = {}
+    pending_provenance = {}
     for source in http["source_paths"]:
         path = source["path"]
         data = safe(path).read_bytes()
@@ -102,13 +109,10 @@ def main():
             "source_path": source, "source_git_blob": current_proof[source]["source_git_blob"],
             "capture_method": method,
         }
-        previous = next((row for row in http["provenance"]
-                         if all(row.get(key) == provenance[key] for key in
-                                ("commit", "plugin_version", "generation", "source_path", "source_git_blob"))), None)
-        if previous is None:
-            http["provenance"].append(provenance)
-        else:
-            previous.update(provenance)
+        key = tuple(provenance[name] for name in (
+            "commit", "plugin_version", "generation", "source_path", "source_git_blob",
+        ))
+        pending_provenance[key] = provenance
 
     keyed = read("plugins/agent-bridge/contract/inputs/http45/native-keyed-admission.json")
     shared_method = (
@@ -152,13 +156,15 @@ def main():
                  previous["captured_from"]["source_path"],
                  "Same-source predecessor-family preservation at HTTP-45; frozen legacy native/drain/"
                  "provider-refresh expectations are not a new runtime capture.")
-    for row in http["provenance"]:
+    for row in pending_provenance.values():
         if (row["commit"] == args.source_commit and row["generation"] == 45
                 and row["source_path"] in {PREFIX + "routes/prompts.py", PREFIX + "session_prompts.py"}):
             row["capture_method"] = (
                 shared_method + " Also preserves the same-source linked unkeyed/native/drain "
                 "predecessor family. These are two operation families, not two independent captures."
             )
+        if row not in http["provenance"]:
+            http["provenance"].append(row)
 
     loaded = {}
     for row in http["fixtures"]:
@@ -172,7 +178,7 @@ def main():
     for row in old_fixture_records:
         if row["generation"] < 45 and evidence.sha256_bytes(safe(row["path"]).read_bytes()) != row["sha256"]:
             raise ValueError(f"historical fixture drift: {row['path']}")
-    outputs[REGISTRY] = encoded(registry)
+    outputs.update(registry_codec.plan(ROOT, snapshot, registry))
     for path in (*outputs, *deleted):
         safe(path)
     probe_root = ROOT / ".test-venvs" / "http45-capture-probes" / (
@@ -206,9 +212,15 @@ def main():
     for source, proof in current_proof.items():
         if evidence.sha256_bytes(safe(source).read_bytes()) != proof["source_sha256"]:
             raise ValueError(f"source changed during capture: {source}")
+    snapshot.verify(ROOT)
     if args.write:
-        for path, data in outputs.items():
-            safe(path).write_bytes(data)
+        publish(
+            ROOT, args.source_commit, outputs, validate=lambda: snapshot.verify(ROOT),
+            input_hashes={
+                row["path"]: registry_codec.digest(safe(row["path"]).read_bytes())
+                for row in old_fixture_records
+            },
+        )
         for path in deleted:
             safe(path).unlink(missing_ok=True)
     else:

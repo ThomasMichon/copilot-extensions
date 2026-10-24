@@ -375,6 +375,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 no_pair=getattr(args, "no_pair", False),
                 pending_seed=getattr(args, "seed", None),
                 creation_key=getattr(args, "creation_key", None),
+                build_launch_plan=False,
             )
         except CreationRequestFailure as exc:
             if args.json:

@@ -28,12 +28,24 @@ to the Linux starts in both host wrappers, not the Windows container arm.
 | Image | Toolchain present | Use |
 |-------|-------------------|-----|
 | `base` (default) | git, python3, node, uv | Plugin-install checks where a stock dev toolchain is assumed. |
-| `pristine` | **Copilot + git only** — a system `python3` exists (as on any real box) but **no venv module, no pip, no uv, no `~/.local/bin`, no feed governance** | The harshest fresh **internal** machine: forces the harness to provision its own toolchain, so uv/venv/pip-feed jams **surface** instead of being hidden. Select with `-Image pristine`. |
+| `pristine` | **Copilot + git only** — a system `python3` exists (as on any real box) but **no venv module, no pip, no uv, no `~/.local/bin`, no baked feed configuration** | Forces the harness to provision its own toolchain. Select with `-Image pristine`; add `-UvIndex ''` when testing missing feed governance. |
 
-Feed governance is injected per-scenario at run time, never baked into an image.
+Runtime Python installs default to the anonymous public Microsoft feed,
+`https://packagefeedproxy.microsoft.io/pypi/simple/`. The runners supply
+`UV_DEFAULT_INDEX` to the container, not host-specific configuration or credentials.
+This also works for ordinary `uv` calls that do not consume the scenario helper.
+The image itself retains no baked index configuration.
+
+Selection is explicit CLI `-UvIndex` / `--uv-index`, then `CR_UV_INDEX`, then
+the public default. Pass `-UvIndex ''` or `--uv-index ''` to leave the index
+unconfigured when testing first-touch feed governance. TLS validation and
+installer dependency-age checks are unchanged; an unavailable mirror fails
+normally rather than silently switching feeds.
+
 The realistic corp-box case to reproduce is an **asymmetry**: a policy sets
 **pip's** internal feed but not **uv**, so `uv`/`uv pip install` still hit the
-TLS-blocked public index while pip works.
+TLS-blocked public index while pip works. Use the explicit empty override for
+that negative control.
 
 Both images also carry a distro `rg` in `/opt/copilot-cleanroom/bin`, outside
 the stock PATH. Only the driven Tier-E Copilot process tree sees it, with
@@ -90,7 +102,8 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 > **Reproducing a network-blocked machine from an unrestricted dev box.**
 > `-BlockPublicFeeds` (`--block-public-feeds` on `run.sh`, or
 > `$env:CR_BLOCK_PUBLIC_FEEDS=1`) null-routes `pypi.org`,
-> `files.pythonhosted.org`, `registry.npmjs.org`, and `download.pytorch.org` at
+> `files.pythonhosted.org`, `registry.npmjs.org`, `download.pytorch.org`, and
+> `packagefeedproxy.microsoft.io` at
 > the container network layer (Docker `--add-host`), regardless of what the
 > HOST machine can actually reach. This lets a fully-connected dev box exercise
 > the same "public feed genuinely unreachable" condition a governed machine
@@ -114,7 +127,8 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.ps1 -Image pristine -Mode shell    # drop into a pristine fresh box (headed copilot)
 ./run.ps1 -Image base -NameSuffix agc    # a SECOND concurrent base clean-room (container cr-base-agc) -- won't clobber another agent's cr-base
 ./run.ps1 -Until 1 -Then shell           # prepare up to stage 1, then hand off to a shell
-./run.ps1 -UvIndex https://…/pypi/simple/  # opt-in uv-index fixture (governed box)
+./run.ps1 -UvIndex https://…/pypi/simple/  # override the public default
+./run.ps1 -UvIndex ''                    # explicit unconfigured-index control
 ./run.ps1 -BlockPublicFeeds -UvIndex https://…  # reproduce a network-blocked machine from an unrestricted dev box
 ./run.ps1 -Mode bridge-register          # expose the box as an agent-bridge agent
 ./run.ps1 -Scenario context-handoff-eval -Mode eval  # handoff speed/fidelity/lifecycle witness
@@ -130,6 +144,7 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 ./run.sh --image base --name-suffix agc   # a SECOND concurrent base clean-room (container cr-base-agc)
 ./run.sh --until 1 --then shell run
 ./run.sh --uv-index https://…/pypi/simple/ run
+./run.sh --uv-index '' run               # explicit unconfigured-index control
 ./run.sh --block-public-feeds --uv-index https://… run   # reproduce a network-blocked machine from an unrestricted dev box
 ./run.sh --scenario agent-vault-eval eval        # Tier-E agent-driven eval (mirrors run.ps1 -Mode eval)
 ./run.sh --scenario context-handoff-eval eval    # handoff speed/fidelity/lifecycle witness
@@ -224,6 +239,76 @@ Use a fresh name suffix for an independent fresh-machine witness. The
 manifest's `auth.copilot: none` prevents host-token lookup or injection.
 The report records the actual source commit and runtime generation; a
 successful preparation or installer exit alone is not the acceptance result.
+
+### Fresh installer failure and durable lifecycle records
+
+`fresh-installer-failure` is an opt-in, credential-free **Linux Tier-P** negative
+witness for Bridge and Dispatch. Run each in its own fresh container against
+the same full merged dev commit. It prepares a clean canonical source payload,
+creates an empty UV cache, verifies the runner's package-feed isolation and
+disables Python downloads, then invokes the actual first-install entry point.
+Dispatch uses its normal
+`--no-service --no-supervisor` options. It does not replace UV, edit the
+installer, import a recorder directly, or repair the fixture.
+
+```bash
+CR_SOURCE_COMMIT=<full-merged-commit> CR_SOURCE_PLUGIN=agent-bridge \
+  ./run.sh --scenario fresh-installer-failure --name-suffix failure-bridge \
+  --block-public-feeds --pass-env CR_SOURCE_COMMIT --pass-env CR_SOURCE_PLUGIN run
+
+CR_SOURCE_COMMIT=<same-full-merged-commit> CR_SOURCE_PLUGIN=agent-dispatch \
+  ./run.sh --scenario fresh-installer-failure --name-suffix failure-dispatch \
+  --block-public-feeds --pass-env CR_SOURCE_COMMIT --pass-env CR_SOURCE_PLUGIN run
+```
+
+The deliberately narrow failure is **real dependency resolution/build
+preparation refusing an unreachable package feed**, after interpreter creation.
+The scenario requires the standard anonymous public Python feed and verifies
+that its hostname and the public PyPI names resolve only to container loopback.
+UV uses the empty cache with a five-second HTTP timeout and no request retries.
+It does not use `UV_OFFLINE`: that option conflicts with the actual installer's
+refresh options and would stop before the intended dependency boundary.
+The verifier requires a fetch failure for a package on that feed and a native
+connection-refused diagnostic, a nonzero nonsignal installer exit,
+and exactly one durable `install` `begin`/`fail` pair whose PIDs match the actual
+installer and whose terminal version matches the prepared source generation.
+No selection, deploy manifest, completed generation, active routing or Dispatch
+`run/endpoint.json` advertisement may be published. An incomplete candidate may
+be cleaned by the installer itself.
+Missing tools, malformed source, clone/preparation failures, timeouts, unrelated
+nonzero exits, malformed records and any success record fail the scenario.
+
+The normal report records the commit, plugin and installer status. Its copied
+`cr-logs/` retain the actual installer output, PID, status, prepared identity,
+durable JSONL and `failure-witness.json`. No host credentials are consulted or
+injected (`auth.copilot/gh/ado: none`). This manual scenario adds no required-PR
+matrix and does not qualify Windows, daemon cutover, production deployment or
+offline-install support or failed-update preservation; see `merged-dev-runtime` for the separate successful
+source-install witness. Containers remain available for inspection until
+explicit teardown.
+
+Give simultaneous runs distinct `CR_RESULTS_DIR` paths outside the checkout;
+the runner's second-resolution default can otherwise select the same report
+directory even when the container suffixes differ.
+
+### Credential-free repository exposure policy
+
+The Tier-P/F1 `repository-agent-exposure` scenario stamps and provisions
+Worktrees from the read-only candidate checkout, then exercises the installed
+policy CLI against disposable repository fixtures. It proves absent/true/false
+and malformed policy, fresh reads, review-label denial, and source-only
+registration/worktree allocation without a launch or project adoption. It
+also proves adoption refusal leaves project registration unchanged. It does not launch an authoring agent,
+read account credentials or alter host registrations:
+
+```bash
+bash tools/clean-room/run.sh --scenario repository-agent-exposure \
+  --harness-mount "$PWD" --name-suffix exposure-candidate run
+```
+
+Use a unique suffix. The scenario retains its disposable container for
+inspection; remove that specific run through the normal clean-room lifecycle
+after inspecting the report.
 
 ### Credential-free budget-guidance snapshot
 
@@ -479,7 +564,7 @@ Override via `run.ps1` params or `CR_*` env (see the `scenarios/generic-single-p
 header): `CR_MARKETPLACE_REPO` (a GitHub `owner/repo`, or a container-local
 marketplace directory mounted with `-HarnessMount` for uncommitted-worktree
 validation), `CR_MARKETPLACE_NAME`, `CR_PRIMARY_PLUGIN`,
-`CR_EXPECT_DEPS`, `CR_UV_INDEX` (opt-in uv-index fixture),
+`CR_EXPECT_DEPS`, `CR_UV_INDEX` (runtime Python index override),
 `CR_BLOCK_PUBLIC_FEEDS` (null-route public feeds at the container network
 layer), `CR_UNTIL` (stop after
 stage N). The scenario name + stage list live in `manifest.json`.

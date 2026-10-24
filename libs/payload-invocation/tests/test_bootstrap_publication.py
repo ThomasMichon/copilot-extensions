@@ -12,8 +12,9 @@ from functools import cache
 import pytest
 
 from test_adopter_publication import ROOT, SHELLS, _adopter, _command, _without_python
+from test_bridge_first_use_publication import _initialize_shell_profiles
 from test_command_binding import (
-    _snapshot,
+    POWERSHELL, _snapshot,
     _write,
     binding_fixture as binding_fixture,
     powershell_host as powershell_host,
@@ -66,7 +67,59 @@ def _bootstrap_fixture(
             )
             suffix = "sh"
         (scripts / f"{name}.{suffix}").write_text(content, encoding="utf-8")
+    if plugin == "agent-vault":
+        engines = None
+        if os.name == "nt":
+            stock = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+            engines = (stock, POWERSHELL, shutil.which("pwsh"))
+        fixture["bootstrap_shell_profiles"] = _initialize_shell_profiles(
+            fixture, environment, engines=engines,
+        )
+        driver = fixture["payload"] / "libs" / "update-driver" / "scripts"
+        (driver / "foundation-produce.ps1").write_text(
+            "param([string]$Root,[string]$SourceHash)\n"
+            "[IO.File]::WriteAllText((Join-Path $Root 'bootstrap-foundation-entered'), $SourceHash)\n"
+            "exit 37\n", encoding="utf-8",
+        )
+        (driver / "foundation-produce.sh").write_text(
+            '#!/usr/bin/env bash\nprintf "%s" "$2" >"$1/bootstrap-foundation-entered"\n'
+            "printf 'fixture bootstrap foundation refusal\\n' >&2\nexit 37\n",
+            encoding="utf-8",
+        )
     return environment
+
+
+def _bootstrap_snapshot(fixture: dict) -> dict:
+    # Shell-only controls attest these exact host profiles, never product state.
+    profiles = fixture.get("bootstrap_shell_profiles", set())
+    return {name: value for name, value in _snapshot(fixture["home"]).items() if name not in profiles}
+
+
+def _assert_vault_driver_launch(fixture: dict, result, action: str) -> None:
+    root = fixture["home"] / ".copilot-extensions" / "update-driver"
+    assert f"bootstrap {action} supervision launched" in result.stderr, result.stdout + result.stderr
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        diagnostic = "\n".join(path.read_text(errors="replace") for path in root.glob("first-use-*.log"))
+        if (root / "bootstrap-foundation-entered").is_file() and (
+            "Foundation construction failed" in diagnostic or
+            "fixture bootstrap foundation refusal" in diagnostic
+        ):
+            break
+        time.sleep(.05)
+    else:
+        pytest.fail(result.stdout + result.stderr + diagnostic)
+    assert not (fixture["legacy"] / "installer-dispatched").exists()
+    assert not (fixture["legacy"] / "process-dispatched").exists()
+    assert not (fixture["legacy"] / "reconcile.lock").exists()
+    assert not (root / "queue.sqlite3").exists()
+
+
+def _assert_hook_deadline(fixture: dict, started: float) -> None:
+    hooks = json.loads((fixture["payload"] / "hooks.json").read_text(encoding="utf-8"))
+    deadline = hooks["hooks"]["sessionStart"][0]["timeoutSec"]
+    elapsed = time.monotonic() - started
+    assert elapsed <= deadline, f"bootstrap admission took {elapsed:.2f}s; hook deadline is {deadline}s"
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)
@@ -78,7 +131,7 @@ def test_bootstrap_family_denies_stamp_before_dispatch(
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
-    before = _snapshot(binding_fixture["home"])
+    before = _bootstrap_snapshot(binding_fixture)
 
     result = _run(
         binding_fixture, environment, _command(binding_fixture, shell, "bootstrap-check"), host,
@@ -88,10 +141,10 @@ def test_bootstrap_family_denies_stamp_before_dispatch(
     assert result.returncode == 3, result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
     assert "Runtime publication refused" in result.stderr
-    assert _snapshot(binding_fixture["home"]) == before
+    assert _bootstrap_snapshot(binding_fixture) == before
     if host:
         host.close()
-        assert _snapshot(binding_fixture["home"]) == before
+        assert _bootstrap_snapshot(binding_fixture) == before
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)
@@ -108,11 +161,16 @@ def test_bootstrap_family_still_stamps_standalone(
         _command(binding_fixture, shell, "bootstrap-check")
     )
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
+    started = time.monotonic()
     result = _run(
         binding_fixture, environment, command, host,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
+    if plugin == "agent-vault":
+        _assert_hook_deadline(binding_fixture, started)
+        _assert_vault_driver_launch(binding_fixture, result, "stamp")
+        return
     expected = "stamp-binstub" if plugin == "agent-machines" and shell == "powershell" else "stamp"
     assert (binding_fixture["legacy"] / "installer-dispatched").read_text().strip() == expected
     if plugin == "agent-machines" and shell == "powershell":
@@ -157,17 +215,17 @@ def test_bootstrap_family_healthy_runtime_remains_read_only(
     _installed(binding_fixture, healthy=True)
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
-    before = _snapshot(binding_fixture["home"])
+    before = _bootstrap_snapshot(binding_fixture)
     result = _run(
         binding_fixture, environment, _command(binding_fixture, shell, "bootstrap-check"), host,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
     assert not result.stderr
-    assert _snapshot(binding_fixture["home"]) == before
+    assert _bootstrap_snapshot(binding_fixture) == before
     if host:
         host.close()
-        assert _snapshot(binding_fixture["home"]) == before
+        assert _bootstrap_snapshot(binding_fixture) == before
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)
@@ -178,7 +236,11 @@ def test_bootstrap_family_helperless_compatibility(
 ) -> None:
     environment = _bootstrap_fixture(binding_fixture, shell, plugin, bootstrap_payloads)
     suffix = "ps1" if shell == "powershell" else "sh"
-    helper = binding_fixture["payload"] / f"scripts/installation-context/plugin-publication-probe.{suffix}"
+    if plugin == "agent-vault":
+        native_suffix = "ps1" if os.name == "nt" else "sh"
+        helper = binding_fixture["payload"] / f"scripts/installation-context/installation-context.{native_suffix}"
+    else:
+        helper = binding_fixture["payload"] / f"scripts/installation-context/plugin-publication-probe.{suffix}"
     helper.rename(helper.with_suffix(".unavailable"))
     command = (
         _recording_processes(binding_fixture, shell, environment)
@@ -187,21 +249,22 @@ def test_bootstrap_family_helperless_compatibility(
     )
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
-    before = _snapshot(binding_fixture["home"])
+    before = _bootstrap_snapshot(binding_fixture)
     result = _run(
         binding_fixture, environment, command, host,
     )
-    assert result.returncode == (0 if state == "missing" else 3), result.stdout + result.stderr
+    compatible_missing = state == "missing" and plugin != "agent-vault"
+    assert result.returncode == (0 if compatible_missing else 3), result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
     witness = binding_fixture["legacy"] / "installer-dispatched"
-    if state == "missing":
+    if compatible_missing:
         expected = "stamp-binstub" if plugin == "agent-machines" and shell == "powershell" else "stamp"
         assert witness.read_text().strip() == expected
         if plugin == "agent-machines" and shell == "powershell":
             assert Path(environment["BOOTSTRAP_PROCESS_WITNESS"]).read_text() == "spawn"
     else:
         assert "Runtime publication refused" in result.stderr
-        assert _snapshot(binding_fixture["home"]) == before
+        assert _bootstrap_snapshot(binding_fixture) == before
 
 
 def _recording_processes(fixture: dict, shell: str, environment: dict) -> list[str]:
@@ -248,16 +311,16 @@ def test_bootstrap_family_denies_drift_before_reap_lock_or_spawn(
     os.utime(lock, (1_000_000_000, 1_000_000_000))
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], state)
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
-    before = _snapshot(binding_fixture["home"])
+    before = _bootstrap_snapshot(binding_fixture)
     result = _run(binding_fixture, environment, command, host)
     assert not Path(environment["BOOTSTRAP_PROCESS_WITNESS"]).exists()
     assert result.returncode == 3, result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
     assert "Runtime publication refused" in result.stderr
-    assert _snapshot(binding_fixture["home"]) == before
+    assert _bootstrap_snapshot(binding_fixture) == before
     if host:
         host.close()
-        assert _snapshot(binding_fixture["home"]) == before
+        assert _bootstrap_snapshot(binding_fixture) == before
 
 
 @pytest.mark.parametrize("shell", SHELLS)
@@ -305,9 +368,14 @@ def test_bootstrap_family_standalone_drift_still_dispatches(
     command = _recording_processes(binding_fixture, shell, environment)
     _policy(binding_fixture, binding_fixture["legacy"], binding_fixture["arguments"], "standalone")
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
+    started = time.monotonic()
     result = _run(binding_fixture, environment, command, host)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {}
+    if plugin == "agent-vault":
+        _assert_hook_deadline(binding_fixture, started)
+        _assert_vault_driver_launch(binding_fixture, result, "provision")
+        return
     witness = Path(environment["BOOTSTRAP_PROCESS_WITNESS"])
     deadline = time.monotonic() + 2
     while not witness.exists() and time.monotonic() < deadline:
@@ -406,11 +474,16 @@ def test_bootstrap_publication_with_stock_bash(
         (tools / "bash").symlink_to(interpreter)
         environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
     command[0] = str(interpreter)
-    before = _snapshot(binding_fixture["home"])
+    before = _bootstrap_snapshot(binding_fixture)
 
     result = _run(binding_fixture, environment, command)
 
     assert json.loads(result.stdout) == {}, result.stdout + result.stderr
+    if plugin == "agent-vault":
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "Runtime publication refused" in result.stderr
+        assert _bootstrap_snapshot(binding_fixture) == before
+        return
     if state in {"missing", "standalone"}:
         assert result.returncode == 0, result.stdout + result.stderr
         witness = binding_fixture["legacy"] / (
@@ -423,7 +496,7 @@ def test_bootstrap_publication_with_stock_bash(
     else:
         assert result.returncode == 3, result.stdout + result.stderr
         assert "Runtime publication refused" in result.stderr
-        assert _snapshot(binding_fixture["home"]) == before
+        assert _bootstrap_snapshot(binding_fixture) == before
 
 
 @pytest.mark.parametrize("shell", SHELLS)

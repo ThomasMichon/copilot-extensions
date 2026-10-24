@@ -22,6 +22,9 @@ ISSUER = "https://issuer.fixture.test:9091"
 AUDIENCE = "https://resource.fixture.test"
 CLIENT = "qualification-client"
 SIGNING_KID = "qualification-es256"
+# Exact client-credentials subject assumption; a provider mismatch must refuse.
+ENROLLED_SUBJECT = CLIENT
+ENROLLED_PRINCIPAL = "qualification-principal"
 
 
 def private_write(path: Path, data: bytes) -> None:

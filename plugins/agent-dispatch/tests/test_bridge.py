@@ -11,6 +11,7 @@ import pytest
 from agent_dispatch import bridge, bridge_agent_registry, bridge_reclaim, procutil
 from agent_dispatch.queue import Status
 from tests._helpers import RepoDefaultingQueue as TaskQueue
+from tests._hosting_owner import admission_owner as admission_owner
 
 # -- claim by id -------------------------------------------------------------
 
@@ -147,8 +148,8 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     )
     assert result.returncode == 0
     cmd = calls["cmd"]
-    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "task-worker"]
-    assert "task42" in cmd[3]  # the prompt carries the task id
+    assert cmd[:4] == ["/usr/bin/agent-bridge", "create", "--require-agent-hosting", "task-worker"]
+    assert "task42" in cmd[4]  # the prompt carries the task id
     assert cmd[-1] == "--no-wait"  # wait=False -> --no-wait
 
 
@@ -173,12 +174,12 @@ def test_spawn_worker_charter_appends_to_direct_create(monkeypatch):
     )
     assert result.returncode == 0
     cmd = calls["cmd"]
-    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "Atlas-Core-wsl"]
+    assert cmd[:4] == ["/usr/bin/agent-bridge", "create", "--require-agent-hosting", "Atlas-Core-wsl"]
     assert "--charter" in cmd
     assert cmd[cmd.index("--charter") + 1] == "cab-sweep-reconciler"
 
 
-def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkeypatch):
+def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkeypatch, admission_owner):
     calls: list[tuple[list[str], dict]] = []
 
     def fake_run(cmd, **kwargs):
@@ -217,8 +218,10 @@ def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkey
 
     assert result.returncode == 0
     assert json.loads(result.stdout)["session_id"] == "sid-123"
-    assert calls[0][0] == ["/usr/bin/agent-bridge", "resume", "wt-1"]
-    assert calls[1][0][:4] == ["/usr/bin/agent-bridge", "send", "wt-1", "--prompt-file"]
+    assert calls[0][0] == ["/usr/bin/agent-bridge", "resume", "wt-1", "--require-agent-hosting"]
+    assert calls[1][0][:5] == [
+        "/usr/bin/agent-bridge", "send", "wt-1", "--require-agent-hosting", "--prompt-file",
+    ]
     assert calls[1][1]["input"]
     assert calls[2][0] == [
         "/usr/bin/agent-bridge",
@@ -230,7 +233,7 @@ def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkey
     ]
 
 
-def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeypatch):
+def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeypatch, admission_owner):
     """A bound-charter worker (the non-direct-spawn-target path) with
     reclaim=True must go through the same stop-then-revalidate-then-force
     sequence as the direct-spawn path -- not a blind 'resume --force', which
@@ -271,7 +274,7 @@ def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeyp
     assert kw["json_output"] is True
 
 
-def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypatch):
+def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypatch, admission_owner):
     """``resume_worktree=True`` is the non-forcing conversation-recovery path
     (distinct from ``reclaim=True`` above, which is an explicit forceful
     take-over): it must delegate with ``allow_takeover=False`` so
@@ -304,7 +307,7 @@ def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypa
     assert kw["allow_takeover"] is False
 
 
-def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeypatch):
+def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeypatch, admission_owner):
     """End-to-end (through ``spawn_worker``, not just ``resume_worktree_and_
     send`` directly): a missing bridge session record must surface as the
     caller's own refusal, never a swallowed/retried fresh session."""
@@ -395,7 +398,7 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     assert result.returncode == 0
 
 
-def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch):
+def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch, admission_owner):
     """``reclaim=True`` (#6744 Phase 3, since ``create --reclaim`` was removed
     from agent-bridge) resolves via ``resume <worktree_id>`` (no ``--force`` --
     see ``bridge_reclaim``'s own docstring on why this never bypasses the
@@ -430,8 +433,10 @@ def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch):
     assert result.returncode == 0
     assert len(calls) == 3
     assert calls[0][1:4] == ["--json", "agent-show", "task-worker"]
-    assert calls[1] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1"]
-    assert calls[2][:4] == ["/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file"]
+    assert calls[1] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--require-agent-hosting"]
+    assert calls[2][:5] == [
+        "/usr/bin/agent-bridge", "send", "resumed-9", "--require-agent-hosting", "--prompt-file",
+    ]
     assert "--no-wait" in calls[2]
 
 
@@ -443,7 +448,7 @@ def test_spawn_worker_reclaim_requires_worktree_id(monkeypatch):
         bridge.spawn_worker("task42", worker_id="w1", reclaim=True)
 
 
-def test_spawn_worker_omits_reclaim_by_default(monkeypatch):
+def test_spawn_worker_omits_reclaim_by_default(monkeypatch, admission_owner):
     calls = {}
 
     def fake_run(cmd, **kwargs):
@@ -607,6 +612,7 @@ def test_resume_worker_sends_to_existing_session(monkeypatch):
         "/usr/bin/agent-bridge",
         "send",
         "session-1",
+        "--require-agent-hosting",
         "--prompt-file",
         "-",
         "--no-wait",
@@ -655,7 +661,7 @@ def test_resume_session_fleet_normalizes_host_and_runs_over_ssh(monkeypatch):
         "/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
     ]
     assert calls["argv"][5] == "pool-a"  # normalized: stripped + lowercased
-    assert "agent-bridge send session-1 --prompt-file - --no-wait" in calls["argv"][6]
+    assert "agent-bridge send session-1 --require-agent-hosting --prompt-file - --no-wait" in calls["argv"][6]
     assert calls["input"] == "continue"
 
 

@@ -23,6 +23,10 @@ import yaml
 
 from . import config as cfg
 from . import disposition_history, record_cache
+from .tracking_lookup import (
+    find_paired_record as find_paired_record,
+    load_record_by_id as load_record_by_id,
+)
 from .effort_focus import ActiveEffort, active_effort_from_mapping
 from .record_io import load_record_uncached as _load_record_uncached
 from . import record_machine_identity
@@ -2296,6 +2300,25 @@ def _save_record_unlocked(
     *,
     preserve_handoff_reservations: bool = True,
 ) -> None:
+    """Fence paired responsibility through the complete record transaction."""
+    from . import paired_claims
+
+    path = path if path is not None else record.yaml_path
+    current = load_record(path) if path.exists() else None
+    with paired_claims.save_guard(record, current):
+        _save_record_contents_unlocked(
+            record, path, current=current,
+            preserve_handoff_reservations=preserve_handoff_reservations,
+        )
+
+
+def _save_record_contents_unlocked(
+    record: WorktreeRecord,
+    path: Path | None = None,
+    *,
+    current: WorktreeRecord | None,
+    preserve_handoff_reservations: bool = True,
+) -> None:
     """Write a worktree tracking record to YAML (atomic).
 
     Ordinary full-record writers may hold a stale in-memory snapshot. Preserve
@@ -2305,7 +2328,8 @@ def _save_record_unlocked(
     ``preserve_handoff_reservations=False`` while setting/clearing reservations
     under the required record lock.
 
-    The ACTUAL universal write chokepoint (2026-09-27): not only
+    The universal serializer, called under ``_save_record_unlocked``'s pair
+    fence: not only
     ``save_record``, but also several already-locked direct callers (e.g.
     the execution-leg CLI). Refreshing :mod:`record_cache` HERE, not only in
     ``save_record``, reaches every one of them.
@@ -2317,7 +2341,6 @@ def _save_record_unlocked(
     from . import pr_authority, pr_publication_state
     if path is None:
         path = record.yaml_path
-    current = load_record(path) if path.exists() else None
     if preserve_handoff_reservations and current is not None:
         if current.effort_revision > record.effort_revision:
             record.active_effort = current.active_effort
@@ -2508,6 +2531,9 @@ def _save_record_unlocked(
             for relation in removed_controllers
         ),
     )
+
+    from . import paired_claims
+    paired_claims.validate_save(record, current)
 
     title_val = record.title or "null"
     # Quote titles that contain YAML-special characters (colons, etc.)
@@ -3045,48 +3071,6 @@ def find_worktree_id_by_cwd(cwd: str, *, project: str | None = None) -> str | No
     return best_id
 
 
-def load_record_by_id(
-    worktree_id: str,
-    *,
-    tracking_path: Path | None = None,
-) -> WorktreeRecord | None:
-    """Load a tracked worktree record by id from a tracking directory.
-
-    Returns ``None`` when the id is empty, no record file exists, or the file
-    is unreadable/malformed. Fail-safe -- never raises.
-    """
-    if not worktree_id:
-        return None
-    path = (tracking_path or cfg.tracking_dir()) / f"{worktree_id}.yaml"
-    if not path.exists():
-        return None
-    try:
-        return load_record(path)
-    except Exception:
-        return None
-
-
-def find_paired_record(record: WorktreeRecord) -> WorktreeRecord | None:
-    """Resolve the SIBLING record of a paired worktree, or ``None``.
-
-    Reads ``record.pair_ref`` (a :class:`ClaimRef` to the sibling) and loads that
-    worktree's record from the referenced project's tracking directory.
-    Only same-machine qualified refs resolve. A legacy record misplaced in the
-    current project's directory is deliberately not accepted:
-    ``state-root --pair`` must surface that broken pair until ``doctor --fix``
-    copies the record to its owning project registry.
-    """
-    ref = record.pair_claim_ref
-    if ref is None:
-        return None
-    if ref.is_qualified and ref.machine == record.execution_machine and ref.project:
-        return load_record_by_id(
-            ref.worktree_id,
-            tracking_path=cfg.project_dir(ref.project) / "worktrees",
-        )
-    return None
-
-
 def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     """Retire a reaped worktree's tracking record: tombstone it as
     ``archived`` (unpaired) or ``finalized`` when paired (BOTH-gate
@@ -3135,9 +3119,8 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     tombstone path -- matching :func:`default_paired_sibling_final`'s own
     "unknown -> spare" philosophy.
 
-    Fail-safe: if a tombstone write raises for any reason, falls back to a
-    plain unlink -- a reap must never be blocked *indefinitely* by this
-    bookkeeping.
+    A refused paired tombstone preserves the ledger for a later retry.
+    Unpaired write failures retain the legacy plain-unlink fallback.
 
     **Locking (pr-attribution-codenames Phase 2 follow-up).** Every delete
     (including the sibling delete, in the both-reaped hard-delete branch) is
@@ -3182,6 +3165,7 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
     deferred by a contended lock or changed pair -- callers retry on a later
     reap pass. Raises ``ValueError`` for unsettled responsibility.
     """
+    from . import paired_claims
     from .retirement_safety import require_retirable, retirement_blocker, same_pair
 
     path = tracking_path / f"{record.worktree_id}.yaml"
@@ -3220,11 +3204,12 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
             if record.is_paired:
                 sibling: WorktreeRecord | None = None
                 try:
-                    sibling = find_paired_record(record)
+                    sibling = paired_claims.reciprocal_sibling(record)
                 except Exception:
                     sibling = None
                 if (
                     sibling is not None
+                    and sibling.status == "finalized"
                     and sibling.reaped_at
                     and retirement_blocker(sibling) is None
                 ):
@@ -3237,9 +3222,10 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                 return True
 
             def _write_tombstone(status: WorktreeStatus) -> bool:
-                # A raising tombstone write falls back to a plain unlink
-                # rather than blocking the reap indefinitely.
+                # A refused paired conclusion must retain its responsibility.
                 try:
+                    if ref := paired_claims.paired_ref(record):
+                        paired_claims.require_clearable(record, ref)
                     now = _now_iso()
                     record.status = status
                     if record.completed_at is None:
@@ -3248,6 +3234,8 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                     save_record(record, path=path)
                     return True
                 except Exception:
+                    if record.is_paired:
+                        return False
                     path.unlink(missing_ok=True)
                     return True
 

@@ -271,4 +271,4 @@ def test_installed_console_script_maps_to_console_entry() -> None:
     pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
     data = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
     scripts = data["project"]["scripts"]
-    assert scripts["agent-worktrees"] == "agent_worktrees.__main__:console_entry"
+    assert scripts["agent-worktrees"] == "agent_worktrees.current_roster_entry:console_entry"

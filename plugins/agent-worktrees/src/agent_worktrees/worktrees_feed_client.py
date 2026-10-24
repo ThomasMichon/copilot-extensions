@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 
+from . import worktrees_observation_contract as observations
 from .worktrees_client import READ_TIMEOUT, validate_result
 from .worktrees_feed import FEED_ACTION, FEED_CAPABILITY
 from .worktrees_projection import MAX_COLLECTION_ITEMS, MAX_ROW_BYTES, _identity
@@ -87,6 +88,8 @@ class FeedReceiver:
         self._frames: list = []
         self._order: list[str] = []
         self._ordered: set[str] = set()
+        self._observations: dict = {}
+        self._observed: set = set()
 
     def receive(self, frame: dict) -> list[dict] | None:
         if not isinstance(frame, dict):
@@ -138,6 +141,10 @@ class FeedReceiver:
                     raise ProjectionUnavailable("resident feed update is stale or out of order")
                 self._rows = {row["id"]: row for row in self.current["worktrees"]}
             self._begin = frame
+            self._observations = {} if self.current is None else {
+                item["id"]: item for item in self.current.get("observations", [])
+            }
+            self._observed = set()
             self._frames = [frame]
             self._touched = set()
             self._order = []
@@ -176,6 +183,19 @@ class FeedReceiver:
             return [frame]
         if self._begin is None or frame.get("projection") != self._begin["projection"]:
             raise ProjectionUnavailable("resident feed mixed publication barriers")
+        if kind == "observation":
+            if self.request["contract_version"] != observations.VERSION:
+                raise ProjectionUnavailable("unnegotiated observation frame")
+            item = frame.get("observation")
+            observations.validate_observation(item, self._begin["cursor"])
+            wid = item["id"]
+            if wid in self._observed or wid not in self._rows:
+                raise ProjectionUnavailable("duplicate or unknown observation identity")
+            observations.check_observation_advance(self._observations.get(wid), item)
+            self._observed.add(wid)
+            self._observations[wid] = item
+            self._frames.append(frame)
+            return None
         if kind == "order":
             identities = frame.get("ids")
             if (
@@ -203,10 +223,18 @@ class FeedReceiver:
                 if self._begin["type"] != "update" or wid not in self._rows:
                     raise ProjectionUnavailable("resident feed deleted an unknown row")
                 del self._rows[wid]
+                self._observations.pop(wid, None)
             else:
                 from .worktrees_projection import _encode_row
 
-                _encode_row(row)
+                _encode_row({k: v for k, v in row.items() if k != "semantic_revision"} if (
+                    self.request["contract_version"] == observations.VERSION
+                ) else row)
+                if self.request["contract_version"] == observations.VERSION:
+                    observations.check_advance(
+                        self._rows.get(wid), row, field="semantic_revision",
+                    )
+                    observations.validate_wire_row(row)
                 self._rows[wid] = row
                 if len(self._rows) > self._begin["selected_count"]:
                     # Updates may insert before deleting, so bound against both rosters.
@@ -229,6 +257,8 @@ class FeedReceiver:
         result = {
             **self._begin, "ok": True, "worktrees": rows,
         }
+        if self.request["contract_version"] == observations.VERSION:
+            result["observations"] = list(self._observations.values())
         self.current = validate_result(result, self.request)
         if self._begin.get("selected_count") != len(self._rows):
             raise ProjectionUnavailable("resident feed did not complete its declared roster")
@@ -246,21 +276,23 @@ def _client(request: dict):
     from zdd import routing
 
     from . import status_monitor_cutover as control
+    from . import config as cfg
     from .worktrees_client import read_current
 
-    endpoint = routing.read_active_endpoint(control.routing_dir(), verify_listener=False)
+    runtime_home = cfg.install_dir()
+    endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
     if endpoint is None:
         restored = read_current(request)
         if restored["projection"]["quality"] != "current":
             raise FeedFailure(
                 restored["availability"]["reason"], code="unready", retry=True,
             )
-        endpoint = routing.read_active_endpoint(control.routing_dir(), verify_listener=False)
+        endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
         if endpoint is None:
             raise FeedFailure(
                 "resident feed endpoint disappeared after recovery", code="disconnected", retry=True,
             )
-    with control.control_token_path().open(encoding="utf-8") as token_file:
+    with control.control_token_path(runtime_home).open(encoding="utf-8") as token_file:
         token = token_file.read(4097).strip()
     if not token or len(token) > 4096:
         raise FeedFailure("resident feed authentication is unavailable", code="authentication")
@@ -275,7 +307,7 @@ def _client(request: dict):
             raise FeedFailure(
                 restored["availability"]["reason"], code="unready", retry=True,
             ) from exc
-        endpoint = routing.read_active_endpoint(control.routing_dir(), verify_listener=False)
+        endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
         if endpoint is None:
             raise FeedFailure(
                 "resident feed endpoint disappeared after recovery", code="disconnected", retry=True,
@@ -286,6 +318,10 @@ def _client(request: dict):
         raise FeedFailure(
             "resident lacks worktrees-feed-v1; update the engine", code="incompatible",
         )
+    if request["contract_version"] == observations.VERSION and observations.CAPABILITY not in (
+        health.get("capabilities", [])
+    ):
+        raise FeedFailure("resident lacks worktrees-observations-v2", code="incompatible")
     return client
 
 

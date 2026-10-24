@@ -10,7 +10,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** source-only intent and implementation PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; implementation authorized, standing-intent review first
+- **Status:** Active; enforcement and source marker merged; release blocked, adoption gated
 - **Vision:** extends [agent-worktrees](../../../visions/plugins/agent-worktrees/README.md)
   repository identity/contribution posture and
   [agent-bridge](../../../visions/plugins/agent-bridge/README.md)
@@ -59,7 +59,8 @@ vendor CLI.
 The current machine-local `projects.yaml` field `expose_agent` filters Bridge
 discovery; `repos.yaml` uses `agent` when projecting local exposure into project
 registration. These are not already a repository-owned, consistently enforced
-hosting veto. Do not describe the proposed behavior as implemented.
+hosting veto. The reviewed implementation and repository marker add that
+contract; release and running adopter enforcement remain separate gates.
 
 Use the existing repository configuration and resolution rules documented in
 [configuration](../../../docs/configuration.md#in-repo-committed), including
@@ -96,6 +97,10 @@ dependency. Implementation sequencing and additional safeguards/tests below
 remain visibly agent-recommended; the operator authorized driving this effort,
 not destructive live reconciliation or unrelated release-repair work.
 
+The operator clarified the discovery defaults during implementation, verbatim:
+
+> Yeah keep in mind this is specific repos opting *out* of agent discovery; by default assume all repos could have an agent when checking them directly. That said, repos.yaml and related.yaml need to opt *in* to declaring an agent, and projects.yaml of course defines only repos expected to launch into Copilot and use Worktree Manager. copilot-extensions is a worktree-class related repo only, no agent
+
 ## Plan
 
 ### Phase 0 - Reviewed proposal
@@ -108,79 +113,95 @@ not destructive live reconciliation or unrelated release-repair work.
 
 _Agent-recommended implementation sequence; execution authorized._
 
-- [ ] Review a vision amendment distinguishing source repositories from
+- [x] Review a vision amendment distinguishing source repositories from
   agent-hosting projects, before implementing the stronger hosting contract.
-- [ ] Define one effective repository-policy resolver, consumed through existing
+- [x] Define one effective repository-policy resolver, consumed through existing
   plugin boundaries without introducing a second registry or mandatory runtime
   dependency between otherwise independent plugins.
-- [ ] Add strict boolean `expose_agent` repository configuration using existing
+- [x] Add strict boolean `expose_agent` repository configuration using existing
   canonical/legacy path and marketplace resolution. An explicit repository
   `false` is a veto over stale local `true` and explicit named targets; a `true`
   or absent key does not independently grant adoption or launch authority.
-- [ ] Preserve existing machine-local exposure controls and absent-key
+- [x] Preserve existing machine-local exposure controls and absent-key
   compatibility. Do not silently reinterpret every historical
   `projects.yaml expose_agent: false` as the new repository-owned veto.
-- [ ] Refuse malformed explicit policy or an unreadable required policy source
+- [x] Preserve the operator's distinct discovery defaults: direct repository
+  checks have no implicit veto; `repos.yaml` and `related.yaml` require explicit
+  agent opt-in; `projects.yaml` contains Copilot/Manager launch projects.
+  The repository's own source-only posture and live catalog acceptance remain
+  Phase 3 obligations.
+- [x] Refuse malformed explicit policy or an unreadable required policy source
   with an actionable error rather than treating it as permission to host.
 
 ### Phase 2 - Managed adoption and launch boundaries
 
 _Agent-recommended implementation sequence; requires Phase 1._
 
-- [ ] Apply the effective veto before project-adoption side effects and before
+- [x] Apply the effective veto before project-adoption side effects and before
   managed authoring launch effects: Manager/picker, Bridge creation/embodiment,
   resume/re-embodiment, dispatch/autopilot and managed handoff successor paths.
   Inventory actual entry points during implementation; do not assume one front
   covers the others.
-- [ ] Check caller planning and the receiving launch boundary, including
+- [x] Check caller planning and the receiving launch boundary, including
   supported remote/provider routes. A stale discovery result or an explicit
   target must not bypass receiver enforcement; fail visibly when a required
   receiver cannot uphold the policy.
-- [ ] Preserve source-only workspace allocation and source-control lifecycle
+- [x] Preserve source-only workspace allocation and source-control lifecycle
   operations. Separate `create worktree` from `launch agent` even when a caller
   currently composes them.
-- [ ] Preserve external Copilot Code Review and review-only instructions without
+- [x] Preserve external Copilot Code Review and review-only instructions without
   a forgeable generic `purpose=review` exemption to managed authoring launch.
-- [ ] Return an actionable refusal identifying the policy and suggesting an
+- [x] Return an actionable refusal identifying the policy and suggesting an
   eligible external harness, without silently selecting or spawning one.
 
 ### Phase 3 - Adoption and state-preserving reconciliation
 
 _Agent-recommended follow-through; live changes require separate authorization._
 
-- [ ] Add the source-only repository's explicit denial after generic enforcement
+- [x] Add the source-only repository's explicit denial after generic enforcement
   and source-operation compatibility are qualified. Do not add an inert marker
-  and claim that hosting is already prevented.
-- [ ] Provide a supported preview/reconciliation path for conflicting existing
+  and claim that installed hosting is already prevented.
+- [ ] Complete the worktree-class, related-only posture with no advertised agent
+  on authorized adopters. Preserve existing registrations and other state until
+  necessary reconciliation is explicitly approved.
+- [x] Provide a supported preview/reconciliation path for conflicting existing
   project registrations. Preserve sessions, history, tracking and claims; no
   automatic termination, deletion or unregistration.
 - [ ] Update authoritative configuration, adoption and launch documentation;
   publish through the normal release flow and validate authorized adoption.
   Keep release, installation and actual enforced behavior distinct.
 
+Release is blocked by the existing coverage-packet defect tracked in #8500 and
+#8516. The existing fix #8508 and its governed Main helper adoption retain their
+release owner; this effort does not fork that fix, widen its evidence cap, retry
+past the gate or claim that a merged source change is installed.
+
 ## Validation Plan
 
 _Agent-recommended proofs; record results as implementation proceeds._
 
-- [ ] Exercise strict policy parsing and canonical/legacy/marketplace resolution:
+- [x] Exercise strict policy parsing and canonical/legacy/marketplace resolution:
   absent, true, false, malformed and unreadable configurations; no
   success-shaped permission fallback.
-- [ ] Prove repository `false` defeats stale local `true`, explicit targets and
+- [x] Prove repository `false` defeats stale local `true`, explicit targets and
   cached discovery, while local exposure restrictions still apply and absent
   policy preserves compatibility without auto-adopting a project.
-- [ ] Use isolated fixtures to assert denial occurs before adoption writes,
+- [x] Prove an absent repository veto permits direct agent eligibility checks
+  without advertising ordinary `repos.yaml` or `related.yaml` entries as agents;
+  explicit catalog opt-in remains subject to the repository veto.
+- [x] Use isolated fixtures to assert denial occurs before adoption writes,
   session/process/mux creation or seed submission for each inventoried managed
   entry point. Test caller and receiver boundaries, including remote/provider
   routing and unsupported enforcing receivers.
-- [ ] Prove source worktree allocation, edits, bounded tests, PR creation and
+- [x] Prove source worktree allocation, edits, bounded tests, PR creation and
   completion remain usable under an external harness; externally hosted
   Copilot Code Review remains usable. Agent/review files confer no hosting
   permission and a generic review-purpose parameter cannot bypass denial.
-- [ ] Prove a policy introduced after a session exists does not kill it,
+- [x] Prove a policy introduced after a session exists does not kill it,
   discard its state or erase custody. Newly attempted managed
   resume/re-embodiment is refused; read-only inspection and deliberate
   state-preserving migration remain available.
-- [ ] Run targeted bounded suites and the applicable clean-room/native
+- [x] Run targeted bounded suites and the applicable clean-room/native
   Windows/Linux entry-point proofs before release/adoption; no production
   agent launch as an unapproved test.
 - [ ] Verify authorized installed policy enforcement and unchanged source/review
@@ -189,7 +210,7 @@ _Agent-recommended proofs; record results as implementation proceeds._
 
 ## Proposal
 
-Repository configuration to implement; **not yet enforced**:
+Merged repository configuration; **not yet released or installed**:
 
 ```yaml
 expose_agent: false
@@ -198,6 +219,12 @@ expose_agent: false
 The new work is consistent resolution and enforcement, not another flag name.
 The implementation must not special-case a repository name or confuse
 machine metadata/project enumeration with hosting eligibility.
+
+Mixed-version enforcement is part of that contract. Managed producers require
+a receiving CLI which recognizes hosting enforcement, and Bridge additionally
+checks the running daemon's independent versioned capability before every
+request attempt. Installing a current caller is not evidence that its receiving
+daemon or separately resolved Worktrees owner has upgraded.
 
 ## Journal
 
@@ -228,3 +255,225 @@ machine metadata/project enumeration with hosting eligibility.
 - Standing-intent amendment is the first review gate. Effective policy and
   boundary implementation follow only after that amendment lands; no live
   session, registry or installed runtime changed during inventory.
+- Standing-intent #8350 merged after current-head Copilot approval with no
+  findings and passing required checks. Implementation now follows those
+  reviewed boundaries; the umbrella remains open.
+- Added one independent, vendored `repository-policy` library for fresh
+  canonical/legacy/selected-marketplace resolution. Its 33 focused tests pass
+  through the bounded runner in a disconnected disposable container. Caller and
+  receiving-boundary integration, release and installed enforcement remain open.
+- Clarified repository opt-out versus catalog opt-in during implementation.
+  Direct eligibility checks do not require an affirmative repository marker;
+  catalog membership alone does not advertise an agent. Compatibility corrections
+  and their regression proofs remain in progress; nothing is installed yet.
+
+### 2026-10-23 - Boundary compatibility qualification
+
+- The shared resolver and complete success-response schema pass 67 isolated
+  tests. Source-independent wheel/import qualification also passed.
+- Focused container admission and existing launch coverage pass 97 tests;
+  CodeSpaces admission, exact worktree selection and venue coverage pass 204.
+  Managed handoff coverage previously passed 108 tests.
+- Expanded Bridge coverage now passes 567 tests, including privileged receiver
+  capability and request-provenance regressions. Dispatch passes 266 tests,
+  including interrupted-startup custody preservation. Corrections preserve the
+  substantive refusal, validation-order and custody assertions.
+- Worktrees/Manager now distinguish direct opt-out eligibility, explicit
+  repository-agent declarations and launch-project adoption. Qualification is
+  still pending, including an identified Manager pre-admission preparation path.
+- Prepared a credential-free installed-CLI scenario covering fresh denial,
+  review-label refusal, adoption-state preservation and real source-only Git
+  worktree allocation. It has not yet run against a stable integrated candidate.
+- No implementation has been published, installed or declared enforced. Native
+  Windows proof, release/adoption and state-preserving registration review remain
+  open; no live registry, session or custody state has been changed.
+
+### 2026-10-23 - Integrated continuation qualification
+
+- Continued the existing source candidate under the same reviewed effort and
+  completion gate. Source work remains controlled from an eligible external
+  harness; the source checkout remains sessionless.
+- Completed the prior Worktrees and Manager compatibility corrections, retaining
+  the recorded 432 passing Worktrees cases with five platform skips and 261
+  passing Manager cases with 44 platform skips. These Linux results do not
+  replace native Windows qualification.
+- Independent source review found and corrected three integration defects:
+  project-only Bridge admission now uses read-only owner metadata rather than
+  launch resolution; direct CodeSpaces stdio admission precedes claims, relay
+  tokens and provisioning; and local topology advertisements honor current
+  repository denial without changing catalog opt-in. The named correction
+  follow-up found no remaining high-confidence defects.
+- The additional disconnected correction cohorts pass 199 Worktrees/record
+  cases, 261 Bridge/discovery cases, and 96 CodeSpaces cases with three platform
+  skips. Five focused test-runner contracts pass. Ruff, module-size,
+  install/version, generated payload, shared-vendor and documentation gates pass.
+- The credential-free clean-room scenario now passes all three phases, including
+  actual installed owner-prefixed project and exact-worktree policy queries,
+  denied adoption with unchanged registration state, and real source-only Git
+  worktree allocation. This is an isolated candidate installation, not adopter
+  rollout or permission to change live registrations.
+- Native qualification, reviewed implementation publication, the repository's
+  own denial marker, release and authorized adoption remain open. Existing
+  sessions, claims and registration state remain unchanged.
+- Integrated the current upstream cold-recovery custody changes without moving
+  repository denial behind recovery writes. An independent integration review
+  identified a stop arriving during the new policy await; capture and
+  revalidation now preserve the original stop generation across that await and
+  lifecycle-lock acquisition. Five deterministic delayed-admission regressions
+  pass without a native launch, reconnect prompt, cleared stop or re-enabled
+  recovery.
+- Qualified the coupled cold-drain/recovery and hosting cohort. A replacement
+  exiting between liveness observation and native reference acquisition now
+  produces the existing explicit refusal while retaining custody; a
+  deterministic regression preserves the unknown reconnect and stop token.
+  The cohort passed 249 cases before the additional five stop-generation
+  controls. A cohesive preflight extraction also preserves the module cap
+  without widening its baseline; 71 creation/policy cases pass.
+- Four additional stopped-handoff controls preserve successful consumption of
+  the originally authorized stop token while refusing a newer stop during brief
+  generation. The fence keeps the original session and notice generation rather
+  than recapturing authority after resume.
+
+### 2026-10-23 - Native qualification and public capture checkpoint
+
+- Native Windows source qualification passes the shared resolver (67 cases),
+  Worktrees policy/owner boundaries (90), Manager (82 with 18 platform skips),
+  Bridge receivers (93), Dispatch (18), and container admission (6). The selected
+  source boundary code, not a deployed runtime or real model session, was tested.
+- Repaired the Manager fixture's Windows Python forwarding: CRT `execv` lost
+  multiline code/argument quoting and returned success before its failing child.
+  Explicit bounded subprocess forwarding now preserves code, stdin and exit
+  status; the actual PowerShell wrapper refuses malformed policy before any
+  diagnostic pruning or automatic preparation.
+- Direct CodeSpace admission now checks an exact available venue before SSH
+  configuration can wake it, using its discovered raw identity/account without
+  projecting account bindings. Six new controls plus existing attached,
+  detached and SSH compatibility pass 195 disconnected cases; the final native
+  policy cohort passes 21 cases.
+- The public source checkpoint passes all 1,274 currently admitted unit cases.
+  Canonical HTTP-47 capture and no-write verification each pass all 117 required
+  model-free probes. Only owned current-generation evidence and registry metadata
+  are refreshed; older generations, protocol floors and independent expectations
+  remain unchanged.
+- Project-root admission also refuses CWD-relative owner anchors before policy
+  inspection. The stricter read applies only to the selected project; unrelated
+  legacy source metadata and ordinary record readers retain their existing
+  behavior. The final Worktrees/record cohort passes 202 cases.
+- Phases 1 and 2 are source-complete, not merged/released/installed claims.
+  The repository marker, contribution/review acceptance under it, release and
+  separately authorized live adoption/reconciliation remain the next gates.
+- Provider review identified two outer resume admission reads that preceded
+  capture of the retained session's stop generation. Implicit prompt recovery
+  and native worktree loading now use the same pre-await session fence before
+  status changes, acquisition gates or downstream recovery. Four deterministic
+  controls complete a newer stop during admission, with and without an older
+  stop token, and prove the newer authority and dormant state remain intact.
+- The coupled hosting/native-owner/cold-stop cohort passes 307 disconnected
+  cases. Native-owner fixtures now provide actual existing workspaces and
+  authoritative explicit execution paths; the Windows transport assertion
+  checks both the outer refusal gate and the nested encoded native-resume
+  command. The final Worktrees native admission cohort passes 93 cases.
+- The review correction and native-owner compatibility cohort also passes 275
+  cases on native Windows. Canonical HTTP-47 capture and no-write replay each
+  pass 117 probes against the published correction source. Historical evidence,
+  independent expectations and protocol floors remain unchanged.
+- Reconciled the implementation with the upstream immutable-provenance sidecar
+  migration without reverting its storage layout or historical evidence.
+  Current-generation evidence is recaptured through the integrated canonical
+  producer, not hand-merged across the layout change.
+- Updated the existing CLI embodiment and remote-machine routing fixtures to
+  model the new read-only owner preflights and mandatory hosting flag. All
+  reservation cleanup controls remain; the two disconnected cohorts pass 11
+  and 28 cases, including actual subprocess plan serialization and decoded
+  Windows argument/exit propagation.
+- The integrated sidecar-aware source passes native Worktrees (121 cases) and
+  Bridge (286 cases) cohorts. Its newly published source checkpoint passes all
+  117 canonical capture probes and the no-write replay; only current-generation
+  owned evidence changes, retaining the upstream immutable provenance chunks.
+- Trusted container ACP launch now validates and wraps the original native
+  command for process-only authentication before applying the repository guard.
+  The real authentication validator remains strict; the restricted transport
+  retains its separate guard. The coupled container cohort passes 134 cases.
+- Retained container and CodeSpace delivery journals reconcile their original
+  idempotent operation before new-launch admission. A vanished journal must
+  pass fresh admission before any new launch. This preserves receipts and
+  custody without permitting a new managed embodiment in a denied repository;
+  the strict Worktrees denial before mux probing remains unchanged.
+  The CodeSpace cohort passes 146 cases; both venue cohorts include a
+  journal-disappearance race proving recovery cannot become launch authority.
+
+### 2026-10-23 - Mixed-version receiving-owner compatibility
+
+- Provider feedback identified independently resolved legacy Bridge and
+  Worktrees executables which could ignore caller-side admission. Managed
+  Dispatch create, resume and potentially cold-resuming send now require
+  `--require-agent-hosting`; legacy parsers refuse before launch rather than
+  falling back. The ordinary managed creation/resume route is covered too.
+- A current Bridge CLI also requires the actual running daemon's independent
+  `repository_agent_hosting: 1` capability. The existing per-attempt protocol
+  fence composes both requirements and rechecks each safe retry after endpoint
+  re-resolution. Old daemons cannot inherit admission from a newer CLI.
+  Historical receipt-only reads remain state-preserving.
+- The disconnected correction cohorts pass 153 Bridge capability/retry cases,
+  223 Dispatch command/reclaim cases, 93 owner/registry cases, and 360
+  launch/parser cases with 31 platform skips. Literal-path launch fixtures use
+  a real policy-backed workspace without writing to operating-system roots;
+  registry adoption fixtures now provide an actual checkout. Existing command,
+  reclaim, identity and exit assertions remain strict.
+- Extracted the shared Worktrees launch-argument parser to its existing focused
+  module rather than widening the 1,000-line cap. The source remains a
+  qualification candidate; updated native proof, current semantic capture,
+  accepted review/merge, the repository marker, release and authorized adoption
+  remain distinct completion gates.
+- Qualified that exact committed source on native Windows: Worktrees 153,
+  Bridge 439 and Dispatch 223 cases pass, including actual legacy-parser
+  refusal and current-client/old-daemon refusal. Each bounded job confirms
+  cleanup. Canonical HTTP-47 capture and no-write replay each pass 117 probes
+  against the published correction checkpoint; only the 66 owned current
+  outputs change. Both contracts and all 583 fixtures validate with unchanged
+  historical packets, independent expectations and protocol floors.
+- A clean provider review reported no open findings. A subsequent base-branch
+  conflict required integrating the upstream database schema lock before merge.
+  No runtime policy code conflicted. Reconciled the registry losslessly,
+  retaining both append-only histories and unchanged immutable chunks, then
+  recaptured the genuine public rebased checkpoint. Canonical write and no-write
+  runs each pass all 117 probes; this remains source evidence, not rollout.
+
+### 2026-10-24 - Enforcement merged; source marker acceptance
+
+- Implementation #8468 merged at `3c42fee5f95c56acfc1ffe2b72f1fb9cfc356f33`
+  after current-head clean Copilot review and passing required CI. Read the
+  canonical Plan and Validation Plan again; release, the source marker and
+  installed adoption were not inferred complete from that merge.
+- The supported read-only registration audit and state-preserving reconciliation
+  procedure landed with enforcement. They do not mutate registrations, stop
+  sessions, delete state or settle another owner's claims.
+- Added the repository's negative marker in its existing
+  `.agent-worktrees/config.yaml`, not a competing configuration path. The source
+  guide now states the boundary. Qualification and a source-only contribution
+  through external review under that marker follow before claiming acceptance.
+  No live runtime, project registration or session is changed.
+- The marker, policy, source-allocation and read-only audit cohort passes 88
+  disconnected cases. Both contracts and all 583 fixtures still validate
+  without recapture because no runtime producer changed. The marker's own
+  external-harness contribution and review remain the next acceptance witness;
+  the older clean room already proves real source allocation under denial.
+- Source marker #8520 merged at `8647ec5cd5` after current-head Copilot approval
+  with no findings and green required CI. Its source edits, bounded tests,
+  managed publication, externally hosted review and normal merge all ran under
+  the actual denial marker from an external harness. Five additional
+  actual-checkout marker cases pass on native Windows with verified cleanup.
+- Read-only adopter previews remain previews: existing registered anchor
+  checkouts can still lack the new marker, so eligibility there is not proof
+  of installed enforcement. Existing registrations, visibility settings,
+  sessions and custody remain unchanged pending release and explicit adoption.
+- Natural promotion run
+  [40075117367](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40075117367)
+  executed the merged implementation source. All 1,414 admitted units passed
+  in 31.37 seconds, but packet admission refused `coverage.json` at 66,304,392
+  bytes against the unchanged 16,777,216-byte cap. The only failed job was
+  source-unit evidence; downstream qualification/publication was skipped.
+  This matches existing #8500/#8516 and active fix #8508. Attached the current
+  evidence to that owner rather than creating a competing fix or bypassing
+  the cap. Release, installed enforcement and approved catalog reconciliation
+  remain unresolved completion gates.

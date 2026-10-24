@@ -76,12 +76,17 @@ class _SessionPromptMixin:
         automatically re-spawned and the session resumed before
         delivering the prompt.
         """
-        if self._draining:
+        from .cold_outages import assert_prompt_allowed, reconnect_admitted_before_drain
+
+        if self._draining and not reconnect_admitted_before_drain(
+            self, session_id, delivery_id, prompt=prompt, no_resume=no_resume,
+        ):
             raise DaemonDrainingError("turn")
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        assert_prompt_allowed(self._db, session_id, delivery_id)
         if session.status not in (SessionStatus.IDLE, SessionStatus.STOPPED):
             raise ValueError(
                 f"Session {session_id} is {session.status.value}, not idle"
@@ -94,6 +99,9 @@ class _SessionPromptMixin:
             if no_resume:  # re-checked here: a stop may have landed since admission
                 raise SessionNotRunningError(
                     f"{SessionNotRunningError.code}: Session {session_id} has no running client")
+            from .hosting_policy import require_session_hosting
+
+            await require_session_hosting(self, session, operation="implicit resume")
             log.info(
                 "Session %s (%s) process is dead -- auto-%s",
                 session_id,
@@ -117,7 +125,9 @@ class _SessionPromptMixin:
 
         from .remote_relationships import assert_admission
         await assert_admission(self, session)
-        if self._draining:
+        if self._draining and not reconnect_admitted_before_drain(
+            self, session_id, delivery_id, prompt=prompt, no_resume=no_resume,
+        ):
             raise DaemonDrainingError("turn")
         if native_admission is not None:
             from .native_keyed_admission import validate_holder
@@ -486,13 +496,24 @@ class _SessionPromptMixin:
                 tool_calls_json=json.dumps(result.get("tool_calls", [])),
                 completed_at=time.time(),
             )
+            from .cold_outages import provider_result
+
+            provider_result(self, session, turn_index, result)
 
             session.status = SessionStatus.IDLE
             self._db.update_session_status(
                 session.session_id, SessionStatus.IDLE.value, time.time()
             )
 
+        except asyncio.CancelledError:
+            from .cold_outages import provider_result
+
+            provider_result(self, session, turn_index, None)
+            raise
         except Exception as exc:
+            from .cold_outages import provider_result
+
+            provider_result(self, session, turn_index, None)
             log.error(
                 "Prompt failed for session %s turn %d: %s",
                 session.session_id, turn_index, exc,

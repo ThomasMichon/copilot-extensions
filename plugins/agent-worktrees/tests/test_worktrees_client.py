@@ -53,6 +53,79 @@ def request(**extra):
     return {"contract_version": 1, "project": "project", **extra}
 
 
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("failure", ["invalid-request", "unready", "superseded"])
+def test_worktrees_client_decodes_serialized_runtime_failures(tmp_path, version, failure):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    payload = request(contract_version=version)
+    if failure == "invalid-request":
+        payload.update(worktree_id="one", codename="quiet-knob")
+    elif failure == "unready":
+        owner.activate()
+    else:
+        owner.close_admission("superseded")
+    try:
+        response = json.loads(json.dumps(owner.handle(payload)))
+        assert response["ok"] is False
+        assert response["contract_version"] == 1
+        assert response["error"]["code"] == failure
+        expected = (
+            projection.ProjectionError
+            if failure == "invalid-request"
+            else projection.ProjectionUnavailable
+        )
+        with pytest.raises(expected) as caught:
+            client.validate_result(response, payload)
+        assert response["error"]["message"] in str(caught.value)
+        assert "incompatible" not in str(caught.value)
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("change", [
+    {"contract_version": 3},
+    {"contract_version": True},
+    {"ok": None},
+    {"ok": 0},
+    {"error": {}},
+    {"error": {"code": "", "message": "unready"}},
+    {"error": {"code": None, "message": "unready"}},
+    {"error": {"code": "unready", "message": ""}},
+])
+def test_worktrees_client_rejects_malformed_shared_failure(change, version):
+    response = {
+        "contract_version": 1, "ok": False,
+        "error": {"code": "unready", "message": "no publication"},
+        **change,
+    }
+    with pytest.raises(projection.ProjectionUnavailable, match="malformed|incompatible|lacks"):
+        client.validate_result(response, request(contract_version=version))
+
+
+def test_worktrees_client_does_not_admit_v1_success_as_v2(tmp_path):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    owner.publish("project", [{"id": "one"}], observed_at=1)
+    try:
+        response = json.loads(json.dumps(owner.handle(request())))
+        with pytest.raises(projection.ProjectionUnavailable, match="incompatible"):
+            client.validate_result(response, request(contract_version=2))
+    finally:
+        owner.shutdown()
+
+
+def test_worktrees_client_rejects_unnegotiated_v2_failure():
+    response = {
+        "contract_version": 2, "ok": False,
+        "error": {"code": "unready", "message": "no publication"},
+    }
+    with pytest.raises(projection.ProjectionUnavailable, match="incompatible"):
+        client.validate_result(response, request())
+    with pytest.raises(projection.ProjectionUnavailable, match="unready: no publication"):
+        client.validate_result(response, request(contract_version=2))
+
+
 @pytest.fixture
 def no_caller_compute(monkeypatch):
     def forbidden(*args, **kwargs):
@@ -89,7 +162,7 @@ def test_worktrees_client_real_transport_uses_existing_auth_only(
             base_url=f"http://127.0.0.1:{server.port}",
         ),
     )
-    monkeypatch.setattr(control, "control_token_path", lambda: token_path)
+    monkeypatch.setattr(control, "control_token_path", lambda runtime_home=None: token_path)
     monkeypatch.setattr(
         control, "load_or_create_control_token", lambda: pytest.fail("reader minted auth")
     )

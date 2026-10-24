@@ -11,7 +11,7 @@ import threading
 
 from machine_transport import split_machine_environment, resolve_machine_selection
 
-from . import activity, local_cache_refresh, output, profile_assignment, restore_launch, sessions, tracking, tracking_write, worktree_identity
+from . import activity, agent_policy, local_cache_refresh, output, profile_assignment, restore_launch, sessions, tracking, tracking_write, worktree_identity
 from . import codename_tracking, config as cfg, machine_identity
 from .launch_trace import append_launch_event
 from .execution_spaces import ExecutionSpaceError, registry_for_config
@@ -217,8 +217,7 @@ class ResolveCommandState:
 
     def load_config(self) -> cfg.Config:
         if self.config is None:
-            with step("Resolving launch configuration", enabled=not self.ordinary_picker):
-                self.config = cfg.load_config()
+            self.config = cfg.load_config()
         return self.config
 
     def _resolve_codename_selector(self) -> None:
@@ -295,6 +294,7 @@ def _remote_selector_args(state: ResolveCommandState) -> list[str]:
         value = getattr(state.args, name, None)
         if value is not None:
             args.append("--" + name.replace("_", "-") + "=" + str(value))
+    args.append("--require-agent-hosting")
     return args
 
 
@@ -371,6 +371,10 @@ def add_parsers(sub) -> None:
         help="Keep creation prompts queued until the returned command executes",
     )
     parser.add_argument("--stage-launch-seed", action="store_true", help="Require typed launch-seed staging")
+    parser.add_argument(
+        "--require-agent-hosting", action="store_true",
+        help="Require repository-owned hosting admission (refuse older receivers)",
+    )
     # The fence is unconditional; this capability flag excludes older engines before mutation.
     parser.add_argument(
         "--require-native-seed", action="store_true",
@@ -463,8 +467,6 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         return cmd_request(args)
     if getattr(args, "defer_new_seed", None) is None:
         args.defer_new_seed = True
-    if not getattr(args, "dry_run", False):
-        append_launch_event("resolve_handler_start")
     try:
         state = ResolveCommandState.from_args(args)
     except _ResolveEarlyExit as exc:
@@ -799,6 +801,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
+    launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
+    if launch_preflight.error:
+        return output._json_error(launch_preflight.error, exit_code=3)
     from .execution_spaces import require_record_mutation
     try:
         require_record_mutation(record, config)
@@ -966,8 +971,9 @@ def _resolve_noninteractive_worktree(state: ResolveCommandState) -> int:
         return 1
     record = tracking.load_record(yaml_path)
     try:
+        agent_policy.require(record.worktree_path)
         _validate_profile_assignment_config(config)
-    except profile_assignment.ProfileAssignmentError as exc:
+    except ValueError as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3

@@ -81,6 +81,25 @@ class RuntimeAdmission:
     def document(self) -> str:
         return encode(asdict(self))
 
+    @classmethod
+    def parse(cls, raw: str) -> RuntimeAdmission:
+        """Decode an original association without losing duplicate fields."""
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise RuntimeCustodyError("Duplicate producer association field")
+                result[key] = value
+            return result
+
+        try:
+            value = json.loads(raw, object_pairs_hook=unique)
+            if type(value) is not dict or set(value) != {"installation", "epoch", "producer"}:
+                raise RuntimeCustodyError("Unknown producer association")
+            return cls(**value)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeCustodyError("Malformed retained producer association") from exc
+
 
 @dataclass(frozen=True)
 class RuntimeEpoch:
@@ -123,8 +142,13 @@ def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
         "id TEXT PRIMARY KEY, installation TEXT NOT NULL, epoch INTEGER NOT NULL,"
         "producer_json TEXT NOT NULL)",
     }
+    return tables, operation_triggers(("sessions", "turns"))
+
+
+def operation_triggers(tables: tuple[str, ...]) -> dict[str, tuple[str, str]]:
+    """Canonical admission, association and history guards for DB-owned operations."""
     triggers = {}
-    for table in ("sessions", "turns"):
+    for table in tables:
         triggers[f"{table}_runtime_admission"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_runtime_admission "
             f"BEFORE INSERT ON {table} BEGIN "
@@ -162,7 +186,7 @@ def _schema_definitions() -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
                 f"AFTER {operation} ON {table} BEGIN "
                 "UPDATE bridge_runtime_epoch SET revision=revision+1 WHERE singleton=1; END"
             )
-    return tables, triggers
+    return triggers
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

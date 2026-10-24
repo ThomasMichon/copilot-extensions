@@ -70,6 +70,8 @@ def _runtime_publication_identity(
         _fail("Runtime publication requires an explicit context and canonical installation policy.")
     decision = resolve_runtime_deployment(**arguments)
     policy = decision["deployment"]
+    if "runtimeProfiles" in policy:
+        _fail(RUNTIME_PROFILE_RECOVERY)
     if (
         decision["status"] not in {"ready", "deactivation-required"}
         or decision["actualMode"] != "namespaced"

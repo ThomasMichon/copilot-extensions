@@ -22,13 +22,29 @@ class _RuntimeCustodyMixin:
             conn = self._get_conn()
             if conn.in_transaction:
                 raise RuntimeCustodyError("Runtime custody cannot borrow an unfinished transaction")
-            conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            synchronous = conn.execute("PRAGMA synchronous").fetchone()[0] if write else None
+            if write and synchronous < 2:
+                conn.execute("PRAGMA synchronous=FULL")
             try:
+                conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
                 yield conn
                 conn.commit()
             except BaseException:
                 conn.rollback()
                 raise
+            finally:
+                if write and synchronous < 2:
+                    conn.execute(f"PRAGMA synchronous={synchronous}")
+
+    def _execute_runtime_admitted_write(
+        self, statement: str, parameters: tuple[object, ...],
+        admission: RuntimeAdmission | None,
+    ) -> sqlite3.Cursor:
+        """Sync associated inbox admission without changing ordinary event writes."""
+        if admission is None:
+            return self.execute_write(statement, parameters)
+        with self._runtime_transaction(write=True) as conn:
+            return conn.execute(statement, parameters)
 
     def _runtime_installation(self, installation: RuntimeInstallation) -> str:
         if type(installation) is not RuntimeInstallation:

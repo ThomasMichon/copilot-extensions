@@ -839,6 +839,13 @@ def cmd_register_project_entry(args) -> int:
     if inst.is_reserved_project_command(project):
         output.skipped(f"'{project}' is the runtime itself, not a project")
         return 0
+    from repository_policy import AgentHostingError
+
+    try:
+        inst.require_project_hosting(project, repo_dir)
+    except AgentHostingError as exc:
+        output.err(str(exc))
+        return 1
     with inst.project_binstub_registration(project, repo_dir=repo_dir) as binstub_registration:
         if repo_dir:
             try:

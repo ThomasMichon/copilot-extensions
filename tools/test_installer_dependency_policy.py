@@ -24,6 +24,46 @@ SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("names", [
+    [], "example", ("../example",), ("example", "EXAMPLE"), (False,),
+])
+def test_generated_local_exclusions_refuse_invalid_names_before_uv(names):
+    with pytest.raises(policy.DependencyPolicyError, match="excluded local packages"):
+        with policy.retain_uv_install("unused-uv", [], excluded_local_packages=names):
+            pytest.fail("invalid exclusions cannot reach UV or admit retained inputs")
+
+
+def test_generated_local_exclusions_canonicalize_owned_temp_aliases(monkeypatch):
+    from contextlib import contextmanager
+
+    temporary = policy._configuration.temporary_inputs
+    observed = []
+    expected = object()
+
+    @contextmanager
+    def aliased(parent):
+        with temporary(parent) as directory:
+            path = Path(directory)
+            yield str(path / ".." / path.name)
+
+    @contextmanager
+    def retain(_uv, arguments, **options):
+        constraint, = options["_generated_constraints"]
+        assert constraint == constraint.resolve()
+        assert constraint.read_text(encoding="utf-8") == "example-local<0,>=0\n"
+        assert arguments[-2:] == ["--constraint", str(constraint)]
+        observed.append(constraint)
+        yield expected
+
+    monkeypatch.setattr(policy._configuration, "temporary_inputs", aliased)
+    monkeypatch.setattr(policy, "_retain_uv_install", retain)
+    with policy.retain_uv_install(
+        "unused-uv", [], excluded_local_packages=("Example_Local",),
+    ) as transaction:
+        assert transaction is expected
+    assert len(observed) == 1 and not observed[0].exists()
+
+
 @pytest.mark.parametrize("fraction", ["1", "12", "123", "1234", "12345", "123456", "123456789"])
 def test_absolute_cutoff_fraction_is_python310_compatible_and_conservative(fraction):
     value = policy._cutoff_value(f"Absolute(2026-10-06T00:00:00.{fraction}Z)", NOW)
@@ -877,6 +917,7 @@ def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_
 
 
 def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypatch):
+    import configparser
     import subprocess
     import zipfile
 
@@ -891,6 +932,15 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
         '[tool.setuptools.packages.find]\nwhere=["src"]\n',
         encoding="utf-8",
     )
+    configuration = source / "setup.cfg"
+    configuration.write_text(
+        "[metadata]\ndescription = 100%% retained\n"
+        "[egg_info]\ntag_build = .post1\negg_base = src\n",
+        encoding="utf-8",
+    )
+    original_files = {
+        path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()
+    }
     actual = subprocess.run
     retained = []
 
@@ -898,6 +948,11 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
         if "--show-settings" in command:
             return actual(command, **kwargs)
         retained.append(Path(command[command.index("-e") + 1]))
+        config = configparser.ConfigParser(interpolation=None)
+        config.read(retained[-1] / "setup.cfg", encoding="utf-8")
+        assert config["metadata"]["description"] == "100%% retained"
+        assert config["egg_info"]["tag_build"] == ".post1"
+        assert config["egg_info"]["egg_base"] == "."
         result = actual(
             [sys.executable, "-I", "-c",
              "from setuptools.build_meta import build_editable,get_requires_for_build_editable;"
@@ -907,6 +962,8 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
             timeout=30, creationflags=policy._HEADLESS,
         )
         assert result.returncode == 0, result.stdout + result.stderr
+        assert len(list(retained[-1].glob("*.egg-info"))) == 1
+        assert not list(source.rglob("*.egg-info"))
         wheels = list(retained[-1].glob("*.whl"))
         assert len(wheels) == 1, result.stdout + result.stderr
         with zipfile.ZipFile(wheels[0]) as wheel:
@@ -922,6 +979,103 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
     )
     assert built.returncode == 0, built.stdout + built.stderr
     assert len(retained) == 1 and not retained[0].exists()
+    assert {
+        path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()
+    } == original_files
+
+
+@pytest.mark.parametrize("configuration", [
+    None,
+    "[metadata]\ndescription = 100% retained\n",
+    "[metadata]\ndescription = 100% retained\n"
+    "[egg_info]\ntag_build = .fixture\negg_base = src\n"
+    "[options.data_files]\nshare/WidgetPkg = first.txt\nshare/widgetpkg = second.txt\n",
+])
+def test_retained_editable_metadata_configuration_stays_private(tmp_path, monkeypatch, configuration):
+    import configparser
+
+    source = source_project(tmp_path / "source")
+    manifest = source / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
+        + '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+        encoding="utf-8",
+    )
+    (source / "src").mkdir()
+    original = source / "setup.cfg"
+    if configuration is not None:
+        original.write_text(configuration, encoding="utf-8")
+    retained = []
+
+    def run(command, **kwargs):
+        if "--show-settings" in command:
+            return CompletedProcess(command, 0, settings(), "")
+        retained.append(Path(command[command.index("-e") + 1]))
+        config = configparser.ConfigParser(interpolation=None)
+        config.optionxform = str
+        config.read(retained[-1] / "setup.cfg", encoding="utf-8")
+        assert config["egg_info"]["egg_base"] == "."
+        if configuration is not None:
+            assert config["metadata"]["description"] == "100% retained"
+        if configuration is not None and "tag_build" in configuration:
+            assert config["egg_info"]["tag_build"] == ".fixture"
+            assert dict(config["options.data_files"]) == {
+                "share/WidgetPkg": "first.txt", "share/widgetpkg": "second.txt",
+            }
+        return CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(policy.subprocess, "run", run)
+    policy.run_uv_install(
+        "uv", ["--no-config", "-e", str(source)], env=offline_environment(tmp_path),
+        cwd=tmp_path, trusted_source_roots=(source,),
+    )
+    assert len(retained) == 1 and not retained[0].exists()
+    if configuration is None:
+        assert not original.exists()
+    else:
+        assert original.read_text(encoding="utf-8") == configuration
+
+
+@pytest.mark.parametrize("failure", ["malformed", "read", "write"])
+def test_retained_editable_metadata_configuration_failure_refuses(tmp_path, monkeypatch, failure):
+    source = source_project(tmp_path / "source")
+    manifest = source / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
+        + '[tool.setuptools.packages.find]\nwhere=["src"]\n',
+        encoding="utf-8",
+    )
+    (source / "src").mkdir()
+    original = source / "setup.cfg"
+    configuration = "not an INI file\n" if failure == "malformed" else "[metadata]\nname = fixture\n"
+    original.write_text(configuration, encoding="utf-8")
+    opened = Path.open
+    original_native = Path(policy._native_retained_path(original))
+    retained = []
+    calls = []
+
+    def open_config(path, mode="r", *args, **kwargs):
+        if path.name == "setup.cfg" and path not in (original, original_native):
+            retained.append(path.parent)
+            if (failure == "read" and mode == "r") or (failure == "write" and mode == "w"):
+                raise OSError("fixture configuration failure")
+        return opened(path, mode, *args, **kwargs)
+
+    def probe(command, **kwargs):
+        calls.append(command)
+        assert "--show-settings" in command
+        return CompletedProcess(command, 0, settings(), "")
+
+    monkeypatch.setattr(Path, "open", open_config)
+    monkeypatch.setattr(policy.subprocess, "run", probe)
+    with pytest.raises(policy.DependencyPolicyError, match="editable.*metadata"):
+        policy.run_uv_install(
+            "uv", ["--no-config", "-e", str(source)], env=offline_environment(tmp_path),
+            cwd=tmp_path, trusted_source_roots=(source,),
+        )
+    assert len(calls) == 1
+    assert retained and all(not path.exists() for path in retained)
+    assert original.read_text(encoding="utf-8") == configuration
 
 
 def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypatch):
@@ -941,7 +1095,8 @@ def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypat
         )
 
 
-def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("excluded", [(), ("unused-local",)])
+def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch, excluded):
     source = source_project(
         tmp_path / "runtime" / ".install-stage" / ("stage-" + "x" * 40)
         / "plugin" / "libs" / "fixture-source",
@@ -985,6 +1140,7 @@ def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path,
     installed = policy.run_uv_install(
         shutil.which("uv"), ["--no-index", "--target", str(target), "--python", sys.executable, str(source)],
         cwd=cwd, env=offline_environment(tmp_path), trusted_source_roots=(source,),
+        excluded_local_packages=excluded,
         capture_output=True, text=True, timeout=30, now=NOW,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr
@@ -1384,6 +1540,105 @@ def test_retained_transaction_refuses_copy_mutation_before_execution(tmp_path, m
             env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,),
         ):
             pytest.fail("mutated input cannot reach the admitted execution boundary")
+
+
+def test_retained_overlapping_projects_compare_each_file_pair_once(tmp_path, monkeypatch):
+    parent = source_project(tmp_path / "parent", name="fixture-parent")
+    child = source_project(parent / "child", name="fixture-child")
+    read_bytes = Path.read_bytes
+    reads = {}
+
+    def observe(path):
+        if path.name == "fixture_backend.py":
+            key = Path(str(path).removeprefix("\\\\?\\"))
+            reads[key] = reads.get(key, 0) + 1
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", observe)
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **_kwargs: CompletedProcess(command, 0, settings(), ""),
+    )
+    with policy.retain_uv_install(
+        "attributed-uv", ["--no-config", str(parent), str(child)],
+        env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(parent, child),
+    ) as transaction:
+        for project in (parent, child):
+            original = project / "fixture_backend.py"
+            retained = transaction.sources[project] / original.name
+            assert reads[original] == 1
+            assert reads[retained] == 1
+            assert transaction.source_hashes[original] == hashlib.sha256(read_bytes(original)).hexdigest()
+
+
+def test_retained_metadata_remapping_work_is_independent_of_scalar_count(tmp_path, monkeypatch):
+    layout = policy._configuration.retained_source_layout
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **_kwargs: CompletedProcess(command, 0, settings(), ""),
+    )
+
+    def count_mirrors(scalars):
+        source = source_project(tmp_path / f"source-{scalars}")
+        manifest = source / "pyproject.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8")
+            + "keywords=" + json.dumps([f"keyword-{index}" for index in range(scalars)]) + "\n",
+            encoding="utf-8",
+        )
+        calls = []
+
+        def observe(*args, **kwargs):
+            anchors, mirror = layout(*args, **kwargs)
+
+            def counted(path):
+                calls.append(path)
+                return mirror(path)
+
+            return anchors, counted
+
+        with monkeypatch.context() as patch:
+            patch.setattr(policy._configuration, "retained_source_layout", observe)
+            with policy.retain_uv_install(
+                "attributed-uv", ["--no-config", str(source)],
+                env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,),
+            ) as transaction:
+                assert transaction.source_hashes[source / "fixture_backend.py"]
+        return len(calls)
+
+    assert count_mirrors(64) == count_mirrors(1)
+
+
+def test_retained_remapping_preserves_nested_native_uri_and_escaped_forms(tmp_path, monkeypatch):
+    parent = source_project(tmp_path / "parent", name="fixture-parent")
+    child = source_project(parent / "child", name="fixture-child")
+    forms = [
+        str(child / "fixture_backend.py"),
+        child.as_uri() + "/fixture_backend.py",
+        child.as_posix() + "/fixture_backend.py",
+        json.dumps(str(child))[1:-1],
+    ]
+    manifest = parent / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "\n[tool.fixture]\npaths=" + json.dumps([forms]) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **_kwargs: CompletedProcess(command, 0, settings(), ""),
+    )
+    with policy.retain_uv_install(
+        "attributed-uv", ["--no-config", str(parent), str(child)],
+        env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(parent, child),
+    ) as transaction:
+        retained = transaction.sources[child]
+        data = policy._toml(transaction.sources[parent] / "pyproject.toml")
+        assert data["tool"]["fixture"]["paths"] == [[
+            str(retained / "fixture_backend.py"),
+            retained.as_uri() + "/fixture_backend.py",
+            retained.as_posix() + "/fixture_backend.py",
+            json.dumps(str(retained))[1:-1],
+        ]]
 
 
 @pytest.mark.parametrize("outcome", ["nonzero", "checked", "success", "admission"])

@@ -63,7 +63,20 @@ def test_capability_is_actual_receiver_only(monkeypatch):
     monkeypatch.setattr(elevated, "is_subdaemon", lambda: False)
     assert module.capabilities() == {}
     monkeypatch.setattr(elevated, "is_subdaemon", lambda: True)
-    assert module.capabilities() == {"field_meta": {module.META_KEY: {"version": 1}}}
+    assert module.capabilities() == {
+        "field_meta": {module.META_KEY: {"version": 1, "repository_hosting_version": 1}},
+    }
+
+
+@pytest.mark.parametrize("version", [None, True, "1", 0, 2])
+def test_preparation_capability_without_exact_hosting_version_is_not_launch_authority(version):
+    client = SimpleNamespace(_initialize_result=InitializeResponse(
+        protocol_version=PROTOCOL_VERSION, field_meta={
+            module.META_KEY: {"version": 1, "repository_hosting_version": version},
+        },
+    ))
+    with pytest.raises(module.PrivilegedLaunchRefused, match="no session was requested"):
+        module._require_capability(client)
 
 
 @pytest.mark.parametrize("change", [
@@ -154,7 +167,9 @@ async def test_missing_or_mismatched_receipt_cannot_authorize_delivery(receipt):
     client = SimpleNamespace(
         _privileged_launch_context=context(),
         _initialize_result=InitializeResponse(
-            protocol_version=PROTOCOL_VERSION, field_meta={module.META_KEY: {"version": 1}},
+            protocol_version=PROTOCOL_VERSION, field_meta={
+                module.META_KEY: {"version": 1, "repository_hosting_version": 1},
+            },
         ),
         _lifecycle_rpc=AsyncMock(return_value=NewSessionResponse(
             session_id="unconfirmed", field_meta={module.META_KEY: receipt},
@@ -204,7 +219,9 @@ async def test_real_sdk_metadata_and_receiver_registration(
     monkeypatch.setattr(venue_plugins, "resolve_controller_cwd", AsyncMock(side_effect=AssertionError(
         "receiver must not reinterpret sender ownership in its own registry",
     )))
-    target = target_for(tmp_path / "registry-anchor")
+    anchor = tmp_path / "registry-anchor"
+    anchor.mkdir()
+    target = target_for(anchor)
     target.explicit_cwd = False
     target.elevated = True
     target.env = {"PROFILE": "receiver"}
@@ -213,6 +230,12 @@ async def test_real_sdk_metadata_and_receiver_registration(
         "env": {"PROFILE": "receiver-plan"},
     }})
     monkeypatch.setattr(transport, "_resolve_worktree", allocation)
+
+    async def record(worktree_id, project, **_kwargs):
+        assert worktree_id == "allocated" and project == "sample-project"
+        return {"id": worktree_id, "repo": project, "path": str(execution)}
+
+    monkeypatch.setattr("agent_bridge.acquisition_authority.read_worktree_record", record)
     resolver = SimpleNamespace(resolve_async=AsyncMock(return_value=target))
     sessions = {}
     request_env = {"REQUEST": "yes", SOURCE_ENV: preference_source}
@@ -353,7 +376,9 @@ async def test_primary_rejects_unconfirmed_receiver_preferences():
     client = AcpClient(preference_source="target-settings")
     client._privileged_launch_context = bound
     client._initialize_result = InitializeResponse(
-        protocol_version=PROTOCOL_VERSION, field_meta={module.META_KEY: {"version": 1}},
+        protocol_version=PROTOCOL_VERSION, field_meta={
+            module.META_KEY: {"version": 1, "repository_hosting_version": 1},
+        },
     )
     client._lifecycle_rpc = AsyncMock(return_value=NewSessionResponse(
         session_id="unconfirmed", field_meta={module.META_KEY: {"version": 1, "digest": bound.digest()}},
@@ -666,7 +691,9 @@ async def test_parent_provenance_survives_restart_and_refusal_never_recreates(
     spawned = AsyncMock(return_value=process)
     monkeypatch.setattr(core, "spawn", spawned)
     mock_acp_client._initialize_result = InitializeResponse(
-        protocol_version=PROTOCOL_VERSION, field_meta={module.META_KEY: {"version": 1}},
+        protocol_version=PROTOCOL_VERSION, field_meta={
+            module.META_KEY: {"version": 1, "repository_hosting_version": 1},
+        },
     )
     monkeypatch.setattr(core, "AcpClient", MagicMock(return_value=mock_acp_client))
     target = SpawnTarget(

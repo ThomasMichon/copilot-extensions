@@ -5,6 +5,14 @@ plugin roster** lives in `.github/plugin/marketplace.json` (mirrored, with
 descriptions, in `README.md` and `docs/architecture.md`). All ship from this
 repo via the Copilot CLI marketplace.
 
+This is a source repository, not an agent-hosting harness. Its repository-owned
+`expose_agent: false` preserves source worktrees, editing, tests and PRs under an
+external eligible harness while refusing managed authoring sessions and project
+adoption. Externally hosted Copilot Code Review is unchanged. The setting lives
+in the existing `.agent-worktrees/config.yaml`; see
+`plugins/agent-worktrees/docs/repository-agent-policy.md` for enforcement and
+state-preserving reconciliation.
+
 > **This file is the map, not the manual.** It orients you and links out to the
 > homes that hold the substance -- read the waypoint you need instead of crawling
 > the tree, which is how a large repo stays navigable. It deliberately uses
@@ -287,6 +295,8 @@ public face:
   worktree's assigned codename, decodes to nothing on its own) or `false`
   (fully anonymous); never publish raw machine, worktree, or session
   identifiers in a PR title, body, commit message, label, or generated marker.
+  The standard `Copilot-Session` commit trailer is the narrow provenance
+  exception documented in `CONTRIBUTING.md`; preserve it when supplied.
   Closed-circuit repos may opt in to full raw source attribution
   (`pr.source_attribution: true`) in their own config.
 

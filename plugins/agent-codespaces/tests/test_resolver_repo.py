@@ -45,6 +45,7 @@ import pytest
 from agent_codespaces.config import CodespacesConfig, RepoConfig
 from agent_codespaces.lifecycle import CodespaceInfo
 from agent_codespaces._invoke import dispatch_argv
+from agent_codespaces.hosting_policy import guarded_launch
 from agent_codespaces.resolver import CodespaceResolver
 
 _COPILOT = "copilot --acp --stdio --allow-all --experimental"
@@ -114,16 +115,20 @@ class TestResolveCrossRepo:
             "cs-1", repo="example-marketplace", repo_remote=remote,
         )
         cmd = _remote_cmd(target.spawn_command)
-        assert cmd == (
-            f"[ -e /workspaces/example-marketplace/.git ] || "
-            f"git clone -- {remote} /workspaces/example-marketplace && "
-            f"cd /workspaces/example-marketplace && {_COPILOT}"
-        )
-        assert target.codespace["name"] == "cs-1"
-        assert target.codespace["checkout_provision_command"] == (
+        provision = (
             f"[ -e /workspaces/example-marketplace/.git ] || "
             f"git clone -- {remote} /workspaces/example-marketplace"
         )
+        assert cmd == guarded_launch(
+            f"[ -e /workspaces/example-marketplace/.git ] || "
+            f"git clone -- {remote} /workspaces/example-marketplace && "
+            f"cd /workspaces/example-marketplace && {_COPILOT}",
+            "/workspaces/example-marketplace",
+            provision=provision,
+        )
+        assert target.codespace["name"] == "cs-1"
+        assert target.codespace["checkout_provision_command"] == provision
+        assert cmd.index(provision) < cmd.index("agent-policy check") < cmd.index(_COPILOT)
         assert target.codespace["repo"] == "example-marketplace"
         assert target.codespace["workspace_folder"] == (
             "/workspaces/example-marketplace"
@@ -150,7 +155,9 @@ class TestResolveCrossRepo:
             repo_remote="https://github.com/example-org/example-web",
         )
         cmd = _remote_cmd(target.spawn_command)
-        assert cmd == f"cd /workspaces/example-web && {_COPILOT}"
+        assert cmd == guarded_launch(
+            f"cd /workspaces/example-web && {_COPILOT}", "/workspaces/example-web",
+        )
         assert "git clone" not in cmd
 
     @pytest.mark.asyncio
@@ -161,19 +168,22 @@ class TestResolveCrossRepo:
             repo_remote="https://github.com/example-user/dotfiles",
         )
         cmd = _remote_cmd(target.spawn_command)
-        assert cmd == (
+        assert cmd == guarded_launch(
             "cd /workspaces/.codespaces/.persistedshare/dotfiles "
-            f"&& {_COPILOT}"
+            f"&& {_COPILOT}",
+            "/workspaces/.codespaces/.persistedshare/dotfiles",
         )
         assert "git clone" not in cmd
 
     @pytest.mark.asyncio
-    async def test_bare_request_unchanged(self, _patched):
+    async def test_bare_request_preserves_repository_in_guarded_launch(self, _patched):
         config = CodespacesConfig(repos={_CS_REPO: RepoConfig(workspace_repo="example-web")})
         _patched(config)
         target = await CodespaceResolver().resolve("cs-1")
         cmd = _remote_cmd(target.spawn_command)
-        assert cmd == f"cd /workspaces/example-web && {_COPILOT}"
+        assert cmd == guarded_launch(
+            f"cd /workspaces/example-web && {_COPILOT}", "/workspaces/example-web",
+        )
         assert target.codespace == {
             "name": "cs-1",
             "repo": _CS_REPO,

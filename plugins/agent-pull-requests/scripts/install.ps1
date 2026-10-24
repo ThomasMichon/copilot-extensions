@@ -27,6 +27,29 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+# === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
+function Copy-InstallerStageDirectory {
+    param([string]$Source, [string]$Destination)
+    # Retain provider semantics for links; ordinary payload files use native copying.
+    if ([IO.File]::GetAttributes($Source) -band [IO.FileAttributes]::ReparsePoint) {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+        return
+    }
+    [void][IO.Directory]::CreateDirectory($Destination)
+    foreach ($file in [IO.Directory]::EnumerateFiles($Source)) {
+        $target = [IO.Path]::Combine($Destination, [IO.Path]::GetFileName($file))
+        if ([IO.File]::GetAttributes($file) -band [IO.FileAttributes]::ReparsePoint) {
+            Copy-Item -LiteralPath $file -Destination $target -Force
+        } else {
+            [IO.File]::Copy($file, $target, $true)
+        }
+    }
+    foreach ($directory in [IO.Directory]::EnumerateDirectories($Source)) {
+        Copy-InstallerStageDirectory $directory ([IO.Path]::Combine($Destination, [IO.Path]::GetFileName($directory)))
+    }
+}
+# === end install-contract:v4 payload-copy ===
+
 # Cell dispatch precedes self-staging, locks, and every legacy-root write.
 $cellParameters = @('Context', 'DurableHome', 'ExpectedMarketplaceId', 'SnapshotId',
     'RuntimeVersion', 'ExpectedNamespaceGeneration', 'ExpectedInstallGeneration')
@@ -107,8 +130,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__selfStageRoot = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") '.install-stage'
                 $__selfStageDir = Join-Path $__selfStageRoot ((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID")
                 New-Item -ItemType Directory -Force -Path $__selfStageDir | Out-Null
-                Copy-Item -LiteralPath $__selfStagePayload -Destination $__selfStageDir -Recurse -Force
                 $__selfStagedPayload = Join-Path $__selfStageDir (Split-Path -Leaf $__selfStagePayload)
+                Copy-InstallerStageDirectory $__selfStagePayload $__selfStagedPayload
                 $__selfStagedEntry = Join-Path (Join-Path $__selfStagedPayload 'scripts') (Split-Path -Leaf $PSCommandPath)
                 # Best-effort reap of prior stage dirs; NEVER touch a live one.
                 # Only remove a sibling whose owner pid (the <ts>-<pid> suffix) is
@@ -288,14 +311,21 @@ function Invoke-VersionedActivate {
     Test-SourceRuntimeUnchanged
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) { return $true }
+    $py = $VenvPython
+    if (-not (Test-Path -LiteralPath $py -PathType Leaf)) {
+        Write-Fail "Candidate runtime interpreter is unavailable (versions/$SrcVersion) -- not activating"
+        return $false
+    }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_pull_requests' 2>$null
+    $nativeError = ''
+    [void](Invoke-Hidden -FilePath $VenvPython -ArgList @(
+        '-I', '-B', '-m', 'agent_pull_requests', '--help'
+    ) -ErrorOutput ([ref]$nativeError))
     $slotOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) {
+        Write-Fail "Isolated agent_pull_requests CLI health probe failed: $nativeError"
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
@@ -665,7 +695,8 @@ function Invoke-Stamp {
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
     New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
     $exclude = if ($SourceRuntimeIdentity) { @() } else {
-        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests',
+            'snapshot-provenance.json')
     }
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force

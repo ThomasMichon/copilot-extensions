@@ -264,8 +264,9 @@ def test_packet_requires_each_regular_bounded_file(packet_case, monkeypatch, nam
     size = max(path.stat().st_size for path in directory.iterdir())
     monkeypatch.setattr(packet, "MAX_PACKET_FILE_BYTES", size)
     (directory / name).write_bytes(b" " * (size + 1))
-    with pytest.raises(UnitEvidenceError, match="bounded"):
+    with pytest.raises(UnitEvidenceError, match="bounded") as error:
         _verify(packet_case)
+    assert f"bytes={size + 1}, limit={size}" in str(error.value)
 
 
 @pytest.mark.parametrize("name", ["unit-manifest.json", "unit-proof.json", "coverage.json"])

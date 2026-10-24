@@ -160,9 +160,9 @@ def test_agent_defaults_by_class(home: Path):
     repos.add_repo("sg", "/home/u/sg", repo_class="singleton", plat="wsl")
     repos.add_repo("ref", "/home/u/ref", repo_class="reference", plat="wsl")
     reg = repos.read_registry()
-    # worktree/singleton expose an agent by default; reference does not.
-    assert reg.repos["wt"].agent is True
-    assert reg.repos["sg"].agent is True
+    # An editing class never implicitly declares an agent.
+    assert reg.repos["wt"].agent is False
+    assert reg.repos["sg"].agent is False
     assert reg.repos["ref"].agent is False
 
 
@@ -173,14 +173,15 @@ def test_no_agent_flag_overrides_and_roundtrips(home: Path):
     e = repos.read_registry().repos["plugin-src"]
     assert e.repo_class == "worktree"
     assert e.agent is False
-    # The deviation from the class default is persisted explicitly.
+    # The explicit discovery preference is persisted.
     text = (home / ".agent-worktrees" / "repos.yaml").read_text()
     assert "agent: false" in text
 
 
-def test_agent_true_persisted_for_reference(home: Path):
+@pytest.mark.parametrize("repo_class", ["reference", "singleton", "worktree", "knowledge"])
+def test_explicit_agent_true_persisted_for_each_class(home: Path, repo_class: str):
     repos.add_repo("ref-agent", "/home/u/ref-agent",
-                   repo_class="reference", agent=True, plat="wsl")
+                   repo_class=repo_class, agent=True, plat="wsl")
     text = (home / ".agent-worktrees" / "repos.yaml").read_text()
     assert "agent: true" in text
     assert repos.read_registry().repos["ref-agent"].agent is True

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
@@ -326,9 +326,19 @@ def test_discovery_paginates_all_open_pull_requests(tmp_path):
     assert any("after=cursor-1" == value for value in calls[-1])
 
 
-def test_windows_command_shim_uses_cmd(monkeypatch):
-    monkeypatch.setattr(reviewer_source.os, "name", "nt")
-    argv = reviewer_source._command_argv(
-        "C:\\tools\\gh.cmd", ["auth", "status"]
-    )
-    assert argv[1:4] == ["/d", "/c", "C:\\tools\\gh.cmd"]
+@pytest.mark.parametrize("platform", ["nt", "posix"])
+@pytest.mark.parametrize("suffix", ["cmd", "bat", "exe"])
+def test_windows_command_shim_uses_cmd(monkeypatch, platform, suffix):
+    native_os = reviewer_source.os
+    native_name = native_os.name
+    monkeypatch.setattr(reviewer_source, "os", SimpleNamespace(
+        name=platform, environ={"COMSPEC": "cmd.exe"},
+    ))
+    monkeypatch.setattr(reviewer_source, "Path", PureWindowsPath)
+    executable = f"C:\\tools\\gh.{suffix}"
+    argv = reviewer_source._command_argv(executable, ["auth", "status"])
+    if platform == "nt" and suffix in {"cmd", "bat"}:
+        assert argv == ["cmd.exe", "/d", "/c", executable, "auth", "status"]
+    else:
+        assert argv == [executable, "auth", "status"]
+    assert native_os.name == native_name

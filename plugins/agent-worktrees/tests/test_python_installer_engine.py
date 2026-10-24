@@ -210,6 +210,63 @@ def test_freeze_closes_transitive_external_paths_without_editing_source(engine, 
     assert engine.freeze_inputs(plugin, tmp_path / "changed").payload_hash != frozen.payload_hash
 
 
+@pytest.mark.parametrize("extras", [
+    ["server"], "server", ("",), ("server,store",), ("../server",),
+    ("server", "SERVER"), ("unknown",),
+])
+def test_candidate_refuses_invalid_extra_selection_before_writing(engine, tmp_path, extras):
+    plugin = _package(tmp_path / "plugin", "example")
+    with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write('[project.optional-dependencies]\nserver=[]\n')
+    root = tmp_path / "runtime"
+    with pytest.raises(ValueError, match="extras"):
+        with engine.numbered_candidate(
+            root, "1.0.0", plugin=plugin, uv=tmp_path / "unused-uv",
+            base_python=tmp_path / "unused-python", health_module="example_module", extras=extras,
+        ):
+            pytest.fail("invalid extras cannot admit a candidate")
+    assert not root.exists()
+
+
+def test_extra_selection_normalizes_order_and_refuses_ambiguous_declarations(engine, tmp_path):
+    plugin = _package(tmp_path / "plugin", "example")
+    manifest = plugin / "pyproject.toml"
+    with manifest.open("a", encoding="utf-8") as stream:
+        stream.write('[project.optional-dependencies]\nserver=[]\nstdio_mcp=[]\n')
+    assert engine._selected_extras(plugin, ("STDIO.MCP", "SERVER")) == ("server", "stdio-mcp")
+    assert engine._selected_extras(plugin, ("STDIO..__MCP",)) == ("stdio-mcp",)
+    with manifest.open("a", encoding="utf-8") as stream:
+        stream.write('stdio-mcp=[]\n')
+    with pytest.raises(ValueError, match="ambiguous"):
+        engine._selected_extras(plugin, ("server",))
+
+
+def test_dev_candidate_refuses_nonbase_profiles_before_writing(engine, tmp_path):
+    plugin = _package(tmp_path / "plugin", "example")
+    with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write('[project.optional-dependencies]\nserver=[]\n')
+    root = tmp_path / "runtime"
+    with pytest.raises(ValueError, match="immutable numbered"):
+        with engine.dev_candidate(
+            root, owner="profile-test", plugin=plugin, uv=tmp_path / "unused-uv",
+            base_python=tmp_path / "unused-python", health_module="example_module",
+            extras=("server",),
+        ):
+            pytest.fail("mutable slots cannot acquire a non-base profile")
+    assert not root.exists()
+
+
+def test_construction_identity_preserves_base_and_binds_selected_extras(engine, tmp_path):
+    plugin = _package(tmp_path / "plugin", "example")
+    files = engine._source_files((plugin,))
+    base = engine._construction_hash(files, ())
+    server = engine._construction_hash(files, ("server",))
+    assert base == engine.runtime.fingerprint_source(files)
+    assert len({base, server, engine._construction_hash(files, ("server", "store"))}) == 3
+    (plugin / "src" / "module.py").write_text("VALUE = 2\n", encoding="utf-8")
+    assert engine._construction_hash(files, ("server",)) != server
+
+
 def test_freeze_identity_survives_relocation_and_ignores_build_outputs(engine, tmp_path):
     plugin = _package(tmp_path / "one" / "plugin", "example")
     (plugin / "build").mkdir()
@@ -531,6 +588,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     info=f"{name}-{version}.dist-info"
     metadata=f"Metadata-Version: 2.1\\nName: {project['name']}\\nVersion: {version}\\n"
     metadata+="".join(f"Requires-Dist: {dependency}\\n" for dependency in project.get("dependencies",[]))
+    for extra,requirements in project.get("optional-dependencies",{}).items():
+        metadata+=f"Provides-Extra: {extra}\\n"
+        metadata+="".join(f"Requires-Dist: {dependency}; extra == '{extra}'\\n" for dependency in requirements)
     with zipfile.ZipFile(pathlib.Path(wheel_directory)/wheel,"w") as archive:
         for source in (root/"src").rglob("*.py"):
             archive.write(source,str(source.relative_to(root/"src")).replace("\\\\","/"))
@@ -577,6 +637,342 @@ def build_inputs(tmp_path, monkeypatch):
     monkeypatch.setenv("UV_NO_INDEX", "1")
     monkeypatch.setenv("UV_NO_CACHE", "1")
     return repo / "plugin", Path(uv)
+
+
+@pytest.fixture
+def profile_inputs(build_inputs):
+    plugin, uv = build_inputs
+    with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(
+            '[project.optional-dependencies]\nserver=[]\nstore=[]\n'
+            'missing=["unavailable-profile-dependency==1.0"]\n',
+        )
+    return plugin, uv
+
+
+@pytest.fixture
+def role_inputs(build_inputs):
+    plugin, uv = build_inputs
+    for directory, name, dependencies, sources in (
+        ("host", "example-host", 'dependencies=["example-host-leaf"]\n',
+         '[tool.uv.sources]\nexample-host-leaf={path="../host-leaf",editable=true}\n'),
+        ("host-leaf", "example-host-leaf", "", ""),
+    ):
+        package = _package(plugin.parent / directory, name)
+        (package / "pyproject.toml").write_text(
+            f'[project]\nname="{name}"\nversion="1.0.0"\n{dependencies}'
+            '[build-system]\nrequires=[]\nbuild-backend="backend"\nbackend-path=["."]\n'
+            + sources, encoding="utf-8",
+        )
+        (package / "backend.py").write_text(_WHEEL_BACKEND, encoding="utf-8")
+    with (plugin / "pyproject.toml").open("a", encoding="utf-8") as stream:
+        stream.write(
+            'example-host={path="../host",editable=true}\n'
+            '[project.optional-dependencies]\nclient=[]\nservice=["example-host"]\n',
+        )
+    return plugin, uv
+
+
+@pytest.mark.parametrize("selection", [
+    [], "example", ("../example",), ("EXAMPLE", "example"), (False,), ("unknown",),
+])
+def test_local_package_selection_refuses_before_runtime_writes(
+    engine, tmp_path, build_inputs, selection,
+):
+    plugin, uv = build_inputs
+    root = tmp_path / "runtime"
+    with pytest.raises(ValueError, match="selection"):
+        with engine.numbered_candidate(
+            root, "1.0.0", plugin=plugin, uv=uv, base_python=Path(sys.executable),
+            health_module="example_module", local_packages=selection,
+        ):
+            pytest.fail("invalid local package selection cannot admit a candidate")
+    assert not root.exists()
+
+
+def test_local_package_profile_is_normalized_and_keeps_full_source_identity(
+    engine, role_inputs, tmp_path,
+):
+    plugin, _uv = role_inputs
+    packages = engine._package_roots(plugin)
+    selection = engine._selected_local_packages(
+        plugin, packages, ("EXAMPLE_Dependency", "AGENT.procutil"),
+    )
+    assert selection == ("agent-procutil", "example", "example-dependency")
+    files = engine._source_files(packages)
+    before = engine._construction_hash(files, ("client",), selection)
+    assert before != engine._construction_hash(files, ("client",))
+    host = plugin.parent / "host" / "src" / "module.py"
+    host.write_text("VALUE=2\n", encoding="utf-8")
+    assert engine._construction_hash(files, ("client",), selection) != before
+    assert engine._selected_local_packages(plugin, packages, ()) == ("example",)
+    root = tmp_path / "runtime"
+    with pytest.raises(ValueError, match="immutable numbered"):
+        with engine.dev_candidate(
+            root, owner="role-test", plugin=plugin, uv=tmp_path / "unused",
+            base_python=Path(sys.executable), health_module="example_module", local_packages=(),
+        ):
+            pytest.fail("mutable development must not accept role selection")
+    assert not root.exists()
+
+
+@pytest.mark.timeout(180)
+def test_selected_local_role_uses_one_retained_graph_and_exact_installed_closure(
+    engine, tmp_path, role_inputs, monkeypatch,
+):
+    from contextlib import contextmanager
+
+    plugin, uv = role_inputs
+    root = tmp_path / "runtime"
+    arguments = dict(
+        plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module",
+    )
+    client = ("agent-procutil", "example-dependency")
+    retain = engine.retain_uv_install
+    transactions = []
+
+    @contextmanager
+    def trace(*args, **kwargs):
+        with retain(*args, **kwargs) as transaction:
+            transactions.append(transaction)
+            assert set(transaction.sources) == set(engine._package_roots(plugin))
+            constraints = Path(transaction.argv[transaction.argv.index("--constraint") + 1])
+            assert constraints.read_text(encoding="utf-8") == (
+                "example-host<0,>=0\nexample-host-leaf<0,>=0\n"
+            )
+            for name in ("host", "host-leaf"):
+                assert str(transaction.sources[plugin.parent / name]) not in transaction.argv
+                assert str(transaction.sources[plugin.parent / name] / "pyproject.toml") not in transaction.argv
+            yield transaction
+
+    monkeypatch.setattr(engine, "retain_uv_install", trace)
+    with engine.numbered_candidate(
+        root, "1.0.0+client", extras=("client",), local_packages=client, **arguments,
+    ) as built:
+        assert not built.reused
+        assert built.local_packages == ("agent-procutil", "example", "example-dependency")
+        assert len(transactions) == 1
+        evidence = built.slot / ".runtime-input-origins.json"
+        receipt = json.loads(evidence.read_text(encoding="utf-8"))
+        assert set(receipt["packages"]) == set(built.local_packages)
+        assert receipt["local_packages"] == list(built.local_packages)
+    assert not built.frozen_plugin.exists()
+    assert all(not path.exists() for path in transactions[0].sources.values())
+
+    def refuse_construction(*args, **kwargs):
+        pytest.fail("healthy role reuse cannot construct")
+
+    with monkeypatch.context() as reuse:
+        reuse.setattr(engine.runtime, "construction_lease", refuse_construction)
+        with engine.numbered_candidate(
+            root, "1.0.0+client", extras=("client",), local_packages=tuple(reversed(client)),
+            **{**arguments, "uv": tmp_path / "absent", "base_python": tmp_path / "absent-python"},
+        ) as existing:
+            assert existing.reused and existing.local_packages == built.local_packages
+        for selection in (None, (), (*client, "example-host")):
+            with pytest.raises(RuntimeError, match="different content"):
+                with engine.numbered_candidate(
+                    root, "1.0.0+client", extras=("client",), local_packages=selection, **arguments,
+                ):
+                    pytest.fail("another local closure cannot reuse the selected role")
+        receipt["local_packages"] = []
+        evidence.write_text(json.dumps(receipt), encoding="utf-8")
+        with pytest.raises(engine.HealthRepairRequired, match="selected local packages"):
+            with engine.numbered_candidate(
+                root, "1.0.0+client", extras=("client",), local_packages=client, **arguments,
+            ):
+                pytest.fail("changed local closure evidence must refuse reuse")
+
+    monkeypatch.setattr(engine, "retain_uv_install", retain)
+    service = (*client, "example-host", "example-host-leaf")
+    with engine.numbered_candidate(
+        root, "1.0.0+service", extras=("service",), local_packages=service, **arguments,
+    ) as host:
+        assert not host.reused
+        assert set(host.local_packages) == {
+            "example", "agent-procutil", "example-dependency", "example-host", "example-host-leaf",
+        }
+        assert set(json.loads((host.slot / ".runtime-input-origins.json").read_text())["packages"]) == (
+            set(host.local_packages)
+        )
+        assert engine.runtime.is_complete(root, host.slot.name, expect_hash=host.payload_hash)
+    assert not (root / "current-version").exists()
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.parametrize("selection", [
+    ("agent-procutil", "example-dependency"),
+    ("agent-procutil", "example-dependency", "example-host"),
+])
+def test_incomplete_local_role_cannot_fall_back_or_complete(
+    engine, role_inputs, tmp_path, monkeypatch, selection,
+):
+    plugin, uv = role_inputs
+    monkeypatch.setenv("UV_PRERELEASE", "allow")
+    for directory in ("host", "host-leaf"):
+        manifest = plugin.parent / directory / "pyproject.toml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace('version="1.0.0"', 'version="0.0.dev1"'),
+            encoding="utf-8",
+        )
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "current-version").write_text("previous\n", encoding="utf-8")
+    with pytest.raises(subprocess.CalledProcessError):
+        with engine.numbered_candidate(
+            root, "1.0.0+service", plugin=plugin, uv=uv, base_python=Path(sys.executable),
+            health_module="example_module", extras=("service",), local_packages=selection,
+        ):
+            pytest.fail("missing direct or transitive local dependency cannot construct")
+    assert not engine.runtime.is_complete(root, "1.0.0+service")
+    assert (root / "current-version").read_text(encoding="utf-8") == "previous\n"
+
+
+@pytest.mark.timeout(180)
+def test_deep_local_role_keeps_generated_constraints_out_of_source_ancestry(
+    engine, tmp_path, role_inputs,
+):
+    plugin, uv = role_inputs
+    deep = tmp_path / ("caller-" + "x" * 80) / "workspace" / "repo"
+    deep.parent.mkdir(parents=True)
+    shutil.move(str(plugin.parent), str(deep))
+    plugin = deep / plugin.name
+    packages = engine._package_roots(plugin)
+    files = engine._source_files(packages)
+    before = engine.runtime.fingerprint_source(files)
+    inputs = engine.FrozenInputs(plugin, packages, before)
+    with engine._retained_inputs(inputs, uv, Path(sys.executable), refresh=False) as legacy:
+        baseline_depth = len(legacy.plugin.parts)
+    with engine.numbered_candidate(
+        tmp_path / "runtime", "1.0.0+client", plugin=plugin, uv=uv,
+        base_python=Path(sys.executable), health_module="example_module",
+        extras=("client",), local_packages=("agent-procutil", "example-dependency"),
+    ) as candidate:
+        assert not candidate.reused
+        assert len(candidate.frozen_plugin.parts) == baseline_depth
+        assert len(str(candidate.frozen_plugin)) < 260
+        assert engine.runtime.is_complete(
+            tmp_path / "runtime", candidate.slot.name, expect_hash=candidate.payload_hash,
+        )
+    assert engine._source_files(packages) == files
+    assert engine.runtime.fingerprint_source(files) == before
+
+
+@pytest.mark.timeout(180)
+def test_role_health_refuses_an_excluded_installed_distribution(
+    engine, role_inputs, tmp_path, monkeypatch,
+):
+    plugin, uv = role_inputs
+    construct = engine._construct
+
+    def extra_distribution(*args, **kwargs):
+        python = construct(*args, **kwargs)
+        slot = args[1]
+        metadata = next(slot.rglob("example-1.0.0.dist-info")).with_name("example_host-1.0.0.dist-info")
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(
+            "Metadata-Version: 2.1\nName: example-host\nVersion: 1.0.0\n", encoding="utf-8",
+        )
+        return python
+
+    monkeypatch.setattr(engine, "_construct", extra_distribution)
+    root = tmp_path / "runtime"
+    with pytest.raises(subprocess.CalledProcessError) as caught:
+        with engine.numbered_candidate(
+            root, "1.0.0+client", plugin=plugin, uv=uv, base_python=Path(sys.executable),
+            health_module="example_module", extras=("client",),
+            local_packages=("agent-procutil", "example-dependency"),
+        ):
+            pytest.fail("excluded installed dependencies cannot pass role health")
+    assert "excluded local package is installed: example-host" in caught.value.stderr
+    assert not engine.runtime.is_complete(root, "1.0.0+client")
+
+
+@pytest.mark.timeout(120)
+def test_selected_extras_use_retained_uv_and_cannot_reuse_another_profile(
+    engine, tmp_path, profile_inputs, monkeypatch,
+):
+    from contextlib import contextmanager
+
+    plugin, uv = profile_inputs
+    root = tmp_path / "runtime"
+    retain = engine.retain_uv_install
+    transactions = []
+
+    @contextmanager
+    def trace(*args, **kwargs):
+        with retain(*args, **kwargs) as transaction:
+            transactions.append(transaction)
+            yield transaction
+
+    monkeypatch.setattr(engine, "retain_uv_install", trace)
+    arguments = dict(
+        plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module",
+    )
+    with engine.numbered_candidate(
+        root, "1.0.0+host", extras=("STORE", "SERVER"), **arguments,
+    ) as built:
+        assert not built.reused and built.extras == ("server", "store")
+        assert engine.runtime.is_complete(root, "1.0.0+host", expect_hash=built.payload_hash)
+        assert len(transactions) == 1
+        target = str(transactions[0].sources[plugin]) + "[server,store]"
+        assert target in transactions[0].argv
+        evidence = built.slot / ".runtime-input-origins.json"
+        receipt = json.loads(evidence.read_text(encoding="utf-8"))
+        assert receipt["extras"] == ["server", "store"]
+        assert receipt["packages"]["example"] == built.frozen_plugin.as_uri()
+        assert built.payload_hash == engine._construction_hash(
+            engine._source_files(engine._package_roots(plugin)), built.extras,
+        )
+    assert not built.frozen_plugin.exists()
+
+    def refuse_construction(*args, **kwargs):
+        pytest.fail("completed profile reuse must not construct")
+
+    monkeypatch.setattr(engine.runtime, "construction_lease", refuse_construction)
+    arguments.update(uv=tmp_path / "absent-uv", base_python=tmp_path / "absent-python")
+    with engine.numbered_candidate(
+        root, "1.0.0+host", extras=("server", "store"), **arguments,
+    ) as reused:
+        assert reused.reused and reused.extras == built.extras
+    for extras in ((), ("server",), ("store",)):
+        with pytest.raises(RuntimeError, match="different content"):
+            with engine.numbered_candidate(root, "1.0.0+host", extras=extras, **arguments):
+                pytest.fail("another profile cannot reuse the same immutable slot")
+    assert len(transactions) == 1
+    receipt["extras"] = []
+    evidence.write_text(json.dumps(receipt), encoding="utf-8")
+    with pytest.raises(engine.HealthRepairRequired, match="selected dependency profile"):
+        with engine.numbered_candidate(
+            root, "1.0.0+host", extras=("server", "store"), **arguments,
+        ):
+            pytest.fail("profile evidence must be checked on healthy reuse")
+
+
+@pytest.mark.timeout(120)
+def test_selected_extra_dependency_failure_cannot_complete_or_activate(
+    engine, tmp_path, profile_inputs,
+):
+    plugin, uv = profile_inputs
+    root = tmp_path / "runtime"
+    arguments = dict(
+        plugin=plugin, uv=uv, base_python=Path(sys.executable), health_module="example_module",
+    )
+    with engine.numbered_candidate(root, "1.0.0", **arguments) as base:
+        assert not base.extras
+        assert base.payload_hash == engine.runtime.fingerprint_source(
+            engine._source_files(engine._package_roots(plugin)),
+        )
+        assert "extras" not in json.loads(
+            (base.slot / ".runtime-input-origins.json").read_text(encoding="utf-8"),
+        )
+    (root / "current-version").write_text("1.0.0\n", encoding="utf-8")
+    with pytest.raises(subprocess.CalledProcessError):
+        with engine.numbered_candidate(root, "1.0.0+missing", extras=("missing",), **arguments):
+            pytest.fail("unavailable selected dependency cannot produce a ready candidate")
+    assert not engine.runtime.is_complete(root, "1.0.0+missing")
+    assert (root / "current-version").read_text(encoding="utf-8") == "1.0.0\n"
+    assert not list((root / ".installer-inputs").iterdir())
 
 
 def test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change(
@@ -932,7 +1328,8 @@ def test_reused_health_does_not_classify_cleanup_or_ownership_failure_as_repair(
     monkeypatch.setattr(engine, "_child", failed)
     with pytest.raises(type(failure)) as caught:
         engine._verify_installed(
-            None, tmp_path, tmp_path / "python", "example", 0, 1, require_frozen_origin=False,
+            engine.FrozenInputs(tmp_path, (), "unused"),
+            tmp_path, tmp_path / "python", "example", 0, 1, require_frozen_origin=False,
         )
     assert caught.value is failure
 

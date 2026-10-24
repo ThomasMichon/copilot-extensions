@@ -52,6 +52,17 @@ if [ -f "$CONFIG" ]; then
 fi
 
 installer_args=()
+recovery_only=0
+if [ "${1-}" = --recover-for-repair ]; then
+    recovery_only=1
+    installer_args+=(--recover-for-repair)
+    shift
+    if [ "${1-}" = --json ]; then
+        installer_args+=(--json)
+        shift
+    fi
+    [ "$#" -eq 0 ] || { _bootstrap_progress 'repair recovery accepts only --json.' failed; exit 2; }
+fi
 if [ "${1-}" = --repair-update ]; then
     [ "$#" -ge 4 ] || { _bootstrap_progress 'incomplete update bootstrap source.' failed; exit 2; }
     REPO="$2"
@@ -59,6 +70,12 @@ if [ "${1-}" = --repair-update ]; then
     shift 3
     [ "${1-}" = update ] || { _bootstrap_progress 'update bootstrap only accepts update.' failed; exit 2; }
     installer_args+=(--repair-update)
+fi
+
+if [ "$recovery_only" -eq 1 ]; then
+    recovery_staging="$(mktemp -d -t manager-repair.XXXXXXXX)"
+    STAGING="$recovery_staging/source"
+    trap 'rm -rf -- "$recovery_staging"' EXIT
 fi
 
 _bootstrap_progress 'Worktree Manager bootstrap'
@@ -156,4 +173,11 @@ case ":$PATH:" in
 esac
 
 # Then run whatever the caller asked for through the freshly-installed app.
+if [ "$recovery_only" -eq 1 ]; then
+    "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}"
+    exit "$?"
+fi
+if [ "$#" -eq 0 ]; then
+    exec "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}"
+fi
 exec "$PYTHON" -I -S -B -X utf8 scripts/runtime_install.py --root "$ROOT" --payload "$PWD" "${installer_args[@]}" -- "$@"

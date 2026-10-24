@@ -508,6 +508,14 @@ async function autoForceHandoff(sid, cwd) {
       "Manual continuation is required -- invoke the context-handoff skill.",
       { level: "error" },
     );
+    if (result.seed && result.manualInstructions) {
+      session.send(result.manualInstructions).catch((error) =>
+        session.log(
+          `[Context Handoff] Stored baton instructions could not be delivered: ${error.message}`,
+          { level: "warning" },
+        )
+      );
+    }
     return;
   }
   session.log(
@@ -1043,18 +1051,24 @@ const session = await joinSession({
             (args?.handoff_token ?? state.pendingHandoff?.token ?? "").toString().trim() || null,
           mode: handoffConfig.mode,
         });
+        if (result?.stored?.id && result.seed) {
+          state.pendingHandoff = {
+            seed: result.seed,
+            token: result.stored.id,
+            storage: result.stored.storage,
+            worktree: result.stored.metadata?.worktree || null,
+          };
+        }
         if (!result?.ok) {
           return (
             "Cannot trigger handoff: " +
-            `${result?.error || "the pickup signal flow failed before it could start."}`
+            `${result?.error || "the pickup signal flow failed before it could start."}` +
+            (result?.seed
+              ? `\n\n${result.manualInstructions || "The handoff remains stored."}\n\n` +
+                `Final short handoff prompt/seed:\n\n${result.seed}`
+              : "")
           );
         }
-        state.pendingHandoff = {
-          seed: result.seed,
-          token: result.stored.id,
-          storage: result.stored.storage,
-          worktree: result.stored.metadata?.worktree || null,
-        };
         const pickup = result.pickup || { via: [] };
         const pickedUp = pickup.pickedUp;
         const pickupLine = pickedUp

@@ -19,7 +19,7 @@ import {
   writeFileSync, readFileSync, existsSync, mkdirSync, renameSync, unlinkSync,
   openSync, closeSync, statSync, readdirSync, linkSync, ftruncateSync, writeSync,
 } from "node:fs";
-import { join, basename, dirname, resolve } from "node:path";
+import { join, basename, dirname, resolve, posix, win32 } from "node:path";
 import { execFileSync, execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -1742,6 +1742,8 @@ export function retryStoredHandoffCutover(cwd, sid, execute = runCli) {
       error: "retry-cutover requires --session-id or COPILOT_AGENT_SESSION_ID",
     };
   }
+  const admission = checkRepositoryHosting(cwd, execute);
+  if (!admission.ok) return admission;
   try {
     return cliJson(
       "agent-worktrees",
@@ -1754,6 +1756,36 @@ export function retryStoredHandoffCutover(cwd, sid, execute = runCli) {
     return {
       ok: false,
       error: describeCliError(error) || "Could not retry handoff cutover.",
+    };
+  }
+
+}
+
+export function checkRepositoryHosting(cwd, execute = runCli) {
+  try {
+    const policy = JSON.parse(execute(
+      "agent-worktrees",
+      ["agent-policy", "check", "--path", cwd, "--operation", "handoff", "--json"],
+      { cwd, timeout: 5000, allowProvision: false },
+    ));
+    const validPath = (value) => typeof value === "string" && value.trim().length > 0
+      && !/[\x00-\x1f\x7f]/.test(value)
+      && (posix.isAbsolute(value) || win32.isAbsolute(value));
+    if (policy?.version !== 1 || policy.allowed !== true
+        || !validPath(policy.repository)
+        || ![null, true].includes(policy.expose_agent)
+        || !Array.isArray(policy.sources) || !Array.isArray(policy.denied_by)
+        || !policy.sources.every(validPath) || policy.denied_by.length !== 0
+        || Object.hasOwn(policy, "error") || Object.hasOwn(policy, "code")) {
+      throw new Error("Required repository hosting receiver returned invalid policy.");
+    }
+    return { ok: true, policy };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "repository-hosting-refused",
+      error: describeCliError(error)
+        || "Repository hosting check failed; use an eligible external harness.",
     };
   }
 }
@@ -3346,6 +3378,7 @@ export async function triggerHandoff(
     noteHandoff = noteHandoffInRecord,
     logActivity = logHandoffActivity,
     requestBridge = requestAgentBridgeHandoff,
+    checkHosting = checkRepositoryHosting,
     readPickupSignals = pickupSignals,
     sleepFn = sleep,
     // Called ONCE the baton is durably stored (right after store()/
@@ -3455,6 +3488,27 @@ export async function triggerHandoff(
   // mode, the default, never arms pickup at all, so there is nothing to
   // gate and no reason to add the sync's latency to this call).
   if (autoEnabled) await beforeArmPickup();
+  if (autoEnabled) {
+    const admission = checkHosting(cwd, execute);
+    if (!admission.ok) {
+      const noteResult = noteHandoff(
+        cwd, sid, stored.id, stored.metadata?.title || title, false,
+      );
+      return {
+        ...admission, stored, seed, sessionState,
+        automaticCutoverDisabled: true,
+        worktreeSignal: {
+          noted: Boolean(noteResult?.noted), liveCutoverArmed: false,
+          noteError: noteResult?.error ?? null,
+        },
+        bridge: { attempted: false, accepted: false, reason: admission.reason },
+        manualInstructions:
+          "Automatic pickup was refused by repository hosting admission. " +
+          "The stored baton remains available for deliberate manual consumption " +
+          "from an eligible external harness.\n\n" + seed,
+      };
+    }
+  }
   // `noteHandoff` (agent-worktrees `note-handoff`) always records this
   // handoff in the worktree's own ledger now, regardless of mode -- this is
   // the head-tracking/lineage state (a manually-consuming successor later

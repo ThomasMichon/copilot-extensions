@@ -28,6 +28,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from repository_policy import AgentHostingError
 
 from .. import ui_task_modes as _modes
 from ..agent_registry import _agent_worktrees_bin
@@ -355,6 +356,21 @@ async def _guard(
 
 
 async def _embody(project: str, worktree_id: str, seed: str | None) -> tuple[Any | None, str]:
+    from ..hosting_policy import require_path_hosting
+
+    record, error = await _aw(
+        ["-p", project, "record", "--worktree-id", worktree_id, "--json"], timeout=30.0,
+    )
+    row = record.get("worktree") if isinstance(record, dict) else None
+    if (
+        not isinstance(row, dict) or row.get("id") != worktree_id
+        or not isinstance(row.get("path"), str) or not row["path"]
+    ):
+        return None, error or "cannot establish the actual workspace for repository hosting policy"
+    try:
+        require_path_hosting(row["path"], operation="UI embodiment")
+    except AgentHostingError as exc:
+        return None, str(exc)
     args = ["-p", project, "embody", "--worktree-id", worktree_id, "--json"]
     if seed:
         args[5:5] = ["--seed", seed]
@@ -379,6 +395,15 @@ async def start_task(request: Request) -> JSONResponse:
     if repo_row is None:
         known = ", ".join(sorted(str(r["name"]) for r in repo_rows))
         return _refuse(400, err or f"unknown project {project!r}; choose one of: {known}")
+    from ..hosting_policy import require_path_hosting
+
+    checkout = _modes.checkout_path(repo_row)
+    if checkout is None:
+        return _refuse(409, "cannot establish repository hosting policy without a checkout")
+    try:
+        require_path_hosting(checkout, operation="UI task")
+    except AgentHostingError as exc:
+        return _refuse(409, str(exc))
     mode = str(body.get("mode") or "").strip() or None
     try:
         seed = _modes.seed_for(_modes.load_modes(_modes.checkout_path(repo_row)), mode, prompt)
@@ -427,6 +452,14 @@ async def resume_task(worktree_id: str, request: Request) -> JSONResponse:
     live = (await _live.list_live_sessions(request, worktree_id=worktree_id)).live_sessions
     if row.get("session_lock_live") or any(s.status == "live" for s in live):
         return _refuse(409, "this worktree already has a live session")
+    from ..hosting_policy import require_path_hosting
+
+    if not row.get("path"):
+        return _refuse(409, "cannot establish the actual workspace for repository hosting policy")
+    try:
+        require_path_hosting(row["path"], operation="UI resume")
+    except AgentHostingError as exc:
+        return _refuse(409, str(exc))
     prompt = str(body.get("prompt") or "").strip()[:MAX_PROMPT_CHARS]
     async with st["lock"]:
         embodied, err = await _embody(row["project"], worktree_id, prompt or None)

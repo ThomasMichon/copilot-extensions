@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"6d548e655d43162f23f37cc177ad12ebf9665b0e3a82ab8b444aa26807e3c566","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.18-dev1","renderedBytes":1531,"schema":"copilot-extensions.instruction-projection","sourceId":"contribution-boundary","template":"instructions/contribution-boundary.instructions.md","templateBytes":439,"templateSha256":"f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"6d548e655d43162f23f37cc177ad12ebf9665b0e3a82ab8b444aa26807e3c566","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.19-dev1","renderedBytes":1531,"schema":"copilot-extensions.instruction-projection","sourceId":"contribution-boundary","template":"instructions/contribution-boundary.instructions.md","templateBytes":439,"templateSha256":"f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd","version":1} -->
 
 
 > If `.github/instructions/copilot-extensions-harness/contribution-boundary.local.instructions.md` is available, compare
@@ -13,4 +13,4 @@ applyTo: "**"
 
 **Fallback policy `[owner: copilot-extensions-harness@0.1.0-dev39]`:** copilot-extensions accepts only general-purpose, organization-neutral capabilities; personal needs belong in the adopter's private control repo and organization-specific work in its internal marketplace. Invoke the `contributing-to-copilot-extensions` skill for the complete contribution ground rules and flow.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"6abf0d177c8622d89b121c587a41e2d05f45a847a6fc39a16069501168cfd199"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"fe8fafb5f9012bea08ec1988e7fc8c935310e61f04eb90066c1681ab53f7b2a4"} -->

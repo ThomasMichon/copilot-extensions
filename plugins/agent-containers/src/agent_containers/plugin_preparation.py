@@ -122,6 +122,14 @@ def _script(args, target, *, run_input=None, remote_env=None, relay_port=None, p
         if rc:
             raise RuntimeError("Venue could not resolve the explicit execution worktree")
         workspace = parse_execution_checkout(output)
+    from .hosting_policy import guest_check_command
+
+    if not getattr(args, "hosting_live_attachment", False):
+        rc, _output, error = run_input(
+            f"bash -lc {shlex.quote(guest_check_command(workspace))}", b"", timeout=90,
+        )
+        if rc:
+            raise RuntimeError(f"Guest repository hosting refused or receiver unsupported: {error.strip()}")
     script = build_prepare_script(
         plan, workspace, **({"include_prepared_context": True} if include_compiled_context else {}),
     )

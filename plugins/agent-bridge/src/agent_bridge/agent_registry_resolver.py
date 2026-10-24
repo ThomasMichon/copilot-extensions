@@ -19,6 +19,9 @@ from .agent_registry_common import (
 from .agent_registry_discovery import DiscoveryResult, _ProviderDiscoveryMixin
 from .agent_registry_namespace import NamespaceResolver
 from .cold_store_sources import ColdStoreProviderRegistry
+from .hosting_policy import (
+    require_namespace_hosting, resolve_elevated_relay, resolve_namespace_with_plugins,
+)
 from .provider_sources import ProviderManifest
 from .remote_acp_catalog import RemoteAcpCatalog, reconcile_remote_rows
 from .remote_acp_config import is_remote_address
@@ -329,6 +332,9 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 name,
                 prefix,
             )
+            reference = await self._require_namespace_hosting(prefix, name)
+            if reference is not None:
+                return reference
             await resolver.ensure_ready(name)
             return await self._resolve_with_plugins(resolver, name)
 
@@ -364,6 +370,9 @@ class AgentResolver(_ProviderDiscoveryMixin):
                     )
                     return await self._resolve_venue_bound(sender_repo, resolve_name)
                 return await self._resolve_bare(agent_name)
+            reference = await self._require_namespace_hosting(resolver.prefix, resolve_name)
+            if reference is not None:
+                return reference
             await resolver.ensure_ready(resolve_name)
             return await self._resolve_with_plugins(resolver, resolve_name)
 
@@ -374,6 +383,13 @@ class AgentResolver(_ProviderDiscoveryMixin):
             raise ValueError("Remote ACP target policy unavailable")
         _name, spec = self.remote_acp_catalog.resolve(address, project=project)
         return SpawnTarget(type="remote-acp", cwd="/", remote_acp=spec.model_dump(mode="json"))
+
+    async def _require_namespace_hosting(
+        self, prefix: str, name: str, *, repo: str | None = None, repo_remote: str | None = None,
+    ) -> SpawnTarget | None:
+        return await require_namespace_hosting(
+            self, prefix, name, repo=repo, repo_remote=repo_remote,
+        )
 
     async def _resolve_venue_bound(
         self, repo: str, venue: str,
@@ -386,6 +402,11 @@ class AgentResolver(_ProviderDiscoveryMixin):
         if ns:
             prefix, name = ns
             resolver = self._namespace_resolvers[prefix]
+            reference = await self._require_namespace_hosting(
+                prefix, name, repo=repo, repo_remote=repo_remote,
+            )
+            if reference is not None:
+                return reference
             await resolver.ensure_ready(name)
             return await self._resolve_with_plugins(
                 resolver,
@@ -402,6 +423,11 @@ class AgentResolver(_ProviderDiscoveryMixin):
             if resolver is None:
                 target = await self._resolve_bare(venue)
                 return self._bind_repo(target, repo, venue)
+            reference = await self._require_namespace_hosting(
+                resolver.prefix, resolve_name, repo=repo, repo_remote=repo_remote,
+            )
+            if reference is not None:
+                return reference
             await resolver.ensure_ready(resolve_name)
             return await self._resolve_with_plugins(
                 resolver,
@@ -483,20 +509,9 @@ class AgentResolver(_ProviderDiscoveryMixin):
         repo_remote: str | None = None,
     ) -> SpawnTarget:
         """Resolve via a namespace resolver, injecting related-repo plugins."""
-        extra = await self._related_plugins_for(resolver, name)
-        target = await self._call_resolver(
-            resolver,
-            name,
-            extra_plugins=extra,
-            repo=repo,
-            repo_remote=repo_remote,
+        return await resolve_namespace_with_plugins(
+            self, resolver, name, repo=repo, repo_remote=repo_remote,
         )
-        metadata = target.codespace or target.container
-        if metadata is not None:
-            metadata["related_plugins"] = [
-                {"source": ref.source, "enable": ref.enable} for ref in extra
-            ]
-        return target
 
     async def _call_resolver(
         self,
@@ -581,28 +596,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
         self, agent_name: str,
     ) -> SpawnTarget | None:
         """Return a sub-daemon relay target for an elevated agent, else None."""
-        from . import elevated
-
-        config = self._agents.get(agent_name)
-        if config is None or not config.requires_admin:
-            return None
-        if not elevated.relay_applicable(config.requires_admin):
-            return None
-
-        loop = asyncio.get_running_loop()
-        token = await loop.run_in_executor(None, elevated.ensure_running)
-        cmd = elevated.relay_spawn_command(config.name, token=token)
-        log.info(
-            "Routing elevated agent '%s' via sub-daemon relay (port %d)",
-            config.name,
-            elevated.discovered_port(),
-        )
-        return SpawnTarget(
-            type="command",
-            spawn_command=cmd,
-            project=config.project,
-            elevated=True,
-        )
+        return await resolve_elevated_relay(self, agent_name)
 
     async def _gather_bare_candidates(
         self, name: str,

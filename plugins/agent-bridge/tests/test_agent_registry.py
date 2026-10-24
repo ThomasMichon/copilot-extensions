@@ -697,11 +697,31 @@ class TestAutoDiscoveryMerge:
 # -- Namespace resolver tests --------------------------------------------------
 
 
-class _MockResolver:
+@pytest.fixture
+def registry_receiver(tmp_path, monkeypatch):
+    """Supply actual isolated policy through the receiver/owner query seams."""
+    from repository_policy import require_agent_hosting
+
+    guest = tmp_path / "registry-receiver"
+    guest.mkdir()
+    (guest / ".git").mkdir()
+
+    async def query(target, *, operation):
+        return {**require_agent_hosting(guest, operation=operation).to_dict(), "allowed": True}
+
+    async def owner_cwd(target):
+        return str(guest)
+
+    monkeypatch.setattr("agent_bridge.provider_hosting.query_provider_policy", query)
+    monkeypatch.setattr("agent_bridge.hosting_policy.resolve_project_cwd", owner_cwd)
+    return guest
+
+
+class _MockResolver(CliNamespaceResolver):
     """A test namespace resolver (implements NamespaceResolver protocol)."""
 
     def __init__(self, prefix_val: str = "mock"):
-        self._prefix = prefix_val
+        super().__init__(prefix_val, "isolated-fixture-provider")
 
     @property
     def prefix(self) -> str:
@@ -724,6 +744,7 @@ class _MockResolver:
             raise RuntimeError("Agent is not ready")
 
 
+@pytest.mark.usefixtures("registry_receiver")
 class TestNamespaceResolvers:
     """Namespace resolver registration and dispatch."""
 
@@ -999,6 +1020,7 @@ class TestNamespaceResolvers:
 # -- AdminResolver tests ------------------------------------------------------
 
 
+@pytest.mark.usefixtures("registry_receiver")
 class TestAdminResolver:
     """Tests for admin: namespace resolver."""
 
@@ -1170,6 +1192,7 @@ class TestAdminResolver:
         ]
 
 
+@pytest.mark.usefixtures("registry_receiver")
 class TestElevatedRelayRouting:
     """Cap 2 Slice 3: a bare requires_admin agent routes to the sub-daemon."""
 
@@ -1358,11 +1381,11 @@ class TestElevatedDiscovery:
 # -- Plugin injection contract (related-repo plugins) -------------------------
 
 
-class _PluginAwareResolver:
+class _PluginAwareResolver(CliNamespaceResolver):
     """Namespace resolver that records the extra_plugins it was resolved with."""
 
     def __init__(self, prefix_val: str = "pl"):
-        self._prefix = prefix_val
+        super().__init__(prefix_val, "isolated-fixture-provider")
         self.seen_extra: object = "UNSET"
 
     @property
@@ -1382,6 +1405,7 @@ class _PluginAwareResolver:
         return None
 
 
+@pytest.mark.usefixtures("registry_receiver")
 class TestPluginInjectionContract:
     """agent-bridge decides related-repo plugins; resolvers fold them."""
 
@@ -1897,6 +1921,26 @@ class TestReposRegistryAgents:
          "paths": {"windows": "D:\\Src\\docs-only"}},
     ]
 
+    @pytest.mark.parametrize("policy", ["false", "'false'"])
+    def test_local_repository_policy_veto_filters_every_topology_advertisement(
+        self, tmp_path, caplog, policy,
+    ):
+        ms = _topo_machines()
+        local = ms["host-dev6"]
+        row = {"name": "source-only", "agent": True, "paths": {"windows": str(tmp_path)}}
+        initial = derive_topology_agents(ms, "source-only", [], local, "windows", [row])
+        assert "source-only@dev6" in initial and "dev6" in initial
+        config = tmp_path / ".copilot-extensions/agent-worktrees/config.yaml"
+        config.parent.mkdir(parents=True)
+        config.write_text(f"expose_agent: {policy}\n", encoding="utf-8")
+        before = config.read_bytes()
+        agents = derive_topology_agents(ms, "source-only", [], local, "windows", [row])
+        assert "source-only@dev6" not in agents and "dev6" not in agents
+        assert "expose_agent" in caplog.text
+        assert row["agent"] is True and config.read_bytes() == before
+        # A similarly named remote checkout is not governed by this host's files.
+        assert "cloud1" in agents
+
     def test_local_loopback_repo_agents_without_control_plane(self):
         ms = _topo_machines()
         local = ms["host-dev6"]
@@ -2000,6 +2044,28 @@ class TestReposRegistryAgents:
 
 
 class TestLoadRelatedEntries:
+
+    def test_source_relation_does_not_declare_an_agent(self, tmp_path):
+        d = tmp_path / ".agent-worktrees"
+        d.mkdir()
+        (d / "related.yaml").write_text(
+            "related:\n  source-only:\n    class: worktree\n"
+            "    locus: { machines: [cloud1] }\n", encoding="utf-8",
+        )
+        related = _load_related_entries(tmp_path)
+        ms = _topo_machines()
+        assert derive_topology_agents(ms, None, related, ms["host-dev6"]) == {}
+
+    @pytest.mark.parametrize("agent", [None, False, "true", 1])
+    def test_repo_catalog_requires_literal_agent_opt_in(self, tmp_path, agent):
+        ms = _topo_machines()
+        row = {"name": "source-only", "class": "worktree", "paths": {"windows": str(tmp_path)}}
+        if agent is not None:
+            row["agent"] = agent
+        assert infer_control_plane_project([row], tmp_path / "machines.yaml") is None
+        assert derive_topology_agents(
+            ms, None, [], ms["host-dev6"], "windows", [row],
+        ) == {}
 
     def test_parses_locus_and_delegate(self, tmp_path):
         d = tmp_path / ".agent-worktrees"
@@ -2507,11 +2573,11 @@ class TestResolveRepoRemote:
         assert resolve_repo_remote("x") is None
 
 
-class _RepoRemoteAwareResolver:
+class _RepoRemoteAwareResolver(CliNamespaceResolver):
     """Codespace-like resolver that records repo + repo_remote it receives."""
 
     def __init__(self, prefix_val="cs"):
-        self._prefix = prefix_val
+        super().__init__(prefix_val, "isolated-fixture-provider")
         self.seen: dict = {}
 
     @property
@@ -2537,6 +2603,7 @@ class _RepoOnlyResolver(_RepoRemoteAwareResolver):
         return SpawnTarget(type="command", spawn_command=["echo", name])
 
 
+@pytest.mark.usefixtures("registry_receiver")
 class TestRepoRemoteThreading:
     """#174: agent-bridge threads repo_remote into <repo>@<venue> dispatch."""
 

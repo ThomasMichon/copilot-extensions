@@ -2715,12 +2715,12 @@ def test_gc_disabled_by_default(tmp_path, monkeypatch):
 
     monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
     q = TaskQueue(tmp_path / "tasks.db")
-    url, stop = _boot(create_app(q))  # no sweep_interval -> no GC loop
+    url, stop = _boot(create_app(q))  # no sweep_interval -> task GC disabled
     try:
         c = DispatchClient(url)
         tid = c.create("leased")["id"]
         c.claim(worker_id="m/wt", repo=TEST_REPO)
-        time.sleep(0.5)  # no GC loop running, so nothing requeues on its own
+        time.sleep(0.5)  # diagnostics maintenance never enables task reconciliation
         assert c.get(tid)["status"] == Status.CLAIMED
         assert c.recover()["recovered"] == 1  # manual recover still works
         assert c.get(tid)["status"] == Status.QUEUED

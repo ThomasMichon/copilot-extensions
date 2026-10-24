@@ -283,9 +283,11 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
             "versioned_runtime_construction.py", "versioned_runtime_source.py",
             "versioned_runtime_publication.py",
             "resolve-runtime.sh", "resolve-runtime.ps1",
+            "runtime-gate.sh", "runtime-gate.ps1",
             "delegated-waiter-callback.sh", "delegated-waiter-callback.ps1",
         ):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
+        shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
         for ext in ("sh", "ps1"):
             (scripts / f"install.{ext}").write_bytes(script(ext).encode("utf-8"))
         package = payload / "src" / "agent_dispatch"

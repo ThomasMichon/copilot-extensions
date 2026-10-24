@@ -47,14 +47,14 @@ def test_importing_the_module_registers_all_three_verbs():
     assert "claim_add" in verbs
     assert "claim_release" in verbs
     assert "claim_settle" in verbs
-    assert all(tracking_write._VERB_VERSIONS[verb] == 3 for verb in (
+    assert all(tracking_write._VERB_VERSIONS[verb] == 4 for verb in (
         "claim_add", "claim_release", "claim_settle",
     ))
 
 
 @pytest.mark.parametrize("verb", ["claim_add", "claim_release", "claim_settle"])
-@pytest.mark.parametrize("old_version", [1, 2])
-def test_claim_cli_never_dials_pre_authority_daemon(verb, old_version, record_path, monkeypatch):
+@pytest.mark.parametrize("old_version", [1, 2, 3])
+def test_claim_cli_never_dials_pre_paired_claim_daemon(verb, old_version, record_path, monkeypatch):
     from agent_worktrees import claims_cli, locks, status_monitor_runtime
 
     old = {

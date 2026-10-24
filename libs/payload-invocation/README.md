@@ -52,6 +52,10 @@ which must preserve legacy behavior for absent/false policy and fail closed
 instead of falling back when namespaced evidence is requested, malformed, or
 blocked.
 
+Dispatch's [command admission](../../plugins/agent-dispatch/README.md#install)
+uses this contract while preserving its separate global upstream-first and
+payload-local provisioning routes and explicit scoped-installer readiness.
+
 ### Test isolation
 
 Copied runtime fixtures materialize the selected consumer's declared dependencies
@@ -81,10 +85,17 @@ tests/test_adopter_publication.py --allow-explicit-tiers`.
 the first adopter. Other manifests retain byte-identical catalogs. The optional
 `catalogBindingModule` vendors the same pure ownership code into the runtime
 package for its existing deploy-manifest publisher.
-Binding emitters use isolated Python, including the PowerShell launcher probe
-and selected helper process: neither the project working directory, inherited
+Binding emitters use isolated Python, including the PowerShell launcher
+bootstrap and binding helper: neither the project working directory, inherited
 Python import paths, nor user-site startup hooks supply discovery code.
 Only the explicitly addressed payload helper supplies binding code.
+The PowerShell launcher admits its interpreter and runs that helper in the same
+process, avoiding a second Python startup. An unavailable launcher can fall
+back to a non-WindowsApps interpreter; an admitted helper's failure or empty
+response cannot trigger a retry. Each emission reads current ownership again:
+neither interpreter admission nor a prior catalog caches a binding decision.
+`COPILOT_EXTENSIONS_BOOT_TRACE` adds timestamped binding stages to stderr only;
+ordinary emission adds no trace output or diagnostic subprocess.
 
 The binding contains normalized source identity/fingerprint, plugin identity,
 and a selected installation only when its ownership has been validated.
@@ -174,9 +185,13 @@ separate native owner; this does not wrap those entrypoints.
 Lifecycle/publication CLI callers may pass `--project-root` to retain their
 launch project's source declarations while moving waiting supervisors out of a
 replaceable payload. Omission retains the original current-directory behavior;
-the option is not accepted by ordinary read-only catalog discovery. Logger
-carries that read context across its native staging handoff while the same
-live lease still validates source/root/purpose. On Windows Bash, re-executing
+the option is not accepted by ordinary read-only catalog discovery. Logger and
+Worktrees carry that read context across native staging while the same live
+lease still validates source/root/purpose. Worktrees also retains it through
+Python-owned helper publication and native manifest publication. Changing the
+working directory must not qualify an unresolved source or replace the owner
+of a pending reservation; an unattributed retry remains unattributed until its
+own successful publication clears the reservation. On Windows Bash, re-executing
 a command-string Bash before native Python avoids retaining the payload script
 descriptor in MSYS's native-exec parent.
 

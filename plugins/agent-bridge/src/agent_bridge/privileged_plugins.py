@@ -9,7 +9,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal
 
-from acp.exceptions import RequestError
 from pydantic import BaseModel, Field, field_validator
 
 from .spawn_target import REQUEST_OVERRIDES_KEY, SpawnTarget
@@ -69,7 +68,9 @@ def capabilities() -> dict[str, Any]:
     """Only the actual privileged receiver advertises this preparation owner."""
     from . import elevated
 
-    return {"field_meta": {META_KEY: {"version": 1}}} if elevated.is_subdaemon() else {}
+    return {
+        "field_meta": {META_KEY: {"version": 1, "repository_hosting_version": 1}},
+    } if elevated.is_subdaemon() else {}
 
 
 async def start_client(client: Any, process: Any, session: Any) -> None:
@@ -119,6 +120,10 @@ def _require_capability(client: Any) -> None:
         raise PrivilegedLaunchRefused(
             "Privileged receiver lacks plugin preparation capability; no session was requested"
         )
+    if type(capability.get("repository_hosting_version")) is not int or capability["repository_hosting_version"] != 1:
+        raise PrivilegedLaunchRefused(
+            "Privileged receiver lacks repository hosting enforcement; no session was requested"
+        )
 
 
 async def lifecycle_rpc(client: Any, method: Any, **params: Any) -> Any:
@@ -127,6 +132,8 @@ async def lifecycle_rpc(client: Any, method: Any, **params: Any) -> Any:
     if context is None:
         return await client._lifecycle_rpc(method, **params)
     _require_capability(client)
+    from acp.exceptions import RequestError
+
     try:
         result = await client._lifecycle_rpc(
             method, **params, **{META_KEY: context.model_dump(mode="json")},
@@ -158,6 +165,8 @@ def read_context(metadata: dict[str, Any], agent: str | None) -> PrivilegedConte
     """Validate only our namespace, keeping unrelated ACP metadata additive."""
     if META_KEY not in metadata:
         return None
+    from acp.exceptions import RequestError
+
     from . import elevated
 
     try:

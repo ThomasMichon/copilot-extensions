@@ -20,24 +20,38 @@ def test_payload_manifest_describes_agent_dispatch_runtime() -> None:
     )
     assert manifest == {
         "schema": "copilot-extensions.payload-invocation",
-        "version": 1,
+        "version": 2,
         "command": "agent-dispatch",
         "module": "agent_dispatch",
-        "runtimeRoot": ".agent-dispatch",
+        "legacyRuntimeRoot": ".agent-dispatch",
+        "installationContext": "required",
         "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
         "purpose": "Coordinate queued agent work and task lifecycles",
         "installer": "install",
         "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
+        "payloadRootEnv": "AGENT_DISPATCH_PAYLOAD_ROOT",
+        "payloadDispatcher": {
+            "posix": "scripts/runtime-gate.sh",
+            "windows": "scripts/runtime-gate.ps1",
+        },
     }
 
     posix = (PLUGIN / "bin" / "agent-dispatch").read_text(encoding="utf-8")
     powershell = (PLUGIN / "bin" / "agent-dispatch.ps1").read_text(
         encoding="utf-8"
     )
-    assert 'bash "$_installer" provision' in posix
+    assert 'exec bash "$_payload_root/scripts/runtime-gate.sh" "$@"' in posix
+    assert 'export AGENT_DISPATCH_PAYLOAD_ROOT="$_payload_root"' in posix
+    assert '"$_installer" provision' not in posix
     assert "payload-dir" not in posix
-    assert "$_installer provision" in powershell
+    assert "$env:AGENT_DISPATCH_PAYLOAD_ROOT = $_payloadRoot" in powershell
+    assert (
+        "$_payloadDispatcher = Join-Path $_payloadRoot 'scripts\\runtime-gate.ps1'"
+        in powershell
+    )
+    assert "& $_payloadDispatcher @args" in powershell
+    assert "$_installer provision" not in powershell
     assert "payload-dir" not in powershell
 
 
@@ -129,9 +143,12 @@ def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
     shadow.chmod(0o755)
 
     env = os.environ.copy()
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     env.update(
         {
             "HOME": str(home),
+            "AGENT_DISPATCH_INSTALL_DIR": str(runtime),
+            "AGENT_DISPATCH_NO_SELFPROVISION": "1",
             "COPILOT_PLUGIN_ROOT": str(PLUGIN),
             "PATH": f"{shadow_bin}{os.pathsep}{env['PATH']}",
         }
@@ -142,8 +159,10 @@ def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
         env=env,
         capture_output=True,
         text=True,
-        check=True,
+        timeout=30,
+        check=False,
     )
+    assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == "-m agent_dispatch create example|payload"
     assert not shadow_marker.exists()
 

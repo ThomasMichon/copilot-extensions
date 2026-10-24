@@ -237,6 +237,46 @@ def test_native_mode_needs_no_python_and_never_mutates_legacy(tmp_path, enabled)
     assert not (profile / ".local").exists()
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_native_frozen_input_checks_canonical_source_bytes_and_ignores_only_generated_files(
+    legacy_staging, changed,
+):
+    import ast
+
+    profile, origin, _, _, environment = legacy_staging
+    repository = SCRIPTS.parents[2]
+    tree = ast.parse((repository / "libs" / "installer-engine" / "installer_engine.py").read_text())
+    generated = ast.literal_eval(next(
+        node.value for node in tree.body if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "_GENERATED_DIRECTORIES"
+                for target in node.targets)
+    ))
+    for name in (*generated, "fixture.egg-info", "fixture.dist-info"):
+        directory = origin / name
+        directory.mkdir()
+        (directory / "generated").write_text("not an admitted input", encoding="utf-8")
+    (origin / "ignored.pyc").write_bytes(b"not a source input")
+    (origin / "ignored.pyo").write_bytes(b"not a source input")
+    (origin / "empty-directory").mkdir()
+    copied = profile / ".agent-pull-requests" / ".install-stage" / "request" / origin.name
+    shutil.copytree(origin, copied, ignore=shutil.ignore_patterns(
+        *generated, "*.egg-info", "*.dist-info", "*.pyc", "*.pyo", "empty-directory",
+    ))
+    if changed:
+        (copied / "content.txt").write_text("not the source bytes", encoding="utf-8")
+    environment.update(COPILOT_PLUGIN_ROOT=str(origin), COPILOT_PLUGIN_INSTALL_STAGED="1",
+                       COPILOT_PLUGIN_STAGED_FROM=str(origin))
+    if os.name == "nt":
+        environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+    result = native(copied / "scripts" / "payload-mode", environment=environment)
+    if changed:
+        assert result.returncode != 0 and "differs from its origin" in result.stderr
+    else:
+        assert result.returncode == 0 and result.stdout.strip() == "legacy", result.stderr
+    assert not (profile / ".agent-pull-requests" / "current-version").exists()
+    assert not (profile / ".local").exists()
+
+
 @pytest.mark.parametrize("overrides", ["absent", {}, {"fixture": {"enabled": True}}, None, "invalid"])
 def test_posix_legacy_admission_distinguishes_missing_and_invalid_marketplaces(tmp_path, overrides):
     from test_source_install_transactions import _host, _quote
@@ -312,6 +352,36 @@ def test_first_touch_uses_canonical_receipt_and_activation_without_owner(first_t
     for key in ("versionsRoot", "stateRoot", "runRoot", "launchersRoot"):
         assert not Path(validated[key]).exists()
     assert not (profile / ".agent-pull-requests").exists()
+
+
+def test_command_cannot_activate_an_unqualified_cold_cell(first_touch, monkeypatch):
+    module, profile = first_touch
+    monkeypatch.setattr(module, "installer", lambda: SimpleNamespace(foundation=lambda: api))
+    assert module.discover(api)[0]["reason"] == "activation-required"
+    before = set(profile.rglob("*"))
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "ordinary cold command must not start an installer",
+    ))
+    with pytest.raises(PermissionError, match="qualified installation driver"):
+        module.execute(["--help"])
+    assert set(profile.rglob("*")) == before
+
+
+def test_command_cannot_provision_an_empty_active_cell(selected, monkeypatch):
+    module, installation, runtime, current, _ = selected
+    adapter = SimpleNamespace(
+        foundation=lambda: api, management_version=lambda: runtime.payload_version,
+    )
+    monkeypatch.setattr(module, "installer", lambda: adapter)
+    monkeypatch.setattr(module, "discover", lambda _: (
+        current, installation.durable_home, installation.os_profile, {},
+    ))
+    monkeypatch.setattr(module, "selection", lambda *args: None)
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "ordinary cold command must not start an installer",
+    ))
+    with pytest.raises(PermissionError, match="qualified installation driver"):
+        module.execute(["--help"])
 
 
 def test_existing_unactivated_receipt_requires_explicit_decision(first_touch):
@@ -583,6 +653,56 @@ def test_legacy_staging_installer_revalidates_marketplace_opt_out(
     )
     assert not (profile / ".local").exists()
     assert not (profile / ".copilot-extensions" / "marketplaces").exists()
+
+
+@pytest.mark.parametrize("damage", [
+    "none", "stage-content", "unselected", "stamped", "identity", "missing-provenance",
+])
+def test_native_staged_snapshot_requires_current_canonical_selection(legacy_staging, damage):
+    profile, origin, _, settings, environment = legacy_staging
+    captured = api.resolve_context(
+        payload_root=origin, plugin_id="agent-pull-requests",
+        copilot_home=profile / ".copilot", environment=environment,
+    )
+    installation = profile / ".agent-pull-requests"
+    snapshot = installation / "snapshots" / "1.0.0-retained"
+    shutil.copytree(origin, snapshot)
+    receipt = snapshot / "snapshot-provenance.json"
+    document = {
+        "schema": "copilot-extensions.legacy-snapshot-source", "version": 2,
+        "snapshotId": snapshot.name, "payloadVersion": "1.0.0", "resolution": captured,
+    }
+    receipt.write_text(json.dumps(document), encoding="utf-8")
+    (installation / "payload-dir").write_text(str(snapshot), encoding="utf-8")
+    (installation / "stamped-version").write_text("1.0.0", encoding="utf-8")
+    settings.write_text("{}", encoding="utf-8")
+    staged = installation / ".install-stage" / "request" / "agent-pull-requests"
+    shutil.copytree(snapshot, staged)
+    if damage == "stage-content":
+        (staged / "content.txt").write_text("changed stage", encoding="utf-8")
+    elif damage == "unselected":
+        (installation / "payload-dir").write_text(str(snapshot.with_name("other")), encoding="utf-8")
+    elif damage == "stamped":
+        (installation / "stamped-version").write_text("9.9.9", encoding="utf-8")
+    elif damage == "identity":
+        document["snapshotId"] = "other"
+        for path in (receipt, staged / receipt.name):
+            path.write_text(json.dumps(document), encoding="utf-8")
+    elif damage == "missing-provenance":
+        receipt.unlink()
+        (staged / receipt.name).unlink()
+    environment.update(
+        COPILOT_PLUGIN_ROOT=str(snapshot), COPILOT_PLUGIN_INSTALL_STAGED="1",
+        COPILOT_PLUGIN_STAGED_FROM=str(snapshot),
+    )
+    before = {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()}
+    result = native(staged / "scripts" / "payload-mode", environment=environment)
+    if damage == "none":
+        assert result.returncode == 0 and result.stdout.strip() == "legacy", result.stderr
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()} == before
+    assert not (profile / ".local").exists()
 
 
 @pytest.mark.parametrize("damage", [

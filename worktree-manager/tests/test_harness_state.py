@@ -71,6 +71,7 @@ def _make_home(tmp: Path, *, include_wsl: bool = True) -> Path:
         "repos:\n"
         "  dotfiles:\n"
         "    class: worktree\n"
+        "    agent: true\n"
         "    remote: \"https://github.com/example-operator/dotfiles.git\"\n"
         f"    windows: \"{win}\"\n"
         "    linux: \"" + str(checkout).replace("\\", "/") + "\"\n"
@@ -118,7 +119,7 @@ def test_build_repos_indicators(tmp_path: Path):
     repos = {r.name: r for r in build_repos(home)}
     df = repos["dotfiles"]
     assert df.klass == "worktree"
-    assert df.agent is True            # default when unset
+    assert df.agent is True            # explicit registry opt-in
     assert df.is_project is True       # promoted (in projects.yaml)
     assert df.pr_model == "pr"         # from checkout .agent-worktrees/config.yaml
     assert df.path and Path(df.path).exists()

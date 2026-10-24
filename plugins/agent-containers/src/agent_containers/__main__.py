@@ -31,7 +31,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_flags as _creation_flags
 
-from . import claim_provider_cli, rescue_capture_cli
+from . import claim_provider_cli, hosting_policy, rescue_capture_cli
 from . import copilot_process_auth as process_auth
 from .config import (
     RESTRICTED_PROFILE,
@@ -444,14 +444,9 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
 
     context = _trusted_session_host_context(args.name, args.expected_instance)
     config, fleet, user, workspace = context
-    acp_command = config.acp_command_for(fleet)
-    launcher_token = "{{target_preference_launcher}}"
-    token_count = acp_command.count(launcher_token)
-    if token_count > 1:
-        raise ValueError("target preference template requires exactly one launcher token")
-    instance_id = getattr(context, "instance_id", "")
-    if token_count and (not args.expected_instance or instance_id != args.expected_instance):
-        raise ValueError("target preference launcher requires its selected execution instance")
+    acp_command, launcher_token, token_count, instance_id = hosting_policy.session_host_launch_inputs(
+        context, args.expected_instance,
+    )
     projection_target = args.expected_instance or args.name
     ssh_config = prepare_ssh_config(projection_target, user)
     cleanup_remote_envs(projection_target, user)
@@ -493,6 +488,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     _, acp_command = process_auth.prepare_acp_launch(
         config, fleet, projection_target, user, acp_command, remote_env,
     )
+    acp_command = hosting_policy.guarded_launch(acp_command, workspace)
     remote_command = build_remote_command(
         acp_command,
         remote_env,
@@ -959,6 +955,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
         return launch_task(args, _exec_stdio)
     extra = resolve_extra_copilot_args(getattr(args, "copilot_args", None))
     target = resolve_live_exec_target(args.name, config=load_config())
+    hosting_policy.require_container_hosting(target)
 
     if target.actual_profile == RESTRICTED_PROFILE:
         from .lease import ProviderAdmissionError, session_admission
@@ -1015,6 +1012,7 @@ def _launch_container_agent(
 ) -> int:
     """Launch through the trust-profiled transport while holding its lock."""
     if actual_profile == RESTRICTED_PROFILE:
+        acp_command = hosting_policy.guarded_launch(acp_command, fleet.workspace_folder or config.workspace_folder)
         spawn_cmd = build_restricted_acp_spawn_command(
             container_id or args.name,
             user,
@@ -1101,7 +1099,9 @@ def _launch_container_agent(
     try:
         ssh_config = prepare_ssh_config(args.name, user)
         copilot_auth_env = process_auth.prepare_launch(config, fleet, args.name, user)
-        acp_command = process_auth.wrap_command(acp_command, copilot_auth_env)
+        acp_command = hosting_policy.guarded_launch(
+            process_auth.wrap_command(acp_command, copilot_auth_env), fleet.workspace_folder or config.workspace_folder,
+        )
         remote_command = build_remote_command(acp_command, remote_env)
         spawn_cmd = build_ssh_command(
             ssh_config,

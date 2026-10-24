@@ -42,6 +42,17 @@ planes such as a worktree manager, agent-bridge, or a human operator.
 
 This plugin ships six cooperating payload pieces:
 
+**Repository hosting veto:** live arming (`mode: auto` or explicit `force`) and
+cutover retry require a fresh, read-only `agent-worktrees agent-policy check
+--path <cwd> --operation handoff --json` through the attributed peer command.
+Unsupported or refusing receivers block automatic pickup; `force` does not
+bypass repository policy. A trigger stores the baton and session-state copy
+first. On refusal it records manual-only lineage and returns the seed, without
+logging a live request or pinging Bridge. Save, consume and history remain
+independent of hosting eligibility. The actual successor receiver must recheck
+before launch. Configuration semantics are owned by the shared
+[repository-policy library](../../libs/repository-policy/README.md).
+
 The custom-transfer thresholds/workflows described below apply when native
 continuity is not selected, or the operator explicitly requests owner/process
 transfer. The native-first selection above takes precedence for context-only

@@ -1103,6 +1103,8 @@ async def resync_session(session_id: str, request: Request):
     mgr: SessionManager = request.app.state.session_manager
     try:
         count = await mgr.resync_session(session_id)
+    except DaemonDrainingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except ValueError as exc:
@@ -1478,6 +1480,8 @@ async def resume_session(session_id: str, request: Request):
     mgr: SessionManager = request.app.state.session_manager
     try:
         session = await mgr.resume_session(session_id)
+    except DaemonDrainingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     except ValueError as exc:

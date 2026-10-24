@@ -37,6 +37,8 @@ def _args(**kw):
 
 @pytest.fixture
 def seams(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.hosting_policy.require_codespace_hosting",
+                        lambda *args, **kwargs: None)
     calls = types.SimpleNamespace(
         holds=[], releases=[], reserve=[], release_res=[], remote=[], ssh=[], deregistered=[], ref_payloads=[],
         live_rows={"anchor-example-web@cs-1": {"session_id": "sid-42", "venue": {"target": "cs-1"}},
@@ -116,6 +118,20 @@ def seams(monkeypatch):
     monkeypatch.setattr("venue_copilot.refs.deliver_note",
                         lambda sid, note, **kwargs: calls.messages.append((sid, note, kwargs)) or True)
     return calls
+
+
+def test_repository_refusal_precedes_owner_reservation_and_launch(seams, monkeypatch, capsys):
+    def denied(*args, **kwargs):
+        raise RuntimeError("expose_agent: false")
+
+    monkeypatch.setattr("agent_codespaces.hosting_policy.require_codespace_hosting", denied)
+    assert detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED)) == 1
+    assert seams.holds == []
+    assert seams.reserve == []
+    assert seams.ssh == []
+    assert seams.remote == []
+    captured = capsys.readouterr()
+    assert "expose_agent: false" in captured.out + captured.err
 
 
 def _ssh(calls, *, stdout="", stderr="", code=0, rc=None):
@@ -1167,6 +1183,9 @@ def test_admitted_seed_with_lost_responses_retains_owner_and_rejoins_same_operat
     assert pending["creation_receipt"] == receipt and pending["operation"] == "r1"
     # Connection expiry does not remove the separately retained delivery.
     monkeypatch.setattr(owner, "get_hold", lambda *args: None)
+    def deny_new_launch(*args, **kwargs):
+        raise RuntimeError("expose_agent: false must not block retained delivery settlement")
+    monkeypatch.setattr("agent_codespaces.hosting_policy.admit_detached_launch", deny_new_launch)
     # A failed reconciliation preserves the ledger and never relaunches.
     assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams)) == 75
     capsys.readouterr()
@@ -1183,6 +1202,19 @@ def test_admitted_seed_with_lost_responses_retains_owner_and_rejoins_same_operat
     assert queue.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
     assert all(value == attempts[0] for value in attempts)
     queue.close()
+
+
+def test_vanished_pending_delivery_rechecks_hosting_before_new_launch(seams, monkeypatch, capsys):
+    snapshots = iter([{"status": "admitted"}, None])
+    monkeypatch.setattr(owner, "get_pending_delivery", lambda *args: next(snapshots))
+    def deny(*args, **kwargs):
+        raise RuntimeError("expose_agent: false")
+    monkeypatch.setattr("agent_codespaces.hosting_policy.admit_detached_launch", deny)
+    assert detach.cmd_detach(
+        _args(worktree_id="wt-7"), ssh_session=_ssh(seams),
+    ) == 1
+    assert "expose_agent: false" in json.loads(capsys.readouterr().out)["error"]
+    assert seams.ssh == [] and seams.holds == []
 
 
 def test_pending_recovery_probe_failure_retains_journal_without_task_or_mux_launch(

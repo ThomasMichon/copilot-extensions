@@ -41,6 +41,7 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path, config):
 def admission_config(tmp_path, monkeypatch):
     monkeypatch.setattr(request.cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(request.cfg, "detect_platform", lambda: "windows")
+    (tmp_path / "tree").mkdir()
     registry = tmp_path / ".agent-worktrees" / "machines.yaml"
     registry.parent.mkdir()
     registry.write_text("machines: {}\n", encoding="utf-8")
@@ -152,7 +153,12 @@ def test_safe_but_mismatched_receipt_never_redirects_replay(
     intent = _intent(kind)
     record = tracking.create_new_record("wt-b", "worktree/wt-b", str(tmp_path / "tree"),
                                        "demo", "test", "windows", tmp_path)
+    if kind == "resume":
+        tracking.create_new_record(
+            "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+        )
     args = {
+        "project": admission_config.repo_name,
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
         "fingerprint": hashlib.sha256(
             json.dumps(intent, sort_keys=True, ensure_ascii=False).encode("utf-8"),
@@ -305,6 +311,7 @@ def test_legacy_long_allocation_is_recovered_without_renaming(
     intent = _intent("new")
     identity = "test-wsl-wsl-20261013-100000-" + intent["request_id"]
     request._apply_admit({
+        "project": config.repo_name,
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
         "fingerprint": hashlib.sha256(
             json.dumps(intent, sort_keys=True, ensure_ascii=False).encode("utf-8"),
@@ -569,6 +576,7 @@ def test_status_never_exposes_incomplete_new_creation_as_ready(tmp_path, authori
                                        "demo", "test", "windows", tmp_path)
     intent = _intent("new")
     request._dispatch("launch_request_admit", {
+        "project": authority.repo_name,
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
         "fingerprint": "f" * 64, "kind": "new", "worktree_id": "wt-a",
         "timestamp": "20261010-120000",
@@ -580,6 +588,9 @@ def test_status_never_exposes_incomplete_new_creation_as_ready(tmp_path, authori
 
 
 def test_status_unstaged_resume_is_admission_incomplete(tmp_path, authority):
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+    )
     intent = _intent()
     request._dispatch("launch_request_admit", {
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
@@ -645,6 +656,9 @@ def test_corrupt_admission_is_structured_for_every_registered_handler(
 
 
 def test_corrupt_admission_returns_over_real_wire_and_daemon_remains_usable(tmp_path, authority):
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "tree"), "demo", "test", "windows", tmp_path,
+    )
     args = {
         "tracking_dir": str(tmp_path), "request_id": "a" * 32,
         "fingerprint": "f" * 64, "kind": "resume", "worktree_id": "wt-a",

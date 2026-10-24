@@ -116,6 +116,28 @@ def _roles(value):
             raise PlanError("role declaration must be an object")
 
 
+def configuration_capacity(config, *, fleet_id):
+    """Validate the shared adopter contract without altering custom declarations."""
+    record(config, "fleet-manager.config", {"fleet_id", "revision", "capacity", "roles"},
+           {"template", "extensions"})
+    if config["fleet_id"] != fleet_id:
+        raise PlanError("adopter fleet identity mismatch")
+    identifier(config["revision"], "config revision")
+    capacity = config["capacity"]
+    if not isinstance(capacity, dict) or set(capacity) != {"machine_limit", "execution_hosts"}:
+        raise PlanError("unsupported capacity declaration")
+    integer(capacity["machine_limit"], "configured machine limit", minimum=1, maximum=MAX_ITEMS)
+    integer(capacity["execution_hosts"], "configured execution hosts", maximum=MAX_ITEMS)
+    _roles(config["roles"])
+    if "template" in config:
+        provenance = config["template"]
+        if not isinstance(provenance, dict) or set(provenance) != {"id", "revision"}:
+            raise PlanError("unsupported template provenance")
+        identifier(provenance["id"], "template provenance id")
+        identifier(provenance["revision"], "template provenance revision")
+    return capacity
+
+
 def plan(template, config, live, *, fleet_id, machine_limit, now):
     """Return proposals only; never mutate input, create hosts, or retire resources."""
     identifier(fleet_id, "fleet id")
@@ -138,23 +160,7 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
         raise PlanError("template requires at least one central service role")
 
     if config is not None:
-        record(config, "fleet-manager.config", {"fleet_id", "revision", "capacity", "roles"},
-               {"template", "extensions"})
-        if config["fleet_id"] != fleet_id:
-            raise PlanError("adopter fleet identity mismatch")
-        identifier(config["revision"], "config revision")
-        capacity = config["capacity"]
-        if not isinstance(capacity, dict) or set(capacity) != {"machine_limit", "execution_hosts"}:
-            raise PlanError("unsupported capacity declaration")
-        integer(capacity["machine_limit"], "configured machine limit", minimum=1, maximum=MAX_ITEMS)
-        integer(capacity["execution_hosts"], "configured execution hosts", maximum=MAX_ITEMS)
-        _roles(config["roles"])
-        if "template" in config:
-            provenance = config["template"]
-            if not isinstance(provenance, dict) or set(provenance) != {"id", "revision"}:
-                raise PlanError("unsupported template provenance")
-            identifier(provenance["id"], "template provenance id")
-            identifier(provenance["revision"], "template provenance revision")
+        capacity = configuration_capacity(config, fleet_id=fleet_id)
     else:
         capacity = {"machine_limit": machine_limit, "execution_hosts": template["execution_hosts"]}
 

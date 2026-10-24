@@ -11,7 +11,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "enum": [1, 2]
     },
     "contracts": {
       "type": "array",
@@ -27,7 +27,33 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": 1}}},
+      "then": {
+        "properties": {
+          "contracts": {
+            "items": {
+              "not": {"required": ["provenance_chunks"]},
+              "properties": {"provenance": {"minItems": 1}}
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
+    "provenanceChunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "path", "sha256", "record_count"],
+      "properties": {
+        "contract": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$"},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "record_count": {"type": "integer", "minimum": 1}
+      }
+    },
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
@@ -267,10 +293,15 @@
         },
         "provenance": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/runtimeProvenance"
           }
+        },
+        "provenance_chunks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/provenanceChunk"}
         },
         "support_window": {
           "type": "string",
@@ -292,7 +323,11 @@
           "type": "string",
           "minLength": 1
         }
-      }
+      },
+      "anyOf": [
+        {"properties": {"provenance": {"minItems": 1}}},
+        {"required": ["provenance_chunks"]}
+      ]
     },
     "deferredContract": {
       "type": "object",

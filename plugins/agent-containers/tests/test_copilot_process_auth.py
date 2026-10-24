@@ -16,7 +16,7 @@ from ssh_manager import SSHConfig
 from agent_containers import __main__ as cli
 from agent_containers import copilot_detach as detach
 from agent_containers import copilot_process_auth as auth
-from agent_containers import copilot_venue, resolver
+from agent_containers import copilot_venue, hosting_policy, resolver
 from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.session_host_context import TrustedContext
 from agent_containers.ssh_transport import cleanup_remote_env as real_cleanup_remote_env
@@ -34,7 +34,8 @@ def launch_seams(monkeypatch):
     config = ContainersConfig(forward_gh_token=True, relay_enabled=False)
     fleet = FleetConfig(copilot_cli_account="inference-user")
     target = SimpleNamespace(config=config, fleet=fleet, user="vscode",
-                             actual_profile="trusted", workspace_folder="/workspace")
+                             actual_profile="trusted", workspace_folder="/workspace",
+                             container_id="fixture-instance")
     seen = SimpleNamespace(staged=[], commands=[], cleaned=[], native=[], created=True)
     tokens = iter(("inference-one", "inference-two"))
     monkeypatch.setattr(resolver, "host_copilot_cli_token", lambda account: next(tokens))
@@ -78,6 +79,16 @@ def launch_seams(monkeypatch):
         ))
     monkeypatch.setattr(cli, "_exec_stdio", lambda argv, env:
         seen.commands.append((argv, {"env": env})) or 0)
+
+    def policy_read(selected, command):
+        assert selected.container_id == target.container_id
+        assert 'agent-policy check --path "$PWD"' in command
+        return subprocess.CompletedProcess([], 0, json.dumps({
+            "version": 1, "allowed": True, "repository": "/workspace",
+            "expose_agent": None, "sources": [], "denied_by": [],
+        }), "")
+
+    monkeypatch.setattr(hosting_policy, "_run", policy_read)
     return target, seen
 
 
@@ -90,7 +101,9 @@ def test_each_actual_launch_reads_updated_source_without_manager_token(
     args = SimpleNamespace(name="example-1", stdio=False, expected_instance=None, host_relay_port=None)
     if boundary == "session-host":
         monkeypatch.setattr(cli, "_trusted_session_host_context", lambda *a:
-            TrustedContext(target.config, target.fleet, target.user, "/workspace", ""))
+            TrustedContext(
+                target.config, target.fleet, target.user, "/workspace", target.container_id,
+            ))
     if boundary == "attached":
         import ssh_manager
         import venue_copilot
@@ -121,6 +134,9 @@ def test_each_actual_launch_reads_updated_source_without_manager_token(
                 args, target.config, target.fleet, "trusted", target.user,
                 "copilot --acp --stdio",
             ) == 0
+            command = seen.commands[-1][0][-1]
+            assert "repository_policy_launch" in command
+            assert command.index("agent-policy check") < command.index(".env.d")
         elif boundary == "session-host":
             assert cli._cmd_session_host_prepare(args) == 0
             prepared = json.loads(capsys.readouterr().out)
