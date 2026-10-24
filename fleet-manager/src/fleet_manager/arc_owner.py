@@ -32,6 +32,7 @@ _REFERENCE_FIELDS = (
 MAX_HELM_DEPTH = 64
 MAX_HELM_ITEMS = 4096
 MAX_HELM_NODES = 65536
+_YAML_RESERVED = frozenset({"y", "n", "yes", "no", "true", "false", "on", "off", "null"})
 
 
 def _hash(value):
@@ -92,6 +93,11 @@ class ArcDeployment:
             raise PlanError("ARC runner and controller namespaces must be separate")
         for name in ("node", "runner_group"):
             identifier(settings[name], "ARC selected setting")
+        for name in ("namespace", "release", "controller_namespace", "controller_service_account",
+                     "runner_service_account", "credential_secret", "runner_group"):
+            scalar = settings[name]
+            if scalar[0].isdigit() or scalar.lower() in _YAML_RESERVED:
+                raise PlanError("ARC chart names must be unambiguous string scalars")
         if (type(settings["runner_image"]) is not str
                 or not _IMAGE.fullmatch(settings["runner_image"])):
             raise PlanError("ARC runner image must be digest pinned")

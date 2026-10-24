@@ -1,14 +1,16 @@
-"""Actual native protocol fixture; not a real Helm/cluster or deployment proof."""
+"""Pure protocol matrix and selected native boundaries, not live deployment proof."""
 
 from __future__ import annotations
 
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
 import sys
 import time
 
@@ -27,65 +29,61 @@ from test_runtime_identity import NOW
 from test_runtime_identity import keys as keys
 
 
-_HELM = r'''
-import json
-from pathlib import Path
-import sys
-args = sys.argv[1:]
-root = Path.cwd()
-with (root / "commands.jsonl").open("a") as out:
-    out.write(json.dumps(args) + "\n")
-state = root / "release.json"
-live = root / "live-resource.json"
-def option(name):
-    return args[args.index(name) + 1]
-if args[0] == "list":
-    print(json.dumps([] if not state.exists() else [{
-        "name": option("--filter").strip("^$"), "namespace": option("--namespace"),
-    }]))
-elif args[0] == "status":
-    status = json.loads(state.read_text())
-    if "--show-resources" in args:
-        objects = []
-        if live.exists():
-            values = json.loads(live.read_text())
-            objects.append({
-                "apiVersion": "actions.github.com/v1alpha1", "kind": "AutoscalingRunnerSet",
-                "metadata": {"name": status["name"], "namespace": status["namespace"],
-                             "uid": "actual-resource", "resourceVersion": "1"},
-                "spec": {key: values[key] for key in (
-                    "githubConfigUrl", "githubConfigSecret", "runnerGroup", "runnerScaleSetName",
-                    "minRunners", "maxRunners", "template",
-                )},
-            })
-        status["info"]["resources"] = {"v1alpha1/AutoscalingRunnerSet": objects}
-    print(json.dumps(status))
-elif args[:2] == ["get", "values"]:
-    print(json.dumps(json.loads(state.read_text())["config"]))
-elif args[0] == "upgrade":
-    assert Path(args[2]).read_bytes() == b"selected-fixture-chart"
-    values = json.load(sys.stdin)
-    assert isinstance(values["githubConfigSecret"], str)
-    previous = json.loads(state.read_text()) if state.exists() else {}
-    value = {
-        "name": args[1], "namespace": option("--namespace"),
-        "version": previous.get("version", 0) + 1,
-        "info": {"status": "deployed", "description": option("--description")},
-        "config": values,
-    }
-    state.write_text(json.dumps(value))
-    if not live.exists() or previous.get("config") != values:
-        live.write_text(json.dumps(values))
-    if (root / "lost-reply").exists():
-        raise SystemExit(7)
-    print("{}")
-else:
-    raise SystemExit(9)
-'''
+def _helm_protocol(args, root, input_text):
+    import json
+    from pathlib import Path
+
+    with (root / "commands.jsonl").open("a") as out:
+        out.write(json.dumps(args) + "\n")
+    state, live = root / "release.json", root / "live-resource.json"
+
+    def option(name):
+        return args[args.index(name) + 1]
+
+    if args[0] == "list":
+        return 0, json.dumps([] if not state.exists() else [{
+            "name": option("--filter").strip("^$"), "namespace": option("--namespace"),
+        }])
+    if args[0] == "status":
+        status = json.loads(state.read_text())
+        if "--show-resources" in args:
+            objects = []
+            if live.exists():
+                values = json.loads(live.read_text())
+                objects.append({
+                    "apiVersion": "actions.github.com/v1alpha1", "kind": "AutoscalingRunnerSet",
+                    "metadata": {"name": status["name"], "namespace": status["namespace"],
+                                 "uid": "actual-resource", "resourceVersion": "1"},
+                    "spec": {key: values[key] for key in (
+                        "githubConfigUrl", "githubConfigSecret", "runnerGroup", "runnerScaleSetName",
+                        "minRunners", "maxRunners", "template",
+                    )},
+                })
+            status["info"]["resources"] = {"v1alpha1/AutoscalingRunnerSet": objects}
+        return 0, json.dumps(status)
+    if args[:2] == ["get", "values"]:
+        return 0, json.dumps(json.loads(state.read_text())["config"])
+    if args[0] == "upgrade":
+        assert Path(args[2]).read_bytes() == b"selected-fixture-chart"
+        values = json.loads(input_text)
+        assert isinstance(values["githubConfigSecret"], str)
+        previous = json.loads(state.read_text()) if state.exists() else {}
+        value = {
+            "name": args[1], "namespace": option("--namespace"),
+            "version": previous.get("version", 0) + 1,
+            "info": {"status": "deployed", "description": option("--description")},
+            "config": values,
+        }
+        state.write_text(json.dumps(value))
+        if not live.exists() or previous.get("config") != values:
+            live.write_text(json.dumps(values))
+        return (7, "") if (root / "lost-reply").exists() else (0, "{}")
+    return 9, ""
 
 
 @pytest.fixture
-def rig(tmp_path, monkeypatch, keys):
+def rig(tmp_path, monkeypatch, keys, request):
+    native_protocol = bool(getattr(request, "param", False))
     root = Path(__file__).absolute().parents[2]
     monkeypatch.syspath_prepend(str(root / "libs" / "agent-procutil" / "src"))
     from agent_procutil.owned_process import run_caller_owned
@@ -131,12 +129,20 @@ def rig(tmp_path, monkeypatch, keys):
     selected = [ArcDeployment.from_dict(value, chart=chart)]
     executable = Path(sys.executable).absolute()
     script = tmp_path / "helm-fixture.py"
-    script.write_text(_HELM)
+    script.write_text(
+        "import sys\nfrom pathlib import Path\n" + inspect.getsource(_helm_protocol)
+        + "\ncode, output = _helm_protocol(sys.argv[1:], Path.cwd(), sys.stdin.read())\n"
+        "print(output)\nraise SystemExit(code)\n"
+    )
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("fixture-only")
 
     def native(argv, **kwargs):
-        return run_caller_owned([str(executable), str(script), *argv[1:]], **kwargs)
+        if native_protocol:
+            return run_caller_owned([str(executable), str(script), *argv[1:]], **kwargs)
+        code, output = _helm_protocol(argv[1:], Path(kwargs["cwd"]), kwargs["input_text"])
+        kwargs["on_settled"]()
+        return subprocess.CompletedProcess(argv, code, output, "")
 
     journal = NodeJournal(
         tmp_path / "node.db", authority="gateway-a", installation="install-a", target="worker-a",
@@ -168,6 +174,7 @@ def rig(tmp_path, monkeypatch, keys):
         "owner": owner, "harness": harness, "selected": selected, "value": value,
         "chart": chart, "request": request, "permit": permit, "store": store,
         "journal": journal, "root": tmp_path, "allocation": allocation,
+        "native_protocol": native_protocol,
     }
 
 
@@ -192,7 +199,9 @@ def test_live_status_envelope_has_explicit_byte_depth_and_duplicate_key_bounds()
             ArcHelmOwner._json(raw)
 
 
+@pytest.mark.parametrize("rig", [True], indirect=True)
 def test_real_native_boundary_converges_and_repeat_does_not_replay(rig):
+    assert rig["native_protocol"]
     request = rig["request"]()
     result = rig["owner"].converge(request, rig["permit"](request))
     result.check_intent(request)
@@ -221,7 +230,9 @@ def test_real_native_boundary_converges_and_repeat_does_not_replay(rig):
     assert not list(rig["root"].glob("fleet-arc-*"))
 
 
+@pytest.mark.parametrize("rig", [True], indirect=True)
 def test_lost_native_reply_survives_restart_and_new_operation_cannot_take_custody(rig):
+    assert rig["native_protocol"]
     request = rig["request"]()
     (rig["root"] / "lost-reply").touch()
     with pytest.raises(PlanError, match="uncertain"):
@@ -496,6 +507,9 @@ else:
     ("github_url", "https://user:secret@example.invalid/repository"),
     ("github_url", "https://example.invalid/repository?token=secret"),
     ("namespace", "arc-system"), ("release", "--take-ownership"),
+    ("runner_group", "true"), ("runner_group", "0123"), ("release", "yes"),
+    ("namespace", "123"), ("credential_secret", "false"),
+    ("controller_service_account", "null"), ("runner_service_account", "no"),
 ])
 def test_unsafe_selected_settings_are_rejected_without_native_work(rig, setting, value):
     selected = copy.deepcopy(rig["value"])

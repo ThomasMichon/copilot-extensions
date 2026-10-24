@@ -103,6 +103,13 @@ exact owned ARC spec comparison. The selected forge URL is normalized by removin
 trailing slashes before generating values, matching the official chart's scope
 representation.
 
+The fixed profile also refuses numeric-leading or YAML-reserved chart names
+(including boolean/null spellings) for namespaces, releases, service accounts,
+credential-secret names and runner groups. The official chart emits those
+fields as plain YAML scalars; accepting an ambiguous string could change its
+type only after durable effect custody had begun. This is a supported-profile
+restriction, not a change to Kubernetes or GitHub's general naming rules.
+
 The ownership marker binds the selected chart and generated values, rather than
 the incidental proposal generation. A repeated original operation returns its
 retained receipt without any native call. A newly admitted generation always
@@ -137,8 +144,14 @@ receipts are not a current health probe.
 ## Qualification
 
 `test_arc_owner.py` uses the real identity verifier/admission authority,
-preparation store and node journal plus actual contained native processes
-implementing a synthetic Helm protocol. It covers exact grant binding,
+preparation store and node journal with one synthetic Helm protocol. Pure input,
+scope and drift matrices invoke that protocol in-process. Selected convergence,
+exact replay and lost-reply controls run it through actual contained native
+processes; contention retains two separate installed journal processes.
+The native controls explicitly assert that their real-process mode is selected.
+This avoids multiplying incidental interpreter startup for pure field matrices
+without pooling or removing the process-lifetime and concurrent-writer proofs.
+It covers exact grant binding,
 revocation, fleet isolation, no takeover, exact repeat, stored/live-resource drift, lost replies,
 restart and UNKNOWN custody. This is process-boundary/component evidence,
 not a real Helm deployment or live-cluster proof. Its separate live-resource
