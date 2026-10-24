@@ -252,6 +252,9 @@ supplier paths and normal runtime admission. PowerShell `-File` qualification
 names only its script operand, leaving subsequent optional data/output paths
 opaque even though strict Save admission does not yet support that option
 grammar. No dependency check executes provider code.
+The non-admitting qualification path also recognizes bounded POSIX shell
+flag/option prefixes (for example `sh -u` and `bash -o nounset`), without
+qualifying arguments after the script or widening strict Save admission.
 Legacy webhook emitters keep their existing runtime builder; command/builtin
 validation applies only when the registration owner selects that shape.
 A worker identity must retain its defining

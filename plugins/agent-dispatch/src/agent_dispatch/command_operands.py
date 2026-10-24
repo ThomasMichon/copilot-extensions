@@ -23,6 +23,32 @@ def is_python_interpreter(executable: str) -> bool:
     ) is not None
 
 
+def _posix_qualification_operand(command: list[str], *, include_inline: bool) -> int | None:
+    index = 1
+    while index < len(command):
+        value = command[index]
+        if value in {"-", "-s"}:
+            return None
+        if value == "--":
+            return index + 1 if index + 1 < len(command) and command[index + 1] != "-" else None
+        if re.fullmatch(r"-[a-zA-Z]*c", value):
+            return index + 1 if include_inline and index + 1 < len(command) else None
+        if value in {"-o", "+o"}:
+            index += 1
+            if index >= len(command):
+                raise RegistrarError("missing shell option value")
+        elif re.fullmatch(r"[-+][abefhkmnptuvxBCEHPTilr]+", value) or value in {
+            "--norc", "--noprofile", "--posix", "--login",
+        }:
+            pass
+        elif value.startswith(("-", "+")):
+            raise RegistrarError("shell option roles cannot yet be qualified safely")
+        else:
+            return index
+        index += 1
+    return None
+
+
 def script_operand_index(
     command: list[str], *, include_inline: bool = False, strict: bool = True,
 ) -> int | None:
@@ -37,6 +63,8 @@ def script_operand_index(
                         raise RegistrarError("script dependencies after non-Python options cannot yet be validated safely")
                     return index + 1 if index + 1 < len(command) else None
         if _executable_name(command[0]) in {"sh", "bash", "dash", "ash", "zsh", "ksh", "fish"}:
+            if not strict and _executable_name(command[0]) != "fish":
+                return _posix_qualification_operand(command, include_inline=include_inline)
             if len(command) > 1 and command[1] != "-" and not command[1].startswith("-"):
                 return 1
             if len(command) > 2 and command[1] == "-c":

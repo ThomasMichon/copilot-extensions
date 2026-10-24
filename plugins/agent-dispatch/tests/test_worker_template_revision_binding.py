@@ -283,8 +283,9 @@ def test_shell_execution_roles_do_not_treat_later_script_arguments_as_code(comma
 
 
 @pytest.mark.parametrize("kind", ["emitter", "evaluator"])
+@pytest.mark.parametrize("interpreter", ["powershell", "posix", "posix-option"])
 def test_direct_read_only_pointer_discovery_does_not_apply_save_time_grammar(
-    monkeypatch, tmp_path, kind,
+    monkeypatch, tmp_path, kind, interpreter,
 ):
     from dropin_registry import ScanAuthority
     from agent_dispatch import repo_config
@@ -294,10 +295,14 @@ def test_direct_read_only_pointer_discovery_does_not_apply_save_time_grammar(
     execution.mkdir()
     directory = supplier / repo_config.CANONICAL_REPO_CONFIG_DIR / "registrar"
     directory.mkdir(parents=True)
-    script = supplier / "existing.ps1"
+    prefix = {
+        "powershell": ["pwsh", "-File"], "posix": ["sh", "-u"],
+        "posix-option": ["bash", "-o", "nounset"],
+    }[interpreter]
+    script = supplier / ("existing.ps1" if interpreter == "powershell" else "existing.sh")
     script.write_text("Write-Output '[]'", encoding="utf-8")
     output = supplier / "optional.json"
-    command = ["pwsh", "-File", str(script), str(output)]
+    command = [*prefix, str(script), str(output)]
     spec = (
         {"id": "fixture", "command": command, "cwd": "repo:execution:.", "interval_seconds": 60}
         if kind == "emitter" else {
@@ -316,7 +321,7 @@ def test_direct_read_only_pointer_discovery_does_not_apply_save_time_grammar(
     assert authority == ScanAuthority.COMPLETE and len(declarations) == 1
     effective = declarations[0].spec
     argv = effective["command"] if kind == "emitter" else effective["evaluator_spec"]["scripts"]["selected"]
-    assert argv == ["pwsh", "-File", "repo:library:existing.ps1", str(output)]
+    assert argv == [*prefix, f"repo:library:{script.name}", str(output)]
     resolved, cwd = repository_resources.resolve_execution_resources(argv, "repo:execution:.")
     assert resolved == command and cwd == str(execution)
     assert not output.exists()
