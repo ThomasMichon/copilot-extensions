@@ -348,7 +348,11 @@ def add_parsers(sub) -> None:
         help="Require atomically fenced native launch-seed staging",
     )
     parser.add_argument("--seed-id", default=None, help="Execute this already-staged launch intent")
-    parser.add_argument("--launch-attempt-id", default=None, help="Correlate a negotiated remote prompt admission")
+    parser.add_argument("--launch-attempt-id", default=None, help="Correlate a confirmed Manager launch attempt")
+    parser.add_argument(
+        "--require-launch-attempt", action="store_true",
+        help="Require durable prompt-free resolution receipts before launch effects",
+    )
     parser.add_argument("--launch-request-b64", default=None, help="Accept a structured target-local launch request")
     parser.add_argument("--launch-request-status", default=None, help="Inspect an admitted target-local launch request")
     parser.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
@@ -412,12 +416,16 @@ def add_parsers(sub) -> None:
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
     with preview_mode(getattr(args, "dry_run", False)):
+        if getattr(args, "require_launch_attempt", False):
+            from . import launch_attempt
+
+            return launch_attempt.required(args, lambda: _cmd_resolve(args))
         return _cmd_resolve(args)
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
     attempt_id = getattr(args, "launch_attempt_id", None)
-    if attempt_id is not None:
+    if attempt_id is not None and not getattr(args, "require_launch_attempt", False):
         from .launch_request import _protocol_fields
 
         try:
@@ -712,7 +720,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             f"{getattr(state.args, 'environment', None) or ''}".strip()
         )
 
-    if getattr(state.args, "launch_attempt_id", None) is not None:
+    if (
+        getattr(state.args, "launch_attempt_id", None) is not None
+        and not getattr(state.args, "require_launch_attempt", False)
+    ):
         return output._json_error("Launch attempt correlation requires a remote target", exit_code=2)
 
     try:

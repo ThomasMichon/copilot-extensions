@@ -758,3 +758,11 @@ do not establish that later transport fences preserve installed parity.
   review/CI, native POSIX transport qualification and containing-release/
   authorized installed conversation acceptance remain open. This is source
   progress, not a delivered repair or completion of either parent effort.
+- **2026-10-24** -- Negotiated native SSH slice #8605 merged after current-head
+  approval with no findings and green required CI. Source now restores remote
+  New/cold Resume prompts and binds the linked journal's saved attempt to target
+  admission without weakening native-provider or duplicate-delivery fences.
+  Both canonical plans were re-read: installed-source qualification, full
+  engine/native outcome evidence, original conversation/exactly-once delivery,
+  release/authorized rollout and owned-resource cleanup remain open. Continue
+  the linked journal's local/seedless and native-owner correlation next.

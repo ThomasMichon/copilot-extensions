@@ -66,7 +66,8 @@ def test_native_target_retains_correlation_through_replay_and_handoff(
     assert len(tracking.list_records(tmp_path)) == 1
 
 
-def test_native_cli_returns_only_bound_target_evidence(tmp_path, authority, monkeypatch, capsys):
+@pytest.mark.parametrize("journaled", [False, True])
+def test_native_cli_returns_only_bound_target_evidence(tmp_path, authority, monkeypatch, capsys, journaled):
     tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
                                "demo", "test", "windows", tmp_path)
     load_config = launch_request.cfg.load_config
@@ -74,6 +75,7 @@ def test_native_cli_returns_only_bound_target_evidence(tmp_path, authority, monk
                         lambda *a, **kw: load_config(*a, **kw) if kw.get("project") else authority)
     assert resolve_cli.cmd_resolve(parse([
         "--json", "--launch-request-b64", encode(intent()), "--require-native-seed",
+        *(["--require-launch-attempt"] if journaled else []),
     ])) == 0
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["version"] == 2 and receipt["native_seed_required"] is True
@@ -188,8 +190,9 @@ def test_capability_mismatch_refuses_before_configuration(monkeypatch, version, 
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
+@pytest.mark.parametrize("journaled", [False, True])
 @pytest.mark.parametrize("damage", [None, "version", "attempt_id", "native_seed_required", "missing"])
-def test_sender_verifies_target_native_receipt_without_weaker_retry(monkeypatch, shell, damage):
+def test_sender_verifies_target_native_receipt_without_weaker_retry(monkeypatch, shell, journaled, damage):
     monkeypatch.setattr(remote_seed_launch.cfg, "project_name", lambda: "demo")
     calls = []
     def run(argv, **kwargs):
@@ -200,6 +203,7 @@ def test_sender_verifies_target_native_receipt_without_weaker_retry(monkeypatch,
         else:
             options = shlex.split(shlex.split(argv[-1])[-1])
         assert "--require-native-seed" in options
+        assert ("--require-launch-attempt" in options) is journaled
         value = launch_request.decode(options[options.index("--launch-request-b64") + 1])
         assert value == {**intent(), "request_id": value["request_id"]}
         receipt = {
@@ -215,6 +219,8 @@ def test_sender_verifies_target_native_receipt_without_weaker_retry(monkeypatch,
         return SimpleNamespace(returncode=0, stdout=json.dumps(receipt))
     monkeypatch.setattr(remote_seed_launch.subprocess, "run", run)
     args = ["--worktree-id", "wt-a", "--require-native-seed", "--launch-attempt-id=" + "b" * 32]
+    if journaled:
+        args.append("--require-launch-attempt")
     if damage:
         with pytest.raises(RuntimeError, match="unconfirmed"):
             remote_seed_launch.prepare(None, "target", shell, args, intent()["text"])
@@ -228,6 +234,9 @@ def test_sender_verifies_target_native_receipt_without_weaker_retry(monkeypatch,
         else:
             command = plan["remote_command"]
         assert "--require-native-seed" in command and "--seed-id" in command
+        assert ("--require-launch-attempt" in command) is journaled
+        if journaled:
+            assert "--launch-attempt-id=" + "b" * 32 in command
     assert len(calls) == 1
 
 
@@ -241,3 +250,20 @@ def test_attempt_identity_cannot_be_silently_ignored(monkeypatch, options):
     with output.capture_json_output() as captured:
         assert resolve_cli.cmd_resolve(parse([*options, "--launch-attempt-id", "b" * 32])) == 2
     assert "correlation requires" in json.loads(captured.getvalue())["error"]
+
+
+@pytest.mark.parametrize("attempt_id", [None, "b" * 32])
+def test_target_requires_bound_v2_attempt_before_configuration(monkeypatch, attempt_id):
+    value = {**intent(), "attempt_id": attempt_id}
+    called = []
+    def config():
+        called.append(True)
+        raise ValueError("configuration probe reached")
+    monkeypatch.setattr(launch_request.cfg, "load_config", config)
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(parse([
+            "--json", "--launch-request-b64", encode(value),
+            "--require-native-seed", "--require-launch-attempt",
+        ])) == 3
+    assert called == ([] if attempt_id is None else [True])
+    assert ("Invalid launch attempt identity" in captured.getvalue()) is (attempt_id is None)

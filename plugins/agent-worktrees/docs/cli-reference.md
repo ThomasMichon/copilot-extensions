@@ -1011,11 +1011,23 @@ to forward through `--machine`.
 `--require-native-seed` on a non-preview remote JSON prompt negotiates version-2
 target admission and remains on the identity-only second-hop launch. Optional
 `--launch-attempt-id <32-lowercase-hex>` binds the Manager's saved attempt to the
-target receipt; it requires that remote native-prompt path. Local, seedless and
-preview uses refuse before mutation. Old receivers or mismatched receipts fail
+target receipt; without the newer receipt capability it requires that remote
+native-prompt path. Preview uses refuse before mutation. Old receivers or mismatched receipts fail
 visibly without stripping capability flags or automatically repeating New.
 See [the engine-Picker contract](engine-picker-contract.md#ssh-launch-prompt-admission)
 for the envelope, persisted receipt and read-only status fields.
+
+For journaled local and seedless actions, pair that ID with
+`--require-launch-attempt`. Explicit New, worktree and base resolution then
+records a prompt-free, durable initial receipt before effects and binds the
+returned worktree/seed/request IDs before publishing the plan. The same flags
+survive local re-resolution and SSH forwarding. Seedless SSH planning is only
+forwarding evidence, not target admission. Structured prompted admission also
+accepts this fence, requiring a bound version-2 attempt before configuration.
+An older target refuses the flag before effects; no weaker fallback is used.
+These receipts do not prove native launch or prompt acceptance.
+See [resolution receipts](engine-picker-contract.md#launch-attempt-resolution-receipts)
+for storage, crash and evidence boundaries.
 
 ## Keeping worktrees current
 

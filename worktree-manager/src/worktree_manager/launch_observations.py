@@ -98,10 +98,7 @@ def resolve_for(req, *, defer_projections: bool = False) -> tuple[object | None,
                 target_environment=getattr(req, "environment", None),
                 target_no_mux=getattr(req, "no_mux", False),
                 seed=getattr(req, "seed_prompt", None),
-                **({"launch_attempt_id": attempt_id} if (
-                    attempt_id is not None and getattr(req, "machine", None)
-                    and getattr(req, "seed_prompt", None)
-                ) else {}),
+                **({"launch_attempt_id": attempt_id} if attempt_id is not None else {}),
                 **({"defer_projections": True} if defer_projections else {}),
             )
         except engine_client.EngineError:

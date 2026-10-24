@@ -1,0 +1,9 @@
+{
+  "comment": "Require bound engine resolution receipts for every journaled launch action without weaker retries",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

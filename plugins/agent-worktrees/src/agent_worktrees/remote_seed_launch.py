@@ -12,6 +12,7 @@ import uuid
 from agent_procutil import no_window_kwargs
 
 from . import config as cfg
+from .launch_attempt import identity
 from .launch_request import MAX_REQUEST_BYTES
 
 MAX_REMOTE_COMMAND_CHARS = 28000
@@ -56,10 +57,13 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
         not native_required or re.fullmatch(r"[0-9a-f]{32}", attempt_id) is None
     ):
         raise ValueError("Launch attempt identity requires negotiated native seed admission")
+    if "--require-launch-attempt" in args:
+        identity(attempt_id)
     for index, arg in enumerate(args):
         if index == selector_end or arg in (
             "--new", "--worktree-id", "--no-mux", "--defer-new-seed", "--stage-launch-seed",
             "--require-agent-hosting", "--require-native-seed",
+            "--require-launch-attempt",
         ) or arg in attempt_options:
             continue
         raise ValueError(
@@ -82,6 +86,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     command = shell_command(shell, [
         project, "resolve", "--json", "--require-agent-hosting", "--launch-request-b64", encoded,
         *(["--require-native-seed"] if native_required else []),
+        *(["--require-launch-attempt"] if "--require-launch-attempt" in args else []),
     ])
     if len(command) > MAX_REMOTE_COMMAND_CHARS:
         raise ValueError("Remote launch request exceeds the remote shell command limit")
@@ -134,6 +139,8 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
                    "--require-agent-hosting", "--stage-launch-seed", "--seed-id", receipt["seed_id"]]
     if native_required:
         launch_args.append("--require-native-seed")
+    if "--require-launch-attempt" in args:
+        launch_args += ["--require-launch-attempt", "--launch-attempt-id=" + identity(attempt_id)]
     if request["no_mux"]:
         launch_args.append("--no-mux")
     return {

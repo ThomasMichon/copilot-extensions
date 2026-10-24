@@ -224,6 +224,7 @@ def test_remote_option_inventory_covers_all_resolve_parser_destinations() -> Non
         "no_mux", "no_fast_forward", "json", "worktree_id", "codename", "base", "auto",
         "new_worktree", "bridge", "profile", "defer_new_seed", "stage_launch_seed",
         "require_native_seed", "native_resume_session", "launch_attempt_id", "require_agent_hosting",
+        "require_launch_attempt",
         "seed_id", "launch_request_b64", "launch_request_status", "machine", "environment",
         "target_no_mux", "parent_session", "caller_worktree", "owner_ref", "seed", "copilot_args",
     }
