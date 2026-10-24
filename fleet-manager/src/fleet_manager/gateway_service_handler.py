@@ -159,6 +159,7 @@ async def respond(
             "type": "chunk", "id": exchange.id, "seq": exchange.sequence,
             "data": base64.b64encode(response.body[offset:offset + CHUNK_BYTES]).decode("ascii"),
         })
+        request.lifetime.check()
         await exchange.ack
     request.lifetime.check()
     check(request.context.expires_at > time.time(), "caller-context-expired")

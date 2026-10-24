@@ -181,8 +181,10 @@ credential-provider work stays with its current owners.
   through ordinary review before changing runtime behavior.
   #8434 merged after exact-head Copilot approval and required CI; this closes
   reviewed intent only, not runner provisioning or live fleet acceptance.
-- [ ] Implement contributed template/slot composition and capacity-aware
+- [x] Implement contributed template/slot composition and capacity-aware
   named-machine runner allocations, preserving custom registrar state.
+  #8465 supplies the installed design command and JSON resource grid. It does
+  not supply a graphical loadout surface, controller execution or live runners.
 - [ ] Connect the committed desired composition to controller-owned source
   acquisition, preparation, notification and exact-plan approval.
 - [ ] Carry the typed runner declaration through the real supported deployment
@@ -438,6 +440,17 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #8465 merged the installed template/slot designer, portable ARC declaration,
+  dependency-capability closure and named-machine CPU/memory/disk accounting.
+  Exact-head Copilot approval and required checks passed after fixes for
+  publication reload bounds, intermediate expansion, shared adopter validation
+  and full-size blocked-grid diagnostics. Native focused contracts passed
+  (195), as did offline Linux contracts (58) and an actual built/installed
+  dependency-free command consumer. Re-read the parent Request, Plan and
+  Validation Plan after merge. The same worktree continues with controller-owned
+  source acquisition, prepared notification and exact confirmation; graphical
+  presentation, managed execution/lifecycle and actual-job proof remain open.
+  No live pool, routing, credential, capacity or deployment state changed.
 - #8434 merged the capacity-grid loadout child vision, complete confirmed
   Gateway outfitting intent and linked #7192 realization plan. Exact-head
   review and required checks passed. Re-read this parent Plan and Validation

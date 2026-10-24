@@ -13,7 +13,7 @@ import ssl
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import aiohttp
@@ -28,7 +28,7 @@ from .gateway_service_channel import (
 )
 from .gateway_service_context import METHODS
 from .gateway_service_handler import (
-    PROFILE, HandlerBinding, ServiceRequest, respond,
+    PROFILE, HandlerBinding, RequestLifetime, ServiceRequest, respond,
 )
 
 LOG = logging.getLogger(__name__)
@@ -61,8 +61,10 @@ class Exchange:
     ack: asyncio.Future[None] | None = None
     sequence: int = 0
     request: ServiceRequest | None = None
+    lifetime: RequestLifetime = field(default_factory=RequestLifetime, repr=False)
 
     def disconnect(self) -> None:
+        self.lifetime.close()
         if self.request is not None:
             self.request.lifetime.close()
 
@@ -212,21 +214,26 @@ class ServiceConnector:
                 "User-Agent", "Accept", "Accept-Encoding", "Content-Type",
             },
         ) as response:
+            exchange.lifetime.check()
             response_status(response.status)
             check(response.headers.getall("Content-Encoding", ["identity"]) == ["identity"],
                   "invalid-backend-response")
             selected = headers(response.headers.items(), RESPONSE_HEADERS)
             await send(ws, {"type": "headers", "id": exchange.id,
                             "status": response.status, "headers": selected})
+            exchange.lifetime.check()
             total = 0
             async for data in response.content.iter_chunked(CHUNK_BYTES):
+                exchange.lifetime.check()
                 total += len(data)
                 check(total <= RESPONSE_BYTES, "response-limit")
                 exchange.sequence += 1
                 exchange.ack = asyncio.get_running_loop().create_future()
                 await send(ws, {"type": "chunk", "id": exchange.id, "seq": exchange.sequence,
                                 "data": base64.b64encode(data).decode("ascii")})
+                exchange.lifetime.check()
                 await exchange.ack
+            exchange.lifetime.check()
             await send(ws, {"type": "end", "id": exchange.id})
 
     async def connect_once(self) -> None:
