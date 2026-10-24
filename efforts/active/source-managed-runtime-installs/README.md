@@ -305,7 +305,7 @@ transaction execution from the existing recurring-maintenance assignment.
   unsupported outcomes before state writes; remove its age/PID installer guard
   rather than retaining another execution owner. Explicit installers and cells
   remain separate acceptance.
-- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify SSH's
+- [x] **Agent-recommended bounded next-adopter prerequisite:** qualify SSH's
   existing legacy stamp/provision actions through the same native foundation,
   canonical queue and frozen-input owner before changing any ordinary SSH
   publisher. Preserve its own payload declaration, source/root/project,
@@ -316,6 +316,19 @@ transaction execution from the existing recurring-maintenance assignment.
   nested/unsupported refusal on native Windows/Linux. Command/bootstrap,
   explicit installer, namespaced and retained-source #5379 qualification remain
   separate unless directly exercised.
+- [ ] **Agent-recommended bounded bootstrap adoption:** route SSH's legacy
+  session bootstrap's first stamp and drift provisioning through its qualified
+  fixed native actions, packaged foundation and the same canonical queue.
+  Preserve the actual service-less installer, source/root/project and control
+  semantics, killswitch, healthy no-op and independent companion/guidance hooks.
+  Remove the age/PID installer guard rather than retaining another execution
+  owner; no foreground fallback or recursive submission behind existing custody.
+  Qualify actual materialized hooks against the existing 15-second deadline,
+  exact output, caller loss, ordinary receipt/result and no-write publication,
+  source, nested and unsupported refusals on Windows/Linux. Initial runtime
+  preparation may use the already-qualified fixed recipe; it does not credit
+  unadopted command publishers. Retained-source #5379, primary/payload commands,
+  explicit installers and namespaced/custom-root publication remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

@@ -1,8 +1,9 @@
 # Launch-attempt storage and confirmation
 
 `worktree_manager.launch_attempts.LaunchAttempts` is an internal, local evidence
-store. Current source wires Picker confirmation before effects; execution
-outcome correlation, inspection commands and machine sweeps remain incomplete.
+store. Current source wires Picker confirmation before effects and Manager-owned
+resolution/launcher observations. Engine/native outcome correlation, inspection
+commands and machine sweeps remain incomplete.
 This does not enable remote prompts or qualify an installed prompt-loss repair.
 The implementation and remaining integration are
 tracked by the [launch-attempt effort](../../efforts/active/worktree-launch-attempt-journal/README.md).
@@ -18,8 +19,7 @@ locality resolution retain their selected target/options with unknown locality
 and a structured `locality-unresolved` refusal. They neither exit nor start
 embodiment or launch. Opening an unavailable Resume prompt editor is not a
 confirmation and records nothing. A deferred continuation already carrying an
-attempt ID never creates a replacement intent; later outcome correlation
-remains incomplete.
+attempt ID never creates a replacement intent.
 The attempt ID remains on the Manager decision and `LaunchRequest`; it is not
 yet an engine or native-receipt correlation contract.
 
@@ -49,6 +49,38 @@ navigation while migration is pending; it is **not** complete 90-day retention
 across all prompt copies. No pending daemon intent is migrated or deleted by
 this confirmation gate.
 
+## Manager observations
+
+The same confirmed attempt follows `_resolve_for`, `_run_launch`, Restore,
+task embodiment and provider venue handoff. The Manager commits
+`resolution-requested` before calling the engine, then `resolved` with only
+returned worktree/request/seed identities. This is a returned plan, not
+allocation or process-start proof. Engine resolution can mutate before an
+error or lost reply; such failures are `unknown`, never evidence that no
+worktree was allocated.
+
+Local option/admission refusals are `refused`. Restore and task embodiment
+have distinct `*-requested` and `*-returned` observations; they do not
+claim that Copilot started. Direct, relocated, remote and AHP launcher calls,
+including new-window and provider handoff wrappers, commit `launch-requested`
+before invoking the existing owner, then `launcher-returned` with its exit
+code if control returns. That code may describe a wrapper or spawned-window
+handoff, not Copilot. AHP's requested boundary precedes hosted-session
+preparation too, because preparation can create a session and persist its
+binding before the final launcher runs. POSIX process replacement and abrupt
+process exit may
+leave only the requested boundary. Missing completion evidence remains
+unknown; the journal never fills it in or replays the action.
+
+An observation failure before the next effect prevents that effect and
+reports a sanitized error. After a launcher or embodiment has already
+returned, a failed outcome write warns without changing its actual result
+into a retry-shaped failure. Exceptions retain a bounded reason code and
+propagate through existing error handling, not into journal free text.
+No engine/native receipt is authenticated or manufactured by these Manager
+observations. Cross-process attempt-ID transport and target-owner correlation
+remain separate, incomplete work.
+
 ## API and durability
 
 Construct the store with the Manager's existing installation-local private root
@@ -73,6 +105,10 @@ unknown attempts. Owner labels are attribution, not authentication or proof of
 acceptance; consumers must validate the actual owner's receipt before appending
 such an observation. A plan, zero process exit or missing event never implies a
 launched Copilot, consumed prompt or safe replay.
+Worktree observation IDs preserve engine-provided Unicode verbatim, including
+combining characters. They are bounded opaque identifiers that reject ASCII
+whitespace and controls, not filesystem paths or a reason to normalize the engine's identity. Other
+observation identity fields retain their existing restricted encoding.
 
 ## Private readers and expiry
 

@@ -23,7 +23,8 @@ _UNKNOWN_LOCALITY = -1
 _APPLICATION_ID = 0x574C4131
 _ACTIONS = {"new", "resume", "open", "restore", "base", "bare-resume", "open-venue"}
 _PHASES = {
-    "confirmed", "refused", "resolved", "launch-requested", "launcher-returned",
+    "confirmed", "refused", "resolution-requested", "resolved", "launch-requested", "launcher-returned",
+    "restore-requested", "restore-returned", "embodiment-requested", "embodiment-returned",
     "target-admitted", "allocated", "copilot-started", "prompt-handoff", "unknown",
 }
 _OWNERS = {"manager", "engine", "daemon", "native"}
@@ -102,7 +103,14 @@ def _validate_observation(owner: str, phase: str, details: dict) -> None:
     if owner not in _OWNERS or phase not in _PHASES or not isinstance(details, dict):
         raise ValueError("Invalid launch observation")
     for key, value in details.items():
-        if key in {"worktree_id", "request_id", "seed_id", "conversation_id"}:
+        if key == "worktree_id":
+            # Opaque engine IDs can contain Unicode, including combining marks.
+            if (
+                not isinstance(value, str) or not 1 <= len(value) <= 512
+                or any(ord(char) <= 32 or ord(char) == 127 for char in value)
+            ):
+                raise ValueError("Invalid launch observation worktree identity")
+        elif key in {"request_id", "seed_id", "conversation_id"}:
             if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9_.:@/-]{1,512}", value) is None:
                 raise ValueError("Invalid launch observation identity")
         elif key == "exit_code":

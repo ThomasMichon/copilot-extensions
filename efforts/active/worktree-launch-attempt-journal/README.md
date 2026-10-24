@@ -49,8 +49,8 @@ or permission to replay an ambiguous creation or prompt.
 
 At effort start, Manager saved prompt-only history from the confirmation widget.
 Storage #8505 and confirmation #8542 now preserve known-target intent before
-effects. Truthful unresolved-locality refusal recording is implemented for
-review; comprehensive outcome correlation remains incomplete. Engine activity
+effects. Truthful unresolved-locality refusal recording merged in #8574;
+comprehensive outcome correlation remains incomplete. Engine activity
 has rolling lifecycle and preparation-phase events, but attempts before
 allocation lack a worktree identity, prompt text is
 deliberately absent there, and phase step IDs are not a whole-attempt ID.
@@ -107,6 +107,8 @@ The following decomposition and detailed evidence rules are agent-recommended.
 
 ### Phase 3 -- Existing-owner outcome correlation
 
+- [x] Retain the confirmed attempt through Manager resolution, launch, Restore,
+  task embodiment and provider handoff, recording only Manager observations.
 - [ ] Carry the attempt ID through local and SSH boundaries, binding the
   target receipt and allocated worktree ID before later launch phases.
 - [ ] Record per-owner progress, refusal, error and exit events without putting
@@ -381,3 +383,67 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   contract. Both canonical zombie/live-member refusal controls pass; this is a
   generated-copy consistency repair, not a new guardian design or native macOS
   qualification. No failing CI gate was bypassed.
+
+### 2026-10-24 -- Phase 2 refusal recording merged; outcome correlation next
+
+- #8574 merged as `09bce158f38c22020443cf2b6fa459a937181599` after the final
+  head received approval with no findings and required CI, attribution,
+  workflow and identifier checks passed. Both parent issues remain open.
+- The continuing source is pulled forward onto the confirmed merge. The
+  provider's complete commit roster matched the local roster and every touched
+  path matched merged content before discarding any already-merged replay.
+  A native routine-sync guard still refuses the deleted remote PR ref; it did
+  not change source. Recovery backups remain intact.
+- Phase 2 is implemented, not the parent objective. Start Phase 3 with the
+  Manager's actual resolution and launch boundaries, then carry correlation
+  through existing engine/target owners. Preserve unknown/interrupted evidence
+  and distinguish returned plans, allocation, launcher return and actual native
+  handoff. Keep the negotiated SSH fence, retention/migration, inspection,
+  current-version portable proof and installed conversation gates open.
+
+### 2026-10-24 -- Manager outcome-observation slice prepared for review
+
+- The confirmed attempt now follows actual Manager resolution and launch
+  boundaries, Restore preparation, provider handoff and task embodiment.
+  Returned plan identities are correlated as Manager `resolved` evidence,
+  never relabeled allocation, Copilot start or prompt acceptance.
+- Requested boundaries commit before the next effect. Local refusals are
+  explicit; engine failures after possible mutation and interrupted calls
+  remain unknown. Post-effect observation failures log a sanitized warning
+  while preserving the actual result, so a completed handoff is not disguised
+  as permission to retry. Task observations stay on tracked background work.
+- Source unit controls cover real protected SQLite state through Manager
+  seams, required-write failures, optional outcome-write failures, identity
+  correlation and private-error exclusion. Native Windows writer/reader
+  controls prove that abrupt exit during resolution or launcher execution
+  retains the last committed boundary and exact private input without an
+  invented completion or replay.
+- The explicit native measurement isolates four Manager observations from
+  synthetic engine/launcher work. The final enabled-versus-unjournaled
+  101-attempt / 505-event comparison measured 98.4027ms for the first
+  enabled chain and warm nearest-rank p50/p95/p99/max of
+  93.4584/174.6267/296.4259/609.5926ms with no failures. The sequential
+  unjournaled baseline measured p50/p95/p99/max of
+  0.0126/0.0159/0.0450/0.0502ms; samples are insufficient for tail
+  qualification and the observed outlier is retained, not discarded.
+  This is off the UI confirmation thread, not a passing 100ms physical-key
+  budget or representative installed launch qualification. The reproducible
+  lane also compares unjournaled execution with the same synthetic workload.
+- Engine/target transport, native-owner receipt correlation, negotiated SSH
+  seeds, POSIX/current-installed qualification, retention/migration, inspection
+  and original same-conversation New/cold Resume gates remain open. This
+  slice is not completion of either parent issue.
+- The first review identified AHP session preparation as an earlier mutation
+  than final launcher invocation. Moved the required requested boundary ahead
+  of `ensure_session`, retained one requested event, and added direct controls
+  for write refusal before preparation, preparation failure and a normal
+  hosted launch. The affected AHP/launch/admission portfolio passes 112 cases
+  with 10 skips. Current-head review and CI remain publication gates.
+- The next review found that the journal's ASCII observation-ID restriction
+  was narrower than supported engine worktree names. Worktree observations
+  now preserve composed/decomposed Unicode and non-Latin/non-BMP characters
+  verbatim, with the existing bound and ASCII whitespace/control rejection;
+  request/seed/conversation ID validation remains restricted. New and Resume
+  seam regressions prove that valid Unicode resolution does not block launch.
+  The affected storage/outcome/AHP/production portfolio passes 188 cases with
+  four skips; current-head review and CI still apply.

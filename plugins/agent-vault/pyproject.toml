@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-vault"
-version = "0.1.90-dev1"
+version = "0.1.91-dev1"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"

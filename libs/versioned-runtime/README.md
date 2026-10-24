@@ -306,7 +306,8 @@ no check-then-replace or link-then-unlink fallback. Abandoned attempts remain
 evidence and cannot block a fresh attempt. An already-existing final name is
 never adopted or replaced, even when it contains identical bytes.
 
-Matching target-writer leases remain held until `keep()` or `rollback()`.
+Matching target-writer leases remain held until `keep()`, `retain()` or
+`rollback()`.
 `target_leases(root, targets, open_lock=None)` also accepts a pinned-directory
 opener for callers with an admitted no-follow namespace. The opener receives
 the lease-directory path and lock basename and returns an owned descriptor;
@@ -319,6 +320,23 @@ The owner chooses the terminal operation from the actual runtime outcome:
 keep candidate helpers after committed settlement, including an exception
 re-raised after commit-forward; recover them only when the previous runtime
 actually remains selected/serving.
+
+`retain()` is the successful settlement for a caller that still needs durable
+created-object attribution or later recovery. It verifies the live targets,
+backups, context and producer receipts before releasing writer custody, and
+deletes none of them. A failed verification leaves custody with the caller for
+explicit recovery; it is not a success-shaped cleanup warning. The caller owns
+the retained workspace's lifetime and exact operation binding. Later mutation
+must reacquire the normal target leases and check the current physical object
+against those original proofs through `check_owned`/`recover_owned`; retained
+bytes or a matching digest alone never authorize a foreign replacement.
+`keep()` retains its existing cleanup behavior.
+All three settlements bind the context's root and exact target-to-backup/state
+mapping to the values captured during publication. Valid JSON with altered
+recovery bindings cannot silently change restoration into removal.
+Retained settlement additionally requires each newly created output's exact
+captured physical state in the producer proofs. Unchanged normalized no-ops
+remain explicitly non-owned and do not acquire a created-output claim.
 
 Rollback restores proven uncontested outputs, preserves foreign replacements
 and reports incomplete recovery with evidence retained. The separate

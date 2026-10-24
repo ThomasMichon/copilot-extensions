@@ -69,10 +69,11 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   installer/lifecycle/deployment owners remain separate. Its source validation
   and acceptance are tracked in the same logging sub-plan, not a competing effort.
   Shared policy and Bridge application source merged as #8495 after exact-head
-  approval and required CI. Explicit retained spools are Python-API-only:
-  configuration-loader/helper adoption and owned quiet maintenance are not yet
-  delivered. The sub-plan records the accepted API and next adapter boundary;
-  the parent and #8377 remain open.
+  approval and required CI. #8577 subsequently accepted the additive retained
+  configuration loaders, worker-owned quiet maintenance and local discovery.
+  Adopter helper/configuration migration, release/install verification and live
+  qualification remain undelivered. The sub-plan records the exact source
+  contract and remaining owners; the parent and #8377 remain open.
 - **Trusted image slice:** #8352 owns the bounded
   [trusted harness container plan](trusted-harness-containers.md) under #6030.
   Its proposed `.devcontainer/trusted-harness-base/` reservation does not transfer
