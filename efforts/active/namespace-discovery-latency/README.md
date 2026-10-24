@@ -96,6 +96,17 @@ the complete source-keyed artifact set and all current-source verification.
 This supersedes the reservation approach for this repair; it does not
 authorize live Main-control activation or installed rollout.
 
+Subsequent operator selections, captured verbatim:
+
+> Activate and deploy
+
+> Great. Continue driving now that you have a container to try in
+
+**Selection summary:** Coordinate reviewed control adoption with its existing
+owner, use normal authorized local rollout, and continue bounded source
+diagnosis and isolated container qualification. This does not authorize a
+timeout waiver, installed-code patch, control takeover or fleet-wide change.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -132,12 +143,18 @@ authorize live Main-control activation or installed rollout.
   cases, within unchanged caller budgets.
 - [x] Land the implementation through review and required CI. #7998 merged to
   `dev`; that merge is not a qualified Main release.
-- [ ] Repair the blocking source-publication failure on #8033 through normal
+- [x] Repair the blocking source-publication failure on #8033 through normal
   Dev review. Use the current source's complete signed artifact set rather
   than another source's per-plugin version aliases; preserve source binding,
   immutable bytes, consumer readback and legacy publication compatibility.
-  Main-control activation remains with its separately authorized owner.
-- [ ] Confirm qualified promotion to `main` separately from the `dev` merge.
+  #8115 merged as `c66e0bd7570ef4262d1f9c312a3593fbef52fd30`.
+- [ ] Have the existing #3336/#6237 control owner adopt the reviewed helper;
+  source publication and a containing release do not change the live pin.
+- [x] Confirm qualified promotion to `main` separately from the `dev` merge.
+  Natural #8287 contains the source repair; #8302 separately contains the
+  registered-Manager launcher repair.
+- [ ] Requalify the remaining installed reader latency after a reviewed
+  state-root follow-up, preserving complete discovery within eight seconds.
 - [ ] Retain release/rollout responsibility explicitly. Apply a local rollout
   only through the unified updater with its required authorization; verify the
   actual running generation and complete target discovery before claiming live
@@ -182,6 +199,102 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-23 - State-root continuation and fresh-container qualification
+
+- Fresh credential-free Linux source-install witnesses at
+  `c66e0bd7570ef4262d1f9c312a3593fbef52fd30` pass all six stages for
+  Containers and CodeSpaces: real source preparation/installation, exact
+  completed generation, operation without the source checkout, and immutable
+  identical reuse. Their containers were removed through the existing rig.
+- The first container attempt exposed a stale caller PATH missing Docker's
+  already installed credential helper. Only the test process's PATH was
+  refreshed from the installer's registered directory. The next fresh run
+  correctly refused the blocked public Python feed. A separate fresh witness
+  passed with the rig's explicit governed-index fixture; the failed receipt
+  remains a failure. No credentials were injected or TLS checks disabled.
+- These are fresh-source installation witnesses, not a full Linux suite,
+  authenticated remote enumeration, or native Windows deadline qualification.
+- The installed container reader still takes 12.406 seconds. Read-only core
+  attribution places 7.474 seconds in its optional knowledge-overlay lookup.
+  The nested Worktrees state-root read spends about 4.0 seconds composing
+  foreign PR overlays, including the enabled-plugin corpus. Docker calls and
+  imports do not account for that dominant delay.
+- The bounded source follow-up reuses the existing
+  `include_control_plane_related_pr=False` option only for the state-root
+  reader. Normal publication policy, binding layers, parser/output contracts,
+  native command ownership and the eight-second bound remain unchanged.
+- The eight new handler cases pass the canonical unit effect observer in
+  2.969 seconds with one coverage collection. All 1,147 original packet nodes
+  and their source hashes remain admitted; the new packet has 1,155 nodes,
+  one additional production coverage target and the same 300-second bound.
+- The existing contained state-root and paired-worktree selection passes all
+  129 cases after updating its coupled config-loader fixture to accept the
+  existing explicit keyword. Its first 128-pass/one-failure result was a real
+  fixture incompatibility and was corrected, not waived.
+- A real native CLI core read from the prepared source-test environment returns
+  the exact installed state-root JSON, with its knowledge binding intact.
+  The observed candidate core process takes 1.818 seconds versus an installed
+  core read of 5.975 seconds. These different-source environment observations
+  are not a controlled speedup or production-shim/aggregate deadline proof.
+  Required review/CI, qualified release and complete native caller acceptance
+  remain open.
+- The exact committed follow-up source
+  `f4cb9e8d4bf9cb4a88c9c06c27893321c804091b` also passes the complete
+  canonical Linux unit packet in a credential-free container: 1,155 nodes,
+  3,465 phase reports, 51 coverage targets, no prohibited effects and 40.006
+  seconds within the unchanged 300-second bound. The container received only
+  a read-only committed-source archive and was removed after its receipts
+  were captured.
+- The complete native Windows packet is not credited: after 873 passes and
+  one skip it reaches the retained #1303 preservation boundary's forbidden
+  `ctypes.dlopen`. No observer exemption or skipped identity was added.
+  The independent Linux packet, focused native units and binding/pair
+  selection remain distinct results.
+
+### 2026-10-23 - Containing releases and retained installed acceptance
+
+- #8115 merged after current-head Copilot approval, resolved findings and
+  required green CI with 911 admitted units. Natural #8287 qualified its
+  containing Dev source `9c2b429b1473b0fda70d2b0a88f0cda31a23f417`;
+  source publication/readback succeeded before the Main PR.
+- Reviewed launcher repair #8297 merged as
+  `85e977e6beb7059f6d29ddb4566ba292a57aae68`. Natural run
+  `40020841398`, attempt one, qualified that exact source and #8302 landed
+  Main `58c60f60b9d5e890f9c3ae6fc5ffdba7c925a098`.
+- Normal authorized local rollout reached Manager `0.6.108-dev1` and
+  Worktrees `1.24.229-dev1` activation, but the remaining suite handoff
+  failed without its child diagnostic. Existing #7743 owners retain both
+  reached no-window stdio hops and native settlement/lifetime integration;
+  #6859 and held #7833 retain their distinct lifetime repair.
+- The operator-authorized Docker prerequisite is now installed with its
+  WSL 2 Linux engine running. Container enumeration succeeds, but native
+  execution still exceeds the foreground budget and strict streaming reports
+  HTTP 503. No shared restart, deadline increase or provider disablement was
+  used. This is not completed rollout or complete-roster acceptance.
+- The existing Main-control owner was asked to coordinate helper adoption.
+  An unanswered comment is not a transfer. Current control, complete native
+  consumption, broader #5761 outcomes and the parent guidance objective stay
+  open; this effort is Active.
+
+### 2026-10-22 - Retained postmerge journal
+
+- #7998 merged as `958d3e2046bb395d54c7fe8d63280a5bd68e848b` after
+  current-head review and required source CI. Its first natural promotion
+  `39884763835` rejected candidate
+  `79c140926bd984de53a667e315c2a0999f3fbbc2` with
+  `manifest source closure differs from candidate`; candidate merge and
+  landing recording were skipped. The earlier `39883715115` failed at the
+  same boundary and its watchdog created #8033.
+- That historical controller was Main
+  `9489a0fe8e4284538c3e00d5aaad2ac0cf474f75` with helper
+  `ce77da58017442f83bf3d82a5f80b111b63b9737`. No failed-source retry,
+  closure waiver, control edit or installed rollout was performed then.
+- The original postmerge journal is retained by its local backup. Its
+  publication/source facts are reconciled above rather than replaying an
+  obsolete checklist over current Dev. The historical partial Linux
+  portfolio and all seven failing families remain with #1303; they are not a
+  complete-suite passing claim.
 
 ### 2026-10-23 - Single verified source-set readback
 

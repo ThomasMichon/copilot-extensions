@@ -24,6 +24,17 @@ def empty_activation():
     return ActivationReport(authority=ScanAuthority.COMPLETE, decisions={})
 
 
+def repository_map(*entries):
+    return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps({
+        "repository_map_version": 1, "inventory_authority": "complete",
+        "projection": {"quality": "current"}, "repos": entries,
+    }))
+
+
+def registered_root(name, root, repo_class="reference"):
+    return {"name": name, "class": repo_class, "registration": "ready", "path": str(root)}
+
+
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "registrar"))
@@ -33,7 +44,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_dispatch.workers_catalog._observation", lambda: {"known": False})
     monkeypatch.setattr(
         wt, "run_agent_worktrees_capture",
-        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout='{"inventory_authority":"complete","repos":[]}', stderr=""),
+        lambda *args, **kwargs: repository_map(),
     )
 
 
@@ -166,18 +177,19 @@ def test_repository_layers_and_user_local_reuse_existing_roots(monkeypatch, tmp_
     local = rd.registrar_dir() / "templates" / "index.json"
     write_index(rd.registrar_dir(), index=local)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
-    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"inventory_authority":"complete","repos":[{"name":"library"}]}', stderr="",
-    ))
     calls = []
-    def resolve(snapshot, name):
-        calls.append((name, snapshot._execution))
-        return root
-    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", resolve)
+    def read_map(*args, **kwargs):
+        calls.append((args, kwargs))
+        return repository_map(registered_root("library", root))
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", read_map)
+    monkeypatch.setattr(
+        "agent_dispatch.repository_resources._registered_repository",
+        lambda *a, **kw: pytest.fail("map consumer performed a per-repository lookup"),
+    )
     before = bytes_at(tmp_path)
     rows, summary = wt.discover_templates(empty_activation())
     assert summary["state"] == "complete" and len(rows) == 3
-    assert calls == [("library", False)]
+    assert calls == [(("repos", "map", "--json"), {"timeout": 5})]
     assert {row["source"]["index"] for row in rows} == {str(canonical_index), str(overlay), str(local)}
     assert len({row["id"] for row in rows}) == 3
     assert before == bytes_at(tmp_path) and not rd.pointers_file().exists()
@@ -217,10 +229,9 @@ def test_unavailable_repository_layers_are_not_absent_optional_layers(monkeypatc
                 target_is_directory=True,
             )
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
-    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"inventory_authority":"complete","repos":[{"name":"library"}]}', stderr="",
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **kw: repository_map(
+        registered_root("library", root),
     ))
-    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", lambda self, name: root)
     before = bytes_at(tmp_path)
     rows, summary = wt.discover_templates(empty_activation())
     assert len(rows) == 1
@@ -293,10 +304,9 @@ def test_permission_denied_layers_keep_readable_peers(monkeypatch, tmp_path, den
             return False
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"marketplaceId": "example-cell"}))
-    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"inventory_authority":"complete","repos":[{"name":"library"}]}', stderr="",
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **kw: repository_map(
+        registered_root("library", root),
     ))
-    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", lambda self, name: root)
     before = bytes_at(tmp_path)
     with monkeypatch.context() as denied_probe:
         # Windows native directory probes can bypass both Path.stat and os.stat.
@@ -378,7 +388,7 @@ def test_real_cli_first_touch_inert_catalog_is_read_only(tmp_path):
 import runpy, sys
 from types import SimpleNamespace
 from agent_dispatch import worker_templates
-worker_templates.run_agent_worktrees_capture = lambda *a, **k: SimpleNamespace(returncode=0, stdout='{"inventory_authority":"complete","repos":[]}', stderr='')
+worker_templates.run_agent_worktrees_capture = lambda *a, **k: SimpleNamespace(returncode=0, stdout='{"repository_map_version":1,"projection":{"quality":"current"},"inventory_authority":"complete","repos":[]}', stderr='')
 sys.argv = ['agent-dispatch', 'workers', 'catalog']
 runpy.run_module('agent_dispatch', run_name='__main__')
 """
@@ -407,16 +417,12 @@ def test_duplicate_json_fields_are_explicit_errors(tmp_path):
 def test_bad_repository_inventory_row_and_duplicate_names_keep_healthy_sources(monkeypatch, tmp_path):
     root = tmp_path / "repo"
     write_index(root, index=root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json")
-    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout='{"inventory_authority":"complete","repos":[false,{"name":"healthy"},{"name":"duplicate"},{"name":"duplicate"}]}', stderr="",
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **kw: repository_map(
+        False, registered_root("healthy", root),
+        registered_root("duplicate", root), registered_root("duplicate", root),
     ))
-    calls = []
-    def resolve(snapshot, name):
-        calls.append(name)
-        return root
-    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", resolve)
     rows, summary = wt.discover_templates(empty_activation())
-    assert len(rows) == 1 and calls == ["healthy"]
+    assert len(rows) == 1 and rows[0]["source"]["provider"] == "repo:healthy"
     assert summary["state"] == "partial"
     assert {finding["reason"] for finding in summary["findings"]} == {"invalid", "ambiguous"}
 
@@ -458,23 +464,78 @@ def test_older_inventory_contract_never_claims_complete_discovery(monkeypatch):
     rows, summary = wt.discover_templates(empty_activation())
     assert not rows and summary["state"] == "partial"
     assert summary["findings"][0]["reason"] == "inventory-authority-unavailable"
-    assert calls == [(("repos", "list", "--strict", "--json"), {"timeout": 5})]
+    assert calls == [(("repos", "map", "--json"), {"timeout": 5})]
+
+
+@pytest.mark.parametrize("change", [
+    {"repository_map_version": True},
+    {"repository_map_version": 2},
+    {"inventory_authority": "advisory"},
+    {"projection": {"quality": "stale"}},
+    {"availability": {"status": "stale", "reason": "refresh failed"}},
+])
+def test_stale_or_incompatible_map_never_falls_back_to_point_resolution(monkeypatch, tmp_path, change):
+    root = tmp_path / "library"
+    write_index(root, index=root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json")
+    data = json.loads(repository_map(registered_root("library", root)).stdout)
+    data.update(change)
+    calls = []
+
+    def read_map(*args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(data), stderr="")
+
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", read_map)
+    monkeypatch.setattr(
+        "agent_dispatch.repository_resources._registered_repository",
+        lambda *a, **kw: pytest.fail("stale map triggered point resolution"),
+    )
+    rows, summary = wt.discover_templates(empty_activation())
+    assert rows == [] and summary["state"] == "partial"
+    assert summary["findings"][0]["reason"] == "inventory-authority-unavailable"
+    assert calls == [("repos", "map", "--json")]
+
+
+def test_unavailable_map_entry_keeps_healthy_registered_peer(monkeypatch, tmp_path):
+    root = tmp_path / "library"
+    write_index(root, index=root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json")
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **kw: repository_map(
+        registered_root("library", root),
+        {"name": "missing", "class": "worktree", "registration": "unavailable",
+         "path": None, "reason": "registered root is absent"},
+    ))
+    rows, summary = wt.discover_templates(empty_activation())
+    assert len(rows) == 1 and rows[0]["source"]["provider"] == "repo:library"
+    assert summary["state"] == "partial"
+    assert summary["findings"] == [{
+        "source": "repo:missing", "reason": "unavailable", "detail": "registered root is absent",
+    }]
+
+
+def test_consumer_name_restrictions_do_not_poison_healthy_map_peers(monkeypatch, tmp_path):
+    root = tmp_path / "library"
+    write_index(root, index=root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json")
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **kw: repository_map(
+        registered_root(".github", root), registered_root("_tools", root),
+        registered_root("library", root),
+    ))
+    rows, summary = wt.discover_templates(empty_activation())
+    assert len(rows) == 1 and rows[0]["source"]["provider"] == "repo:library"
+    assert summary["state"] == "partial"
+    assert len(summary["findings"]) == 2
+    assert {finding["reason"] for finding in summary["findings"]} == {"invalid"}
 
 
 def test_repository_names_do_not_inherit_template_id_length_limit(monkeypatch, tmp_path):
     name = "a" * 81
     root = tmp_path / "library"
     write_index(root, index=root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json")
-    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *args, **kwargs: SimpleNamespace(
-        returncode=0, stdout=json.dumps({"repos": [{"name": name}], "inventory_authority": "complete"}), stderr="",
+    monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **kw: repository_map(
+        registered_root(name, root),
     ))
-    calls = []
-    def resolve(snapshot, selected):
-        calls.append(selected)
-        return root
-    monkeypatch.setattr(wt.RepositoryResourceSnapshot, "root", resolve)
     rows, summary = wt.discover_templates(empty_activation())
-    assert calls == [name] and summary["state"] == "complete" and len(rows) == 1
+    assert summary["state"] == "complete" and len(rows) == 1
+    assert rows[0]["source"]["provider"] == f"repo:{name}"
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO contract; directory refusal covers nonregular files on Windows")
@@ -489,7 +550,7 @@ def test_real_cli_refuses_fifo_without_blocking_healthy_templates(tmp_path, targ
 import runpy, sys
 from types import SimpleNamespace
 from agent_dispatch import worker_templates
-worker_templates.run_agent_worktrees_capture = lambda *a, **k: SimpleNamespace(returncode=0, stdout='{"inventory_authority":"complete","repos":[]}', stderr='')
+worker_templates.run_agent_worktrees_capture = lambda *a, **k: SimpleNamespace(returncode=0, stdout='{"repository_map_version":1,"projection":{"quality":"current"},"inventory_authority":"complete","repos":[]}', stderr='')
 sys.argv = ['agent-dispatch', 'workers', 'catalog']
 runpy.run_module('agent_dispatch', run_name='__main__')
 """

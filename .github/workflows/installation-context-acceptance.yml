@@ -23,13 +23,17 @@ on:
         description: Exercise retained lock export and existing install seasoning with real UV
         type: boolean
         default: false
+      candidate_profiles:
+        description: Exercise role-selectable candidate construction and immutable reuse with real UV
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -50,7 +54,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -73,6 +77,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  candidate-profiles-linux:
+    if: ${{ inputs.candidate_profiles }}
+    name: Native candidate profiles (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps: &candidate-profile-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Isolated role construction, origins and reuse
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_python_installer_engine.py --timeout 600
+          -k "local_role or local_package or role_health or selected_extras
+          or selected_extra_dependency or dev_candidate_refuses_nonbase or construction_identity"
+
+  candidate-profiles-windows:
+    if: ${{ inputs.candidate_profiles }}
+    name: Native candidate profiles (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps: *candidate-profile-steps
 
   watch-owner-native-linux:
     if: ${{ inputs.watch_owner }}

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Callable
 
 from agent_procutil.owned_process import (
     OutputLimitExceeded,
@@ -214,25 +215,39 @@ def _decode(reply: object, request: dict, returncode: int) -> subprocess.Complet
 def run(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None, capture: bool,
+    on_settled: Callable[[], None] | None = None,
 ) -> subprocess.CompletedProcess:
-    request = _validate({
-        "argv": argv, "timeout": timeout, "input_text": input_text, "capture": capture,
-        "limits": [max_stdout_bytes, max_stderr_bytes],
-    })
-    frame = json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n"
-    if len(frame) > _MAX_REQUEST:
-        raise ValueError("caller-owned request exceeds its frame limit")
+    if on_settled is not None and not callable(on_settled):
+        raise TypeError("settlement notification must be callable")
+    try:
+        request = _validate({
+            "argv": argv, "timeout": timeout, "input_text": input_text, "capture": capture,
+            "limits": [max_stdout_bytes, max_stderr_bytes],
+        })
+        frame = json.dumps(request, ensure_ascii=True, allow_nan=False) + "\n"
+        if len(frame) > _MAX_REQUEST:
+            raise ValueError("caller-owned request exceeds its frame limit")
+        if os.name != "nt":
+            _require_posix_support()
+    except BaseException:
+        # No native launch has been attempted at this preparation boundary.
+        if on_settled is not None:
+            on_settled()
+        raise
     if os.name == "nt":
         return _run_owned(
             argv, timeout=timeout, input_text=input_text, capture=capture,
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
+            on_settled=on_settled,
         )
-    _require_posix_support()
-    with _lifetime_lock:
-        reader, writer = os.pipe()
-        _lifetime_writers.add(writer)
+    reader = writer = None
+    launch_attempted = False
     try:
+        with _lifetime_lock:
+            reader, writer = os.pipe()
+            _lifetime_writers.add(writer)
         os.set_inheritable(writer, False)
+        launch_attempted = True
         try:
             result = _run_owned(
                 [
@@ -243,16 +258,25 @@ def run(
                 timeout=timeout, input_text=frame, capture=True, pass_fds=(reader,),
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
+                on_settled=on_settled,
             )
         except subprocess.TimeoutExpired as error:
             raise subprocess.TimeoutExpired(argv, timeout) from error
         except OutputLimitExceeded as error:
             raise RuntimeError("caller-owned completion frame exceeded its byte budget") from error
     finally:
-        os.close(reader)
-        with _lifetime_lock:
-            _lifetime_writers.remove(writer)
-            os.close(writer)
+        try:
+            try:
+                if reader is not None:
+                    os.close(reader)
+            finally:
+                if writer is not None:
+                    with _lifetime_lock:
+                        _lifetime_writers.discard(writer)
+                        os.close(writer)
+        finally:
+            if not launch_attempted and on_settled is not None:
+                on_settled()
     try:
         reply = json.loads(result.stdout)
     except (ValueError, TypeError) as error:

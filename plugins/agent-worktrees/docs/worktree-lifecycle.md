@@ -95,6 +95,51 @@ the directory, including an unsuccessful removal attempt. The existing cleanup
 flow removes them only after the checkout is actually absent. This does not
 enable automatic cleanup or change its eligibility and custody gates.
 
+### Paired knowledge is an owned obligation
+
+A harness paired with a knowledge **worktree** holds a durable `worktree` claim
+on that exact sibling. Pair creation journals it with the reciprocal link.
+Finalization reconciles missing or stale legacy claims before checking the
+ordinary obligation gate, reopening a falsely finalized harness when needed.
+An anchor-kind pair does not allocate a sibling worktree claim.
+
+The claim remains active until the reciprocal knowledge worktree is explicitly
+finalized. A clean or unused checkout, published commits, a stopped session,
+or an absent checkout does not substitute for that conclusion. Settle, release,
+remove, sweep, overwrite, handoff, and `finalize --abandon` cannot clear an
+unfinished pair's responsibility; missing, foreign, or unreadable sibling
+records preserve the claim.
+
+Land the knowledge changes through that repository's configured publication
+flow, finalize the knowledge sibling, then finalize the harness. The sibling's
+successful finalization settles the parent claim bottom-up. Even an unused
+sibling requires that explicit conclusion; no cascade infers it complete.
+Both records remain subject to the existing BOTH-finalized removal gate and
+fresh liveness/cleanup checks. Finalization does not remove the knowledge half
+while the harness half is still unfinished.
+
+The final sibling probe and physical removal share a bounded sibling-record
+lock through the terminal save. Contention refuses cleanup rather than trusting
+a stale finalized state. Both pairing directions require reciprocal identity;
+a foreign finalized record is not permission to delete. Legacy pairs without
+a claim cannot erase their links or become terminal to bypass this check.
+Dispatch cleanup likewise waits for explicit sibling finalization, retaining
+its exact reciprocal creator link and interrupted-unlink receipt checks.
+It releases only the exact settled paired claim under both lifecycle locks;
+unrelated held resources still block conclusion. Reconciliation of a newly
+settled legacy claim uses the same finalized-proof fence. A refused paired
+tombstone write preserves its ledger instead of falling back to deletion.
+Repeated sibling finalization leaves an already released parent pair claim
+released. Pair-only reconciliation can repair completed managed owners without
+admitting unrelated allocations or overwriting handoff/producer custody.
+The first paired save fences and validates a proposed settled claim even
+before the harness's pairing metadata has been committed.
+Retargeting a settled pair verifies and fences both the old sibling's discharge
+and the replacement sibling's finalized state through that same save.
+If a sibling reopens during a repeated finalize, failed rollback of the old
+finalized state restores an active harness and an active paired obligation.
+The checkout and reopened work remain intact, and reconciliation can retry.
+
 ### Session worktree names
 
 Seeded and unseeded session creation use the same timestamp and four-character
