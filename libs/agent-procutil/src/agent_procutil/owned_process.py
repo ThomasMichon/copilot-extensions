@@ -389,6 +389,8 @@ def _run_owned(
     capture_limits: tuple[int, int] | None = None, pass_fds: tuple[int, ...] = (),
     confirm_posix_group: bool = False,
     on_settled: Callable[[], None] | None = None,
+    cwd: str | os.PathLike | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")
@@ -418,6 +420,8 @@ def _run_owned(
         **no_window_kwargs(),
         **({"start_new_session": True} if not windows and not inherit_process_group else {}),
         **({"pass_fds": pass_fds} if pass_fds else {}),
+        **({"cwd": cwd} if cwd is not None else {}),
+        **({"env": env} if env is not None else {}),
     )
     retained = False
     try:
@@ -515,6 +519,8 @@ def run_caller_owned(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None = None, capture: bool = True,
     on_settled: Callable[[], None] | None = None,
+    cwd: str | os.PathLike | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Execute with caller-lifetime ownership and explicit, separate raw-byte budgets."""
     from agent_procutil._caller_owned import run
@@ -523,4 +529,6 @@ def run_caller_owned(
         argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
         max_stderr_bytes=max_stderr_bytes, input_text=input_text, capture=capture,
         on_settled=on_settled,
+        **({"cwd": cwd} if cwd is not None else {}),
+        **({"env": env} if env is not None else {}),
     )

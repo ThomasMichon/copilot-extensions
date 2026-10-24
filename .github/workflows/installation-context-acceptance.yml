@@ -124,6 +124,7 @@ jobs:
           --test-file tests/test_session_snapshot.py
           --test-file tests/test_write_session_guidance.py
           --test-file tests/test_maintenance_guidance.py
+          --test-file tests/test_snapshot_windows_visibility.py
           --test-file tests/test_mesh.py
           --test-file tests/test_mesh_refresh.py
           --test-file tests/test_fragment_registry.py
@@ -138,6 +139,8 @@ jobs:
     name: Read-only SSH snapshot (Windows)
     runs-on: windows-latest
     timeout-minutes: 10
+    env:
+      AGENT_SSH_WINDOWS_VISIBILITY: "1"
     steps: *ssh-snapshot-native-steps
 
   watch-owner-native-linux:

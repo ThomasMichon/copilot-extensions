@@ -52,6 +52,43 @@ def test_separate_utf8_streams_input_and_real_returncode(capture):
     assert result.stderr == ("diagnostic\u00e9" if capture else None)
 
 
+@native_execution
+def test_caller_owned_uses_explicit_child_context_without_mutating_caller(tmp_path):
+    cwd = Path.cwd()
+    environment = {**os.environ, "CALLER_OWNED_CONTEXT_FIXTURE": "selected"}
+    before = dict(environment)
+    result = _run(
+        "import json,os; print(json.dumps([os.getcwd(),os.environ['CALLER_OWNED_CONTEXT_FIXTURE']]))",
+        cwd=tmp_path, env=environment,
+    )
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == [str(tmp_path), "selected"]
+    assert Path.cwd() == cwd
+    assert environment == before
+    assert os.environ.get("CALLER_OWNED_CONTEXT_FIXTURE") is None
+
+
+def test_windows_explicit_environment_is_unicode_sorted_and_double_terminated():
+    from agent_procutil._windows_caller_owned import _environment_block
+
+    assert _environment_block(None) is None
+    assert _environment_block({})[:].startswith("\0\0")
+    assert _environment_block({"b": "\u00e9", "A": "value"})[:].startswith(
+        "A=value\0b=\u00e9\0\0",
+    )
+
+
+@pytest.mark.parametrize("environment", [
+    {"": "value"}, {"BAD=KEY": "value"}, {"BAD\0KEY": "value"},
+    {"KEY": "bad\0value"}, {"KEY": 3}, {3: "value"},
+])
+def test_windows_explicit_environment_refuses_invalid_entries(environment):
+    from agent_procutil._windows_caller_owned import _environment_block
+
+    with pytest.raises((TypeError, ValueError)):
+        _environment_block(environment)
+
+
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 @native_execution
 def test_raw_byte_limit_accepts_exact_boundary(stream):

@@ -216,6 +216,8 @@ def run(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None, capture: bool,
     on_settled: Callable[[], None] | None = None,
+    cwd: str | os.PathLike | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     if on_settled is not None and not callable(on_settled):
         raise TypeError("settlement notification must be callable")
@@ -239,6 +241,8 @@ def run(
             argv, timeout=timeout, input_text=input_text, capture=capture,
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
             on_settled=on_settled,
+            **({"cwd": cwd} if cwd is not None else {}),
+            **({"env": env} if env is not None else {}),
         )
     reader = writer = None
     launch_attempted = False
@@ -259,6 +263,8 @@ def run(
                 capture_limits=(6 * (max_stdout_bytes + max_stderr_bytes) + 4096, 65536),
                 confirm_posix_group=True,
                 on_settled=on_settled,
+                **({"cwd": cwd} if cwd is not None else {}),
+                **({"env": env} if env is not None else {}),
             )
         except subprocess.TimeoutExpired as error:
             raise subprocess.TimeoutExpired(argv, timeout) from error

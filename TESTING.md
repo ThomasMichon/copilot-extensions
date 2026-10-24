@@ -17,6 +17,12 @@ readiness. It verifies replacement, the 4 KiB bound, preserved catalog, and no
 profile/runtime creation. Dispatch's existing real-venv peer fixture also
 exercises SSH-to-Worktrees same-cell selection and foreign receipt refusal.
 These process boundaries stay outside required unit-only CI.
+The Windows job explicitly enables `AGENT_SSH_WINDOWS_VISIBILITY=1`: a native
+`pythonw.exe` parent drives the actual writer/contributor/CLI chain through two
+cycles and forced timeout while the shared Win32 observer checks visible
+windows and foreground transitions. The flag is otherwise off. Resolver
+timeout coverage also checks that its nested runtime exits independently of
+the writer's outer timeout.
 
 For a focused local run, select `tests/test_session_snapshot.py` and
 `tests/test_write_session_guidance.py` with `tools/run-plugin-tests.py agent-ssh`.

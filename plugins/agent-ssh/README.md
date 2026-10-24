@@ -47,6 +47,8 @@ An invalid selected source does not fall through to a different topology.
 In an installation cell the optional peer is resolved in that same cell, never
 through ambient `PATH`; absent, unbound and refused peers are not an empty mesh.
 Worktrees remains optional for standalone use.
+Its bounded lookup uses the existing caller-lifetime process owner, including
+stream limits and descendant cleanup on timeout or snapshot-caller death.
 
 Coverage distinguishes generated, unattributed, missing, refused and
 indeterminate fragments. It does not inspect the effective OpenSSH include

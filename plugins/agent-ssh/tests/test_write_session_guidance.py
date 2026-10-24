@@ -482,6 +482,48 @@ def test_contributor_timeout_reaps_real_descendant(tmp_path, monkeypatch, parent
                 os.kill(pid, signal.SIGTERM)
 
 
+def test_worktrees_lookup_timeout_reaps_nested_resolver(tmp_path, monkeypatch):
+    from agent_ssh import _worktrees
+
+    pid_file = tmp_path / "resolver-child.pid"
+    resolver = tmp_path / "resolver.py"
+    resolver.write_text(
+        "import os,subprocess,sys,time\nfrom pathlib import Path\n"
+        "assert os.environ['AGENT_WORKTREES_NO_SELFPROVISION']=='1'\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'],"
+        "creationflags=0x08000000 if os.name=='nt' else 0)\n"
+        f"Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        "time.sleep(60)\n", encoding="utf-8",
+    )
+    command = tmp_path / ("peer.ps1" if os.name == "nt" else "peer")
+    if os.name == "nt":
+        quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+        command.write_text(
+            f"& {quote(sys.executable)} {quote(resolver)} @args\n", encoding="utf-8",
+        )
+    else:
+        command.write_text(
+            f'#!/usr/bin/env bash\nexec {shlex.quote(sys.executable)} {shlex.quote(str(resolver))} "$@"\n',
+            encoding="utf-8",
+        )
+        command.chmod(0o755)
+    original = shutil.which
+    monkeypatch.setattr(
+        _worktrees.shutil, "which",
+        lambda name: str(command) if name == "agent-worktrees" else original(name),
+    )
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    try:
+        assert _worktrees.state_root(tmp_path, None) == (None, "unavailable")
+        assert pid_file.exists()
+        assert not _pid_running(int(pid_file.read_text()))
+    finally:
+        if pid_file.exists():
+            pid = int(pid_file.read_text())
+            if _pid_running(pid):
+                os.kill(pid, signal.SIGTERM)
+
+
 def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(tmp_path):
     """A missing/invalid payload cwd must never fall back to the process cwd.
 

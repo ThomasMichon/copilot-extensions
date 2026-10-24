@@ -435,6 +435,7 @@ def test_ssh_snapshot_uses_real_same_cell_peer_and_refuses_foreign_receipts(tmp_
         "import json, os, sys\n"
         "from pathlib import Path\n"
         "assert sys.argv[1:] == ['state-root', '--json']\n"
+        f"assert Path.cwd() == Path({str(tmp_path)!r})\n"
         "assert sys.flags.isolated == sys.flags.utf8_mode == 1\n"
         f"assert os.environ['COPILOT_EXTENSIONS_CONTEXT'] == {str(slot.parent.parent / 'install.json')!r}\n"
         "assert 'PYTHONPATH' not in os.environ\n"

@@ -1,0 +1,9 @@
+{
+  "comment": "Carry additive child cwd/environment options in the shared caller-owned process primitive; default behavior is unchanged.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

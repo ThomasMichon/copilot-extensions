@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from agent_procutil import no_window_kwargs
+from agent_procutil.owned_process import run_caller_owned
 
 from ._peer_launch import ContextRefused, launch_prefix, validate_owner
 
@@ -52,12 +52,11 @@ def state_root(cwd: Path, own: dict | None) -> tuple[Path | None, str]:
         }
         environment["AGENT_WORKTREES_NO_SELFPROVISION"] = "1"
     try:
-        result = subprocess.run(
+        result = run_caller_owned(
             [*argv, "state-root", "--json"], cwd=cwd, env=environment,
-            stdin=subprocess.DEVNULL, capture_output=True, text=True,
-            encoding="utf-8", timeout=5, **no_window_kwargs(),
+            timeout=5, max_stdout_bytes=65536, max_stderr_bytes=65536,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, UnicodeError, subprocess.SubprocessError) as exc:
         if own is not None:
             raise ContextRefused("same-cell Worktrees invocation failed") from exc
         return None, "unavailable"

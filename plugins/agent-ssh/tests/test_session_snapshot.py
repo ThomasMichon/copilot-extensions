@@ -214,7 +214,7 @@ def test_legacy_peer_is_explicitly_nonprovisioning(tmp_path, monkeypatch):
             "requires_external": True, "bound": True, "state_root": str(tmp_path),
         }))
 
-    monkeypatch.setattr(adapter.subprocess, "run", run)
+    monkeypatch.setattr(adapter, "run_caller_owned", run)
     assert adapter.state_root(tmp_path, None) == (tmp_path, "bound")
     assert observed["env"]["AGENT_WORKTREES_NO_SELFPROVISION"] == "1"
     assert observed["argv"][-2:] == ["state-root", "--json"]
@@ -230,7 +230,7 @@ def test_present_same_cell_peer_refusal_never_uses_path(tmp_path, monkeypatch):
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "explicit-receipt")
     monkeypatch.setattr(adapter.shutil, "which", lambda *_: pytest.fail("PATH fallback"))
     monkeypatch.setattr(adapter, "launch_prefix", lambda *_: ["canonical-peer"])
-    monkeypatch.setattr(adapter.subprocess, "run", lambda *_a, **_kw: SimpleNamespace(returncode=126))
+    monkeypatch.setattr(adapter, "run_caller_owned", lambda *_a, **_kw: SimpleNamespace(returncode=126))
     with pytest.raises(adapter.ContextRefused):
         adapter.state_root(tmp_path, {"cellRoot": str(tmp_path), "pluginRoot": str(tmp_path)})
 
@@ -239,7 +239,7 @@ def test_present_same_cell_peer_refusal_never_uses_path(tmp_path, monkeypatch):
 def test_unbound_worktrees_response_keeps_unbound_status(tmp_path, monkeypatch, code):
     monkeypatch.setattr(_worktrees, "state_root", _REAL_STATE_ROOT)
     monkeypatch.setattr(_worktrees.shutil, "which", lambda _: "peer-command")
-    monkeypatch.setattr(_worktrees.subprocess, "run", lambda *_a, **_kw: SimpleNamespace(
+    monkeypatch.setattr(_worktrees, "run_caller_owned", lambda *_a, **_kw: SimpleNamespace(
         returncode=code, stdout=json.dumps({"requires_external": True, "bound": False}),
     ))
     assert _worktrees.state_root(tmp_path, None) == (None, "unbound")
@@ -258,6 +258,6 @@ def test_same_cell_execution_failure_is_refusal_not_optional_absence(tmp_path, m
     def run(*_args, **_kwargs):
         raise failure
 
-    monkeypatch.setattr(_worktrees.subprocess, "run", run)
+    monkeypatch.setattr(_worktrees, "run_caller_owned", run)
     with pytest.raises(_worktrees.ContextRefused):
         _worktrees.state_root(tmp_path, {"cellRoot": str(tmp_path), "pluginRoot": str(tmp_path)})
