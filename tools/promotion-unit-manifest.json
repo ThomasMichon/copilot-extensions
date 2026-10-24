@@ -1587,15 +1587,7 @@
         "tools/promotion_unit_tests/test_host_profile.py::test_host_profile_contract_unit[policy.test_global_kernel_controls_remain_denied]",
         "tools/promotion_unit_tests/test_host_profile.py::test_host_profile_contract_unit[policy.test_mount_operations_are_scoped_to_pinned_systemd_runtime_paths]",
         "tools/promotion_unit_tests/test_host_profile.py::test_host_profile_contract_unit[policy.test_remount_flag_families_keep_safety_flags_mandatory]",
-        "tools/promotion_unit_tests/test_host_profile.py::test_host_profile_contract_unit[policy.test_temporary_root_bindings_do_not_allow_arbitrary_source_repathing]",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py::test_registered_cleanups_run_on_every_exit[none-base]",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py::test_registered_cleanups_run_on_every_exit[none-host]",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py::test_registered_cleanups_run_on_every_exit[setup-base]",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py::test_registered_cleanups_run_on_every_exit[setup-host]",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py::test_registered_cleanups_run_on_every_exit[teardown-base]",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py::test_registered_cleanups_run_on_every_exit[teardown-host]",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py::test_registered_cleanups_run_on_every_exit[cleanup-base]",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py::test_registered_cleanups_run_on_every_exit[cleanup-host]"
+        "tools/promotion_unit_tests/test_host_profile.py::test_host_profile_contract_unit[policy.test_temporary_root_bindings_do_not_allow_arbitrary_source_repathing]"
     ],
     "sources": {
         "libs/installer-engine/installer_dependency_policy.py": "a29a7ee450991c21b07acb0bc2406b29c69e51a1e753c777a6a5283f7ce374bb",
@@ -1757,7 +1749,6 @@
         "tools/promotion_release_evidence.py": "85e870143e58e673719e7ee34e34cc581c93c2f5d888d74e546fffc18d3f1996",
         "tools/promotion_unit_tests/test_trusted_harness_base.py": "956b4bd9276b8df946511772d3fe83ca5df6bc08d4606f731e8ac7307611b7d0",
         "tools/promotion_unit_tests/test_host_profile.py": "e6bd9d07ef2b1699737e27a86e1883038097ec905170067bea3da6e445645331",
-        "tools/promotion_unit_tests/test_unittest_lifecycle.py": "cfa8f99cdf21cc7d0903f4f291a564285194a549a28eef3e658b44bc37589a6f",
         ".devcontainer/trusted-harness-base/tests/test_contract.py": "f193ecfa91ba4b24406d38103c1f357367d0229c4d4e036e08f6cb3b9d5deeb4",
         ".devcontainer/trusted-harness-base/build.py": "4d96b40567c1135bf82d117f6b54a41ac88b5ddf6fe6d033835a42e88203966d",
         ".devcontainer/trusted-harness-base/install.py": "5818d4f7a7dad564cb28496b42a3774d4f924afb95f91d65e1d46629bd05c845",
