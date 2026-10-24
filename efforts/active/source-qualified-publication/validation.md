@@ -51,6 +51,33 @@ submitting worktree; those artifacts are not part of the shipped product.
 Source-only review/CI is not integration, native/GUI/installed qualification
 or authorization to merge.
 
+### Second source-review correction and heartbeat work control
+
+The original captured 63-test and 69-test streams/JUnit remain immutable.
+A separate timestamped follow-up evidence directory inventories their hashes
+before the next execution; it does not replace either historical JUnit file.
+
+Six new focused cases were run **fail first** against the unchanged
+`62d2c55ef15efa8b8d76c07da3834ddba5b22385` module. Captured output and real
+JUnit record **5 failed, 1 passed, 44 deselected** (exit 1), demonstrating:
+snapshot/feed replacement erased the previous absence fence before validating
+incoming rows; source staleness ignored feed/point availability; and twenty
+valid heartbeats performed forty reducer-level deep-copy calls (twenty
+partitions and twenty frame lists). The rejection control already passed.
+
+The private-module correction validates incoming rows before replacing those
+fences, tracks revision-qualified availability independently of reset/reload
+staleness, and delegates a lone heartbeat to the existing receiver validation
+without copying committed state. The expanded focused selection reports
+**75 passed in 2.83s**, exit 0, with real JUnit recording 75 tests and zero
+failures/errors/skips. The deterministic 1,000-row fixture proves twenty
+valid heartbeats cause **zero** partition/frame/row deep copies, preserving
+cursor, floors, observations, receipts and committed object identities.
+Malformed shape, wrong generation/cursor, open-barrier and stale-epoch cases
+remain covered. This is a work-count assertion, not a stopwatch/native or
+installed performance qualification. No shared parser, production importer
+or public API changed.
+
 Coverage includes A10 locked → point A11 unlocked → twenty heartbeat/read
 ticks, independent B11 and feed base10, A12 new-owner supersession, source/
 project collisions, selected-identity refusal, epoch cancellation,

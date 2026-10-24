@@ -58,6 +58,18 @@ def _observation(row: dict) -> dict:
             "derivations": row.get("_observation_derivations", {})}
 
 
+def _validate_frame(frame: dict) -> None:
+    if (not isinstance(frame, dict) or not isinstance(frame.get("type"), str)
+            or frame["type"] not in _FRAME_FIELDS
+            or set(frame) - _FRAME_FIELDS[frame["type"]]):
+        raise ValueError("unsupported feed transaction frame")
+    if frame["type"] == "worktree" and (
+        not isinstance(frame.get("wt"), dict) or set(frame["wt"]) & _METADATA
+        or frame.get("phase", "current") != "current"
+    ):
+        raise ValueError("feed contains receiver metadata")
+
+
 def _envelope(value: dict, *, complete: bool) -> tuple[dict, list[dict]]:
     if not isinstance(value, dict) or set(value) - {
         "ok", "contract_version", "project", "projection", "worktrees",
@@ -127,7 +139,18 @@ class _Partition:
     absence_revision: int = 0
     order: list = field(default_factory=list)
     receipts: dict = field(default_factory=dict)
-    stale: bool = False
+    needs_snapshot: bool = False
+    availability: dict | None = None
+    availability_revision: int = 0
+
+    def note_availability(self, revision: int, availability: dict | None, *, fresh=False) -> None:
+        if revision < self.availability_revision:
+            return
+        # F1 availability can change without a publication; equal-cursor recovery needs freshness.
+        if (revision == self.availability_revision and self.availability is not None
+                and availability is None and not fresh):
+            return
+        self.availability_revision, self.availability = revision, availability
 
     def row(self, row: dict, revision: int) -> None:
         wid = row["id"]
@@ -166,11 +189,11 @@ class _Partition:
 
     def replace(self, rows: list[dict], revision: int) -> None:
         incoming = {row["id"] for row in rows}
+        for row in rows:
+            self.row(row, revision)
         for wid in self.floors.keys() - incoming:
             self.delete(wid, revision)
         self.published_ids, self.absence_revision = incoming, revision
-        for row in rows:
-            self.row(row, revision)
         self.order = [row["id"] for row in rows if row["id"] in self.rows] + [
             wid for wid in self.order if wid not in incoming and wid in self.rows
         ]
@@ -209,7 +232,7 @@ class _SourcePublications:
         self._epochs[source] = epoch
         for (selected, _), partition in self._partitions.items():
             if selected == source:
-                partition.stale = True
+                partition.needs_snapshot = True
         return epoch
 
     def _current(self, source: str, epoch: int) -> bool:
@@ -259,7 +282,8 @@ class _SourcePublications:
         feed.receive({"type": "done", "projection": head, "cursor": head["revision"]})
         candidate.replace(feed.rows, head["revision"])
         candidate.feed, candidate.feed_epoch = feed, epoch
-        candidate.stale = envelope.get("availability") is not None
+        candidate.needs_snapshot = False
+        candidate.note_availability(head["revision"], envelope.get("availability"), fresh=fresh)
         self._partitions[key] = candidate
         return True
 
@@ -275,13 +299,16 @@ class _SourcePublications:
         if candidate is None:
             return False
         if candidate.generation != envelope["projection"]["generation"]:
-            candidate.stale = True
+            candidate.needs_snapshot = True
             self._partitions[source, envelope["project"]] = candidate
             return False
         if len(envelope.get("observations", [])) != len(rows):
             raise ValueError("point publication omitted observation evidence")
         for row in rows:
             candidate.row(row, envelope["projection"]["revision"])
+        candidate.note_availability(
+            envelope["projection"]["revision"], envelope.get("availability"),
+        )
         if len(candidate.floors) > _MAX_ROWS:
             raise ValueError("publication exceeds retained identity bound")
         self._partitions[source, envelope["project"]] = candidate
@@ -295,18 +322,17 @@ class _SourcePublications:
         previous = self._partitions.get((source, project))
         if previous is None or previous.feed_epoch != epoch:
             return False
+        if len(frames) == 1 and isinstance(frames[0], dict) and (
+            frames[0].get("type") == "heartbeat"
+        ):
+            _validate_frame(frames[0])
+            previous.feed.receive(frames[0])
+            return False
         candidate = deepcopy(previous)
         committed = False
+        availability = None
         for frame in deepcopy(frames):
-            if (not isinstance(frame, dict) or not isinstance(frame.get("type"), str)
-                    or frame["type"] not in _FRAME_FIELDS
-                    or set(frame) - _FRAME_FIELDS[frame["type"]]):
-                raise ValueError("unsupported feed transaction frame")
-            if frame["type"] == "worktree" and (
-                not isinstance(frame.get("wt"), dict) or set(frame["wt"]) & _METADATA
-                or frame.get("phase", "current") != "current"
-            ):
-                raise ValueError("feed contains receiver metadata")
+            _validate_frame(frame)
             if committed or (frame["type"] == "heartbeat" and len(frames) != 1):
                 raise ValueError("expected one complete feed transaction")
             rows = candidate.feed.receive(frame)
@@ -314,8 +340,11 @@ class _SourcePublications:
                 frame["projection"]["roster_count"] != frame["selected_count"]
             ):
                 raise ValueError("feed must cover the full source/project roster")
+            if frame["type"] == "update":
+                availability = frame.get("availability")
             if frame["type"] == "commit":
                 candidate.replace(rows, candidate.feed.head["revision"])
+                candidate.note_availability(candidate.feed.head["revision"], availability)
                 committed = True
         if frames[-1]["type"] == "heartbeat":
             return False
@@ -356,7 +385,8 @@ class _SourcePublications:
         partition = self._partitions[source, project]
         return _freeze({
             "epoch": self._epochs[source], "generation": partition.generation,
-            "feed_cursor": partition.feed.head["revision"], "stale": partition.stale,
+            "feed_cursor": partition.feed.head["revision"],
+            "stale": partition.needs_snapshot or partition.availability is not None,
             "floors": deepcopy(partition.floors), "tombstones": deepcopy(partition.tombstones),
             "receipts": {key: partition.receipt_state(value)
                          for key, value in partition.receipts.items()},

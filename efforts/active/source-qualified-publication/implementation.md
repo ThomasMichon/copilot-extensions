@@ -319,6 +319,17 @@ feed roster and order, independently of newer point overlays. Canonical F1
 `worktree` frames with `phase: current` are supported. Current-quality snapshots
 retain validated stale availability warnings, including at an equal cursor;
 they do not silently relabel last-good rows as healthy.
+Incoming rows are checked against the **previous** complete-roster membership
+and absence fence before either is replaced, for both snapshots and feeds.
+Source availability has its own publication revision, separate from reload/
+generation-reset staleness. Older availability cannot override newer evidence;
+at equal revision a warning is conservative until an explicitly fresh snapshot
+clears it. A healthy point or feed cannot clear a pending snapshot/reset fence.
+
+A lone validated heartbeat delegates to the existing receiver's read-only
+heartbeat checks without copying the partition, feed, frames or rows. Epoch,
+frame shape, open barrier, generation and cursor checks remain intact. This
+is a no-op fast path only, not a broader copy-on-write or parser redesign.
 
 `_Receipt` is an optional **private intent**, not an F2 response decoder or
 evidence that any owner endpoint exists. A future adapter would have to prove

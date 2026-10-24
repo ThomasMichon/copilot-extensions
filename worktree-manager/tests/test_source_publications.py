@@ -8,6 +8,7 @@ from worktree_manager.production_picker.picker_tui.source_publications import (
     _Receipt,
     _SourcePublications,
 )
+from worktree_manager.production_picker.picker_tui import source_publications as publications
 
 G = "a" * 32
 H = "b" * 32
@@ -529,3 +530,98 @@ def test_snapshot_preserves_current_quality_stale_availability_at_equal_revision
     assert dict(record(store)["_availability"]) == value["availability"]
     assert snapshot(store, epoch, envelope())
     assert not state(store)["stale"] and record(store)["_availability"] is None
+
+
+@pytest.mark.parametrize("kind", ["snapshot", "feed"])
+def test_replace_validates_rows_against_previous_absence_fences(kind):
+    store, epoch = seeded(items=[])
+    assert snapshot(store, epoch, envelope(13, []))
+    before_records, before_status = store.records(), state(store)
+    with pytest.raises(ValueError, match="tombstone"):
+        if kind == "snapshot":
+            snapshot(store, epoch, envelope(14, [row(revision=12)]))
+        else:
+            feed(store, epoch, update(14, [row(revision=12)], base=13))
+    assert store.records() == before_records and state(store) == before_status
+    assert snapshot(store, epoch, envelope(14, [row(revision=14)]))
+
+
+def test_partition_availability_follows_feed_and_point_revision_not_delayed_evidence():
+    store, epoch = seeded()
+    warning = {"status": "stale", "reason": "publication failed"}
+    frames = update(11, [row(revision=11)])
+    frames[0]["availability"] = warning
+    assert feed(store, epoch, frames) and state(store)["stale"]
+    assert feed(store, epoch, update(12, [row(revision=12)], base=11))
+    assert not state(store)["stale"]
+    delayed = envelope(11, [row(revision=11)])
+    delayed["availability"] = warning
+    assert point(store, epoch, delayed) and not state(store)["stale"]
+    current = envelope(13, [row(revision=13)])
+    current["availability"] = warning
+    assert point(store, epoch, current) and state(store)["stale"]
+    assert point(store, epoch, envelope(13, [row(revision=13)])) and state(store)["stale"]
+    assert point(store, epoch, envelope(12, [row(revision=12)])) and state(store)["stale"]
+    assert point(store, epoch, envelope(14, [row(revision=14)]))
+    assert not state(store)["stale"]
+
+
+def test_partition_availability_is_separate_from_reload_and_generation_reset_staleness():
+    store, epoch = seeded()
+    warning = envelope(11, [row(revision=11)])
+    warning["availability"] = {"status": "stale", "reason": "publication failed"}
+    assert point(store, epoch, warning) and state(store)["stale"]
+    epoch = store.begin_epoch(SOURCE)
+    assert snapshot(store, epoch, envelope())
+    assert state(store)["stale"]
+    assert feed(store, epoch, update(12, [row(revision=12)]))
+    assert not state(store)["stale"]
+    assert not point(store, epoch, envelope(1, [row(revision=1)], generation=H))
+    assert point(store, epoch, envelope(13, [row(revision=13)]))
+    assert state(store)["stale"]
+    assert snapshot(store, epoch, envelope(13, [row(revision=13)]))
+    assert not state(store)["stale"]
+
+
+def test_twenty_heartbeats_copy_no_partition_or_rows_and_preserve_all_state(monkeypatch):
+    store, epoch = seeded([row(str(i)) for i in range(1000)])
+    assert point(store, epoch, envelope(11, [row("0", 11)]), wid="0")
+    assert store.note_receipt(
+        SOURCE, epoch, _Receipt("waiting", PROJECT, "0", G, "published", 12, ("session",)),
+    )
+    before_records, before_status = store.records(), state(store)
+    partition = store._partitions[SOURCE, PROJECT]
+    rows, receiver_rows = partition.rows, partition.feed.rows
+    copied = []
+    original = publications.deepcopy
+    with monkeypatch.context() as patch:
+        def count_copy(value):
+            copied.append(type(value).__name__)
+            return original(value)
+        patch.setattr(publications, "deepcopy", count_copy)
+        for _ in range(20):
+            assert not feed(store, epoch, [{"type": "heartbeat", "generation": G, "cursor": 10}])
+    assert copied == []
+    assert store._partitions[SOURCE, PROJECT] is partition
+    assert partition.rows is rows and partition.feed.rows is receiver_rows
+    assert store.records() == before_records and state(store) == before_status
+
+
+def test_heartbeat_noop_still_checks_shape_epoch_generation_cursor_and_barrier():
+    store, epoch = seeded()
+    valid = {"type": "heartbeat", "generation": G, "cursor": 10}
+    before = state(store)
+    for bad in ({**valid, "generation": H}, {**valid, "cursor": 11},
+                {**valid, "unsupported": True}, {**valid, "cursor": None}):
+        with pytest.raises(ValueError):
+            feed(store, epoch, [bad])
+        assert state(store) == before
+    with pytest.raises(ValueError):
+        feed(store, epoch, [valid, valid])
+    store._partitions[SOURCE, PROJECT].feed._begin = {"type": "update"}
+    with pytest.raises(ValueError, match="barrier"):
+        feed(store, epoch, [valid])
+    store._partitions[SOURCE, PROJECT].feed._begin = None
+    new_epoch = store.begin_epoch(SOURCE)
+    assert not feed(store, epoch, [valid])
+    assert not feed(store, new_epoch, [valid])
