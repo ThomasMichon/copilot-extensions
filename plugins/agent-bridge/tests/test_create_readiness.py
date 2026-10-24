@@ -57,10 +57,12 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
         "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
         "connection": {"repo": "example", "worktree_id": "worktree-a",
                        "native_session_id": "native-a", "target_dir": "/example/worktree"},
+        "creation": {"worktree": {"creation_nonce": "nonce-a"}},
     }
     reservation = {
         "key": "reservation-a", "state": "reserving", "agent_info": None,
         "conversation_retired": False, "creation_key": "logical-work", "allocation_project": None,
+        "allocation_revision": 1,
     }
     calls = []
 
@@ -73,7 +75,9 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
             return reservation
 
         def record_created_agent(self, key, **facts):
-            reservation["agent_info"] = facts["agent_info"]
+            reservation["agent_info"] = {
+                **facts["agent_info"], "startup_invocation": facts["startup_invocation"],
+            }
 
     def run(argv, **kwargs):
         args = parser.parse_args(argv[1:])
@@ -85,10 +89,15 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
             assert args.prompt is None and args.prompt_file is None
             result = created
         elif args.command == "send":
-            assert args.target == "bridge-a" and args.no_wait and args.prompt_file == "-"
+            assert args.target == "bridge-a" and args.no_wait and args.native_invocation_file == "-"
             assert args.expected_native_session_id == "native-a"
-            assert kwargs["input"].startswith("assigned task")
-            result = {"session_id": "bridge-a", "outcome": "delivered", "native_session_id": "native-a"}
+            invocation = json.loads(kwargs["input"])
+            assert invocation["prompt"].startswith("assigned task")
+            result = {
+                "version": 1, "session_id": "bridge-a", "outcome": "delivered",
+                "native_session_id": "native-a", "invocation_key": invocation["invocation_key"],
+                "turn_index": 0, "queued": False, "admission": "accepted",
+            }
         else:
             assert args.session_id == "bridge-a"
             if args.command == "resume":
@@ -108,10 +117,10 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
     monkeypatch.setattr(ordinary_bridge, "agent_bridge_launch_prefix", lambda: ["bridge"])
     monkeypatch.setattr(ordinary_bridge.subprocess, "run", run)
     monkeypatch.setattr(bridge, "registered_agent_project", lambda *args, **kw: None)
-    task = {"spawn_reservation_key": "reservation-a", "generation": 0}
+    task = {"id": "task-a", "spawn_reservation_key": "reservation-a", "generation": 0}
     kwargs = {"client": Client(), "agent": "local", "project": "example",
               "charter": "reviewer", "prompt": "assigned task"}
     handle = ordinary_bridge.start(task, **kwargs)
     ordinary_bridge.start(task, **kwargs)
     ordinary_bridge.observe(handle)
-    assert calls == ["create", "send", "status", "resume", "status", "send", "wait"]
+    assert calls == ["create", "send", "send", "wait"]

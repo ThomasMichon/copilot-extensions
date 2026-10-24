@@ -129,9 +129,10 @@ completion custody. Redirected diagnostics must reach the durable request log,
 not disappear behind an exit code.
 
 The **One-line bootstrap** below remains the fresh-install entry, not a required
-manual migration step for an adopted Manager. Do not rewrite a deployed launcher,
-install application dependencies into ambient Python, or use update bypass flags
-to force recovery.
+manual migration step for an adopted Manager. Its explicit
+[queue-release mode](#older-client-queue-release) is separate from installation.
+Do not rewrite a deployed launcher or install application dependencies into
+ambient Python to force recovery.
 
 Bootstrap-owned human progress goes to stderr with UTC correlation time and
 explicit running, warning or failed state. PowerShell uses its in-process
@@ -142,6 +143,18 @@ claim wall-clock differences are durations. These dependency-free lines do not
 load an installed runtime. Native prerequisite diagnostics, exceptions and the
 launched Manager's streams and exit status retain their existing ownership;
 this is not a claim that those separate producers are all framed.
+
+The fresh Manager's private update-repair prefix then opens its own
+`update/manager/engine_repair` human scope before the aggregate update run
+exists. Its start, missing-source or caught-refusal diagnostics, and final
+exit status use the shared UTC/monotonic stderr formatter. A failed repair
+ends that scope as failed and does not start aggregate orchestration.
+Native repair children explicitly forward the caller's existing standard
+descriptors, retaining redirected Windows streams even when no new console
+is allocated. They settle through the existing lifecycle owner; their
+diagnostics are not captured or decorated by this scope. The exit-only repair
+entry remains unframed when called outside a human scope, and older runtimes
+without the formatter retain the original diagnostics.
 
 `doctor` also reports **plugin-catalog alignment**: whether the authored
 catalog (`data/plugins.toml`) still matches the discovered plugin membership
@@ -639,6 +652,50 @@ install with `worktree-manager self-install` (dry-run) / `--apply`, and see it i
 project binstub discovers this Manager through the generic control-plane-provider
 registry rather than a literal `worktree-manager` PATH probe.
 
+### Older-client queue release
+
+An older installed Manager or Worktrees command may not understand
+`update --recover-for-repair`. An explicitly authorized operator can instead
+use an intact, trusted newer source's recovery-only entry. With Python 3.11+
+already available, from that source root:
+
+```bash
+python3 -I -S -B -X utf8 worktree-manager/scripts/runtime_install.py --recover-for-repair --json
+```
+
+On Windows, use the corresponding `python.exe` invocation. This entry imports
+only that Manager payload's declared local update-driver dependency closure,
+including materialized release payloads. It does not import the installed
+application, require its cooperation, construct Manager, publish selectors or
+commands, start services, or run pending work.
+
+The paired native bootstrap also accepts this mode:
+
+```bash
+bash worktree-manager/bootstrap.sh --recover-for-repair --json
+```
+
+```powershell
+& .\worktree-manager\bootstrap.ps1 --recover-for-repair --json
+```
+
+These bootstrap commands fetch the configured source into a private temporary
+directory, not the Manager installer's shared staging directory, and remove
+that temporary source after the recovery child finishes, including on failure.
+The ordinary bootstrap prerequisite policy still applies. `--json` is optional;
+no installation options or application command may accompany recovery.
+`WORKTREE_MANAGER_ROOT` selects bootstrap source configuration, not a different
+queue: recovery addresses the executing user's canonical installation queue.
+
+The [driver's explicit repair contract](../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+owns authorization, failed-history preservation and refusal semantics. JSON
+reports `cleanup_confirmed: false` and the actual released records, never a
+successful installation. A current execution owner, malformed queue or separately
+fenced native foundation still refuses this bounded entry. Release neither
+retires a live installer nor replays its failed request; request the intended
+ordinary installation separately after release. Full bounded takeover and
+selected-runtime readiness remain distinct from this operation.
+
 ### Slot completeness and recovery
 
 Each `versions/<generation>/` directory is an engine-owned venv with canonical
@@ -687,6 +744,7 @@ worktree-manager update --detach --json
 worktree-manager update --request-status <request-id> --json
 worktree-manager update --recovery-status --json
 worktree-manager update --recover-after-restart --json
+worktree-manager update --recover-for-repair --json
 worktree-manager update --supervised-debug
 ```
 
@@ -734,6 +792,14 @@ exclusive authority. It refuses same-boot, missing, malformed or unsupported
 boot evidence; age and PID disappearance are not substitutes. Settlement retains
 the interrupted failure and does not replay it or start an update. Submit a new
 ordinary update explicitly after recovery.
+
+`--recover-for-repair` instead records explicit operator authorization to release
+valid queue fences without historical cleanup or boot evidence. It preserves the
+failed outcome and reports `recovery_authority`/`released_at`, not native
+settlement. It neither runs nor replays an installation. The
+[driver recovery contract](../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+defines its scope, atomic migration, current-owner refusal and remaining
+foundation/active-takeover limitations.
 
 The same authority wraps public `stage-update` acquisition and
 `reconcile-plugins --apply`, including the session provisioning hook. They

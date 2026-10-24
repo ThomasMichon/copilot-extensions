@@ -34,6 +34,9 @@ class FakeClient:
     def list_agents(self):
         return [{"name": n} for n in self._agents]
 
+    def resolve_live_session(self, _target):
+        return {}
+
     def list_sessions(self, *, status=None):
         if status:
             return [s for s in self.sessions if s.get("status") == status]
@@ -253,6 +256,89 @@ def test_create_passes_existing_checkout_target(fixed_caller, monkeypatch):
     assert client.started[0]["worktree_id"] == "wt-review"
 
 
+@pytest.mark.parametrize("command", ["create", "send"])
+@pytest.mark.parametrize("registered", [True, False])
+@pytest.mark.parametrize("caller", ["explicit-controller", None])
+def test_cli_creation_and_delivery_share_caller(monkeypatch, command, registered, caller):
+    client = FakeClient(agents=["agent-x"] if registered else [])
+    delivered = []
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_get_caller_id", lambda: "ambient-controller")
+    monkeypatch.setattr(m, "_get_caller_session_id", lambda: None)
+    monkeypatch.setattr(m, "_worktrees_get", lambda _key: None)
+    monkeypatch.setattr(m, "_sender_repo", lambda: None)
+    monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "agent_bridge.resume_handoff_cli.find_singleton_repo", lambda _target: None,
+    )
+    monkeypatch.setattr(
+        m, "_submit_and_stream",
+        lambda *a, caller_id, **kw: delivered.append(caller_id),
+    )
+    argv = [command, "agent-x", "discover selected skills", "--no-wait"]
+    if caller is not None:
+        argv.extend(["--caller", caller])
+    args = m.build_parser().parse_args(argv)
+
+    getattr(m, "_cmd_" + command)(args)
+
+    expected = caller or "ambient-controller"
+    assert client.started[0]["caller_id"] == expected
+    assert delivered == [expected]
+
+
+def test_send_explicit_caller_reuses_its_own_session(monkeypatch):
+    client = FakeClient(sessions=[
+        _sess("ambient", agent="agent-x", caller="ambient-controller", status="idle"),
+        _sess("explicit", agent="agent-x", caller="explicit-controller", status="idle"),
+    ], agents=["agent-x"])
+    delivered = []
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_get_caller_id", lambda: "ambient-controller")
+    monkeypatch.setattr(
+        m, "_submit_and_stream",
+        lambda _client, _args, sid, _prompt, *, caller_id: delivered.append((sid, caller_id)),
+    )
+    args = m.build_parser().parse_args([
+        "send", "agent-x", "discover selected skills", "--caller", "explicit-controller", "--no-wait",
+    ])
+
+    m._cmd_send(args)
+
+    assert delivered == [("explicit", "explicit-controller")]
+    assert client.started == []
+    assert client.ended == []
+
+
+def test_start_retry_retains_selected_caller(monkeypatch):
+    client = FakeClient(sessions=[
+        _sess("expired", agent="agent-x", caller="explicit-controller", status="failed"),
+    ], conflict_sid="expired")
+    original_start = client.start_session
+
+    def start(**kwargs):
+        try:
+            return original_start(**kwargs)
+        finally:
+            client._conflict_sid = None
+
+    monkeypatch.setattr(client, "start_session", start)
+    monkeypatch.setattr(m, "_get_caller_id", lambda: pytest.fail("selected caller must not be rediscovered"))
+    monkeypatch.setattr(m, "_get_caller_session_id", lambda: None)
+    monkeypatch.setattr(m, "_worktrees_get", lambda _key: None)
+    monkeypatch.setattr(m, "_sender_repo", lambda: None)
+    monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **kw: None)
+
+    assert m._start_agent_session(
+        client, "agent-x", caller_id="explicit-controller",
+    ) == "fresh-sid"
+
+    assert [request["caller_id"] for request in client.started] == [
+        "explicit-controller", "explicit-controller",
+    ]
+    assert client.ended == ["expired"]
+
+
 def test_create_reclaim_removed_no_such_param(fixed_caller, monkeypatch):
     # agent-bridge-cold-resume Phase 3: create's break-glass reclaim was
     # removed entirely -- _start_agent_session no longer accepts a `reclaim`
@@ -358,7 +444,7 @@ def test_cmd_send_uses_main_resolve_target_compatibility_seam(monkeypatch):
     monkeypatch.setattr(
         m,
         "_resolve_target",
-        lambda _client, _target, force=False: seen.setdefault("resolved", "sess-compat"),
+        lambda _client, _target, force=False, caller_id=None: seen.setdefault("resolved", "sess-compat"),
     )
     monkeypatch.setattr(
         m,

@@ -129,6 +129,16 @@ and
 is a new one started. Output streams in real-time: response text, thought
 blocks, and tool call summaries.
 
+`--caller` overrides that affinity key for both named-agent session selection
+and creation, as well as prompt delivery and its cursor. Ordinary `create`
+also records the selected caller before launching the child. A usable caller
+checkout can supply controller-local plugin selection through the existing
+preparation rules; the key does not override qualified ownership or target-local
+plugin choices. Omitting the flag retains current-worktree discovery.
+Forced replacement validates sender preferences and remote ownership/capability
+before ending the incumbent, then reuses those caller facts for creation.
+A refused preflight or missing replacement agent leaves the incumbent intact.
+
 > **There is no `send --new`.** It was removed because it silently reused a
 > pre-existing (often stopped, stale) session instead of creating a fresh one.
 > To force a brand-new session, use the payload-local `create` operation below.
