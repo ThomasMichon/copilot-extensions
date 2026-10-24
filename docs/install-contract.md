@@ -3223,6 +3223,12 @@ health. It verifies the copied file coverage and content against the admitted
 source identity, and records the transaction's actual non-editable installation
 origins, not a second snapshot's paths. `freeze_inputs()` remains an explicit
 source-copy utility for packaging fixtures, not the construction path.
+Within that transaction, path-replacement forms and their ordered matcher are
+prepared once rather than rebuilt for each metadata scalar. Overlapping local
+package roots share verification only for the same original/retained file pair;
+every distinct pair still compares both content hashes and contributes its
+original-source hash. Neither result survives the transaction or replaces the
+construction owner's source-identity and fingerprint checks.
 The bootstrap requires Python 3.11 or newer.
 The POSIX guardian observes its direct child without reaping it until the
 owned process group is settled. Python 3.11/3.12 on macOS lack `os.waitid`;
