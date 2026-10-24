@@ -722,8 +722,10 @@ win grows with build complexity.
   without changing callbacks, keeping every policy copy under the 1000-line cap.
   The repaired development regression packet passes 411 controls with one
   POSIX-only installer-helper skip on Windows. Install/sync/changefile/module,
-  documentation, feed-neutrality, lint and diff guards pass. Final repaired
-  required units, native qualification and review remain open.
+  documentation, feed-neutrality, lint and diff guards pass. The unchanged
+  required packet passes all 1497 units without observed effects in 216.672
+  seconds at `cfffe6ca4eb359e5f3921fd199f9f1e08a5ef6d8`. Repaired published-head
+  CI, native qualification and fresh review remain open.
   The parent Plan and Validation Plan remain open.
 
 ### 2026-10-24 - Policy/release planner merged; exact source lock next
