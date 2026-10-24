@@ -159,6 +159,17 @@ the existing caller handles while retaining hidden native children and their
 completion custody. Redirected diagnostics must reach the durable request log,
 not disappear behind an exit code.
 
+Engine repair tolerates transient Windows payload-directory sharing contention
+without stopping live sessions or disabling their hooks. A completed native
+plugin **update** reporting sharing/lock violation 32 or 33 may retry at most
+twice, after its owned process tree is quiescent, within the original shared
+180-second acquisition budget. Each retry revalidates the registered source,
+all marketplace definitions and the requested plugin's ledger entry after
+backoff. Installs, POSIX failures, timeouts, uncertain cleanup and
+authentication, permission, integrity or policy refusals are not replayed.
+Persistent contention remains a failed update; a refreshed payload alone still
+does not prove a healthy, selected engine runtime.
+
 The **One-line bootstrap** below remains the fresh-install entry, not a required
 manual migration step for an adopted Manager. Its explicit
 [queue-release mode](#older-client-queue-release) is separate from installation.

@@ -436,7 +436,7 @@ def repair_case(
 
     acquisitions = []
 
-    def acquire_registered_payload(command, environment, cwd):
+    def acquire_registered_payload(command, environment, cwd, **kwargs):
         assert command[-3:] == ["plugin", "update", "agent-worktrees@fixture"]
         assert environment["COPILOT_HOME"] == str(home / ".copilot")
         acquisitions.append(list(command))
@@ -962,8 +962,8 @@ def test_repair_engine_revalidates_captured_owner_after_acquisition(repair_case,
     case = repair_case
     acquire = engine_origin._native_acquisition
 
-    def change_owner(command, environment, cwd):
-        result = acquire(command, environment, cwd)
+    def change_owner(command, environment, cwd, **kwargs):
+        result = acquire(command, environment, cwd, **kwargs)
         manifest = json.loads(case.manifest.read_text())
         manifest["commandBinding"]["runtimeRoot"] = str(case.home / "changed-root")
         case.manifest.write_text(json.dumps(manifest), encoding="utf-8")

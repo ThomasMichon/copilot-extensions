@@ -1,0 +1,9 @@
+{
+  "comment": "Recover transient Windows native payload-update sharing failures within the existing acquisition budget without replaying installs or uncertain children.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
