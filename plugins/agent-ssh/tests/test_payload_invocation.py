@@ -63,11 +63,14 @@ def test_bootstrap_stands_down_for_explicit_installation_context() -> None:
     )
 
 
-def test_runtime_gates_keep_first_use_provisioning_lock() -> None:
+def test_runtime_gates_delegate_whole_first_use_to_the_installation_driver() -> None:
     posix = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "runtime-gate.ps1").read_text(encoding="utf-8")
-    assert ".provision.lock" in posix
-    assert ".provision.lock" in powershell
+    for gate in (posix, powershell):
+        assert "stamp-provision" in gate
+        assert "ssh-command-v1" in gate
+        assert ".provision.lock" not in gate
+        assert ".provision-status" not in gate
 
 
 def _fake_runtime_gate_payload(root: Path, *, windows: bool) -> Path:
@@ -87,7 +90,8 @@ def _fake_runtime_gate_payload(root: Path, *, windows: bool) -> Path:
     )
     if windows:
         (scripts / "resolve-runtime.ps1").write_text(
-            "$AgentRtPy = $env:TEST_AGENT_RT_PY\n",
+            "# Trace contract: normal/read-only/ready-v1\n"
+            "param([string]$TraceMode)\n$AgentRtPy = $env:TEST_AGENT_RT_PY\n",
             encoding="utf-8",
         )
         (scripts / "install.ps1").write_text(
@@ -109,7 +113,8 @@ def _fake_runtime_gate_payload(root: Path, *, windows: bool) -> Path:
         )
     else:
         (scripts / "resolve-runtime.sh").write_text(
-            '#!/usr/bin/env bash\nAGENT_RT_PY="$TEST_AGENT_RT_PY"\n',
+            '#!/usr/bin/env bash\n# Trace contract: normal/read-only/ready-v1\n'
+            'AGENT_RT_PY="$TEST_AGENT_RT_PY"\n',
             encoding="utf-8",
         )
         (scripts / "install.sh").write_text(

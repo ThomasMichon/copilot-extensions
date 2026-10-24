@@ -1,3 +1,4 @@
+# Installation driver contract: ssh-first-use-v1
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
@@ -158,7 +159,10 @@ else {
 function Resolve-RuntimePython {
     $script:AgentRtPy = $null
     $env:AGENT_RT_ROOT = $runtimeRoot
-    . $runtimeResolver
+    if (-not (Select-String -LiteralPath $runtimeResolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+        throw 'Read-only runtime resolver is unavailable; update or repair the owning payload.'
+    }
+    . $runtimeResolver -TraceMode ready
     return $AgentRtPy
 }
 
@@ -197,87 +201,48 @@ if ($env:AGENT_SSH_NO_SELFPROVISION) {
     exit 1
 }
 
-New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
-$statusPath = Join-Path $runtimeRoot '.provision-status'
-$_lockPath = Join-Path $runtimeRoot '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open(
-            $_lockPath,
-            [IO.FileMode]::OpenOrCreate,
-            [IO.FileAccess]::ReadWrite,
-            [IO.FileShare]::None
-        )
-    } catch {
-        Start-Sleep -Milliseconds 200
+if (Test-Path Env:AGENT_SSH_PINNED_CONTEXT) {
+    [Console]::Error.WriteLine('[agent-ssh] pinned invocation requires a prepared owning runtime; provision independently.')
+    exit 126
+}
+if ($context -or $runtimeRoot -ine $legacyRoot -or
+    ($env:AGENT_SSH_HOME -and $env:AGENT_SSH_HOME -ine $legacyRoot)) {
+    [Console]::Error.WriteLine('[agent-ssh] cold namespaced/custom-root provisioning requires explicit installation management.')
+    exit 126
+}
+if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
+    [Console]::Error.WriteLine('[agent-ssh] nested first-use submission is unsupported; retain the current installation owner.')
+    exit 126
+}
+$location = Get-Location
+if ($location.Provider.Name -cne 'FileSystem') {
+    throw 'Invocation requires a filesystem project location.'
+}
+$project = $location.ProviderPath
+$executionRoot = Join-Path $env:USERPROFILE '.copilot-extensions\update-driver'
+function Invoke-FirstUse {
+    param([string]$Payload, [string]$Action)
+    $firstUse = Join-Path $Payload 'libs\update-driver\scripts\first-use.ps1'
+    if (-not (Test-Path -LiteralPath $firstUse -PathType Leaf) -or -not (
+        Select-String -LiteralPath $firstUse -SimpleMatch `
+            '# Installation driver lifecycle contract: ssh-command-v1' -Quiet
+    )) {
+        throw 'The packaged installation driver lacks the SSH stamp lifecycle contract.'
     }
-}
-
-$_provisionedPy = $null
-$_provisionRc = 0
-try {
-    $_provisionedPy = Resolve-RuntimePython
-    if (-not $_provisionedPy) {
-        [Console]::Error.WriteLine(
-            '[agent-ssh] runtime not provisioned -- provisioning on first use (may take ~30-120s: builds a versioned venv). Do not kill; extend your timeout.'
-        )
-        [Console]::Error.WriteLine(
-            "::agent-provisioning:: plugin=agent-ssh eta_seconds=120 reason=first-use status=$statusPath"
-        )
-        try {
-            "provisioning $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-                Set-Content -LiteralPath $statusPath -Encoding utf8
-        } catch {}
-
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer stamp -InstallDir $runtimeRoot 2>&1 |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
-        $_provisionRc = $LASTEXITCODE
-        if ($_provisionRc -eq 0) {
-            $_snapshot = ''
-            try { $_snapshot = ([IO.File]::ReadAllText((Join-Path $runtimeRoot 'payload-dir'))).Trim() } catch {}
-            $_snapshotInstaller = if ($_snapshot) { Join-Path $_snapshot 'scripts\install.ps1' } else { '' }
-            if (-not ($_snapshotInstaller -and (Test-Path -LiteralPath $_snapshotInstaller))) {
-                [Console]::Error.WriteLine("[agent-ssh] stamped snapshot installer not found: $_snapshotInstaller")
-                $_provisionRc = 127
-            } else {
-                & $hostExe -NoProfile -ExecutionPolicy Bypass -File $_snapshotInstaller provision -InstallDir $runtimeRoot 2>&1 |
-                    ForEach-Object { [Console]::Error.WriteLine($_) }
-                $_provisionRc = $LASTEXITCODE
-            }
-        }
-        if ($_provisionRc -eq 0) {
-            $_provisionedPy = Resolve-RuntimePython
-        }
-    }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
-}
-
-if ($_provisionRc -ne 0) {
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
-        "failed rc=$_provisionRc $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-            Set-Content -LiteralPath $statusPath -Encoding utf8
-    } catch {}
-    [Console]::Error.WriteLine(
-        "[agent-ssh] provisioning FAILED. See the log above; retry, or run: $installer provision -InstallDir $runtimeRoot"
-    )
-    exit $_provisionRc
+        $nativeShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        & $nativeShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $firstUse `
+            -Root $executionRoot -Payload $Payload -RuntimeRoot $runtimeRoot `
+            -Project $project -InstallerAction $Action -Wait
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousEap }
+    if ($code -ne 0) { exit $code }
 }
 
-if ($_provisionedPy) {
-    try {
-        "ready $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-            Set-Content -LiteralPath $statusPath -Encoding utf8
-    } catch {}
-    Invoke-Runtime -Python $_provisionedPy
-}
-
-try {
-    "failed rc=1 $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-        Set-Content -LiteralPath $statusPath -Encoding utf8
-} catch {}
-[Console]::Error.WriteLine(
-    '[agent-ssh] provisioning reported success but no runtime slot resolved.'
-)
+Invoke-FirstUse -Payload $payloadRoot -Action stamp-provision
+$runtimePython = Resolve-RuntimePython
+if ($runtimePython) { Invoke-Runtime -Python $runtimePython }
+[Console]::Error.WriteLine('[agent-ssh] driver completed without a resolvable runtime.')
 exit 1

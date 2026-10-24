@@ -129,6 +129,18 @@ not qualify retained-source #5379, command publishers, cells, explicit installer
 or host rollout. The non-download subset is
 `tools/run-plugin-tests.py update-driver --test-file tests/test_first_use_ssh_bootstrap.py`.
 
+## Optional SSH command adoption
+
+The manual `installation-context-full.yml` portfolio `ssh-commands` separately
+qualifies actual materialized legacy primary/payload commands on fresh Windows
+and Linux runners. It exercises Python-free first use, caller Job/group loss
+across the whole stamp/snapshot/provision request, concurrent callers, retained
+source with the installed payload unavailable, healthy argument/exit forwarding
+and no-write cold refusals. Healthy cell dispatch remains covered independently.
+This does not exercise remote SSH, explicit installers, custom-root/cell cold
+publication or the network-backed #5379 acceptance. The non-download subset is
+`tools/run-plugin-tests.py update-driver --test-file tests/test_first_use_ssh_command.py`.
+
 ## Optional SSH session snapshot
 
 The manual `installation-context-acceptance.yml` selector `ssh_snapshot=true`

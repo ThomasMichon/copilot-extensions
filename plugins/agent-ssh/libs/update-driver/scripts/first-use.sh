@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Installation driver lifecycle contract: vault-stamp-v1
+# Installation driver lifecycle contract: ssh-command-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then
@@ -18,7 +19,7 @@ while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --client-only) service_mode=(--client-only); shift ;;
         --installer-action)
-            [[ "$#" -ge 2 && ( "$2" == provision || "$2" == stamp ) ]] || exit 2
+            [[ "$#" -ge 2 && ( "$2" == provision || "$2" == stamp || "$2" == stamp-provision ) ]] || exit 2
             installer_action="$2"; shift 2 ;;
         --wait) wait_for_owner=1; shift ;;
         --run-owner)
@@ -61,6 +62,9 @@ case "$plugin" in
     agent-ssh) prefix=AGENT_SSH ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
+if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
+    printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
+fi
 if [[ "$plugin" == agent-ssh ]]; then
     [[ "$(query "$manifest" module)" == agent_ssh &&
         "$(query "$manifest" legacyRuntimeRoot)" == .agent-ssh &&
