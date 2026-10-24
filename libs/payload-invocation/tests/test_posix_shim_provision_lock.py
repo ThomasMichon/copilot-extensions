@@ -76,7 +76,12 @@ def _posix(path: Path) -> str:
     return str(path).replace("\\", "/")
 
 
-def _rendered_lock_section(tmp_path: Path) -> str:
+def _rendered_lock_section(tmp_path: Path, entry: str) -> str:
+    if entry == "dispatch":
+        dispatcher = SCRIPT.parents[2] / "plugins/agent-dispatch/scripts/runtime-gate.sh"
+        text = dispatcher.read_text(encoding="utf-8")
+        start = text.index('LOCK_LINK=""\n')
+        return 'RUNTIME_ROOT="$_runtime_root"\n' + text[start:text.index("trap cleanup EXIT\n", start)]
     plugin = tmp_path / "plugin"
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True)
@@ -110,24 +115,42 @@ def _rendered_lock_section(tmp_path: Path) -> str:
     return shim[start : shim.index(LOCK_END, start)]
 
 
-def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
-    tmp_path: Path,
-) -> None:
-    """The owner is dead at the first check, but by the under-mutex re-read
-    another reaper has removed it and a live holder P has taken the lock. P
-    then releases and Q re-creates the lock before the reaper's liveness
-    probe. The reaper may only remove the owner it judged stale itself, so
-    Q's live lock must survive."""
+def _assert_lock_scenario(tmp_path: Path, entry: str, hooks: str) -> None:
     bash = _bash()
     if bash is None:
         pytest.skip("bash not available")
-    section = _rendered_lock_section(tmp_path)
+    section = _rendered_lock_section(tmp_path, entry)
     root = tmp_path / "rt"
     root.mkdir()
     state = tmp_path / "state"
     state.mkdir()
     (root / ".provision.lock.pid").write_bytes(b"6161")
     (state / "live").write_bytes(b"")
+    script = (
+        f"_runtime_root='{_posix(root)}'\nSTATE='{_posix(state)}'\n"
+        + _SHIM + hooks + section
+        + 'echo "acquired $$ $(cat "$LINK")"\n'
+    )
+    harness = tmp_path / "harness.sh"
+    harness.write_bytes(script.encode())
+    result = subprocess.run(
+        [bash, _posix(harness)], capture_output=True, text=True, timeout=60,
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    violations = state / "violations"
+    assert not violations.exists(), violations.read_text()
+    status, pid, holder = result.stdout.split()
+    assert status == "acquired" and holder == pid
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch"])
+def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
+    tmp_path: Path, entry: str,
+) -> None:
+    """Only remove the owner originally judged stale, even if a live holder
+    releases and another holder recreates the link during revalidation."""
     hooks = (
         'before_read() {\n'
         '    case "$1" in\n'
@@ -139,19 +162,19 @@ def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
         '    if [[ "$1" == 2 ]]; then echo 8181 > "$STATE/live"; printf 8181 > "$LINK"; fi\n'
         '}\n'
     )
-    script = (
-        f"_runtime_root='{_posix(root)}'\nSTATE='{_posix(state)}'\n"
-        + _SHIM + hooks + section
-        + 'echo "acquired $$ $(cat "$LINK")"\n'
+    _assert_lock_scenario(tmp_path, entry, hooks)
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch"])
+def test_posix_reaper_serializes_another_reaper_after_final_read(
+    tmp_path: Path, entry: str,
+) -> None:
+    hooks = (
+        'before_read() { :; }\n'
+        'after_read() {\n'
+        '    if [[ "$1" == 2 && ! -d "$_runtime_root/.provision.reap.mutex" ]]; then\n'
+        '        echo 8181 > "$STATE/live"; printf 8181 > "$LINK"\n'
+        '    fi\n'
+        '}\n'
     )
-    harness = tmp_path / "harness.sh"
-    harness.write_bytes(script.encode())
-    result = subprocess.run(
-        [bash, _posix(harness)], capture_output=True, text=True, timeout=60,
-        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
-    )
-    assert result.returncode == 0, result.stderr
-    violations = state / "violations"
-    assert not violations.exists(), violations.read_text()
-    status, pid, holder = result.stdout.split()
-    assert status == "acquired" and holder == pid
+    _assert_lock_scenario(tmp_path, entry, hooks)

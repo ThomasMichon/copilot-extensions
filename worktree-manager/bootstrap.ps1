@@ -54,6 +54,19 @@ if (Test-Path $Config) {
 
 $installerArgs = @()
 $commandArgs = @($args)
+$RecoveryStaging = $null
+if ($commandArgs.Count -and $commandArgs[0] -ceq '--recover-for-repair') {
+    $installerArgs += '--recover-for-repair'
+    $commandArgs = @($commandArgs | Select-Object -Skip 1)
+    if ($commandArgs.Count -and $commandArgs[0] -ceq '--json') {
+        $installerArgs += '--json'
+        $commandArgs = @($commandArgs | Select-Object -Skip 1)
+    }
+    if ($commandArgs.Count) { throw 'Repair recovery accepts only --json.' }
+    $RecoveryStaging = Join-Path ([IO.Path]::GetTempPath()) ('manager-repair.' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $RecoveryStaging | Out-Null
+    $Staging = Join-Path $RecoveryStaging 'source'
+}
 if ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
     if ($commandArgs.Count -lt 4 -or $commandArgs[3] -cne 'update') {
         throw 'Incomplete or invalid update bootstrap source/command.'
@@ -63,6 +76,7 @@ if ($commandArgs.Count -and $commandArgs[0] -ceq '--repair-update') {
     $installerArgs += '--repair-update'
     $commandArgs = @($commandArgs | Select-Object -Skip 3)
 }
+try {
 Write-BootstrapProgress 'Worktree Manager bootstrap'
 
 # -- Prerequisites (auto-provision; restart-aware; user-local first) ----------
@@ -157,7 +171,11 @@ try {
         $Python = & uv python find --no-project '>=3.11'
     }
     if ($LASTEXITCODE -ne 0 -or -not $Python) { throw 'Manager needs Python 3.11 or newer.' }
-    & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
+    if ($commandArgs.Count) {
+        & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs -- @commandArgs
+    } else {
+        & $Python -I -S -B -X utf8 (Join-Path $PWD 'scripts\runtime_install.py') --root $Root --payload $PWD @installerArgs
+    }
     $commandExit = $LASTEXITCODE
 } finally {
     Pop-Location
@@ -169,3 +187,6 @@ if ($commandExit -eq 0 -and ($env:PATH -split ';') -notcontains $LocalBin) {
     Write-BootstrapProgress "Add '$LocalBin' to your PATH (uv and the worktree-manager binstub live there), then restart your shell." warning
 }
 exit $commandExit
+} finally {
+    if ($RecoveryStaging) { Remove-Item -LiteralPath $RecoveryStaging -Recurse -Force }
+}

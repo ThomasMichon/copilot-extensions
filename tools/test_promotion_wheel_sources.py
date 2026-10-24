@@ -256,10 +256,12 @@ def test_validator_provisioning_never_exposes_release_authority(monkeypatch, tmp
     root = Path(__file__).resolve().parent.parent
     jobs = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())["jobs"]
     probes = []
+    selected_uv = str(tmp_path / "uv-fixture")
+    monkeypatch.setattr(policy, "_select_uv_executable", lambda _: selected_uv)
 
     def settings_probe(command, **kwargs):
         probes.append(command)
-        assert command[:4] == ["uv", "pip", "install", "--show-settings"]
+        assert command[:4] == [selected_uv, "pip", "install", "--show-settings"]
         return subprocess.CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
             index_locations: IndexLocations { indexes: [], flat_index: [], },
             exclude_newer: ExcludeNewer { global: None, package: ExcludeNewerPackage({}), },

@@ -26,7 +26,11 @@ IDENTIFIER = re.compile(r"[a-z0-9._-]{1,64}\Z")
 FIELDS = {
     "join": ({"channel", "actor"}, set()),
     "leave": ({"channel", "codename"}, {"actor"}),
-    "post": ({"channel", "codename", "text", "request_id"}, set()),
+    "post": ({"channel", "codename", "text", "request_id"}, {"collaboration"}),
+    "thread": ({"channel", "codename", "event_id"},
+               {"limit", "max_bytes", "epoch", "head", "after"}),
+    "inbox": ({"channel", "codename"},
+              {"limit", "max_bytes", "epoch", "head", "after", "recent_after", "recent_limit"}),
     "read": ({"channel", "codename"}, {"limit"}),
     "cursor": ({"channel", "codename", "expected_cursor", "next_cursor"}, set()),
     "wait": ({"channel", "codename"}, {"timeout", "batch_ms"}),
@@ -179,6 +183,12 @@ def validate_request(request):
         if len(text.encode("utf-8")) > 8192:
             raise ChatError("invalid", "Text is too large.")
         _printable(request["request_id"], "request_id", 128)
+        if "collaboration" in request:
+            from .collaboration import normalize
+            normalize(request["collaboration"])
+    elif op in {"thread", "inbox"}:
+        from .collaboration import validate_view
+        validate_view(request)
     elif op == "read":
         _integer(request.get("limit", 50), "limit", 1, 100)
     elif op == "members":
@@ -220,8 +230,8 @@ def validate_request(request):
 class ChatStore:
     """One conversation owner, with short SQLite transactions and bounded waits.
 
-    Inactive memberships still occupy capacity. Text quota counts UTF-8 text
-    bytes, not SQLite/file overhead. Nothing prunes unread history.
+    Inactive memberships still occupy capacity. Message quota counts UTF-8 text
+    and normalized metadata, not SQLite/file overhead. Nothing prunes unread history.
     """
 
     def __init__(
@@ -293,6 +303,35 @@ class ChatStore:
                 );
                 CREATE INDEX IF NOT EXISTS events_channel_id
                     ON events(channel, id);
+                CREATE TABLE IF NOT EXISTS collaborations (
+                    event_id INTEGER PRIMARY KEY REFERENCES events(id),
+                    kind TEXT NOT NULL, metadata TEXT NOT NULL,
+                    thread_root INTEGER NOT NULL REFERENCES events(id),
+                    reply_to INTEGER REFERENCES events(id),
+                    supersedes INTEGER REFERENCES collaborations(event_id),
+                    channel TEXT NOT NULL REFERENCES channels(name),
+                    reply_author TEXT REFERENCES actors(codename),
+                    author_codename TEXT NOT NULL REFERENCES actors(codename)
+                );
+                CREATE INDEX IF NOT EXISTS collaborations_thread
+                    ON collaborations(thread_root, event_id);
+                CREATE INDEX IF NOT EXISTS collaborations_reply
+                    ON collaborations(reply_to, kind, event_id);
+                CREATE INDEX IF NOT EXISTS collaborations_review
+                    ON collaborations(channel, reply_author, kind, event_id);
+                CREATE INDEX IF NOT EXISTS collaborations_answer
+                    ON collaborations(reply_to, author_codename, event_id) WHERE kind='answer';
+                CREATE INDEX IF NOT EXISTS collaborations_supersedes
+                    ON collaborations(supersedes, event_id);
+                CREATE TABLE IF NOT EXISTS collaboration_recipients (
+                    event_id INTEGER NOT NULL REFERENCES collaborations(event_id),
+                    codename TEXT NOT NULL REFERENCES actors(codename),
+                    channel TEXT NOT NULL REFERENCES channels(name),
+                    kind TEXT NOT NULL,
+                    PRIMARY KEY(event_id, codename)
+                );
+                CREATE INDEX IF NOT EXISTS collaboration_recipient_events
+                    ON collaboration_recipients(channel, codename, kind, event_id);
             """)
             with self._transaction():
                 self._db.execute(
@@ -520,17 +559,27 @@ class ChatStore:
         }
 
     def _post(self, request):
+        from .collaboration import metadata, normalize, receipt, relationship
+
         channel, codename = request["channel"], request["codename"]
+        value = normalize(request["collaboration"]) if "collaboration" in request else None
         old = self._db.execute(
             "SELECT * FROM events WHERE codename=? AND request_id=?",
             (codename, request["request_id"]),
         ).fetchone()
         if old:
-            if old["channel"] != channel or old["text"] != request["text"]:
+            previous = metadata(self, old["id"])
+            old_value = json.loads(previous["metadata"]) if previous else None
+            if old["channel"] != channel or old["text"] != request["text"] or old_value != value:
                 raise ChatError("conflict", "Request ID already has different content.")
-            return {"event": self._event(old), "duplicate": True}
+            return receipt(self, old, True, value)
         self._member(channel, codename)
-        size = len(request["text"].encode("utf-8"))
+        reply, root, reply_author = (
+            relationship(self, request, value) if value is not None else (None, None, None)
+        )
+        size = len(request["text"].encode("utf-8")) + (
+            len(json_bytes(value)) if value is not None else 0
+        )
         counts = dict(self._db.execute(
             "SELECT key, value FROM settings WHERE key IN ('event_count', 'message_bytes')"
         ))
@@ -546,6 +595,21 @@ class ChatStore:
              json_bytes(self._actor(codename)).decode("utf-8"),
              request["text"], request["request_id"], size),
         ).lastrowid
+        if value is not None:
+            self._db.execute(
+                """INSERT INTO collaborations
+                (event_id, kind, metadata, thread_root, reply_to, supersedes, channel,
+                 reply_author, author_codename)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (row_id, value["kind"], json_bytes(value).decode("utf-8"),
+                 root if root is not None else row_id, reply, value.get("supersedes"),
+                 channel, reply_author, codename),
+            )
+            self._db.executemany(
+                """INSERT INTO collaboration_recipients (event_id, codename, channel, kind)
+                VALUES (?, ?, ?, ?)""",
+                [(row_id, recipient, channel, value["kind"]) for recipient in value["to"]],
+            )
         self._db.execute(
             "UPDATE settings SET value=CAST(value AS INTEGER)+1 WHERE key='event_count'"
         )
@@ -554,7 +618,15 @@ class ChatStore:
             (size,),
         )
         row = self._db.execute("SELECT * FROM events WHERE id=?", (row_id,)).fetchone()
-        return {"event": self._event(row), "duplicate": False}
+        return receipt(self, row, False, value)
+
+    def _thread(self, request):
+        from .collaboration import view
+        return view(self, request)
+
+    def _inbox(self, request):
+        from .collaboration import view
+        return view(self, request)
 
     def _read(self, request):
         channel, codename = request["channel"], request["codename"]

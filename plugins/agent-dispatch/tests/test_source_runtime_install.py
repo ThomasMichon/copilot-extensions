@@ -528,12 +528,16 @@ def test_native_first_use_does_not_bootstrap_upstream_for_orphaned_source_slots(
         pytest.skip("PowerShell unavailable")
     root = tmp_path / ".agent-dispatch"
     (root / "versions" / source[2].runtime_version).mkdir(parents=True)
-    text = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
-    stub = re.search(r"\$ps1Content = @'\n(.*?)\n'@", text, re.DOTALL)
-    assert stub
+    text = (SCRIPTS / "runtime-gate.ps1").read_text(encoding="utf-8")
+    selection = "function Select-ProvisionSource {" + text.split(
+        "function Select-ProvisionSource {", 1,
+    )[1].split("\n$provisionSource = Select-ProvisionSource", 1)[0]
     harness = tmp_path / "first-use.ps1"
     harness.write_text(
-        "function Invoke-WebRequest { throw 'unexpected upstream request' }\n" + stub.group(1),
+        "function Invoke-WebRequest { throw 'unexpected upstream request' }\n"
+        + f"$runtimeRoot = '{str(root).replace(chr(39), chr(39) * 2)}'\n"
+        + "$globalSurface = $true\n$payloadRoot = ''\n"
+        + selection + "\nSelect-ProvisionSource\n",
         encoding="utf-8",
     )
     env = {

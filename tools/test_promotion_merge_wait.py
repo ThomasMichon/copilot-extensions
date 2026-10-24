@@ -19,7 +19,7 @@ import pytest
 import yaml
 
 from _promotion_workflow_test_support import (
-    api_response, assert_source_owned_boundary, source_owned,
+    api_response, assert_source_owned_boundary, source_owned, unit_profile,
 )
 
 WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "validate-and-promote.yml"
@@ -73,7 +73,7 @@ def waiter(monkeypatch, tmp_path):
         assert "needs.materialized-candidate-windows.result == 'success'" in merge_job["if"]
     if "source-units" in workflow["jobs"]:
         for key, value in {
-            "QUALIFICATION_PROFILE": "source-units-v2",
+            "QUALIFICATION_PROFILE": unit_profile(workflow["jobs"]),
             "QUALIFICATION_RUN": "1", "QUALIFICATION_ATTEMPT": "1",
             "QUALIFICATION_UNIT_JOB": "456", "QUALIFICATION_UNIT_ARTIFACT": "789",
             "QUALIFICATION_UNIT_ARTIFACT_DIGEST": "sha256:" + "a" * 64,

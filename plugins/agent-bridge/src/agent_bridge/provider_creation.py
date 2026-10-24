@@ -48,6 +48,9 @@ async def start(
     prompt: str | None = None, **options: Any,
 ) -> tuple[Session, dict[str, Any]]:
     """Journal before launch; uncertainty never permits a second native start."""
+    from .hosting_policy import require_target_hosting
+
+    await require_target_hosting(target, operation="provider creation")
     venue = target.venue or {}
     capabilities = venue.get("capabilities")
     if (

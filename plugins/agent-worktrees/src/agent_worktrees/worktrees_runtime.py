@@ -9,6 +9,7 @@ from contextlib import closing
 from pathlib import Path
 
 from . import config as cfg
+from . import worktrees_observation_contract as observations
 from .worktrees_projection import WorktreesProjection, _identity
 from .worktrees_projection_index import (
     ProjectionError,
@@ -38,7 +39,7 @@ def request_selection(payload: dict) -> tuple[str, dict]:
         raise ProjectionError("invalid current-roster request fields")
     if type(payload.get("contract_version")) is not int:
         raise ProjectionError("missing current-roster contract version")
-    if payload["contract_version"] != CONTRACT_VERSION:
+    if payload["contract_version"] not in (CONTRACT_VERSION, observations.VERSION):
         raise ProjectionError("unsupported current-roster contract version")
     project = _identity(payload.get("project"), name="project")
     if cfg._PROJECT_NAME_RE.fullmatch(project) is None:
@@ -160,7 +161,7 @@ class WorktreesRuntime:
 
         with self._lock:
             return {
-                "capabilities": [CAPABILITY, FEED_CAPABILITY],
+                "capabilities": [CAPABILITY, FEED_CAPABILITY, observations.CAPABILITY],
                 "worktrees": {
                     "contract_version": CONTRACT_VERSION,
                     "status": self._reason,
@@ -184,14 +185,18 @@ class WorktreesRuntime:
             self._demand[project] = self._now()
             publication_error = self._publication_errors.get(project)
         try:
-            result = self.store.read(project, **selection)
+            result = self.store.read(
+                project, **selection, contract_version=payload["contract_version"],
+            )
         except ProjectionUnavailable as exc:
             if self._wake is not None:
                 self._wake.set()
             return self._failure("unready", publication_error or str(exc))
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
-        result = {"ok": True, "contract_version": CONTRACT_VERSION, **result}
+        result = {"ok": True, "contract_version": payload["contract_version"], **result}
+        if payload["contract_version"] == observations.VERSION:
+            result["project"] = project
         if publication_error is not None:
             result["availability"] = {"status": "stale", "reason": publication_error}
         return result

@@ -12,6 +12,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException
+from repository_policy import AgentHostingError
 
 from .acquisition_authority import read_worktree_record, worktree_command
 from .acquisition_contract import AcquisitionRefused
@@ -145,6 +146,9 @@ async def start(
         )
     if manager.is_draining:
         raise AcquisitionRefused("creation_draining", "bridge is draining", effect="not_started")
+    from .hosting_policy import require_target_hosting
+
+    await require_target_hosting(target, operation="keyed creation")
     db = manager.db
     store = AcquisitionStore(db)
     digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
@@ -234,6 +238,10 @@ async def start(
                     _update(db, digest, state="terminal")
                     raise AcquisitionRefused("creation_terminal", "original native conversation was ended")
                 if operation["state"] == "allocated":
+                    await require_target_hosting(
+                        replace(target, cwd=row["path"], explicit_cwd=True),
+                        operation="keyed creation",
+                    )
                     if not _sessionless(manager, row, head, worktree_id):
                         raise AcquisitionRefused("creation_history_occupied", "workspace is not positively sessionless")
                     store.gate_workspace(
@@ -248,7 +256,7 @@ async def start(
                             raise AcquisitionRefused("creation_conflict", "workspace identity changed before native start")
                         if not _sessionless(manager, current, current_head, worktree_id):
                             raise AcquisitionRefused("live_holder", "workspace changed before native start")
-                    except AcquisitionRefused:
+                    except (AcquisitionRefused, AgentHostingError):
                         store.release_workspace_gate(worktree_id, delivery_id)
                         raise
                     target = replace(target, worktree_id=worktree_id, cwd=saved["path"], explicit_cwd=True)
@@ -257,6 +265,7 @@ async def start(
 
                     async def before_launch() -> None:
                         try:
+                            await require_target_hosting(target, operation="keyed creation")
                             current, current_head = await _workspace(
                                 target.project, worktree_id, expected=saved,
                             )
@@ -283,6 +292,10 @@ async def start(
                         raise AcquisitionRefused(
                             "creation_preparation_failed", str(exc), effect="not_started",
                         ) from exc
+                    except AgentHostingError:
+                        if db.get_session(operation["session_id"]) is None:
+                            _update(db, digest, state="allocated")
+                        raise
                     finally:
                         state = db.execute_read(
                             "SELECT state FROM workspace_embodiments WHERE key_digest=?", (digest,),

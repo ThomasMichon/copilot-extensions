@@ -132,6 +132,17 @@ def discover_local_agents() -> dict[str, AgentConfig]:
             skipped.append(project_name)
             continue
         anchor = project_data.get("anchor", "")
+        if anchor and Path(anchor).is_dir():
+            from repository_policy import AgentHostingError
+
+            from .hosting_policy import require_path_hosting
+
+            try:
+                require_path_hosting(anchor, operation="discovery")
+            except AgentHostingError as exc:
+                log.warning("Repository agent %s is unavailable: %s", project_name, exc)
+                skipped.append(project_name)
+                continue
         discovered[project_name] = AgentConfig(
             name=project_name,
             project=project_name,
@@ -399,7 +410,7 @@ def infer_control_plane_project(
     best_name: str | None = None
     best_len = -1
     for entry in repos:
-        if not isinstance(entry, dict) or not entry.get("agent"):
+        if not isinstance(entry, dict) or entry.get("agent") is not True:
             continue
         name = str(entry.get("name", "")).strip()
         if not name:
@@ -416,6 +427,26 @@ def infer_control_plane_project(
                 if length > best_len:
                     best_name, best_len = name, length
     return best_name
+
+
+def _local_repository_allows_discovery(entry: dict, platform: str) -> bool:
+    paths = entry.get("paths")
+    raw = paths.get(platform) if isinstance(paths, dict) else None
+    if not isinstance(raw, str) or not raw:
+        return True
+    path = Path(os.path.expandvars(raw)).expanduser()
+    if not path.is_dir():
+        return True
+    from repository_policy import AgentHostingError
+
+    from .hosting_policy import require_path_hosting
+
+    try:
+        require_path_hosting(path, operation="discovery")
+    except AgentHostingError as exc:
+        log.warning("Repository agent %s is unavailable: %s", entry.get("name"), exc)
+        return False
+    return True
 
 
 def derive_topology_agents(
@@ -448,10 +479,18 @@ def derive_topology_agents(
             and env.name == local_platform
         )
 
+    def _local_project_allows_discovery(project: str) -> bool:
+        entry = next((
+            row for row in repos or [] if isinstance(row, dict) and row.get("name") == project
+        ), {})
+        return _local_repository_allows_discovery(entry, local_platform)
+
     if control_plane_project:
         for machine in machines.values():
             for env in machine.ssh_environments:
                 if not (_is_loopback(machine, env) or machine.ssh_ready):
+                    continue
+                if _is_loopback(machine, env) and not _local_project_allows_discovery(control_plane_project):
                     continue
                 name = compat._short_machine_agent_name(machine, env)
                 if name in out:
@@ -516,10 +555,12 @@ def derive_topology_agents(
             )
             env_name = spawn_env.name if spawn_env else None
             for entry in repos:
-                if not isinstance(entry, dict) or not entry.get("agent"):
+                if not isinstance(entry, dict) or entry.get("agent") is not True:
                     continue
                 repo = str(entry.get("name", "")).strip()
                 if not repo:
+                    continue
+                if not _local_repository_allows_discovery(entry, local_platform):
                     continue
                 name = f"{repo}@{venue}"
                 if name in out:

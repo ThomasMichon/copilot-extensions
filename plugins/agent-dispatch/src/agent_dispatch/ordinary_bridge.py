@@ -231,6 +231,13 @@ def start(
     from .bridge import registered_agent_project
     harness = registered_agent_project(agent, strict=True)
     project = reservation.get("allocation_project") or harness or project
+    from .hosting_policy import require_execution_harness
+
+    if not info and (project or reservation.get("worktree_path") or reservation.get("worktree")):
+        require_execution_harness(
+            path=reservation.get("worktree_path"), project=project,
+            worktree_id=reservation.get("worktree"), timeout=timeout,
+        )
     from .workspace_binding import bind_allocation
     from .spawn_factories import SpawnPreparationRetained
     if assigned:
@@ -244,9 +251,13 @@ def start(
         except SpawnPreparationRetained as exc:
             raise CreatedAgentUnrecorded(str(exc)) from exc
 
-    def run(argv: list[str], *, prompt_input: str | None = None) -> subprocess.CompletedProcess[str]:
+    def run(
+        argv: list[str], *, prompt_input: str | None = None, read_only: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         from .launch_debug import begin
-        trace = begin(prefix, argv, prompt_input=prompt_input, input_reference=key, timeout=timeout)
+        trace = None if read_only else begin(
+            prefix, argv, prompt_input=prompt_input, input_reference=key, timeout=timeout,
+        )
         try:
             result = subprocess.run([*prefix, *argv], input=prompt_input, capture_output=True,
                                     text=True, encoding="utf-8", check=False, timeout=timeout, **no_window_kwargs())
@@ -328,6 +339,7 @@ def start(
                 ["--json", "send", session_id, "--expected-native-session-id", actual.native,
                  "--native-invocation-file", "-", "--receipt-only", "--no-wait"],
                 prompt_input=receipt_input,
+                read_only=True,
             )
         except (subprocess.TimeoutExpired, OSError) as exc:
             raise BridgeCarriedSessionBusy(
@@ -352,13 +364,19 @@ def start(
             raise BridgeUnavailable("retained ordinary agent has retired or unknown conversation authority")
         try:
             current_task(client, task)
-            store_info()
-            status_result = run(["--json", "status", session_id])
+            status_result = run(["--json", "status", session_id], read_only=True)
             if status_result.returncode:
                 raise BridgeCarriedSessionBusy("retained ordinary agent status is unproven")
             status = _json_result(status_result).get("status")
             if status == "stopped":
-                resumed = run(["--json", "resume", session_id, "--strict"])
+                require_execution_harness(path=actual.path, project=project, timeout=timeout)
+            elif status != "idle":
+                raise BridgeCarriedSessionBusy(f"retained ordinary agent is not idle: {status}")
+            store_info()
+            if status == "stopped":
+                resumed = run([
+                    "--json", "resume", session_id, "--require-agent-hosting", "--strict",
+                ])
                 response = _json_result(resumed)
                 if resumed.returncode or response.get("session_id") != session_id:
                     raise BridgeCarriedSessionBusy("strict ordinary resume did not preserve the retained bridge identity")
@@ -367,8 +385,6 @@ def start(
                     raise TaskError("strict ordinary resume changed retained native/workspace identity")
                 if info.get("fact_kind") == "resumed":
                     info = {**current, "startup_invocation": info["startup_invocation"]}
-            elif status != "idle":
-                raise BridgeCarriedSessionBusy(f"retained ordinary agent is not idle: {status}")
         except (TaskError, DispatchError, OSError, subprocess.TimeoutExpired) as exc:
             raise BridgeCarriedSessionBusy(f"retained ordinary agent resume failed: {exc}") from exc
     else:
@@ -393,7 +409,10 @@ def start(
                         "legacy allocation has no immutable ordinary invocation; explicit reconciliation required"
                     )
                 try:
-                    resumed = run(["--json", "resume", reservation["worktree"], "--strict"])
+                    resumed = run([
+                        "--json", "resume", reservation["worktree"],
+                        "--require-agent-hosting", "--strict",
+                    ])
                     if resumed.returncode:
                         raise BridgeCarriedSessionBusy(resumed.stderr or resumed.stdout or "strict worktree resume refused")
                     response = _json_result(resumed)
@@ -417,7 +436,8 @@ def start(
         if not info:
             target = f"{project}@{agent}" if project and "@" not in agent else agent
             from .ordinary_invocation import KEYED_NATIVE_PROTOCOL
-            argv = ["--json", "create", target, "--creation-key", reservation["creation_key"],
+            argv = ["--json", "create", target, "--require-agent-hosting",
+                    "--creation-key", reservation["creation_key"],
                     "--min-daemon-protocol", str(KEYED_NATIVE_PROTOCOL)]
             if assigned:
                 argv += ["--worktree-id", reservation["worktree"]]

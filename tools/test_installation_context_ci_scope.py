@@ -116,7 +116,7 @@ def test_native_jobs_do_not_reenter_required_unit_only_ci(retired_job: str) -> N
     units = workflow["jobs"]["unit-tests"]
     execution = next(step for step in units["steps"] if step.get("id") == "units")
     assert execution["if"] == "steps.impact.outputs.run == 'true'"
-    assert "tools/run-promotion-unit-tests.py" in execution["run"]
+    assert "tools/ci_pr_unit_reuse.py" in execution["run"]
     assert not execution.get("continue-on-error", False)
 
 
@@ -199,6 +199,32 @@ def test_derived_native_diagnostics_are_not_a_required_smoke_fallback() -> None:
     assert "tools/run-standalone-tests.py" not in commands
 
 
+@pytest.mark.parametrize("platform,runner", [
+    ("linux", "ubuntu-latest"), ("windows", "windows-latest"),
+])
+def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform, runner) -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert trigger["workflow_dispatch"]["inputs"]["candidate_profiles"]["default"] is False
+    name = f"candidate-profiles-{platform}"
+    job = workflow["jobs"][name]
+    assert job["if"] == "${{ inputs.candidate_profiles }}"
+    assert job["runs-on"] == runner
+    assert job["timeout-minutes"] == 15
+    assert "strategy" not in job
+    execution = job["steps"][-1]
+    assert "--test-file tests/test_python_installer_engine.py" in execution["run"]
+    for selector in ("local_role", "local_package", "role_health", "selected_extras"):
+        assert selector in execution["run"]
+    assert not execution.get("continue-on-error", False)
+    for diagnostics in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
+        assert "!inputs.candidate_profiles" in workflow["jobs"][diagnostics]["if"]
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    assert name not in required["jobs"]
+
+
 def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
@@ -208,6 +234,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert set(inputs) == {
         "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
+        "candidate_profiles", "ssh_snapshot", "wheel_inputs",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -223,12 +250,16 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-service-linux", "pr-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
+        "candidate-profiles-linux", "candidate-profiles-windows",
+        "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
+        "wheel-inputs-linux", "wheel-inputs-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
         assert job["if"] == (
             "${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service "
-            "&& !inputs.pr_artifacts && !inputs.dependency_compile }}"
+            "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
+            "&& !inputs.ssh_snapshot && !inputs.wheel_inputs }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -243,6 +274,67 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         assert "-m " not in step["run"].rsplit("pytest", 1)[1]
         if runner == "windows-latest":
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+
+
+def test_foundation_snapshot_staging_is_disposable_and_bounded() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    for name, runner in (
+        ("foundation-linux", "ubuntu-latest"), ("foundation-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'"
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 25
+        step = next(
+            entry for entry in job["steps"]
+            if entry.get("name") == "Qualify selected snapshot staging and ordinary-copy refusal"
+        )
+        assert step["env"] == {"APR_NATIVE_OS_ACCOUNT_ACCEPTANCE": "1"}
+        assert step["run"].split() == [
+            "python", "tools/run-plugin-tests.py", "agent-pull-requests",
+            "--allow-explicit-tiers", "--allow-host-state",
+            "--test-file", "tests/test_cell_invocation.py",
+            "-k", '"native_staged_snapshot', "or", "legacy_staging_reentry", "or", 'frozen_input"',
+            "--test-timeout", "60", "--timeout", "300",
+        ]
+
+
+def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "pull-requests-commands" in (
+        trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    )
+    assert workflow["jobs"]["exhaustive"]["if"] == (
+        "github.event_name != 'workflow_dispatch' || inputs.portfolio == 'context'"
+    )
+    for name, runner in (
+        ("pull-requests-command-linux", "ubuntu-latest"),
+        ("pull-requests-command-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-commands'"
+        )
+        assert job["timeout-minutes"] == 25
+        assert job["runs-on"] == runner and not job.get("strategy")
+        steps = [step["run"] for step in job["steps"] if "run" in step]
+        assert len(steps) == 2
+        assert steps[0].split() == [
+            "python", "tools/run-plugin-tests.py", "update-driver",
+            "--test-file", "tests/test_first_use_pull_requests_command.py",
+            "--test-timeout", "900", "--timeout", "1080",
+        ]
+        assert steps[1].split() == [
+            "python", "tools/run-plugin-tests.py", "agent-pull-requests",
+            "--test-file", "tests/test_cell_invocation.py",
+            "-k", '"dispatch_preserves', "or", 'command_cannot"',
+            "--test-timeout", "60", "--timeout", "180",
+        ]
+        assert not job.get("continue-on-error")
 
 
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:

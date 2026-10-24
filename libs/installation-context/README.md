@@ -693,7 +693,7 @@ governance, command ownership, construction, activation or maintenance.
 
 The policy is an ordinary, unlinked `runtime-deployment.json` file in the actual
 runtime root already selected by mode governance. There is no deployment-policy
-path override or environment-variable authorization. Its exact fields are
+path override or environment-variable authorization. Its required fields are
 `schema: "copilot-extensions.runtime-deployment"`, `version: 1`, a JSON boolean
 `managed`, and `owner`. The owner's exact fields match the existing installation
 tuple: `sourceFingerprint`, `pluginId`, `mode`, `runtimeRoot` and `environment`
@@ -701,8 +701,51 @@ tuple: `sourceFingerprint`, `pluginId`, `mode`, `runtimeRoot` and `environment`
 ownership, not a runtime-artifact source selector or a new installation mode.
 No copy of a policy may redirect the resolver to its recorded root.
 
-Missing policy retains standalone behavior; matching `managed: false` explicitly
-permits standalone publication. Matching `managed: true` refuses plugin
+The same owner-bound file optionally accepts `runtimeProfiles`, with only
+`allowSourceFallback` (a JSON boolean) and `backend` (an explicit opaque
+capability reference). All three native deployment readers validate these
+fields; malformed or self-authorizing fields, including an approvals map,
+refuse rather than becoming defaults. Older readers safely refuse this
+optional extension instead of ignoring a stricter policy.
+Until a publication lifecycle consumes and enforces the selected profile,
+even a valid explicit `runtimeProfiles` object holds ordinary publication with
+`reason: "runtime-profile-consumer-required"`. A true empty object is valid
+intent, not permission for a profile-unaware constructor to ignore that intent.
+No current native engine constructor is enabled by this reader.
+The hold also applies to explicit management leases and borrowed custody,
+including a live ticket acquired before profile settings were added. The
+managed-only exception remains available when `runtimeProfiles` is absent.
+
+Python `resolve_runtime_profile_policy` and the stdlib-only Python CLI action
+`runtime-profile-policy` resolve that input through the existing source,
+installation-mode and deployment readers. With no policy file, a resolved fresh
+installation prefers artifact mode, permits governed source fallback and selects
+CPU. A retained capability remains selected; an unprofiled existing runtime
+requires an explicit migration choice. The API accepts `backend`,
+`retained_backend` and `existing_installation`; the CLI exposes the corresponding
+`--backend`, `--retained-backend` and `--existing-installation` arguments.
+An explicit choice conflicting with the installation-owned backend refuses.
+No device discovery implicitly selects an accelerator.
+
+The returned `runtimeProfiles` object contains readiness, the existing owner,
+effective selection intent and a `policyId` over that owner, intent, managed
+flag and publication hold. Equivalent JSON formatting does not change it; a changed effective policy
+or installation does. This is a policy invalidation input, not a reusable
+admission receipt. The identity also binds profile presence, so adding an empty
+profile object changes the management-publication policy even when plugin
+publication was already held by `managed: true`. It is not a whole-record
+approval. Unresolved provenance, pending mode
+activation and invalid policy return blocked intent, never a CPU default.
+Pending activation includes mode resolution reporting `status: "ready"` with
+`reason: "activation-required"`; it does not resolve a legacy-root profile.
+The CLI exits 1 for blocked or malformed input. Resolution writes no state and
+does not clear `deployment.allowPluginPublication`, select or authenticate a
+source release, approve a profile, qualify a feed/device, resolve/download a
+closure, construct or activate a runtime. Native consumers must compose those
+independent gates; this API does not enable them.
+
+Missing policy retains standalone behavior; matching `managed: false` without
+profile settings explicitly permits standalone publication. Matching `managed: true` refuses plugin
 publication, with an explicit-management recovery action. Unreadable, malformed,
 unsupported, linked or foreign policy refuses publication with an explicit
 diagnostic instead of becoming a standalone default. Healthy installed

@@ -335,6 +335,7 @@ def test_real_read_only_cli_boundary_never_asserts_model_admission(tmp_path: Pat
 @pytest.mark.guard
 def test_shipped_inline_allowlist_is_explicit_and_substantive() -> None:
     expected = {
+        ("agent-conduct-guidance", "multi-agent-rules-of-engagement"),
         ("agent-conduct-guidance", "process-hygiene-fallback"),
         ("agent-conduct-guidance", "delegation-fallback"),
         ("agent-conduct-guidance", "scratch-space-fallback"),

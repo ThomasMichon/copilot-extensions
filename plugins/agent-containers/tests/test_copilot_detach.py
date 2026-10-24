@@ -20,6 +20,7 @@ from ssh_manager import keeper_holds as shared_keeper_holds
 from agent_containers import copilot_detach as detach
 from agent_containers import forward_keeper
 from agent_containers.config import ContainersConfig, FleetConfig, RESTRICTED_PROFILE
+from tests._hosting_owner import policy_reply
 
 
 def _args(**kw):
@@ -245,6 +246,9 @@ def test_admitted_seed_lost_response_keeps_mux_keeper_inputs_and_pending_recover
     monkeypatch.setattr(forward_keeper, "read_state", lambda name: {
         "pending_deliveries": seams.pending,
     })
+    def deny_new_launch(*args, **kwargs):
+        raise RuntimeError("expose_agent: false must not block retained delivery settlement")
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_hosting", deny_new_launch)
     assert detach.cmd_detach(args, require_live_relay_port=lambda: 41235,
                              relay_healthy=lambda port: True) == 75
     capsys.readouterr()
@@ -257,6 +261,22 @@ def test_admitted_seed_lost_response_keeps_mux_keeper_inputs_and_pending_recover
     assert all(value == attempts[0] for value in attempts)
     assert queue.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
     queue.close()
+
+
+def test_vanished_pending_delivery_rechecks_hosting_before_new_launch(seams, monkeypatch, capsys):
+    snapshots = iter([
+        {"pending_deliveries": {"anchor-repo@repo-1": {"status": "admitted"}}},
+        {},
+    ])
+    monkeypatch.setattr(forward_keeper, "read_state", lambda _name: next(snapshots))
+    def deny(*args, **kwargs):
+        raise RuntimeError("expose_agent: false")
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_hosting", deny)
+    assert detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 41235, relay_healthy=lambda port: True,
+    ) == 1
+    assert "expose_agent: false" in json.loads(capsys.readouterr().out)["error"]
+    assert seams.run == [] and seams.stop_keeper == []
 
 
 @pytest.mark.parametrize("failure", [None, "spawn", "probe"])
@@ -424,6 +444,7 @@ def _target(profile: str = "trusted"):
     )
     return types.SimpleNamespace(
         name="repo-1",
+        container_id="a" * 64,
         config=config,
         fleet=fleet,
         actual_profile=profile,
@@ -467,8 +488,17 @@ def seams(monkeypatch):
         shims=[],
         messages=[],
         pending={},
+        admissions=[],
     )
     target = _target()
+    def policy_run(argv, **kwargs):
+        calls.admissions.append(argv)
+        return policy_reply(
+            argv, container_id=target.container_id, workspace=target.workspace_folder,
+        )
+    monkeypatch.setattr("agent_containers.hosting_policy.subprocess", types.SimpleNamespace(
+        run=policy_run, SubprocessError=subprocess.SubprocessError,
+    ))
     monkeypatch.setattr("venue_copilot.refs.deliver_note",
                         lambda sid, note, **kwargs: calls.messages.append((sid, note, kwargs)) or True)
     import agent_containers.config as config_mod

@@ -116,6 +116,13 @@ def launch(
     admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None,
 ) -> int:
+    from . import agent_policy
+
+    try:
+        agent_policy.require_record(record_path)
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 3
     if (preserve_seed_id and not admission_only) or (admission_only and (seed_id or invoke)):
         raise ValueError("Admission-only launch cannot claim a prompt")
     if native_resume_session and not admission_only:
@@ -139,6 +146,14 @@ def _launch(
         record = tracking.load_record(record_path)
     except (OSError, ValueError) as exc:
         print(f"Could not read launch-prompt worktree: {exc}", file=sys.stderr)
+        return 3
+    from . import agent_policy
+    from repository_policy import AgentHostingError
+
+    try:
+        agent_policy.require(record.worktree_path)
+    except AgentHostingError as exc:
+        print(str(exc), file=sys.stderr)
         return 3
     current = launch_seed_state.peek(record_path)
     if native_resume_session:

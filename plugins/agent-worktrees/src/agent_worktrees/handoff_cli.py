@@ -7,12 +7,14 @@ import subprocess
 import time
 from contextlib import ExitStack
 
-from . import config as cfg, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
+from . import agent_policy, config as cfg, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
 from . import launch_seed_state, embody_resume, embody_completion
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
 from . import bridge_acquisition_launch, bridge_seed_delivery, native_restart_launch
 from .launch_passthrough import passthrough_error as _passthrough_error
+from .launch_passthrough import add_launch_passthrough_args
+from .bridge_acquisition_launch import apply_bridge_scope as _apply_bridge_scope
 
 
 def _core():
@@ -47,41 +49,6 @@ def _monitor_maybe_process_handoff_record(*args, **kwargs): return _core()._moni
 def _monitor_session_state_handoff_path(*args, **kwargs): return _core_helper("_monitor_session_state_handoff_path", status_monitor_runtime._monitor_session_state_handoff_path)(*args, **kwargs)
 def _monitor_read_session_state_handoff(*args, **kwargs): return _core_helper("_monitor_read_session_state_handoff", status_monitor_runtime._monitor_read_session_state_handoff)(*args, **kwargs)
 def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_worktree_id_by_codename(*args, **kwargs)
-
-
-def add_launch_passthrough_args(p: argparse.ArgumentParser) -> None:
-    """Register the launch-passthrough flags shared by `embody` and `copilot`."""
-    p.add_argument(
-        "--copilot-process-launcher", default=None, metavar="PATH",
-        help="One-launch executable wrapper for direct Copilot or normalized "
-        "setup. Requires an absolute executable path; custom templates and "
-        "configured copilot_path overrides fail closed.",
-    )
-    p.add_argument(
-        "--copilot-arg", dest="copilot_args", action="append", default=[],
-        metavar="ARG",
-        help="Extra argument appended to the launched Copilot command line "
-        "(repeatable; use the `--copilot-arg=--flag=value` form for values that "
-        "start with '-'). For example `--copilot-arg=--plugin-dir=/path` stages "
-        "a plugin into the session, `--copilot-arg=--no-ask-user` for an "
-        "unattended one. Mode-changing flags (--acp, --stdio, -p/--prompt, "
-        "-i/--interactive) are refused -- use --seed for the first turn.",
-    )
-    p.add_argument(
-        "--bridge-scope-id", dest="bridge_scope_id", default=None, metavar="ID",
-        help="Identity the launched session registers with agent-bridge "
-        "(exported as AGENT_BRIDGE_SCOPE_ID; default: `agent-worktrees get "
-        "session-scope-id`). A venue launcher sets a venue-qualified id "
-        "(e.g. `anchor-<repo>@<codespace>`) so sessions on different venues of "
-        "the same repo stay distinguishable on the host bridge. Does not change "
-        "the local mux session name.",
-    )
-
-
-def _apply_bridge_scope(env: dict[str, str], args: argparse.Namespace) -> None:
-    scope = getattr(args, "bridge_scope_id", None)
-    if scope:
-        env["AGENT_BRIDGE_SCOPE_ID"] = scope
 
 
 def add_parsers(sub) -> None:
@@ -259,14 +226,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return native_restart_launch.cmd_embody(args)
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
-    if getattr(args, "require_native_admission", False) and getattr(args, "bridge_acquisition", None) in {None, "fresh"}:
-        return output._json_error("Native admission requires an exact existing conversation", exit_code=3)
-    if (
-        getattr(args, "require_plugin_preparation", False) or getattr(args, "bridge_plugin_request", None)
-    ) and not getattr(args, "bridge_acquisition", None):
-        return output._json_error("Plugin preparation requires typed Bridge acquisition", exit_code=3)
-    if getattr(args, "bridge_acquisition", None) and (not raw_id or getattr(args, "seed", None) or getattr(args, "copilot_args", None)):
-        return output._json_error("bridge acquisition requires an explicit worktree and no seed/passthrough args", exit_code=3)
+    if error := bridge_acquisition_launch.intent_error(args, raw_id):
+        return output._json_error(error, exit_code=3)
     codename_arg = getattr(args, "codename", None)
     anchor_mode = getattr(args, "anchor", False)
     if codename_arg and not raw_id:
@@ -303,6 +264,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
     except Exception as e:
         return output._json_error(str(e))
 
+    if make_new or anchor_mode:
+        if refusal := agent_policy.json_refusal(config.default_repo.anchor):
+            return refusal
+
     if anchor_mode:
         if getattr(args, "bridge_seed_operation", None):
             try:
@@ -335,6 +300,9 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if not yaml_path.exists():
             return output._json_error(f"Worktree not found: {wt_id}")
         work_dir = tracking.load_record(yaml_path).worktree_path
+
+    if refusal := agent_policy.json_refusal(work_dir):
+        return refusal
 
     # Resume: a live mux session already embodies this worktree -- don't
     # duplicate (one live session per cwd). Report it and stop.
@@ -426,6 +394,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
             return output._json_error(str(exc), exit_code=3)
 
     if already:
+        if refusal := agent_policy.json_refusal(work_dir):
+            return refusal
         # Legacy New fallback targets only the registered Copilot pane.
         # Typed Resume intent is never consumed by this path.
         display_pane = sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
@@ -440,6 +410,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 return output._json_error(f"Could not hand off staged New prompt: {exc}", exit_code=3)
         pending_seed_result, settled = {}, {}
         if claimed:
+            if refusal := agent_policy.json_refusal(work_dir):
+                return refusal
             pending_seed_result = sessions.mux_seed_pane(
                 copilot_pane, claimed, session_name=sessions.mux_session_name(wt_id),
                 ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
@@ -584,6 +556,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         except InterruptedError as exc:
             output._json_output(bridge_acquisition_launch.preparation_failure(wt_id, work_dir, exc))
             return 3
+        if refusal := agent_policy.json_refusal(work_dir):
+            return refusal
         result = sessions.mux_new_session(
             wt_id, work_dir, embody_resume.with_resume(launch_cmd, resume_target), env)
     finally:
@@ -714,6 +688,8 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
             "note": "a live mux session already embodies this repo's anchor",
         })
         return 0
+    if refusal := agent_policy.json_refusal(work_dir):
+        return refusal
     if getattr(args, "ensure_mux", False):
         sessions.ensure_mux_available()
     result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
@@ -724,6 +700,8 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         )
 
     new_pane = result.get("new_pane")
+    if refusal := agent_policy.json_refusal(work_dir):
+        return refusal
     seed_ready_timeout = getattr(args, "seed_ready_timeout", None) or 180.0
     seed_result = (
         sessions.mux_seed_pane(new_pane, seed, session_name=result.get("session"),

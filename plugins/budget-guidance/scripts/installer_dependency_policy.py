@@ -652,7 +652,27 @@ def retain_uv_install(
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
     retained_resource_roots: tuple[Path, ...] = (),
+    excluded_local_packages: tuple[str, ...] = (),
     _operation: str = "install",
+):
+    """Own the admitted graph and optional first-party exclusion constraints."""
+    with _configuration.retain_local_exclusions(
+        _retain_uv_install, uv, arguments, excluded_local_packages=excluded_local_packages,
+        error_type=DependencyPolicyError,
+        env=env, cwd=cwd, now=now, trusted_source_roots=trusted_source_roots,
+        retained_resource_roots=retained_resource_roots, _operation=_operation,
+    ) as transaction:
+        yield transaction
+
+
+@contextmanager
+def _retain_uv_install(
+    uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
+    cwd: Path | None = None, now: datetime | None = None,
+    trusted_source_roots: tuple[Path, ...] = (),
+    retained_resource_roots: tuple[Path, ...] = (),
+    _operation: str = "install",
+    _generated_constraints: tuple[Path, ...] = (),
 ):
     """Own the admitted graph until the caller's execution and health settle."""
     now = datetime.now(timezone.utc) if now is None else now
@@ -732,60 +752,12 @@ def retain_uv_install(
         if any(root.is_relative_to(path) for path in (*projects, *resources)):
             raise DependencyPolicyError("retained snapshot must be outside copied inputs")
         context_project = dict(_argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
-        pairs = list(_argument_pairs(arguments))
-        operands = [value for option, value in pairs if not option]
-        compact_sources = (
-            projects and operands and not files and not editables and not context_project
-            and not any(option in _FILE_OPTIONS | {"--group"} for option, _ in pairs)
-            and not any(environment.get(key) for key in (
-                "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE",
-            ))
-            and all(Path(value).is_absolute() for value in operands)
-            and not any(_metadata_needs_caller_layout(_toml(project / "pyproject.toml")) for project in projects)
-            and not any(_metadata_needs_caller_layout(_toml(path))
-                        for path, _ in _config_inputs(arguments, environment, base))
+        anchors, mirror = _configuration.retained_source_layout(
+            root, projects, files, resources, base, arguments, environment, editables,
+            argument_pairs=_argument_pairs, file_options=_FILE_OPTIONS,
+            toml=_toml, config_inputs=_config_inputs, generated_constraints=_generated_constraints,
         )
-        # An unrelated caller cwd must not force absolute build inputs to retain
-        # their entire checkout/staging ancestry. Relative-input layouts stay intact.
-        paths = [*projects, *files, *resources]
-        if not compact_sources:
-            paths.append(base)
-        if context_project:
-            paths.append((base / context_project).resolve())
-        anchors = {}
-        for path in paths:
-            anchor = path.anchor.lower()
-            members = [str(member) for member in paths if member.anchor.lower() == anchor]
-            common = Path(os.path.commonpath(members))
-            anchors[anchor] = common.parent if common.is_file() else common
-
-        def mirror(path):
-            path = Path(path).resolve()
-            anchor = hashlib.sha256(path.anchor.encode()).hexdigest()[:12]
-            return root / anchor / path.relative_to(anchors[path.anchor.lower()])
-
-        def remap(value):
-            if isinstance(value, list):
-                return [remap(item) for item in value]
-            if isinstance(value, dict):
-                return {key: remap(item) for key, item in value.items()}
-            if not isinstance(value, str):
-                return value
-            replacements = {}
-            for path in sorted(projects | files, key=lambda item: len(str(item)), reverse=True):
-                for before, after in (
-                    (path.as_uri(), mirror(path).as_uri()),
-                    (str(path), str(mirror(path))),
-                    (path.as_posix(), mirror(path).as_posix()),
-                    (json.dumps(str(path))[1:-1], json.dumps(str(mirror(path)))[1:-1]),
-                ):
-                    replacements[before] = after
-            if not replacements:
-                return value
-            return re.sub(
-                "|".join(re.escape(before) for before in replacements),
-                lambda match: replacements[match[0]], value,
-            )
+        remap = _configuration.retained_source_remapper(projects | files, mirror)
 
         for project in sorted(projects, key=lambda path: len(path.parts)):
             destination = mirror(project)
@@ -802,15 +774,21 @@ def retain_uv_install(
             shutil.copytree(_native_retained_path(resource), _native_retained_path(mirror(resource)), dirs_exist_ok=True,
                             copy_function=_copy_retained_file)
         source_hashes = {}
+        verified_pairs = set()
         for project in projects:
             destination = Path(_native_retained_path(mirror(project)))
             for path in destination.rglob("*"):
                 if path.is_file():
                     original_path = project / path.relative_to(destination)
+                    # Preserve exact names even where Path equality folds case.
+                    pair = (str(original_path), str(path))
+                    if pair in verified_pairs:
+                        continue
                     retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
                     if hashlib.sha256(Path(_native_retained_path(original_path)).read_bytes()).hexdigest() != retained_hash:
                         raise DependencyPolicyError("source content changed while retaining UV inputs")
                     source_hashes[original_path] = retained_hash
+                    verified_pairs.add(pair)
         for project in projects:
             manifest = mirror(project) / "pyproject.toml"
             original_data = _toml(manifest)
@@ -836,6 +814,7 @@ def retain_uv_install(
             find["where"] = [relative]
             setuptools["package-dir"] = {"": relative}
             _write_toml(Path(_native_retained_path(manifest)), data)
+            _configuration.retain_editable_metadata(mirror(project), error_type=DependencyPolicyError)
         for path in files:
             destination = mirror(path)
             Path(_native_retained_path(destination.parent)).mkdir(parents=True, exist_ok=True)
@@ -928,7 +907,9 @@ def run_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
     trusted_source_roots: tuple[Path, ...] = (),
-    retained_resource_roots: tuple[Path, ...] = (), _operation: str = "install", **run_options,
+    retained_resource_roots: tuple[Path, ...] = (),
+    excluded_local_packages: tuple[str, ...] = (),
+    _operation: str = "install", **run_options,
 ) -> subprocess.CompletedProcess:
     """Audit and execute the same private source, requirements and configuration."""
     result = None
@@ -937,6 +918,8 @@ def run_uv_install(
             uv, arguments, env=env, cwd=cwd, now=now,
             trusted_source_roots=trusted_source_roots,
             retained_resource_roots=retained_resource_roots,
+            **({"excluded_local_packages": excluded_local_packages}
+               if excluded_local_packages != () else {}),
             **({"_operation": _operation} if _operation != "install" else {}),
         ) as transaction:
             run_options.setdefault("creationflags", _HEADLESS)

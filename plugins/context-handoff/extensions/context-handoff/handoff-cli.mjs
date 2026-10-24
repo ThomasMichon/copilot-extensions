@@ -211,6 +211,15 @@ async function cmdTrigger(args) {
     process.stderr.write(
       `handoff-cli trigger: ${result.error || result.reason || "failed"}\n`,
     );
+    if (result.seed) {
+      process.exitCode = 1;
+      if (args.json) return emit(result, args);
+      process.stdout.write(
+        `${result.manualInstructions || "The handoff remains stored."}\n\n` +
+        `Final short handoff prompt/seed:\n\n${result.seed}\n`,
+      );
+      return;
+    }
     process.exit(1);
   }
   if (args.json) return emit(result, args);

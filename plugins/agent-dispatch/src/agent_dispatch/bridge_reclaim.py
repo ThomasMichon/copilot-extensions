@@ -113,7 +113,7 @@ def _resume(
     record or a failed resume each refuse (409) instead of silently
     starting a fresh replacement conversation.
     """
-    resume_cmd = [*exe, "--json", "resume", worktree_id]
+    resume_cmd = [*exe, "--json", "resume", worktree_id, "--require-agent-hosting"]
     if force:
         resume_cmd.append("--force")
     if strict:
@@ -196,7 +196,9 @@ def _send(
     send_cmd = [*exe]
     if json_output:
         send_cmd.append("--json")
-    send_cmd += ["send", session_id, "--prompt-file", "-", "--caller", caller]
+    send_cmd += [
+        "send", session_id, "--require-agent-hosting", "--prompt-file", "-", "--caller", caller,
+    ]
     if not wait:
         send_cmd.append("--no-wait")
     return subprocess.run(  # noqa: S603

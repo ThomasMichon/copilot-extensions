@@ -65,6 +65,12 @@ def test_stock_bash_management_retains_modern_shell_floor(tmp_path: Path) -> Non
     "foreign-source", "foreign-root", "foreign-environment", "directory",
     "array-policy-managed", "array-policy-standalone", "nested-array-policy",
     "empty-array-policy", "multiple-array-policies", "null-policy", "whitespace-policy",
+    "profile-empty", "profile-cpu", "profile-accelerator", "profile-strict",
+    "profile-invalid-boolean", "profile-unknown", "profile-array", "profile-array-backend",
+    "profile-wrong-case", "profile-multiline-backend", "profile-url-backend",
+    "profile-empty-key", "profile-newline-key", "profile-known-and-empty-key",
+    "profile-known-and-suffixed-key", "profile-known-and-prefixed-key",
+    "profile-known-fallback-and-suffixed-key",
 ])
 def test_native_policy_decision_matches_reference(
     tmp_path: Path, runner: str, case: str,
@@ -106,6 +112,29 @@ def test_native_policy_decision_matches_reference(
         policy["owner"]["runtimeRoot"] = str(tmp_path / "other")
     elif case == "foreign-environment":
         policy["owner"]["environment"]["homeRealPath"] = str(tmp_path / "other-profile")
+    elif case.startswith("profile-"):
+        policy["runtimeProfiles"] = {
+            "profile-empty": {},
+            "profile-cpu": {"backend": "cpu"},
+            "profile-accelerator": {"backend": "cuda12"},
+            "profile-strict": {"allowSourceFallback": False, "backend": "cpu"},
+            "profile-invalid-boolean": {"allowSourceFallback": "false"},
+            "profile-unknown": {"approvals": {}},
+            "profile-array": [],
+            "profile-array-backend": {"backend": ["cpu"]},
+            "profile-wrong-case": {"Backend": "cpu"},
+            "profile-multiline-backend": {"backend": "cpu\n"},
+            "profile-url-backend": {"backend": "https://public.example/simple"},
+            "profile-empty-key": {"": False},
+            "profile-newline-key": {"\n": False},
+            "profile-known-and-empty-key": {"backend": "cpu", "": False},
+            "profile-known-and-suffixed-key": {"backend": "cpu", "backend\n": False},
+            "profile-known-and-prefixed-key": {"backend": "cpu", "\nbackend": False},
+            "profile-known-fallback-and-suffixed-key": {
+                "allowSourceFallback": False, "allowSourceFallback\n": True,
+            },
+        }[case]
+        policy["managed"] = False
     if case not in {"missing", "directory"}:
         _write_json(path, policy)
     if case == "directory":
@@ -143,6 +172,7 @@ def test_native_policy_decision_matches_reference(
     for field in ("path", "state", "managed", "allowPluginPublication", "reason", "owner", "recovery"):
         assert actual[field] == reference[field], (field, actual, reference)
     assert bool(actual["diagnostic"]) == bool(reference["diagnostic"])
+    assert actual.get("runtimeProfiles") == reference.get("runtimeProfiles")
     if before is not None:
         assert path.read_bytes() == before
     if case == "missing":

@@ -9,7 +9,8 @@ import time
 from zdd import routing
 
 from . import status_monitor_cutover as control
-from . import status_monitor_runtime as monitor
+from . import config as cfg
+from . import worktrees_observation_contract as observations
 from .worktrees_projection import SCHEMA_VERSION, _encode_row, read_advisory
 from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
 from .worktrees_runtime import CONTRACT_VERSION, request_selection
@@ -18,16 +19,36 @@ READ_TIMEOUT = 1.0
 RECOVERY_WAIT = 0.5
 
 
+def __getattr__(name: str):
+    if name == "monitor":
+        from . import status_monitor_runtime
+
+        return status_monitor_runtime
+    raise AttributeError(name)
+
+
 def validate_result(result: dict, request: dict) -> dict:
     if not isinstance(result, dict) or type(result.get("contract_version")) is not int:
         raise ProjectionUnavailable("resident lacks worktrees-current-v1; update the engine")
-    if result["contract_version"] != CONTRACT_VERSION:
+    if result["contract_version"] not in (CONTRACT_VERSION, observations.VERSION) or (
+        result["contract_version"] != request["contract_version"]
+        and not (result.get("ok") is False and result["contract_version"] == CONTRACT_VERSION)
+    ):
         raise ProjectionUnavailable(
             "incompatible resident current-roster contract; update the engine"
         )
+    if result.get("ok") is True and result["contract_version"] == observations.VERSION and (
+        result.get("project") != request["project"]
+    ):
+        raise ProjectionUnavailable("resident observation response changed project")
     if result.get("ok") is not True:
         error = result.get("error")
-        if not isinstance(error, dict) or not isinstance(error.get("message"), str):
+        if (
+            result.get("ok") is not False
+            or not isinstance(error, dict)
+            or not isinstance(error.get("code"), str) or not error["code"]
+            or not isinstance(error.get("message"), str) or not error["message"]
+        ):
             raise ProjectionUnavailable("malformed resident current-roster error")
         if error.get("code") == "invalid-request":
             raise ProjectionError(error["message"])
@@ -66,8 +87,13 @@ def validate_result(result: dict, request: dict) -> dict:
     ):
         raise ProjectionUnavailable("invalid resident current-roster availability")
     try:
+        if result["contract_version"] == observations.VERSION:
+            observations.validate_rows(rows, result.get("observations"), revision)
         for row in rows:
-            wid, _encoded = _encode_row(row)
+            if result["contract_version"] == observations.VERSION:
+                wid = row["id"]
+            else:
+                wid, _encoded = _encode_row(row)
             if wid in identities:
                 raise ProjectionError("duplicate current-roster row")
             identities.add(wid)
@@ -106,11 +132,12 @@ def validate_result(result: dict, request: dict) -> dict:
 
 
 def _resident(request: dict) -> dict:
-    endpoint = routing.read_active_endpoint(control.routing_dir(), verify_listener=False)
+    runtime_home = cfg.install_dir()
+    endpoint = routing.read_active_endpoint(control.routing_dir(runtime_home), verify_listener=False)
     if endpoint is None:
         raise ConnectionError("resident current-roster endpoint is unavailable")
     # An ordinary reader must never create or replace the owner's credential.
-    with control.control_token_path().open(encoding="utf-8") as token_file:
+    with control.control_token_path(runtime_home).open(encoding="utf-8") as token_file:
         token = token_file.read(4097).strip()
     if not token or len(token) > 4096:
         raise ProjectionUnavailable("resident current-roster authentication is unavailable")
@@ -126,6 +153,8 @@ def read_current(request: dict, *, recover: bool = True) -> dict:
     except ProjectionError:
         raise
     except (ConnectionError, FileNotFoundError) as exc:
+        from . import status_monitor_runtime as monitor
+
         unavailable = str(exc)
         if recover and monitor._status_monitor_enabled():
             started = monitor._ensure_status_monitor()
@@ -149,16 +178,21 @@ def read_current(request: dict, *, recover: bool = True) -> dict:
                 unavailable = "resident launch/recovery did not produce a usable current roster"
     except (OSError, ValueError, RecursionError, ProjectionUnavailable) as exc:
         unavailable = str(exc)
+    from . import status_monitor_runtime as monitor
+
     try:
         result = read_advisory(
             monitor._aw_runtime_home() / "worktrees-current.sqlite3",
             project,
             **selection,
+            contract_version=request["contract_version"],
         )
     except (ProjectionError, ProjectionUnavailable) as exc:
         raise ProjectionUnavailable(f"{unavailable}; no usable advisory roster: {exc}") from exc
     result["availability"] = {"status": "advisory", "reason": unavailable}
-    result["contract_version"] = CONTRACT_VERSION
+    result["contract_version"] = request["contract_version"]
+    if request["contract_version"] == observations.VERSION:
+        result["project"] = project
     result["ok"] = True
     return result
 

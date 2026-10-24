@@ -24,6 +24,11 @@ manifests into `~/.agent-bridge/providers.d/`; the bridge then exposes
 `codespace:` / `container:` agents and folds in their credential-relay profiles.
 If a sibling is missing, only that namespace/relay feature is unavailable.
 
+Discovery is not launch permission. Repository `expose_agent: false` vetoes
+managed authoring; provider/relay protocols without a fresh enforcing receiver
+refuse launch. See [repository hosting eligibility](repository-hosting.md) for
+the current boundary and preserved source-only/live operations.
+
 ## 2. Bootstrap the Service
 
 `copilot plugin install` only vendors the plugin **payload** into

@@ -22,6 +22,7 @@ agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
 agent-ssh mesh-status
+agent-ssh session-snapshot --json
 agent-ssh fleet-targets registry.yaml --module transports\direct\module.yaml --provider-instance lab-ssh --target my-machine
 agent-ssh refresh-mesh --json
 agent-ssh copilot-config set my-machine --workspace /workspaces/repo
@@ -33,6 +34,41 @@ agent-ssh copilot my-machine --stop
 The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
+
+### Session topology and profile evidence
+
+`session-snapshot` captures fresh declared aliases and this client's managed
+fragment coverage without running OpenSSH, evaluating `Match exec`, probing a
+host, emitting profiles, persisting warnings, or provisioning a runtime.
+`--path` and `--config-d` select explicit topology and fragment inputs. Without
+`--path`, existing caller/repository discovery wins; only when no caller source
+is selected may an available Worktrees peer resolve an external state root.
+An invalid selected source does not fall through to a different topology.
+In an installation cell the optional peer is resolved in that same cell, never
+through ambient `PATH`; absent, unbound and refused peers are not an empty mesh.
+Worktrees remains optional for standalone use.
+Its bounded lookup uses the existing caller-lifetime process owner, including
+stream limits and descendant cleanup on timeout or snapshot-caller death.
+
+Coverage distinguishes generated, unattributed, missing, refused and
+indeterminate fragments. It does not inspect the effective OpenSSH include
+chain or claim route/connectivity health: both remain `unobserved`, and
+`ssh.ready` remains declared state. A generated fragment can exist without
+being selected by OpenSSH.
+
+The output-free session-start writer combines the attributable command catalog
+with a bounded snapshot in the exact session's guidance file. It uses the
+payload's existing runtime with self-provisioning disabled; an absent, older
+or refused runtime produces an explicit unavailable status. Resume replaces
+the prior snapshot. Contributor timeouts retire the owned process group on
+POSIX or strict, non-breakaway Job on Windows, including nested runtimes.
+The Windows writer loads the process primitive from this payload's shipped
+`agent-procutil` dependency (or the canonical in-repository development source),
+not an ambient Python package. It does not install that dependency at launch.
+If the combined 4 KiB budget is exceeded, a fitting command
+catalog is preserved and snapshot omission is explicit. Run the catalog's
+`session-snapshot --json` command for the full current report; use the
+`agent-ssh` skill for diagnosis and route repair, not automatic launch-time repair.
 
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates

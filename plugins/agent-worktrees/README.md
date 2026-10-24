@@ -11,6 +11,11 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+Source repositories can veto managed authoring agents without losing source
+worktree and contribution operations. See
+[repository hosting policy](docs/repository-agent-policy.md) for `expose_agent`,
+read-only admission checks, and the allocation/launch distinction.
+
 For optional encrypted PR attribution with an already configured agent-vault
 KeePass database, use `identity-vault setup/status/verify` or the
 [setting-up-pr-identity skill](skills/setting-up-pr-identity/SKILL.md).
@@ -75,6 +80,11 @@ recorded result; `--detach --json` returns an acceptance receipt, and
 `--recovery-status` inspects restart-proven settlement availability, and
 `--recover-after-restart` settles only old-boot interruptions without replaying
 them; neither requires a project.
+`--recover-for-repair` explicitly authorizes queue release without historical
+cleanup evidence, retaining the failure and reporting authorization separately
+from native settlement. It runs no installation; see the
+[shared recovery contract](../../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+for its bounded scope and remaining takeover/foundation limitations.
 `--no-manager` selects the standalone updater but still queues it.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
@@ -251,6 +261,13 @@ current platform's existing local root. Unlike ordinary `repos find`, it never
 uses a source-root discovery fallback. Invalid or duplicate registry mappings,
 missing registrations and unavailable checkouts are explicit errors. Acquisition
 and adoption remain separate owner operations; this read never clones a repo.
+
+For a whole registered inventory, use
+[`agent-worktrees repos map --json`](docs/repository-map.md). The existing
+resident flattens registry metadata and local-root availability before the
+request. One bounded read returns the map without per-repository subprocesses;
+unready, stale and unavailable maps are explicit rather than healthy empty
+inventories. Point-of-use execution and mutation admission remain separate.
 
 Worktree Manager's [Repositories Configuration section](docs/repositories-configuration.md)
 uses the native read/preview/apply CLI to inspect registration, routes, state
@@ -824,6 +841,8 @@ missing legacy generation evidence remains unknown.
 
 Installation-cell governance waits use the caller's bounded installer wait
 budget, not the directory-lock helper's short initialization grace period.
+The installer keeps authority checks and lock ownership in the sibling
+`runtime_install_governance.py` module, retained with the installed bootstrap.
 On Windows, temporary frozen package inputs use the OS temporary directory:
 `CreateProcess` cannot start a build backend with an overlong working directory,
 even when long file paths are enabled. The installed slot stays in its authorized

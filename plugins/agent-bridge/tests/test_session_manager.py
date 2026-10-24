@@ -122,6 +122,7 @@ def _mock_agent_proc():
     return proc
 
 
+@pytest.mark.usefixtures("provider_admission")
 @pytest.mark.asyncio
 async def test_failed_process_launch_reaps_wrapper_tree(session_manager, monkeypatch):
     """A stage-7 failure must not leave a provider/SSH holder alive."""
@@ -232,6 +233,25 @@ def _patch_spawn():
     with patch("agent_bridge.session_manager.spawn") as mock_spawn:
         mock_spawn.return_value = _mock_agent_proc()
         yield mock_spawn
+
+
+@pytest.fixture
+def provider_admission(tmp_path, monkeypatch):
+    """An isolated enforcing guest for tests that already replace its agent transport."""
+    from repository_policy import require_agent_hosting
+
+    guest = tmp_path / "provider-policy-checkout"
+    guest.mkdir()
+    (guest / ".git").mkdir()
+    checks = []
+
+    async def query(target, *, operation):
+        checks.append((target, operation))
+        return {**require_agent_hosting(guest, operation=operation).to_dict(), "allowed": True}
+
+    monkeypatch.setattr("agent_bridge.provider_hosting.query_provider_policy", query)
+    monkeypatch.setattr("agent_bridge.hosting_policy.query_ssh_policy", query)
+    return guest, checks
 
 
 @pytest.fixture
@@ -412,6 +432,10 @@ class TestLocalCacheRefreshWiring:
         ``target.cwd`` was unset at ``start_session``'s own entry."""
         resolved_dir = tmp_path / "resolved-worktree"
         resolved_dir.mkdir()
+        monkeypatch.setattr(
+            "agent_bridge.hosting_policy.resolve_project_cwd",
+            AsyncMock(return_value=str(resolved_dir)),
+        )
         fake_argv = self._fake_agent_argv(tmp_path)
 
         async def _fake_resolve(target, *, tracker=None, session_id=""):
@@ -479,6 +503,7 @@ class TestLocalCacheRefreshWiring:
                 await self._kill(mgr, session)
             db.close()
 
+    @pytest.mark.usefixtures("provider_admission")
     @pytest.mark.asyncio
     async def test_a_remote_boundary_call_never_invokes_resolve_local_launch_or_refresh(
         self, tmp_path: Path, monkeypatch
@@ -536,6 +561,7 @@ class TestLocalCacheRefreshWiring:
         mock_refresh.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("provider_admission")
 class TestConcurrencyGuard:
     """Single-session-per-CodeSpace concurrency guard."""
 
@@ -707,6 +733,7 @@ async def _start_codespace_session(tmp_db, monkeypatch):
     return acp_command, captured["remote_child_argv"]
 
 
+@pytest.mark.usefixtures("provider_admission")
 class TestCodespaceSessionHostAcpCommand:
     """The Session-Host CodeSpace dispatch passes copilot's acp_command through
     unchanged (no ``--model`` launch flags).
@@ -725,6 +752,7 @@ class TestCodespaceSessionHostAcpCommand:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_trusted_container_selects_remote_session_host(
     tmp_db,
     monkeypatch,
@@ -858,6 +886,7 @@ async def test_trusted_container_selects_remote_session_host(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_container_cleanup_exception_does_not_fail_successful_start(
     tmp_db,
     monkeypatch,
@@ -936,6 +965,7 @@ async def test_container_cleanup_exception_does_not_fail_successful_start(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_codespace_handshake_failure_releases_claim(
     tmp_db,
     monkeypatch,
@@ -3235,6 +3265,7 @@ def test_ensure_columns_backfills_background_recovery_for_stopped_rows(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_stopped_container_resume_reattaches_without_refresh(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
@@ -3294,6 +3325,7 @@ async def test_stopped_container_resume_reattaches_without_refresh(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_stopped_legacy_container_resume_reattaches_despite_missing_overrides(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
@@ -3398,6 +3430,7 @@ async def test_stopped_container_live_host_applies_current_relay_policy(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("provider_admission")
 async def test_stopped_container_relay_failure_prevents_prompt_admission(
     tmp_db, tmp_path, monkeypatch,
 ) -> None:
@@ -3816,6 +3849,7 @@ class TestBackgroundTaskGate:
         assert session_manager.get_session(sid) is None
 
 
+@pytest.mark.usefixtures("provider_admission")
 class TestResumeSession:
     """Session resume from STOPPED state."""
 
@@ -3860,11 +3894,11 @@ class TestResumeSession:
 
     @pytest.mark.asyncio
     async def test_start_session_preserves_existing_provider_override_provenance(
-        self, session_manager, _patch_spawn, _patch_acp
+        self, session_manager, _patch_spawn, _patch_acp, tmp_path
     ) -> None:
         target = SpawnTarget(
             type="local",
-            cwd="/workspaces/example",
+            cwd=str(tmp_path),
             env={"REQUEST_OVERRIDE": "kept"},
             copilot_args=["--request-flag"],
             venue={
@@ -5085,6 +5119,7 @@ class TestDurablePromptQueue:
         assert session_manager._db.count_pending_prompts(sid) == 1
 
 
+@pytest.mark.usefixtures("provider_admission")
 class TestCodespaceExclusiveClaim:
     """#897 Increment B step 2: the Session-Host CodeSpace dispatch path
     acquires an exclusive, worktree-keyed claim before establishing the

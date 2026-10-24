@@ -48,6 +48,10 @@ The ``agent-worktrees`` prefix is stripped for SSH compatibility
 
 from __future__ import annotations
 
+if __name__ == "__main__":
+    from .current_roster_entry import run_module_if_selected
+    run_module_if_selected()
+
 import argparse
 import contextlib
 import dataclasses
@@ -97,7 +101,7 @@ from . import (
     permissions as permissions,
     pr_config,
     pr_ops,
-    procs as procs,
+    procs as _procs_module,
     profile_assignment,
     prune,
     reciprocal_presentation,
@@ -106,6 +110,8 @@ from . import (
     sessions_pane_retire,  # noqa: F401 -- compatibility re-export (handoff_cutover.py tests patch m.sessions_pane_retire)
     terminal_identity, tracking, tracking_lifecycle,
 )
+procs = _procs_module
+
 from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
@@ -113,7 +119,7 @@ from . import installer as inst
 from . import loop_governance as loop_governance_mod  # noqa: F401 -- compatibility re-export
 from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
-from . import state_root as state_root_mod
+from . import state_root as state_root_mod  # noqa: F401 -- compatibility re-export
 from .copilot_launch_prefs import resolve_launch_pref_flags
 from .process_launcher import apply_process_launcher, bind_execution_directory, native_option_tokens, quote_powershell_command
 from .update_stage import cmd_stage_update as cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
@@ -1947,38 +1953,20 @@ def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
     return out
 
 
-@dataclasses.dataclass(frozen=True)
-class LaunchPreflight:
-    """Read-only validation required before constructing a launch plan."""
-
-    config_root: state_root_mod.ConfigRoot | None = None
-
-    @property
-    def error(self) -> str | None:
-        if self.config_root is not None and not self.config_root.path:
-            return (
-                self.config_root.error or "could not resolve the machine-local configuration root"
-            )
-        return None
-
-    @property
-    def config_root_path(self) -> str:
-        return (self.config_root.path or "") if self.config_root else ""
-
-
-class LaunchPreflightError(RuntimeError):
-    """A launch plan cannot be built without mutating unsafe state."""
+from .launch_preflight import LaunchPreflight, LaunchPreflightError
 
 
 def _preflight_launch(
     config: cfg.Config,
     args: argparse.Namespace,
     work_dir: str,
+    *,
+    allocation_source: str | None = None,
 ) -> LaunchPreflight:
     """Validate normalized setup state before any launch-side mutation."""
     from .resolve_launch_cli import preflight_launch
 
-    return preflight_launch(config, args, work_dir)
+    return preflight_launch(config, args, work_dir, allocation_source=allocation_source)
 
 
 def _launch_preflight_error(
@@ -6320,6 +6308,13 @@ def main(argv: list[str] | None = None) -> int:
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
 
+    # Policy inspection must not resolve/adopt a project or prepare runtime state.
+    policy_args = front_door_cli.policy_invocation(args_list)
+    if policy_args is not None:
+        from . import agent_policy
+
+        return agent_policy.main(policy_args[0], project=policy_args[1])
+
     # ── Raw pre-dispatch ──────────────────────────────────────────────
     # Handle compatibility aliases and the default "launch" action
     # BEFORE argparse, which can't represent both CLI and launch modes.
@@ -6470,7 +6465,7 @@ def main(argv: list[str] | None = None) -> int:
         args_list[0] not in {
             "state-root", "coordination-readiness", "config-root", "knowledge",
         }
-        and args_list[:2] != ["repos", "list"]
+        and args_list[:2] not in (["repos", "list"], ["repos", "map"])
     ):
         _ensure_cluster_loaded()
 
@@ -6718,16 +6713,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def console_entry() -> None:
-    """Entry point for both the ``python -m agent_worktrees`` guard below and
-    the installed ``agent-worktrees`` console script (`pyproject.toml`'s
-    ``[project.scripts]``) -- the generated script wrapper calls this
-    directly, bypassing the ``__main__`` guard, so routing both through here
-    is required for the shutdown-crash workaround to cover the installed
-    command too.
-    """
-    from ._shutdown_exit import run_and_exit
-
-    run_and_exit(main)
+    """Compatibility entry retaining the root's late-bound main callable."""
+    from .current_roster_entry import run_legacy_console
+    run_legacy_console(main)
 
 
 def __getattr__(name: str):

@@ -210,11 +210,14 @@ this campaign contributes the bounded
 [exact-profile contract](../governed-python-artifact-promotion/exact-profile-contract.md)
 to #4876's existing authority design. The inert exact record and pure selection
 API merged in #7044, not approval-source integration, a loader, publication or
-acquisition. #6941 retains the separate contributor-owned
+acquisition. The repository-only actual-wheel verifier merged in #8399; it
+closes the byte/metadata comparison prerequisite, not authority, governed
+acquisition, reusable admission or native engine integration.
+#6941 retains the separate contributor-owned
 candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
 Darwin acceptance remain with #5768. Apply the reviewed profile contract under
-#6737, composing #6598 construction and #6707 admission rather than overlapping
-their open implementations. The effort and retained runtime/state stay open.
+#6737, composing the merged #6598 construction and #6707 admission rather than
+creating another constructor. The effort and retained runtime/state stay open.
 
 The next stretch follows the operator-approved
 [zero-configuration default](zero-configuration-defaults.md). A harness-supplied
@@ -682,3 +685,186 @@ profile-record API or a competing admission constructor.
   that is not evidence of abandonment or permission to create a replacement.
   Native integration remains blocked on an accepted owner contract, with
   responsibility retained here and no completed transfer claimed.
+
+### 2026-10-23 - Consume merged admission and verify actual profile wheel bytes
+- #6707 merged as `7519c4113c84c00b7831d3fc146dab455013097f` on October 20.
+  Consumed its shared constructor through managed post-merge reconciliation;
+  the earlier open-draft coordination wait no longer applies. Its retained
+  source transaction, construction/health ownership and source identity remain
+  the implementation to compose, not a replacement target.
+- #7092 merged as `1028136fa616c3d81401b4e07ff1f89a60c90310` after a clean
+  reduced current-head review and successful CI `39001643452`, with all 45
+  actual contexts complete. Re-read the canonical Plan and default sub-plan;
+  only intent/review accounting closed. The earlier native timeout remains
+  tracked separately in #7020, not resolved by a different passing invocation.
+- Advanced the actual-byte prerequisite of the reviewed exact-profile
+  contract. The existing wheel validator now supplies inspected metadata and
+  unpacked size to a repository-only complete-set verifier. Exact archive
+  digests, actual Python/dependency/extra metadata, wheel identity/tags and
+  RECORD content must agree within explicit caller budgets; no extraction or
+  package execution occurs. First-party promotion keeps its generator check.
+- The source-only pure unit packet includes the actual-byte refusal and
+  boundary controls; it does not become a runtime integration test. This
+  precursor neither authenticates the profile nor proves a real permitted CPU
+  closure, target device, feed admission or reusable receipt. Those and native
+  application remain open. #6941 retains candidate-input ownership.
+- The operator renewed direction to continue driving this campaign as owner.
+  Keep the next authority/actual governed closure and native integration gates
+  here; no takeover, accepted transfer, model/corpus mutation or rollout is
+  inferred from the admission merge or byte verification.
+- Actual Windows packet validation exposed native operations in two existing
+  unit wrappers: FIFO creation skipped without `os.mkfifo`, and preservation
+  file access reached the native loader. Retained the original assertions with
+  synthetic FIFO metadata and ordinary synthetic file read/replace adapters.
+  Production adapters and original native library tests remain unchanged.
+  Keep the observer, zero-skip rule and whole-packet deadline intact (#1303).
+- Pre-publication code validation passed the complete admitted packet: 1,175 cases,
+  no skips or actor effects, 234.094 seconds including coverage recording
+  within the unchanged 300-second bound. The focused verifier/source-metadata
+  regression selection passed 135 cases; the earlier normal and optimized
+  Python selections each passed 121. Actual retained file handles exercise the
+  helper's consumer contract, not just in-memory asserted records.
+- Module ceilings and changed-code lint pass. The static source-metadata
+  validator moved unchanged into its existing source-admission component with
+  a public re-export; its function AST is identical. Broader mixed native
+  artifact cohorts exceeded their bounded invocation windows; their full
+  completion is not claimed. Initial Windows fixture-path failures were
+  diagnosed and avoided with a shorter private fixture root, without changing
+  Git configuration or filesystem policy.
+- Clean-room provisioning and live engine validation are not applicable to
+  this repository-only, non-enabled helper slice. Real governed acquisition,
+  first-use construction, approved CPU/accelerator closure and external native
+  acceptance remain explicit prerequisites of the later consumer integration.
+- Hosted Linux CI exposed an incidental native-loader import through the
+  builder's filename parser. Moved that pure grammar into the existing static
+  source-admission component and retained the builder's public delegation/error
+  type. Byte verification now has a regression that forbids builder/feed
+  imports; no effect-observer exception or preloading workaround is used.
+- Review also corrected runtime wheel compatibility for dotted distribution
+  aliases and SHA-384/SHA-512 RECORD entries. Archive/source identities remain
+  SHA-256, and first-party promotion keeps its existing generator, exact
+  version spelling and SHA-256 RECORD requirements. These corrections do not
+  add a feed, acquisition authority or construction mode.
+- Post-review controls passed 154 cases under both normal and optimized Python,
+  including the old builder parser API. All 187 changed byte-verifier and
+  portable-wrapper nodes also passed under the unchanged effect observer with
+  coverage in 49.734 seconds. The latest whole-Windows packet reached its
+  unchanged 300-second bound and is not counted as a completed packet; required
+  hosted full-packet validation remains independent. No deadline was widened
+  or partial result promoted to a full receipt.
+- Subsequent review caught a caller-side `packaging` dependency in that shared
+  token parser. Restored dependency-free structural parsing and the builder's
+  original numeric-version policy; PEP 440 comparison remains lazy in the
+  runtime inspection path. A real fresh `-I -S` caller with `packaging`
+  deliberately unavailable now exercises both the builder parser and
+  first-party inspector, preserving the locked-toolchain bootstrap boundary.
+- That clean-caller correction passed 156 focused cases under normal and
+  optimized Python, plus all 188 changed nodes under the original effect
+  observer in 71.281 seconds including coverage. The native child check stays
+  outside the no-actor packet. Upstream unit-inventory conflicts were
+  reconciled as this PR's exact delta, preserving other contributors' additions
+  and removals and rebinding merged source hashes without changing policy.
+- #8399 actually merged to `dev` as
+  `b4f1a24ea4b47a26ea8b7e866af97d08dfce1648` after current-head Copilot
+  approval with no open findings and successful required CI `40059533965`.
+  The hosted complete packet passed 1,274 cases in 18.115 seconds including
+  coverage. Re-read this parent Plan/Validation Plan and the default sub-plan:
+  only the repository-only byte-comparison prerequisite is delivered.
+- Managed post-merge reconciliation initially failed on the generated unit
+  inventory. Retained backups, proved the delivered files and all owned nodes
+  already existed on pinned upstream, and dropped only redundant merged
+  history. Managed reconciliation then reported up-to-date; no unmerged work
+  was discarded. The worktree remains bound to the open Phase 4 objective.
+- Next extend the actual installation-authority/source-policy seam and prove
+  a real permitted exact CPU closure through existing governed mechanisms.
+  Preserve #6941's original input-generator contribution rather than
+  duplicating it; its old cancelled CI run is not a green acceptance result.
+  Default enabling, immutable constructor application and native/service
+  acceptance remain open. No runtime/model/corpus mutation or rollout occurred.
+
+### 2026-10-23 - Existing-authority default-policy input
+
+- Traced the retained constructor and source-pin checks into the existing
+  installation-context source/mode/deployment owner. Source content pins are
+  not approval; the new reader resolves configuration intent at that actual
+  owner rather than inventing a profile directory or an approvals map.
+- `resolve_runtime_profile_policy` and its stdlib-only Python CLI action
+  provide a CPU-first, artifact-preferred, governed-source-permitted baseline
+  without a policy file. Optional overrides remain in the already owner-bound
+  `runtime-deployment.json`; they may disable fallback or explicitly select a
+  capability. Retained capability, deliberate changes and explicit unprofiled
+  migration stay distinct. Existing managed-publication holds remain intact.
+- The policy identity binds the resolved source/installation owner, effective
+  intent and managed flag. It is an invalidation input, not profile approval,
+  source-release verification, a feed/device permission or reusable admission.
+  The engine constructors do not yet consume this API.
+- Actual fresh-adopter and deployment regressions passed 88 combined cases,
+  including real project marketplace configuration and a fresh `-I -S` CLI
+  without profile/approval files. Native Python/PowerShell parsing passed
+  32 targeted new/existing controls. A long-path fixture failure was rerun
+  with the retained short fixture root; the same assertions then exposed and
+  corrected a real PowerShell optional-output property bug.
+- The existing release-metadata adapter is owned by #8367, not a competing
+  implementation here. The canonical installed wheel-input work remains
+  #8419, and #6941 retains candidate-input generation. Posted coordination
+  on the first two PRs, including the already merged #8399 prerequisites.
+  This policy-input slice does not close their gates or this parent effort.
+- #8494 carries this implementation. The initial hosted head passed the complete
+  1,421-unit packet in 34.177 seconds including coverage, and the opt-in native
+  reader lane passed on both Linux and Windows. Required guards caught two
+  newly registered SSH runtime-source copies introduced by the rebase target;
+  rerunning the canonical owner synchronized those copies. This correction
+  still requires current-head CI/review; the earlier passing jobs do not
+  authorize merging a failed guard.
+- Review found a real Bash parity defect: blank/newline profile property names
+  were discarded by line-oriented key enumeration. The canonical reader now
+  compares recognized fields with the declared object size, preserving a true
+  empty object while refusing blank keys. Synchronized all native copies and
+  added exact blank, newline-only and mixed-key parity cases. The corrected
+  focused cohorts passed 90 API/pure cases and 38 actual Python/PowerShell
+  reader cases. An earlier broader invocation exceeded its unchanged
+  300-second limit and is not counted as a full pass.
+- Required workflow validation also refused a dynamic matrix runner route.
+  The optional reader lane now uses explicit hosted Linux/Windows jobs with
+  the same shared steps; the trusted-CI contract passes locally. Current-head
+  hosted native acceptance, full required CI and a fresh review remain gates.
+- Follow-up review caught a known key plus a newline-suffixed alias that the
+  count-only correction still accepted. Removed line-oriented key enumeration:
+  Bash now queries only the two permitted literal properties and compares
+  their presence with the complete object size. Added prefix/suffix alias
+  parity controls; all 41 pure controls pass. The previous corrected head's
+  complete required CI and Linux/Windows reader acceptance passed, but its
+  review was not a passing verdict and is not reused as approval.
+- Self-review also closed a compatibility hazard: valid explicit profile
+  settings must not be parsed and then ignored by ordinary publication.
+  Such settings now retain a profile-aware-consumer-required hold, including
+  for a valid empty object. The no-file standalone baseline is unchanged;
+  policy identity also binds the publication hold. Those API and actual
+  Python/PowerShell controls passed 90 and 38 cases respectively before the
+  additional alias fixtures; current-head hosted acceptance remains required.
+- The next review found two actual boundary gaps. Explicit management leases
+  and borrowers could ignore valid profile settings, and mode readiness with
+  `reason: activation-required` incorrectly yielded a legacy-root CPU policy.
+  Real-path regressions reproduced both before the fix. Management now rejects
+  profile settings by presence before custody validation, including an empty
+  object and an already-live ticket; managed-only publication is unchanged.
+  Pending activation now returns blocked intent with no owner, selection or
+  policy identity. The optional Linux/Windows lane exercises both the new
+  regressions and existing custody controls. One broad local cohort reached
+  its unchanged 300-second limit without a full receipt; it is not a pass.
+  The focused real-path cohort then passed all 13 cases, and all 53 pure
+  controls passed under the actor-free observer with source coverage in
+  15.860 seconds. Sync, source hashes, lint, install/docs and trusted-CI
+  contracts also pass locally.
+  Current-head unit evidence, native acceptance and a fresh review remain gates.
+- Review of the management correction found an additional invalidation gap:
+  managed-only policy and managed policy with an empty profile object shared
+  an identity, despite different management-publication permission. Pure and
+  actual owner-bound regressions reproduced that collision. The policy digest
+  now also binds the profile-aware-publication requirement. The preceding
+  head passed all 1467 required units and hosted Linux/Windows reader/custody
+  acceptance; those results do not substitute for validation and review of
+  this correction.
+  The corrected local slice passes 53 actor-observed units with coverage in
+  22.047 seconds and all 20 actual owner-policy/isolated-CLI cases in
+  30.83 seconds; source closure and fatal lint also pass.

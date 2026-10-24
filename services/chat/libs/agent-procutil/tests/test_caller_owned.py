@@ -52,6 +52,43 @@ def test_separate_utf8_streams_input_and_real_returncode(capture):
     assert result.stderr == ("diagnostic\u00e9" if capture else None)
 
 
+@native_execution
+def test_caller_owned_uses_explicit_child_context_without_mutating_caller(tmp_path):
+    cwd = Path.cwd()
+    environment = {**os.environ, "CALLER_OWNED_CONTEXT_FIXTURE": "selected"}
+    before = dict(environment)
+    result = _run(
+        "import json,os; print(json.dumps([os.getcwd(),os.environ['CALLER_OWNED_CONTEXT_FIXTURE']]))",
+        cwd=tmp_path, env=environment,
+    )
+    assert result.returncode == 0
+    assert json.loads(result.stdout) == [str(tmp_path), "selected"]
+    assert Path.cwd() == cwd
+    assert environment == before
+    assert os.environ.get("CALLER_OWNED_CONTEXT_FIXTURE") is None
+
+
+def test_windows_explicit_environment_is_unicode_sorted_and_double_terminated():
+    from agent_procutil._windows_caller_owned import _environment_block
+
+    assert _environment_block(None) is None
+    assert _environment_block({})[:].startswith("\0\0")
+    assert _environment_block({"b": "\u00e9", "A": "value"})[:].startswith(
+        "A=value\0b=\u00e9\0\0",
+    )
+
+
+@pytest.mark.parametrize("environment", [
+    {"": "value"}, {"BAD=KEY": "value"}, {"BAD\0KEY": "value"},
+    {"KEY": "bad\0value"}, {"KEY": 3}, {3: "value"},
+])
+def test_windows_explicit_environment_refuses_invalid_entries(environment):
+    from agent_procutil._windows_caller_owned import _environment_block
+
+    with pytest.raises((TypeError, ValueError)):
+        _environment_block(environment)
+
+
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])
 @native_execution
 def test_raw_byte_limit_accepts_exact_boundary(stream):
@@ -165,6 +202,26 @@ def test_output_overflow_settles_a_concurrently_blocked_input_writer():
 def test_invalid_utf8_is_not_returned_as_success():
     with pytest.raises(UnicodeError):
         _run("import sys; sys.stdout.buffer.write(b'\\xff')")
+
+
+@native_execution
+@pytest.mark.parametrize("failure", ["none", "timeout", "decode", "limit"])
+def test_native_settlement_notification_precedes_result_or_failure(failure):
+    observed = []
+    code, timeout, limit = "print('ready')", 5, 4096
+    expected = nullcontext()
+    if failure == "timeout":
+        code, timeout = "import time; time.sleep(60)", .3
+        expected = pytest.raises(subprocess.TimeoutExpired)
+    elif failure == "decode":
+        code = "import sys; sys.stdout.buffer.write(b'\\xff')"
+        expected = pytest.raises(UnicodeError)
+    elif failure == "limit":
+        code, limit = "print('too much')", 1
+        expected = pytest.raises(OutputLimitExceeded)
+    with expected:
+        _run(code, timeout=timeout, stdout=limit, on_settled=lambda: observed.append(True))
+    assert observed == [True]
 
 
 @native_execution
@@ -348,6 +405,7 @@ def test_windows_cleanup_failure_is_explicit_and_not_retried():
 
 @pytest.mark.parametrize("exits", [True, False])
 def test_group_confirmation_waits_for_exit_without_releasing_root(monkeypatch, exits):
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(platform="linux"))
     process = SimpleNamespace(pid=10, returncode=None)
     observations = []
     closed = []
@@ -440,6 +498,10 @@ def test_pidfd_exit_observation_accepts_high_descriptors():
 
 @pytest.mark.parametrize("boundary", ["retire", "confirm", "wait"])
 def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary):
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(
+        platform="linux", executable=sys.executable,
+    ))
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
     process = SimpleNamespace(stdin=None, stdout=None, stderr=None, returncode=None)
     failure = (
         subprocess.TimeoutExpired(["guard"], 2) if boundary == "wait"
@@ -468,11 +530,70 @@ def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary)
     monkeypatch.setattr(
         protocol, "_confirm_group", fail if boundary == "confirm" else lambda *a: None,
     )
+    observed = []
     with pytest.raises(OwnedCleanupError) as caught:
-        _run("pass")
+        _run("pass", on_settled=lambda: observed.append(True))
     assert caught.value.process is process
     assert caught.value.__cause__ is failure
     assert process.returncode is None
+    assert observed == []
+
+
+def test_prelaunch_refusal_notifies_without_attempting_native_spawn(monkeypatch):
+    observed = []
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid preparation attempted process creation")
+
+    monkeypatch.setattr(protocol, "_run_owned", forbidden)
+    with pytest.raises(ValueError):
+        _run("pass", timeout=0, on_settled=lambda: observed.append(True))
+    assert observed == [True]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX lifetime pipe preparation")
+@pytest.mark.parametrize("boundary", ["pipe", "registration", "inheritable"])
+def test_lifetime_pipe_refusal_notifies_outside_guard_and_closes_descriptors(monkeypatch, boundary):
+    observed, descriptors = [], []
+    pipe = os.pipe
+
+    def allocate():
+        if boundary == "pipe":
+            raise OSError(errno.EMFILE, "synthetic descriptor exhaustion")
+        pair = pipe()
+        descriptors.extend(pair)
+        return pair
+
+    def refuse(*args):
+        raise OSError(errno.EIO, "synthetic inheritance refusal")
+
+    def notify():
+        assert protocol._lifetime_lock.acquire(blocking=False)
+        protocol._lifetime_lock.release()
+        assert not set(descriptors) & protocol._lifetime_writers
+        for fd in descriptors:
+            with pytest.raises(OSError):
+                os.fstat(fd)
+        observed.append(True)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("failed pipe preparation reached native launch")
+
+    monkeypatch.setattr(protocol.os, "pipe", allocate)
+    monkeypatch.setattr(protocol, "_require_posix_support", lambda: None)
+    if boundary == "registration":
+        class RefusingWriters(set):
+            def add(self, value):
+                raise MemoryError("synthetic registration refusal")
+
+        monkeypatch.setattr(protocol, "_lifetime_writers", RefusingWriters())
+    if boundary == "inheritable":
+        monkeypatch.setattr(protocol.os, "set_inheritable", refuse)
+    monkeypatch.setattr(protocol, "_run_owned", forbidden)
+    with pytest.raises((OSError, MemoryError)):
+        _run("pass", on_settled=notify)
+    assert observed == [True]
+    assert bool(descriptors) is (boundary != "pipe")
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux group ownership")

@@ -23,6 +23,7 @@ from verify_promotion_workflows import (  # noqa: E402
 SCHEMA = "copilot-extensions.candidate-qualification"
 LEGACY_PROFILE = "legacy-ci-v1"
 UNIT_PROFILE = "source-units-v2"
+CANDIDATE_UNIT_PROFILE = "candidate-units-v3"
 _SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -201,6 +202,7 @@ def qualify_units(
     main_before: str, control_sha: str, promotion_run: str,
     candidate_root: Path, dev_root: Path, unit_packet_dir: Path, unit_manifest: str,
     unit_artifact_id: int, unit_artifact_digest: str,
+    profile: str = UNIT_PROFILE,
 ) -> dict:
     from candidate_qualification_receipt import (
         artifact_identity, input_equivalence, load_manifest, owner_identity, packet_binding,
@@ -219,10 +221,23 @@ def qualify_units(
     manifest, source_manifest_digest = load_manifest(dev_root, unit_manifest)
     if regular_bytes(dev_root, unit_manifest) != regular_bytes(candidate_root, unit_manifest):
         raise VerificationError("candidate does not preserve the admitted source-unit manifest bytes")
+    if profile not in (UNIT_PROFILE, CANDIDATE_UNIT_PROFILE):
+        raise VerificationError("unknown unit execution profile")
+    source_root, packet_arguments = dev_root, {}
+    if profile == CANDIDATE_UNIT_PROFILE:
+        from promotion_candidate_units import derive_manifest
+
+        manifest, _development, _candidate = derive_manifest(
+            manifest, development_root=dev_root, candidate_root=candidate_root,
+            dev_sha=dev_sha, candidate_tree=identity["tree"],
+        )
+        source_root = candidate_root
+        packet_arguments["development_root"] = dev_root
     packet = packet_binding(
-        unit_packet_dir, source_sha=dev_sha, manifest=manifest, source_root=dev_root,
+        unit_packet_dir, source_sha=dev_sha, manifest=manifest, source_root=source_root,
+        **packet_arguments,
     )
-    inputs = input_equivalence(dev_root, candidate_root, manifest)
+    inputs = input_equivalence(source_root, candidate_root, manifest)
     deadline = time.monotonic() + 120
 
     def read(path: str):
@@ -254,16 +269,18 @@ def qualify_units(
         validate(candidate_root, candidate_sha, dev_sha, main_before) != identity
         or load_manifest(dev_root, unit_manifest)[1] != source_manifest_digest
         or regular_bytes(dev_root, unit_manifest) != regular_bytes(candidate_root, unit_manifest)
-        or input_equivalence(dev_root, candidate_root, manifest) != inputs
+        or input_equivalence(source_root, candidate_root, manifest) != inputs
         or packet_binding(
-            unit_packet_dir, source_sha=dev_sha, manifest=manifest, source_root=dev_root,
+            unit_packet_dir, source_sha=dev_sha, manifest=manifest, source_root=source_root,
+            **packet_arguments,
         ) != packet
     ):
         raise VerificationError("source-unit qualification inputs changed during admission")
     _source_snapshot(dev_root, dev_sha)
     _snapshot(repository, candidate_ref, candidate_sha, main_before)
     return {
-        "schema": SCHEMA, "version": 2, "profile": UNIT_PROFILE, "repository": repository,
+        "schema": SCHEMA, "version": 3 if profile == CANDIDATE_UNIT_PROFILE else 2,
+        "profile": profile, "repository": repository,
         **identity, "candidate_ref": candidate_ref, "control_sha": control_sha,
         "promotion_run": promotion_run, "unit_manifest": unit_manifest,
         "source_manifest_sha256": source_manifest_digest, "unit_inputs_digest": inputs,
@@ -277,11 +294,12 @@ def verify_receipt(
     expected_profile: str = LEGACY_PROFILE, dev_root: Path | None = None,
     unit_packet_dir: Path | None = None, unit_manifest: str | None = None,
 ) -> str:
-    if expected_profile == UNIT_PROFILE:
+    if expected_profile in (UNIT_PROFILE, CANDIDATE_UNIT_PROFILE):
         if (
             not isinstance(receipt, dict) or receipt.get("schema") != SCHEMA
-            or type(receipt.get("version")) is not int or receipt["version"] != 2
-            or receipt.get("profile") != UNIT_PROFILE or dev_root is None
+            or type(receipt.get("version")) is not int
+            or receipt["version"] != (3 if expected_profile == CANDIDATE_UNIT_PROFILE else 2)
+            or receipt.get("profile") != expected_profile or dev_root is None
             or unit_packet_dir is None or unit_manifest is None
         ):
             raise VerificationError("explicit source-unit v2 qualification evidence is required")
@@ -292,6 +310,7 @@ def verify_receipt(
             dev_root=dev_root, unit_packet_dir=unit_packet_dir, unit_manifest=unit_manifest,
             unit_artifact_id=receipt.get("unit_artifact_id"),
             unit_artifact_digest=receipt.get("unit_artifact_digest"),
+            **({"profile": expected_profile} if expected_profile == CANDIDATE_UNIT_PROFILE else {}),
         )
         if receipt != expected:
             raise VerificationError("source-unit qualification receipt is absent, invalid or stale")
@@ -344,7 +363,7 @@ def verify_receipt(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=(LEGACY_PROFILE, UNIT_PROFILE), required=True)
+    parser.add_argument("--profile", choices=(LEGACY_PROFILE, UNIT_PROFILE, CANDIDATE_UNIT_PROFILE), required=True)
     for name in (
         "repository", "candidate-ref", "candidate-sha", "dev-sha", "main-before",
         "control-sha", "promotion-run",
@@ -359,7 +378,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--unit-artifact-digest")
     args = parser.parse_args(argv)
     unit_fields = ("unit_packet_dir", "unit_manifest", "unit_artifact_id", "unit_artifact_digest")
-    if args.profile == UNIT_PROFILE and any(getattr(args, key) is None for key in unit_fields):
+    if args.profile in (UNIT_PROFILE, CANDIDATE_UNIT_PROFILE) and any(getattr(args, key) is None for key in unit_fields):
         parser.error("source-units-v2 requires packet directory, source manifest and exact artifact ID/digest")
     if args.profile == LEGACY_PROFILE and any(getattr(args, key) is not None for key in unit_fields):
         parser.error("legacy qualification cannot consume source-unit evidence")
@@ -367,10 +386,12 @@ def main(argv: list[str] | None = None) -> int:
         arguments = {
             key: value for key, value in vars(args).items()
             if key not in ("profile", "receipt", "github_output") and (
-                args.profile == UNIT_PROFILE or key not in unit_fields
+                args.profile in (UNIT_PROFILE, CANDIDATE_UNIT_PROFILE) or key not in unit_fields
             )
         }
-        receipt = (qualify_units if args.profile == UNIT_PROFILE else qualify)(**arguments)
+        if args.profile == CANDIDATE_UNIT_PROFILE:
+            arguments["profile"] = args.profile
+        receipt = (qualify_units if args.profile in (UNIT_PROFILE, CANDIDATE_UNIT_PROFILE) else qualify)(**arguments)
         args.receipt.write_bytes(receipt_bytes(receipt))
         digest = receipt_digest(receipt)
         if args.github_output is not None:
@@ -383,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
                 for field in ("candidate_sha", "dev_sha", "main_before", "control_sha", "tree"):
                     output.write(f"{field}={receipt[field]}\n")
                 output.write(f"qualification_profile={args.profile}\n")
-                if args.profile == UNIT_PROFILE:
+                if args.profile in (UNIT_PROFILE, CANDIDATE_UNIT_PROFILE):
                     for field in (
                         "unit_job_id", "unit_artifact_id", "unit_artifact_digest", "packet_digest",
                         "unit_manifest_digest", "unit_inputs_digest",

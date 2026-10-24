@@ -8,6 +8,7 @@ reads are explicitly advisory, including after restart.
 from __future__ import annotations
 
 import json
+import copy
 import math
 import sqlite3
 import threading
@@ -17,6 +18,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import worktrees_observation_contract as observations
 from .worktrees_projection_index import (
     INDEX_SCHEMA,
     ProjectionError,
@@ -185,10 +187,34 @@ class _Publication:
     rows: dict[str, str]
     index: SelectionIndex | None = None
     index_key: tuple | None = None
+    observations: dict | None = None
+    semantic_revisions: dict | None = None
+    semantic_rows: dict | None = None
 
-    def read(self, ids: Iterable[str], *, quality: str) -> dict:
-        rows = [_decode_row(wid, self.rows[wid]) for wid in ids]
-        return {
+    def read(self, ids: Iterable[str], *, quality: str, contract_version: int = 1) -> dict:
+        rows, facts = [], []
+        for wid in ids:
+            row = _decode_row(wid, self.rows[wid])
+            value = (
+                self.observations[wid] if self.observations is not None
+                else observations.observation(row, self.revision)
+            )
+            semantic = None
+            if contract_version == 2 or (self.index is None and self.observations is not None):
+                semantic = {**observations.semantic_row(row), "semantic_revision": (
+                    self.semantic_revisions[wid] if self.semantic_revisions is not None
+                    else self.revision
+                )}
+            if self.index is None and self.observations is not None:
+                observations.validate_rows([semantic], [value], self.revision)
+            if contract_version == 2:
+                observations.validate_wire_row(semantic)
+                row = semantic
+                facts.append(copy.deepcopy(value))
+            else:
+                row = observations.with_observation(row, value)
+            rows.append(row)
+        result = {
             "worktrees": rows,
             "projection": {
                 "schema_version": SCHEMA_VERSION,
@@ -200,6 +226,9 @@ class _Publication:
                 "quality": quality,
             },
         }
+        if contract_version == 2:
+            result["observations"] = facts
+        return result
 
 
 class WorktreesProjection:
@@ -263,7 +292,7 @@ class WorktreesProjection:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with closing(sqlite3.connect(self.db_path, timeout=1.0)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
-                conn.executescript(_SCHEMA + INDEX_SCHEMA)
+                conn.executescript(_SCHEMA + INDEX_SCHEMA + observations.SCHEMA)
                 conn.execute("BEGIN IMMEDIATE")
                 if authority_check is not None and not authority_check():
                     raise ProjectionUnavailable("projection publisher is no longer elected")
@@ -278,13 +307,20 @@ class WorktreesProjection:
             or not math.isfinite(observed_at) or observed_at < 0
         ):
             raise ProjectionError("invalid projection observation timestamp")
-        encoded = {}
+        encoded, raw_rows, semantic_rows = {}, {}, {}
         identities = []
         for row in rows:
             wid, payload = _encode_row(row)
             if wid in encoded:
                 raise ProjectionError("duplicate current worktree identity")
             encoded[wid] = payload
+            # Iterators may reuse the row dictionary and its nested fact values.
+            row = json.loads(payload)
+            raw_rows[wid] = row
+            semantic_rows[wid] = json.dumps(
+                observations.semantic_row(row), sort_keys=True, ensure_ascii=False,
+                allow_nan=False, separators=(",", ":"),
+            )
             identities.append({field: row.get(field) for field in (
                 "id", "status", "platform", "codename", "checkout_present",
             )})
@@ -302,19 +338,62 @@ class WorktreesProjection:
             if index is None:
                 index = SelectionIndex(identities)
             revision = previous.revision + 1 if previous is not None else 1
+            facts, versions = {}, {}
+            changed = {}
+            for wid, payload in encoded.items():
+                row = raw_rows[wid]
+                old_payload = None if previous is None else previous.rows.get(wid)
+                same = (
+                    old_payload is not None and previous.semantic_rows[wid] == semantic_rows[wid]
+                )
+                versions[wid] = previous.semantic_revisions[wid] if same else revision
+                observations.validate_wire_row({
+                    **observations.semantic_row(row), "semantic_revision": versions[wid],
+                })
+                facts[wid] = observations.observation(
+                    row, revision,
+                    None if previous is None else previous.observations.get(wid),
+                )
+                if same:
+                    encoded[wid] = old_payload
+                else:
+                    changed[wid] = payload
             publication = _Publication(
                 self.generation, revision, observed_at, len(encoded), encoded, index, index_key,
+                facts, versions, semantic_rows,
             )
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with closing(sqlite3.connect(self.db_path, timeout=1.0)) as conn, conn:
                 conn.execute("PRAGMA journal_mode=WAL")
-                conn.executescript(_SCHEMA + INDEX_SCHEMA)
+                conn.executescript(_SCHEMA + INDEX_SCHEMA + observations.SCHEMA)
                 conn.execute("BEGIN IMMEDIATE")
                 self._claim(conn, None)
-                conn.execute("DELETE FROM worktrees_projection_row WHERE project=?", (project,))
+                removed = (
+                    set(previous.rows) - encoded.keys() if previous is not None
+                    else {wid for (wid,) in conn.execute(
+                        "SELECT worktree_id FROM worktrees_projection_row WHERE project=?", (project,)
+                    )} - encoded.keys()
+                )
+                for table in ("row", "observation"):
+                    conn.executemany(
+                        f"DELETE FROM worktrees_projection_{table} WHERE project=? AND worktree_id=?",
+                        ((project, wid) for wid in removed),
+                    )
                 conn.executemany(
-                    "INSERT INTO worktrees_projection_row VALUES (?, ?, ?)",
-                    ((project, wid, payload) for wid, payload in encoded.items()),
+                    "INSERT INTO worktrees_projection_row VALUES (?, ?, ?) "
+                    "ON CONFLICT(project, worktree_id) DO UPDATE SET payload=excluded.payload",
+                    ((project, wid, payload) for wid, payload in changed.items()),
+                )
+                conn.executemany(
+                    "INSERT INTO worktrees_projection_observation VALUES (?, ?, ?) "
+                    "ON CONFLICT(project, worktree_id) DO UPDATE SET payload=excluded.payload",
+                    ((project, wid, json.dumps({
+                        "semantic_revision": versions[wid], **facts[wid],
+                    }, separators=(",", ":"))) for wid in encoded),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO worktrees_projection_observation_head VALUES (?, ?, ?)",
+                    (project, self.generation, revision),
                 )
                 conn.execute(
                     "INSERT OR REPLACE INTO worktrees_projection_head VALUES (?, ?, ?, ?, ?, ?)",
@@ -331,6 +410,7 @@ class WorktreesProjection:
         self, project: str, *, worktree_id: str | None = None, codename: str | None = None,
         status_filter: str | None = None, platform_filter: str | None = None,
         include_missing: bool = True,
+        contract_version: int = 1,
     ) -> dict:
         project = _identity(project, name="project")
         selection = Selection(
@@ -340,7 +420,9 @@ class WorktreesProjection:
             publication = None if self._closed else self._projects.get(project)
         if publication is None or publication.index is None:
             raise ProjectionUnavailable("resident current roster is not published")
-        return publication.read(publication.index.select(selection), quality="current")
+        return publication.read(
+            publication.index.select(selection), quality="current", contract_version=contract_version,
+        )
 
     def published_projects(self) -> set[str]:
         with self._publication_lock:
@@ -362,6 +444,7 @@ def read_advisory(
     db_path: Path, project: str, *, worktree_id: str | None = None, codename: str | None = None,
     status_filter: str | None = None, platform_filter: str | None = None,
     include_missing: bool = True,
+    contract_version: int = 1,
 ) -> dict:
     """Read only independent current slots; never create or recover the store."""
     project = _identity(project, name="project")
@@ -393,12 +476,33 @@ def read_advisory(
             ):
                 raise ProjectionError("invalid durable publication metadata")
             selected_id, expected_count = durable_selection(conn, project, selection)
-            parameters: tuple = (MAX_ROW_BYTES, project)
+            has_observations = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='worktrees_projection_observation_head'",
+            ).fetchone() is not None
+            if has_observations:
+                # An older elected writer may have published after this extension.
+                # Its complete v1 publication wins; never reuse another incarnation's metadata.
+                has_observations = conn.execute(
+                    "SELECT generation, revision FROM worktrees_projection_observation_head "
+                    "WHERE project=?", (project,),
+                ).fetchone() == (generation, revision)
+            parameters: tuple = (MAX_ROW_BYTES,)
             query = (
                 "SELECT CASE WHEN length(CAST(r.worktree_id AS BLOB))<=256 "
                 "THEN r.worktree_id END, CASE WHEN length(CAST(r.payload AS BLOB))<=? "
-                "THEN r.payload END FROM worktrees_projection_row r "
+                "THEN r.payload END"
             )
+            if has_observations:
+                query += ", CASE WHEN length(CAST(o.payload AS BLOB))<=? THEN o.payload END"
+                parameters += (MAX_ROW_BYTES,)
+            query += " FROM worktrees_projection_row r "
+            if has_observations:
+                query += (
+                    "LEFT JOIN worktrees_projection_observation o "
+                    "ON o.project=r.project AND o.worktree_id=r.worktree_id "
+                )
+            parameters += (project,)
             if selected_id is not None:
                 query += "WHERE r.project=? AND r.worktree_id=?"
                 parameters += (selected_id,)
@@ -413,15 +517,31 @@ def read_advisory(
                     query += " LIMIT 0"
             rows = conn.execute(query, parameters)
             encoded = {}
-            for wid, payload in rows:
+            facts, versions = {}, {}
+            for stored in rows:
+                wid, payload = stored[:2]
                 if not isinstance(payload, str):
                     raise ProjectionError("durable current row exceeds byte bound")
                 encoded[_identity(wid, name="worktree id")] = payload
+                if has_observations:
+                    try:
+                        value = json.loads(stored[2])
+                        if not isinstance(value, dict):
+                            raise ProjectionError("invalid durable observation")
+                        versions[wid] = value.pop("semantic_revision")
+                        observations.validate_observation(value, revision)
+                    except (TypeError, ValueError, KeyError) as exc:
+                        raise ProjectionError("invalid durable observation") from exc
+                    facts[wid] = value
             if len(encoded) != expected_count or (
                 selection == Selection() and expected_count != row_count
             ):
                 raise ProjectionError("incomplete durable current roster")
-            publication = _Publication(generation, revision, observed_at, row_count, encoded)
-            return publication.read(encoded, quality="advisory")
+            publication = _Publication(
+                generation, revision, observed_at, row_count, encoded,
+                observations=facts if has_observations else None,
+                semantic_revisions=versions if has_observations else None,
+            )
+            return publication.read(encoded, quality="advisory", contract_version=contract_version)
     except (sqlite3.Error, OSError) as exc:
         raise ProjectionUnavailable(f"durable current roster unavailable: {exc}") from exc

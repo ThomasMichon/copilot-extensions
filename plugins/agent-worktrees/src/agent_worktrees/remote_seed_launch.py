@@ -48,6 +48,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     for index, arg in enumerate(args):
         if index == selector_end or arg in (
             "--new", "--worktree-id", "--no-mux", "--defer-new-seed", "--stage-launch-seed",
+            "--require-agent-hosting",
         ):
             continue
         raise ValueError(
@@ -66,7 +67,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     encoded = base64.b64encode(raw).decode("ascii")
     project = cfg.project_name()
     command = shell_command(shell, [
-        project, "resolve", "--json", "--launch-request-b64", encoded,
+        project, "resolve", "--json", "--require-agent-hosting", "--launch-request-b64", encoded,
     ])
     if len(command) > MAX_REMOTE_COMMAND_CHARS:
         raise ValueError("Remote launch request exceeds the remote shell command limit")
@@ -111,7 +112,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
             project, alias, request_id, kind, "mismatched launch identity",
         )
     launch_args = [project, "--worktree-id", receipt["worktree_id"],
-                   "--stage-launch-seed", "--seed-id", receipt["seed_id"]]
+                   "--require-agent-hosting", "--stage-launch-seed", "--seed-id", receipt["seed_id"]]
     if request["no_mux"]:
         launch_args.append("--no-mux")
     return {

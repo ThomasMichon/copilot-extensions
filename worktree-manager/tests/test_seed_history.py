@@ -121,34 +121,70 @@ def test_acl_shell_selection_and_explicit_missing_shell_skip(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
-@pytest.mark.parametrize("legacy_only", [False, True])
-def test_windows_history_has_protected_owner_system_acl(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_only: bool,
-) -> None:
-    if legacy_only:
-        which = shutil.which
-        monkeypatch.setattr(shutil, "which", lambda name: which(name) if name != "pwsh" else None)
-    shell = _acl_powershell()
+def test_windows_history_has_protected_owner_system_acl(tmp_path: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_security = advapi.GetFileSecurityW
+    get_security.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    get_security.restype = wintypes.BOOL
+    get_control = advapi.GetSecurityDescriptorControl
+    get_control.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.WORD), ctypes.POINTER(wintypes.DWORD)]
+    get_control.restype = wintypes.BOOL
+    get_dacl = advapi.GetSecurityDescriptorDacl
+    get_dacl.argtypes = [
+        wintypes.LPVOID, ctypes.POINTER(wintypes.BOOL), ctypes.POINTER(wintypes.LPVOID),
+        ctypes.POINTER(wintypes.BOOL),
+    ]
+    get_dacl.restype = wintypes.BOOL
+    get_ace = advapi.GetAce
+    get_ace.argtypes = [wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.LPVOID)]
+    get_ace.restype = wintypes.BOOL
+    sid_text = advapi.ConvertSidToStringSidW
+    sid_text.argtypes = [wintypes.LPVOID, ctypes.POINTER(wintypes.LPWSTR)]
+    sid_text.restype = wintypes.BOOL
+    kernel.LocalFree.argtypes = [wintypes.LPVOID]
+    kernel.LocalFree.restype = wintypes.LPVOID
+
+    class ACL(ctypes.Structure):
+        _fields_ = [
+            ("revision", ctypes.c_byte), ("reserved", ctypes.c_byte),
+            ("size", wintypes.WORD), ("count", wintypes.WORD), ("reserved2", wintypes.WORD),
+        ]
+
     history = seed_history.SeedHistory("demo", tmp_path)
     history.remember("private")
     for path in (history.path.parent, history.path):
-        # An inherited PSModulePath can select another PowerShell edition's module.
-        script = (
-            "$ErrorActionPreference='Stop';"
-            "Import-Module (Join-Path $PSHOME "
-            "'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1');"
-            "$acl=Get-Acl -LiteralPath '" + str(path).replace("'", "''") + "';"
-            "$acl.AreAccessRulesProtected;"
-            "$acl.Access | ForEach-Object {"
-            "$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value}"
-        )
-        result = subprocess.run(
-            [shell, "-NoProfile", "-Command", script],
-            capture_output=True, text=True, timeout=20,
-            **no_window_kwargs(),
-        )
-        if result.returncode or set(result.stdout.split()) != {"True", "S-1-3-4", "S-1-5-18"}:
-            pytest.fail(f"ACL inspection with {shell} failed:\n{result.stderr}", pytrace=False)
+        needed = wintypes.DWORD()
+        get_security(str(path), 4, None, 0, ctypes.byref(needed))
+        assert needed.value
+        descriptor = ctypes.create_string_buffer(needed.value)
+        assert get_security(str(path), 4, descriptor, needed, ctypes.byref(needed))
+        control, revision = wintypes.WORD(), wintypes.DWORD()
+        assert get_control(descriptor, ctypes.byref(control), ctypes.byref(revision))
+        assert control.value & 0x1000  # SE_DACL_PROTECTED, independent of SDDL rendering.
+        present, defaulted, dacl = wintypes.BOOL(), wintypes.BOOL(), wintypes.LPVOID()
+        assert get_dacl(descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted))
+        assert present.value and dacl.value
+        assert ctypes.cast(dacl, ctypes.POINTER(ACL)).contents.count == 2
+        principals = set()
+        for index in range(2):
+            ace = wintypes.LPVOID()
+            assert get_ace(dacl, index, ctypes.byref(ace))
+            assert ctypes.c_byte.from_address(ace.value).value == 0  # ACCESS_ALLOWED_ACE_TYPE.
+            assert wintypes.DWORD.from_address(ace.value + 4).value == 0x1F01FF  # FILE_ALL_ACCESS.
+            text = wintypes.LPWSTR()
+            assert sid_text(ace.value + 8, ctypes.byref(text))
+            try:
+                principals.add(text.value)
+            finally:
+                kernel.LocalFree(text)
+        assert principals == {"S-1-3-4", "S-1-5-18"}
 
 
 def test_permission_failure_blocks_submission(tmp_path, monkeypatch):

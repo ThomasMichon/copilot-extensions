@@ -3,6 +3,15 @@
   "version": 1,
   "projections": [
     {
+      "id": "elevation-fallback",
+      "deliveryMode": "inline",
+      "template": "instructions/elevation-fallback.instructions.md",
+      "destination": ".github/instructions/agent-conduct-guidance/elevation-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
       "id": "multi-agent-rules-of-engagement",
       "deliveryMode": "inline",
       "template": "instructions/multi-agent-rules-of-engagement.instructions.md",

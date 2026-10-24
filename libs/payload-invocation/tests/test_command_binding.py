@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -39,13 +40,46 @@ def _write(path: Path, value: Any) -> None:
 
 
 def _snapshot(root: Path) -> dict:
-    return {
-        path.relative_to(root).as_posix(): (
+    def capture(path):
+        return path.relative_to(root).as_posix(), (
             path.is_dir(), path.stat().st_mtime_ns,
             path.read_bytes() if path.is_file() else None,
         )
-        for path in [root, *root.rglob("*")]
-    }
+
+    # Keep every byte and directory timestamp without serial per-file I/O stalls.
+    with ThreadPoolExecutor(max_workers=8) as reader:
+        return dict(reader.map(capture, [root, *root.rglob("*")]))
+
+
+def test_snapshot_retains_every_byte_even_when_size_and_timestamp_are_unchanged(tmp_path):
+    directory = tmp_path / "nested"
+    directory.mkdir()
+    path = directory / "resource"
+    path.write_bytes(b"old")
+    info = path.stat()
+    before = _snapshot(tmp_path)
+    assert before["nested"] == (True, directory.stat().st_mtime_ns, None)
+    assert before["nested/resource"] == (False, info.st_mtime_ns, b"old")
+    path.write_bytes(b"new")
+    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+    after = _snapshot(tmp_path)
+    assert after["nested/resource"] == (False, info.st_mtime_ns, b"new")
+    assert after != before
+
+
+def test_snapshot_surfaces_file_read_failure(tmp_path, monkeypatch):
+    path = tmp_path / "resource"
+    path.write_bytes(b"retained")
+    original = Path.read_bytes
+
+    def fail(target):
+        if target == path:
+            raise OSError("fixture snapshot read failure")
+        return original(target)
+
+    monkeypatch.setattr(Path, "read_bytes", fail)
+    with pytest.raises(OSError, match="fixture snapshot read failure"):
+        _snapshot(tmp_path)
 
 
 def _lifecycle_lock_path(root: Path) -> Path:
@@ -330,6 +364,7 @@ def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[
         "PSModuleAnalysisCachePath": os.devnull,
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+    environment.pop("COPILOT_EXTENSIONS_BOOT_TRACE", None)
     for relative in (".cache/powershell", ".local/share/powershell/Modules"):
         (fixture["home"] / relative).mkdir(parents=True)
     if os.name == "nt":
@@ -482,9 +517,9 @@ def test_command_binding_catalog_disables_user_site_startup(
         launcher.write_text(
             "if ($args[0] -ne '-3') { throw 'Expected Python 3 launcher' }\n"
             "$probeArgs=@($args[1..($args.Count-1)])\n"
-            "$null=& $env:TEST_PYTHON @probeArgs\n"
+            "& $env:TEST_PYTHON @probeArgs\n"
             "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
-            "Write-Output $env:TEST_PYTHON\n",
+            "exit 0\n",
             encoding="utf-8",
         )
         wrapper = home / "site-catalog.ps1"
@@ -510,6 +545,7 @@ def test_command_binding_catalog_disables_user_site_startup(
             text=True, timeout=30, **kwargs,
         )
         assert completed.returncode == 0, completed.stdout + completed.stderr
+        assert "::boot-trace::" not in completed.stdout + completed.stderr
         envelope = json.loads(completed.stdout)
         match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
         assert match, completed.stdout
@@ -709,13 +745,35 @@ def test_command_binding_real_catalog_read_only(
         assert catalog["commands"][0]["availability"] == "ready"
         assert catalog["binding"]["status"] == ("selected" if owned else "unresolved")
         assert _snapshot(binding_fixture["home"]) == before
+    if owned:
+        manifest_path = binding_fixture["legacy"] / "deploy-manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["commandBinding"]["sourceFingerprint"] = "sha256:" + "0" * 64
+        _write(manifest_path, manifest)
+        before = _snapshot(binding_fixture["home"])
+        completed = host.run(argv) if host else subprocess.run(
+            argv, env=environment, cwd=binding_fixture["home"],
+            capture_output=True, text=True, timeout=30, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+        envelope = json.loads(completed.stdout)
+        match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
+        assert match, completed.stdout
+        binding = json.loads(match.group(1))["binding"]
+        assert binding["status"] == "blocked"
+        assert binding["reason"] == "legacy-ownership-mismatch"
+        assert binding["installation"] is None
+        assert _snapshot(binding_fixture["home"]) == before
     if host:
         host.close()
     assert _snapshot(binding_fixture["home"]) == before
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
-@pytest.mark.parametrize("launcher", ["py", "python", "alias-only"])
+@pytest.mark.parametrize("launcher", [
+    "py", "python", "alias-only", "py-unavailable", "helper-failure", "empty-response",
+])
 def test_command_binding_catalog_python_launcher_avoids_app_alias(
     binding_fixture: dict, launcher: str, powershell_host,
 ) -> None:
@@ -727,23 +785,41 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     launcher_path.write_text(
         "if ($args[0] -ne '-3') { throw 'Python launcher must select Python 3' }\n"
         "if (($args[1..6] -join ' ') -ne '-I -B -E -X utf8 -c') { throw 'Unexpected probe flags' }\n"
-        "Write-Output $env:TEST_PYTHON\nexit 0\n",
+        "if ($args.Count -ne 15 -or $args[8] -ne "
+        "(Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/command_binding.py')) {\n"
+        "    throw 'Expected binding helper in the admitted interpreter process'\n"
+        "}\n"
+        "[Console]::Error.WriteLine('fixture-launcher-run')\n"
+        "if ($env:TEST_LAUNCHER -eq 'py-unavailable') { exit 3 }\n"
+        "$pythonArgs=@($args[1..($args.Count-1)])\n"
+        "& $env:TEST_PYTHON @pythonArgs\n"
+        "exit $LASTEXITCODE\n",
         encoding="utf-8",
     )
     environment.update({
         "TEST_PYTHON": python, "TEST_LAUNCHER": launcher,
         "TEST_LAUNCHER_PATH": str(launcher_path),
+        "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
     })
+    if launcher in {"helper-failure", "empty-response"}:
+        helper = binding_fixture["payload"] / "scripts/command_binding.py"
+        helper.write_text(
+            "raise SystemExit(7)\n" if launcher == "helper-failure" else "pass\n",
+            encoding="utf-8",
+        )
     wrapper = binding_fixture["home"] / "app-alias-fixture.ps1"
     wrapper.write_text(
         "function Get-Command {\n"
         "    param($Name,$CommandType,$ErrorAction)\n"
-        "    if ($Name -eq 'py' -and $env:TEST_LAUNCHER -eq 'py') {\n"
+        "    if ($Name -eq 'py' -and $env:TEST_LAUNCHER -notin @('python','alias-only')) {\n"
         "        return @{Source=$env:TEST_LAUNCHER_PATH}\n"
+        "    }\n"
+        "    if ($Name -ne 'py' -and $env:TEST_LAUNCHER -in @('py','helper-failure','empty-response')) {\n"
+        "        throw 'An admitted interpreter must not trigger fallback discovery'\n"
         "    }\n"
         "    if ($Name -eq 'python3') { return $null }\n"
         "    if ($Name -eq 'python') {\n"
-        "        if ($env:TEST_LAUNCHER -eq 'python') { return @{Source=$env:TEST_PYTHON} }\n"
+        "        if ($env:TEST_LAUNCHER -in @('python','py-unavailable')) { return @{Source=$env:TEST_PYTHON} }\n"
         "        return @{Source='C:\\Users\\example\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe'}\n"
         "    }\n"
         "}\n"
@@ -753,13 +829,29 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
     host = powershell_host(binding_fixture, environment)
     completed = host.run([POWERSHELL, "-File", str(wrapper)])
     assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert "::boot-trace::" not in completed.stdout
+    assert completed.stderr.count("fixture-launcher-run") == (
+        0 if launcher in {"python", "alias-only"} else 1
+    )
+    assert completed.stderr.count("phase=catalog-binding-complete ") == 1
+    assert completed.stderr.count("phase=catalog-python-start ") == (
+        1 if launcher in {"py", "helper-failure", "empty-response"} else 0
+    )
+    assert completed.stderr.count("phase=catalog-helper-start ") == (
+        1 if launcher in {"python", "py-unavailable"} else 0
+    )
     envelope = json.loads(completed.stdout)
     match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
     assert match, completed.stdout
     binding = json.loads(match.group(1))["binding"]
-    if launcher == "alias-only":
+    if launcher in {"alias-only", "helper-failure", "empty-response"}:
         assert binding["status"] == "unresolved"
-        assert binding["reason"] == "binding-interpreter-unavailable"
+        assert binding["reason"] == {
+            "alias-only": "binding-interpreter-unavailable",
+            "helper-failure": "binding-resolver-failed",
+            "empty-response": "binding-response-invalid",
+        }[launcher]
+        assert binding["installation"] is None
     else:
         assert binding["status"] == "selected", binding
 
@@ -808,6 +900,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
             "PLUGIN_DIR=\"$TEST_PAYLOAD\"\nINSTALL_DIR=\"$TEST_RUNTIME\"\n"
             "VENV_PYTHON=\"$TEST_PYTHON\"\nLINK_DIR=\"$TEST_RUNTIME/.venv\"\n"
             "SCRIPT_DIR=\"$TEST_SOURCE_SCRIPTS\"\nSRC_VERSION='1.0.0'\n"
+            "__aw_admission_project=\"$PWD\"\n"
             '. "$SCRIPT_DIR/source-runtime.sh"\n_initialize_source_runtime\n'
             f"CONTEXTUAL_INSTALL={'true' if contextual else 'false'}\n"
             + function + "\nwrite_deploy_manifest\n"
@@ -830,6 +923,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
             "$PluginDir=$env:TEST_PAYLOAD\n$InstallDir=$env:TEST_RUNTIME\n"
             "$VenvPython=$env:TEST_PYTHON\n$LinkDir=Join-Path $InstallDir '.venv'\n"
             "$ScriptDir=$env:TEST_SOURCE_SCRIPTS\n$SrcVersion='1.0.0'\n"
+            "$admissionProject=(Get-Location).Path\n"
             ". (Join-Path $ScriptDir 'source-runtime.ps1')\nInitialize-SourceRuntime\n"
             f"$ContextualInstall=${'true' if contextual else 'false'}\n"
             + function + "\nWrite-V3Manifest\n"

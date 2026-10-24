@@ -586,8 +586,8 @@ def collect_local_projects(
     current_project: str | None = None, *, home_dir=None, strict: bool = False,
     input_roots: ProfileInputRoots | None = None,
 ) -> list[ProjectInput]:
-    """Collect registry, roster and selection inputs, with the current project
-    first. Publishing uses strict parsing instead of tolerant view defaults."""
+    """Collect registered project inputs, prioritizing the current project only
+    when adopted. Publishing uses strict parsing instead of tolerant view defaults."""
     from .harness_state import build_projects as hs_build_projects
     from .harness_state import home as hs_home
     from .harness_state import _read_yaml
@@ -598,7 +598,7 @@ def collect_local_projects(
     by_name = {p.name: p for p in projects}
 
     ordered: list[str] = []
-    if current_project:
+    if current_project is not None and current_project in by_name:
         ordered.append(current_project)
     for p in projects:
         if p.name not in ordered:
@@ -616,7 +616,7 @@ def collect_local_projects(
     for name in ordered:
         info = by_name.get(name)
         display = (info.display_name if info else None) or _display_from_slug(name)
-        agent_exposed = bool(info.repo.agent) if info and info.repo else True
+        agent_exposed = bool(info.repo.agent) if info and info.repo else False
         roster = info.roster if info else ()
         wsl_distro = info.wsl_distro if info else None
         wsl_state = info.wsl_state if info else None

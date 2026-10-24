@@ -107,13 +107,18 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
 
 
 def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, output: Any) -> None:
-    from . import config as cfg, legacy_wsl_record_locality, obligations, tracking
+    from . import config as cfg, legacy_wsl_record_locality, obligations, paired_claims, tracking
 
-    require_record_mutation(record, config)
     try:
         owner = record.owner_claim_ref
+        if (
+            owner is None and getattr(record, "pair_role", None) == "knowledge"
+            and getattr(record, "pair_kind", None) == "worktree"
+        ):
+            owner = record.pair_claim_ref
         if owner is None or not owner.is_qualified:
             return
+        require_record_mutation(record, config)
         if owner.machine == config.machine:
             parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
             legacy_parent = False
@@ -139,6 +144,11 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
             if not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             child_ref = tracking.format_claim_ref(config.machine, config.repo_name, worktree_id)
+            if child_ref == paired_claims.paired_ref(parent) and any(
+                c.ref == child_ref and c.kind == "worktree" and c.state == obligations.RELEASED
+                for c in parent.resources
+            ):
+                return
             settled = tracking.settle_resource_claim(
                 parent, child_ref, obligations.AT_REST, save=False,
             )

@@ -8,6 +8,13 @@ def complete_launch(
     prepared_context, resume_target, driver, selection, result, cfg, sessions,
     output, launch_seed_state, tracking_write, profile_assignment, clock,
 ) -> int:
+    from . import agent_policy
+    from repository_policy import AgentHostingError
+
+    try:
+        agent_policy.require(work_dir)
+    except AgentHostingError as exc:
+        return output._json_error(str(exc), exit_code=3)
     new_pane = result.get("new_pane")
     # Reserve only New intent at delivery; failed typing retains it.
     claimed_seed: str | None = None

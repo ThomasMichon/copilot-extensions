@@ -702,6 +702,21 @@ $env:AGENT_VAULT_PAYLOAD_ROOT = $_snap
 & $_gate @args
 exit $LASTEXITCODE
 '@
+    } elseif ($CommandName -ceq 'agent-pull-requests') {
+        $coldDispatcher = @'
+if ($_root -ine (Join-Path $env:USERPROFILE '.agent-pull-requests')) {
+    [Console]::Error.WriteLine('[agent-pull-requests] cold custom-root provisioning requires explicit installation management.')
+    exit 126
+}
+$_gate = Join-Path $_snap 'scripts\invoke-payload-runtime.ps1'
+if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or
+    -not (Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: pull-requests-first-use-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-pull-requests] owning snapshot dispatcher is unavailable; repair the owning payload.')
+    exit 126
+}
+& $_gate @args
+exit $LASTEXITCODE
+'@
     }
 
     $ps1Path = Join-Path $LocalBin "$CommandName.ps1"

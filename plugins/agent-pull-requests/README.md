@@ -22,6 +22,10 @@ The installer builds an immutable versioned venv under
 `~/.agent-pull-requests/versions/<version>/`, deploys a real
 `~/.local/bin/agent-pull-requests` binstub, and self-reconciles that runtime on
 session start the same way the other Python runtime plugins do.
+Before completing or selecting a legacy runtime generation, both native
+installers run its actual CLI in isolation with `--help`. A successful package
+import alone is not candidate health; a failed entry point leaves the prior
+selection and completion intact.
 
 Both native installers also accept an explicitly
 [prepared source payload](../../tools/prepare_runtime_source.md). Its verified
@@ -60,8 +64,28 @@ nonempty scoped map requires resolvable source identity.
 Legacy self-staging revalidates the original installed marketplace against the
 current policy. The child accepts an origin hint only inside its own canonical
 staging layout, with an existing installed payload and identical, link-free
-payload contents; staging flags alone never bypass admission. A replaced or
+payload contents; staging flags alone never bypass admission. A canonical
+frozen input may omit generated artifacts and empty directories, but its
+complete admitted file set and bytes must still match. Arbitrary copied
+payloads cannot borrow an installed origin through environment hints.
+A replaced or
 unavailable origin fails closed rather than guessing its marketplace.
+
+The legacy cold payload command and generated primary command submit provisioning
+to the packaged standalone installation driver before any outer provisioning
+lock or cold trace write. Waiting observes the caller-independent owner and
+relays its result; there is no foreground fallback. The primary command retains
+its exact selected snapshot rather than switching to the current marketplace
+payload. Healthy runtime dispatch does not require the driver or permission to
+publish. Missing/older helpers, nested installation custody, pinned reads and
+no-self-provision controls refuse cold provisioning explicitly.
+
+The fixed recipe requires the default legacy root, canonical installed payload
+or selected snapshot, native staging layout and existing installer. It accepts
+neither a service option nor an arbitrary source/root. Cold custom-root and
+namespaced command provisioning require explicit installation management;
+healthy namespaced dispatch remains supported. Session bootstrap and explicit
+installer callers are separate, not migrated by command adoption.
 
 ## Verbs
 

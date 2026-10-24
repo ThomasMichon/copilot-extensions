@@ -123,7 +123,7 @@ creation, not an implicit permission migration or a read-only status side effect
   cannot lose a concurrent submission. Debug uses this same path, not a bypass.
   An optional trusted `executor(Transaction)->int` must finish all its effects
   and cleanup before returning. Returning an exit code certifies that cleanup
-  boundary; exceptions are conservatively interrupted.
+  boundary; custom-executor exceptions remain conservatively interrupted.
 
 ## Execution and borrowed custody
 
@@ -227,9 +227,36 @@ inherited native group; deliberate group escape, cross-kernel commands, and
 privilege transitions require their own supported owner. An interrupted fence
 is not cleared merely because cleanup probably completed or the lock is free.
 
+### Native-confirmed same-boot failure
+
+The default executor receives an explicit `run_caller_owned(on_settled=...)`
+notification only at a known pre-launch refusal or after the entire strict
+Windows Job / POSIX group has been positively settled. If execution then fails
+and all borrowed participants close cleanly, the owner records `interrupted`
+with **no exit status**, the original exception type, `settlement_kind` of
+`native_scope`, `settled_at`, and the unchanged admission boot in
+`settled_boot_id`. This is a failed request, not a fabricated canonical result.
+The waiter still reports failure, but later requests may execute on the same
+boot without clearing history or replaying the interrupted work.
+
+Cleanup failure, lost custody, unclosed/abandoned participants, arbitrary custom
+executor exceptions and owner death do not produce that proof. Their fences
+remain. Native foundation progress keeps its independent interruption checks;
+a settled queue request cannot clear an uncertain foundation operation.
+
+Schema **4** retains schema 3's explicit settlement kind and adds separate
+`recovery_authority` and `released_at` fields. Read-only status and enqueue
+also accept schemas 2 and 3 without migrating them. A drainer migrates a valid older
+queue only while holding the existing installation lock and an immediate
+SQLite transaction: requests and pending identities are preserved, existing
+changed-boot settlement becomes `kernel_restart`, and old interrupted records
+remain unsettled. Migration never invents native cleanup evidence for them.
+Downlevel code that does not support schema 4 refuses the upgraded database rather
+than silently interpreting authorization as cleanup proof. Schema 1 remains unsupported.
+
 ### Explicit positive settlement after kernel restart
 
-Schema **2** records `Request.boot_id` at transaction admission, under the
+`Request.boot_id` is recorded at transaction admission, under the
 installation lock, before invoking the executor. `kernel_boot_identity()`
 reads Linux's kernel boot UUID, macOS `sysctlbyname("kern.bootsessionuuid")`,
 or Windows `NtQuerySystemInformation(SystemBootEnvironmentInformation=90)` BootIdentifier.
@@ -255,20 +282,48 @@ settled_requests = recover_after_restart()  # explicit mutation, same OperationL
   initializes one, and checks its file identity across reconciliation.
   Missing/disappeared/replaced state refuses explicitly, including a database
   removed between the initial observation and the mutation boundary.
-- Only a different native boot UUID on the same platform provides positive
-  evidence that old native descendants cannot still execute. Settlement adds
-  `settled_boot_id` and `settled_at`, preserving the interrupted state, failure
+- For interruptions without native scope proof, this existing recovery path
+  requires a different native boot UUID on the same platform. Settlement adds
+  `settlement_kind=kernel_restart`, `settled_boot_id` and `settled_at`, preserving the interrupted state, failure
   text, absent exit status, and original admission identity. A crashed
   `running` record becomes `interrupted`, never successful or replayed.
-- Only those positively settled fences stop blocking later work. Existing
+- In this restart-evidence path, only positively settled fences stop blocking later work. Existing
   pending work stays pending until an explicit normal worker/update runs.
   Repeating settlement is idempotent. There is no force/TTL/PID reset, manual
   database-edit/delete recipe, root rotation escape, or reboot command.
 
 Schema 1 predates admission boot evidence and is explicitly unsupported rather
 than silently upgraded into fabricated recovery authority. Malformed state
-also refuses. This new core has not been deployed to live state; these schema
-changes affect only isolated fixtures in this change.
+also refuses. Neither this proof nor the distinct authorization path below
+authorizes manual journal surgery, a reboot, or an unrequested live repair.
+
+### Explicit operator-authorized queue release
+
+`recover_for_repair(*, authorized=False, root=None) -> tuple[Request, ...]`
+requires literal `authorized=True` from an explicitly authorized repair adapter.
+It releases valid running/interrupted/blocked queue records without requiring
+historical cleanup, pre-launch, boot or old-owner evidence. This is **authorization,
+not positive settlement**: `recovery_authority=operator_repair` and `released_at`
+record the release, while `settlement_kind`, `settled_at` and `settled_boot_id`
+remain absent. Failed outcomes, error text, admission identity and pending work
+are preserved. A crashed running record becomes interrupted, never successful.
+
+The operation acquires the existing installation lock nonblockingly and upgrades
+valid schema-2/3 records under one immediate SQLite transaction. Missing/replaced/
+malformed state or a current lock owner refuses without partial release. Repeated
+calls are idempotent; ordinary admission never chooses this policy implicitly.
+Restart assessment, queue admission, worker startup, pending waiters and foundation
+queue admission all distinguish this authority from native cleanup proof.
+
+Manager and Worktrees expose `update --recover-for-repair [--json]` without
+requiring a project or starting an installer. That command authorizes
+only queue release; it runs no installer and replays nothing. A subsequent
+explicit ordinary update uses the same canonical queue and executor.
+This bounded API is not a complete force-reinstall operation: active-installer
+retirement, corrupt-journal reconstruction and independent native-foundation
+repair remain separate work. An unsettled foundation record is never cleared by
+queue release. Optional audited pre-launch recovery is also separate, never a
+historical-proof prerequisite for operator-authorized repair.
 
 ### Native foundation progress and interruption
 
@@ -276,8 +331,9 @@ The earlier Python-free construction boundary has a separate, narrowly scoped
 progress record, **not another request queue or installation owner**:
 `<execution-root>/foundation-operation.json`. It uses
 `copilot-extensions.installation-foundation-operation`, version `1`, and the
-same `<execution-root>/execution.lock`. SQLite remains schema 2; no request
-history is deleted, migrated or moved to another execution root.
+same `<execution-root>/execution.lock`. Its native progress remains version 1,
+independent of the schema-4 queue; no request history is deleted or moved to
+another execution root.
 
 `foundation_status(root=...) -> FoundationOperation | None` reads that bounded,
 plain-file record without creating anything. It records only operation/source
@@ -600,19 +656,59 @@ stay explicit, separate boundaries. The single foundation progress snapshot
 is not durable ordinary-request history; ordinary publication adapters need
 canonical queued request receipts.
 
-### Fixed first-use handoff and Vault command adoption
+### Fixed first-use recipes and command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
-support the owning Agent Vault payload's existing legacy **direct `provision`**
-and **`stamp`** actions. Namespaced installation recipes refuse before
+support the owning Agent Vault and Agent Pull Requests payloads' existing legacy
+**direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
 selected owning source's runtime gate before taking a provisioning lock
 (the existing snapshot pointer for installed payloads).
-Other publishers, including Vault's bootstrap reconciliation hook and explicit
-installer entry points, have not adopted it. Other plugin identities and their
-snapshot-specific recipes remain unsupported rather than being inferred
+Vault's legacy session bootstrap also uses the fixed stamp/provision actions.
+Explicit installer entry points remain separate, unadopted callers.
+Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
+
+Pull Requests' legacy cold payload and generated primary commands use the same
+fixed recipe before outer provisioning locks or cold resolver writes. The
+primary delegates to its exact selected snapshot's versioned dispatcher;
+missing/older dispatchers and custom roots refuse without a foreground fallback.
+Healthy commands retain their existing runtime path without touching the queue.
+Cold namespaced commands refuse before activation or provisioning until that
+recipe is qualified. Bootstrap and explicit installer publishers remain separate.
+The recipe uses the
+same canonical queue and frozen-input owner, projects its own context instead of
+Vault's, and clears legacy shell action/force/root hints before invoking the
+fixed native action. Its no-self-provision control retains presence semantics.
+Its installer has no service-selection option: client-only requests refuse
+before queue or plugin writes rather than passing Vault's `NoService` flag.
+The canonical installer-engine sync owner supplies its input freezer; the
+existing native installer remains the executor and publication authority.
+This recipe requires the default legacy root and either its canonical installed
+payload or its exact selected legacy snapshot. Snapshot admission uses the
+existing snapshot-provenance reader, including the ordinary receipt, snapshot
+identity, `payload-dir`, `stamped-version` and canonical source fingerprint.
+It revalidates live publication policy and selection before queue acceptance
+and again under execution custody; changing selection never silently replaces
+the accepted snapshot with a newer installed payload.
+Native restamping omits the old legacy snapshot sidecar from its private
+candidate and publishes fresh provenance for the new selection through the
+existing publisher. Version-2 source receipts therefore remain valid inputs
+without being mistaken for the candidate's version-1 receipt; the selected
+source's bytes are not rewritten.
+It freezes beneath that installation's existing `.install-stage` layout under
+the same outer queue custody. Arbitrary copied/out-of-layout directory payloads or custom-root
+recipes refuse before acquisition or queue/plugin writes. The native mode
+reader retains its canonical installed/selected-snapshot origin and staging-location checks,
+then verifies the copied source bytes. A canonical frozen tree may omit
+generated artifacts and empty directories, but may not omit or alter an
+admitted file or add a cached/extraneous file. Complete legacy staging retains
+its existing whole-tree check; ordinary payloads cannot borrow an installed
+source's identity by setting staging hints.
+The Windows reader invokes its native helper with
+typed in-process parameters, preserving JSON probe bytes rather than passing
+them through another PowerShell command-line parser.
 
 Both native clients take the execution root, owning payload, addressed runtime
 root and originating project. Before creating driver state, they honor the
@@ -628,23 +724,43 @@ even to another root. Both native and Python admission refuse nested evidence
 before state creation rather than queuing behind the caller's own custody.
 This is an explicit unsupported outcome, not a second owner or inline retry.
 The optional Windows `-ServiceMode client-only`, Linux `--client-only` and
-Python `client_only=True` select only the canonical installer's existing
+Python `client_only=True` select only Vault's canonical installer's existing
 `-NoService`/`--no-service` option. This boolean participates in durable request
 and runner identity; ordinary service-enabled behavior is still the default.
 No arbitrary installer options are accepted.
 Windows `-InstallerAction stamp`, Linux `--installer-action stamp` and Python
-`installer_action="stamp"` select only Vault's existing canonical stamping
+`installer_action="stamp"` select only the owning plugin's existing canonical stamping
 action. This selection is distinct durable request identity; equivalent pending
 stamps coalesce without absorbing a provision request. The default provision
 identity is unchanged. A stamp retains source/publication and no-self-provision/
-pinned-read admission, but does not build or select a Vault venv or register its
+pinned-read admission, but does not build or select a plugin venv or register a
 service; constructing the independent driver foundation is separate. Combining
-stamp with client-only selection refuses before state creation. This qualified
-recipe is not adoption of the session bootstrap or explicit installer callers.
+stamp with client-only selection refuses before state creation. The recipe does
+not authorize arbitrary lifecycle actions or adopt explicit installer callers.
 The optional Windows `-Wait` and Linux `--wait` keep the launching client as an
 observer of its independently launched finite supervisor and relay its diagnostics
-and exit status. They do not move installation into the caller. Launch-only
+and exit status. Waiting emits the same positive supervisor acknowledgement on
+stderr, so diagnostics can identify and observe that exact owner even if the
+caller disappears; this still does not certify ordinary queue acceptance.
+They do not move installation into the caller. Launch-only
 acknowledgement remains the default for existing native clients.
+
+Vault's bootstrap first reads its existing deployment/version/selected-runtime
+markers. A healthy runtime, selected cell or active bootstrap killswitch stays
+read-only without requiring driver support. No-self-provision and pinned reads
+return an explicit deferred no-op; nested ownership refuses. Otherwise the hook
+normalizes runtime routing through the same helper as command dispatch, checks
+the packaged `vault-stamp-v1` lifecycle contract and launches the fixed action
+through the native client. A stale `reconcile.lock` is neither modified nor
+used to kill another process. Its stdout remains only `{}`; stderr carries the
+launch acknowledgement and root-owned diagnostic location, never a durable
+acceptance claim. First stamping and drift retain their session-bound triggers;
+no recurring worker or schedule is added. Global command availability follows
+queued stamp completion, while the payload-local command can be used directly.
+The POSIX hook preserves its existing metadata-Python/no-Python no-op boundary;
+only actual native first-use commands claim Python-free genesis. Stock legacy
+Bash/macOS cold bootstrap explicitly refuses. Other session hook behavior and
+the independent guidance writer remain unchanged.
 
 Vault declares this library through the existing canonical `uv` source and
 release materializer. Its self-contained payload carries the fixed three-sibling
@@ -676,6 +792,10 @@ nonzero result. A changed input fingerprint, context, installation or action
 remains a separate request.
 The trusted runner is reconstructed internally as that foundation's retained
 module, never a caller-supplied executable, installer name or argument recipe.
+Windows admission is already in stock PowerShell 5.1 and invokes the same
+canonical read-only installation helper in-process, with explicit named source,
+root and project arguments. This avoids redundant interpreter startups while
+preserving both publication and provenance checks within the hook deadline.
 
 After `enqueue` commits, the existing queue's ID/state JSON is the **durable
 ordinary-request receipt**. It appears in the supervisor log even if worker
@@ -728,6 +848,19 @@ through the native supervisor, requires a successful ordinary queue result and
 the canonical primary/payload pointer, and proves no Vault venv, current-runtime
 selection or service artifact was created. Subsequent provisioning stays a
 separate request under the same authority.
+Pull Requests' corresponding actual-installer case uses its service-less
+canonical contract: cold stamp, provision from that exact retained snapshot
+with the installed payload unavailable, failed candidate preserving the
+healthy selection, and installed CLI/module origin after both source trees
+are removed. The caller-loss fixture runs with both fixed identities. The
+same portfolio does not switch any ordinary Pull Requests publisher.
+The hosted-only actual bootstrap case additionally enforces the declared hook
+deadline and output shape, closes its caller Job/group during cold construction,
+and verifies the same stamp operation/result survives. It then qualifies real
+drift provisioning with default service effects, normalized foreign routing,
+exact originating project and healthy hooks that submit no new work. Canonical
+uninstall and owned-supervisor settlement enclose that disposable service lane;
+it does not authorize operator-host enrollment.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;

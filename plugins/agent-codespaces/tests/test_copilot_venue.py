@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import shlex
+import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -161,6 +163,45 @@ class TestInteractiveSshReverseForwardsAndRemoteCommand:
 
 @pytest.fixture
 def store(monkeypatch, tmp_path):
+    class PolicyConnection:
+        async def ensure_connected(self, name, source, forwards):
+            assert name == "cs-1" and forwards == []
+
+        async def disconnect(self, name):
+            assert name == "cs-1"
+
+    async def policy_owner(manager, name, command, **kwargs):
+        assert name == "cs-1"
+        inner = shlex.split(command)[2]
+        if '"$WORKTREES" resolve --json' in inner:
+            words = shlex.split(inner)
+            data = {
+                "action": "exec", "worktree_id": words[words.index("--worktree-id") + 1],
+                "work_dir": "/workspaces/prepared",
+            }
+        elif "agent-policy check --help" in inner:
+            return SimpleNamespace(exit_code=0, stdout="", stderr="")
+        else:
+            assert 'agent-policy check --path "$PWD"' in inner
+            words = shlex.split(inner)
+            assert words[:2] == ["cd", "--"]
+            data = {
+                "version": 1, "allowed": True, "repository": words[2],
+                "expose_agent": None, "sources": [], "denied_by": [],
+            }
+        return SimpleNamespace(exit_code=0, stdout=json.dumps(data), stderr="")
+
+    monkeypatch.setattr("ssh_manager.ConnectionManager", PolicyConnection)
+    monkeypatch.setattr("agent_codespaces.lifecycle.account_for_codespace", lambda name: None)
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.list_codespaces",
+        lambda: [SimpleNamespace(
+            name="cs-1", display_name="cs-1", repository="octo/example-web-codespaces",
+            state="Available", account="",
+        )],
+    )
+    monkeypatch.setattr("agent_codespaces._ssh_retry.exec_with_retry", policy_owner)
+    monkeypatch.setattr("venue_copilot.live_session_for", lambda handle: None)
     monkeypatch.setattr(owner, "OWNER_FILE", tmp_path / "connection-owner.json")
     monkeypatch.setattr(owner, "_LOCK_FILE", tmp_path / "connection-owner.lock")
     monkeypatch.setattr(owner, "RUNTIME_DIR", tmp_path)
@@ -345,7 +386,10 @@ class TestCmdCopilotAnchorDefault:
         monkeypatch.setattr(
             "agent_codespaces.lifecycle.list_codespaces",
             lambda: [
-                argparse.Namespace(name="cs-1", repository="octo/example-web-codespaces"),
+                argparse.Namespace(
+                    name="cs-1", display_name="cs-1", repository="octo/example-web-codespaces",
+                    state="Available", account="",
+                ),
             ],
         )
 
@@ -378,8 +422,8 @@ class TestCmdCopilotAnchorDefault:
         monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
         monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
         monkeypatch.setattr(
-            "agent_codespaces.lifecycle.list_codespaces",
-            lambda: (_ for _ in ()).throw(
+            copilot_venue, "_resolve_anchor_identity",
+            lambda *_args: (_ for _ in ()).throw(
                 AssertionError("must not resolve anchor identity when --worktree-id is given")
             ),
         )

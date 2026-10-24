@@ -7,9 +7,12 @@
 - **Status:** Active; plan reviewed, isolated adoption proof delivered
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `repeatable-role-fleet-adoption`, `bounded-desired-state-control`,
-  `role-placement-preserves-service-authority`
+  `role-placement-preserves-service-authority`,
+  `convention-discoverable-diagnostic-logs`
 - **Umbrella issue:** #6030
 - **Sub-issues:** #5861 (existing named reconciliation follow-on)
+  and #8377 (diagnostic logging audit and retention)
+  and #7192 (first-class configurable Actions runner loadouts)
 
 ## Guiding Intent
 
@@ -31,6 +34,9 @@ placement is an explicit requirement; no option is a mandatory core dependency.
 |-------------|---------------------|-------------|
 | Campaign owner | Intent, substrate synthesis, integration and PR stewardship | Managed upstream worktree |
 | Deployment owner | Sequential adapter and fresh-environment proofs | Separate managed upstream worktree after plan review |
+| Runner loadout participant | Vision-first #7192 template, placement and declaration-to-managed-owner flow; existing release/lifecycle/authentication owners retained | Existing #7192 coordination and separate managed upstream worktree |
+| Trusted base-image participant | Bounded #8352 image recipe, contract, docs and tests; no controller or credential ownership | Separate managed upstream worktree; campaign owner integrates |
+| Diagnostic logging contributor | Bounded #8377 Dispatch application-handler, discovery and retention source slice; no installer/native capture or deployment ownership | Managed source worktree `spinning-sprocket` |
 | Adopter | Capacity, inventory, trust and live activation approval | Provider-specific downstream flow |
 
 ## Coordination
@@ -49,6 +55,21 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   credentials, organization policy or downstream coordination links.
 - **Activation:** Reviewed upstream code is not permission to enroll a live fleet,
   acquire capacity, change operator credentials or move an existing service.
+- **Logging slice:** `spinning-sprocket` owns Dispatch application diagnostics,
+  local discovery and existing-owner idle maintenance under #8377. It does not
+  modify #8370's installer-attempt capture or #6812's progress formatter.
+  Native capture, Bridge/telemetry, controller/container mappings and actual
+  released/running qualification remain explicit integration acceptance.
+  The bounded application source merged as #8415 after approval and required
+  CI; the [logging sub-plan](logging-conventions.md) records its exact merge,
+  validation and transferred remaining interfaces. None of the broad logging
+  amendment's checkboxes is closed by that partial source delivery.
+- **Trusted image slice:** #8352 owns the bounded
+  [trusted harness container plan](trusted-harness-containers.md) under #6030.
+  Its proposed `.devcontainer/trusted-harness-base/` reservation does not transfer
+  controller, credential, publication/signing or Gateway/SSH source custody.
+  Campaign owner retains integration and publication; implementation awaits
+  the plan's merged review and an explicit execution instruction.
 
 ## Context
 
@@ -125,6 +146,41 @@ accepted floor. The isolation and fencing details remain agent-recommended.
 
 ## Plan
 
+### Capacity-grid loadouts and configurable runner amendment
+
+The operator clarified the existing designer/controller split and requested
+upstream realization. Public-safe summary: fleet-manager designs expectations,
+actualizes contributed role/slot templates into the knowledge repository's
+final composition, and publishes named-machine allocations. The Gateway-side
+controller pulls published sources, prepares the deployment, notifies
+fleet-manager and waits for exact-plan confirmation. A grid-based view must
+compare CPU, memory, disk and other supported allocations against capacity.
+The confirmed operation includes required auth relays, tunnels, API/UX exposure
+and control-side deployments within an inspectable outfitting duration.
+
+The latest execution request is:
+
+> Make sure the vision upstream accounts for this. Then, see if you can wire in a flow for this into the grand system, building out the pieces needed to make GitHub Actions Runners for copilot-extensions configurable via fleet-manager
+
+The [runner-loadout realization plan](runner-loadouts.md) extends this
+existing campaign and #7192; it is not a second controller or a replacement
+for #6240/#6424/#6241 and #6681 ownership. Its decomposition and validation
+are **agent-recommended**. Existing client, Gateway/SSH, trusted-image and
+credential-provider work stays with its current owners.
+
+- [x] Land the loadout/Gateway vision and this implementation amendment
+  through ordinary review before changing runtime behavior.
+  #8434 merged after exact-head Copilot approval and required CI; this closes
+  reviewed intent only, not runner provisioning or live fleet acceptance.
+- [ ] Implement contributed template/slot composition and capacity-aware
+  named-machine runner allocations, preserving custom registrar state.
+- [ ] Connect the committed desired composition to controller-owned source
+  acquisition, preparation, notification and exact-plan approval.
+- [ ] Carry the typed runner declaration through the real supported deployment
+  owner with complete support closure, bounded outcomes and no raw command API.
+- [ ] Prove real convergence, update/failure recovery, drain/removal and one
+  authorized job; planner-only acceptance cannot close this amendment.
+
 ### Repository-led preparation and local telemetry amendment
 
 The operator's 2026-10-23 direction extends this existing campaign, not a parallel
@@ -154,6 +210,28 @@ owners retain those changes.
   multi-destination delivery after the deployment foundation is usable.
 - Local JSONL adopter/debug capture is useful independent evidence, not a
   completion claim for any of these controller or hosted-sink items.
+
+### Diagnostic logging audit and retention amendment
+
+The operator extended this existing effort:
+
+> We should also do an audit of existing logging while we in this effort and ensure all logging goes to clearly by-convention discoverable and predicable locations, with timestamps, attribution, and 30-day retention
+
+The [logging audit and implementation plan](logging-conventions.md) records
+source-backed coverage, existing owners and measurable acceptance. It includes
+native installer/cutover output, not just optional telemetry. #8377 owns
+integration; #8370 retains installer-attempt logging and #6812 retains
+install/update progress formatting. No competing implementation or live fleet
+mutation follows from this amendment.
+
+- [ ] Complete the writer/consumer inventory with explicit disposition for
+  every diagnostic logging category.
+- [ ] Implement owner-resolved log discovery, timestamps and attribution
+  through the existing logging/launch and deployment owners.
+- [ ] Enforce elapsed 30-day retention for active, archived, quiet/restarted
+  and container-owned logging; preserve explicit incomplete-attempt protection.
+- [ ] Validate concurrent writers, native Windows/POSIX handles, protocol
+  output/privacy and truthful failed/rolled-back/committed outcomes.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -193,6 +271,9 @@ Implementation sequencing below is **agent-recommended**:
   keep the portable runtime name-free and the private capacity adapter private.
 - [ ] Prove first useful index/dispatch service roles and full managed harness
   container on an explicitly admitted/leased controller host.
+- [ ] Deliver the bounded #8352 [trusted base-image slice](trusted-harness-containers.md);
+  then integrate its separately owned build, deployment and venue-validation
+  dependencies without claiming the broader fleet proof complete.
 - [ ] Add central worktree/bridge monitoring and declared future communication
   roles without inventing ready capabilities that are not implemented.
 - [ ] Implement explicit Gateway telemetry scope/retention and preservation-safe
@@ -288,6 +369,11 @@ Implementation sequencing below is **agent-recommended**:
 
 All entries are **agent-recommended implementation gates**.
 
+- [ ] Loadout acceptance follows the [runner matrix](runner-loadouts.md#validation):
+  resource fit/refusal, template/registrar preservation, published-source pull,
+  exact confirmation, complete support readiness and bounded partial/unknown
+  outcomes through actual owner adapters. No secret, routing, new-host or
+  live-pool action is inferred from a plan or this source amendment.
 - [ ] Three-input reconciliation preserves user overrides/unknown roles and live
   unowned resources; stale config/inventory/quota invalidates apply.
 - [ ] No quota cannot trigger creation; one-host service-only placement reports
@@ -298,6 +384,11 @@ All entries are **agent-recommended implementation gates**.
   processes, managed worktrees/plugin loading and configured source auth.
 - [ ] User-controlled monitoring is bounded/redacted and off-fleet analytics
   export remains disabled without separate explicit policy/consent.
+- [ ] Logging inventory and convention discovery cover all selected roles and
+  every native/structured output category without terminal-output dependence.
+- [ ] Synthetic clock and real writer tests prove the 30-day boundary,
+  continuous rollover, idle/startup cleanup, concurrent append safety and
+  protected incomplete-attempt handling; size/count-only rotation is not proof.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
 - [ ] Client-only fresh install and uninstall on Windows/Linux: no controller,
@@ -338,6 +429,19 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #8434 merged the capacity-grid loadout child vision, complete confirmed
+  Gateway outfitting intent and linked #7192 realization plan. Exact-head
+  review and required checks passed. Re-read this parent Plan and Validation
+  Plan after merge, pulled the same worktree forward, and resumed the
+  declaration-to-managed-owner implementation. Existing live pools, routing,
+  credentials, capacity and all other parent gates remain unchanged.
+- Logging audit requested under #8377: existing append-only, size-rotated and
+  daily-backup-count writers do not establish universal age-based retention.
+  #8370's installer-attempt implementation and #6812's formatter remain with
+  their existing owners. Audit evidence and the proposed convention are in
+  [the logging sub-plan](logging-conventions.md); implementation is not claimed.
+- #8334 merged the shared native single-operation JSONL append correction.
+  This is concurrency correctness, not rotation, retention or deployment proof.
 - #8298 merged into `dev`: fleet preparation and local diagnostic-spool intent
   are reviewed documentation, not a deployed controller or Grafana service.
   #8323 follows up only the existing Bridge/Dispatch JSONL append correctness.

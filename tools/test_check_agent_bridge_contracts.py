@@ -204,6 +204,8 @@ def repo(tmp_path: Path) -> Path:
     (root / "tools").mkdir(parents=True)
     (root / "tools" / SCRIPT.name).write_bytes(SCRIPT.read_bytes())
     (root / "tools" / EVIDENCE_MODULE.name).write_bytes(EVIDENCE_MODULE.read_bytes())
+    for name in ("agent_bridge_contract_registry.py", "agent_bridge_contract_paths.py"):
+        (root / "tools" / name).write_bytes((SCRIPT.parent / name).read_bytes())
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "user.name", "Test")
@@ -306,6 +308,26 @@ def test_valid_registry_passes(repo: Path) -> None:
     assert "OK (2 contracts, 2 fixtures)" in result.stdout
 
 
+def test_checker_validates_complete_chunked_history_without_rewriting(repo: Path) -> None:
+    import agent_bridge_contract_registry as codec
+
+    original = codec.load(repo)
+    updated = copy.deepcopy(original.materialized)
+    updated["contracts"][0]["provenance"] *= 5000
+    outputs = codec.plan(repo, original, updated)
+    assert len(outputs) > 2
+    assert all(len(data) <= codec.MAX_ARTIFACT_BYTES for data in outputs.values())
+    for relative, data in outputs.items():
+        target = repo / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    assert codec.load(repo).materialized == updated
+    result = _run(repo)
+    assert result.returncode == 0, result.stderr
+    assert "OK (2 contracts, 2 fixtures)" in result.stdout
+    assert all((repo / path).read_bytes() == data for path, data in outputs.items())
+
+
 def test_ci_checks_registry_once_and_keeps_pr_source_coverage() -> None:
     import yaml
 
@@ -317,7 +339,9 @@ def test_ci_checks_registry_once_and_keeps_pr_source_coverage() -> None:
         if SCRIPT.name in step.get("run", "")
     ]
     assert len(steps) == 2
-    commands = {step.get("if"): step["run"] for step in steps}
+    impact = "steps.code-impact.outputs.run == 'true' && "
+    assert all(step["if"].startswith(impact) for step in steps)
+    commands = {step["if"].removeprefix(impact): step["run"] for step in steps}
     assert commands == {
         "github.event_name != 'pull_request'": "python tools/check-agent-bridge-contracts.py",
         "github.event_name == 'pull_request'": (
@@ -343,7 +367,7 @@ def test_ci_checks_registry_once_and_keeps_pr_source_coverage() -> None:
 @pytest.mark.parametrize("corruption", ["schema", "fixture", "provenance"])
 def test_diff_mode_retains_full_registry_validation(repo: Path, corruption: str) -> None:
     if corruption == "schema":
-        _mutate_registry(repo, lambda data: data.update(schema_version=2))
+        _mutate_registry(repo, lambda data: data.update(schema_version=3))
     elif corruption == "fixture":
         _write(repo, FIXTURE, {"corrupted": True})
     else:
@@ -675,7 +699,7 @@ def test_ci_preserves_orphan_blob_validation_outside_fast_pre_push(
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [
-        (lambda data: data.__setitem__("schema_version", 2), "only version 1"),
+        (lambda data: data.__setitem__("schema_version", 3), "only versions 1 and 2"),
         (
             lambda data: data["contracts"][0].pop("owner"),
             "missing fields: owner",

@@ -147,6 +147,9 @@ class AdminResolver:
                 "configured on the remote side (e.g., via sudoers)"
             )
 
+        from .hosting_policy import require_target_hosting
+
+        await require_target_hosting(target, operation="admin launch")
         # Windows: relay through the elevated sub-daemon -- identical transport
         # to a bare requires_admin agent, no gsudo / RunAs, no CLI-side diff.
         # The sub-daemon (itself elevated) resolves the bare name locally and
@@ -163,6 +166,9 @@ class AdminResolver:
                 type="command",
                 spawn_command=cmd,
                 project=target.project,
+                cwd=target.cwd,
+                worktree_id=target.worktree_id,
+                explicit_cwd=target.explicit_cwd,
                 elevated=True,
             )
 

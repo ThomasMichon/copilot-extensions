@@ -55,12 +55,20 @@ def rig(tmp_path, monkeypatch):
             )
 
         with client_factory() as client:
-            calls, grants = [], []
+            calls, grants, admissions = [], [], []
             prepared = {}
             agent = f"container:dispatch/{spec['instance_id']}/{'b' * 32}/worker"
             monkeypatch.setattr(delivery, "agent_bridge_launch_prefix", lambda: ["bridge-fixture"])
 
             def command(argv, payload=None):
+                if argv[:2] == ["provider-fixture", "dispatch-check-hosting"]:
+                    assert json.loads(payload) == {}
+                    assert argv[argv.index("--expected-container-id") + 1] == spec["instance_id"]
+                    admissions.append(list(argv))
+                    return {
+                        "version": 1, "allowed": True, "checked": True,
+                        "container_id": spec["instance_id"],
+                    }
                 calls.append((list(argv), payload))
                 if argv[0] == "provider-fixture":
                     body = json.loads(payload)
@@ -104,6 +112,7 @@ def rig(tmp_path, monkeypatch):
                 queue=queue, task=task, spec=spec, client=client, api=api, control=control,
                 supervisor=supervisor, spawn=spawn, calls=calls, grants=grants,
                 command=command, app=app, client_factory=client_factory,
+                admissions=admissions,
             )
 
 
@@ -294,14 +303,27 @@ def test_projected_worker_starts_and_completes_without_fleet_authority(rig):
 
 def test_restart_before_prepare_reuses_actual_claim_and_receipt(rig, monkeypatch):
     original = delivery._provider
-    monkeypatch.setattr(delivery, "_provider", lambda *_args: (_ for _ in ()).throw(delivery.BridgeUnavailable("interrupted")))
+
+    def interrupted_prepare(spec, action, body):
+        if action == "dispatch-prepare":
+            raise delivery.BridgeUnavailable("interrupted")
+        return original(spec, action, body)
+
+    monkeypatch.setattr(delivery, "_provider", interrupted_prepare)
     assert rig.supervisor.poll_once() == []
     held = rig.queue.get(rig.task.id)
     assert held.status == "claimed" and held.owner_session_id is None
-    assert "binding_id" not in reservation(rig)["agent_info"]
+    retained = reservation(rig)
+    assert "binding_id" not in retained["agent_info"]
+    assert retained["agent_info"]["worker_id"] == held.owner
+    assert retained["agent_info"]["task_generation"] == held.generation
+    assert len(rig.admissions) == 1
     monkeypatch.setattr(delivery, "_provider", original)
     assert rig.supervisor.reconcile_reserving() == 1
-    assert reservation(rig)["state"] == "spawned"
+    repaired = reservation(rig)
+    assert repaired["state"] == "spawned"
+    assert repaired["key"] == retained["key"]
+    assert repaired["creation_key"] == retained["creation_key"]
     assert rig.queue.get(rig.task.id).generation == held.generation
     assert sum("create" in argv for argv, _ in rig.calls) == 1
 

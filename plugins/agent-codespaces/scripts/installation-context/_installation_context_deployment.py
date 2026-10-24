@@ -4,6 +4,51 @@ from __future__ import annotations
 
 RUNTIME_DEPLOYMENT_SCHEMA = "copilot-extensions.runtime-deployment"
 RUNTIME_DEPLOYMENT_FILE = "runtime-deployment.json"
+RUNTIME_PROFILE_RECOVERY = (
+    "Runtime profile intent requires a profile-aware construction lifecycle; "
+    "ordinary plugin publication cannot ignore it."
+)
+
+
+def _runtime_profile_settings(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not set(value) <= {
+        "allowSourceFallback", "backend",
+    }:
+        _fail("runtimeProfiles supports only allowSourceFallback and backend.")
+    result = dict(value)
+    if "allowSourceFallback" in result and not isinstance(result["allowSourceFallback"], bool):
+        _fail("runtimeProfiles.allowSourceFallback must be a JSON boolean.")
+    if "backend" in result and (
+        not isinstance(result["backend"], str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", result["backend"]) is None
+    ):
+        _fail("runtimeProfiles.backend must be an explicit opaque capability reference.")
+    return result
+
+
+def _runtime_profile_selection(
+    settings: Mapping[str, Any], *, backend: str | None,
+    retained_backend: str | None, existing_installation: bool,
+) -> dict[str, Any]:
+    settings = _runtime_profile_settings(settings)
+    for selection in (backend, retained_backend):
+        if selection is not None:
+            _runtime_profile_settings({"backend": selection})
+    if not isinstance(existing_installation, bool):
+        _fail("existing_installation must be a boolean.")
+    configured = settings.get("backend")
+    if backend is not None and configured is not None and backend != configured:
+        _fail("Explicit runtime backend conflicts with the installation-owned policy.")
+    selected = backend or configured or retained_backend
+    if selected is None:
+        if existing_installation:
+            _fail("An unprofiled runtime requires an explicit migration capability.")
+        selected = "cpu"
+    return {
+        "preferArtifact": True,
+        "allowSourceFallback": settings.get("allowSourceFallback", True),
+        "backend": selected,
+    }
 
 
 def _deployment_owner(
@@ -87,8 +132,13 @@ def _deployment_policy(
                 diagnostic=f"Runtime deployment policy version {version} is unsupported.",
             )
             return result
-        if set(policy) != {"schema", "version", "owner", "managed"}:
-            _fail("Runtime deployment policy fields must be schema, version, owner and managed.")
+        required = {"schema", "version", "owner", "managed"}
+        if not required <= set(policy) or not set(policy) <= required | {"runtimeProfiles"}:
+            _fail("Runtime deployment policy has missing or unsupported fields.")
+        profiles = (
+            _runtime_profile_settings(_exact_property(policy, "runtimeProfiles"))
+            if "runtimeProfiles" in policy else None
+        )
         managed = _exact_property(policy, "managed")
         if not isinstance(managed, bool):
             _fail("Runtime deployment policy managed must be a JSON boolean.")
@@ -97,15 +147,22 @@ def _deployment_policy(
         if not isinstance(owner, Mapping) or dict(owner) != expected:
             _fail("Runtime deployment policy belongs to another installation or environment.")
         result.update(
-            state="valid", managed=managed, allowPluginPublication=not managed,
-            reason="deployment-managed" if managed else "deployment-explicit-standalone",
+            state="valid", managed=managed,
+            allowPluginPublication=not managed and profiles is None,
+            reason=(
+                "deployment-managed" if managed else
+                "runtime-profile-consumer-required" if profiles is not None else
+                "deployment-explicit-standalone"
+            ),
             owner=expected,
             recovery=(
                 "Use explicit installation management to install or update this runtime; "
                 "plugin bootstrap and first use may not publish it."
-                if managed else None
+                if managed else RUNTIME_PROFILE_RECOVERY if profiles is not None else None
             ),
         )
+        if profiles is not None:
+            result["runtimeProfiles"] = profiles
     except (InstallationContextError, OSError, UnicodeError, json.JSONDecodeError) as error:
         result["diagnostic"] = str(error)
     return result
@@ -128,3 +185,42 @@ def resolve_runtime_deployment(**arguments: Any) -> dict[str, Any]:
         Path(runtime_root) / RUNTIME_DEPLOYMENT_FILE, resolution, arguments,
     )
     return {**resolution, "deployment": policy}
+
+
+@_validation_scope
+def resolve_runtime_profile_policy(
+    *, backend: str | None = None, retained_backend: str | None = None,
+    existing_installation: bool = False, **arguments: Any,
+) -> dict[str, Any]:
+    """Read owner-bound selection intent, not record approval or permission to install."""
+    resolution = resolve_runtime_deployment(**arguments)
+    deployment = resolution["deployment"]
+    result: dict[str, Any] = {
+        "status": "blocked", "reason": "runtime-profile-owner-unresolved",
+        "owner": None, "selection": None, "policyId": None,
+    }
+    if resolution["status"] != "ready" or resolution.get("reason") == "activation-required":
+        return {**resolution, "runtimeProfiles": result}
+    if deployment["state"] not in {"missing", "valid"}:
+        result["reason"] = deployment["reason"]
+        return {**resolution, "runtimeProfiles": result}
+    owner = _deployment_owner(resolution, arguments)
+    selection = _runtime_profile_selection(
+        deployment.get("runtimeProfiles", {}), backend=backend,
+        retained_backend=retained_backend, existing_installation=existing_installation,
+    )
+    identity = {
+        "schema": "copilot-extensions.runtime-profile-policy", "version": 1,
+        "owner": owner, "selection": selection,
+        "managed": deployment["managed"],
+        "allowPluginPublication": deployment["allowPluginPublication"],
+        "profileAwarePublicationRequired": "runtimeProfiles" in deployment,
+    }
+    digest = hashlib.sha256(json.dumps(
+        identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")).hexdigest()
+    result.update(
+        status="ready", reason="runtime-profile-policy-resolved",
+        owner=owner, selection=selection, policyId=f"sha256:{digest}",
+    )
+    return {**resolution, "runtimeProfiles": result}

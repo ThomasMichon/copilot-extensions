@@ -49,6 +49,29 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+# === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
+function Copy-InstallerStageDirectory {
+    param([string]$Source, [string]$Destination)
+    # Retain provider semantics for links; ordinary payload files use native copying.
+    if ([IO.File]::GetAttributes($Source) -band [IO.FileAttributes]::ReparsePoint) {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+        return
+    }
+    [void][IO.Directory]::CreateDirectory($Destination)
+    foreach ($file in [IO.Directory]::EnumerateFiles($Source)) {
+        $target = [IO.Path]::Combine($Destination, [IO.Path]::GetFileName($file))
+        if ([IO.File]::GetAttributes($file) -band [IO.FileAttributes]::ReparsePoint) {
+            Copy-Item -LiteralPath $file -Destination $target -Force
+        } else {
+            [IO.File]::Copy($file, $target, $true)
+        }
+    }
+    foreach ($directory in [IO.Directory]::EnumerateDirectories($Source)) {
+        Copy-InstallerStageDirectory $directory ([IO.Path]::Combine($Destination, [IO.Path]::GetFileName($directory)))
+    }
+}
+# === end install-contract:v4 payload-copy ===
+
 # Staging itself writes installation state, so publication admission precedes it.
 if ($Action -in @('install', 'update', 'stamp', 'provision')) {
     . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
@@ -226,8 +249,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__selfStageRoot = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") '.install-stage'
                 $__selfStageDir = Join-Path $__selfStageRoot ((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID")
                 New-Item -ItemType Directory -Force -Path $__selfStageDir | Out-Null
-                Copy-Item -LiteralPath $__selfStagePayload -Destination $__selfStageDir -Recurse -Force
                 $__selfStagedPayload = Join-Path $__selfStageDir (Split-Path -Leaf $__selfStagePayload)
+                Copy-InstallerStageDirectory $__selfStagePayload $__selfStagedPayload
                 $__selfStagedEntry = Join-Path (Join-Path $__selfStagedPayload 'scripts') (Split-Path -Leaf $PSCommandPath)
                 # Best-effort reap of prior stage dirs; NEVER touch a live one.
                 # Only remove a sibling whose owner pid (the <ts>-<pid> suffix) is
@@ -1464,8 +1487,41 @@ function New-SyncTaskAction {
     # path so this never depends on PATH contents at all.
     $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
     $taskHost = if ($pwshCmd) { $pwshCmd.Source } else { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
-    return New-ScheduledTaskAction -Execute $taskHost `
-        -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $TaskLauncher + '"')
+    # A GUI root plus CREATE_NO_WINDOW avoids Default Terminal handoff without
+    # conhost's loss of the child's exit code.
+    $guiPythonJson = & $VenvPython -I -c 'import json; from agent_procutil import windowless_python; print(json.dumps(windowless_python(require_windowless=True), ensure_ascii=True))'
+    if ($LASTEXITCODE -ne 0 -or -not $guiPythonJson) {
+        throw 'Cannot register headless sync task: windowless Python is unavailable'
+    }
+    $guiPython = $guiPythonJson | ConvertFrom-Json -ErrorAction Stop
+    $headlessLauncher = [System.IO.Path]::ChangeExtension($TaskLauncher, '.py')
+    $headlessBody = @'
+import os
+import subprocess
+import sys
+import traceback
+from pathlib import Path
+
+log = Path(__file__).resolve().parent.parent / "logs" / "session-sync.log"
+log.parent.mkdir(parents=True, exist_ok=True)
+with log.open("w", encoding="utf-8") as output:
+    try:
+        result = subprocess.run(
+            [sys.argv[1], "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+             "Bypass", "-File", sys.argv[2]],
+            stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            env={**os.environ, "PYTHONUTF8": "1"},
+        )
+        code = result.returncode
+    except Exception:
+        traceback.print_exc(file=output)
+        code = 1
+sys.exit(code)
+'@
+    [System.IO.File]::WriteAllText($headlessLauncher, $headlessBody, [System.Text.UTF8Encoding]::new($false))
+    return New-ScheduledTaskAction -Execute ("$guiPython").Trim() `
+        -Argument ('-I "' + $headlessLauncher + '" "' + $taskHost + '" "' + $TaskLauncher + '"')
 }
 
 function Test-SyncTaskActionCurrent {

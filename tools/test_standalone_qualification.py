@@ -8,6 +8,13 @@ from _promotion_workflow_test_support import source_workflow
 from test_run_standalone_tests import SCRIPT, runner
 
 
+def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path):
+    assert runner.standalone_build_resources("services/chat", source_root=tmp_path) == (
+        tmp_path / "libs" / "versioned-runtime",
+        tmp_path / "libs" / "installer-engine",
+    )
+
+
 @pytest.mark.parametrize("profile,timeout,explicit", [
     ("acceptance", 120, False), ("full", 600, False),
     ("acceptance", 45, True), ("full", 45, True),
@@ -132,7 +139,10 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
     if "unit-tests" in ci:
         assert set(ci) == {"checks", "unit-tests", "pr-gate"}
         assert set(ci["pr-gate"]["needs"]) == {"checks", "unit-tests"}
-        for jobs, owner in ((ci, "unit-tests"), (promotion, "source-units")):
+        for jobs, owner, producer in (
+            (ci, "unit-tests", "tools/ci_pr_unit_reuse.py"),
+            (promotion, "source-units", "tools/run-promotion-unit-tests.py"),
+        ):
             commands = [
                 step["run"] for job in jobs.values() for step in job.get("steps", [])
                 if "run" in step
@@ -141,7 +151,7 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
             assert not any("run-plugin-tests.py" in command for command in commands)
             packets = [
                 step["run"] for step in jobs[owner]["steps"]
-                if "tools/run-promotion-unit-tests.py" in step.get("run", "")
+                if producer in step.get("run", "")
             ]
             assert len(packets) == 1
             assert "--source-sha" in packets[0] and "--output-dir" in packets[0]

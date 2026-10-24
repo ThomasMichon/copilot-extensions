@@ -983,130 +983,30 @@ deploy_binstub() {
     fi
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1 \
+        runtime-gate.sh runtime-gate.ps1 \
         delegated-waiter-callback.ps1 delegated-waiter-callback.sh; do
         if [[ -f "$SCRIPT_DIR/$r" ]]; then
             _runtime_publication_copy "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r" || return 1
         fi
     done
+    mkdir -p "$INSTALL_DIR/bin/installation-context" || return 1
+    for r in installation-context.sh installation-context.ps1 \
+        guest-environment.sh guest-environment.ps1 json-query.awk; do
+        _runtime_publication_copy "$SCRIPT_DIR/installation-context/$r" \
+            "$INSTALL_DIR/bin/installation-context/$r" || return 1
+    done
     local STUB_STAGE BOARD_STAGE
     _runtime_publication_stage "$STUB" STUB_STAGE || return 1
-    cat > "$STUB_STAGE" << 'STUBEOF' || return 1
-#!/usr/bin/env bash
-# agent-dispatch binstub -- self-provisioning (install-on-first-use).
-# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
-# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
-# version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
-# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
-# provision on first use rather than silently binding the system interpreter.
-export PYTHONUTF8=1
-_name="agent-dispatch"
-_root="$HOME/.$_name"
-_resolver="$_root/bin/resolve-runtime.sh"
-_resolve() {
-    AGENT_RT_PY=""
-    if [ -f "$_resolver" ]; then
-        AGENT_RT_ROOT="$_root"
-        . "$_resolver"
-    fi
-}
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_dispatch "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_dispatch "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-# Primary path (agent-dispatch-standalone-container Phase 4): fetch and run the
-# UPSTREAM installer via the STABLE public-install-surface proxy
-# (install/dispatch/bootstrap.sh -- see
-# docs/patterns/standalone-service-layout.md), which itself resolves to
-# whatever the real standalone bootstrap currently is, rather than relying
-# on this plugin's own already-staged payload. This is a deliberate
-# transition toward a single installer source of truth; the locally stamped
-# snapshot below remains only as an offline/network-restricted fallback and
-# is expected to be dropped once this path is validated.
-# AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to the fallback (e.g. an
-# air-gapped host).
-_rc=1
-_source_pinned=0
-_source_version=""
-_source_marker_present=0
-_source_payload="$(cat "$_root/payload-dir" 2>/dev/null)"
-for _marker in stamped-version current-version last-known-good; do
-    _selected="$(cat "$_root/$_marker" 2>/dev/null)"
-    case "$_selected" in
-        *+source.*|*.source.*)
-            _source_marker_present=1
-            if [ "$_source_payload" = "$_root/snapshots/$_selected" ]; then
-                _source_pinned=1; _source_version="$_selected"; break
-            fi
-            ;;
-    esac
-done
-if [ "$_source_marker_present" -eq 1 ] && [ "$_source_pinned" -eq 0 ]; then
-    printf '%s\n' 'Selected source snapshot is unavailable; refusing a different provisioning source.' >&2
-    exit 126
-fi
-if [ "$_source_pinned" -eq 0 ]; then
-    for _slot in "$_root"/versions/*+source.* "$_root"/versions/*.source.*; do
-        if [ -d "$_slot" ]; then
-            printf '%s\n' 'Source runtime recovery requires an exact source selector; refusing upstream provisioning.' >&2
-            exit 126
-        fi
-    done
-fi
-_boot_url="https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.sh"
-if [ "$_source_pinned" -eq 0 ] && [ -z "${AGENT_DISPATCH_PROVISION_OFFLINE:-}" ]; then
-    _boot_file="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-bootstrap.XXXXXX")"
-    printf '%s\n' "[$_name] fetching upstream installer (install/dispatch/bootstrap.sh, main)..." >&2
-    if (command -v curl >/dev/null 2>&1 && curl -fsSL "$_boot_url" -o "$_boot_file") || \
-       (command -v wget >/dev/null 2>&1 && wget -qO "$_boot_file" "$_boot_url"); then
-        bash "$_boot_file" provision >&2
-        _rc=$?
-    else
-        printf '%s\n' "[$_name] upstream installer fetch failed; falling back to the locally stamped snapshot." >&2
-    fi
-    rm -f "$_boot_file"
-fi
-if [ "$_rc" -ne 0 ]; then
-    _install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-    if [ "$_source_pinned" -eq 1 ] && [ "$_install" != "$_root/snapshots/$_source_version/scripts/install.sh" ]; then
-        printf '%s\n' 'Selected source snapshot is unavailable; refusing a different provisioning source.' >&2
-        exit 126
-    fi
-    if [ ! -f "$_install" ] && [ "$_source_pinned" -eq 0 ]; then
-        _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-    fi
-    if [ -f "$_install" ]; then
-        bash "$_install" provision >&2
-        _rc=$?
-    else
-        printf '%s\n' "[$_name] cannot self-provision: no upstream installer reachable (set AGENT_DISPATCH_PROVISION_OFFLINE=1 to skip that attempt) and no local snapshot installer found. Ensure the plugin is enabled, then retry." >&2
-    fi
-fi
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_dispatch "$@"
-fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry (bootstrap: curl -fsSL $_boot_url | bash -s provision), or run the local snapshot installer manually if present." >&2
-fi
-exit "$_rc"
+    printf '#!/usr/bin/env bash\nexport AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch\nexport AGENT_DISPATCH_PAYLOAD_ROOT=%q\n_dispatch_gate=%q\n' \
+        "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$INSTALL_DIR/bin/runtime-gate.sh" > "$STUB_STAGE" || return 1
+    cat >> "$STUB_STAGE" << 'STUBEOF' || return 1
+exec bash "$_dispatch_gate" "$@"
 STUBEOF
     chmod +x "$STUB_STAGE" || return 1
     _runtime_publication_commit_file "$STUB" "$STUB_STAGE" || return 1
     _runtime_publication_stage "$BOARD_STUB" BOARD_STAGE || return 1
-    sed 's/-m agent_dispatch /-m agent_dispatch.board_cli /g' "$STUB" > "$BOARD_STAGE" || return 1
+    sed 's/AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch$/AGENT_DISPATCH_COMMAND_MODULE=agent_dispatch.board_cli/' \
+        "$STUB" > "$BOARD_STAGE" || return 1
     chmod +x "$BOARD_STAGE" || return 1
     _runtime_publication_commit_file "$BOARD_STUB" "$BOARD_STAGE" || return 1
     _ok "Binstub: $STUB (self-provisioning)"

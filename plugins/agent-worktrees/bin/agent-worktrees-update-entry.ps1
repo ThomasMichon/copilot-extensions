@@ -15,7 +15,7 @@ if ($_updateArgs.Count -ge 3 -and $_updateArgs[0] -cin @('--project', '-p')) {
 if ($_updateArgs.Count -eq 0 -or $_updateArgs[0] -cne 'update') { return }
 if (@($_updateArgs | Where-Object {
     $_ -cin @('--no-manager', '--auth-report', '--help', '-h',
-        '--request-status', '--recovery-status', '--recover-after-restart') -or
+        '--request-status', '--recovery-status', '--recover-after-restart', '--recover-for-repair') -or
     $_.StartsWith('--request-status=')
 }).Count) { return }
 $_awUpdateHandled = $true

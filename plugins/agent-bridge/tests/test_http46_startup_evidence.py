@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import agent_bridge_contract_registry as registry_codec
 
 from agent_bridge import __main__ as cli, protocol, startup_observation as observer
 from agent_bridge import startup_progress as producer
@@ -49,7 +50,8 @@ def frames(text):
 def test_http46_policy_and_capability_are_literal_contract_expectations():
     vector = packet()
     assert vector["response"] == {"protocol_version": 46, "min_protocol_version": 1}
-    assert protocol.HTTP_PROTOCOL_VERSION == protocol.STARTUP_PROGRESS_PROTOCOL_VERSION == 46
+    assert protocol.STARTUP_PROGRESS_PROTOCOL_VERSION == 46
+    assert protocol.HTTP_PROTOCOL_VERSION >= protocol.STARTUP_PROGRESS_PROTOCOL_VERSION
     assert protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
     assert protocol.KEYED_NATIVE_PROMPT_PROTOCOL_VERSION == 45
     assert vector["progress_prefix"] == PROGRESS_PREFIX == "@@agent-startup "
@@ -88,7 +90,9 @@ def test_http46_public_health_advertisement_matches_new_operation_packet(monkeyp
     with TestClient(app) as api:
         response = api.get("/health")
     assert response.status_code == 200
-    assert {key: response.json()[key] for key in packet()["response"]} == packet()["response"]
+    assert response.json()["protocol_version"] == protocol.HTTP_PROTOCOL_VERSION
+    assert response.json()["protocol_version"] >= packet()["response"]["protocol_version"]
+    assert response.json()["min_protocol_version"] == packet()["response"]["min_protocol_version"]
 
 
 def test_http46_producer_and_observer_frames_replay_independent_vectors(monkeypatch, capsys):
@@ -306,9 +310,9 @@ def _body(value):
 
 
 def test_http46_generation46_attestations_link_unchanged_families_without_rewriting_history():
-    registry = json.loads((CONTRACT / "registry.json").read_text())
+    registry = registry_codec.load(ROOT).materialized
     http = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
-    assert http["declared_range"]["current"] == 46
+    assert http["declared_range"]["current"] >= 46
     registered = {row["path"]: row for row in http["fixtures"]}
     seen = set()
     for row in http["fixtures"]:
@@ -338,11 +342,12 @@ def test_http46_generation46_attestations_link_unchanged_families_without_rewrit
     assert seen == {row["path"] for row in http["fixtures"] if row["generation"] == 45}
 
 
-def test_http46_generation46_attestations_cover_semantic_sources_and_moved_prompt_owner():
-    registry = json.loads((CONTRACT / "registry.json").read_text())["contracts"][0]
+def test_current_generation_attestations_cover_semantic_sources_and_moved_prompt_owner():
+    registry = registry_codec.load(ROOT).materialized["contracts"][0]
+    generation = registry["declared_range"]["current"]
     proofs = {}
     for row in registry["fixtures"]:
-        if row["generation"] == 46:
+        if row["generation"] == generation:
             fixture = json.loads((ROOT / row["path"]).read_text())
             proof = fixture["captured_from"]
             proofs.setdefault(proof["source_path"], set()).add(proof["source_sha256"])

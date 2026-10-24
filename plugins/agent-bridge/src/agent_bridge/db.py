@@ -20,6 +20,7 @@ from .db_schema import _SchemaMixin
 from .db_sessions import _SessionsMixin
 from .db_relationships import _RelationshipsMixin
 from .db_runtime_custody import _RuntimeCustodyMixin
+from .db_inbox_custody import _InboxCustodyMixin
 
 __all__ = [
     "Database",
@@ -35,6 +36,7 @@ __all__ = [
 class Database(
     _CoreMixin,
     _RuntimeCustodyMixin,
+    _InboxCustodyMixin,
     _SchemaMixin,
     _SessionsMixin,
     _RelationshipsMixin,

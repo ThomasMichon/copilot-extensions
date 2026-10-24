@@ -30,6 +30,7 @@ class _LiveMessageReceiptsMixin:
         cur = self.execute_write(
             "UPDATE live_messages SET consumed_at=? "
             f"WHERE session_id={_CANON} AND id=? AND consumed_at IS NULL "
+            "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
             "AND kind NOT LIKE 'control:%'",
             (now, session_id, session_id, message_id),
         )

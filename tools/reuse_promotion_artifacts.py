@@ -64,10 +64,21 @@ def read_admitted_source_index(
         for page in pages
     ):
         raise PromotionArtifactError(f"{tag}: invalid source artifact pages")
+    from promotion_release_evidence import MAX_EVIDENCE_ASSETS, supplementary_evidence_asset
+
     assets: dict[str, dict] = {}
+    seen, evidence_count = set(), 0
     for page in pages:
         for asset in page:
             name = asset.get("name")
+            if not isinstance(name, str) or name in seen:
+                raise PromotionArtifactError(f"{tag}: duplicate or invalid source artifact")
+            seen.add(name)
+            if supplementary_evidence_asset(asset, dev_head):
+                evidence_count += 1
+                if evidence_count > MAX_EVIDENCE_ASSETS:
+                    raise PromotionArtifactError(f"{tag}: too many supplementary evidence assets")
+                continue
             if (
                 not isinstance(name, str) or name in assets or "/" in name or "\\" in name
                 or name in (".", "..") or len(name) > 255

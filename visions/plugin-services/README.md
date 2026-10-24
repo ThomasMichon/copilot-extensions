@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -182,6 +182,29 @@ resource fencing, or existing standalone-service defaults.
   this model for a specific service. Linked from here as they are authored.
 
 ## Features
+
+### attributed-daemon-instances
+
+Every shipped resident-service launch has attributable instance custody,
+including source-only, native-supervised and container startup paths. Instance
+identity is distinct from installed version and singleton generation. Owners
+can discover their instances across isolated state roots without depending on a
+running central service.
+
+Explicitly ephemeral host-side test instances have renewable finite leases,
+bounded maximum lifetimes and declared disposable runtime artifacts. Unattended
+tests have safe defaults; interactive tests that may wait for human input
+declare a pause-tolerant lifetime rather than inheriting an unattended deadline.
+Lifetime renewal follows the actual test owner, independently of agent-turn
+activity. Test teardown and independent expiry prevent permanent orphans;
+ordinary authorized install/update reconciliation provides a cleanup backstop.
+
+Cleanup preserves production service lifetime, election, cutover and protected
+recoverable work. It acts only on explicitly disposable, expired instances with
+verified process and artifact custody. Unknown ownership, reused process
+identities, foreign or changed paths and unsettled effects remain visible holds,
+never guessed termination or deletion. Source checkouts, installed code and
+retained proof artifacts are not disposable instance state.
 
 ### progress-aware-service-and-tool-operations
 
@@ -629,6 +652,21 @@ security need, not become redundant attestation chains that obstruct legitimate
 communication. Authorization, consent, privacy, safe destructive operations,
 wrong-owner and stale-process protection, corruption/race prevention, and
 release/review/CI gates should remain intact.
+
+### user-owned-coordination-boundary
+Bridge and Dispatch cooperate within the user's own execution and access
+boundary, not a multi-tenant identity service. Equally privileged participants
+inside that established boundary should not require per-agent tokens or
+cryptographic attestation chains to perform authorized coordination. Local
+reachability alone does not establish that boundary. Cross-container access
+should authenticate at the container network bridge's proxy wrapper, with
+the underlying service inaccessible through an unauthenticated bypass.
+Other host and trust-boundary crossings retain their secured transport.
+Ownership, incarnation and revision checks should prevent wrong-target effects
+and stale replay. Hashing and durable receipts should primarily protect data
+integrity, recovery and reconciliation after interruption, not duplicate the
+boundary's access controls. Disconnects and timeouts must not silently lose
+accepted work or manufacture permission to repeat an uncertain effect.
 
 ### collision-free-endpoints
 Two plugin services — and the *same* service running on both sides of a shared

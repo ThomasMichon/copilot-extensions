@@ -81,6 +81,10 @@ class CodeSpaceTransport:
         res = await self._manager.exec_command(self._name, command, timeout=timeout, **kwargs)
         return (res.exit_code, res.stdout, res.stderr)
 
+    async def close(self) -> None:
+        """Release a bounded inspection transport without affecting guest processes."""
+        await self._manager.disconnect(self._name)
+
     async def run_script(
         self, script: str, *, timeout: float = 60.0,
     ) -> tuple[int, str, str]:

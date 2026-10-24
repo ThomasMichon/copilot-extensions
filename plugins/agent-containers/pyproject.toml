@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-containers"
-version = "0.2.95-dev1"
+version = "0.2.96-dev1"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-repository-policy",
     "pyyaml>=6.0.3",
     "agent-ssh-manager",
     "agent-credential-relay",
@@ -28,6 +29,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-repository-policy = { path = "libs/repository-policy" }
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
 # Shared OpenSSH process/config primitives used by the trusted-fleet
 # transport. This is a `uv`-editable canonical reference

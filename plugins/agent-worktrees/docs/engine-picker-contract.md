@@ -7,6 +7,21 @@ boundary is what keeps the coupling one-way and dependency-free (the Picker owns
 no worktree logic or state), and it is why the TUI framework (Textual) stays
 entirely out of the plugin engine.
 
+## Repository hosting admission
+
+The read-only [`agent-policy check`](repository-agent-policy.md) API is
+project-independent and reads the explicit `--path`, including denied or
+unadopted repositories. Policy version 1 is distinct from launch transport
+versions. It returns the policy provenance and `allowed: true`, or nonzero JSON
+`version`, `code`, `error`. A successful negative-policy check is not adoption
+or launch permission.
+
+Manager launch planning and SSH receivers require `--require-agent-hosting`;
+the flag is a compatibility fence, not an opt-in to enforcement. The current
+engine enforces repository policy even without the flag. Unsupported engines
+must refuse, with no fallback that removes it. Source-only `create` omits
+optional launch planning and returns no `launch` member.
+
 ## SSH launch-prompt admission
 
 The Worktrees composer is host-rendered for local and machine-SSH sources.
@@ -16,7 +31,8 @@ is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries version 1,
 `request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`
 and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
 are encoded. Prompt text never enters the interactive SSH launch string.
-Structured admission/status accepts only its protocol options and `--json`;
+Structured admission/status accepts only its protocol options, `--json`, and
+the hosting-admission capability fence;
 ordinary resolve selectors, modifiers and positional Copilot arguments are
 rejected before reading or mutating target launch state. Exactly one nonempty
 protocol option is required; an empty value never enters ordinary resolve.
@@ -25,6 +41,9 @@ launch-request error envelope and exit status 3 for both admission and status;
 they never enter ordinary or remote machine resolution.
 
 The target's existing tracking-write daemon owns admission and seed staging.
+Hosting-aware admission and seed stage/take require verb version 7; older
+writers cannot receive a weak fallback. The receiver checks fresh policy before
+writing an admission receipt or seed.
 Admission retains a text-free fingerprint and allocated worktree/intent IDs
 under external tracking state. The returned receipt carries those identities,
 not prompt text. The host's subsequent remote plan launches the same worktree
@@ -75,8 +94,9 @@ The bounded current identity fields include string `creation_nonce` and Boolean
 `head_yielded`, preserving creation identity and resumable yielded-head semantics
 without carrying the creation or session-transition histories.
 
-The resident publishes complete project replacements into its SQLite WAL
-store, then swaps the in-memory publication. It claims the writer generation
+The resident publishes complete project transactions into its SQLite WAL
+store, changing only semantic rows whose values changed, then swaps the
+in-memory publication. It claims the writer generation
 only after monitor election. Drained/superseded endpoints refuse current reads;
 a late predecessor cannot reclaim the durable owner. Failure retains the
 last complete publication with explicit `availability.status: stale`.
@@ -113,6 +133,132 @@ and selected row count, `worktree` frames from that same publication, then
 `done`. The Manager admits a complete barrier before replacing its rows and
 rejects mixed revisions, duplicates and incomplete snapshots. This one-shot
 contract remains one-shot for existing consumers.
+
+### Explicit-project held-feed entry
+
+Canonical `--project NAME list ... --follow` invocations share an early entry
+between `python -m agent_worktrees` and the package's console declaration.
+The syntactic selector performs no configuration, filesystem or process work.
+Duplicates, abbreviations, implicit routing, help, unknown options and missing
+values decline to the existing dispatcher exactly once. Both paths use the
+same list argument declaration; accepted feeds retain canonical project/CWD,
+registry and installation-cell resolution, demand registration, authentication
+and shutdown behavior.
+
+The healthy current-roster client supplies its canonical runtime root to the
+existing control path helpers rather than loading monitor recovery machinery
+to discover that root. Recovery remains lazy and retains its existing
+unavailable/advisory behavior. Library import of `agent_worktrees.__main__`
+never runs the early selector. This is import/dispatch separation, not a new
+read authority, a new receipt operation, or a latency guarantee.
+
+### Negotiated observation contract (v2)
+
+The owner additionally advertises `worktrees-observations-v2`. A consumer
+that has discovered that capability may request `contract_version: 2` with
+the **same bounded selection fields** on `worktrees-read` or `worktrees-feed`.
+`worktrees_observation_contract.negotiate(request, capabilities)` selects v2
+only from already-observed capability evidence; it performs no discovery,
+ownership probe or read. Old strict request parsers must receive v1. Existing
+CLI flags and Manager loaders still select v1; the v2 parsers are available
+for separately staged consumer integration, not an implicit wire upgrade.
+
+V2 retains the existing projection fields and **schema_version: 1**. The wire
+contract version, durable schema version and opaque elected-writer generation
+are distinct. Every row adds `semantic_revision` (last semantic change in the
+current generation). Its `fact_provenance` retains quality, with observation
+times moved into a separate `observations` list:
+
+The 65,536-byte row limit counts the complete compact UTF-8 v2 row, including
+the actual decimal width of `semantic_revision`. Legacy field/type validation
+still applies separately to its semantic fields. The publisher checks every
+projected row before committing the atomic wave; one oversized row rejects the
+whole wave without advancing its head. Engine and Manager admission enforce
+the same complete-row limit. Manager's four locally derived metadata fields
+are excluded only when revalidating already-admitted rows, never at raw
+ingress. V1 row capacity and the schema-1 storage limit remain unchanged;
+a compatible older writer's row that cannot fit v2 is refused explicitly on
+that v2 read, not truncated or rewritten.
+
+V1 reconstruction starts from semantic fields and overlays only the current
+observation entry. Removing an optional closure observation therefore removes
+its `computed_at` from live and advisory v1 output, even when the unchanged
+semantic payload is retained without a row write.
+
+Publication snapshots each input row from its validated encoding before
+advancing the input iterable. Reusing or clearing an iterator-owned dictionary,
+including its nested fact values, cannot alter earlier row identities or
+observations in the atomic wave.
+
+```json
+{
+  "id": "tree",
+  "facts": {
+    "session": {
+      "quality": "current",
+      "observed_at": 1000.0,
+      "observation_revision": 11
+    }
+  },
+  "derivations": {
+    "closure": {
+      "computed_at": "2026-10-22T12:00:00",
+      "observation_revision": 11
+    }
+  }
+}
+```
+
+There is exactly one observation entry per selected row, including an empty
+`facts` object for rows without fact provenance. The fact groups are `record`,
+`git`, `mux` and `session`. An unavailable fact has a null `observed_at`;
+timestamps and revisions are validated, not truthiness-coerced. Optional
+`derivations.closure` carries the closure descriptor's computation time,
+which is also observation metadata; its domain facts remain in the semantic
+row. No arbitrary `*_at` fields are removed: activity/lifecycle timestamps
+remain semantic. Unchanged fact observations retain their observation revision.
+
+The v2 feed adds one bounded `observation` frame per changed observation entry,
+with the same `projection` and `observation` object above. Initial observations
+follow their semantic rows; updates retain the full order frames. Receivers
+stage both kinds until done/commit. Duplicate, unknown, mismatched-quality,
+future or regressing observations are rejected. A heartbeat changes neither
+facts nor observation time; publication revision may advance without a
+semantic row delta. Manager parsers expose admitted metadata as `_observations`
+and `_observation_derivations` alongside `_projection`; source-store/UI
+integration is separate. A publication cursor is not a point-row floor.
+
+Durability remains backward-compatible: additive observation tables are bound
+to a project generation/revision; the original schema-1 row/head/index tables
+and election mechanism remain usable by older supported writers. The semantic
+row keeps its last changed v1-shaped payload. Current v1 reads reconstruct
+latest actual observation timestamps from the matching side data; an older
+reader can still read the valid, conservatively older timestamps. If an older
+elected writer publishes, its generation/revision no longer matches the side
+data: its complete v1 payload wins and no stale metadata is overlaid.
+No new source-version election rule or per-read owner attestation is added.
+
+Rows, observations, deletion, head and order/index changes commit in one
+transaction before live visibility or notification. Failed writes preserve
+the prior complete publication. V1 retains truthful whole-row deltas, including
+observation changes; zero semantic-row deltas are the negotiated v2 guarantee.
+Neither protocol implements targeted observation requests or mutation receipts
+yet; those remain separate owner operations.
+
+### Test-only contended-host tier
+
+The native Worktrees and synthetic Manager deadline fixtures accept
+`WORKTREES_TEST_BUDGET_FACTOR=1|2|3`, default `1`. This is an explicit
+per-run test opt-in, not a runtime setting or a new production deadline.
+Selected fixture waits, deliberate delays and teardown budgets scale together;
+semantic, source/cursor, restart-count and cleanup assertions remain intact.
+The original nominal two-second goal is still measured separately.
+
+Reports distinguish `contended_test_pass`, factor, actual elapsed time and
+`nominal_qualified`. Factors above one never set nominal qualification true.
+A contended-tier pass does not erase a failed nominal run, authorize merge,
+or change production settings. The source effort's validation record carries
+the bounded selectors, actual results and remaining performance work.
 
 ### Held current-roster feed and cutover
 

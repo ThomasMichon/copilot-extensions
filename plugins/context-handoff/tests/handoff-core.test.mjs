@@ -38,7 +38,8 @@ import {
   safePathSegment,
   sanitizedGitEnv,
   sessionBindingForSession,
-  triggerHandoff,
+  triggerHandoff as realTriggerHandoff,
+  checkRepositoryHosting,
   recoverStoredHandoff,
   writeJsonAtomic,
   writeSessionStateHandoff,
@@ -54,6 +55,74 @@ import {
   abortFileHandoff,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import { extractRecoveryLocatorFromPrompt } from "../extensions/context-handoff/cutover-seed.mjs";
+
+function triggerHandoff(options) {
+  return realTriggerHandoff({ checkHosting: () => ({ ok: true }), ...options });
+}
+
+for (const options of [{ mode: "auto" }, { mode: "manual-only", force: true }]) {
+  test(`repository denial preserves the baton without live effects: ${JSON.stringify(options)}`, async () => {
+    const effects = [];
+    const result = await realTriggerHandoff({
+      ...options, promptText: "continue source-only work", sid: "predecessor", cwd: "/source",
+      store: () => {
+        effects.push("store");
+        return { storage: "file", id: "baton", metadata: { title: "Continue" } };
+      },
+      writeSessionState: () => {
+        effects.push("session-state");
+        return { ok: true, path: "/state/baton" };
+      },
+      execute: (_bin, argv) => {
+        assert.equal(argv[0], "agent-policy");
+        effects.push("policy");
+        throw new Error("expose_agent: false; use an eligible external harness");
+      },
+      noteHandoff: (_cwd, _sid, _id, _title, live) => {
+        assert.equal(live, false);
+        effects.push("manual-note");
+        return { noted: true, liveCutover: false };
+      },
+      logActivity: () => { effects.push("activity"); },
+      requestBridge: () => { effects.push("bridge"); },
+      readPickupSignals: () => { effects.push("poll"); },
+      sleepFn: async () => { effects.push("sleep"); },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.stored.id, "baton");
+    assert.match(result.seed, /file:baton$/);
+    assert.match(result.error, /expose_agent: false/);
+    assert.equal(result.worktreeSignal.liveCutoverArmed, false);
+    assert.equal(result.bridge.attempted, false);
+    assert.deepEqual(effects, ["store", "session-state", "policy", "manual-note"]);
+  });
+}
+
+test("retry refuses before handoff-cutover on denied or unsupported hosting receiver", () => {
+  for (const response of [null, "{}", "not JSON"]) {
+    const effects = [];
+    const result = retryStoredHandoffCutover("/source", "predecessor", (_bin, argv) => {
+      effects.push(argv[0]);
+      if (response === null) throw new Error("expose_agent: false");
+      return response;
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "repository-hosting-refused");
+    assert.deepEqual(effects, ["agent-policy"]);
+  }
+});
+
+test("hosting check rejects success-shaped missing, denied or malformed policy", () => {
+  for (const policy of [
+    {}, { version: 1, repository: "/source", expose_agent: false, sources: [], denied_by: [] },
+    { version: 1, repository: "/source", expose_agent: true, sources: [], denied_by: ["base"] },
+    { version: 1, allowed: true, repository: " ", expose_agent: null, sources: [], denied_by: [] },
+    { version: 1, allowed: true, repository: "/source", expose_agent: null, sources: [null], denied_by: [] },
+    { version: 1, allowed: true, repository: "/source", expose_agent: null, sources: [], denied_by: [], error: null },
+  ]) {
+    assert.equal(checkRepositoryHosting("/source", () => JSON.stringify(policy)).ok, false);
+  }
+});
 
 function withTempHome(fn) {
   const dir = mkdtempSync(join(tmpdir(), "context-handoff-home-"));
@@ -325,6 +394,11 @@ test("retryStoredHandoffCutover shells to agent-worktrees handoff-cutover --retr
     "predecessor-1",
     (bin, argv, opts) => {
       calls.push({ bin, argv, opts });
+      if (argv[0] === "agent-policy") {
+        return JSON.stringify({
+          version: 1, allowed: true, repository: "C:\\repo", expose_agent: null, sources: [], denied_by: [],
+        });
+      }
       return JSON.stringify({
         ok: true,
         outcome: "refocused",
@@ -336,7 +410,8 @@ test("retryStoredHandoffCutover shells to agent-worktrees handoff-cutover --retr
   );
   assert.equal(result.ok, true);
   assert.equal(result.outcome, "refocused");
-  assert.deepEqual(calls, [{
+  assert.equal(calls[0].argv[0], "agent-policy");
+  assert.deepEqual(calls.slice(1), [{
     bin: "agent-worktrees",
     argv: ["handoff-cutover", "--retry", "--session-id", "predecessor-1", "--json"],
     opts: { cwd: "C:\\repo", timeout: 30000 },

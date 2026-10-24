@@ -397,6 +397,21 @@ def cmd_detach(
         )
         return 0
 
+    from venue_copilot import live_session_for
+    from . import forward_keeper
+    from .hosting_policy import require_container_hosting
+
+    rejoining = (live_session_for(plan["scope_id"]) or {}).get("status") == "live"
+    args.hosting_live_attachment = rejoining
+    retained = (forward_keeper.read_state(args.name) or {}).get("pending_deliveries") or {}
+    recovering = bool(retained.get(plan["scope_id"]))
+    try:
+        if not recovering:
+            require_container_hosting(
+                target, worktree_id=getattr(args, "worktree_id", None), live_attachment=rejoining,
+            )
+    except RuntimeError as exc:
+        return _fail(str(exc), plan)
     target_lock = TargetLock(f"container:{args.name}", op="copilot")
     try:
         target_lock.acquire(force=getattr(args, "force", False))
@@ -407,7 +422,6 @@ def cmd_detach(
     remote_env: str | None = None
     adapter: _ContainerAdapter | None = None
     try:
-        from . import forward_keeper
         held = forward_keeper.read_state(args.name) or {}
         pending = (held.get("pending_deliveries") or {}).get(plan["scope_id"])
         if pending:
@@ -459,6 +473,10 @@ def cmd_detach(
                 "error": "owned delivery remains pending; original native session and ownership retained",
             })
         try:
+            if recovering:
+                require_container_hosting(
+                    target, worktree_id=getattr(args, "worktree_id", None), live_attachment=rejoining,
+                )
             launch_env, relay_port, host_relay_port = _launch_env(
                 args,
                 target,

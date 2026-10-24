@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from .worktree_rows_contract import CurrentSnapshot, parse_current_rows
+from .worktree_rows_contract import CurrentSnapshot, parse_current_rows, publication_wire_rows
+from .worktree_observation_contract import (
+    check_advance,
+    check_observation_advance,
+    validate_observation,
+)
 
 
 class FeedUnavailable(ValueError):
@@ -24,6 +29,10 @@ class CurrentFeed:
         self._touched: set = set()
         self._order: list[str] = []
         self._ordered: set[str] = set()
+        self._observations: dict = {}
+        self._observed: set = set()
+        self._version = 1
+        self._project: str | None = None
 
     def _metadata(self, rows, frame) -> list[dict]:
         return [
@@ -81,7 +90,9 @@ class CurrentFeed:
             if frame.get("projection") != self.head:
                 raise ValueError("current-roster feed availability changed publication")
             parse_current_rows(
-                {**frame, "ok": True, "contract_version": 1, "worktrees": []}, complete=False
+                {**frame, "ok": True, "contract_version": self._version,
+                 "project": self._project, "worktrees": []},
+                complete=False,
             )
             self.rows = self._metadata(self.rows, frame)
             return self.rows
@@ -89,6 +100,12 @@ class CurrentFeed:
             if self._begin is not None:
                 raise ValueError("current-roster feed opened a second publication barrier")
             head = frame.get("projection")
+            if self.head is not None and frame.get("contract_version") != self._version:
+                raise ValueError("current-roster feed changed contract version")
+            if self.head is not None and self._version == 2 and (
+                frame.get("project") != self._project
+            ):
+                raise ValueError("current-roster feed changed project")
             parse_current_rows({**frame, "ok": True, "worktrees": []}, complete=False)
             if (
                 head["quality"] != "current"
@@ -109,7 +126,18 @@ class CurrentFeed:
                 ):
                     raise ValueError("current-roster feed update is stale or out of order")
                 self._pending = {row["id"]: row for row in self.rows}
+                self._observations = {
+                    row["id"]: {
+                        "id": row["id"], "facts": row["_observations"],
+                        **({"derivations": row["_observation_derivations"]}
+                           if row.get("_observation_derivations") else {}),
+                    }
+                    for row in self.rows if "_observations" in row
+                }
             self._begin = frame
+            self._version = frame["contract_version"]
+            self._project = frame.get("project")
+            self._observed = set()
             self._touched = set()
             self._order = []
             self._ordered = set()
@@ -120,6 +148,17 @@ class CurrentFeed:
             rows = self._snapshot.receive(frame)
             if rows is None:
                 return None
+        elif kind == "observation":
+            if self._version != 2:
+                raise ValueError("unnegotiated observation frame")
+            item = frame.get("observation")
+            validate_observation(item, self._begin["cursor"])
+            if item["id"] not in self._pending or item["id"] in self._observed:
+                raise ValueError("duplicate or unknown observation identity")
+            check_observation_advance(self._observations.get(item["id"]), item)
+            self._observed.add(item["id"])
+            self._observations[item["id"]] = item
+            return None
         elif kind == "order":
             identities = frame.get("ids")
             if (
@@ -146,10 +185,13 @@ class CurrentFeed:
                 if wid not in self._pending:
                     raise ValueError("current-roster feed deleted an unknown row")
                 del self._pending[wid]
+                self._observations.pop(wid, None)
             else:
                 admitted = parse_current_rows(
                     {**self._begin, "ok": True, "worktrees": [row]}, complete=False
                 )
+                if self._version == 2:
+                    check_advance(self._pending.get(wid), admitted[0], field="semantic_revision")
                 self._pending[wid] = admitted[0]
                 if len(self._pending) > len(self.rows) + self._begin["selected_count"]:
                     raise ValueError("current-roster feed exceeded its declared roster bound")
@@ -160,6 +202,11 @@ class CurrentFeed:
             if self._ordered != self._pending.keys():
                 raise ValueError("current-roster feed omitted its committed identity order")
             rows = self._metadata([self._pending[wid] for wid in self._order], self._begin)
+            if self._version == 2:
+                rows = parse_current_rows({
+                    **self._begin, "ok": True, "worktrees": publication_wire_rows(rows),
+                    "observations": list(self._observations.values()),
+                })
         if (
             kind not in {"done", "commit"}
             or frame.get("cursor") != self._begin["cursor"]

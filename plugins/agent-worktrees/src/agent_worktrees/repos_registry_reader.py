@@ -123,11 +123,12 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                         f"registered repository {name!r} has invalid class {raw_class!r}"
                     )
                 norm_class = normalize_class(raw_class)
-                raw_agent = entry.get("agent")
-                agent = (
-                    bool(raw_agent) if raw_agent is not None
-                    else norm_class != "reference"
-                )
+                raw_agent = entry.get("agent", False)
+                if strict and type(raw_agent) is not bool:
+                    raise RepositoryResolutionError(
+                        f"registered repository {name!r} agent must be a Boolean"
+                    )
+                agent = raw_agent is True
                 remote = entry.get("remote", "")
                 if strict and not isinstance(remote, str):
                     raise RepositoryResolutionError(

@@ -20,6 +20,9 @@ def explicit_context() -> bool:
 def validate_context() -> dict[str, Any] | None:
     """Validate even when a caller's explicit argument bypasses peer lookup."""
     if not explicit_context():
+        root = Path(os.environ.get("AGENT_CODESPACES_HOME") or (Path.home() / ".agent-codespaces"))
+        if root.parent.name == "plugins" and root.parent.parent.parent.name == "marketplaces":
+            raise ContextRefused("CodeSpaces namespaced installation context is missing")
         return None
     try:
         context = os.environ["COPILOT_EXTENSIONS_CONTEXT"]
