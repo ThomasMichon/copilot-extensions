@@ -142,6 +142,22 @@ cross-host writer fence or completed update/rollback lifecycle.
 
 ## Optional diagnostic telemetry
 
+The independent `ssh_service=true` selector runs the contained standalone
+`services/ssh` suite on Linux and Windows. It covers installed foreground
+Gateway registration, later-machine enrollment/notifications, original-request
+recovery and writer drain. The Linux lane additionally selects native
+acceptance in its disposable runner account: real OpenSSH listener custody,
+two distinct relay keys, a loopback reverse forward, a peer's permitted local
+forward and an unauthorized reverse-bind refusal. It never invokes a remote
+shell, exec, PTY or subsystem. Native target-login credentials remain distinct.
+The fixture owns one finite temporary directory in that disposable account's
+actual home so production `StrictModes` remains enabled; it does not read or
+modify existing SSH configuration. Do not select
+`SSH_SERVICE_NATIVE_ACCEPTANCE=1` in a production account.
+The Windows lane remains control-plane-only and explicitly skips Linux-native
+cases. These tests do not qualify a built native container image, normal Fleet
+placement, provider/Vault admission or a preserving production migration.
+
 Manager's source-native consumer lane is documented in
 [`worktree-manager/docs/source-observation.md`](worktree-manager/docs/source-observation.md).
 Select its `test_performance_observation.py`, `test_performance_native.py` and

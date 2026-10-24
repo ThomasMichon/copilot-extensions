@@ -60,6 +60,11 @@ class DirectoryStore:
                         binding["principal"],
                     ))
             self._accept_configuration(db)
+            db.execute("""CREATE TABLE IF NOT EXISTS relay_keys (
+                machine TEXT NOT NULL, environment TEXT NOT NULL,
+                generation INTEGER NOT NULL, public_key TEXT NOT NULL,
+                PRIMARY KEY(machine, environment, generation))""")
+            self._relay_snapshot(db)
 
     @contextmanager
     def _transaction(self):
@@ -141,10 +146,41 @@ class DirectoryStore:
         with self._transaction() as db:
             return self._snapshot(db)
 
+    def _relay_snapshot(self, db) -> list[dict]:
+        snapshot = self._snapshot(db)
+        rows = []
+        keys = {row["public_key"] for row in snapshot["directory"]["machines"]}
+        policy = GatewaySSHPolicy.from_dict(snapshot["policy"])
+        for row in snapshot["directory"]["machines"]:
+            binding = next(item for item in self.config.authority["bindings"] if (
+                item["machine"], item["environment"]
+            ) == (row["machine"], row["environment"]))
+            relay = db.execute(
+                "SELECT public_key FROM relay_keys "
+                "WHERE machine=? AND environment=? AND generation=?",
+                (row["machine"], row["environment"], binding["generation"]),
+            ).fetchone()
+            if relay is not None:
+                check(relay[0] not in keys, "relay-key-must-be-distinct")
+                keys.add(relay[0])
+            decision = policy.resolve(row["machine"], row["environment"]).to_dict()
+            if decision["state"] != "configured":
+                continue
+            check(relay is not None or "relay" not in self.config.to_dict(),
+                  "relay-public-key-required")
+            if relay is not None:
+                rows.append({**row, "relay_public_key": relay[0]})
+        return rows
+
+    def relay_snapshot(self) -> list[dict]:
+        with self._transaction() as db:
+            return self._relay_snapshot(db)
+
     def enroll(self, principal: str, request: dict, *, checkpoint=lambda: None) -> tuple[dict, bool]:
         check(isinstance(request, dict) and set(request) == {
             "request_id", "machine", "environment", "generation", "public_key", "host_key",
-        }, "invalid-enrollment")
+        } | ({"relay_public_key"} if "relay_public_key" in request else set()),
+              "invalid-enrollment")
         identifier(request["request_id"], "SSH enrollment request")
         integer(request["generation"], "SSH enrollment generation", minimum=1)
         binding = self.config.binding(principal)
@@ -158,6 +194,11 @@ class DirectoryStore:
         public_key(request["public_key"])
         if request["host_key"] is not None:
             public_key(request["host_key"])
+        relay_key = request.get("relay_public_key")
+        if relay_key is not None:
+            public_key(relay_key)
+        check("relay" not in self.config.to_dict() or relay_key is not None,
+              "relay-public-key-required")
         encoded = canonical(request)
         with self._transaction() as db:
             checkpoint()
@@ -173,6 +214,13 @@ class DirectoryStore:
             ).fetchone()
             check(row is None or row == (request["public_key"], request["host_key"]),
                   "key-change-requires-new-generation")
+            previous_relay = db.execute(
+                "SELECT public_key FROM relay_keys "
+                "WHERE machine=? AND environment=? AND generation=?",
+                (binding["machine"], binding["environment"], binding["generation"]),
+            ).fetchone()
+            check(row is None or (previous_relay[0] if previous_relay else None) == relay_key,
+                  "relay-key-change-requires-new-generation")
             if previous is None:
                 count = db.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
                 check(count < MAX_REQUESTS, "enrollment-journal-full")
@@ -185,6 +233,11 @@ class DirectoryStore:
                     request["public_key"], request["host_key"],
                 ))
                 db.execute("UPDATE metadata SET revision=revision+1 WHERE id=1")
+                if relay_key is not None:
+                    db.execute("INSERT INTO relay_keys VALUES (?,?,?,?)", (
+                        binding["machine"], binding["environment"], binding["generation"], relay_key,
+                    ))
             result = self._snapshot(db)
+            self._relay_snapshot(db)
             checkpoint()
             return result, changed

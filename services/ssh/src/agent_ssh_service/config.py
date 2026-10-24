@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 from fleet_manager.gateway_ssh_policy import ENVIRONMENTS, GatewaySSHPolicy
+from fleet_manager.gateway_ssh_provider import public_key
 from fleet_manager.planning import canonical, decode, identifier, integer, record
 
 MAX_MACHINES = 32
@@ -46,7 +47,7 @@ class ServiceConfig:
             "revision", "data_dir", "fleet", "gateway", "slot", "controller",
             "gateway_origin", "gateway_ca", "proof_key_file", "access_token_file",
             "policy", "bindings",
-        })
+        } | ({"relay"} if "relay" in value else set()))
         integer(value["revision"], "SSH configuration revision", minimum=1)
         for name in ("fleet", "gateway", "slot", "controller"):
             identifier(value[name], "SSH service identity")
@@ -61,6 +62,23 @@ class ServiceConfig:
         origin(value["gateway_origin"])
         policy = GatewaySSHPolicy.from_dict(value["policy"])
         check(value["controller"] in policy.to_dict()["controllers"], "unknown-controller")
+        if "relay" in value:
+            relay = value["relay"]
+            check(isinstance(relay, dict) and set(relay) == {
+                "sshd", "ssh_keygen", "host_key_file", "host_public_key",
+                "listen_host", "port", "user",
+            }, "invalid-native-relay")
+            for name in ("sshd", "ssh_keygen", "host_key_file"):
+                path = absolute(relay[name])
+                check(not any(char in str(path) for char in '"%\r\n'),
+                      "invalid-native-relay-path")
+            public_key(relay["host_public_key"])
+            integer(relay["port"], "SSH relay port", minimum=1024, maximum=65535)
+            check(relay["listen_host"] in ("127.0.0.1", "0.0.0.0"),
+                  "invalid-native-relay-address")
+            check(isinstance(relay["user"], str)
+                  and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]{0,63}", relay["user"]) is not None,
+                  "invalid-native-relay-user")
         rows = value["bindings"]
         check(isinstance(rows, list) and 1 <= len(rows) <= MAX_MACHINES, "invalid-bindings")
         targets, principals, aliases, ports = set(), set(), set(), set()
@@ -79,11 +97,17 @@ class ServiceConfig:
             decision = policy.resolve(*target).to_dict()
             check(decision["backend"] == "gateway"
                   and decision["controller"] == value["controller"], "controller-mismatch")
+            if "relay" in value and decision["state"] == "configured":
+                check(not decision["host_path"], "native-relay-host-mediation-unsupported")
+                check(decision["effective_inbound"] and decision["effective_outbound"],
+                      "native-relay-requires-bidirectional-policy")
             port = row["reverse_port"]
             if port is not None:
                 integer(port, "SSH reverse port", minimum=1, maximum=65535)
                 check(port not in ports, "duplicate-reverse-port")
                 ports.add(port)
+                if "relay" in value:
+                    check(port != value["relay"]["port"], "relay-port-collision")
             check(not decision["effective_inbound"] or port is not None,
                   "inbound-reverse-port-required")
             check(target not in targets and row["principal"] not in principals
@@ -110,6 +134,7 @@ class ServiceConfig:
     @property
     def authority(self) -> dict:
         value = self.to_dict()
-        return {name: value[name] for name in (
+        fields = (
             "revision", "fleet", "gateway", "slot", "controller", "policy", "bindings",
-        )}
+        ) + (("relay",) if "relay" in value else ())
+        return {name: value[name] for name in fields}

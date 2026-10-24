@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from pathlib import Path
 import sqlite3
+import subprocess
 import sys
 
 from . import __version__
@@ -24,7 +25,7 @@ def main(argv=None) -> int:
         asyncio.run(run(ServiceConfig.load(args.config)))
         return 0
     except (OSError, PlanError, SSHServiceError, TransportError,
-            AlreadyRunningError, sqlite3.Error) as exc:
+            AlreadyRunningError, sqlite3.Error, subprocess.SubprocessError, RuntimeError) as exc:
         print("agent-ssh-service: " + type(exc).__name__, file=sys.stderr)
         return 1
 

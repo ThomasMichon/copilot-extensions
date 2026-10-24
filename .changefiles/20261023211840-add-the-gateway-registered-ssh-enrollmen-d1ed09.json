@@ -1,5 +1,5 @@
 {
-  "comment": "Add the Gateway-registered SSH enrollment/public-directory service, persistent admission and bounded connected-machine notifications.",
+  "comment": "Add the Gateway-registered SSH enrollment/public-directory service, bounded connected-machine notifications and an optional owned forward-only native Linux relay with distinct generation-bound relay keys.",
   "changes": [
     {
       "plugin": "services/ssh",

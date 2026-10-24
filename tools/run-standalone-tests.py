@@ -185,6 +185,7 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         sources = [
             str(REPO / "fleet-manager") + "[service-gateway]",
             str(REPO / "libs" / "single-instance-lease"),
+            str(REPO / "libs" / "agent-procutil"),
         ]
     extra = ("test" if smoke else "native,test") if component == "services/index" else "dev"
     if component == "worktree-manager":
@@ -232,9 +233,11 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             override = Path(temporary) / "overrides.txt"
             fleet = (REPO / "fleet-manager").resolve().as_uri()
             lease = (REPO / "libs" / "single-instance-lease").resolve().as_uri()
+            procutil = (REPO / "libs" / "agent-procutil").resolve().as_uri()
             override.write_text(
                 f"fleet-manager[service-gateway] @ {fleet}\n"
-                f"agent-single-instance-lease @ {lease}\n", encoding="utf-8",
+                f"agent-single-instance-lease @ {lease}\n"
+                f"agent-procutil @ {procutil}\n", encoding="utf-8",
             )
             overrides = ["--override", str(override)]
         run_uv_install(
