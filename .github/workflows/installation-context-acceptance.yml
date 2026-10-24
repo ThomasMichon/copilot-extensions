@@ -278,17 +278,16 @@ jobs:
     timeout-minutes: 15
     steps: *candidate-profile-steps
 
-  chat-construction:
+  chat-construction-linux:
     if: ${{ inputs.chat_construction }}
-    name: Chat construction (${{ matrix.os }}, Python ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
+    name: Chat construction (Linux, Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
+    strategy: &chat-construction-strategy
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
         python: ["3.10", "3.11"]
-    steps:
+    steps: &chat-construction-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         id: chat-python
@@ -305,6 +304,14 @@ jobs:
         run: >-
           python tools/run-standalone-tests.py services/chat
           --chat-suite full --timeout 600
+
+  chat-construction-windows:
+    if: ${{ inputs.chat_construction }}
+    name: Chat construction (Windows, Python ${{ matrix.python }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy: *chat-construction-strategy
+    steps: *chat-construction-steps
 
   ssh-snapshot-native-linux:
     if: ${{ inputs.ssh_snapshot }}

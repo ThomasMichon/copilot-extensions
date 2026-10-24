@@ -121,8 +121,11 @@ qualification and explicitly refuses construction before creating a runtime.
 Foreign import scopes and attempts to prepare a completed slot must refuse.
 This optional lane does not publish a selected installation, create a host,
 prove a governed feed or qualify native subscription/adoption.
-`tools/test_standalone_qualification.py` checks its explicit opt-in, retained
-default-lane exclusions, interpreter binding and exact acceptance/full commands.
+`tools/test_standalone_qualification.py` checks its explicit opt-in, literal
+hosted runner routes, retained default-lane exclusions, interpreter binding and
+exact acceptance/full commands. Deterministic workspace clock-boundary controls
+also require forwarded owner timeouts to stay within the original 60-second
+budget; no floating-point tolerance is added to that assertion.
 
 ## Wheel-input inspection
 

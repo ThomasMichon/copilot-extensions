@@ -43,6 +43,7 @@ test_existing_owner_head_and_execution_tuple_are_not_reassigned
 test_invalid_initialization_refuses_before_executing_owner
 test_unresolved_or_inconsistent_owner_evidence_refuses_without_fallback
 test_workspace_reads_share_one_finite_deadline
+test_workspace_deadline_rounding_never_exceeds_original_budget
 test_late_owner_response_cannot_turn_deadline_expiry_into_success
 test_workspace_requires_explicit_complete_owner_argv_before_execution
 test_owner_failure_is_not_retried_or_downgraded_to_anchor
@@ -190,6 +191,7 @@ EXPECTED = {
 
 PARAMETER_COUNTS = dict.fromkeys(EXPECTED, 1)
 PARAMETER_COUNTS.update({
+    "test_workspace.py::test_workspace_deadline_rounding_never_exceeds_original_budget": 2,
     "test_construction.py::test_occupied_import_scope_is_not_replaced": 4,
     "test_construction.py::test_installed_health_refuses_bootstrap_drift": 3,
     "test_collaboration.py::test_metadata_refuses_invalid_fields_and_bounds": 22,

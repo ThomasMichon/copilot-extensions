@@ -1,5 +1,5 @@
 {
-  "comment": "Consume installed canonical construction for exact Chat client candidates and retained source-independent invocation",
+  "comment": "Consume canonical Chat client construction with retained source-independent invocation and exact workspace read budgets",
   "changes": [
     {
       "plugin": "services/chat",

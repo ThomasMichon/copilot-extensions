@@ -472,6 +472,24 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-24 - Fresh-host qualification corrections
+
+- Fresh Linux3.10/3.11 lanes completed acceptance and full execution. Both
+  Windows floors exposed an actual workspace deadline subtraction rounding
+  above60s; keep the strict limit and cap forwarding to the original budget.
+  Two deterministic binary-exponent boundary regressions add coverage without
+  changing or removing any previous case.
+- Use two literal hosted OS routes with the existing Python-floor matrices,
+  rather than weakening the trusted-CI prohibition on dynamic runner routes.
+  The actual trusted-CI guard and52 bounded workflow/runner contracts pass.
+- The corrected Windows3.11 candidate passes417/456 acceptance nodes
+  (415 passed,2 POSIX skips,39 full-only deselections) in117.64s within180s,
+  and full454+2 skips in184.71s within600s. Both report complete execution and
+  membership
+  `855b1be0c87ee399cf619154debd38e3d8325c32cd872d99dea0b7fa54b142b0`.
+  Re-run all four fresh hosted combinations against the corrected head;
+  earlier results do not certify this changed candidate.
+
 ### 2026-10-24 - Current installed-constructor qualification
 
 - The current Windows Python3.11.9 candidate passed the complete unfiltered

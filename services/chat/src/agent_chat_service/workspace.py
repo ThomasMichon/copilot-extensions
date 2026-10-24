@@ -14,6 +14,7 @@ from .transport import command, run_command
 _KEY = re.compile(r"[A-Za-z0-9_.-]{1,256}")
 _SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _LABEL = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+_WORKSPACE_TIMEOUT = 60.0
 _CWD_RUNNER = (
     "import os,subprocess,sys; os.chdir(sys.argv[1]); "
     "os.environ.pop('PYTHONPATH',None); "
@@ -56,10 +57,11 @@ def resolve_workspace(*, worktrees_command, session_id, cwd):
         _refuse("invalid_initialization")
     directory = _directory(cwd, "invalid_initialization")
     owner = command(worktrees_command)
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + _WORKSPACE_TIMEOUT
 
     def read(*args, structured=False):
-        remaining = deadline - time.monotonic()
+        # Float subtraction can round above the original budget at a clock exponent boundary.
+        remaining = min(_WORKSPACE_TIMEOUT, deadline - time.monotonic())
         if remaining <= 0:
             _refuse("workspace_timeout")
         raw = run_command(

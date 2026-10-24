@@ -2,6 +2,7 @@ import copy
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import math
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -247,6 +248,25 @@ def test_workspace_reads_share_one_finite_deadline(owner, monkeypatch):
         resolve(owner)
     assert caught.value.code == "workspace_timeout"
     assert owner["calls"] == [("record", "--cwd", str(Path(owner["cwd"]).resolve()), "--json")]
+
+
+@pytest.mark.parametrize("boundary", [512.0, 1024.0])
+def test_workspace_deadline_rounding_never_exceeds_original_budget(
+    owner, monkeypatch, boundary,
+):
+    instant = math.nextafter(boundary, 0.0)
+    assert (instant + 60) - instant > 60
+    monkeypatch.setattr(workspace.time, "monotonic", lambda: instant)
+    original = workspace.run_command
+    timeouts = []
+
+    def read(*args, **options):
+        timeouts.append(options["timeout"])
+        return original(*args, **options)
+
+    monkeypatch.setattr(workspace, "run_command", read)
+    assert resolve(owner)["participant"]["id"] == "worktree-1"
+    assert timeouts == [60.0]
 
 
 def test_late_owner_response_cannot_turn_deadline_expiry_into_success(owner, monkeypatch):

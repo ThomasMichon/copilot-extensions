@@ -22,25 +22,25 @@ def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_pytho
     selected = triggers["workflow_dispatch"]["inputs"]["chat_construction"]
     assert selected["type"] == "boolean" and selected["default"] is False
     jobs = workflow["jobs"]
-    job = jobs["chat-construction"]
-    assert job["if"] == "${{ inputs.chat_construction }}"
-    assert job["runs-on"] == "${{ matrix.os }}"
-    assert job["strategy"] == {
-        "fail-fast": False,
-        "matrix": {"os": ["ubuntu-latest", "windows-latest"], "python": ["3.10", "3.11"]},
-    }
-    setup = next(step for step in job["steps"] if step.get("id") == "chat-python")
-    assert setup["with"]["python-version"] == "${{ matrix.python }}"
-    acceptance, full = [step for step in job["steps"] if "run" in step]
-    assert acceptance["env"]["UV_PYTHON"] == "${{ steps.chat-python.outputs.python-path }}"
-    assert acceptance["run"].split() == [
-        "python", "tools/run-standalone-tests.py", "services/chat", "--prepare",
-        "--chat-suite", "acceptance", "--timeout", "180",
-    ]
-    assert full["run"].split() == [
-        "python", "tools/run-standalone-tests.py", "services/chat",
-        "--chat-suite", "full", "--timeout", "600",
-    ]
+    for suffix, host in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        job = jobs["chat-construction-" + suffix]
+        assert job["if"] == "${{ inputs.chat_construction }}"
+        assert job["runs-on"] == host
+        assert job["strategy"] == {
+            "fail-fast": False, "matrix": {"python": ["3.10", "3.11"]},
+        }
+        setup = next(step for step in job["steps"] if step.get("id") == "chat-python")
+        assert setup["with"]["python-version"] == "${{ matrix.python }}"
+        acceptance, full = [step for step in job["steps"] if "run" in step]
+        assert acceptance["env"]["UV_PYTHON"] == "${{ steps.chat-python.outputs.python-path }}"
+        assert acceptance["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/chat", "--prepare",
+            "--chat-suite", "acceptance", "--timeout", "180",
+        ]
+        assert full["run"].split() == [
+            "python", "tools/run-standalone-tests.py", "services/chat",
+            "--chat-suite", "full", "--timeout", "600",
+        ]
     for name in ("derived-diagnostics-posix", "derived-diagnostics-windows"):
         assert "!inputs.chat_construction" in jobs[name]["if"]
         assert "!inputs.wheel_inputs" in jobs[name]["if"]
