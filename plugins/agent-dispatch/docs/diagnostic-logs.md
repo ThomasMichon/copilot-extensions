@@ -33,7 +33,10 @@ guessed away. A backward clock does not expire future evidence. This cannot undo
 expiry already performed before a clock was corrected.
 
 The handler rolls active output at UTC date changes or 5 MB, with no backup-count
-limit replacing age retention. Emission only appends/rolls the current file:
+limit replacing age retention. An unterminated tail from an interrupted append
+also rolls before the next write, preserving the damaged evidence separately
+instead of concatenating a fresh record into it.
+Emission only appends/rolls the current file:
 it never scans or prunes history on a coordinator coroutine's event-loop thread.
 Existing daemon maintenance prunes active **and** archived files, debounced to at
 most once per 60 seconds. The coordinator invokes it through `asyncio.to_thread`;

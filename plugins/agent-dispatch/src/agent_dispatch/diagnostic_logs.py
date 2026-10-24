@@ -221,13 +221,16 @@ class DiagnosticLog(logging.Handler):
             size = self.path.stat().st_size
             with self.path.open("rb") as source:
                 first = json.loads(source.readline())
+                source.seek(-1, os.SEEK_END)
+                terminated = source.read(1) == b"\n"
             first_day = _utc(datetime.fromisoformat(first["ts"])).date()
         except FileNotFoundError:
             return
         except (ValueError, KeyError, TypeError):
             first_day = None
+            terminated = False
             size = self.path.stat().st_size
-        if size and (size >= self.max_bytes or first_day != now.date()):
+        if size and (size >= self.max_bytes or first_day != now.date() or not terminated):
             stamp = now.strftime("%Y%m%dT%H%M%S%fZ")
             archive = self.path.with_name(
                 f"{self.component}.{stamp}-{uuid.uuid4().hex}.jsonl"

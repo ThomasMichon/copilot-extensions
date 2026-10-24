@@ -436,3 +436,19 @@ def test_event_loop_emission_does_no_history_work_when_expiry_is_due(tmp_path, m
     assert handler.last_error is None
     assert archive.exists()  # only the off-thread owner may prune this history
     assert json.loads(handler.path.read_text(encoding="utf-8"))["message"].startswith("request")
+
+
+def test_restart_rolls_unterminated_tail_without_corrupting_next_event(tmp_path):
+    now = datetime.now(timezone.utc)
+    path = tmp_path / "logs" / "diagnostics" / "coordinator.jsonl"
+    seed(path, now)
+    original = path.read_bytes() + b'{"ts":"interrupted'
+    path.write_bytes(original)
+    handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
+    handler.emit(record_at(now, "readable after interrupted append"))
+    assert json.loads(path.read_text(encoding="utf-8"))["message"] == (
+        "readable after interrupted append"
+    )
+    archives = [p for p in handler._files() if p != path]
+    assert len(archives) == 1
+    assert archives[0].read_bytes() == original

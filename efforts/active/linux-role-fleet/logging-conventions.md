@@ -157,3 +157,8 @@ installer attempts, optional spools or a deployment adapter.
   history maintenance. The event-loop regression proves emission does no history
   scan even when expired archives exist, and the real GC regression asserts
   maintenance scans execute off the event-loop thread.
+- 2026-10-23 — Re-review's previously missed interrupted-tail case is also
+  addressed: check only the final byte while inspecting the active segment and
+  roll an unterminated file before appending. A restart regression preserves the
+  damaged archive byte-for-byte while proving the new event stays parseable.
+  This does not alter the separately owned telemetry append contract.
