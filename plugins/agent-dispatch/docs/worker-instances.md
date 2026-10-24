@@ -211,6 +211,10 @@ cannot retain that qualification refuse rather than publishing plain paths.
 Named defining-hop suppliers remain qualified even when the selected outer
 template is local or plugin-owned and the inherited cwd was written as an
 absolute path.
+Overlapping named supplier roots refuse materialization rather than selecting
+one namespace's execution authority by iteration order. Inherited suppliers
+qualify explicit execution contexts only; they do not manufacture a missing
+working directory. Implicit defaults remain owned by the selected provider.
 Dependency inspection resolves named command/cwd resources read-only without
 replacing their persisted names or granting execution authority.
 Emitter runtime tokens such as `{python}` are rendered only in the temporary

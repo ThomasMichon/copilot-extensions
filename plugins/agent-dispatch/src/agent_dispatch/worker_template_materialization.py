@@ -92,9 +92,18 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
     if source["provider"].startswith("repo:"):
         repository = source["provider"].removeprefix("repo:")
         suppliers.setdefault(repository, Path(source["root"]))
+    roots = list(suppliers.values())
+    if any(
+        left.is_relative_to(right) or right.is_relative_to(left)
+        for index, left in enumerate(roots) for right in roots[index + 1:]
+    ):
+        raise RegistrarError("overlapping supplier repository roots cannot be materialized safely")
     for repository, root in suppliers.items():
         original = tuple(
-            qualify_supplier_context(declaration, repository, root)
+            qualify_supplier_context(
+                declaration, repository, root,
+                implicit=source["provider"] == f"repo:{repository}",
+            )
             for declaration in original
         )
     if suppliers and document.get("kind") in {"emitter", "evaluator"}:

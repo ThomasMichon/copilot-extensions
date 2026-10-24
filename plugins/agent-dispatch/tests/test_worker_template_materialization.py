@@ -529,6 +529,65 @@ def test_inherited_evaluator_supplier_cwd_retains_actual_runtime_admission(monke
         evaluator.evaluate({})
 
 
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_overlapping_named_supplier_roots_refuse_ambiguous_execution_context(
+    monkeypatch, tmp_path, repo_class,
+):
+    from agent_dispatch import repository_resources
+
+    outer = tmp_path / "outer"
+    inner = outer / "inner"
+    inner.mkdir(parents=True)
+    (inner / "policy.py").write_text("print('never-executed')", encoding="utf-8")
+    (inner / "base.json").write_text(json.dumps({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy",
+            "evaluator_spec": {
+                "scripts": {"policy": [sys.executable, "policy.py"]}, "cwd": str(inner),
+            },
+        },
+    }), encoding="utf-8")
+    (outer / "base.json").write_text(json.dumps({
+        "extends": "repo:inner:base.json",
+    }), encoding="utf-8")
+    roots = {"outer": (outer, "worktree"), "inner": (inner, repo_class)}
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository", lambda name, **k: roots[name],
+    )
+    _, row = provider({"extends": "repo:outer:base.json"}, kind="evaluator")
+    with pytest.raises(RegistrarError, match="overlapping supplier"):
+        save(row, activate=True)
+    assert not instance_dir().exists() and not active_dir().exists()
+
+
+@pytest.mark.parametrize("kind", ["emitter", "evaluator"])
+def test_inherited_supplier_does_not_create_an_absent_execution_cwd(monkeypatch, tmp_path, kind):
+    from agent_dispatch import repository_resources
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    spec = (
+        {"id": "{name}", "command": [sys.executable, "-c", "print('[]')"], "interval_seconds": 60}
+        if kind == "emitter" else {
+            "repo": "example/project", "evaluator_ref": "policy",
+            "evaluator_spec": {"scripts": {"policy": [sys.executable, "-c", "print('{}')"]}},
+        }
+    )
+    (supplier / "base.json").write_text(json.dumps({"kind": kind, "spec": spec}), encoding="utf-8")
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository", lambda *a, **k: (supplier, "worktree"),
+    )
+    _, row = provider({"extends": "repo:library:base.json"}, kind=kind)
+    if kind == "evaluator":
+        with pytest.raises(RegistrarError, match="source-relative evaluator script cwd"):
+            save(row)
+        assert not instance_dir().exists()
+    else:
+        assert save(row, activate=True)["activation"] == "pending"
+        declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+        assert "cwd" not in declaration.spec
+
+
 @pytest.mark.parametrize("kind", ["evaluator", "supervised-lane"])
 def test_supplier_owned_absolute_file_policy_refuses_unrepresentable_named_context(
     monkeypatch, tmp_path, kind,

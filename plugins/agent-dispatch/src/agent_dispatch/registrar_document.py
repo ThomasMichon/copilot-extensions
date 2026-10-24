@@ -33,11 +33,12 @@ def _identity_origin_root(origin: Path | str, leaf_root: Path) -> str:
 
 def qualify_supplier_context(
     declaration: ProfileDeclaration, repository: str, root: Path,
+    *, implicit: bool = True,
 ) -> ProfileDeclaration:
     """Keep read-only supplier context named until execution admission."""
     from .repository_resources import is_repository_resource
 
-    def qualify(value: str | None, *, implicit: bool = True) -> str | None:
+    def qualify(value: str | None, *, implicit: bool = implicit) -> str | None:
         if is_repository_resource(value):
             return value
         if value is None and not implicit:
@@ -67,7 +68,8 @@ def qualify_supplier_context(
 
     spec = dict(declaration.spec)
     if declaration.kind == "emitter":
-        spec["cwd"] = qualify(spec.get("cwd"))
+        if "cwd" in spec or implicit:
+            spec["cwd"] = qualify(spec.get("cwd"))
         if "worker_identity_cwd" in spec:
             spec["worker_identity_cwd"] = qualify(spec["worker_identity_cwd"])
         loop = spec.get("repository_issue_loop")
@@ -80,7 +82,8 @@ def qualify_supplier_context(
         evaluator = spec.get("evaluator_spec")
         if not isinstance(evaluator, Mapping) or "scripts" not in evaluator:
             return declaration
-        spec["evaluator_spec"] = {**evaluator, "cwd": qualify(evaluator.get("cwd"))}
+        if "cwd" in evaluator or implicit:
+            spec["evaluator_spec"] = {**evaluator, "cwd": qualify(evaluator.get("cwd"))}
     else:
         return declaration
     return replace(declaration, spec=spec)
