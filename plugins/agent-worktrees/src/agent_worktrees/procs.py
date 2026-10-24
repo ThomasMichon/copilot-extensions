@@ -21,6 +21,7 @@ import subprocess
 from pathlib import Path
 
 __all__ = [
+    "checkout_retirement_blocker",
     "copilot_relaunch_path",
     "count_processes_named",
     "is_descendant_of",
@@ -52,6 +53,13 @@ def _is_under(cwd: str, root: str) -> bool:
     return c == r or c.startswith(r + os.sep)
 
 
+def _physical_path(path: str, *, strict: bool = False) -> str:
+    resolved = os.path.realpath(path, strict=strict)
+    if os.name == "nt" and resolved.startswith("\\\\?\\"):
+        return "\\\\" + resolved[8:] if resolved[4:8].upper() == "UNC\\" else resolved[4:]
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # POSIX
 # ---------------------------------------------------------------------------
@@ -65,6 +73,8 @@ def _iter_processes_posix(*, strict: bool = False):
         if strict:
             raise
         return
+    if strict and str(os.getpid()) not in (entry.name for entry in entries):
+        raise OSError("process inspection unavailable: /proc does not contain the inspecting process")
     for entry in entries:
         if not entry.name.isdigit():
             continue
@@ -735,7 +745,7 @@ def processes_with_cwd_under(
     if require_available and system not in {"Windows", "Linux"}:
         raise OSError(f"cwd inspection unsupported on {system}")
     if require_available:
-        root = os.path.realpath(root, strict=True)
+        root = _physical_path(root, strict=True)
     excluded = {os.getpid()}
     if exclude_pids:
         excluded |= exclude_pids
@@ -749,6 +759,8 @@ def processes_with_cwd_under(
                 raise
             return hits
         pids = _win_enum_pids(strict=True) if require_available else _win_enum_pids()
+        if require_available and os.getpid() not in pids:
+            raise OSError("process inspection unavailable: enumeration omits the inspecting process")
         for pid in pids:
             if pid in excluded:
                 continue
@@ -756,7 +768,7 @@ def processes_with_cwd_under(
                 cwd, name = _win_read_cwd(k32, pid)
             except OSError:
                 continue
-            candidate = os.path.realpath(cwd) if require_available and cwd else cwd
+            candidate = _physical_path(cwd) if require_available and cwd else cwd
             if _is_under(candidate, root):
                 hits.append({"pid": pid, "name": name})
     else:
@@ -764,7 +776,7 @@ def processes_with_cwd_under(
         for pid, cwd, name in processes:
             if pid in excluded:
                 continue
-            candidate = os.path.realpath(cwd) if require_available and cwd else cwd
+            candidate = _physical_path(cwd) if require_available and cwd else cwd
             if _is_under(candidate, root):
                 hits.append({"pid": pid, "name": name})
     return hits
@@ -773,8 +785,8 @@ def processes_with_cwd_under(
 def checkout_retirement_blocker(root: str) -> str | None:
     """Keep unavailable cwd discovery distinct from a supported empty result."""
     try:
-        root = os.path.realpath(root, strict=True)
-        if _is_under(os.path.realpath(os.getcwd()), root):
+        root = _physical_path(root, strict=True)
+        if _is_under(_physical_path(os.getcwd()), root):
             return f"live process still uses the checkout: current process({os.getpid()})"
         holders = processes_with_cwd_under(root, require_available=True)
     except OSError as exc:

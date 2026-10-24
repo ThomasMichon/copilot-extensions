@@ -13,6 +13,46 @@ import pytest
 from agent_worktrees import cleanup_reap, permissions, sessions
 
 
+def test_strict_linux_inspection_accepts_a_census_containing_its_own_pid(tmp_path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    proc = tmp_path / "proc"
+    proc.mkdir()
+    (proc / str(os.getpid())).mkdir()
+    other_pid = os.getpid() + 1
+    other = proc / str(other_pid)
+    other.mkdir()
+    try:
+        (other / "cwd").symlink_to(checkout, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks unavailable")
+    (other / "comm").write_text("holder\n")
+    procs = cleanup_reap.procs
+    real_path = procs.Path
+    monkeypatch.setattr(procs, "Path", lambda value: proc if value == "/proc" else real_path(value))
+    monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+    assert procs.processes_with_cwd_under(str(checkout), require_available=True) == [
+        {"pid": other_pid, "name": "holder"},
+    ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-path representation")
+def test_strict_windows_inspection_matches_extended_cwd_paths(tmp_path, monkeypatch):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    procs = cleanup_reap.procs
+    other_pid = os.getpid() + 1
+    monkeypatch.setattr(procs.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(procs, "_win_kernel32", lambda: None)
+    monkeypatch.setattr(procs, "_win_enum_pids", lambda **kwargs: [os.getpid(), other_pid])
+    monkeypatch.setattr(
+        procs, "_win_read_cwd", lambda *args: ("\\\\?\\" + str(checkout.resolve()), "holder"),
+    )
+    assert procs.processes_with_cwd_under(str(checkout), require_available=True) == [
+        {"pid": other_pid, "name": "holder"},
+    ]
+
+
 def test_strict_holder_inspection_resolves_symlinked_checkout_root(tmp_path, monkeypatch):
     physical = tmp_path / "physical"
     physical.mkdir()
@@ -146,7 +186,7 @@ def test_cleanup_preserves_checkout_held_by_live_process(
     assert str(checkout.resolve()) in data["trustedFolders"]
 
 
-@pytest.mark.parametrize("system", ["Darwin", "Windows", "Linux"])
+@pytest.mark.parametrize("system", ["Darwin", "Windows", "Linux", "Linux-empty", "Windows-empty"])
 def test_cleanup_defers_when_cwd_inspection_is_unavailable(
     tmp_path, monkeypatch, sample_record, system,
 ):
@@ -154,7 +194,7 @@ def test_cleanup_defers_when_cwd_inspection_is_unavailable(
     checkout.mkdir()
     record = replace(sample_record, worktree_path=str(checkout))
     monkeypatch.setattr(cleanup_reap, "retirement_blocker", lambda record: None)
-    monkeypatch.setattr(cleanup_reap.procs.platform, "system", lambda: system)
+    monkeypatch.setattr(cleanup_reap.procs.platform, "system", lambda: system.split("-")[0])
 
     def unavailable(*args, **kwargs):
         raise OSError("backend unavailable")
@@ -163,6 +203,17 @@ def test_cleanup_defers_when_cwd_inspection_is_unavailable(
         monkeypatch.setattr(cleanup_reap.procs, "_win_kernel32", unavailable)
     elif system == "Linux":
         monkeypatch.setattr(cleanup_reap.procs, "_iter_processes_posix", unavailable)
+    elif system == "Linux-empty":
+        empty_proc = tmp_path / "unmounted-proc"
+        empty_proc.mkdir()
+        real_path = cleanup_reap.procs.Path
+        monkeypatch.setattr(
+            cleanup_reap.procs, "Path",
+            lambda value: empty_proc if value == "/proc" else real_path(value),
+        )
+    elif system == "Windows-empty":
+        monkeypatch.setattr(cleanup_reap.procs, "_win_kernel32", lambda: None)
+        monkeypatch.setattr(cleanup_reap.procs, "_win_enum_pids", lambda **kwargs: [])
 
     def unexpected_removal(*args, **kwargs):
         pytest.fail("Unavailable cwd inspection must not permit checkout removal")

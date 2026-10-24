@@ -57,6 +57,8 @@ Strict retirement inspection resolves the checkout root and observed cwd paths
 before matching, so symlinked ancestors do not hide a live holder.
 The retirement guard also includes the inspecting process itself, even though
 the legacy general-purpose process enumerator excludes its caller.
+Strict enumeration must contain the inspecting PID; an empty/unmounted `/proc`
+or an empty Windows census is unavailable evidence, not an empty holder set.
 Retaining a checkout does not waive finality checks: PR finalization rechecks
 landed content after holder inspection before marking either a retained or a
 removed checkout finalized.
