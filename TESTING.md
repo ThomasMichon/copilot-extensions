@@ -1453,6 +1453,16 @@ Every case retains its real PowerShell boundary and existing 25-second child
 deadline; engine and library changes are independently covered, not omitted
 from the unchanged publication/older-pointer refusal case.
 
+Select Index's two-cell shutdown contracts with `tools/run-plugin-tests.py
+agent-index --test-file tests/test_installation_cells.py -k
+"two_cell_local_services or two_cell_shutdown"`. The real isolated services
+retain their observed instance tokens, require explicit shutdown acknowledgements
+and zero exit codes, and report control failures after waiting for both children.
+Four boundary-fault controls inject a false acknowledgement, a response failure,
+a nonzero wait result and a timeout result after real graceful shutdown; they
+verify that neither actual child remains running. Native deadlines, item limits
+and required unit-only CI selection are unchanged.
+
 The passive index-service promotion contract supplies an explicit synthetic
 search engine, just as the adjacent drain cases do. Its real HTTP admission
 must reject passive queries without invoking that engine, then admit exactly

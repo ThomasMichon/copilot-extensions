@@ -1,0 +1,9 @@
+{
+  "comment": "Require acknowledged graceful shutdown in the two-cell service fixture.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
