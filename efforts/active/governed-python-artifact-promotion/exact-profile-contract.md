@@ -164,6 +164,9 @@ and cutover ownership. It does not regenerate or edit its historical lock.
   inspected wheel metadata and hashes, closed exact resolution, unchanged
   offline reuse, bounded acquisition and invocation-owned cleanup. Determine
   measured limits before enabling the consumer; this proposal guesses none.
+  The repository-only actual-byte comparator merged in #8399; authenticated
+  acquisition, policy evidence, receipts/reuse and constructor integration
+  still need their actual consumer proof.
 - [ ] Apply the reviewed seam to Windows/POSIX engine constructors under #6737.
   Remove default-install/torch-only-swap; prove first install, retained explicit
   capability, wrong target refusal, source fallback, failed-build retention,

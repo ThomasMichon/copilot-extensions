@@ -32,6 +32,19 @@ and agent-ssh)"`. No production credentials, remote hosts or capacity are needed
 
 ## Optional candidate dependency profiles
 
+The installation-context Python `runtime-profile-policy` reader has no
+site-package dependency. `libs/installation-context/tests/test_runtime_profile_policy.py`
+exercises a fresh configured adopter with no installation, profile or approval
+file, real owner-bound overrides and an actual `-I -S` CLI process.
+`test_runtime_deployment_adapters.py` preserves matching native policy parsing
+and publication holds, including malformed profile fields. Pure selection,
+owner-binding and CLI dispatch controls live in
+`tools/promotion_unit_tests/test_runtime_profile_intent.py`; only these pure
+controls join required unit CI. These checks prove configuration-policy input,
+not a permitted CPU wheel closure, authenticated profile release or native
+engine construction. The manual `runtime_profiles=true` acceptance selector
+runs the actual readers on Linux and Windows.
+
 `python tools/run-plugin-tests.py agent-worktrees --test-file
 tests/test_python_installer_engine.py` covers the canonical candidate engine,
 including explicit declared extras. Its offline synthetic packages exercise real

@@ -35,13 +35,17 @@ on:
         description: Exercise bounded wheel-byte inspection and trusted promotion validation
         type: boolean
         default: false
+      runtime_profiles:
+        description: Exercise actual owner-bound runtime-profile policy readers without installation
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.ssh_snapshot && !inputs.wheel_inputs }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -62,7 +66,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.ssh_snapshot && !inputs.wheel_inputs }}
+    if: ${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -85,6 +89,34 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  runtime-profile-policy:
+    if: ${{ inputs.runtime_profiles }}
+    name: Native runtime-profile policy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test dependencies
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest
+      - name: Fresh configured authority and isolated CLI
+        run: python -m pytest -q libs/installation-context/tests/test_runtime_profile_policy.py libs/installation-context/tests/test_runtime_deployment.py
+      - name: Native POSIX policy parsing
+        if: runner.os == 'Linux'
+        run: python -m pytest -q libs/installation-context/tests/test_runtime_deployment_adapters.py -k "native_policy and profile and not powershell and not posix32"
+      - name: Native Windows policy parsing
+        if: runner.os == 'Windows'
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: python -m pytest -q libs/installation-context/tests/test_runtime_deployment_adapters.py -k "native_policy and profile and not posix"
 
   candidate-profiles-linux:
     if: ${{ inputs.candidate_profiles }}

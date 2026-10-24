@@ -3115,6 +3115,19 @@ separate concern (#6941); neither constraints nor this inert record prove an
 approved, available CPU/accelerator closure. The current constructors and their
 retained slots remain unchanged by this preparation seam.
 
+The installation-context Python `resolve_runtime_profile_policy` API and
+`runtime-profile-policy` CLI now resolve configuration intent through the
+existing installation owner. No profile/approval file is required for the
+CPU-first, artifact-preferred, governed-source-permitted baseline. Optional
+`runtimeProfiles` settings in the existing owner-bound deployment policy can
+disable source fallback or explicitly select a capability. Retained capability
+and explicit unprofiled migration remain distinct. See the
+[library contract](../libs/installation-context/README.md) for fields and
+readiness/refusal behavior. Its owner/effective-policy digest is an invalidation
+input, not whole-record approval, source-byte authentication, a feed permission
+or an admission receipt. Native constructors do not yet consume this new API;
+the actual closure, authority composition and constructor acceptance stay open.
+
 `tools/runtime_profile_wheels.py` adds repository-only actual-byte verification,
 not an approval adapter. `verify_profile_wheels` requires the complete exact
 filename-to-binary-stream set, caller-supplied total archive/unpacked byte

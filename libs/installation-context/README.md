@@ -693,13 +693,43 @@ governance, command ownership, construction, activation or maintenance.
 
 The policy is an ordinary, unlinked `runtime-deployment.json` file in the actual
 runtime root already selected by mode governance. There is no deployment-policy
-path override or environment-variable authorization. Its exact fields are
+path override or environment-variable authorization. Its required fields are
 `schema: "copilot-extensions.runtime-deployment"`, `version: 1`, a JSON boolean
 `managed`, and `owner`. The owner's exact fields match the existing installation
 tuple: `sourceFingerprint`, `pluginId`, `mode`, `runtimeRoot` and `environment`
 (`platform`, `homeRealPath`, `wslDistro`). This is invocation/installation
 ownership, not a runtime-artifact source selector or a new installation mode.
 No copy of a policy may redirect the resolver to its recorded root.
+
+The same owner-bound file optionally accepts `runtimeProfiles`, with only
+`allowSourceFallback` (a JSON boolean) and `backend` (an explicit opaque
+capability reference). All three native deployment readers validate these
+fields; malformed or self-authorizing fields, including an approvals map,
+refuse rather than becoming defaults. Older readers safely refuse this
+optional extension instead of ignoring a stricter policy.
+
+Python `resolve_runtime_profile_policy` and the stdlib-only Python CLI action
+`runtime-profile-policy` resolve that input through the existing source,
+installation-mode and deployment readers. With no policy file, a resolved fresh
+installation prefers artifact mode, permits governed source fallback and selects
+CPU. A retained capability remains selected; an unprofiled existing runtime
+requires an explicit migration choice. The API accepts `backend`,
+`retained_backend` and `existing_installation`; the CLI exposes the corresponding
+`--backend`, `--retained-backend` and `--existing-installation` arguments.
+An explicit choice conflicting with the installation-owned backend refuses.
+No device discovery implicitly selects an accelerator.
+
+The returned `runtimeProfiles` object contains readiness, the existing owner,
+effective selection intent and a `policyId` over that owner, intent and managed
+flag. Equivalent JSON formatting does not change it; a changed effective policy
+or installation does. This is a policy invalidation input, not a reusable
+admission receipt or whole-record approval. Unresolved provenance, pending mode
+activation and invalid policy return blocked intent, never a CPU default.
+The CLI exits 1 for blocked or malformed input. Resolution writes no state and
+does not clear `deployment.allowPluginPublication`, select or authenticate a
+source release, approve a profile, qualify a feed/device, resolve/download a
+closure, construct or activate a runtime. Native consumers must compose those
+independent gates; this API does not enable them.
 
 Missing policy retains standalone behavior; matching `managed: false` explicitly
 permits standalone publication. Matching `managed: true` refuses plugin
