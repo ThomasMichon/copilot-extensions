@@ -21,6 +21,7 @@ from .participant import ENVIRONMENT_KEY, borrowed_custody, participant_environm
 RECIPES = {
     "agent-vault": "AGENT_VAULT",
     "agent-pull-requests": "AGENT_PULL_REQUESTS",
+    "agent-ssh": "AGENT_SSH",
 }
 PROTOCOL = 1
 INSTALLER_ACTIONS = ("provision", "stamp")
@@ -34,6 +35,11 @@ PULL_REQUESTS_CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "AGENT_PULL_REQUESTS_HOME", "AGENT_PULL_REQUESTS_INSTALLATION_ID",
     "AGENT_PULL_REQUESTS_NO_SELFPROVISION", "AGENT_PULL_REQUESTS_PINNED_CONTEXT",
+)
+SSH_CONTEXT_KEYS = (
+    "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "AGENT_SSH_HOME", "AGENT_SSH_INSTALLATION_ID",
+    "AGENT_SSH_NO_SELFPROVISION", "AGENT_SSH_PINNED_CONTEXT",
 )
 
 
@@ -60,6 +66,8 @@ def _environment(payload: Path) -> dict[str, str]:
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
         "AGENT_PULL_REQUESTS_INSTALL_DIR",
+        "AGENT_SSH_VALIDATED_CONTEXT", "AGENT_SSH_PAYLOAD_ROOT",
+        "AGENT_SSH_ACTION", "AGENT_SSH_DRY_RUN",
     ):
         result.pop(key, None)
     return result
@@ -90,7 +98,9 @@ def _inspect(
         or type(manifest.get("version")) is not int or manifest["version"] != 2
         or manifest.get("command") != plugin
         or manifest.get("installationContext") != "required"
-        or manifest.get("provisionMode") != "direct"
+        or manifest.get("provisionMode", "snapshot") != (
+            "snapshot" if plugin == "agent-ssh" else "direct"
+        )
         or manifest.get("installer", "install") != "install"
         or manifest.get("noSelfProvisionEnv") != no_self
     ):
@@ -99,6 +109,22 @@ def _inspect(
         raise ProvisionError("owning plugin self-provisioning is disabled")
     if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
+    if plugin == "agent-ssh":
+        if (
+            runtime_root != Path.home() / ".agent-ssh"
+            or payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
+            or payload.name != plugin
+        ):
+            raise ProvisionError("SSH first use requires its canonical installed payload and default legacy root")
+        if (
+            manifest.get("module") != "agent_ssh"
+            or manifest.get("legacyRuntimeRoot") != ".agent-ssh"
+            or manifest.get("payloadRootEnv") != "AGENT_SSH_PAYLOAD_ROOT"
+            or manifest.get("payloadDispatcher") != {
+                "posix": "scripts/runtime-gate.sh", "windows": "scripts/runtime-gate.ps1",
+            }
+        ):
+            raise ProvisionError("SSH first use requires its declared native runtime gate")
     if plugin == "agent-pull-requests":
         installed = payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
         snapshot = payload.parent == runtime_root / "snapshots"
@@ -216,9 +242,11 @@ def enqueue(
             *(("--client-only",) if client_only else ()),
         ],
     )
-    context_keys = (
-        CONTEXT_KEYS if admission["plugin"] == "agent-vault" else PULL_REQUESTS_CONTEXT_KEYS
-    )
+    context_keys = {
+        "agent-vault": CONTEXT_KEYS,
+        "agent-pull-requests": PULL_REQUESTS_CONTEXT_KEYS,
+        "agent-ssh": SSH_CONTEXT_KEYS,
+    }[admission["plugin"]]
     context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
     return core.enqueue(
@@ -260,13 +288,14 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
 
         # Reuse the canonical complete-input copier under this request's custody.
         # Keep these files: native publication may retain a source path into them.
+        legacy_stage = admission["plugin"] in {"agent-pull-requests", "agent-ssh"}
         inputs = _path(
-            runtime_root / ".install-stage" if admission["plugin"] == "agent-pull-requests"
+            runtime_root / ".install-stage" if legacy_stage
             else root / "provision-inputs"
         )
         inputs.mkdir(mode=0o700, parents=True, exist_ok=True)
         destination = inputs / custody.request_id
-        if admission["plugin"] == "agent-pull-requests":
+        if legacy_stage:
             # Keep legacy staging reapers off this live, queue-owned native tree.
             destination = inputs / f"{custody.request_id}-{os.getpid()}" / admission["plugin"]
         frozen = engine.freeze_inputs(payload, destination)

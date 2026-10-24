@@ -58,8 +58,25 @@ plugin="$(query "$identity" name)"
 case "$plugin" in
     agent-vault) prefix=AGENT_VAULT ;;
     agent-pull-requests) prefix=AGENT_PULL_REQUESTS ;;
+    agent-ssh) prefix=AGENT_SSH ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
+if [[ "$plugin" == agent-ssh ]]; then
+    [[ "$runtime" == "$HOME/.agent-ssh" &&
+        "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
+        "$(basename -- "$payload")" == agent-ssh ]] || {
+        printf 'SSH first use requires its canonical installed payload and default legacy root.\n' >&2; exit 1;
+    }
+    [[ "$(query "$manifest" module)" == agent_ssh &&
+        "$(query "$manifest" legacyRuntimeRoot)" == .agent-ssh &&
+        "$(query "$manifest" payloadRootEnv)" == AGENT_SSH_PAYLOAD_ROOT &&
+        "$(query "$manifest" $'payloadDispatcher\034posix')" == scripts/runtime-gate.sh &&
+        "$(query "$manifest" $'payloadDispatcher\034windows')" == scripts/runtime-gate.ps1 &&
+        "$(printf '%s' "$manifest" | LC_ALL=C awk -f "$__foundation_assets/json-query.awk" \
+            -v mode=len -v query_path=payloadDispatcher)" == 2 ]] || {
+        printf 'SSH first use requires its declared native runtime gate.\n' >&2; exit 1;
+    }
+fi
 if [[ "$plugin" == agent-pull-requests ]]; then
     [[ "$runtime" == "$HOME/.agent-pull-requests" && (
         "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" ||
@@ -94,12 +111,25 @@ else
     [[ "$code" == 3 ]] || exit "$code"
     installer=install
 fi
+if [[ "$plugin" == agent-ssh ]]; then
+    if provision_type="$(query_type "$manifest" provisionMode)"; then
+        [[ "$provision_type" == string && "$(query "$manifest" provisionMode)" == snapshot ]] || {
+            printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
+        }
+    else
+        code=$?
+        [[ "$code" == 3 ]] || exit "$code"
+    fi
+else
+    [[ "$(query "$manifest" provisionMode)" == direct ]] || {
+        printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
+    }
+fi
 [[ "$(query "$manifest" schema)" == copilot-extensions.payload-invocation &&
     "$(query_type "$manifest" version)" == number &&
     "$(query "$manifest" version)" == 2 && "$installer" == install &&
     "$(query "$manifest" noSelfProvisionEnv)" == "$no_self" &&
     "$(query "$manifest" command)" == "$plugin" &&
-    "$(query "$manifest" provisionMode)" == direct &&
     "$(query "$manifest" installationContext)" == required ]] || {
     printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
 }

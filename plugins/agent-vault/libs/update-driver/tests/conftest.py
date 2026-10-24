@@ -90,9 +90,12 @@ def owning_context(area, monkeypatch):
     }), encoding="utf-8")
     for key in (
         *provision.CONTEXT_KEYS, *provision.PULL_REQUESTS_CONTEXT_KEYS,
+        *provision.SSH_CONTEXT_KEYS,
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
         "AGENT_PULL_REQUESTS_INSTALL_DIR", "UPDATE_DRIVER_WITNESS",
+        "AGENT_SSH_VALIDATED_CONTEXT", "AGENT_SSH_PAYLOAD_ROOT",
+        "AGENT_SSH_ACTION", "AGENT_SSH_DRY_RUN",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HOME", str(profile))
@@ -190,3 +193,35 @@ def owning_pull_requests(owning_payload):
         },
     }), encoding="utf-8")
     return installed, installation.with_name(".agent-pull-requests"), project
+
+
+@pytest.fixture
+def owning_ssh(owning_pull_requests):
+    payload, installation, project = owning_pull_requests
+    payload = payload.rename(payload.with_name("agent-ssh"))
+    for name in ("plugin.json", "payload-invocation.json", "pyproject.toml"):
+        path = payload / name
+        path.write_text(
+            path.read_text().replace("agent-pull-requests", "agent-ssh").replace(
+                "AGENT_PULL_REQUESTS", "AGENT_SSH",
+            ), encoding="utf-8",
+        )
+    path = payload / "payload-invocation.json"
+    manifest = json.loads(path.read_text())
+    del manifest["provisionMode"]
+    manifest.update(
+        module="agent_ssh", legacyRuntimeRoot=".agent-ssh",
+        payloadRootEnv="AGENT_SSH_PAYLOAD_ROOT",
+        payloadDispatcher={
+            "posix": "scripts/runtime-gate.sh", "windows": "scripts/runtime-gate.ps1",
+        },
+    )
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    for name in ("install.ps1", "install.sh"):
+        path = payload / "scripts" / name
+        path.write_text(path.read_text().replace(
+            "AGENT_PULL_REQUESTS", "AGENT_SSH",
+        ).replace("AGENT_SSH_FORCE", "AGENT_SSH_DRY_RUN").replace(
+            "AGENT_SSH_INSTALL_DIR", "AGENT_SSH_PAYLOAD_ROOT",
+        ), encoding="utf-8")
+    return payload, installation.with_name(".agent-ssh"), project
