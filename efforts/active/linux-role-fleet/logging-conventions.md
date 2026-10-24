@@ -151,3 +151,9 @@ installer attempts, optional spools or a deployment adapter.
   Focused Windows diagnostics plus telemetry now pass 44 tests (17 diagnostics);
   unchanged Bridge concurrent spool append proof passes all 7 tests from #8334.
   No native capture, installer or live scope is promoted by these corrections.
+- 2026-10-23 — Follow-up review correctly identified synchronous history work on
+  coroutine logging. Emission now only appends/rolls the active file; existing
+  off-thread coordinator GC and the supervisor iteration exclusively own ongoing
+  history maintenance. The event-loop regression proves emission does no history
+  scan even when expired archives exist, and the real GC regression asserts
+  maintenance scans execute off the event-loop thread.

@@ -267,7 +267,6 @@ class DiagnosticLog(logging.Handler):
             if record.exc_info:
                 event["exception"] = logging.Formatter().formatException(record.exc_info)
             data = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
-            self.maintain()
             with self._custody():
                 self._rollover(now)
                 with self.path.open("ab") as target:
@@ -296,7 +295,7 @@ def inventory(root: Path | None = None) -> dict:
             "exists": active.is_file(),
             "archives": [str(p) for p in _diagnostic_files(directory, component) if p != active],
             "retention": "30-day-record-age",
-            "maintenance": "startup, emission and existing daemon maintenance",
+            "maintenance": "startup and existing daemon maintenance (not emission)",
             "write_health": "unknown-from-discovery",
             "unparseable_timestamps": "retained with a degraded diagnostic; never age-guessed",
         })

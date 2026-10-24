@@ -33,8 +33,11 @@ guessed away. A backward clock does not expire future evidence. This cannot undo
 expiry already performed before a clock was corrected.
 
 The handler rolls active output at UTC date changes or 5 MB, with no backup-count
-limit replacing age retention. Each normal emission checks maintenance eligibility;
-at most once per 60 seconds it prunes records in active **and** archived files.
+limit replacing age retention. Emission only appends/rolls the current file:
+it never scans or prunes history on a coordinator coroutine's event-loop thread.
+Existing daemon maintenance prunes active **and** archived files, debounced to at
+most once per 60 seconds. The coordinator invokes it through `asyncio.to_thread`;
+the supervisor already has a synchronous maintenance iteration.
 Unchanged segments reuse in-memory file-identity/size/time-validated earliest
 expiry information; unexpired history is not repeatedly parsed or copied.
 Only files with expired records are rewritten, and custody is yielded between

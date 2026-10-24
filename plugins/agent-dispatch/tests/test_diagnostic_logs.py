@@ -8,6 +8,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -237,6 +238,16 @@ def test_coordinator_quiet_maintenance_runs_before_governance_backoff(tmp_path, 
     package = logging.getLogger("agent-dispatch")
     package.addHandler(handler)
     calls = []
+    event_loop_thread = threading.get_ident()
+    scan_threads = []
+    original_scan = handler._scan
+
+    def scan(path):
+        scan_threads.append(threading.get_ident())
+        assert threading.get_ident() != event_loop_thread
+        return original_scan(path)
+
+    monkeypatch.setattr(handler, "_scan", scan)
 
     async def sleep(_interval):
         if calls:
@@ -255,6 +266,7 @@ def test_coordinator_quiet_maintenance_runs_before_governance_backoff(tmp_path, 
                 health=SimpleNamespace(current_interval=1.0, base_interval=1.0),
                 governance_backoff=backoff,
             ))
+        assert scan_threads
     finally:
         package.removeHandler(handler)
         handler.close()
@@ -398,3 +410,29 @@ def test_discovery_honors_actual_lifecycle_routing_override(tmp_path, monkeypatc
     ]
     assert location["retention"] == "not-managed-by-application-handler"
     assert not root.exists()
+
+
+def test_event_loop_emission_does_no_history_work_when_expiry_is_due(tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc)
+    handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
+    archive = handler.directory / (
+        "coordinator.20260901T000000000000Z-" + "a" * 32 + ".jsonl"
+    )
+    seed(archive, now - timedelta(days=31))
+    scans = []
+
+    def scan(path):
+        scans.append(path)
+        raise AssertionError("history scan on the event-loop emission path")
+
+    monkeypatch.setattr(handler, "_scan", scan)
+
+    async def coroutine():
+        handler.emit(record_at(now, "request coroutine remains independent of history"))
+        await asyncio.sleep(0)
+
+    asyncio.run(coroutine())
+    assert scans == []
+    assert handler.last_error is None
+    assert archive.exists()  # only the off-thread owner may prune this history
+    assert json.loads(handler.path.read_text(encoding="utf-8"))["message"].startswith("request")
