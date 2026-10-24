@@ -60,7 +60,10 @@ def _bundle_sources() -> tuple[tuple[str, Path], ...]:
     return tuple(
         (f"agent_bridge/{rel}", _pkg_root() / rel)
         for rel in _AGENT_BRIDGE_MODULES
-    ) + (("agent_procutil/__init__.py", procutil_source),)
+    ) + (
+        ("agent_procutil/__init__.py", procutil_source),
+        ("agent_bridge/hosting_policy.py", _pkg_root() / "session_host/receiver_policy.py"),
+    )
 
 
 def bundle_source_hash() -> str:

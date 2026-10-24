@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .db_live_session_aliases import CANONICAL_SESSION_SQL as _CANON
+from .runtime_custody import RuntimeCustodyError
 
 
 class LiveControlsMixin:
@@ -27,6 +28,14 @@ class LiveControlsMixin:
                 session_id = conn.execute(
                     f"SELECT {_CANON}", (session_id, session_id)
                 ).fetchone()[0]
+                if conn.execute(
+                    "SELECT 1 FROM live_messages WHERE session_id=? AND kind LIKE 'control:%' "
+                    "AND (runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL) LIMIT 1",
+                    (session_id,),
+                ).fetchone() is not None:
+                    raise RuntimeCustodyError(
+                        "Associated controls require qualified control handoff admission"
+                    )
                 conn.execute(
                     "UPDATE live_messages SET delivered_at=?, outcome='expired' "
                     "WHERE session_id=? AND kind LIKE 'control:%' "
@@ -61,7 +70,8 @@ class LiveControlsMixin:
         cur = self.execute_write(
             "UPDATE live_messages SET delivered_at=?, outcome='withdrawn' "
             f"WHERE session_id={_CANON} AND id=? AND kind LIKE 'control:%' "
-            "AND delivered_at IS NULL AND claimed_at IS NULL",
+            "AND delivered_at IS NULL AND claimed_at IS NULL "
+            "AND runtime_custody_json IS NULL AND handoff_json IS NULL",
             (now, session_id, session_id, control_id),
         )
         return cur.rowcount == 1

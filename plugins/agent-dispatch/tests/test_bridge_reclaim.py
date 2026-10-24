@@ -59,11 +59,13 @@ def test_resume_then_send_happy_path_no_holder(monkeypatch):
     result = _resume(monkeypatch, fake_run, wait=False)
     assert result.returncode == 0
     assert len(calls) == 2
-    assert calls[0] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1"]
+    assert calls[0] == [
+        "/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--require-agent-hosting",
+    ]
     assert "--force" not in calls[0]
     assert "--strict" not in calls[0]  # allow_takeover=True (default) -> non-strict
     assert calls[1] == [
-        "/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file", "-",
+        "/usr/bin/agent-bridge", "send", "resumed-9", "--require-agent-hosting", "--prompt-file", "-",
         "--caller", "agent-dispatch:w1", "--no-wait",
     ]
 
@@ -83,7 +85,7 @@ def test_non_forcing_recovery_requests_strict_resume(monkeypatch):
     result = _resume(monkeypatch, fake_run, allow_takeover=False, wait=False)
     assert result.returncode == 0
     assert calls[0] == [
-        "/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--strict",
+        "/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--require-agent-hosting", "--strict",
     ]
 
 

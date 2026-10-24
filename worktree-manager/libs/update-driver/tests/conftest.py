@@ -88,7 +88,12 @@ def owning_context(area, monkeypatch):
             {"name": "agent-vault", "source": "./plugins/agent-vault"},
         ],
     }), encoding="utf-8")
-    for key in (*provision.CONTEXT_KEYS, "AGENT_VAULT_VALIDATED_CONTEXT", "UPDATE_DRIVER_WITNESS"):
+    for key in (
+        *provision.CONTEXT_KEYS, *provision.PULL_REQUESTS_CONTEXT_KEYS,
+        "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
+        "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
+        "AGENT_PULL_REQUESTS_INSTALL_DIR", "UPDATE_DRIVER_WITNESS",
+    ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HOME", str(profile))
     monkeypatch.setenv("USERPROFILE", str(profile))
@@ -145,3 +150,43 @@ def owning_payload(owning_context):
         encoding="utf-8",
     )
     return payload, installation, project
+
+
+@pytest.fixture
+def owning_pull_requests(owning_payload):
+    payload, installation, project = owning_payload
+    payload = payload.rename(payload.with_name("agent-pull-requests"))
+    for name in ("plugin.json", "payload-invocation.json", "pyproject.toml"):
+        path = payload / name
+        path.write_text(
+            path.read_text().replace("agent-vault", "agent-pull-requests").replace(
+                "AGENT_VAULT", "AGENT_PULL_REQUESTS",
+            ),
+            encoding="utf-8",
+        )
+    catalog = payload.parents[1] / ".github" / "plugin" / "marketplace.json"
+    catalog.write_text(
+        catalog.read_text().replace("agent-vault", "agent-pull-requests"), encoding="utf-8",
+    )
+    scripts = payload / "scripts"
+    windows = scripts / "install.ps1"
+    windows.write_text(windows.read_text().replace(
+        "[switch]$NoService", "[switch]$Unsupported"
+    ).replace(
+        "if ($Action", "if ($env:AGENT_PULL_REQUESTS_FORCE -or $env:AGENT_PULL_REQUESTS_ACTION "
+        "-or $env:AGENT_PULL_REQUESTS_INSTALL_DIR) { exit 92 }\nif ($Action", 1,
+    ).replace("[bool]$NoService", "[bool]$Unsupported"), encoding="utf-8")
+    posix = scripts / "install.sh"
+    posix.write_text(posix.read_text().replace(
+        "mkdir -p", '[[ -z "${AGENT_PULL_REQUESTS_FORCE:-}" && '
+        '-z "${AGENT_PULL_REQUESTS_ACTION:-}" && -z "${AGENT_PULL_REQUESTS_INSTALL_DIR:-}" ]]\n'
+        '[[ "$#" == 3 ]]\nmkdir -p', 1,
+    ), encoding="utf-8")
+    installed = installation.parent / ".copilot" / "installed-plugins" / "fixture-market" / payload.name
+    shutil.copytree(payload, installed)
+    (installation.parent / ".copilot" / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "fixture-market": {"source": {"source": "github", "repo": "example/fixture-market"}},
+        },
+    }), encoding="utf-8")
+    return installed, installation.with_name(".agent-pull-requests"), project

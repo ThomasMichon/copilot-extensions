@@ -575,6 +575,13 @@ def launch_plan_from_dict(d: dict) -> LaunchPlan:
     )
 
 
+def require_agent_hosting(path: str, *, operation: str = "launch") -> dict:
+    """Require fresh engine policy, including on unadopted source repositories."""
+    from .hosting_admission import require_agent_hosting as require
+
+    return require(path, operation=operation, request=run_json, failure=EngineError)
+
+
 def resolve_launch_plan(
     project: str,
     *,
@@ -608,8 +615,8 @@ def resolve_launch_plan(
 
     Prompted New/Resume requests require typed retry staging. An older engine
     must refuse the capability flag before mutation, rather than silently
-    dropping preservation. Ordinary seedless launches retain version-skew
-    compatibility.
+    dropping preservation. Every launch also requires hosting-policy admission;
+    an engine predating that capability is refused without a weaker fallback.
     Explicitly bounded remote prompted requests allow at least 240 seconds:
     the outer engine must outlive its 180-second SSH admission and startup.
 
@@ -629,7 +636,7 @@ def resolve_launch_plan(
             "resolve requires exactly one of worktree_id, new=True, or base=True"
         )
 
-    args = ["resolve", "--json"]
+    args = ["resolve", "--json", "--require-agent-hosting"]
     require_staging = bool(seed) or bool(defer_new_seed)
     if require_staging:
         args += ["--stage-launch-seed", "--require-native-seed"]
@@ -662,6 +669,11 @@ def resolve_launch_plan(
         )
     except EngineError as e:
         detail = _engine_error_detail(e)
+        if "unrecognized arguments" in detail and "--require-agent-hosting" in detail:
+            raise EngineFeatureUnavailable(
+                "the installed engine cannot enforce repository hosting policy; "
+                "update agent-worktrees before launching"
+            ) from e
         if require_staging and "unrecognized arguments" in detail and any(
             flag in detail for flag in ("--stage-launch-seed", "--require-native-seed")
         ):
@@ -696,7 +708,7 @@ def resolve_launch_plan(
         ):
             obj = run_json(
                 project,
-                ["resolve", "--base", "--no-mux"],
+                ["resolve", "--base", "--no-mux", "--require-agent-hosting"],
                 timeout=timeout,
                 stream_progress=True,
             )

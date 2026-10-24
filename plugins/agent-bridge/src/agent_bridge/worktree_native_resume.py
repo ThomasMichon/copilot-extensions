@@ -211,6 +211,9 @@ async def _resume(
             return _cli_info(native, owner, entry, config, live[0])
         raise _refuse("live_holder", "A represented execution leg still holds this workspace")
 
+    from .hosting_policy import require_owner_hosting
+
+    await require_owner_hosting(owner, resolver, entry.path, operation="native resume")
     preflight = await command([
         "embody", "--worktree-id", worktree_id, "--json",
         "--bridge-acquisition", native, "--require-native-admission", "--dry-run",
@@ -236,6 +239,7 @@ async def _resume(
     if manager.is_draining:
         raise _refuse("draining", "Bridge drained during preparation", status=503)
 
+    await require_owner_hosting(owner, resolver, entry.path, operation="native resume")
     session = None
     if mode == "acp":
         target = replace(
@@ -341,7 +345,9 @@ async def _load_acp(
     head: Callable[[], Awaitable[dict[str, Any]]],
 ) -> SessionInfo:
     from .routes.sessions import _session_info
+    from .hosting_policy import require_session_hosting
 
+    await require_session_hosting(manager, session, operation="native resume")
     _claim_gate(db, store, worktree_id, delivery, "acp", session.session_id, native)
     if not db.reserve_worktree_ownership(worktree_id, session.session_id, now=time.time()):
         raise _refuse("live_holder", "Could not acquire native workspace ownership")

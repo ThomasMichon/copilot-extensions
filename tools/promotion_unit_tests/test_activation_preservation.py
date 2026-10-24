@@ -1,10 +1,13 @@
-"""Expose the original synthetic activation-preservation units unchanged."""
+"""Run original preservation assertions with synthetic, non-native file reads."""
 
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,6 +32,14 @@ _original = _load_source(
     "promotion_original_activation_preservation",
     ROOT / "libs/plugin-activation/tests/test_preservation.py",
 )
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_file_operations(monkeypatch):
+    monkeypatch.setattr(_original.state, "open_binary_shared", lambda path: path.open("rb"))
+    monkeypatch.setattr(_original.state, "_replace_state", os.replace)
+
+
 for _name, _function in vars(_original).items():
     if _name.startswith("test_"):
         assert _name not in globals(), f"duplicate original preservation test: {_name}"

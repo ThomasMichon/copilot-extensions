@@ -9,6 +9,11 @@ through its routing table (`active.json`), so nothing well-known is reserved
 manages agent conversations across multiple Copilot CLI sessions,
 spawning agent subprocesses locally or via SSH.
 
+Managed authoring launch and cold resume honor
+[repository-owned hosting eligibility](repository-hosting.md). Fresh caller and
+receiver checks are independent of discovery, existing custody and source-only
+access; opaque provider/relay protocols currently refuse before launch.
+
 ```
 Copilot CLI sessions (multiple)
   |
@@ -480,6 +485,9 @@ POST   /api/v1/gc                        # Prune aged terminal/disconnected sess
 
 These back the zero-downtime redeploy flow -- see
 [Zero-Downtime Redeploy](#zero-downtime-redeploy).
+The separate [negotiated cold-drain contract](cold-drain.md) covers explicit
+incompatible-preservation interruption and same-native reconnect; it does not
+satisfy required-graceful rollout.
 
 ### Session States
 

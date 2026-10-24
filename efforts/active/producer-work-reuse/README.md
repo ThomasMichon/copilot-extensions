@@ -15,6 +15,11 @@ within its source, authority, configuration and lifetime generation. Keep
 missing, partial and stale evidence distinct from authoritative emptiness.
 An unchanged observation timestamp is not a performance improvement.
 
+The [S3 inventory-freshness amendment proposal](inventory-freshness-plan.md)
+adds durable all-venue inventory, push-assisted bounded staleness and
+representative one-session-per-venue profiles. It is a design/review gate, not
+cache/push implementation admission or a change to credential safety.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -67,6 +72,16 @@ proposed.
 
 ## Request
 
+**Later direction — public-safe summary, not a quotation:** retain last-known
+inventory for all active and inactive/stopped CodeSpaces, with per-source
+freshness and per-venue observations; prefer notifications on existing owned
+SSH transports and explicit stale/out-of-band reconciliation. Characterize a
+configurable two-account, 0/1/4/8-active, one-ACP-or-Mux-session profile, keeping
+historical multi-mux stress evidence intact. No universal runtime cap, private
+quota premise, new remote stack, credential cache or source-ownership transfer
+is implied. The [amendment](inventory-freshness-plan.md) demarcates proposed
+storage/policy details and decisions still required before functional work.
+
 Public-safe capture of the requested scope, with private coordination specifics
 removed: produce concrete, code-grounded implementation plans for Bridge
 namespace caching, Dispatch declarations/health batching, and CodeSpaces
@@ -84,6 +99,17 @@ are **agent-recommended implementation proposals**, not measurements or newly
 authorized runtime behavior.
 
 ## Plan
+
+### S3 inventory freshness amendment — plan/review only
+
+- [x] Trace current inventory, eligibility storage, availability, transport and
+  ACP ownership seams; retain narrow candidate API authorization separately.
+- [x] Characterize revised Mux profiles without changing functional algorithms;
+  preserve original raw stress evidence and mark ACP/full mixed cost unavailable.
+- [ ] Review the [amendment](inventory-freshness-plan.md), record storage/grace/
+  action-publication decisions, and obtain exact source-owner seam admission.
+- [ ] Implement only after those gates; qualify real cache-hit/push/due/stale/
+  disconnected cases and independent ACP/Mux routes before source completion.
 
 ### Phase 1 — Source-grounded proposal
 

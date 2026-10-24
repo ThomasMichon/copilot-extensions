@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import hmac
@@ -42,6 +43,13 @@ class VerifiedIdentity:
     verified_at: int
     evidence: str
     profile: str = "jwt-pop-v1"
+
+
+@dataclass(frozen=True, repr=False)
+class _AccessBinding:
+    subject: str
+    proof_key: str
+    expires_at: int
 
 
 def _text(value, maximum=256):
@@ -143,6 +151,9 @@ class IdentityVerifier:
     not independent replicas with a common nonce or independent replay caches.
     """
 
+    _issuer: str
+    _audience: str
+
     def __init__(self, *, issuer, audience, jwks, trust_valid_until, clock,
                  replay_capacity=MAX_REPLAYS):
         if (not _https(issuer) or not _text(audience, 512)
@@ -195,7 +206,33 @@ class IdentityVerifier:
             raise IdentityError("authority-unavailable")
         return now
 
-    def verify(self, access_token, proof, *, method, target_uri):
+    def _audience_matches(self, audience: object) -> bool:
+        return audience == self._audience
+
+    def _access_binding(self, claims: Mapping[str, object],
+                        kind: str | None) -> _AccessBinding:
+        subject, expires = claims.get("sub"), claims.get("exp")
+        if not isinstance(subject, str) or type(expires) is not int:
+            raise IdentityError("invalid-credential")
+        cnf = claims.get("cnf")
+        if (not isinstance(cnf, dict) or set(cnf) != {"jkt"}
+                or not isinstance(cnf["jkt"], str)
+                or not _text(cnf["jkt"], 43) or len(cnf["jkt"]) != 43):
+            raise IdentityError("invalid-key-binding")
+        return _AccessBinding(subject, cnf["jkt"], expires)
+
+    def _identity(self, claims: Mapping[str, object], binding: _AccessBinding,
+                  now: int, evidence: str, kind: str | None) -> VerifiedIdentity:
+        issued = claims["iat"]
+        assert type(issued) is int
+        return VerifiedIdentity(
+            issuer=self._issuer, subject=binding.subject, audience=self._audience,
+            proof_key=binding.proof_key, issued_at=issued,
+            expires_at=binding.expires_at, verified_at=now, evidence=evidence,
+        )
+
+    def verify(self, access_token: str, proof: str, *, method: str,
+               target_uri: str, kind: str | None = None) -> VerifiedIdentity:
         """Verify one request using server-derived method/HTTPS URI and owned clock.
 
         The caller must establish encrypted server-authenticated transport and
@@ -217,17 +254,14 @@ class IdentityVerifier:
             raise IdentityError("unknown-key")
         _verify(access_token, key)
         if (claims.get("iss") != self._issuer or not _text(claims.get("sub"))
-                or claims.get("aud") != self._audience
+                or not self._audience_matches(claims.get("aud"))
                 or not _time(claims.get("iat")) or not _time(claims.get("exp"))
                 or claims["exp"] <= claims["iat"]):
             raise IdentityError("invalid-credential")
         if "nbf" in claims and (
                 not _time(claims["nbf"]) or claims["nbf"] >= claims["exp"]):
             raise IdentityError("invalid-credential")
-        cnf = claims.get("cnf")
-        if (not isinstance(cnf, dict) or set(cnf) != {"jkt"}
-                or not _text(cnf["jkt"], 43) or len(cnf["jkt"]) != 43):
-            raise IdentityError("invalid-key-binding")
+        binding = self._access_binding(claims, kind)
         proof_header, proof_claims = _parts(proof, MAX_PROOF_BYTES)
         if (set(proof_header) != {"alg", "typ", "jwk"}
                 or proof_header["alg"] != "ES256"
@@ -235,7 +269,7 @@ class IdentityVerifier:
             raise IdentityError("invalid-proof")
         proof_key = _public_key(proof_header["jwk"])
         _verify(proof, proof_key)
-        if not hmac.compare_digest(proof_key.thumbprint(), cnf["jkt"]):
+        if not hmac.compare_digest(proof_key.thumbprint(), binding.proof_key):
             raise IdentityError("invalid-key-binding")
         required = {"jti", "htm", "htu", "iat", "ath", "nonce"}
         if (set(proof_claims) != required or not _text(proof_claims["jti"], 128)
@@ -249,10 +283,10 @@ class IdentityVerifier:
         if (not _text(proof_claims["ath"], 43)
                 or not hmac.compare_digest(proof_claims["ath"], token_hash)):
             raise IdentityError("invalid-token-binding")
-        replay_id = (cnf["jkt"], proof_claims["jti"])
+        replay_id = (binding.proof_key, proof_claims["jti"])
         with self._lock:
             now = self._now_locked()
-            if now >= claims["exp"]:
+            if now >= binding.expires_at:
                 raise IdentityError("expired-credential")
             if (claims["iat"] > now + CLOCK_SKEW
                     or claims.get("nbf", 0) > now + CLOCK_SKEW):
@@ -267,8 +301,5 @@ class IdentityVerifier:
             if len(self._replays) >= self._capacity:
                 raise IdentityError("resource-limit")
             self._replays[replay_id] = proof_claims["iat"] + PROOF_AGE + CLOCK_SKEW
-        return VerifiedIdentity(
-            issuer=self._issuer, subject=claims["sub"], audience=self._audience,
-            proof_key=cnf["jkt"], issued_at=claims["iat"], expires_at=claims["exp"],
-            verified_at=now, evidence=hashlib.sha256(proof.encode("ascii")).hexdigest(),
-        )
+        return self._identity(
+            claims, binding, now, hashlib.sha256(proof.encode("ascii")).hexdigest(), kind)

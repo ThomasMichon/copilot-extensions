@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Installation driver lifecycle contract: vault-stamp-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then
@@ -42,8 +43,7 @@ for path in "$payload" "$runtime"; do
         printf 'Execution root must be separate from owning payload and installation.\n' >&2; exit 1;
     }
 done
-[[ -d "$payload" && -d "$project" && -z "${AGENT_VAULT_NO_SELFPROVISION:-}" &&
-    ! -v AGENT_VAULT_PINNED_CONTEXT ]] || {
+[[ -d "$payload" && -d "$project" ]] || {
     printf 'Owning plugin first-use provisioning is unavailable or disabled.\n' >&2; exit 1;
 }
 query() {
@@ -54,6 +54,36 @@ query_type() {
 }
 manifest="$(cat -- "$payload/payload-invocation.json")"
 identity="$(cat -- "$payload/plugin.json")"
+plugin="$(query "$identity" name)"
+case "$plugin" in
+    agent-vault) prefix=AGENT_VAULT ;;
+    agent-pull-requests) prefix=AGENT_PULL_REQUESTS ;;
+    *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
+esac
+if [[ "$plugin" == agent-pull-requests ]]; then
+    [[ "$runtime" == "$HOME/.agent-pull-requests" && (
+        "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" ||
+        "$(dirname -- "$payload")" == "$runtime/snapshots" ) ]] || {
+        printf 'Pull Requests first use requires its canonical installed payload or selected legacy snapshot.\n' >&2
+        exit 1
+    }
+    if [[ "$(dirname -- "$payload")" == "$runtime/snapshots" ]]; then
+        _native_foundation_plain "$payload/snapshot-provenance.json" file
+        receipt="$(cat -- "$payload/snapshot-provenance.json")"
+        [[ "$(query "$receipt" schema)" == copilot-extensions.legacy-snapshot-source ]] || {
+            printf 'Pull Requests first use requires canonical selected snapshot provenance.\n' >&2; exit 1;
+        }
+    fi
+fi
+[[ "$plugin" == agent-vault || "${#service_mode[@]}" == 0 ]] || {
+    printf 'Client-only selection is unsupported by the owning installer.\n' >&2; exit 1;
+}
+no_self="${prefix}_NO_SELFPROVISION"
+pinned="${prefix}_PINNED_CONTEXT"
+[[ -z "${!no_self:-}" && ! -v "$pinned" &&
+    ( "$plugin" != agent-pull-requests || ! -v "$no_self" ) ]] || {
+    printf 'Owning plugin first-use provisioning is unavailable or disabled.\n' >&2; exit 1;
+}
 if installer_type="$(query_type "$manifest" installer)"; then
     [[ "$installer_type" == string ]] || {
         printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
@@ -64,25 +94,24 @@ else
     [[ "$code" == 3 ]] || exit "$code"
     installer=install
 fi
-[[ "$(query "$identity" name)" == agent-vault &&
-    "$(query "$manifest" schema)" == copilot-extensions.payload-invocation &&
+[[ "$(query "$manifest" schema)" == copilot-extensions.payload-invocation &&
     "$(query_type "$manifest" version)" == number &&
     "$(query "$manifest" version)" == 2 && "$installer" == install &&
-    "$(query "$manifest" noSelfProvisionEnv)" == AGENT_VAULT_NO_SELFPROVISION &&
-    "$(query "$manifest" command)" == agent-vault &&
+    "$(query "$manifest" noSelfProvisionEnv)" == "$no_self" &&
+    "$(query "$manifest" command)" == "$plugin" &&
     "$(query "$manifest" provisionMode)" == direct &&
     "$(query "$manifest" installationContext)" == required ]] || {
     printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
 }
 admission="$(COPILOT_PLUGIN_ROOT="$payload" bash \
     "$payload/scripts/installation-context/installation-context.sh" probe-plugin-publication \
-    --payload-root "$payload" --plugin-id agent-vault --legacy-root "$runtime" \
+    --payload-root "$payload" --plugin-id "$plugin" --legacy-root "$runtime" \
     --project-root "$project")"
 selected_root="$(query "$admission" runtimeRoot)"
 if [[ -z "$selected_root" ]]; then selected_root="$(query "$admission" $'legacy\034root')"; fi
 provenance="$(COPILOT_PLUGIN_ROOT="$payload" bash \
     "$payload/scripts/installation-context/installation-context.sh" resolve \
-    --payload-root "$payload" --plugin-id agent-vault --project-root "$project")"
+    --payload-root "$payload" --plugin-id "$plugin" --project-root "$project")"
 source_id="$(query "$provenance" sourceFingerprint)"
 [[ "$(query "$admission" status)" == ready && "$(query "$admission" actualMode)" == legacy &&
     "$(query "$admission" $'deployment\034allowPluginPublication')" == true &&
@@ -100,6 +129,8 @@ if [[ "$run_owner" == 0 ]]; then
         "$root" "$payload" "$runtime" "$project" --run-owner "$source_id" \
         --installer-action "$installer_action" "${service_mode[@]}"
     if [[ "$wait_for_owner" == 1 ]]; then
+        printf '[installation-driver] launch acknowledgement: launched:%s log:%s\n' \
+            "$__native_daemon_pid" "$log" >&2
         code=0
         wait "$__native_daemon_pid" || code=$?
         cat -- "$log" >&2

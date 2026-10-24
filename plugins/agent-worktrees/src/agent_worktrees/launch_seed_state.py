@@ -140,9 +140,13 @@ def execution_leg_mutation(
 
 
 def _apply_stage(args: dict) -> dict:
+    from . import agent_policy
+
     path = Path(args["yaml_path"])
+    agent_policy.require_record(path)
     with tracking._RecordLock(path, require_sidecar=True):
         record = _record(args)
+        agent_policy.require(record.worktree_path)
         current = peek(path)
         text = args.get("text")
         kind = args.get("kind")
@@ -183,9 +187,13 @@ def _apply_stage(args: dict) -> dict:
 
 
 def _apply_take(args: dict) -> dict:
+    from . import agent_policy
+
     path = Path(args["yaml_path"])
+    agent_policy.require_record(path)
     with tracking._RecordLock(path, require_sidecar=True):
         record = _record(args)
+        agent_policy.require(record.worktree_path)
         current = peek(path)
         if current is None:
             return {"seed": None, "reason": "missing"}
@@ -292,7 +300,7 @@ def _valid_birth_token(value: object) -> bool:
 
 def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
     if verb in {"launch_seed_stage", "launch_seed_take"}:
-        min_version = max(min_version, 5)
+        min_version = max(min_version, 7)
     enabled = status_monitor_runtime._status_monitor_enabled()
 
     def read_authority():
@@ -319,7 +327,10 @@ def _dispatch(verb: str, args: dict, *, min_version: int = 4) -> dict:
         boot_wait_s=tracking_write.BOOT_WAIT_S if enabled else 0.0,
         min_version=min_version,
     )
-    if result.get("error") in {"execution_space", "launch_admission"}:
+    if result.get("error") in {
+        "execution_space", "launch_admission",
+        "repository-agent-exposure-invalid", "repository-agent-exposure-denied",
+    }:
         raise ValueError(result["message"])
     if result.get("error") == "native_transport":
         raise NativeSeedTransportError(result["message"])
@@ -330,6 +341,9 @@ def stage(
     yaml_path: Path, *, kind: Literal["new", "resume"] | None = None, text: str | None = None,
     seed_id: str | None = None,
 ) -> LaunchSeed | None:
+    from . import agent_policy
+
+    agent_policy.require_record(yaml_path)
     result = _dispatch("launch_seed_stage", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "seed_id": seed_id or uuid.uuid4().hex, "kind": kind, "text": text,
@@ -339,6 +353,9 @@ def stage(
 
 def take(yaml_path: Path, *, seed_id: str | None = None, kind: str | None = None,
          handoff_id: str | None = None) -> dict:
+    from . import agent_policy
+
+    agent_policy.require_record(yaml_path)
     return _dispatch("launch_seed_take", {
         "yaml_path": str(yaml_path), "worktree_id": yaml_path.stem,
         "seed_id": seed_id, "kind": kind,
@@ -412,9 +429,16 @@ def settle_creation(yaml_path: Path, receipt: dict, result: dict) -> dict:
 
 def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict]:
     def apply(args: dict) -> dict:
+        from . import agent_policy
+        from repository_policy import AgentHostingError
+
         try:
+            if handler in {_apply_stage, _apply_take}:
+                agent_policy.require_record(Path(args["yaml_path"]))
             with launch_admission.guard(Path(args["yaml_path"]), timeout=2.0):
                 return handler(args)
+        except AgentHostingError as exc:
+            return {"error": exc.code, "message": str(exc)}
         except launch_admission.LaunchAdmissionBusy as exc:
             logging.getLogger(__name__).warning(
                 "Rejecting launch-seed mutation for %s: %s", args.get("worktree_id"), exc,
@@ -430,8 +454,8 @@ def _authority_checked(handler: Callable[[dict], dict]) -> Callable[[dict], dict
     return apply
 
 
-tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=5)
-tracking_write.register_verb("launch_seed_take", _authority_checked(_apply_take), version=5)
+tracking_write.register_verb("launch_seed_stage", _authority_checked(_apply_stage), version=7)
+tracking_write.register_verb("launch_seed_take", _authority_checked(_apply_take), version=7)
 tracking_write.register_verb("launch_seed_restore", _authority_checked(_apply_restore), version=4)
 tracking_write.register_verb("launch_seed_finish", _authority_checked(_apply_finish), version=4)
 tracking_write.register_verb("launch_seed_remove", _authority_checked(_apply_remove), version=5)

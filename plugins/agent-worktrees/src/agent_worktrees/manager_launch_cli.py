@@ -298,7 +298,7 @@ def _resolve_direct_launch_plan(
 ) -> tuple[dict[str, object], str | None]:
     """Resolve the same launch plan the mux launchers consume, but in Python."""
     resolve_args = _agent_worktrees_launch_command(project)
-    resolve_args += ["resolve", "--no-mux", *passthrough]
+    resolve_args += ["resolve", "--no-mux", "--require-agent-hosting", *passthrough]
     proc = subprocess.run(
         resolve_args,
         stdout=subprocess.PIPE,

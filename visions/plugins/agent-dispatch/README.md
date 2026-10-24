@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-21
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -83,6 +83,15 @@ notification. It does **not** run agents, decide priority policy, or embody a
 worker; those belong to the layers around it. Its transport posture matches the
 rest of the fabric's control plane: it is reached **over the fabric's secured
 mesh**, never a raw public listener (see the parent vision's transport rule).
+
+Coordination follows the service model's
+[user-owned boundary](../../plugin-services/README.md#user-owned-coordination-boundary):
+authorized local participants do not need a separate token identity per agent.
+Cross-container access authenticates at the network bridge's proxy wrapper,
+without exposing an unauthenticated service bypass. Task ownership, attachment
+incarnations and revisions still fence stale execution. A disconnect or timeout
+retains the original accepted work and unknown effects for recovery; it neither
+discards the task nor authorizes duplicate execution.
 
 ### Logical machines and local execution authority
 

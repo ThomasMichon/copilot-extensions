@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-bridge"
-version = "0.9.132-dev1"
+version = "0.9.133-dev1"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-repository-policy",
     "agent-process-telemetry",
     "fastapi>=0.141.1",
     # Plain uvicorn (not the [standard] extra) so the HTTP path stays pure
@@ -50,6 +51,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-repository-policy = { path = "libs/repository-policy" }
 agent-process-telemetry = { path = "libs/process-telemetry" }
 agent-worktree-identity = { path = "libs/worktree-identity" }
 # Always resolve the vendored lib from the local path, never an index.

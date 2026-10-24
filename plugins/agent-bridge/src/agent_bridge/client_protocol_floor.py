@@ -23,18 +23,27 @@ def connection_refused(exc: BaseException) -> bool:
     return False
 
 
-def protocol_floored_request(client: Any, floor: int) -> _Request:
+def protocol_floored_request(
+    client: Any, floor: int, *, capabilities: dict[str, int] | None = None,
+) -> _Request:
     """Compose with an existing floor without hiding lower-floor retry loops."""
     request = client._request
+    required = dict(capabilities or {})
     if isinstance(request, partial) and request.func is _request_with_floor:
         floor = max(floor, request.keywords["floor"])
+        for name, version in request.keywords["capabilities"].items():
+            required[name] = max(version, required.get(name, 0))
         request = request.keywords["request"]
-    return partial(_request_with_floor, client=client, floor=floor, request=request)
+    return partial(
+        _request_with_floor, client=client, floor=floor, request=request,
+        capabilities=required,
+    )
 
 
 def _request_with_floor(
     method: str, path: str, *args: Any,
-    client: Any, floor: int, request: _Request, **kwargs: Any,
+    client: Any, floor: int, request: _Request, capabilities: dict[str, int],
+    **kwargs: Any,
 ) -> dict[str, Any] | None:
     from .client import BridgeClientError, BridgeConnectionError
 
@@ -56,7 +65,8 @@ def _request_with_floor(
             if base:
                 client._base = base.rstrip("/")
         try:
-            version = int((attempt("GET", "/health") or {}).get("protocol_version") or 0)
+            health = attempt("GET", "/health") or {}
+            version = int(health.get("protocol_version") or 0)
         except (BridgeConnectionError, OSError, TypeError, ValueError):
             unanswered = BridgeConnectionError(
                 f"the bridge daemon at {client._base} didn't answer a protocol check in time; "
@@ -71,6 +81,15 @@ def _request_with_floor(
                 426, f"the bridge daemon now at {client._base} predates protocol "
                 f"{floor}; not sending the request there",
             )
+        advertised = health.get("capabilities")
+        for name, minimum in capabilities.items():
+            actual = advertised.get(name) if isinstance(advertised, dict) else None
+            if type(actual) is not int or actual < minimum:
+                raise BridgeClientError(
+                    426, f"the bridge daemon now at {client._base} does not support "
+                    f"required capability {name} version {minimum}; "
+                    "the request was not sent",
+                )
         if last_error is not None and time.monotonic() >= deadline:
             raise last_error
         try:

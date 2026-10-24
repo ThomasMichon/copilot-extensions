@@ -1,0 +1,34 @@
+{
+  "name": "fresh-installer-failure",
+  "description": "Credential-free Linux Tier-P witness of real first-install dependency failure with isolated package feeds and an empty cache, native exit status, durable lifecycle records and absent runtime publication.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": ["git", "python3", "uv", "timeout", "runner --block-public-feeds"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "none",
+    "gh": "none",
+    "ado": "none"
+  },
+  "config": {
+    "CR_SOURCE_REPO": "https://github.com/ThomasMichon/copilot-extensions.git",
+    "CR_SOURCE_COMMIT": "required full merged dev commit",
+    "CR_SOURCE_PLUGIN": "agent-bridge (default) or agent-dispatch; run separately in fresh containers"
+  },
+  "expected_artifacts": [
+    "cr-logs/source-install.log",
+    "cr-logs/installer.pid",
+    "cr-logs/installer.exit",
+    "cr-logs/lifecycle.log",
+    "cr-logs/failure-witness.json"
+  ],
+  "stages": [
+    {"n": 0, "title": "verify fresh Linux fixture and prerequisites"},
+    {"n": 1, "title": "prepare one clean merged source payload"},
+    {"n": 2, "title": "run the real installer with an empty offline dependency cache"},
+    {"n": 3, "title": "verify native failure, lifecycle identity and absent publication"}
+  ]
+}

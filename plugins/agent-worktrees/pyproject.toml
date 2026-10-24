@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-worktrees"
-version = "1.24.234-dev1"
+version = "1.24.235-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -33,9 +33,11 @@ dependencies = [
     "agent-worktree-identity",
     "agent-update-telemetry",
     "agent-update-driver",
+    "agent-repository-policy",
 ]
 
 [tool.uv.sources]
+agent-repository-policy = { path = "libs/repository-policy" }
 agent-worktree-identity = { path = "libs/worktree-identity" }
 # Always resolve the vendored config-schema-migration lib from the local path,
 # never an index. Distribution name is namespaced (agent-config-migrate, not the
@@ -114,7 +116,7 @@ agent-update-telemetry = { path = "libs/update-telemetry" }
 agent-update-driver = { path = "libs/update-driver" }
 
 [project.scripts]
-agent-worktrees = "agent_worktrees.__main__:console_entry"
+agent-worktrees = "agent_worktrees.current_roster_entry:console_entry"
 
 [project.optional-dependencies]
 dev = [

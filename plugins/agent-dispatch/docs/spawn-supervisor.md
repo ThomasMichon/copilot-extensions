@@ -31,6 +31,28 @@ spawn is reconciled, never silently double-run or lost).
 
 ## Coordinator, supervisor daemon and worker lanes
 
+Managed local startup checks the selected **execution harness**, not the task's
+repository lane. A known actual local checkout is checked directly through the
+fresh shared library, without requiring a Worktrees runtime. Read-only Worktrees
+resolution is needed only for Worktrees-owned worktree/project metadata; remote
+Worktrees receivers use `agent-policy check --path <checkout> --operation
+dispatch --json`. Admission precedes creation, resume or seed effects.
+Source-only `create_worktree` allocation remains independent.
+The shared [repository-policy library](../../../libs/repository-policy/README.md)
+owns policy precedence and denial semantics.
+Direct library admission uses the marketplace identity from Dispatch's existing
+validated installation receipt. An explicit invalid context refuses before any
+workspace lookup; it is never treated as an absent marketplace. Same-cell peer
+checks and guest checks retain the receiving Worktrees installation's validated
+marketplace rather than taking identity from task metadata.
+
+Restricted provider startup additionally requires `dispatch-check-hosting
+<name> --expected-container-id <id>` before task claiming, binding preparation
+and credential projection. Unsupported admission receivers refuse visibly;
+there is no permissive fallback. Remote/provider receivers remain responsible
+for a fresh check on their actual guest checkout immediately before launch.
+Existing live-session custody and receipt reconciliation are not launch grants.
+
 These are roles within `agent-dispatch`, not three independent task authorities:
 
 | Role | Current responsibility |

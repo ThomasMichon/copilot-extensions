@@ -26,6 +26,12 @@ Runtime enabling and production rollout retain their existing gates.
   extra controller. Establish the actual existing release/configuration
   adapters and their ownership; do not expose the raw inert approvals map as
   user configuration.
+  The installation-context `resolve_runtime_profile_policy` reader now supplies
+  the configuration-intent side through the existing source/mode/deployment
+  owner, with no new policy file. It does not approve an exact record or
+  independently verify source bytes. Release authentication is #8367; actual
+  composition with that channel, governed source closure and the native
+  constructor remains required before checking this item.
 - [ ] Prefer compatible profiles through the verified release channel, then
   check their complete exact closure against actual approved-source policy.
   Preserve the selected release and capability when a profile is unavailable.

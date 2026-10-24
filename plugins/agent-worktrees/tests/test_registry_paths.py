@@ -773,7 +773,10 @@ def test_namespaced_registration_persists_cell_config_dir(
     with pytest.raises(ValueError, match="identity receipt is unreadable"):
         config.project_dir("example")
 
-    installer.register_project("example")
+    repository = tmp_path / "registered-checkout"
+    repository.mkdir()
+    (repository / ".git").mkdir()
+    installer.register_project("example", repo_dir=repository)
 
     entry = installer.read_projects_registry()["projects"]["example"]
     assert Path(entry["config_dir"]) == config.project_dir("example")

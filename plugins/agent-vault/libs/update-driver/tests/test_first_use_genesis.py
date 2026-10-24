@@ -32,10 +32,11 @@ def observe(predicate, timeout, diagnostic):
     raise AssertionError(diagnostic())
 
 
+@pytest.mark.parametrize("payload_fixture", ["owning_payload", "owning_pull_requests"])
 def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
-    owning_payload, area, native_window_observation,
+    request, payload_fixture, area, native_window_observation,
 ):
-    payload, installation, project = owning_payload
+    payload, installation, project = request.getfixturevalue(payload_fixture)
     library = Path(__file__).resolve().parents[2]
     inputs = area / "foundation-source"
     for name in PACKAGES:
@@ -146,7 +147,11 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
         assert foundation_status(root=root).state == "completed"
         assert foundation_status(root=root).operation_id == operation.operation_id
         frozen = Path((installation / "source-path").read_text().strip()).parent
-        assert frozen == root / "provision-inputs" / request.id
+        if payload_fixture == "owning_pull_requests":
+            assert frozen.parent.parent == installation / ".install-stage"
+            assert frozen.parent.name.startswith(request.id + "-")
+        else:
+            assert frozen == root / "provision-inputs" / request.id
         # The admitted native program uses retained inputs, not the mutable payload.
         (payload / "scripts" / "install.ps1").write_text("exit 99\n", encoding="utf-8")
         (payload / "scripts" / "install.sh").write_text("exit 99\n", encoding="utf-8")

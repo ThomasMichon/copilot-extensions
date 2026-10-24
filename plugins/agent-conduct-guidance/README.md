@@ -16,6 +16,7 @@ look for "is there ambient guidance for X."
 
 | Module | Instruction projection | Skill | What it covers |
 |--------|------------------------|-------|-----------------|
+| Consented Windows elevation | [`elevation-fallback`](instructions/elevation-fallback.instructions.md) | [`requesting-windows-elevation`](skills/requesting-windows-elevation/SKILL.md) | One reviewed administrator operation through a temporary limited interactive task, genuine RunAs consent, specified private output log, matching terminal marker and scoped task cleanup; no persistent elevation grant |
 | Multi-agent rules of engagement | [`multi-agent-rules-of-engagement`](instructions/multi-agent-rules-of-engagement.instructions.md) | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | In-scope same-operator peer authority without redundant approval, scope attenuation, real custody and gates, collective decisions/handoff, authoritative countermand, external ingress and minimal provenance |
 | Process-spawn hygiene | [`process-hygiene-fallback`](instructions/process-hygiene-fallback.instructions.md) | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) | Spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly — especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation |
 | Coordinator-first delegation | [`delegation-fallback`](instructions/delegation-fallback.instructions.md) | [`delegating-work`](skills/delegating-work/SKILL.md) | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion |
@@ -43,6 +44,7 @@ patches or weakened update gates.
 
 | Entry point | When it applies | What it does |
 |-------------|-----------------|--------------|
+| [`requesting-windows-elevation`](skills/requesting-windows-elevation/SKILL.md) skill | Windows UAC, run as administrator, or an approved headless operation that cannot reach the user's consent desktop | Uses Windows and PowerShell 7.2+ only; stages a limited interactive task, requests RunAs, streams both outputs, waits for the actual result and removes the confirmed owned task |
 | checked-in instruction projections | Every adopting repository | Loads each module's bounded owner-marked reminder without a startup output hook |
 | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) skill | peer work directives, repeated-approval questions, conflicting directives, leadership handoff or external-domain instructions | Resolves the existing domain/scope/custody evidence and applies bounded authority rules without adding an authorization service |
 | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) skill | "run this in the background", authoring a script/service that shells out, "why does a window keep flashing", any CMD/PowerShell/Python/Node child-process spawn | Selects the correct windowless/headless mechanism for the target language and OS before the spawn happens |
@@ -101,6 +103,19 @@ own concatenation, and combine it with the token in a separate statement --
 never a single scheme-plus-secret literal or f-string -- then verify the
 real header value landed with a non-rendering byte/boolean check rather
 than a plain read-back, per the secret-masking skill.
+
+## Consented Windows elevation
+
+The Windows elevation helper is task-time and self-contained: it needs an
+active same-user interactive desktop and PowerShell 7.2+, but no Python,
+sibling plugin, password store, daemon or preinstalled elevated task.
+Normal execution requires same-account administrator or linked split-token
+elevation. Standard users supplying another administrator account are rejected
+before UAC rather than widening private staging permissions.
+`-InteractiveProbe` checks the desktop route without requesting administration;
+only a separately approved RunAs invocation can qualify administrator execution.
+Cancellation, missing completion and nonzero command results remain failures,
+not successful setup. See the skill for bounded waiting, resumption and cleanup.
 
 ## Model-routing configuration (delegation module)
 
@@ -231,6 +246,9 @@ the budget owner, not reconstructed from billing fields in this plugin.
 The plugin has no runtime, service, network, or authentication dependency.
 Model-routing configuration is optional; the stdlib-only resolver uses Python
 when invoked, while the checked-in projections remain independent of it.
+The optional Windows elevation helper requires PowerShell 7.2+, Task Scheduler,
+an active same-user desktop and genuine operator UAC approval. It does not
+provision these prerequisites or override policy when consent is unavailable.
 
 Plugin manifests do not install companion plugins transitively. Enable domain
 agent, MCP, bridge, or dispatch plugins separately when a task needs them.

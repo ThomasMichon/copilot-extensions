@@ -132,9 +132,9 @@ def push(
     return git_ops.PushResult(ok=False, stderr=last_stderr, stdout=last_stdout)
 
 
-def published_ref(remote: str, destinations: tuple[str, ...], target: str,
-                  cwd: str | Path) -> str:
-    """Observe a pinned destination without resolving its mutable remote name."""
+def observed_ref(remote: str, destinations: tuple[str, ...], target: str,
+                 cwd: str | Path) -> str:
+    """Read a pinned exact ref: its SHA, empty when absent, or raise on failure."""
     alias = f"agent-worktrees-observe-{uuid.uuid4().hex}-url"
     pinned = _destination.get()
     probe_settings = tuple((key, value) for key, value in (pinned[2] if pinned else ())
@@ -156,7 +156,16 @@ def published_ref(remote: str, destinations: tuple[str, ...], target: str,
                 break
     rows = [line.split() for line in published.stdout.splitlines()]
     sha = next((row[0] for row in rows if len(row) == 2 and row[1] == target), "")
-    if published.returncode or not sha:
+    if published.returncode:
+        raise OSError("Cannot observe published remote ref for tracking refresh")
+    return sha
+
+
+def published_ref(remote: str, destinations: tuple[str, ...], target: str,
+                  cwd: str | Path) -> str:
+    """Require a present pinned ref for post-push tracking refresh."""
+    sha = observed_ref(remote, destinations, target, cwd)
+    if not sha:
         raise OSError("Cannot observe published remote ref for tracking refresh")
     return sha
 

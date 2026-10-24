@@ -515,6 +515,21 @@ export AGENT_VAULT_PAYLOAD_ROOT="$_snapshot"
 exec bash "$_gate" "$@"
 DISPATCH
 )" || return 1
+    elif [[ "$command_name" == agent-pull-requests ]]; then
+        cold_dispatch="$(cat <<'DISPATCH'
+if [[ "$_root" != "$HOME/.agent-pull-requests" ]]; then
+    printf '[agent-pull-requests] cold custom-root provisioning requires explicit installation management.\n' >&2
+    exit 126
+fi
+_gate="$_snapshot/scripts/invoke-payload-runtime.sh"
+if [[ ! -f "$_gate" ]] ||
+   ! grep -Fq '# Installation driver contract: pull-requests-first-use-v1' "$_gate"; then
+    printf '[agent-pull-requests] owning snapshot dispatcher is unavailable; repair the owning payload.\n' >&2
+    exit 126
+fi
+exec bash "$_gate" "$@"
+DISPATCH
+)" || return 1
     fi
     printf -v runtime_root_literal '%q' "$runtime_root" || return 1
     printf -v snapshot_installer_literal '%q' "$snapshot_installer_rel" || return 1

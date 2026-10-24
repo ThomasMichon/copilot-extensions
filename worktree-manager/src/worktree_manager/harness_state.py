@@ -511,11 +511,13 @@ def build_repos(
     out: list[RepoInfo] = []
     for name, entry in (reg.get("repos") or {}).items():
         entry = entry or {}
+        if strict and type(entry.get("agent", False)) is not bool:
+            raise ValueError(f"Registered repository {name!r} agent must be a Boolean")
         path = _registered_repo_path(entry, pkey)
         out.append(RepoInfo(
             name=name,
             klass=entry.get("class", "?"),
-            agent=bool(entry.get("agent", True)),
+            agent=entry.get("agent") is True,
             remote=entry.get("remote"),
             path=path,
             account=_account_for(name, entry, account_map),

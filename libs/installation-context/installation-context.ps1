@@ -4364,10 +4364,33 @@ function Read-RuntimeDeploymentPolicy(
             $deployment.diagnostic = "Runtime deployment policy version $version is unsupported."
             return $deployment
         }
-        if (@($policy.PSObject.Properties).Count -ne 4 -or
+        $hasProfiles = Has-ExactProperty $policy 'runtimeProfiles'
+        $expectedProperties = if ($hasProfiles) { 5 } else { 4 }
+        if (@($policy.PSObject.Properties).Count -ne $expectedProperties -or
             -not (Has-ExactProperty $policy 'owner') -or
             -not (Has-ExactProperty $policy 'managed')) {
-            Fail 'Runtime deployment policy fields must be schema, version, owner and managed.'
+            Fail 'Runtime deployment policy has missing or unsupported fields.'
+        }
+        $profiles = $null
+        if ($hasProfiles) {
+            $profiles = Get-RuntimeDeploymentProperty $policy 'runtimeProfiles'
+            if ($profiles -isnot [System.Management.Automation.PSCustomObject]) {
+                Fail 'runtimeProfiles must be a JSON object.'
+            }
+            foreach ($property in $profiles.PSObject.Properties) {
+                if ($property.Name -ceq 'allowSourceFallback') {
+                    if ($property.Value -isnot [bool]) {
+                        Fail 'runtimeProfiles.allowSourceFallback must be a JSON boolean.'
+                    }
+                }
+                elseif ($property.Name -ceq 'backend') {
+                    if ($property.Value -isnot [string] -or
+                        $property.Value -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\z') {
+                        Fail 'runtimeProfiles.backend must be an explicit opaque capability reference.'
+                    }
+                }
+                else { Fail 'runtimeProfiles supports only allowSourceFallback and backend.' }
+            }
         }
         $managed = Get-RuntimeDeploymentProperty $policy 'managed'
         if ($managed -isnot [bool]) {
@@ -4380,12 +4403,19 @@ function Read-RuntimeDeploymentPolicy(
         }
         $deployment.state = 'valid'
         $deployment.managed = $managed
-        $deployment.allowPluginPublication = -not $managed
-        $deployment.reason = $(if ($managed) { 'deployment-managed' } else { 'deployment-explicit-standalone' })
+        $deployment.allowPluginPublication = -not $managed -and -not $hasProfiles
+        $deployment.reason = $(if ($managed) { 'deployment-managed' }
+            elseif ($hasProfiles) { 'runtime-profile-consumer-required' }
+            else { 'deployment-explicit-standalone' })
         $deployment.owner = $expected
         $deployment.recovery = $(if ($managed) {
             'Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it.'
+        } elseif ($hasProfiles) {
+            'Runtime profile intent requires a profile-aware construction lifecycle; ordinary plugin publication cannot ignore it.'
         } else { $null })
+        if ($hasProfiles) {
+            $deployment | Add-Member -NotePropertyName runtimeProfiles -NotePropertyValue $profiles
+        }
     }
     catch {
         $deployment.diagnostic = $_.Exception.Message

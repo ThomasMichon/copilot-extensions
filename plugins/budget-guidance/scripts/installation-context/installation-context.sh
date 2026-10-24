@@ -4849,7 +4849,42 @@ deployment_policy_snapshot() {
             "Repair the installation-owned runtime deployment policy explicitly."
         return
     fi
-    assert_json_object_length "$document" "" 4 "Runtime deployment policy"
+    local profiles="" profile_type field profile_value separator="" property_count profile_count recognized=0
+    property_count="$(json_length_path "$document" "")"
+    if [[ "$property_count" == 5 ]]; then
+        profile_type="$(json_type_path "$document" runtimeProfiles)"
+        [[ "$profile_type" == object ]] || fail "runtimeProfiles must be a JSON object."
+        profile_count="$(json_length_path "$document" runtimeProfiles)"
+        profiles="{"
+        for field in allowSourceFallback backend; do
+            profile_type="$(json_type_path "$document" "$(path_join runtimeProfiles "$field")")"
+            [[ -n "$profile_type" ]] || continue
+            case "$field" in
+                allowSourceFallback)
+                    [[ "$profile_type" == boolean ]] ||
+                        fail "runtimeProfiles.allowSourceFallback must be a JSON boolean."
+                    profile_value="$(json_optional_path "$document" "$(path_join runtimeProfiles "$field")")"
+                    ;;
+                backend)
+                    [[ "$profile_type" == string ]] ||
+                        fail "runtimeProfiles.backend must be an explicit opaque capability reference."
+                    json_optional_into profile_value "$document" "$(path_join runtimeProfiles "$field")"
+                    [[ "$profile_value" =~ ^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$ ]] ||
+                        fail "runtimeProfiles.backend must be an explicit opaque capability reference."
+                    profile_value="$(json_quote "$profile_value")"
+                    ;;
+                *) fail "runtimeProfiles supports only allowSourceFallback and backend." ;;
+            esac
+            profiles="$profiles$separator$(json_quote "$field"):$profile_value"
+            separator=","
+            recognized=$((recognized + 1))
+        done
+        [[ "$recognized" == "$profile_count" ]] ||
+            fail "runtimeProfiles supports only allowSourceFallback and backend."
+        profiles="$profiles}"
+    elif [[ "$property_count" != 4 ]]; then
+        fail "Runtime deployment policy has missing or unsupported fields."
+    fi
     [[ "$(json_type_path "$document" managed)" == boolean ]] ||
         fail "Runtime deployment policy managed must be a JSON boolean."
     managed="$(json_optional_path "$document" managed)"
@@ -4906,19 +4941,24 @@ deployment_policy_snapshot() {
     owner="{\"sourceFingerprint\":$(json_quote "$source_fingerprint"),\"pluginId\":$(json_quote "$RESOLVED_PLUGIN_ID"),\"mode\":$(json_quote "$actual_mode"),\"runtimeRoot\":$(json_quote "$runtime_root"),\"environment\":$(emit_environment_json)}"
     if [[ "$managed" == true ]]; then
         emit_deployment_json "$path" valid true false deployment-managed "$owner" "" \
-            "Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it."
+            "Use explicit installation management to install or update this runtime; plugin bootstrap and first use may not publish it." "$profiles"
+    elif [[ -n "$profiles" ]]; then
+        emit_deployment_json "$path" valid false false runtime-profile-consumer-required "$owner" "" \
+            "Runtime profile intent requires a profile-aware construction lifecycle; ordinary plugin publication cannot ignore it." "$profiles"
     else
-        emit_deployment_json "$path" valid false true deployment-explicit-standalone "$owner"
+        emit_deployment_json "$path" valid false true deployment-explicit-standalone "$owner" "" "" "$profiles"
     fi
 }
 
 emit_deployment_json() {
     local path="$1" state="$2" managed="$3" allow="$4" reason="$5"
     local owner="${6:-null}" diagnostic="${7:-}" recovery="${8:-}"
-    printf '{"path":%s,"state":%s,"managed":%s,"allowPluginPublication":%s,"reason":%s,"owner":%s,"diagnostic":%s,"recovery":%s}' \
+    printf '{"path":%s,"state":%s,"managed":%s,"allowPluginPublication":%s,"reason":%s,"owner":%s,"diagnostic":%s,"recovery":%s' \
         "$(json_quote "$path")" "$(json_quote "$state")" "$managed" "$allow" \
         "$(json_quote "$reason")" "$owner" "$(json_string_or_null "$diagnostic")" \
         "$(json_string_or_null "$recovery")"
+    [[ -z "${9:-}" ]] || printf ',"runtimeProfiles":%s' "$9"
+    printf '}'
 }
 
 resolve_deployment_result() {

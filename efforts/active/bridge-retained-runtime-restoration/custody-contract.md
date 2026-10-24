@@ -41,7 +41,7 @@ wire schemas. Review them with their implementation and contract fixtures.
   installation transition identity, admission epoch and retained-owner state.
   Its effect checks run at the actual owning boundaries. Serialized JSON,
   caller labels and a boolean `complete` cannot manufacture one.
-- Closure/inspection/settlement extend authenticated Bridge administration and
+- Closure/inspection/settlement extend user-scoped Bridge administration and
   existing owner methods. They must not be exposed as unauthenticated health
   authorization or conflated with ordinary `/drain`.
 
@@ -59,11 +59,14 @@ installation identity, original transition ID, expected predecessor native
 birth, current runtime incarnation and requested retained assembly. Persist
 epochs monotonically; selecting older code never rewinds authority.
 
-Each mutation-producing cohort enrolls through its actual authenticated owner
-before its first effect. Enrollment binds role, native/runtime incarnation,
+Each mutation-producing cohort enrolls through its actual owner inside the
+established user-owned access boundary before its first effect.
+Enrollment binds role, native/runtime incarnation,
 supported custody contracts and existing operation associations. It is neither
-an arbitrary client declaration nor a heartbeat lease. Include daemon/background
-producers, acquisition and CLI launch callers, extension inbox consumers,
+an arbitrary out-of-boundary client declaration nor a heartbeat lease.
+The [consumer refinement](consumer-recovery.md) defines the local trust and
+cross-container boundary without per-agent authentication ceremonies.
+Include daemon/background producers, acquisition and CLI launch callers, extension inbox consumers,
 native prompt transports, local hosts and supported remote relationship owners.
 Independently owned or unknown participants require their own compatible
 attestation, or block; a local process label does not enroll a remote owner.
@@ -114,7 +117,9 @@ handoff and consumer incarnation before returning the body. Poll retries expose
 the retained attempt, not another permission to send it. The consumer retains
 that identity through final admission, SDK acceptance and attributed consumption.
 Another native session, alias rollover or consumer incarnation cannot inherit
-it by label.
+it by label. These are correctness and replay fences, not a cryptographic
+identity requirement for equally privileged participants inside the user's
+established boundary.
 
 The window between the final owner check and an SDK call is itself outstanding
 custody. Closure must wait for a known outcome or retain it as unknown; it must
@@ -122,6 +127,9 @@ not acknowledge merely because a later check would reject a new attempt.
 SDK acceptance without consumption continues to appear in inventory.
 Consumption does not certify downstream semantic completion. Claimed controls
 also remain outstanding until their actual outcome is known.
+Accepted payloads and original handoffs remain durable across missing replies,
+disconnects and timeouts; unknown outcome is retained work, not a discard state.
+Recovery follows the [lossless consumer contract](consumer-recovery.md#delivery-and-recovery).
 
 Preserve the native keyed-invocation and turn journals. A crash after native
 acceptance but before DB settlement leaves the same invocation unresolved.

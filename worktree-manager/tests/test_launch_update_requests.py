@@ -70,6 +70,8 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
             f"$VenvPython='{python}'",
             "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
             f"$script:SetupLog='{log}'; $script:ShowLaunchStatus=$false",
+            f"$script:LaunchAdmitted=$true; $script:LaunchPolicyPath='{tmp_path}'",
+            f"function Assert-LaunchTarget {{ param($Path,$Operation); if($Path -cne '{tmp_path}'){{throw 'wrong admission target'}} }}",
             f"$script:UpdateApplied=$false; $script:LaunchProject='{'' if mode == 'no-project' else 'fixture-project'}'",
             f"$noUpdate=${'true' if mode == 'no-update' else 'false'}",
             *(function(name) for name in (
@@ -99,6 +101,8 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
             f"PYTHON={shlex.quote(python)}; LAUNCH_PROJECT={shlex.quote('' if mode == 'no-project' else 'fixture-project')}",
             f"_NO_UPDATE={'1' if mode == 'no-update' else '0'}; _UPDATE_APPLIED=''; _STAGE_PID=''",
             f"SETUP_LOG={shlex.quote(str(log))}; _SETUP_LOG_DIR={shlex.quote(str(tmp_path))}",
+            f"_LAUNCH_ADMITTED=1; _LAUNCH_POLICY_PATH={shlex.quote(str(tmp_path))}",
+            f"admit_launch_target() {{ [[ \"$1\" == {shlex.quote(str(tmp_path))} ]]; }}",
             functions, function("_run_launch_request"), function("invoke_update_apply"),
             f"resolve_runtime_python() {{ printf '%s\\n' {shlex.quote(python)}; }}",
             "invoke_update_apply 1", "invoke_update_apply 1",
@@ -147,17 +151,22 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "bash"])
-def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shell):
+def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monkeypatch, shell):
     if shell == "bash" and os.name != "posix":
         pytest.skip("POSIX native launcher")
     if shell == "pwsh" and (os.name != "nt" or not shutil.which(shell)):
         pytest.skip("Windows native launcher")
+    root = Path(__file__).resolve().parents[1]
+    worktrees_source = root.parent / "plugins/agent-worktrees/src"
+    policy_source = root.parent / "libs/repository-policy/src"
+    # This integration fixture supplies AW; standalone Manager does not depend on it.
+    monkeypatch.syspath_prepend(str(policy_source))
+    monkeypatch.syspath_prepend(str(worktrees_source))
     import agent_worktrees
     import update_driver as driver
     from agent_procutil import direct_python
     from agent_procutil.owned_process import run_caller_owned
 
-    root = Path(__file__).resolve().parents[1]
     home = tmp_path / "home"
     home.mkdir()
     started, gate, finished = (tmp_path / name for name in ("started", "gate", "finished"))
@@ -197,7 +206,9 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shel
         "if __name__=='__main__': raise SystemExit(launch.cmd_launch_update(args))\n",
     )
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
-    env["PYTHONPATH"] = str(tmp_path) + os.pathsep + os.environ["PYTHONPATH"]
+    env["PYTHONPATH"] = os.pathsep.join([
+        str(tmp_path), str(worktrees_source), str(policy_source), os.environ.get("PYTHONPATH", ""),
+    ])
     for name in (
         "WORKTREE_NO_UPDATE", "WORKTREE_NO_RECONCILE", "WORKTREE_BLOCKING_INSTALL",
         "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT",
@@ -218,6 +229,8 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shel
             f"$VenvPython='{python}'; $script:SetupLog='{log}'",
             "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
             "$script:ShowLaunchStatus=$false; $script:UpdateApplied=$false",
+            f"$script:LaunchAdmitted=$true; $script:LaunchPolicyPath='{tmp_path}'",
+            f"function Assert-LaunchTarget {{ param($Path,$Operation); if($Path -cne '{tmp_path}'){{throw 'wrong admission target'}} }}",
             "$script:LaunchProject='fixture'; $noUpdate=$false",
             *(function(name) for name in (
                 "Format-SetupLine", "Write-SetupLog", "Write-SetupStatus",
@@ -243,6 +256,8 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, shel
             f"PYTHON={shlex.quote(python)}; LAUNCH_PROJECT=fixture",
             "_NO_UPDATE=''; _UPDATE_APPLIED=''; _STAGE_PID=''",
             f"SETUP_LOG={shlex.quote(str(log))}; _SETUP_LOG_DIR={shlex.quote(str(tmp_path))}",
+            f"_LAUNCH_ADMITTED=1; _LAUNCH_POLICY_PATH={shlex.quote(str(tmp_path))}",
+            f"admit_launch_target() {{ [[ \"$1\" == {shlex.quote(str(tmp_path))} ]]; }}",
             source[source.index("setup_log() {"):source.index("\n# Write header")],
             *(function(name) for name in (
                 "_run_launch_request", "invoke_update_apply", "start_update_stage",

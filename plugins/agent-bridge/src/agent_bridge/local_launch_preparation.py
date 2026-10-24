@@ -4,7 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .transport import SpawnTarget, resolve_local_launch
+from repository_policy import AgentHostingError
+
+from .transport import SpawnTarget
+
+
+async def resolve_local_launch(
+    target: SpawnTarget, *, session_id: str = "",
+) -> tuple[list[str], str | None, dict[str, str]]:
+    """Use the transport owner's current resolver across both preparation paths."""
+    from .transport import resolve_local_launch as resolve
+
+    return await resolve(target, session_id=session_id)
 
 
 class LocalLaunchPreparationError(RuntimeError):
@@ -24,12 +35,17 @@ class PreparedLocalLaunch:
     ) -> tuple[list[str], str | None, dict[str, str]]:
         if self.session_id != session_id or self.target_json != target.to_json():
             raise ValueError("prepared local launch identity changed")
+        from .hosting_policy import require_path_hosting
+
+        require_path_hosting(self.cwd)
         return list(self.args), self.cwd, dict(self.environment)
 
 
 async def prepare(target: SpawnTarget, session_id: str) -> PreparedLocalLaunch:
     try:
         args, cwd, environment = await resolve_local_launch(target, session_id=session_id)
+    except AgentHostingError:
+        raise
     except Exception as exc:
         raise LocalLaunchPreparationError(f"Local launch preparation failed: {exc}") from exc
     return PreparedLocalLaunch(

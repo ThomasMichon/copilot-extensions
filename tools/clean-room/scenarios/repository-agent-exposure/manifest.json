@@ -1,0 +1,30 @@
+{
+  "name": "repository-agent-exposure",
+  "description": "Credential-free candidate installation and real repository-policy CLI admission without an authoring session.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": ["bash", "git", "python3", "uv", "timeout", "mktemp", "cat"],
+    "provisioned_by_flow": []
+  },
+  "auth": { "copilot": "none", "gh": "none", "ado": "none" },
+  "base": "standalone-without-siblings",
+  "validates": [
+    "The candidate stamps and provisions its standalone Worktrees runtime with the policy library.",
+    "The installed CLI returns complete versioned policy answers without adopting the repository.",
+    "Fresh repository denial defeats review-purpose labels without interpreting review instructions as permission.",
+    "Malformed policy refuses visibly; adoption refusal has no project-registration effects.",
+    "A denied source-only repository registers without agent exposure and allocates a real Git worktree without a launch or project adoption."
+  ],
+  "config": {
+    "CR_HARNESS_MOUNT": "read-only local candidate checkout supplied with --harness-mount",
+    "CR_UV_INDEX": "explicit optional governed dependency feed"
+  },
+  "expected_artifacts": ["~/.local/bin/agent-worktrees"],
+  "stages": [
+    { "n": 0, "title": "fresh credential-free candidate environment" },
+    { "n": 1, "title": "standalone stamp and first-use provision" },
+    { "n": 2, "title": "installed policy and adoption boundaries" }
+  ]
+}

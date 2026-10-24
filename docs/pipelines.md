@@ -15,14 +15,25 @@ The existing manual `installation-context-full.yml` workflow additionally accept
 `portfolio: foundation` for bounded Windows/Ubuntu foundation construction and
 custody qualification. Its scheduled/default `context` portfolio is unchanged;
 the two portfolios do not run together. This explicit integration lane has a
-15-minute per-host job deadline and is not a required unit-only PR or promotion
-job. It does not qualify Python-free genesis or authorize a host rollout.
+25-minute per-host job deadline and is not a required unit-only PR or promotion
+job. Separate bounded foundation/adapter and actual cold first-use portfolios
+qualify Windows/Linux Python-free genesis and the adopted Vault command/bootstrap
+paths. Each keeps the runner's 900-second aggregate and storage caps; one-file
+sub-suites release private acquisition/runtime fixtures between modules.
+This does not qualify macOS or authorize a host rollout.
 
 Source CI contains three jobs: operational `checks`, combined impact/execution
 in `unit-tests`, and the fixed-name `PR gate (required check)`. The unit job
 reads the actual PR base/head diff before installing test tooling or executing
-tests. Known narrative-only changes may skip testing; unknown, code or
+tests. Markdown-only changes have no executable coverage overlap and select
+no unit tests, including nested plugin documentation, skills and root policy
+documents. Unknown, code or
 configuration impact runs only the positively admitted unit packet.
+PR impact uses the merge base of the exact event base/head commits, matching
+the provider's PR change set even when the target branch advances. Comparing
+the two tips would incorrectly include unrelated upstream code as a reverted
+change. Push impact retains its before/after comparison. Missing common
+history is a failure, never an empty-change result.
 It never falls back to standalone services, fleet, native or general plugin
 suites. Guards and the unit job remain independent and parallel. Combining
 impact and execution removes the separate planning runner and duplicate
@@ -64,6 +75,16 @@ not again on each PR update. Admitted Dev-push executions retain that diagnostic
 strict source guards and required validation remain in PR CI. A cancelled or
 superseded execution is not diagnostic or test evidence.
 
+Before the Agent Bridge contract guard, CI explicitly acquires the HTTP-47
+packet's exact captured source commit from the CI-selected, credential-free
+HTTPS repository URL when it is not already available. The separate bounded
+`tools/prepare_bridge_contract_evidence.py` step accepts only a full commit ID,
+does not change checkout, refs or `FETCH_HEAD`, and fails visibly if acquisition
+or verification fails. A normal full branch checkout can omit a squash-orphaned
+capture checkpoint. The checker itself remains offline: it still validates
+complete historical inventory and content-addressed blobs, never regenerates
+capture evidence, and does not waive a changed or unprovable closure.
+
 The checks job independently selects its tracking-write, headless-launch and
 asyncio-timeout AST scans from the pinned diff. Known narrative PRs and changes
 limited to direct Python files in `tools/promotion_unit_tests/` plus the exact
@@ -73,8 +94,23 @@ the admitted packet for packet-file changes. Other, nested/lookalike, mixed,
 production, scanner/policy and workflow changes retain complete scans; empty
 evidence, push, manual and unknown events always run them. Invalid or
 unavailable diff evidence fails the job, not a success-shaped skip. All other
-guards remain unchanged; the ungated trusted-CI guard binds the selector and
-exact scan commands.
+code-focused guards share the same conservative impact classification:
+version/install/runtime contracts, Bridge source closure, generated-file and
+vendor checks, source hygiene and Ruff do not run for Markdown-only diffs.
+Push guard selection also uses its exact before/after diff; manual, unknown
+events and an absent initial-push base retain code checks. Invalid or
+unavailable diff evidence fails rather than claiming no overlap. Source-to-doc
+renames retain the deleted source path and therefore cannot skip validation.
+
+Markdown changes still run release changefile lint, skill/effort/vision structure, documentation and
+runbook lint, file-size limits, workflow policy and gh-aw Markdown pin/version
+checks. The checks job and fixed-name required aggregate remain present.
+Markdown skills and instructions are shipping payload even without executable
+coverage overlap; their required changefile/version bump must not be skipped.
+The aggregate accepts only an explicit unselected/skipped unit result without
+fabricated coverage or reuse evidence; it does not mistake missing coverage for
+proof that executable changes are untested. The ungated trusted-CI guard binds
+both selectors and the conditional scan commands.
 
 Push CI performs source-policy admission without repeating promotion's unit
 execution. Manual CI runs the same admitted packet, not the old full portfolio.
@@ -89,20 +125,78 @@ state and qualification rather than inferring either pause or activation from
 the source-CI layout. Historical full-candidate descriptions below are not
 instructions to reactivate those integration gates.
 
-### Source-unit promotion receipt
+### Composed-candidate promotion receipt
 
 The source promotion declaration owns its independent source-unit transaction.
 Its governed Main control must pin reviewed helpers and qualification evidence;
 combining source-CI jobs changes neither that transaction nor its authority.
 
-After source admission, `source-units` runs the full admitted packet once with
-coverage while the credential-free artifact build proceeds independently.
-Attestation requires both successful units and the unsigned build. Candidate
-preparation retains the source/version, package/lock, signer, source-byte and
-freshness safeguards, but no longer downloads separate full-suite baselines.
-`qualify-candidate` requires the explicit `source-units-v2` profile and proves
-Dev/candidate input equivalence against the original successful unit job,
-upload step and immutable archive. It never dispatches candidate CI.
+The Source controller proposal freezes the stamped, vendored candidate before
+release execution. `compose-candidate` runs the existing composer once and
+retains its exact Git commit, content tree, admitted Dev/Main inputs and
+preparation time in a bounded `candidate.bundle` / `candidate.json` transport.
+Every consumer also requires the candidate SHA emitted by the composition job;
+internally consistent replacement transport data cannot select another object.
+Units and the unsigned artifact build independently import those objects.
+Artifact validation and publication consume the same frozen object; they do
+not recompute version allocation or vendoring after tests. A changed Main base
+requires a new admission, not a silent restamp.
+
+`source-units` retains its provider job identity but executes the fixed Dev
+inventory on candidate bytes using the explicit
+`copilot-extensions.promotion-candidate-units/v1` manifest. Declared materialized
+uv copies extend the admitted import closure, never the test-node inventory or
+five-minute budget. Attestation still requires successful units and the
+unsigned build. `qualify-candidate` uses `candidate-units-v3`, validates the
+candidate hashes and development correspondence against both authoritative
+source roots, and checks the original successful job/upload/immutable archive.
+It never dispatches candidate CI.
+
+Raw candidate line coverage remains in the three-file packet. Its separate
+development projection is bound to Dev bytes, candidate bytes, tree and copy
+origins. Exact copies map directly; recognized same-line version assignments
+leave the changed statement unattributed. Unsupported rewrites and shifted
+regions remain explicitly unmapped. Copy contributions are retained before
+unioning Dev coordinates. No projection asserts that raw Dev bytes, branches
+or functions executed.
+The manifest binds the entire admitted closure, but coordinate maps cover
+observed production files only, not every unexecuted vendor copy or test file.
+
+Coverage is generated evidence, not checked-in source. The collector and hosted
+archive verifier share a 128 MiB per-file bound; exact packet membership, source
+hashes, context completeness and the five-minute execution budget are unchanged.
+The complete expanded version-1 coverage projection is retained without a
+new report encoding merely to fit the former 16 MiB bound.
+
+After qualification, the existing publisher attaches the exact three packet
+files and canonical `qualification.json` in one deterministic ZIP to the same
+Dev-owned `python-artifacts-<Dev SHA>` GitHub Release. Its immutable filename
+binds Dev, candidate and archive SHA-256. Upload never clobbers an asset; an
+existing or newly uploaded asset must pass consumer-authority raw-byte readback
+before the publication receipt can enable Main merge. The receipt also binds
+the retained evidence identity. No generated report, packet or archive is
+added to the Source or generated Main tree.
+
+Readiness and frozen-code reuse recognize only the bounded, hash-named
+supplementary evidence namespace for that same Dev release (at most 64
+retained candidate-evidence assets). It grants no code-execution or
+qualification authority. The separately attested code/index inventory remains
+exact; foreign, malformed, duplicate or arbitrary extra assets are refused.
+Actions artifacts remain the original producing-job evidence, while the
+release copy retains the verified packet after Actions retention expires.
+
+Source support does not itself activate Main. Its independently reviewed
+controller and immutable helper pin select the active qualification contract.
+Historical raw-source and legacy-CI packets retain their original verification;
+neither can be relabeled as candidate execution.
+
+Chat's enrolled package initializer resolves its version from distribution
+metadata, with a source-project metadata fallback when uninstalled. Its
+registered version contract forbids a checked-in Python version literal:
+ordinary Main seeding and changefile allocation must not change imported unit
+source bytes. All enrolled Python files and the raw byte-equivalence verifier
+remain required; no version normalization or source omission bypasses that
+verification.
 
 Job-only retries retain the original producing attempt and archive rather than
 rerunning units or demanding that the still-executing controller already be
@@ -1478,6 +1572,10 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > exposes a Python `__version__` must bump it to match the
 > `pyproject.toml` version in the **same** commit — it is a *fourth* file
 > for that plugin, easy to miss because the marketplace doesn't read it.
+> Registered metadata-only standalone contracts are the explicit exception:
+> `services/chat` resolves the existing distribution/project version instead
+> of embedding a Python literal. Its version guard requires the declared
+> resolver assignment, keeping admitted unit code unchanged during allocation.
 >
 > **Enforced by `tools/check-version-consistency.py`** (pre-push): fails
 > if any plugin's `plugin.json` / `pyproject.toml` / `marketplace.json`

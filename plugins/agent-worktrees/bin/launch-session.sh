@@ -5,9 +5,12 @@ set -euo pipefail
 # Setup log — per-launch log file with PID disambiguation
 # ---------------------------------------------------------------------------
 _SETUP_LOG_DIR="${TMPDIR:-/tmp}/worktree-setup-logs"
-mkdir -p "$_SETUP_LOG_DIR" 2>/dev/null || true
 SETUP_LOG="${WORKTREE_SETUP_LOG:-$_SETUP_LOG_DIR/setup-$$.log}"
-export WORKTREE_SETUP_LOG="$SETUP_LOG"
+unset WORKTREE_SETUP_LOG
+_LAUNCH_ADMITTED=0
+_LAUNCH_POLICY_PATH=""
+_PENDING_SETUP_LOGS=()
+_PENDING_LAUNCH_EVENTS=()
 
 # ---------------------------------------------------------------------------
 # Launch-flow correlation id -- minted once per launcher run and threaded
@@ -24,6 +27,10 @@ export WORKTREE_LAUNCH_ID="$LAUNCH_ID"
 
 setup_log() {
     local level="$1" msg="$2"
+    if [[ "$_LAUNCH_ADMITTED" != 1 ]]; then
+        _PENDING_SETUP_LOGS+=("$level" "$msg")
+        return 0
+    fi
     if [[ -n "${_SETUP_PROGRESS_DIR:-}" || "${_SETUP_PROGRESS_FAILED:-}" == 1 ]]; then
         _setup_progress_emit log "$level" "$msg" || _setup_progress_unavailable "$level" "$msg" 0
         return 0
@@ -90,6 +97,7 @@ _setup_progress_signal() {
 }
 
 _start_setup_progress() {
+    [[ "$_LAUNCH_ADMITTED" == 1 ]] || return 3
     if ! _SETUP_PROGRESS_DIR="$(mktemp -d "$_SETUP_LOG_DIR/progress-$$-XXXXXXXX")"; then
         printf 'WARNING: could not create private launch progress spool; native timing remains unavailable.\n' >&2
         _SETUP_PROGRESS_FAILED=1
@@ -160,6 +168,10 @@ _stop_setup_progress() {
 
 launch_trace() {
     local event="$1" path="${AGENT_WORKTREES_LAUNCH_TRACE:-}"
+    if [[ "$_LAUNCH_ADMITTED" != 1 ]]; then
+        _PENDING_LAUNCH_EVENTS+=("$event")
+        return 0
+    fi
     [[ -n "$path" ]] || return 0
     case "${path,,}" in 0|false|no|off) return 0 ;; esac
     mkdir -p "$(dirname "$path")" 2>/dev/null || true
@@ -175,6 +187,10 @@ launch_trace() {
 _SHOW_LAUNCH_STATUS=""
 setup_status() {
     local level="$1" msg="$2"
+    if [[ "$_LAUNCH_ADMITTED" != 1 ]]; then
+        setup_log "$level" "$msg"
+        return 0
+    fi
     if [[ -n "${_SETUP_PROGRESS_DIR:-}" || "${_SETUP_PROGRESS_FAILED:-}" == 1 ]]; then
         _setup_progress_emit status "$level" "$msg" || _setup_progress_unavailable "$level" "$msg" 1
         return 0
@@ -183,19 +199,76 @@ setup_status() {
 }
 
 
-# Write header
-{
-    echo "# Worktree Manager — session launch log"
-    echo "# Started: $(date '+%Y-%m-%d %H:%M:%S %z')"
-    echo "# PID: $$"
-    echo "# Host: $(hostname)"
-    echo ""
-} > "$SETUP_LOG" 2>/dev/null || true
-chmod 600 "$SETUP_LOG" 2>/dev/null || true
+# Write header only after target admission; early diagnostics stay in memory.
+initialize_launch_diagnostics() {
+    [[ "$_LAUNCH_ADMITTED" != 1 ]] || return 0
+    _LAUNCH_ADMITTED=1
+    export WORKTREE_SETUP_LOG="$SETUP_LOG"
+    mkdir -p "$_SETUP_LOG_DIR" 2>/dev/null || true
+    {
+        echo "# Worktree Manager — session launch log"
+        echo "# Started: $(date '+%Y-%m-%d %H:%M:%S %z')"
+        echo "# PID: $$"
+        echo "# Host: $(hostname)"
+        echo ""
+    } > "$SETUP_LOG" 2>/dev/null || true
+    chmod 600 "$SETUP_LOG" 2>/dev/null || true
+    # shellcheck disable=SC2012
+    ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
+    local index event
+    for ((index=0; index<${#_PENDING_SETUP_LOGS[@]}; index+=2)); do
+        setup_log "${_PENDING_SETUP_LOGS[index]}" "${_PENDING_SETUP_LOGS[index+1]}"
+    done
+    for event in "${_PENDING_LAUNCH_EVENTS[@]+"${_PENDING_LAUNCH_EVENTS[@]}"}"; do
+        launch_trace "$event"
+    done
+    _PENDING_SETUP_LOGS=()
+    _PENDING_LAUNCH_EVENTS=()
+}
 
-# Prune old logs (keep last 10)
-# shellcheck disable=SC2012
-ls -t "$_SETUP_LOG_DIR"/setup-*.log 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
+admit_launch_target() {
+    local target="$1" operation="${2:-launch}" answer
+    if [[ -z "$target" ]]; then
+        echo "ERROR: Launch admission requires an absolute execution workspace." >&2
+        return 3
+    fi
+    if ! answer=$("$PYTHON" -m agent_worktrees agent-policy check --path "$target" --operation "$operation" --json); then
+        printf '%s\n' "$answer" >&2
+        return 3
+    fi
+    if ! printf '%s' "$answer" | "$PYTHON" -c '
+import json,sys
+from pathlib import Path
+from repository_policy import validate_hosting_result
+try:
+    if not Path(sys.argv[1]).is_absolute():
+        raise ValueError("Launch admission requires an absolute execution workspace")
+    validate_hosting_result(json.load(sys.stdin))
+except ValueError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(3)
+' "$target"; then
+        echo "ERROR: Repository hosting owner returned unusable admission." >&2
+        return 3
+    fi
+    _LAUNCH_POLICY_PATH="$target"
+}
+
+admit_refresh_target() {
+    local query=(-m agent_worktrees) target
+    target=$(printf '%s' "$JSON" | "$PYTHON" -c "import json,sys; d=json.load(sys.stdin); print(d.get('status_path') or d.get('work_dir') or '')")
+    if [[ -n "$target" ]]; then
+        admit_launch_target "$target" refresh
+        return
+    fi
+    [[ -z "$LAUNCH_PROJECT" ]] || query+=(--project "$LAUNCH_PROJECT")
+    query+=(get repo-dir)
+    if ! target=$("$PYTHON" "${query[@]}"); then
+        echo "ERROR: Cannot resolve the refresh project's execution workspace." >&2
+        return 3
+    fi
+    admit_launch_target "$target" refresh
+}
 
 # --recovery: bypass worktree resolution entirely, go straight to setup script
 # --project: explicit project identity for CWD-neutral callers
@@ -246,7 +319,7 @@ if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
 fi
 
 # Recovery escape hatch resolves from explicit project identity or CWD.
-if [[ "$RECOVERY_MODE" == "1" ]]; then
+run_recovery() {
     CANDIDATES=()
     if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
           -n "${AGENT_WORKTREES_LAUNCH_RECOVERY_ANCHOR:-}" ]]; then
@@ -265,6 +338,8 @@ if [[ "$RECOVERY_MODE" == "1" ]]; then
     for ANCHOR in "${CANDIDATES[@]}"; do
         SETUP_SCRIPT="$ANCHOR/tools/setup/setup.sh"
         if [[ -f "$SETUP_SCRIPT" ]]; then
+            admit_launch_target "$ANCHOR" recovery || exit 3
+            initialize_launch_diagnostics
             RECOVERY_ARGS=(--recovery "$@")
             if [[ ${#COPILOT_PASSTHROUGH[@]} -gt 0 ]]; then
                 RECOVERY_ARGS+=("${COPILOT_PASSTHROUGH[@]}")
@@ -275,7 +350,7 @@ if [[ "$RECOVERY_MODE" == "1" ]]; then
     done
     echo "ERROR: Cannot find a recovery setup script in the project anchor, Git root, or current directory." >&2
     exit 1
-fi
+}
 
 # Runtime resolution (junction-free, marker-only). Prefer the `current-version`
 # marker -> versions/<ver>/bin/python; fall back to the newest slot only -- the
@@ -392,6 +467,10 @@ fi
 export PYTHONPATH="$RUNTIME_DIR/lib"
 unset PYTHONHOME
 
+if [[ "$RECOVERY_MODE" == "1" ]]; then
+    run_recovery
+fi
+
 run_post_exit() {
     local worktree_id="$1"
     # Re-resolve before use: post-exit runs after the interactive Copilot
@@ -417,6 +496,7 @@ run_post_exit() {
 # Best-effort and fully detached -- never blocks or fails the launch.
 #   activity_log EVENT WORKTREE_ID [key=value ...]
 activity_log() {
+    [[ "$_LAUNCH_ADMITTED" == 1 ]] || return 0
     local event="$1" wt="${2:-}"; shift 2 2>/dev/null || shift $# 
     [[ -z "$event" || -z "$wt" ]] && return 0
     # Re-resolve before use: this can fire long after the interactive Copilot
@@ -461,7 +541,11 @@ _aw_crash_trap() {
     echo "" >&2
     echo "Worktree launcher crashed unexpectedly ('$cmd' exited $exit_code)." >&2
     echo "$recovery_hint" >&2
-    echo "Details logged to: $SETUP_LOG" >&2
+    if [[ "$_LAUNCH_ADMITTED" == 1 ]]; then
+        echo "Details logged to: $SETUP_LOG" >&2
+    else
+        echo "No launch diagnostics were persisted before repository admission." >&2
+    fi
 }
 trap '_aw_crash_trap "$LINENO" "$BASH_COMMAND"' ERR
 
@@ -480,8 +564,8 @@ _STAGE_PID=""
 _UPDATE_APPLIED=""
 
 # ── Optional maintenance: submit by default, join only in blocking mode ─────
-# The Picker runs from the installed runtime venv, so the slow marketplace
-# download is STAGED in the background while the Picker is open, then the apply
+# The Picker runs from the installed runtime venv, so marketplace download
+# starts only after target admission and Picker exit, then the apply
 # (installer -> runtime, pre-launch, reconcile) runs at the JOIN only with
 # WORKTREE_BLOCKING_INSTALL; ordinary launches submit one driver request.
 # The blocking join follows Picker exit and precedes handoff. The launcher script is
@@ -493,6 +577,8 @@ start_update_stage() {
     # Output is discarded so it never writes to the Picker's terminal.
     [[ "$_NO_UPDATE" == "1" ]] && return 0
     [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && return 0
+    [[ "$_LAUNCH_ADMITTED" == 1 ]] || return 3
+    admit_launch_target "$_LAUNCH_POLICY_PATH" maintenance || return 3
     setup_log INFO 'Starting background update stage (stage-update)'
     ( "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 ) &
     _STAGE_PID=$!
@@ -503,6 +589,8 @@ invoke_update_apply() {
     # $2 = "1" to echo status to the terminal (interactive launch); "0" otherwise.
     # Idempotent: runs its body at most once per launch.
     local with_reconcile="${1:-0}"
+    [[ "$_LAUNCH_ADMITTED" == 1 ]] || return 3
+    admit_launch_target "$_LAUNCH_POLICY_PATH" maintenance || return 3
     _SHOW_LAUNCH_STATUS="${2:-0}"
     [[ -n "$_UPDATE_APPLIED" ]] && return 0
     _UPDATE_APPLIED=1
@@ -644,7 +732,7 @@ _run_launch_request() {
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos knowledge worktree agent-worktrees resolve execution-leg post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch launch-update stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_DIRECT_COMMANDS="agent-policy services repos knowledge worktree agent-worktrees resolve execution-leg post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch launch-update stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
 _IS_DIRECT=""
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
@@ -653,21 +741,15 @@ if [[ $# -gt 0 ]]; then
 fi
 if [[ -n "$_IS_DIRECT" ]]; then
     setup_log INFO "Direct dispatch: $1 (bypassing resolve)"
-    # Direct commands retain update-only optional maintenance. Only explicit
-    # blocking mode joins it before dispatch.
-    start_update_stage
-    invoke_update_apply 0
+    # Inspection/source commands get no implicit launch maintenance or diagnostics.
     direct_args=(-m agent_worktrees)
-    [[ -n "$LAUNCH_PROJECT" ]] && direct_args+=(--project "$LAUNCH_PROJECT")
+    [[ -n "$LAUNCH_PROJECT" && "$1" != agent-policy ]] && direct_args+=(--project "$LAUNCH_PROJECT")
     direct_args+=("$@")
+    [[ "$1" != resolve ]] || direct_args+=(--require-agent-hosting)
     exec "$PYTHON" "${direct_args[@]}"
 fi
 
-# ── Background update stage (#1430) ──────────────────────────────────────
-# In explicit blocking mode, start acquisition while the Picker is open. It is
-# joined and applied (installer + pre-launch + reconcile) after resolve returns
-# an exec plan, before the tmux handoff -- see invoke_update_apply below.
-start_update_stage
+# Optional maintenance starts only after the resolved target passes admission.
 
 # ── Resolve launch plan via Python ────────────────────────────────────────
 
@@ -675,7 +757,7 @@ setup_log INFO 'Calling agent_worktrees resolve'
 launch_trace resolve_start
 resolve_args=(-m agent_worktrees)
 [[ -n "$LAUNCH_PROJECT" ]] && resolve_args+=(--project "$LAUNCH_PROJECT")
-resolve_args+=(resolve "$@")
+resolve_args+=(resolve --require-agent-hosting "$@")
 JSON=$(AGENT_WORKTREES_DEFER_PROJECTIONS=1 "$PYTHON" "${resolve_args[@]}")
 RC=$?
 if [[ $RC -ne 0 ]]; then
@@ -724,6 +806,9 @@ if [[ "$ACTION" == "remote" ]]; then
 fi
 
 if [[ "$ACTION" == "refresh" ]]; then
+    admit_refresh_target || exit 3
+    initialize_launch_diagnostics
+    start_update_stage
     # ── Picker refresh: apply the staged update, then relaunch (#1430) ───────
     # The picker's refresh icon exits with action=refresh. It runs from the
     # runtime venv the update replaces, so apply here (venv now free), then
@@ -773,8 +858,7 @@ fi
 # updates normally. Self-contained probe (mirrors the Windows launcher's
 # Test-AwJoiningLiveSession, dev329) so it stays a surgical gate without
 # reordering the rest of the launcher. The staged background download started
-# earlier is harmless if left running -- it primes the cache for the next fresh
-# start and never blocks this re-attach.
+# only starts for an admitted fresh launch; re-attach starts no maintenance.
 aw_joining_live_session() {
     # No-mux launches always (re)start Copilot directly -- the update is relevant.
     local _nomux_env="${WORKTREE_NO_MUX:-}"
@@ -829,6 +913,10 @@ sys.exit(0 if v.get("active") is False else 1)
 }
 
 if [[ "$ACTION" == "exec" ]]; then
+    WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
+    STATUS_PATH=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('status_path') or d.get('work_dir',''))")
+    admit_launch_target "${STATUS_PATH:-$WORK_DIR}" || exit 3
+    initialize_launch_diagnostics
     _SEEDED_LAUNCH=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('seed_claimed') or d.get('seed_pending') else '0')")
     _PENDING_NEW_SEED=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print('1' if json.load(sys.stdin).get('seed_pending') else '0')")
     _SEEDED_WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('worktree_id') or '')")
@@ -847,6 +935,7 @@ if [[ "$ACTION" == "exec" ]]; then
         _JOINING_LIVE=1
         setup_log INFO 'Joining an already-live mux session; skipping pre-launch update for a fast re-attach (update applies on the process next fresh start).'
     else
+        start_update_stage
         invoke_update_apply 1 1
     fi
 
@@ -856,6 +945,7 @@ if [[ "$ACTION" == "exec" ]]; then
     # show the worktree's identity + git disposition -- so prefer status_path
     # (the real worktree) when present.
     STATUS_PATH=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('status_path') or d.get('work_dir',''))")
+    admit_launch_target "${STATUS_PATH:-$WORK_DIR}" || exit 3
     POST_EXIT=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('post_exit') else '0')")
     WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or '')")
     NO_MUX=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('no_mux') else '0')")

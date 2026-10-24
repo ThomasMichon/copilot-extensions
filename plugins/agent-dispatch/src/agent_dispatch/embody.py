@@ -487,6 +487,9 @@ def spawn_embodied_worker(
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
+    from .hosting_policy import require_embodiment_harness
+
+    require_embodiment_harness(project=project, worktree_id=worktree_id, timeout=timeout)
     if seed is None:
         seed = autopilot_worker_prompt(
             task_id,
@@ -501,7 +504,7 @@ def spawn_embodied_worker(
         # `embody` subcommand. It lets a CWD-neutral caller name the target
         # project instead of relying on git-like CWD discovery.
         cmd += ["--project", project]
-    cmd += ["embody"]
+    cmd += ["embody", "--require-agent-hosting"]
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
         if resume_head:
@@ -584,6 +587,9 @@ def spawn_fleet_embodied_worker(
     if verify_timeout:
         remote_argv += ["--verify-timeout", str(verify_timeout)]
     remote_cmd = " ".join(shlex.quote(a) for a in remote_argv)
+    from .hosting_policy import remote_harness_check
+
+    remote_cmd = f"{remote_harness_check(project)} && {remote_cmd}"
     # `host` is the SSH alias (never a raw IP). BatchMode so a missing key
     # fails fast instead of hanging on a password prompt.
     cmd = [exe, "-o", "BatchMode=yes", host.strip().lower(), remote_cmd]

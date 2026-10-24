@@ -581,6 +581,8 @@ def _installation_owner() -> dict[str, Any] | None:
     """Admit an explicit cell before config precedence can bypass peer lookup."""
     raw = os.environ.get(_peer_launch.CONTEXT_ENV, "")
     if not raw:
+        if RUNTIME_DIR.parent.name == "plugins" and RUNTIME_DIR.parent.parent.parent.name == "marketplaces":
+            raise _peer_launch.ContextRefused("Containers namespaced installation context is missing")
         return None
     try:
         return _peer_launch.validate_owner("agent-containers", RUNTIME_DIR, raw)

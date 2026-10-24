@@ -20,6 +20,106 @@ from agent_worktrees.worktrees_projection_index import ProjectionUnavailable
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
 
+def _test_budget_factor():
+    value = os.environ.get("WORKTREES_TEST_BUDGET_FACTOR", "1")
+    if value not in {"1", "2", "3"}:
+        raise ValueError("WORKTREES_TEST_BUDGET_FACTOR must be 1, 2 or 3")
+    return int(value)
+
+
+@pytest.mark.parametrize("value,expected", [(None, 1), ("1", 1), ("2", 2), ("3", 3)])
+def test_test_budget_factor_explicit_values(monkeypatch, value, expected):
+    monkeypatch.delenv("WORKTREES_TEST_BUDGET_FACTOR", raising=False)
+    if value is not None:
+        monkeypatch.setenv("WORKTREES_TEST_BUDGET_FACTOR", value)
+    assert _test_budget_factor() == expected
+
+
+@pytest.mark.parametrize("value", ["", "0", "4", "-1", "1.5", "nan", "2.0"])
+def test_test_budget_factor_rejects_other_values(monkeypatch, value):
+    monkeypatch.setenv("WORKTREES_TEST_BUDGET_FACTOR", value)
+    with pytest.raises(ValueError, match="must be 1, 2 or 3"):
+        _test_budget_factor()
+
+
+# The documented meta-path protocol requires find_spec, not ABC inheritance.
+# https://docs.python.org/3/reference/import.html#the-meta-path
+_GUARDED_MODULE_SCRIPT = """
+import runpy, sys
+class Guard:
+    entries = 0
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'agent_worktrees.__main__':
+            self.entries += 1
+            if self.entries > 1:
+                raise ImportError('dispatcher import back-edge')
+        if fullname in {
+            'agent_worktrees.activity', 'agent_worktrees.front_door_cli',
+            'agent_worktrees.list_cli', 'agent_worktrees.status_monitor_runtime',
+        }:
+            raise ImportError('broad command/recovery import: ' + fullname)
+sys.meta_path.insert(0, Guard())
+sys.argv = ['agent-worktrees', *sys.argv[1:]]
+runpy.run_module('agent_worktrees', run_name='__main__')
+"""
+
+
+def _guard_from_native_script():
+    import ast
+
+    classes = [node for node in ast.parse(_GUARDED_MODULE_SCRIPT).body
+               if isinstance(node, ast.ClassDef)]
+    assert len(classes) == 1
+    namespace = {}
+    exec(compile(ast.Module(body=classes, type_ignores=[]), "<native-guard>", "exec"), namespace)
+    assert namespace["Guard"].__bases__ == (object,)
+    return namespace["Guard"]()
+
+
+@pytest.mark.parametrize("forbidden", [
+    "agent_worktrees.activity",
+    "agent_worktrees.front_door_cli",
+    "agent_worktrees.list_cli",
+    "agent_worktrees.status_monitor_runtime",
+    "agent_worktrees.__main__",
+])
+def test_guarded_import_blocks_before_following_finder_effect(monkeypatch, forbidden):
+    import importlib
+
+    guard = _guard_from_native_script()
+    if forbidden == "agent_worktrees.__main__":
+        assert guard.find_spec(forbidden, None) is None
+    effects = []
+
+    class EffectFinder:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == forbidden:
+                effects.append(fullname)
+                raise AssertionError("forbidden import reached a following finder")
+
+    with monkeypatch.context() as scoped:
+        scoped.delitem(sys.modules, forbidden, raising=False)
+        scoped.setattr(sys, "meta_path", [guard, EffectFinder(), *sys.meta_path])
+        message = "dispatcher import back-edge" if forbidden.endswith(".__main__") else (
+            "broad command/recovery import"
+        )
+        with pytest.raises(ImportError, match=message):
+            importlib.import_module(forbidden)
+    assert effects == []
+
+
+def test_guarded_import_allows_normal_finder_delegation(monkeypatch):
+    import importlib
+
+    guard = _guard_from_native_script()
+    with monkeypatch.context() as scoped:
+        scoped.delitem(sys.modules, "math", raising=False)
+        scoped.setattr(sys, "meta_path", [guard, *sys.meta_path])
+        allowed = importlib.import_module("math")
+        assert allowed.sqrt(4) == 2
+    assert guard.entries == 0
+
+
 def request(**selection):
     return {"contract_version": 1, "project": "project", **selection}
 
@@ -362,7 +462,7 @@ def test_worktrees_feed_retained_crashed_route_runs_bounded_recovery(owner, monk
     recovery = []
     token = tmp_path / "token"
     token.write_text("fixture", encoding="utf-8")
-    monkeypatch.setattr(control, "control_token_path", lambda: token)
+    monkeypatch.setattr(control, "control_token_path", lambda runtime_home=None: token)
     monkeypatch.setattr(
         control, "load_or_create_control_token", lambda: pytest.fail("reader minted a token")
     )
@@ -393,7 +493,7 @@ def test_worktrees_feed_live_health_failure_cannot_trigger_recovery(owner, monke
 
     token = tmp_path / "token"
     token.write_text("fixture", encoding="utf-8")
-    monkeypatch.setattr(control, "control_token_path", lambda: token)
+    monkeypatch.setattr(control, "control_token_path", lambda runtime_home=None: token)
     monkeypatch.setattr(
         routing, "read_active_endpoint", lambda *a, **kw: SimpleNamespace(base_url="http://127.0.0.1:1")
     )
@@ -441,11 +541,18 @@ def test_worktrees_feed_drain_accounts_point_read_until_transport_completion(own
         server.close()
 
 
-def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(tmp_path, monkeypatch):
+@pytest.mark.parametrize("entry_mode", ["module", "console", "guarded-module"])
+def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(
+    tmp_path, monkeypatch, entry_mode,
+):
     from agent_procutil import no_window_flags
 
     from agent_worktrees import config as cfg
 
+    factor = _test_budget_factor()
+    initial_budget = 2.0 * factor
+    step_budget = 2.0 * factor
+    cleanup_budget = 1.0 * factor
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "agent-home"))
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -471,48 +578,117 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(tmp_path,
         for index in range(1100)
     ]
     runtime.publish("project", rows, observed_at=1)
+    received_requests = []
+
+    def handle(action, payload):
+        received_requests.append((action, round(time.monotonic() - started, 3)))
+        return runtime.health() if action == "health" else runtime.handle(payload)
+
+    def stream_handle(action, payload, disconnected):
+        received_requests.append((action, round(time.monotonic() - started, 3)))
+        return runtime.feed.stream(payload, disconnected)
+
     server = control.ControlServer(
-        lambda action, payload: runtime.health() if action == "health" else runtime.handle(payload),
+        handle,
         token="fixture",
-        stream_handle=lambda action, payload, disconnected: runtime.feed.stream(payload, disconnected),
+        stream_handle=stream_handle,
     )
     server.start()
     control.publish_route(server.port, pid=os.getpid(), version="fixture")
     frames = queue.Queue()
+    command = [sys.executable, "-m", "agent_worktrees"]
+    if entry_mode == "console":
+        from importlib.metadata import entry_points
+        from pathlib import Path
+
+        declared = list(entry_points(group="console_scripts", name="agent-worktrees"))
+        assert len(declared) == 1
+        assert declared[0].value == "agent_worktrees.current_roster_entry:console_entry"
+        executable = Path(sys.executable).with_name(
+            "agent-worktrees.exe" if os.name == "nt" else "agent-worktrees"
+        )
+        assert executable.is_file(), "source-owned test environment needs regenerated console scripts"
+        command = [str(executable)]
+    elif entry_mode == "guarded-module":
+        command = [sys.executable, "-c", _GUARDED_MODULE_SCRIPT]
     started = time.monotonic()
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "agent_worktrees", "--project", "project",
+            *command, "--project", "project",
             "list", "--json", "--current", "--stream", "--follow",
             "--include-other-platforms", "--all",
         ],
         cwd=checkout, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
         creationflags=no_window_flags(),
+        env={**os.environ, "PYTHONPROFILEIMPORTTIME": "1"}
+        if os.environ.get("WORKTREES_FEED_IMPORT_PROFILE") == "1" else None,
     )
+    stderr_lines = []
+    raw_stdout = []
+
+    def read_stderr():
+        for line in proc.stderr:
+            stderr_lines.append(line)
+            if len(stderr_lines) > 2048:
+                del stderr_lines[:1024]
 
     def read_stdout():
         for line in proc.stdout:
-            frames.put(json.loads(line))
+            raw_stdout.append(line)
+            frame = json.loads(line)
+            if frame["type"] in {"begin", "done", "commit"}:
+                received_requests.append((frame["type"], round(time.monotonic() - started, 3)))
+            frames.put(frame)
 
     reader = threading.Thread(target=read_stdout)
+    error_reader = threading.Thread(target=read_stderr)
     reader.start()
+    error_reader.start()
+    qualified = False
+    contended_checks_completed = False
+    elapsed = None
+    cleanup_failure = None
     try:
         initial = []
         try:
             while not initial or initial[-1]["type"] != "done":
-                initial.append(frames.get(timeout=max(0.001, 2 - (time.monotonic() - started))))
+                initial.append(frames.get(
+                    timeout=max(0.001, initial_budget - (time.monotonic() - started)),
+                ))
         except queue.Empty:
+            missed_frames = len(initial)
+            # Eventual diagnostic completion never changes the admitted verdict.
+            diagnostic_deadline = started + 10 * factor
+            while proc.poll() is None and time.monotonic() < diagnostic_deadline:
+                try:
+                    item = frames.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if item["type"] in {"done", "error"}:
+                    break
             exited = proc.poll()
             if exited is None:
                 proc.terminate()
-                proc.wait(timeout=2)
+                proc.wait(timeout=step_budget)
+            error_reader.join(timeout=cleanup_budget)
+            import_times = []
+            for line in stderr_lines:
+                if line.startswith("import time:"):
+                    fields = line.removeprefix("import time:").split("|")
+                    if len(fields) == 3 and fields[0].strip().isdigit():
+                        import_times.append((int(fields[1]), int(fields[0]), fields[2].strip()))
+            ranked = sorted(import_times, reverse=True)[:12]
+            f1_imports = [item for item in import_times if "worktrees_observation" in item[2]]
             pytest.fail(
-                f"CLI initial roster missed 2s: {len(initial)} frames, exit={exited}, "
-                f"stderr={proc.stderr.read(8192)!r}",
+                f"CLI initial roster missed {initial_budget:g}s "
+                f"(nominal 2s, factor {factor}): {missed_frames} frames, exit={exited}, "
+                f"requests={received_requests!r}, import_cumulative_self_us={ranked!r}, "
+                f"F1_imports={f1_imports!r}, "
+                f"stderr={''.join(line for line in stderr_lines if not line.startswith('import time:'))[-8192:]!r}",
             )
         elapsed = time.monotonic() - started
-        assert elapsed < 2
+        assert elapsed < initial_budget
         receiver = client.FeedReceiver(request())
         current = apply(receiver, initial)
         assert len(current["worktrees"]) == 1100
@@ -522,22 +698,80 @@ def test_worktrees_feed_actual_cli_full_roster_load_update_and_cutover(tmp_path,
         runtime.publish("project", rows, observed_at=2)
         changed = []
         while not changed or changed[-1]["type"] != "commit":
-            changed.append(frames.get(timeout=2))
+            changed.append(frames.get(timeout=step_budget))
         assert len([f for f in changed if f["type"] == "worktree"]) == 1
         assert apply(receiver, changed)["worktrees"][-1]["dirty"] == 9
         runtime.close_admission("update")
-        notice = frames.get(timeout=2)
+        notice = frames.get(timeout=step_budget)
         assert notice["type"] == "going-away" and notice["reason"] == "update"
-        proc.wait(timeout=2)
-        reader.join(timeout=1)
+        proc.wait(timeout=step_budget)
+        reader.join(timeout=cleanup_budget)
         assert proc.returncode == 0 and not reader.is_alive()
-        assert runtime.feed.wait_closed(1)
-        print(f"actual CLI full current roster: 1100 rows in {elapsed * 1000:.2f}ms")
+        assert runtime.feed.wait_closed(cleanup_budget)
+        print(
+            f"actual CLI full current roster: 1100 rows in {elapsed * 1000:.2f}ms, "
+            f"test factor {factor}; nominal qualification is separate"
+        )
+        contended_checks_completed = True
+        qualified = factor == 1
     finally:
-        runtime.close_admission()
-        if proc.poll() is None:
-            proc.terminate()
-            proc.wait(timeout=2)
-        reader.join(timeout=1)
-        server.close()
-        runtime.shutdown()
+        failure = sys.exc_info()[1]
+        try:
+            runtime.close_admission()
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=step_budget)
+            reader.join(timeout=cleanup_budget)
+            error_reader.join(timeout=cleanup_budget)
+            server.close()
+            runtime.shutdown()
+            if contended_checks_completed:
+                assert not reader.is_alive() and not error_reader.is_alive()
+        except BaseException as exc:
+            cleanup_failure = exc
+            raise
+        finally:
+            if report_dir := os.environ.get("F1_NATIVE_REPORT_DIR"):
+                import hashlib
+                from pathlib import Path
+
+                report = Path(report_dir).resolve()
+                repo = Path(__file__).resolve().parents[3]
+                assert report.is_relative_to(repo / ".test-venvs") and report.is_dir()
+                (report / f"native-{entry_mode}.json").write_text(json.dumps({
+                    "source_commit": os.environ.get("F1_SOURCE_COMMIT"),
+                    "production_ancestor": os.environ.get("F1_PRODUCTION_ANCESTOR"),
+                    "environment_reference": os.environ.get("F1_ENVIRONMENT_REFERENCE"),
+                    "test_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                    "entry_mode": entry_mode, "argv": proc.args,
+                    "console_declaration": declared[0].value if entry_mode == "console" else None,
+                    "interpreter": sys.executable, "python_version": sys.version,
+                    "started_monotonic": started,
+                    "budget_factor": factor,
+                    "nominal_initial_deadline_seconds": 2.0,
+                    "initial_deadline_seconds": initial_budget,
+                    "step_budget_seconds": step_budget,
+                    "cleanup_budget_seconds": cleanup_budget,
+                    "diagnostic_window_seconds": 10 * factor,
+                    "initial_elapsed_seconds": elapsed,
+                    "nominal_initial_threshold_met": elapsed is not None and elapsed < 2.0,
+                    "nominal_run_exercised": factor == 1,
+                    "fixture_row_count": 1100,
+                    "qualified": qualified and cleanup_failure is None,
+                    "nominal_qualified": qualified and cleanup_failure is None,
+                    "contended_checks_completed": contended_checks_completed,
+                    "contended_test_pass": (
+                        contended_checks_completed and failure is None
+                        and cleanup_failure is None
+                    ),
+                    "failure": None if failure is None else {
+                        "type": type(failure).__name__, "message": str(failure),
+                    },
+                    "phases": received_requests,
+                    "cleanup_failure": None if cleanup_failure is None else {
+                        "type": type(cleanup_failure).__name__, "message": str(cleanup_failure),
+                    },
+                    "stdout": "".join(raw_stdout), "stderr": "".join(stderr_lines),
+                    "returncode": proc.returncode,
+                    "readers_joined": not reader.is_alive() and not error_reader.is_alive(),
+                }, indent=2), encoding="utf-8")

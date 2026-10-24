@@ -136,7 +136,12 @@ def run_resume(
             )
             status = result.get("status", "")
             if as_json:
-                json_out({"session_id": target, "status": status, "verb": "resumed"})
+                json_out({
+                    **result,
+                    "session_id": result.get("session_id") or target,
+                    "status": status,
+                    "verb": "resumed",
+                })
             else:
                 print(f"[OK] Session {target} resumed ({status})")
             return
@@ -171,13 +176,10 @@ def run_resume(
             status = result.get("status", "")
             sid = result.get("session_id", "") or worktree_id
             verb = "took over" if reclaim else "loaded"
-            payload = {"session_id": sid, "status": status, "verb": verb}
-            for field in ("acp_session_id", "durable_session_id", "mode"):
-                if result.get(field) is not None:
-                    payload[field] = result[field]
+            payload = {**result, "session_id": sid, "status": status, "verb": verb}
             if noun == "Repo":
                 payload["requested_target"] = target
-            payload["worktree_id"] = worktree_id
+            payload.setdefault("worktree_id", worktree_id)
             if as_json:
                 json_out(payload)
             else:

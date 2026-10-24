@@ -56,6 +56,7 @@ async def run_agent_session_host(
     from ..agent_registry import build_resolver
     from ..config import load_config
     from ..transport import resolve_local_launch
+    from ..hosting_policy import require_target_hosting
     from .launcher import run_host
 
     if resolver is None:
@@ -73,6 +74,10 @@ async def run_agent_session_host(
             "targets -- a remote/command target here means a mis-route"
         )
 
+    if cwd is not None:
+        target.cwd = cwd
+        target.explicit_cwd = True
+    await require_target_hosting(target)
     args, work_dir, env = await resolve_local_launch(
         target, session_id=agent_name, prepare_plugins=False,
     )

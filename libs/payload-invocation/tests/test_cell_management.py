@@ -1,4 +1,5 @@
 """Explicit cell publication borrows existing installation custody."""
+# ruff: noqa: F811 -- imported pytest fixtures are injected by name
 from __future__ import annotations
 
 import json
@@ -83,9 +84,40 @@ def test_management_refuses_bad_policy_before_lock_writes(
     assert _snapshot(binding_fixture["home"]) == before
 
 
+@pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("profiles", [{}, {"backend": "cpu"}, {"allowSourceFallback": False}])
+def test_management_profile_hold_precedes_lease_borrow_and_cli(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, capsys, managed: bool, profiles: dict,
+) -> None:
+    primitive = binding_fixture["primitive"]
+    root, arguments = _cell(binding_fixture, {})
+    _policy(binding_fixture, root, arguments, "managed" if managed else "standalone")
+    path = root / "runtime-deployment.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["runtimeProfiles"] = profiles
+    _write(path, document)
+    before = _snapshot(binding_fixture["home"])
+    with pytest.raises(primitive.InstallationContextError, match="profile-aware construction"):
+        with primitive.runtime_publication_lease(**arguments):
+            pytest.fail("Profile hold acquired management custody")
+    with pytest.raises(primitive.InstallationContextError, match="profile-aware construction"):
+        primitive.borrow_runtime_publication(**arguments)
+    for key, value in binding_fixture["environment"].items():
+        monkeypatch.setenv(key, value)
+    command = ["probe-management-publication"]
+    for key in ("payload_root", "plugin_id", "legacy_root", "context", "durable_home"):
+        command.extend(["--" + key.replace("_", "-"), str(arguments[key])])
+    assert primitive.main(command) == 1
+    output = capsys.readouterr()
+    assert "profile-aware construction" in output.err
+    assert "managementPublication" not in output.out
+    assert _snapshot(binding_fixture["home"]) == before
+
+
 @pytest.mark.parametrize("change", [
     "purpose", "purpose-version", "purpose-generation", "host", "pid",
     "different-pid", "token", "generation", "policy",
+    "profile-empty", "profile-cpu", "profile-source",
 ])
 def test_borrower_rejects_changed_custody(binding_fixture: dict, change: str) -> None:
     primitive = binding_fixture["primitive"]
@@ -120,9 +152,17 @@ def test_borrower_rejects_changed_custody(binding_fixture: dict, change: str) ->
                 receipt = json.loads(receipt_before)
                 receipt["generation"] += 1
                 _write(receipt_path, receipt)
+            elif change.startswith("profile-"):
+                document = json.loads(policy_before)
+                document["runtimeProfiles"] = {
+                    "profile-empty": {},
+                    "profile-cpu": {"backend": "cpu"},
+                    "profile-source": {"allowSourceFallback": False},
+                }[change]
+                _write(policy_path, document)
             else:
                 _policy(binding_fixture, root, arguments, "invalid")
-            if change not in {"generation", "policy"}:
+            if change not in {"generation", "policy"} and not change.startswith("profile-"):
                 _write(lock.owner_path, owner)
             inventory = _snapshot(binding_fixture["home"])
             with pytest.raises(primitive.InstallationContextError):

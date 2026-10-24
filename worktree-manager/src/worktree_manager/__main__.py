@@ -1256,6 +1256,11 @@ def _run_launch(req) -> int:
             print(f"error: could not inspect the persisted execution leg: {error}")
             return 1
     if use_ahp:
+        try:
+            engine_client.require_agent_hosting(str(plan.work_dir))
+        except engine_client.EngineError as error:
+            print(f"error: repository hosting admission refused: {error}")
+            return 1
         if new_window:
             print('error: "new window" launches are not yet supported for AHP-backed sessions.')
             return 1
@@ -1531,6 +1536,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  update [--wait|--detach|--supervised-debug]  submit and observe a durable suite update")
         print("  update --request-status ID [--json]        read a durable request without installing")
         print("  update --recovery-status|--recover-after-restart [--json]  inspect/settle interrupted work")
+        print("  update --recover-for-repair [--json]  authorize queue release without cleanup proof; no install")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")

@@ -1602,6 +1602,25 @@ def test_prepare_dependencies_does_not_duplicate_an_explicit_prepare_only(tmp_pa
     assert args.count("--prepare-only") == 1
 
 
+def test_prepare_dependencies_strips_file_selectors_only_from_preparation(tmp_path: Path) -> None:
+    arguments = [
+        "agent-worktrees", "--test-file", "tests/test_one.py",
+        "--test-file=tests/test_two.py", "-k", "policy",
+    ]
+    with mock.patch.object(
+        wrapper._net_scope.subprocess, "run", return_value=mock.Mock(returncode=0),
+    ) as run:
+        wrapper._net_scope.prepare_dependencies(
+            "/usr/bin/devcontainer", wrapper.REPO, "abc123",
+            tmp_path / "devcontainer.json", arguments, wrapper._canonicalize_flag,
+        )
+    assert run.call_args.args[0][-4:] == ["agent-worktrees", "-k", "policy", "--prepare-only"]
+    assert arguments == [
+        "agent-worktrees", "--test-file", "tests/test_one.py",
+        "--test-file=tests/test_two.py", "-k", "policy",
+    ]
+
+
 def test_prepare_dependencies_raises_on_nonzero_exit(tmp_path: Path) -> None:
     fake_result = mock.Mock(returncode=1)
     config_path = tmp_path / "devcontainer.json"

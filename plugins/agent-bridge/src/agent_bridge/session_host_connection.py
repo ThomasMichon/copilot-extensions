@@ -65,6 +65,9 @@ class _SessionHostConnectionMixin:
         from .session_host.host_index import HostRecord
         from .session_host.spawner import LocalSpawner
         from .transport import resolve_local_launch
+        from .hosting_policy import require_path_hosting, require_target_hosting
+
+        await require_target_hosting(target)
 
         if spawner is None:
             spawner = LocalSpawner(
@@ -93,6 +96,7 @@ class _SessionHostConnectionMixin:
                     target, tracker=tracker, session_id=session_id,
                 ))
             )
+            require_path_hosting(work_dir)
             if work_dir and not target.cwd:
                 target.cwd = work_dir
             # Final composition precedes publication; the owner reuses only
@@ -130,6 +134,10 @@ class _SessionHostConnectionMixin:
                 return bound
 
             spawner.prepare_child = prepare_bound_child
+        from . import cold_outages
+
+        if cold_outages.latest(self._db, session_id) is not None:
+            cold_outages.revalidate_launch(self, session_id)
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a
             # command the agent runs (e.g. an in-session `test-chamber services
@@ -145,6 +153,10 @@ class _SessionHostConnectionMixin:
             # 127.0.0.1:<local_port>. spawn() blocks briefly on host readiness,
             # so it is already off-loop.
             step_started = time.monotonic()
+            if remote_child_argv is None:
+                require_path_hosting(work_dir)
+            else:
+                await require_target_hosting(target)
             spawned = await step("session-host-start", spawner.spawn(
                 args, cwd=work_dir, env=child_env, session_id=session_id,
             ))

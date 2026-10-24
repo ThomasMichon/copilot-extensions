@@ -1210,14 +1210,14 @@ def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
             mux_calls.append(worktree_id)
             return False
 
-        def no_owned_processes(worktree_path):
+        def no_checkout_holders(worktree_path, **kwargs):
             process_calls.append(Path(worktree_path))
             return []
 
         monkeypatch.setattr(finalize.sessions, "kill_tmux_session", absent_mux)
-        monkeypatch.setattr(finalize.procs, "terminate_processes_under", no_owned_processes)
+        monkeypatch.setattr(finalize.procs, "processes_with_cwd_under", no_checkout_holders)
         assert finalize.validate_and_finalize(env.worktree_id, config) is True
-        assert mux_calls == [env.worktree_id]
+        assert mux_calls == []
         assert process_calls == [env.clone]
 
 

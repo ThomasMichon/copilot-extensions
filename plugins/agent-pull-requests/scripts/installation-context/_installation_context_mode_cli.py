@@ -630,6 +630,12 @@ def _build_parser() -> argparse.ArgumentParser:
     deployment_parser = subparsers.add_parser("deployment-status")
     _add_mode_arguments(deployment_parser)
 
+    profile_parser = subparsers.add_parser("runtime-profile-policy")
+    _add_mode_arguments(profile_parser)
+    profile_parser.add_argument("--backend")
+    profile_parser.add_argument("--retained-backend")
+    profile_parser.add_argument("--existing-installation", action="store_true")
+
     publication_parser = subparsers.add_parser("probe-plugin-publication")
     _add_mode_arguments(publication_parser)
 
@@ -941,6 +947,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result["managementPublication"] = True
             elif arguments.action in {"deployment-status", "probe-plugin-publication"}:
                 result = resolve_runtime_deployment(**mode_arguments)
+            elif arguments.action == "runtime-profile-policy":
+                result = resolve_runtime_profile_policy(
+                    backend=arguments.backend, retained_backend=arguments.retained_backend,
+                    existing_installation=arguments.existing_installation, **mode_arguments,
+                )
             else:
                 result = probe_legacy_entrypoint(**mode_arguments)
         json.dump(result, sys.stdout, ensure_ascii=False, separators=(",", ":"))
@@ -950,6 +961,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.action == "probe-plugin-publication" and not result["deployment"]["allowPluginPublication"]:
             return 3
         if arguments.action == "guest-status" and result["status"] != "ready":
+            return 1
+        if arguments.action == "runtime-profile-policy" and result["runtimeProfiles"]["status"] != "ready":
             return 1
         return 0
     except InstallationContextError as error:

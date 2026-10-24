@@ -160,6 +160,16 @@ someone else's PR". The [execution-driver slice](execution-driver.md) therefore
 proceeds against the existing canonical updater, independently of open staging,
 watchdog and recurring-maintenance changes, without superseding their owners.
 
+**Repair evidence clarification (2026-10-23), summary:** audited, request-bound
+pre-launch recovery is allowed, but an explicit operator order to repair,
+clean-install or force-reinstall does not require historical cleanup evidence.
+Operator authorization is distinct from native-confirmed settlement. Preserve
+the actual prior failure, addressed installation scope, one active writer and
+unrelated services/data; do not require the broken owner to approve recovery.
+The [request record](inception-transcript.md#explicit-repair-authorization-and-legacy-pre-launch-audit)
+retains the exact words. This approves source implementation, not a concrete
+repair run on a host.
+
 ## Plan
 
 ### Phase 0 - Review the intent and plan
@@ -204,8 +214,10 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Complete the remaining adopter hook/extension publication map and qualify their retained non-deployment behavior and explicit readiness outcomes.
 - [x] **Agent-recommended decomposition:** qualify remaining Bridge/Dispatch/Containers/MCP/Machines/Budget Guidance bootstrap first-stamp and drift paths with actual no-write policy refusal, standalone positives and retained independent hooks.
 - [ ] **Agent-recommended decomposition:** qualify remaining payload/global first-use command routes separately from bootstrap, distinguishing selected-context validity from publication permission and preserving healthy dispatch and explicit helper-skew outcomes.
-- [ ] **Agent-recommended bounded slice:** qualify Bridge command-side first use before provision trace/status/root/lock writes, with actual standalone reachability, healthy managed invocation, helper skew and independently selected installation scope.
+- [x] **Agent-recommended bounded slice:** qualify Bridge command-side first use before provision trace/status/root/lock writes, with actual standalone reachability, healthy managed invocation, helper skew and independently selected installation scope.
 - [ ] **Agent-recommended bounded slice:** qualify Dispatch command-side first use through the canonical required-context dispatcher contract, preserving legacy defaults for unrelated version-1 manifests and actual selected-cell scope.
+- [ ] **Agent-recommended capability follow-up:** qualify Dispatch's native scoped staging/service publication before replacing explicit cold-cell/custom-root command readiness with provisioning.
+- [ ] **Agent-recommended review follow-up:** restore and qualify serialized no-flock stale-lock recovery in Bridge's retained command gate under #7030, separately from its merged publication-admission slice.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
@@ -238,7 +250,10 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] Review the execution-owner clarification and bounded implementation plan.
 - [ ] Review and implement [normal and operator-approved repair modes](execution-driver.md#normal-and-forcerepair-operation): central desired targets, same-version debounce, one active installer, clean normal rollback and bounded repair takeover without stale-marker vetoes. Preserve the [same-boot recovery requirement](execution-driver.md#live-cutover-recovery-correction), older-record repair and unrelated services/data; no host/kernel restart prerequisite.
 - [x] Implement durable requests, compatible pending-request coalescing and attributable read-only status/results.
-- [ ] Land pinned-target active-request sharing through the existing queue and fixed first-use adapter; preserve later execution for unresolved moving targets. This does not close central desired-target selection, worker fan-out, same-boot recovery or repair takeover.
+- [x] Land pinned-target active-request sharing through the existing queue and fixed first-use adapter; preserve later execution for unresolved moving targets. This does not close central desired-target selection, worker fan-out, same-boot recovery or repair takeover.
+- [x] Land native-confirmed same-boot failure settlement, preserving interrupted/no-exit-status outcomes and older request history; qualify strict native cleanup, participant refusal, schema-2 compatibility and subsequent normal execution on Windows/Linux. Owner death without durable proof and legacy/approved repair remain separate open work.
+- [x] Implement explicit operator-authorized legacy fence recovery without a historical cleanup-proof prerequisite, retaining original failed outcomes and recording authorization separately from native proof. Keep audited pre-launch recovery optional, normal admission conservative and active-installer takeover within the bounded repair contract.
+- [x] Qualify an intact-source recovery-only bootstrap for older installed clients that cannot expose the new repair command. Preserve the canonical driver, existing custody and failed history without constructing Manager, replaying work or requiring the old owner to cooperate.
 - [ ] Route ordinary supported suite-update entry points through one caller-independent execution owner over the complete canonical transaction.
 - [x] Migrate the public Manager/engine update commands, staged acquisition and hook `reconcile-plugins --apply` without replacing their canonical executors.
 - [ ] Migrate native launchers' direct validated plan-action execution and remaining suite-adopted first-use publishers while preserving standalone defaults.
@@ -259,8 +274,29 @@ transaction execution from the existing recurring-maintenance assignment.
 - [x] **Agent-recommended bounded first-use handoff:** qualify the fixed legacy Vault direct-provision recipe's native cold supervisor, retained foundation, canonical ordinary queue receipt/result and frozen-input execution on Windows and Linux before adopting any production publisher. Namespaced recipes and actual canonical plugin deployment remain separate acceptance.
 - [x] **Agent-recommended bounded first-use qualification:** exercise that fixed handoff against the actual materialized Vault installer and installed CLI/immutable generation in isolated native Windows and Linux client-only lanes, preserving canonical publication/source admission and healthy selection on failure. Qualify existing-owner/nested invocation with explicit no-write refusal before any production wrapper can recursively enqueue behind its own custody. Ordinary publishers remain unadopted; service-enabled deployment is not credited from client-only evidence.
 - [x] **Agent-recommended bounded publisher adoption:** package the fixed standalone foundation through the existing canonical source/materialization owner and route the legacy Vault cold primary/payload command's admitted provisioning through its durable queue before holding any outer provisioning lock. Preserve healthy dispatch, managed/pinned/no-self-provision no-write refusal, exact owning source/root, ordinary service-enabled defaults and explicit nested/unsupported/recovery outcomes. Qualify the actual generated commands and applicable service effects in isolated native Windows/Linux before claiming production-path acceptance; do not infer adoption or namespaced support from the client-only adapter tests.
-- [ ] **Agent-recommended next publisher boundary:** trace Vault's remaining session bootstrap and explicit installer publication callers against the adopted command handoff, then qualify the next fixed request recipe under the same execution authority. Preserve the existing native staging, source/publication admission, healthy dispatch and explicit unsupported outcomes; do not let a bootstrap caller recursively submit behind its own custody or reintroduce a foreground fallback.
-- [ ] **Agent-recommended bounded stamp prerequisite:** qualify Vault's fixed canonical stamp action through the existing native supervisor and ordinary queue before routing its session bootstrap. Preserve provision request identity, distinct/coalesced stamp identity, source/publication/no-self/pinned/nested refusal and real native publication without a Vault runtime or service. Recipe support is not bootstrap or explicit-installer adoption.
+- [x] **Agent-recommended bounded bootstrap adoption:** route Vault's legacy session bootstrap's first stamp and drift provisioning through the qualified fixed actions under the same execution authority. Preserve the native staging, source/publication admission, healthy and non-deployment hook behavior, originating project, normalized runtime identity and explicit unsupported outcomes. Qualify the actual hook deadline and output-free launch acknowledgement without treating it as durable acceptance; do not recursively submit behind existing custody, retain the age/PID installer guard, or reintroduce a foreground fallback. Explicit installer publishers remain separate.
+- [x] **Agent-recommended bounded stamp prerequisite:** qualify Vault's fixed canonical stamp action through the existing native supervisor and ordinary queue before routing its session bootstrap. Preserve provision request identity, distinct/coalesced stamp identity, source/publication/no-self/pinned/nested refusal and real native publication without a Vault runtime or service. Recipe support is not bootstrap or explicit-installer adoption.
+- [x] **Agent-recommended bounded next-adopter prerequisite:** qualify Pull Requests'
+  fixed legacy stamp/provision recipes for its canonical installed payload and
+  default legacy root through the same native supervisor,
+  canonical queue and frozen-input owner. Preserve its actual installer options,
+  own context, publication/no-self/nested refusal, source-independent installed
+  command, failed-candidate selection and native caller-loss outcomes before
+  adopting any ordinary Pull Requests publisher. Do not infer service options,
+  namespaced support or production command/bootstrap adoption from recipe proof.
+- [x] **Agent-recommended bounded source handoff:** qualify Pull Requests'
+  exact selected legacy snapshot through the same fixed recipe and native
+  staged-origin reader before adopting its ordinary primary command. Preserve
+  canonical snapshot provenance, live publication policy, exact queued source,
+  ordinary-copy refusal and unavailable/reselected-source outcomes; do not
+  replace the retained snapshot with the currently installed payload.
+- [ ] **Agent-recommended bounded publisher adoption:** route Pull Requests'
+  actual generated legacy primary/payload cold commands through the packaged
+  foundation and canonical queue before cold trace or outer-lock writes.
+  Qualify generated commands, exact selected snapshot, caller loss, healthy
+  dispatch and no-write refusals on native Windows/Linux. Refuse unsupported
+  cold custom roots and cells without changing healthy dispatch or adopting
+  bootstrap/explicit installer publishers.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
@@ -445,6 +481,7 @@ credential/configuration effect occurs here.
 
 - [ ] **Bidirectional selection:** forward, lower-version and same-package/different-source replacements use identity inequality; compatible handoff health-gates before retirement, while incompatible/refused/hung handoff allows bounded owned-scope shutdown or identity-checked force termination before cold-start readiness.
 - [ ] **Cold recovery and retries:** breaking all predecessor handoff contracts does not veto selected Dev deployment. Qualify durable recovery after abrupt child death, consumer reconnect after stream/reply loss, safe retry/deduplication or unknown-outcome reconciliation, exclusive ownership and explicit failed-recovery reporting.
+- [ ] **Operator repair authority:** explicit repair proceeds without historical cleanup or pre-launch evidence, including older records that cannot supply it. Audited pre-launch recovery is optional. Distinguish authorization from native settlement, preserve actual failure/pending history, refuse implicit repair in ordinary callers, and verify scoped takeover, actual selected readiness and unrelated-data preservation separately.
 - [ ] **Source admission:** reject dirty, worktree-backed, unmerged or substituted source; preserve the exact resolved commit throughout a run.
 - [ ] **Materialization:** actual installer imports the complete vendor closure from a non-editable install with no source-checkout dependency.
 - [ ] **Identity:** identical inputs reuse unchanged completion bytes; different commits or assembly/dependency/profile inputs cannot overwrite a completed slot.

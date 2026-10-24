@@ -193,6 +193,7 @@ def test_new_two_hop_guard_rejection_and_retry(tmp_path, monkeypatch, capfd, cas
 
 
 def test_new_exec_failure_restores_creation_prompt(tmp_path, monkeypatch):
+    (tmp_path / "wt-a").mkdir()
     record = tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo", "test",
         "windows", tmp_path, pending_seed="New task",
@@ -214,6 +215,7 @@ def test_new_exec_failure_restores_creation_prompt(tmp_path, monkeypatch):
 
 
 def test_uninstrumented_setup_rejects_without_claim_or_execution(tmp_path, monkeypatch):
+    (tmp_path / "wt-a").mkdir()
     record = tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo", "test",
         "windows", tmp_path, pending_seed="New task",
@@ -234,6 +236,7 @@ def test_real_setup_child_rejects_before_copilot_and_keeps_seed_for_retry(tmp_pa
         pytest.skip("PowerShell unavailable")
     if shell == "bash" and BASH is None:
         pytest.skip("Bash unavailable")
+    (tmp_path / "wt-a").mkdir()
     record = tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo", "test",
         "windows", tmp_path,
@@ -292,9 +295,10 @@ def test_non_json_delegated_resolve_retains_new_owner(tmp_path, monkeypatch, ver
 
     config = _create_config(tmp_path)
     monkeypatch.setattr(core.cfg, "tracking_dir", lambda: tmp_path)
+    (tmp_path / "wt-a").mkdir()
     record = tracking.create_new_record(
-        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
-        "windows", tmp_path, pending_seed="New task", codename="already-set",
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), config.repo_name, config.machine,
+        config.platform, tmp_path, pending_seed="New task", codename="already-set",
     )
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(rlc.sessions, "verify_worktree_active", lambda *_a, **_k: verdict)

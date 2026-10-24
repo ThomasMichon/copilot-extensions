@@ -39,12 +39,12 @@ def test_foreground_plan_waits_without_aggregate_deadline(monkeypatch, selection
 
 
 @pytest.mark.parametrize("route", ["shell", "shell-resume", "direct", "ahp", "persisted-ahp", "remote"])
-def test_manager_defers_only_shell_delegated_preparation(monkeypatch, route):
+def test_manager_defers_only_shell_delegated_preparation(tmp_path, monkeypatch, route):
     from worktree_manager import __main__ as entrypoint
     from worktree_manager import ahp_provider, launcher
 
     events = []
-    plan = dict(PLAN, worktree_id="wt-a")
+    plan = dict(PLAN, worktree_id="wt-a", work_dir=str(tmp_path))
     if route == "remote":
         plan["action"] = "remote"
     monkeypatch.setattr(ec, "engine_base_command", lambda: ["engine"])
@@ -66,6 +66,23 @@ def test_manager_defers_only_shell_delegated_preparation(monkeypatch, route):
         return subprocess.CompletedProcess(argv, 0, json.dumps(plan), "")
 
     monkeypatch.setattr(engine_process, "run", run)
+    original_query = ec.run_json
+    owner_reads = []
+
+    def query(project, args, **kwargs):
+        if args[:2] != ["agent-policy", "check"]:
+            return original_query(project, args, **kwargs)
+        assert project is None
+        assert args == [
+            "agent-policy", "check", "--path", str(tmp_path), "--operation", "launch", "--json",
+        ]
+        owner_reads.append(str(tmp_path))
+        return {
+            "version": 1, "repository": str(tmp_path), "expose_agent": None,
+            "sources": [], "denied_by": [], "allowed": True,
+        }
+
+    monkeypatch.setattr(ec, "run_json", query)
     monkeypatch.setattr(
         entrypoint, "_run_relocated_mux_launch",
         lambda *a: events.extend(["maintenance", "final-publication", "shell-handoff"]) or 0,
@@ -93,6 +110,7 @@ def test_manager_defers_only_shell_delegated_preparation(monkeypatch, route):
         assert events[-1] == "direct-handoff"
         assert events.count("inspect-leg") == (1 if resumed else 0)
     assert "AGENT_WORKTREES_DEFER_PROJECTIONS" not in os.environ
+    assert owner_reads == ([str(tmp_path)] if route in {"ahp", "persisted-ahp"} else [])
 
 
 @pytest.mark.parametrize("deferred", [False, True])
@@ -223,6 +241,7 @@ def test_native_maintenance_status_uses_production_sinks(tmp_path, shell, mode):
         "$ErrorActionPreference='Stop'",
         "$script:LaunchTimer=[Diagnostics.Stopwatch]::StartNew()",
         f"$script:SetupLog='{log}'",
+        "$script:LaunchAdmitted=$true",
         f"$script:ShowLaunchStatus=${str(mode != 'quiet').lower()}",
         "$CopilotPassthrough=@('--stdio')" if mode == "stdio" else "$CopilotPassthrough=@()",
         function("Format-SetupLine"),
@@ -329,6 +348,7 @@ def test_bash_progress_failure_is_bounded_and_preserves_native_outcome(tmp_path,
         python = str(missing)
     fixture.write_text("\n".join([
         "set -euo pipefail",
+        "_LAUNCH_ADMITTED=1",
         functions,
         f"PYTHON={shlex.quote(python)}; _SETUP_LOG_DIR={shlex.quote(str(tmp_path))}",
         f"SETUP_LOG={shlex.quote(str(log))}; _SHOW_LAUNCH_STATUS=1",
@@ -366,6 +386,7 @@ def test_bash_progress_shutdown_does_not_signal_a_reused_pid(tmp_path, replaceme
     fixture = tmp_path / "stale-renderer.sh"
     fixture.write_text("\n".join([
         "set -euo pipefail",
+        "_LAUNCH_ADMITTED=1",
         functions,
         f"_SETUP_PROGRESS_DIR={shlex.quote(str(spool))}",
         # A stale renderer PID now names a live non-renderer process. The
@@ -404,6 +425,7 @@ def test_bash_spool_initialization_failure_does_not_abort_native_launch(tmp_path
     fixture = tmp_path / "spool-failure.sh"
     fixture.write_text("\n".join([
         "set -euo pipefail",
+        "_LAUNCH_ADMITTED=1",
         functions,
         f"mktemp() {{ printf '%s\\n' {shlex.quote(str(spool))}; }}",
         "_SETUP_LOG_DIR='unused'; _SETUP_PROGRESS_DIR=''; _SETUP_PROGRESS_PID=''; _SETUP_PROGRESS_JOB=''",
@@ -434,6 +456,7 @@ def test_bash_completed_renderer_cleanup_survives_shell_reaping(tmp_path):
     fixture = tmp_path / "already-reaped.sh"
     fixture.write_text("\n".join([
         "set -euo pipefail",
+        "_LAUNCH_ADMITTED=1",
         functions,
         f"PYTHON={shlex.quote(getattr(sys, '_base_executable', sys.executable))}",
         f"_SETUP_LOG_DIR={shlex.quote(str(tmp_path))}; SETUP_LOG={shlex.quote(str(tmp_path / 'setup.log'))}",
