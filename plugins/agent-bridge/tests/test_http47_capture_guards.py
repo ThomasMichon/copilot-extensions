@@ -76,7 +76,7 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
         text = text.replace("RETAINED_INBOX_PROTOCOL_VERSION = 48\n", "")
         text = text.replace("RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION = 49\n", "")
         text = re.sub(r"(?m)^HTTP_PROTOCOL_VERSION = \d+$", "HTTP_PROTOCOL_VERSION = 47", text)
-        protocol.write_text(text, encoding="utf-8")
+        protocol.write_text(text, encoding="utf-8", newline="\n")
         http["declared_range"].update(current=47, previous_generation=46)
         http["capability_versions"].pop("retained_inbox", None)
         http["capability_versions"].pop("retained_inbox_producer", None)

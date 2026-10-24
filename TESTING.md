@@ -7,6 +7,17 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional historical Bridge source proof
+
+The manual `installation-context-full.yml` portfolio `bridge-contracts`
+runs only the canonical Bridge evidence checker, HTTP-48 archive byte controls,
+HTTP-48/49 publication guards and HTTP-47 history-preservation cases on Ubuntu.
+It retains the ordinary runner's containment and test deadlines. This is
+source/publication evidence, not SDK, native Windows or installed qualification.
+Use a fresh canonical-history-only clone to check proof retention across a
+squash; a long-lived clone may hide missing objects. Windows archive identity
+controls are independent of the heavier Git-backed publication packet.
+
 ## Optional immutable Worktrees runtime qualification
 
 The manual `installation-context-acceptance.yml` selector
