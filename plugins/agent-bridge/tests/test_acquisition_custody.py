@@ -228,3 +228,49 @@ def test_acquisition_completed_receipt_cannot_change_observed_launch_kind(launch
     with pytest.raises(AcquisitionRefused, match="fence"):
         journal.complete(original, claim.token, result(original, acquired="reused"))
     assert journal.read_launch(original)["stage"] == "native_accepted"
+
+
+def test_retired_acquisition_creation_retains_prior_ids_without_reusing_them(tmp_db: Database) -> None:
+    from agent_bridge.acquisition_policy import AcquisitionEvidence, select_acquisition
+    from test_acquisition_foundation import conversation
+
+    owner, producer, admission = enrolled(tmp_db)
+    journal = AcquisitionJournal(tmp_db)
+    original = request(conversation_retired=True)
+    decision = select_acquisition(
+        original, AcquisitionEvidence(True, "native-a", (conversation(),)),
+    )
+    assert decision.acquired == "created"
+    claim = journal.claim(original, runtime_admission=admission)
+    handoff = journal.prepare_launch(
+        original, owner, admission, session_id="new-bridge", native_session_id=None,
+        consumer_incarnation="executor-a",
+    )
+    assert journal.begin_launch(original, owner, admission, handoff["id"], now=2.0)
+    close(tmp_db, owner, producer)
+    with pytest.raises(RuntimeCustodyError, match="retired native"):
+        journal.report_launch(original, handoff["id"], native_session_id="native-a", now=3.0)
+    journal.report_launch(original, handoff["id"], native_session_id="new-native", now=3.0)
+    created = result(original, acquired="created", session_id="new-bridge", native_session_id="new-native")
+    journal.complete(original, claim.token, created, decision=decision)
+    assert journal.claim(original, runtime_admission=admission).result == created
+    assert journal.read_launch(original)["handoff"] == handoff
+
+
+@pytest.mark.parametrize("retired,bridge,native", [
+    (False, "new-bridge", "native-a"),
+    (False, "bridge-a", "new-native"),
+    (True, "bridge-a", None),
+])
+def test_acquisition_launch_still_refuses_wrong_carried_or_retired_holder(
+    tmp_db: Database, retired: bool, bridge: str, native: str | None,
+) -> None:
+    owner, _producer, admission = enrolled(tmp_db)
+    journal = AcquisitionJournal(tmp_db)
+    original = request(conversation_retired=retired)
+    journal.claim(original, runtime_admission=admission)
+    with pytest.raises(RuntimeCustodyError):
+        journal.prepare_launch(
+            original, owner, admission, session_id=bridge, native_session_id=native,
+            consumer_incarnation="executor-a",
+        )

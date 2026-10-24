@@ -33,6 +33,9 @@ admission, bridge session, selected native conversation (null only for creation)
 and consumer incarnation. Repeated preparation observes the same handoff;
 another incarnation cannot replace it. Legacy, foreign, terminal or already
 delivered history cannot acquire prospective custody.
+An explicitly retired creation can keep both prior IDs in its original request
+as historical facts while selecting a new bridge/native identity. It cannot
+revive either retired ID. Continuation/resume still requires the carried IDs.
 
 `begin_launch` rechecks the original open epoch, enrolled producer, request,
 pending stage and handoff in a short FULL transaction. It admits that handoff

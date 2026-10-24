@@ -144,7 +144,10 @@ class _AcquisitionCustodyMixin:
             )
         ):
             raise RuntimeCustodyError("Acquisition launch contradicts original conversation intent")
-        if (
+        retired_creation = native_session_id is None and request.conversation_retired is True
+        if retired_creation and session_id == request.prior_session_id:
+            raise RuntimeCustodyError("Acquisition creation cannot reuse the retired bridge identity")
+        if not retired_creation and (
             request.prior_session_id not in (None, session_id)
             or request.prior_native_session_id not in (None, native_session_id)
         ):
@@ -226,6 +229,8 @@ class _AcquisitionCustodyMixin:
             if now < row["launch_started_at"]:
                 raise RuntimeCustodyError("Acquisition launch acceptance precedes final admission")
             consumer = AcquisitionLaunch(**report["handoff"]["consumer"])
+            if consumer.native_session_id is None and native_session_id == request.prior_native_session_id:
+                raise RuntimeCustodyError("Acquisition creation cannot reuse the retired native identity")
             if consumer.native_session_id not in (None, native_session_id):
                 raise RuntimeCustodyError("Acquisition launch returned another native conversation")
             if report["result"] is not None:
