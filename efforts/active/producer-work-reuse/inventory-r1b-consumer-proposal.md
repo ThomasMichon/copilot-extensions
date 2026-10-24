@@ -77,6 +77,16 @@ drop proved stopped / defer missing reconstruction** contract above.
 empty-set-on-error behavior is not a “may reconnect” verdict. Do not silently
 ship the current fail-open interpretation under a new cache.
 
+There is also an ordering hunk: `ConnectionOwner.reconcile` currently calls
+`sessions.probe` **before** `usable`. The admitted cache-enabled owner path must
+detect loss/invalidate control before any probe/rebuild effect, then obtain the
+allowed qualified recheck and dispatch only admitted observations. Reread hold
+intent after control mutations before reconciling forwards. Merely adding a
+check in the later `usable()` call does not satisfy immediate invalidation.
+The next-cycle lost-channel **provider** recheck is not gated behind the
+120-second session-probe timestamp and does not create a 15-second Copilot/SSH
+poller; existing observation cadence and the selected failure cooldown remain.
+
 ### Proposed private interfaces for exact admission
 
 ```text
