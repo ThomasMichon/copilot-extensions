@@ -21,7 +21,9 @@ job. It does not qualify Python-free genesis or authorize a host rollout.
 Source CI contains three jobs: operational `checks`, combined impact/execution
 in `unit-tests`, and the fixed-name `PR gate (required check)`. The unit job
 reads the actual PR base/head diff before installing test tooling or executing
-tests. Known narrative-only changes may skip testing; unknown, code or
+tests. Markdown-only changes have no executable coverage overlap and select
+no unit tests, including nested plugin documentation, skills and root policy
+documents. Unknown, code or
 configuration impact runs only the positively admitted unit packet.
 It never falls back to standalone services, fleet, native or general plugin
 suites. Guards and the unit job remain independent and parallel. Combining
@@ -73,8 +75,23 @@ the admitted packet for packet-file changes. Other, nested/lookalike, mixed,
 production, scanner/policy and workflow changes retain complete scans; empty
 evidence, push, manual and unknown events always run them. Invalid or
 unavailable diff evidence fails the job, not a success-shaped skip. All other
-guards remain unchanged; the ungated trusted-CI guard binds the selector and
-exact scan commands.
+code-focused guards share the same conservative impact classification:
+version/install/runtime contracts, Bridge source closure, generated-file and
+vendor checks, source hygiene and Ruff do not run for Markdown-only diffs.
+Push guard selection also uses its exact before/after diff; manual, unknown
+events and an absent initial-push base retain code checks. Invalid or
+unavailable diff evidence fails rather than claiming no overlap. Source-to-doc
+renames retain the deleted source path and therefore cannot skip validation.
+
+Markdown changes still run release changefile lint, skill/effort/vision structure, documentation and
+runbook lint, file-size limits, workflow policy and gh-aw Markdown pin/version
+checks. The checks job and fixed-name required aggregate remain present.
+Markdown skills and instructions are shipping payload even without executable
+coverage overlap; their required changefile/version bump must not be skipped.
+The aggregate accepts only an explicit unselected/skipped unit result without
+fabricated coverage or reuse evidence; it does not mistake missing coverage for
+proof that executable changes are untested. The ungated trusted-CI guard binds
+both selectors and the conditional scan commands.
 
 Push CI performs source-policy admission without repeating promotion's unit
 execution. Manual CI runs the same admitted packet, not the old full portfolio.

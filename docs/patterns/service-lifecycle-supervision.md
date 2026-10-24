@@ -95,6 +95,27 @@ for the ownership/visibility distinction and supported primitives.
 
 ### Gotchas this pattern encodes
 
+- **Attribution follows the instance, not just the installed version.** Every
+  shipped daemon entrypoint admits an attributable instance before application
+  work or readiness; detached wrappers reserve custody before creation. Direct
+  source, native-supervisor and container starts use the same contract rather
+  than bypassing it. A host-discoverable inventory remains independent of
+  isolated state roots and requires no running sibling service.
+- **Test lifetime is explicit and finite.** Disposable host-side test instances
+  declare owner, purpose, exact process-birth identity, finite renewable lease,
+  maximum lifetime and disposable runtime artifacts. Unattended tests default
+  to a 10-minute renewable lease and 4-hour maximum; interactive tests must
+  declare an explicit pause-tolerant policy. Renewal follows the test lifecycle
+  owner, not a Copilot turn or a cooperative session-end hook.
+- **Normal install/update reconciliation is a cleanup backstop.** Reuse the
+  instance owner's finite, identity-checked cleanup operation, including on
+  healthy/reuse paths, without turning import/status/resolver/session startup
+  into a destructive sweep. Expiry alone never authorizes signaling a reused
+  PID or deleting foreign paths. Confirm termination before settling exact
+  disposable artifacts; preserve unrelated proof files, source/code, production
+  cutover and unresolved cleanup evidence. Test teardown and independent
+  self-expiry remain primary.
+
 - **The workgroup-principal trap.** Register the Windows task's principal from the
   *current identity* (`[WindowsIdentity]::GetCurrent().Name`), **not**
   `%USERDOMAIN%\%USERNAME%` — on a non-domain (workgroup) machine `USERDOMAIN` is
