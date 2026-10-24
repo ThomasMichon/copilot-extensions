@@ -251,8 +251,11 @@ Dev `8086afc7db615beb3ca01f003e8608e90be409af` at
 `2026-10-23T09:14:35Z`, which includes #8165. Native Codespace acceptance
 below used those effective runtime versions, not a source-only patch.
 
-- [x] Verify publication from `dev` to `main`; perform only authorized rollout
+- [ ] Verify publication from `dev` to `main`; perform only authorized rollout
   through the unified update path and record the effective running version.
+  The earlier #8165 publication and running-version evidence above remains
+  settled. The subsequent caller/preflight correction #8405 requires its own
+  containing release and authorized rollout.
 - [ ] Complete the validation matrix below, or explicitly transfer any
   unavailable lane to a named tracked objective.
 - [ ] Reconcile #5286, #5072, and #954 without closing broader unrelated scope.
@@ -391,9 +394,22 @@ or a reason to create a daemon.
   incumbent, retaining the captured caller facts for creation and retries.
   Missing/malformed ownership, unsupported capability, a missing replacement
   agent, and cross-request caller-context reuse all refuse without ending it.
+- #8405 merged as `9626b048209b0f3abde92d2b66ff0a89d93c9438` after
+  Copilot approved exact head `dfa9f4f5179d6185565f6947c7a0a9fcd44dad6b`,
+  both review findings were fixed and resolved, and required CI passed. Managed
+  completion verified the merge and reconciled the source worktree past the
+  squash without finalizing this active effort.
+- The containing release is blocked by #8411. Run `40055232492` passed source
+  units, artifact construction/attestation, and candidate composition before
+  exact candidate-source reuse rejected `services/chat/src/agent_chat_service/__init__.py`.
+  The existing bounded source-only repair claim and #3336 control/adoption
+  ownership remain authoritative; no competing repair, forced rerun, Main
+  mutation, or installed update was attempted.
 - Publication, authorized rollout, deployed local acceptance, the remaining
-  headed/SSH/privileged lanes, and the blocked trusted-container proof remain
-  open.
+  headed/SSH/privileged lanes, and the independently blocked trusted-container
+  proof remain open. The next slice observes that owned release repair, verifies
+  a containing qualified Main snapshot, then performs authorized running-state
+  and native acceptance instead of crediting this source merge as deployment.
 
 ### 2026-10-23 - Prepare the remote-container controller and isolate bootstrap failure
 
