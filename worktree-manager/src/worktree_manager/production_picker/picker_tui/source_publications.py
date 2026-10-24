@@ -28,6 +28,7 @@ _FRAME_FIELDS = {
     "order": {"type", "projection", "ids"},
     "commit": {"type", "projection", "cursor"},
     "heartbeat": {"type", "generation", "cursor"},
+    "availability": {"type", "projection", "availability"},
 }
 
 
@@ -328,12 +329,34 @@ class _SourcePublications:
             _validate_frame(frames[0])
             previous.feed.receive(frames[0])
             return False
+        if len(frames) == 1 and isinstance(frames[0], dict) and (
+            frames[0].get("type") == "availability"
+        ):
+            _validate_frame(frames[0])
+            if previous.feed._project != project:
+                raise ValueError("availability differs from selected project")
+            candidate = deepcopy(previous)
+            frame = deepcopy(frames[0])
+            rows = candidate.feed.receive(frame)
+            revision = candidate.feed.head["revision"]
+            if revision >= candidate.availability_revision:
+                candidate.note_availability(revision, frame.get("availability"), fresh=True)
+                for row in rows:
+                    wid = row["id"]
+                    if wid in candidate.rows and candidate.floors[wid] <= revision:
+                        candidate.rows[wid] = {
+                            **candidate.rows[wid], "_availability": row["_availability"],
+                        }
+            self._partitions[source, project] = candidate
+            return True
         candidate = deepcopy(previous)
         committed = False
         availability = None
         for frame in deepcopy(frames):
             _validate_frame(frame)
-            if committed or (frame["type"] == "heartbeat" and len(frames) != 1):
+            if committed or (
+                frame["type"] in {"heartbeat", "availability"} and len(frames) != 1
+            ):
                 raise ValueError("expected one complete feed transaction")
             rows = candidate.feed.receive(frame)
             if frame["type"] == "update" and (
@@ -346,8 +369,6 @@ class _SourcePublications:
                 candidate.replace(rows, candidate.feed.head["revision"])
                 candidate.note_availability(candidate.feed.head["revision"], availability)
                 committed = True
-        if frames[-1]["type"] == "heartbeat":
-            return False
         if not committed:
             raise ValueError("incomplete feed transaction")
         self._partitions[source, project] = candidate

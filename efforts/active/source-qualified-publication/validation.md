@@ -78,6 +78,32 @@ remain covered. This is a work-count assertion, not a stopwatch/native or
 installed performance qualification. No shared parser, production importer
 or public API changed.
 
+### Canonical availability-control follow-up
+
+The newly missed provider finding on `24a99623ecbe3f3d4f0fc28e02f386b7cc8d558d`
+was treated as blocking despite the review's "No open issues" headline.
+The actual F1 producer emits standalone `availability` frames when availability
+changes without a new cursor. This correction is confined to the private
+reducer, its existing focused test file and these direct effort documents.
+
+Six new cases ran fail-first against unchanged prior module source:
+**5 failed, 1 passed, 50 deselected**, exit 1, with captured streams and real
+JUnit. Canonical controls were rejected by the old private allowlist.
+After the bounded correction, the same expanded source selection reports
+**81 passed in 10.60s**, exit 0; real JUnit records 81 tests and zero
+failures/errors/skips. Cases cover stale-to-clear at unchanged revision,
+metadata-only row updates, point/snapshot availability floors, empty-roster
+tombstones/absence receipts, malformed/cross-generation/cross-project controls,
+open barriers, old epochs and preserved reset fences. The existing twenty
+heartbeats over 1,000 rows still asserts zero copies and no state mutation.
+
+All earlier 63/69/75 and fail-first artifacts are preserved. A new timestamped
+directory inventories **200** prior artifact files and hashes before this run;
+new raw logs/JUnit use separate names. Historical pre-capture runs remain
+transcript-only. No shared producer/receiver semantics, wire fields or public
+API changed. This remains private source compatibility qualification, not UI,
+Inbox, F2/F4, native, installed or whole-effort acceptance.
+
 Coverage includes A10 locked → point A11 unlocked → twenty heartbeat/read
 ticks, independent B11 and feed base10, A12 new-owner supersession, source/
 project collisions, selected-identity refusal, epoch cancellation,
