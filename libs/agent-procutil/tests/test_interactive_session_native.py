@@ -111,10 +111,10 @@ def restore(self):
 terminal._Terminal.__init__=init
 terminal._Terminal.restore=restore
 _confirm=terminal.confirm_session
-def confirm(process):
+def confirm(process,**kwargs):
     started=time.monotonic()
     try:
-        return _confirm(process)
+        return _confirm(process,**kwargs)
     finally:
         diagnostic['confirm_elapsed']=time.monotonic()-started
         try:

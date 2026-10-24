@@ -185,6 +185,43 @@ def test_full_session_confirmation_retains_guardian_until_all_groups_exit(monkey
     assert census.groups.called
 
 
+def test_session_confirmation_keeps_terminal_progress_live_until_native_exit(monkeypatch):
+    from agent_procutil import _interactive_groups as groups
+    from agent_procutil import owned_process
+
+    process = Mock(pid=123)
+    progress = Mock()
+    monkeypatch.setattr(
+        owned_process, "_observe_unreaped",
+        lambda _process: object() if progress.call_count else None,
+    )
+    census = Mock()
+    census.groups.side_effect = lambda: {456} if progress.call_count < 3 else set()
+    monkeypatch.setattr(groups, "SessionCensus", Mock(return_value=census))
+    groups.confirm_session(process, on_wait=progress)
+    assert progress.call_count == 4
+    process.wait.assert_called_once_with(timeout=2)
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_settlement_pump_is_nonblocking_bounded_and_retains_unwritten_output(monkeypatch, blocked):
+    from agent_procutil import _interactive_terminal as terminal
+
+    output = bytearray(b"x" * (terminal._BUFFER - 2))
+    source = Mock(return_value=b"ab")
+    write = Mock(side_effect=BlockingIOError) if blocked else Mock(return_value=2)
+    ready = Mock(return_value=([], [19], []))
+    monkeypatch.setattr(terminal, "_read_pty", source)
+    monkeypatch.setattr(terminal, "os", SimpleNamespace(write=write))
+    monkeypatch.setattr(terminal, "select", SimpleNamespace(select=ready))
+    terminal._pump(17, SimpleNamespace(fd=19), output)
+    source.assert_called_once_with(17, 2)
+    ready.assert_called_once_with([], [19], [], 0)
+    assert len(write.call_args.args[1]) == 65536
+    assert len(output) == terminal._BUFFER - (0 if blocked else 2)
+    assert output.endswith(b"ab")
+
+
 def test_a_recycled_group_in_another_session_is_never_signalled(monkeypatch):
     from agent_procutil import _interactive_groups as groups
 

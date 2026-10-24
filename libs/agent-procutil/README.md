@@ -299,6 +299,8 @@ Control/status pipes remain separate from terminal data.
 Relay buffers are bounded. After owned-session settlement, terminal output
 drains under a two-second no-progress deadline rather than a total-output
 deadline; continuous progress does not discard a large command's tail.
+The relay continues bounded nonblocking output progress while waiting for
+settlement, so BSD terminal closure cannot wait on its paused master consumer.
 
 Retirement covers every ordinary job group in the private session, not just
 the initial group. Kernel `setpgroup` admission places owned child anchors only

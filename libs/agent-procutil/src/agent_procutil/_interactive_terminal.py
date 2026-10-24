@@ -280,6 +280,21 @@ def _drain(master, terminal, output):
             pass
 
 
+def _pump(master, terminal, output):
+    if master is None:
+        return
+    if len(output) < _BUFFER:
+        data = _read_pty(master, min(65536, _BUFFER - len(output)))
+        if data:
+            output.extend(data)
+    if output and select.select([], [terminal.fd], [], 0)[1]:
+        try:
+            count = os.write(terminal.fd, output[:65536])
+            del output[:count]
+        except BlockingIOError:
+            pass
+
+
 def _run(argv, env):
     from ._caller_owned import _lifetime_lock, _lifetime_writers, _require_posix_support
 
@@ -340,7 +355,8 @@ def _run(argv, env):
                         descriptors.remove(writer)
                     writer = None
                 if process is not None:
-                    confirm_session(process)
+                    # BSD terminal close may wait for the master consumer.
+                    confirm_session(process, on_wait=lambda: _pump(master, terminal, output))
                     _drain(master, terminal, output)
             finally:
                 try:

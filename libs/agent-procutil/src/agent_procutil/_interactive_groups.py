@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -187,18 +188,24 @@ class SessionCustody:
             time.sleep(.005)
 
 
-def confirm_session(process, timeout: float = 2.0) -> None:
+def confirm_session(
+    process, timeout: float = 2.0, *, on_wait: Callable[[], None] | None = None,
+) -> None:
     from .owned_process import OwnedCleanupError, _observe_unreaped
 
     deadline = time.monotonic() + timeout
     try:
         while _observe_unreaped(process) is None:
+            if on_wait is not None:
+                on_wait()
             if time.monotonic() >= deadline:
                 raise TimeoutError("interactive guardian has not settled")
             time.sleep(.005)
         census = SessionCensus(process.pid)
         empty = 0
         while empty < 2:
+            if on_wait is not None:
+                on_wait()
             empty = 0 if census.groups() else empty + 1
             if time.monotonic() >= deadline:
                 raise TimeoutError("interactive session still has live members")
