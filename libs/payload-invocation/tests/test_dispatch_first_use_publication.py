@@ -67,6 +67,12 @@ def _selected_cell(fixture: dict, environment: dict[str, str]) -> tuple[Path, di
 ] + [
     (state, entry) for state in ("upstream-first", "upstream-policy-change")
     for entry in ("global", "board")
+] + [
+    pytest.param(
+        "standalone-no-flock", entry,
+        marks=pytest.mark.skipif(os.name == "nt", reason="Native POSIX fallback-lock route"),
+    )
+    for entry in ("global", "payload", "board")
 ])
 def test_dispatch_actual_first_use_publication(
     binding_fixture: dict, dispatch_release: Path, tmp_path: Path, state: str, entry: str,
@@ -101,6 +107,8 @@ def test_dispatch_actual_first_use_publication(
     temporary.mkdir()
     environment.update({key: str(temporary) for key in ("TEMP", "TMP", "TMPDIR")})
     environment["AGENT_DISPATCH_PROVISION_OFFLINE"] = "1"
+    if state == "standalone-no-flock":
+        environment["COPILOT_EXT_NO_FLOCK"] = "1"
     environment.pop("AGENT_DISPATCH_NO_SELFPROVISION", None)
     stamp_command = [*_command(binding_fixture, shell, "install"), "stamp"]
     if state.startswith("custom-"):
@@ -122,7 +130,7 @@ def test_dispatch_actual_first_use_publication(
     )
     policy_state = (
         state if state in ("invalid", "foreign", "future") else
-        "standalone" if state.endswith("standalone") or state == "changed-under-lock" or state.startswith("upstream-") else "managed"
+        "standalone" if state.endswith("standalone") or state in ("changed-under-lock", "standalone-no-flock") or state.startswith("upstream-") else "managed"
     )
     _policy(binding_fixture, root, arguments, policy_state)
     if state.startswith("custom-"):
@@ -379,7 +387,12 @@ def test_dispatch_actual_first_use_publication(
     elif policy_state == "standalone" and root == legacy:
         assert result.returncode == 37, evidence
         assert record.read_text(encoding="utf-8").strip() == str(root), evidence
-        assert (root / ".provision.lock").is_file(), evidence
+        if state == "standalone-no-flock":
+            assert not (root / ".provision.lock").exists(), evidence
+            assert not (root / ".provision.lock.pid").exists(), evidence
+            assert not (root / ".provision.reap.mutex").exists(), evidence
+        else:
+            assert (root / ".provision.lock").is_file(), evidence
         assert (root / "logs/boot-trace.jsonl").is_file(), evidence
     elif state == "cell-standalone":
         # Native Dispatch installation-cell staging is not yet supported.
