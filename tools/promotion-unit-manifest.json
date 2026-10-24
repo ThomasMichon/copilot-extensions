@@ -1,6 +1,10 @@
 {
   "profile": "copilot-extensions.promotion-units/v1",
   "nodes": [
+    "tools/promotion_unit_tests/test_library_versions.py::test_linked_library_targets_refuse_before_any_version_write[manifest]",
+    "tools/promotion_unit_tests/test_library_versions.py::test_linked_library_targets_refuse_before_any_version_write[ancestor]",
+    "tools/promotion_unit_tests/test_library_versions.py::test_linked_library_targets_refuse_before_any_version_write[source-directory]",
+    "tools/promotion_unit_tests/test_library_versions.py::test_linked_library_targets_refuse_before_any_version_write[fallback]",
     "tools/promotion_unit_tests/test_installer_retention.py::test_retained_overlapping_projects_compare_each_file_pair_once",
     "tools/promotion_unit_tests/test_installer_retention.py::test_retained_metadata_remapping_work_is_independent_of_scalar_count",
     "tools/promotion_unit_tests/test_installer_retention.py::test_retained_remapping_preserves_nested_native_uri_and_escaped_forms",
@@ -1510,10 +1514,10 @@
   "sources": {
     "libs/installer-engine/installer_dependency_policy.py": "08d1cb67e30cae123d6597666973f946ab68c21da76a649bdfc21f0395327ffd",
     "libs/installer-engine/installer_dependency_config.py": "6952c12c3c9550217953b4dce99d4d84baf62c2f42e3d74edc0cbbc08c3e1609",
-    "tools/accumulate_bumps.py": "3ff0fdce5f81e5ca706591284cdb007a5253d09de4aa643e85f4f914b9b02269",
+    "tools/accumulate_bumps.py": "64055cbc51a33c70882ea3e6ed863ec8b34c8bdb8b3b77c297d44e6cd08eecf0",
     "tools/changefile.py": "5eb39b6273af7bec09e54c4168967a17f3c3d1e7b57d196cc1dac4763529555f",
     "tools/uv_editable_ref.py": "cf1cb7324f4ba057e0ea2f1d63b78f635ea2d7925b8ea8835fda8a000444f8aa",
-    "tools/promotion_unit_tests/test_library_versions.py": "47ed93e1e4b851f32684db33631a58bbba460d33aa80bba1f9c6389f1de00a7d",
+    "tools/promotion_unit_tests/test_library_versions.py": "137ec3237306e3718e90bb31bf601211a6fc76cb45ad447a5b897f0feb3e615c",
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
     "libs/config-migrate/src/config_migrate/core.py": "77d2469a245ee27ff80a1f24a236f38b896c23d011e2c8e4720a77df19a748c6",
     "libs/config-migrate/src/config_migrate/registry.py": "e542436a67d0ca488261e5fd17f921d2947296bc2aa04a46d46611a57c7a1f42",

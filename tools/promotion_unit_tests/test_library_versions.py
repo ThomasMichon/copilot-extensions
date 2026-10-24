@@ -75,3 +75,40 @@ def test_shipped_version_seed_failure_refuses(monkeypatch, tmp_path):
     )
     with pytest.raises(promotion.PromotionError, match="cannot seed shipped versions"):
         promotion._seed_versions_from_main(tmp_path, "shipped", acc=fake, repo=tmp_path)
+
+
+@pytest.mark.parametrize("kind", ["manifest", "ancestor", "source-directory", "fallback"])
+def test_linked_library_targets_refuse_before_any_version_write(library, kind):
+    external = library.parent / (library.name + "-external")
+    external.mkdir()
+    manifest = external / "pyproject.toml"
+    manifest.write_text('[project]\nversion="0.1.0-dev7"\n', encoding="utf-8")
+    fallback = external / "__init__.py"
+    fallback.write_text('__version__ = "0.1.0-dev7"\n', encoding="utf-8")
+    canonical = library / "libs/agent-procutil/pyproject.toml"
+    before = (canonical.read_bytes(), manifest.read_bytes(), fallback.read_bytes())
+    copy = library / "plugins/example/libs/agent-procutil"
+    source = copy / "src"
+    source.mkdir()
+    if kind == "manifest":
+        link, target = copy / "pyproject.toml", manifest
+        link.unlink()
+    elif kind == "ancestor":
+        (copy / "pyproject.toml").unlink()
+        source.rmdir()
+        copy.rmdir()
+        link, target = copy, external
+    elif kind == "source-directory":
+        link, target = source / "package", external
+    else:
+        (source / "package").mkdir()
+        link, target = source / "package/__init__.py", fallback
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("native symlink creation requires Windows privilege")
+        raise
+    with pytest.raises(acc.VersionError, match="unsafe library version"):
+        acc.apply({"libs/agent-procutil": ("0.1.0-dev7", "0.1.0-dev8")})
+    assert (canonical.read_bytes(), manifest.read_bytes(), fallback.read_bytes()) == before

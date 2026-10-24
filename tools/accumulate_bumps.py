@@ -152,11 +152,20 @@ def _consumer_root(consumer: str) -> Path:
 
 def iter_library_consumer_names() -> list[str]:
     """Canonical shared libraries addressable as ``libs/<directory>``."""
-    return sorted(
-        path.parent.relative_to(REPO).as_posix()
-        for path in (REPO / "libs").glob("*/pyproject.toml")
-        if not path.is_symlink() and not path.parent.is_symlink()
-    )
+    manifests = sorted((REPO / "libs").glob("*/pyproject.toml"))
+    for path in manifests:
+        _check_library_path(path)
+    return [path.parent.relative_to(REPO).as_posix() for path in manifests]
+
+
+def _check_library_path(path: Path) -> None:
+    if not path.resolve().is_relative_to(REPO.resolve()):
+        raise VersionError(f"unsafe library version path: {path}")
+    for part in (path, *path.parents):
+        if part.is_symlink() or getattr(part, "is_junction", lambda: False)():
+            raise VersionError(f"unsafe library version indirection: {path}")
+        if part == REPO:
+            break
 
 
 def library_roots(consumer: str) -> list[Path]:
@@ -170,6 +179,16 @@ def library_roots(consumer: str) -> list[Path]:
         root for standalone in iter_standalone_consumer_names()
         if (root := REPO / standalone / "libs" / name).joinpath("pyproject.toml").is_file()
     )
+    for root in roots:
+        _check_library_path(root / "pyproject.toml")
+        source = root / "src"
+        _check_library_path(source)
+        if source.is_dir():
+            for package in source.iterdir():
+                _check_library_path(package)
+                if package.is_dir():
+                    for name in ("__init__.py", "_build_info.py"):
+                        _check_library_path(package / name)
     return roots
 
 
