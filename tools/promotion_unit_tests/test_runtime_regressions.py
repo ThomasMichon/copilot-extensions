@@ -92,11 +92,11 @@ def test_native_execution_check_is_project_independent():
         (["update", "--request-status=synthetic-request", "--json"], True),
         (["update", "--recovery-status", "--json"], True),
         (["update", "--recover-after-restart"], True),
-        (["update", "--recover-for-repair"], True),
         (["update"], False),
         (["update", "--detach"], False),
         (["update", "--supervised-debug"], False),
         (["update", "--not-recovery-status"], False),
+        (["update", "--recover-for-repair"], True),
     ],
 )
 def test_other_project_routing_contracts_are_preserved(argv, allowed):
