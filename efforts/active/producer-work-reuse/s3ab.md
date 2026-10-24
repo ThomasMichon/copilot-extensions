@@ -9,10 +9,10 @@
   concurrency, and compatible atomic heartbeat generation fencing.
 - **Current contract:** [selected admission, full publication](selected-authority-contract.md),
   explicitly selected by the user and reviewed/merged in #8278.
-- **Current slice:** CodeSpaces R1a private JSON storage/pure model is admitted
-  with explicit limits/policy inputs and injected-OS unit validation only.
-  Production grace/action/publication decisions and R1b consumer/transport
-  admission remain pending.
+- **Current slice:** new captured A/N1 correctness is accepted; selected status
+  policy and full Option-F control publication are recorded. Exact R1b
+  consumer/path/reconcile/owner admission remains pending. The private prototype
+  stays unwired; N2/performance/activation/full-source gates are not complete.
   The additive candidate seam has narrow explicit user authorization, not an
   owner release. The previous multi-mux cost conflict is historical analysis,
   not the new representative profile's ceiling. No cache/push algorithm is
@@ -21,8 +21,10 @@
   [strict-boundary lower bound](s3ab-boundary-decision.md) remain retained, not
   current-policy performance qualification.
 - **R1a contract:** [storage and pure freshness](inventory-freshness-admission.md)
-  records the exact pure-slice admission/API. Production defaults and F/S
-  control-authority options remain unselected.
+  records the exact pure-slice admission/API and subsequent policy selection.
+- **R1b proposal:** [exact consumer/path/reconcile/owner
+  hunks](inventory-r1b-consumer-proposal.md), including model refinements and
+  the keep-healthy/defer-rebuild owner dependency. No implementation is implied.
 
 ## Request
 
@@ -52,6 +54,12 @@ launch/recovery, production deployment or live venue probes.
   guards; no native qualification is implied.
 - [x] Draft-publish R1a after pure units/fast guards;
   retain all earlier runtime/performance/native gates.
+- [x] Capture a new 92-case A run and real-primitives N1 correctness; receive
+  independent acceptance without reconstructing the original missing receipts.
+- [x] Record selected status policy and Option F, preserving all source-owner
+  boundaries and no speculative SSH.
+- [ ] Obtain exact R1b hunk/path/provider admission; N2 remains separately gated,
+  not a prerequisite for this design work.
 - [x] Implement immutable inventory and batch protocol with explicit wave adapter.
 - [x] Implement bounded concurrent probes, cancellation and atomic renewal fence.
 - [ ] Validate and independently review; publish and merge through normal gates.
@@ -345,6 +353,40 @@ defers to the next due wave, with no hidden per-venue refresh.
 - Next: retain R1b policy and exact consumer/transport-owner admission.
   No storage checkpoint constitutes
   a whole-cache, source-merge, performance, release or installed completion.
+
+### 2026-10-24 — New A/N1 acceptance and selected status policy
+
+- The coordinator independently verified the 21 closed artifact hashes,
+  92-case A JUnit, one N1 harness JUnit with 38 actual-equals-expected cases,
+  ten source pins, 90 ledger events and both writer identity/Job/reader/reaping
+  receipts. Final real operation custody was reacquired/released. No forced
+  cleanup, unavailable case, source bug or source/test change was observed.
+- Accepted canonical 22-member archive SHA-256:
+  `6ca14e177b173cd8f5a1a54fa56546be2310cc33f9e758e0f44968dd6724251d`.
+  This is **new captured A/N1 correctness only**, not the original missing
+  unit/review artifacts, N2, performance, activation or whole-PR completion.
+  Original run files remain retained in the owning worktree; no arbitrary
+  pruning is authorized by this journal/reference.
+- The user selected: fresh badge 60 s; inactive out-of-band reconcile 300 s
+  only on demand/already-running owner; known-disconnect labelled last-known
+  30 s then unknown with history retained; immediate lost-channel control
+  invalidation and one qualified provider recheck next existing 15 s cycle or
+  explicit action, no speculative SSH; source/account failure coalescing and
+  60 s cooldown, explicit refresh one coalesced attempt; unchanged 30 s effect
+  proof. Silence is not disconnect; cache work does not start/keep alive a daemon.
+- **Option F remains selected:** full LIVE candidate/config/credential
+  validation once per completed control-publication batch, not per status
+  read, push delta or tenant. This continues `selected_then_full_publication`,
+  not a new Option-S cross-account revocation boundary.
+- Returned the exact R1b hunk proposal. Model badge/refresh separation and
+  disconnect-label ordering need explicit refinement; filtering unknown holds
+  alone would tear down healthy forwards, so owner keep/drop/defer-rebuild
+  semantics must be admitted together. Canonical page completeness and
+  same-boundary fresh selected-auth plumbing are separate exact provider seams.
+- No caller/shared-credential/transport/push/path-provisioning code or new
+  private default factory was implemented. The additive CandidateRead grant is
+  unchanged and does not release the retained #5761 namespace/discovery owner.
+  N2/sharing/crash/fault-tracing gates remain separate and do not stall design.
 
 ## Reproduction and remaining cells
 

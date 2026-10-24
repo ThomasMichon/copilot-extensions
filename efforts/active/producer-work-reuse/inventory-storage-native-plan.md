@@ -2,10 +2,17 @@
 
 [Admission](inventory-freshness-admission.md) · [Episode](s3ab.md)
 
-**Proposal only. No native/process/crash execution is admitted or started.**
-Keep the pure prototype unwired; no consumer, push, production path/default,
-grace, F/S authority, ready/merge or deployment change. F1 retains the first
-native test slot. These are correctness tests, not latency/performance samples.
+**N1 was separately admitted, performed and accepted for correctness only.**
+The new captured A execution has 92 real JUnit cases; N1 has one harness JUnit
+case with 38 actual-equals-expected correctness cases, zero unavailable cases,
+two cleanly exited writers and verified custody reacquisition/release.
+All raw originals remain retained. The original uncaptured unit/review artifacts
+remain unavailable; the new run is not their reconstruction.
+
+**N2 remains proposal-only and not admitted/performed.** Keep the prototype
+unwired: no consumer, push, path provisioning, ready/merge or deployment change.
+The selected status policy/Option F is a separate specification, not activation.
+These are correctness results, not latency/performance samples.
 
 ## N1 — real primitives, two owned writers
 

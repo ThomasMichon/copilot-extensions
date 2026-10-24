@@ -4,8 +4,9 @@
 
 **R1a pure-storage/model admission recorded:** the dedicated JSON prototype and
 exact two-file source/unit slice below are admitted, with direct docs/changefile
-updates. No production storage activation, policy/default, consumer, cache/push
-effect, transport or new shared helper is admitted. “R1a” means this CodeSpaces
+updates. No production storage activation, consumer, cache/push effect,
+transport or new shared helper is admitted. The later selected status policy
+below is a specification, not runtime activation. “R1a” means this CodeSpaces
 storage/model phase, not another campaign's similarly named slice.
 
 ## Implemented private API refinements
@@ -53,7 +54,9 @@ parent/file identity and bounded decoded contents are checked; uncertainty is
 typed unknown, without rollback. These checks do not claim protection from
 every hostile filesystem race or add directory-fsync/power-loss guarantees.
 
-The following recommendations remain **unselected production policy**.
+The status policy and Option F below are now **explicitly selected**.
+Production caller/path/transport implementation still requires exact admission;
+R1a's required inputs and unwired status do not change.
 
 ## 1. Admitted minimal R1a scope
 
@@ -146,25 +149,25 @@ apply before commit; overflow returns too-large/unknown and preserves the last
 file, never a truncated “complete” snapshot. The real consumer must surface
 that failure and suppress dependent control decisions.
 
-## 2. Concrete policy recommendations for review
+## 2. Selected status policy
 
 Existing facts: owner reconcile **15 s**, availability listing TTL **60 s**,
 Mux probe cadence **120 s**, idle shutdown **300 s**, draft Available-proof
 age **30 s**. SSH's configured keepalive is 30 s with six unanswered probes;
 do not claim disconnect notification itself is bounded by 30 s.
 
-| Decision | Recommended option | Bounded alternative / tradeoff |
-|---|---|---|
-| Status-only fresh badge | 60 s, matching existing availability TTL; no remote work on local hits | 120 s halves the potential display-reconcile frequency but doubles status age |
-| Inactive/stopped out-of-band reconcile | 300 s **on demand or while the existing owner is already running** | 120 s for faster external-start visibility at up to 2.5 times this reconcile frequency |
-| Known disconnect display grace | 30 s of explicitly disconnected/last-known display; then current status is unknown, retaining the historical row | 0 s for immediate unknown; neither option preserves control/lease authority |
-| Lost-channel due action | Invalidate control proof immediately; one source-qualified provider recheck at the next existing 15 s cycle or explicit action, no speculative SSH | Defer until explicit action for least background work, accepting slower recovery |
-| Repeated recheck failure | Coalesce by source/account; 60 s cooldown while unknown; explicit refresh may request one coalesced attempt | 120 s reduces failing-provider load, slows recovery |
-| Effect-proof age | Retain the existing maximum 30 s; do not raise it | Shorter is possible with greater provider work |
+| Decision | Selected rule |
+|---|---|
+| Status-only fresh badge | 60 s; no remote work on local hits |
+| Inactive/stopped out-of-band reconcile | 300 s, only **on demand or while the existing owner is already running** |
+| Known disconnect display grace | Labelled last-known for 30 s, then unknown; historical row retained |
+| Lost-channel due action | Invalidate control proof immediately; one qualified provider recheck at the next **existing 15 s owner cycle** or explicit action; no speculative SSH |
+| Repeated recheck failure | Coalesce by source/account; 60 s cooldown; explicit refresh may request one coalesced attempt |
+| Effect-proof age | Existing maximum 30 s unchanged |
 
-These are **recommendations, not selected defaults**. Timers use the existing
-owner cadence only when work is owed. No due observations means zero remote
-observation work; cache reads do not start/keep alive a daemon.
+Selection does not add a timer, activate a consumer or keep a daemon alive.
+Only the existing owner cadence and admitted demand/due conditions may
+dispatch work. No due observations means zero remote observation work.
 
 An absence of state-change events is normal and is **not** a disconnected or
 dead-session verdict. Do not add a per-session heartbeat poller to make a
@@ -173,7 +176,7 @@ contract can supply a bounded progress guarantee.
 
 ## 3. Status-only versus control publication
 
-**Recommend the simplest first integration:**
+**Selected status/control boundary:**
 
 - Local cache reads and accepted passive deltas publish only age-labelled
   status. They do not mint credentials, renew/release tenants, wake/reconnect,
@@ -186,23 +189,20 @@ contract can supply a bounded progress guarantee.
 - Every true effect/retry still reads fresh selected source/config/account/
   credentials and checks current owner/deadline. Control mutations retain
   expected-generation comparison under the existing owner lock.
-- **Option F (recommended initial control rule):** retain full live candidate/
+- **Option F (selected):** retain full LIVE candidate/
   config/credential validation **once per completed control-publication batch**,
   not per status read, push delta or tenant. No unauthoritative old credential
   digest or imaginary cheap revision. This preserves the reviewed contract
   while removing unconditional whole-provider loops from status consumption.
-- **Option S (requires an explicit new authority decision):** validate selected
-  source/account/credential plus qualified inventory before scoped control
-  publication; unrelated account/credential changes no longer invalidate that
-  batch unless detected by source reconciliation. This changes the previous
-  full-all-account publication rule. It is not implicitly authorized by caching,
-  plan merge or selected fresh authentication.
+- **Option S is not selected.** There is no new scoped cross-account
+  revocation/change-detection boundary.
 
-F retains extra work at real renewal/release boundaries; S can reduce it but
-accepts a different cross-account revocation/change-detection boundary. Neither
-option permits action on partial/ambiguous inventory, unknown selected-provider
+F retains work at real renewal/release boundaries. It does not permit action
+on partial/ambiguous inventory, unknown selected-provider
 authority or stale owner/tenant generations. Re-measure the actual resulting
 callgraph; no historical numeric ceiling or comparison basis changes here.
+The [exact R1b hunk proposal](inventory-r1b-consumer-proposal.md) separates
+status reads, source reconciliation, path wiring and control integration.
 
 ## 4. Exact dependencies outside R1a
 

@@ -111,8 +111,11 @@ authorized runtime behavior.
   preserve original raw stress evidence and mark ACP/full mixed cost unavailable.
 - [x] Review and merge the [amendment](inventory-freshness-plan.md) through
   current-head review, resolved feedback and required CI (#8418).
-- [ ] Record storage/grace/action-publication decisions and obtain exact
-  source-owner seam admission before functional changes.
+- [x] Record the selected status ages/demand/cooldown rules and Option-F
+  control-publication boundary; no Option-S revocation change.
+- [ ] Obtain exact [R1b consumer/path/reconcile/owner hunk
+  admission](inventory-r1b-consumer-proposal.md) before functional integration.
+  Production limits/path activation and protected source seams are not implied.
 - [ ] Implement only after those gates; qualify real cache-hit/push/due/stale/
   disconnected cases and independent ACP/Mux routes before source completion.
 
