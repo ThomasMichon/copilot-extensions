@@ -162,6 +162,9 @@ and pending-input inspection also use the original native target. An original
 URL cannot downgrade a retired enrollment to the successor's legacy queue,
 and the successor cannot recover the predecessor's retained operation key.
 Unassociated legacy rows continue to follow their routing aliases.
+Readiness-bound startup, standalone readiness and mode-control admission retain
+that original target too: an alias cannot insert an unsupported control into a
+successor's legacy queue or reach its readiness waiter.
 
 Enrollment history is immutable apart from irreversible retirement, survives
 registration cleanup and participates in DB revision/inventory observations.

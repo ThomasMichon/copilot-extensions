@@ -138,6 +138,23 @@ def test_http48_capture_actual_observations(
             ordinary, json={**message, "idempotency_key": "synthetic-new-operation"},
         ).status_code,
     }
+    readiness = {
+        "owner": "bridge", "cwd": str(db.db_path.parent), "plugins": [], "timeout_seconds": 0.05,
+    }
+    original_base = ordinary.removesuffix("/messages")
+    observed["alias_control_refusals"] = {
+        "startup": client.post(ordinary, json={
+            **message, "idempotency_key": "synthetic-startup-operation", "plugin_readiness": readiness,
+        }).status_code,
+        "readiness": client.post(original_base + "/plugin-readiness", json=readiness).status_code,
+        "mode-ready": client.post(original_base + "/mode", json={
+            "mode": "autopilot", "plugin_readiness": readiness,
+        }).status_code,
+        "mode": client.post(original_base + "/mode", json={
+            "mode": "autopilot", "wait_timeout": 1.0,
+        }).status_code,
+        "no_new_control": len(db.execute_read("SELECT * FROM live_messages")) == 1,
+    }
     db.close_runtime_epoch(
         owner, db.runtime_epoch(owner), transition_id="synthetic-transition",
         target_assembly="synthetic-retained", predecessor=app.state.live_inbox_runtime._producer,

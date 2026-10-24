@@ -74,3 +74,37 @@ def test_active_alias_never_downgrades_original_enrollment_to_legacy(renamed, fr
             "native-a", sender="sender", body="unsupported", kind=kind, now=time.time(),
         )
         assert mid is None and reason == "retained_inbox_requires_admission"
+
+
+@pytest.mark.parametrize("operation", ["startup", "readiness", "mode-ready", "mode"])
+def test_active_alias_refuses_control_admission_before_any_readiness_wait(
+    renamed, monkeypatch, operation,
+) -> None:
+    (_, client, db, _), url, _, original = renamed
+    waits = []
+
+    def waiting(*args, **kwargs):
+        waits.append(True)
+        raise AssertionError("retained refusal must precede the control/readiness waiter")
+
+    monkeypatch.setattr(db, "live_control_state", waiting)
+    readiness = {
+        "owner": "bridge", "cwd": str(db.db_path.parent), "plugins": [], "timeout_seconds": 120,
+    }
+    base = url.removesuffix("/messages")
+    if operation == "startup":
+        response = client.post(url, json={
+            **PAYLOAD, "idempotency_key": "startup-operation", "plugin_readiness": readiness,
+        })
+    elif operation == "readiness":
+        response = client.post(base + "/plugin-readiness", json=readiness)
+    else:
+        payload = {"mode": "autopilot"}
+        if operation == "mode-ready":
+            payload["plugin_readiness"] = readiness
+        response = client.post(base + "/mode", json=payload)
+    assert response.status_code == 409, response.text
+    assert "retained_inbox_requires_admission" in response.text
+    assert waits == []
+    assert len(db.execute_read("SELECT * FROM live_messages")) == 1
+    assert dict(db.execute_read("SELECT * FROM live_messages")[0]) == original

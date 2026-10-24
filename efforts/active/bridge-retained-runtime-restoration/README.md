@@ -308,6 +308,16 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   current capture/contract/maintenance cohort passes 124 cases; two contracts
   and 659 fixtures pass the canonical checker. Independent review remains
   required; no runtime or parent gate is inferred.
+- The next independent pass found earlier readiness-control admission still
+  discarded the original alias target. Eight ASGI cases reproduced the same
+  failure for startup, standalone readiness and mode controls, asserting that
+  neither a control row nor any readiness/outcome waiter may be reached.
+  Existing readiness/control owners now retain the requested id through the
+  DB fence while keeping canonical identity for legacy response routing.
+  The coupled producer/readiness/control/create portfolio passes 146 cases.
+  Its parser test now selects an isolated metadata owner and a real temporary
+  checkout policy instead of depending on an ambient Worktrees executable;
+  production hosting admission is unchanged.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

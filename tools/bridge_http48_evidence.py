@@ -22,6 +22,7 @@ AFFECTED = tuple(previous.PREFIX + name for name in (
     "routes/live_inbox.py", "db_inbox_custody.py", "db_live_sessions.py",
     "inbox_custody.py", "loop_governance.py", "live_message_enqueue.py", "routes/live_sessions.py",
     "db_live_session_aliases.py", "db_live_message_receipts.py",
+    "plugin_readiness.py", "routes/live_startup_controls.py",
 ))
 TEST = "plugins/agent-bridge/tests/test_http48_capture_probes.py"
 EXTRA_PATHS = (INPUT, TEST, "plugins/agent-bridge/tests/test_live_inbox_runtime.py",

@@ -720,7 +720,7 @@ async def post_live_message(
     expected_session_id = body.expected_session_id
     if body.plugin_readiness is not None:
         message_kind, expected_session_id = await live_startup_controls.startup_message(
-            db, body, target, target_session_id,
+            db, body, target, session_id,
             existing_kind=_existing_startup_kind, wait_readiness=wait_plugin_readiness,
         )
         now = time.time()

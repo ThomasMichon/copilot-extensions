@@ -46,6 +46,13 @@
       "new_key_refused": 409,
       "aliases_removed": true
     },
+    "alias_control_refusals": {
+      "startup": 409,
+      "readiness": 409,
+      "mode-ready": 409,
+      "mode": 409,
+      "no_new_control": true
+    },
     "outcomes_after_close": [
       {"stage": "unknown"},
       {"stage": "sdk_accepted"},
