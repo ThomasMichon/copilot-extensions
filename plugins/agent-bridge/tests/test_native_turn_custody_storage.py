@@ -187,7 +187,7 @@ def test_frozen_legacy_turn_migration_preserves_unknown_native_history(tmp_path:
         Database(path, read_only=True)
     db = Database(path)
     try:
-        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 34
+        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         row, = db.get_turns("retained")
         assert row["prompt"] == "original prompt" and row["response_text"] == "original result"
         assert row["acquisition_delivery_id"] == "original-delivery"
