@@ -10,6 +10,7 @@ import sqlite3
 
 from .planning import MAX_BYTES, MAX_PLAN_BYTES, PlanError, canonical, digest, identifier, integer, record
 
+PLAN_CHUNK = 16 * 1024
 _APPLICATION = 0x464D4C50
 _SCHEMA = {
     "identity": "CREATE TABLE identity(fleet TEXT NOT NULL,installation TEXT NOT NULL)",
@@ -19,6 +20,14 @@ _SCHEMA = {
         "candidate BLOB NOT NULL,plan BLOB,retained BLOB,decision BLOB)"
     ),
 }
+
+
+class InvalidPlanRange(PlanError):
+    """A selected current plan exists, but the requested range is invalid."""
+
+
+class PreparedPlanChanged(PlanError):
+    """The selected generation/digest no longer names an available current plan."""
 
 
 class PreparationStore:
@@ -34,6 +43,7 @@ class PreparationStore:
         identifier(installation, "preparation installation")
         self.path = path.resolve()
         self.fleet, self.installation = fleet, installation
+        self._plan_cache: tuple[int, str, bytes] | None = None
         with self._transaction(initialize=True):
             pass
 
@@ -85,7 +95,7 @@ class PreparationStore:
             raise PlanError("invalid stored preparation encoding") from None
         return value
 
-    def _candidate(self, candidate, plan):
+    def _candidate(self, candidate, plan, *, validate_plan=True):
         record(candidate, "fleet-manager.loadout-candidate", {
             "fleet", "installation", "status", "reason", "sources", "plan_digest",
             "plan_bytes", "inventory_expires_at", "execution_admission",
@@ -101,11 +111,19 @@ class PreparationStore:
             identifier(candidate["reason"], "preparation reason")
         if (candidate["status"] == "blocked") != (candidate["reason"] is not None):
             raise PlanError("prepared candidate requires an explicit degraded reason")
-        if plan is None:
-            if (candidate["status"] != "blocked" or candidate["plan_digest"] is not None
-                    or candidate["plan_bytes"] != 0 or candidate["inventory_expires_at"] != 0):
+        if candidate["plan_bytes"] == 0:
+            if (plan is not None or candidate["status"] != "blocked"
+                    or candidate["plan_digest"] is not None or candidate["inventory_expires_at"] != 0):
                 raise PlanError("missing prepared plan content")
             return
+        selected = candidate["plan_digest"]
+        if (not isinstance(selected, str) or len(selected) != 64
+                or any(character not in "0123456789abcdef" for character in selected)):
+            raise PlanError("invalid prepared plan digest")
+        if not validate_plan:
+            return
+        if plan is None:
+            raise PlanError("missing prepared plan content")
         encoded = canonical(plan, output=True)
         if (not isinstance(plan, dict) or plan.get("schema") != "fleet-manager.loadout-design"
                 or plan.get("version") != 1
@@ -120,40 +138,76 @@ class PreparationStore:
                 )):
             raise PlanError("prepared plan content differs from its candidate")
 
-    def _read(self, connection):
+    def _read(self, connection, *, include_plan=True):
         row = connection.execute(
             "SELECT generation,sequence,observed,"
             "CASE WHEN length(candidate)<=1048576 THEN candidate END,"
-            "CASE WHEN length(plan)<=4194304 THEN plan END,"
-            "CASE WHEN length(decision)<=1048576 THEN decision END FROM proposal",
+            "CASE WHEN ? AND length(plan)<=4194304 THEN plan END,"
+            "CASE WHEN length(decision)<=1048576 THEN decision END,"
+            "CASE WHEN plan IS NULL THEN 0 WHEN typeof(plan)='blob' THEN length(plan) ELSE -1 END "
+            "FROM proposal", (int(include_plan),),
         ).fetchone()
         if row is None:
+            self._plan_cache = None
             return None
-        generation, sequence, observed, candidate, plan, decision = row
+        generation, sequence, observed, candidate, encoded_plan, decision, size = row
         for name, value in (("generation", generation), ("sequence", sequence), ("observed", observed)):
             integer(value, f"stored preparation {name}", minimum=0 if name == "observed" else 1)
         candidate = self._json(candidate)
-        plan = None if plan is None else self._json(plan, output=True)
-        self._candidate(candidate, plan)
+        integer(size, "stored plan size", maximum=MAX_PLAN_BYTES)
+        plan = None if encoded_plan is None else self._json(encoded_plan, output=True)
+        self._candidate(candidate, plan, validate_plan=include_plan)
+        if candidate["plan_bytes"] != size:
+            raise PlanError("stored plan size differs from its candidate")
+        selected_digest = digest(candidate)
         decision = None if decision is None else self._json(decision)
         if decision is not None:
             if (not isinstance(decision, dict)
                     or set(decision) != {"generation", "digest", "reviewer", "reviewed_at",
                                          "activation_authorized"}
-                    or decision["generation"] != generation or decision["digest"] != digest(candidate)
+                    or decision["generation"] != generation or decision["digest"] != selected_digest
                     or decision["activation_authorized"] is not False):
                 raise PlanError("stored prepared review identity differs")
             self._reviewer(decision["reviewer"])
             integer(decision["reviewed_at"], "stored review time")
-        return {
+        result = {
             "generation": generation, "sequence": sequence, "observed_at": observed,
-            "candidate": candidate, "digest": digest(candidate),
-            "plan": plan, "decision": decision,
+            "candidate": candidate, "digest": selected_digest, "decision": decision,
         }
+        if include_plan:
+            result["plan"] = plan
+            self._plan_cache = (
+                (generation, selected_digest, encoded_plan) if encoded_plan is not None else None
+            )
+        elif self._plan_cache is not None and self._plan_cache[:2] != (generation, selected_digest):
+            self._plan_cache = None
+        return result
 
     def read(self) -> dict | None:
         with self._transaction() as connection:
             return self._read(connection)
+
+    def read_metadata(self) -> dict | None:
+        with self._transaction() as connection:
+            return self._read(connection, include_plan=False)
+
+    def read_plan_range(self, *, generation: int, selected_digest: str, offset: int) -> bytes:
+        integer(generation, "selected preparation generation", minimum=1)
+        identifier(selected_digest, "selected preparation digest")
+        integer(offset, "prepared plan offset")
+        with self._transaction() as connection:
+            current = self._read(connection, include_plan=False)
+            if (current is None or current["generation"] != generation
+                    or current["digest"] != selected_digest or not current["candidate"]["plan_bytes"]):
+                raise PreparedPlanChanged("selected prepared generation changed")
+            if offset >= current["candidate"]["plan_bytes"] or offset % PLAN_CHUNK:
+                raise InvalidPlanRange("invalid prepared plan range")
+            if self._plan_cache is None:
+                self._read(connection)
+            cached = self._plan_cache
+            if cached is None or cached[:2] != (generation, selected_digest):
+                raise PlanError("selected prepared plan is unavailable")
+            return cached[2][offset:offset + PLAN_CHUNK]
 
     def publish(self, candidate: dict, plan: dict | None, *, expected: int, now: int) -> dict:
         encoded = canonical(candidate)

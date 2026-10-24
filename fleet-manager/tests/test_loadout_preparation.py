@@ -204,6 +204,62 @@ def test_corrupt_retained_plan_cannot_be_presented_or_confirmed(tmp_path):
         store.read()
 
 
+def test_exact_maximum_plan_pages_validate_full_content_once_and_refuse_stale_selection(tmp_path, monkeypatch):
+    import hashlib
+
+    from fleet_manager import loadout_preparation
+    from fleet_manager.loadout_preparation import PLAN_CHUNK, InvalidPlanRange
+    from fleet_manager.loadouts import design_loadout
+    from fleet_manager.planning import MAX_PLAN_BYTES
+
+    plan = design_loadout(*inputs(), now=150)
+    plan["range_test_payload"] = ["x" * 65536] * 63
+    plan["range_test_tail"] = ""
+    plan["digest"] = digest({key: value for key, value in plan.items() if key != "digest"}, output=True)
+    plan["range_test_tail"] = "y" * (MAX_PLAN_BYTES - len(canonical(plan, output=True)))
+    plan["digest"] = digest({key: value for key, value in plan.items() if key != "digest"}, output=True)
+    encoded = canonical(plan, output=True)
+    assert len(encoded) == MAX_PLAN_BYTES
+    selected = candidate(plan)
+    path = tmp_path / "large-proposal.sqlite"
+    store = PreparationStore(path, fleet="example", installation="controller-1")
+    current = store.publish(selected, plan, expected=0, now=150)
+    store = PreparationStore(path, fleet="example", installation="controller-1")
+    original = loadout_preparation.canonical
+    full_encodings = []
+
+    def counted(value, **options):
+        if isinstance(value, dict) and value.get("schema") == "fleet-manager.loadout-design":
+            full_encodings.append(True)
+        return original(value, **options)
+
+    monkeypatch.setattr(loadout_preparation, "canonical", counted)
+    assert "plan" not in store.read_metadata()
+    assert full_encodings == []
+    chunks = [
+        store.read_plan_range(generation=1, selected_digest=current["digest"], offset=offset)
+        for offset in range(0, len(encoded), PLAN_CHUNK)
+    ]
+    assert len(chunks) == 256 and all(len(chunk) == PLAN_CHUNK for chunk in chunks)
+    assert b"".join(chunks) == encoded
+    assert hashlib.sha256(b"".join(chunks)).hexdigest() == selected["plan_digest"]
+    assert 1 <= len(full_encodings) <= 2
+    encodings_after_download = len(full_encodings)
+    assert store.read_metadata()["digest"] == current["digest"]
+    assert len(full_encodings) == encodings_after_download
+    with pytest.raises(InvalidPlanRange):
+        store.read_plan_range(generation=1, selected_digest=current["digest"], offset=MAX_PLAN_BYTES)
+    with pytest.raises(InvalidPlanRange):
+        store.read_plan_range(generation=1, selected_digest=current["digest"], offset=1)
+    changed = store.publish(
+        {**selected, "sources": {"revision": "c2"}}, plan, expected=1, now=151,
+    )
+    with pytest.raises(PlanError, match="generation changed"):
+        store.read_plan_range(generation=1, selected_digest=current["digest"], offset=PLAN_CHUNK)
+    assert store.read_plan_range(
+        generation=2, selected_digest=changed["digest"], offset=0) == encoded[:PLAN_CHUNK]
+
+
 def test_built_installed_wheel_serves_real_source_to_gateway(tmp_path, repositories):
     from test_client_distribution import build_path, project_at
 

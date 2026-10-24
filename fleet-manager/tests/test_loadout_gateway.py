@@ -7,6 +7,7 @@ import copy
 import json
 from pathlib import Path
 import subprocess
+import sys
 import threading
 import time
 
@@ -67,7 +68,7 @@ def client(rig):
     return PreparedLoadoutClient(caller, prefix="/api")
 
 
-def test_real_source_pull_notification_plan_confirmation_repeat_and_restart(tmp_path, repositories):
+def test_real_source_pull_notification_plan_confirmation_repeat_and_restart(tmp_path, repositories, monkeypatch):
     config = publish_fleet(repositories)
     config["extensions"]["custom"]["large"] = "x" * 40000
     repositories["publish"](config=config)
@@ -82,7 +83,22 @@ def test_real_source_pull_notification_plan_confirmation_repeat_and_restart(tmp_
             assert prepared["candidate"]["status"] == "prepared"
             assert prepared["candidate"]["plan_bytes"] > PLAN_CHUNK * 2
             assert prepared["candidate"]["execution_admission"] == "not-implemented"
-            plan = await thin.plan(prepared)
+            from fleet_manager import loadout_gateway
+
+            encode = loadout_gateway.canonical
+
+            def metadata_only(value, **options):
+                if isinstance(value, dict) and value.get("schema") == "fleet-manager.loadout-design":
+                    raise AssertionError("full plan encoding on the Gateway event loop")
+                return encode(value, **options)
+
+            def no_full_read():
+                raise AssertionError("full store read for a plan page")
+
+            with monkeypatch.context() as selected:
+                selected.setattr(loadout_gateway, "canonical", metadata_only)
+                selected.setattr(controller.store, "read", no_full_read)
+                plan = await thin.plan(prepared)
             assert plan["suggested_config"]["roles"] == config["roles"]
             assert plan["composition"]["allocations"]["runners"]["configuration"]["adapter"] == "helm.arc"
             point = controller.observations.read(
@@ -189,8 +205,11 @@ def test_published_change_invalidates_old_decision_and_never_accepts_uploaded_co
             }))
             assert response.status == 403
             assert controller.store.read()["decision"] is None
-            assert (await thin.caller.request(
-                "GET", f"/api/plan/{prepared['generation']}/{prepared['digest']}/0")).status == 409
+            stale = await thin.caller.request(
+                "GET", f"/api/plan/{prepared['generation']}/{prepared['digest']}/0")
+            assert stale.status == 409 and json.loads(stale.body) == {
+                "error": "prepared-generation-changed",
+            }
     asyncio.run(scenario())
 
 
@@ -277,4 +296,41 @@ def test_native_adapter_failure_retains_ownership_and_prevents_automatic_replay(
             "error": "repository-owner-required",
         }
         assert len(calls) == 1 and controller.store.read() is None
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_settled_native_output_overflow_is_blocked_inspectable_and_recoverable(tmp_path, repositories, stream):
+    from dataclasses import replace
+
+    publish_fleet(repositories)
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            controller, _ = service(tmp_path, repositories)
+            original = controller.config.run
+            failed = []
+
+            def overflow_once(argv, **options):
+                if not failed:
+                    failed.append(True)
+                    return original(
+                        [sys.executable, "-I", "-c", f"import sys;sys.{stream}.write('x'*5000)"],
+                        **options,
+                    )
+                return original(argv, **options)
+
+            controller.config = replace(controller.config, run=overflow_once)
+            await connect_handler(rig, controller.handle)
+            thin = client(rig)
+            blocked = await thin.refresh()
+            assert blocked["candidate"]["status"] == "blocked"
+            assert blocked["candidate"]["reason"] == "published-source-unavailable"
+            assert controller.repository_failure is None
+            assert (await thin.inspect())["digest"] == blocked["digest"]
+            assert (await thin.notifications())["current"]["status"] == "blocked"
+            recovered = await thin.refresh()
+            assert recovered["candidate"]["status"] == "prepared"
+            assert recovered["generation"] > blocked["generation"]
+            assert controller.repository_failure is None and len(failed) == 1
     asyncio.run(scenario())

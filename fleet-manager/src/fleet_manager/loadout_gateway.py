@@ -12,7 +12,9 @@ import subprocess
 import time
 
 from .gateway_service_handler import CallerContext, HandlerBinding, ServiceRequest, ServiceResponse
-from .loadout_preparation import PreparationStore
+from .loadout_preparation import (
+    PLAN_CHUNK, InvalidPlanRange, PreparationStore, PreparedPlanChanged,
+)
 from .loadout_sources import GitSource
 from .loadouts import design_loadout
 from .observation_store import ObservationStore
@@ -20,7 +22,6 @@ from .observations import CurrentUpdate, ObservationCursor, OriginBinding
 from .planning import MAX_PLAN_BYTES, PlanError, canonical, decode, identifier, integer
 
 LOG = logging.getLogger(__name__)
-PLAN_CHUNK = 16 * 1024
 
 
 @dataclass(frozen=True)
@@ -201,7 +202,7 @@ class PreparedLoadoutService:
         return {"cursor": asdict(replay["cursor"]), "events": events}
 
     async def _refresh(self, request: ServiceRequest, scope: ReviewScope) -> dict:
-        previous = await _settled(self.store.read)
+        previous = await _settled(self.store.read_metadata)
         deadline = time.monotonic() + self.acquisition_seconds
         candidate = {
             "schema": "fleet-manager.loadout-candidate", "version": 1,
@@ -268,14 +269,14 @@ class PreparedLoadoutService:
                 if ((request.target == "/notifications"
                      or request.target.startswith("/notifications/"))
                         and request.method == "GET" and not request.body):
-                    current = await _settled(self.store.read)
+                    current = await _settled(self.store.read_metadata)
                     if current:
                         await _settled(lambda: self._notify(current))
                     result = await _settled(lambda: self._notifications(request.target))
                     self._checkpoint(request, scope)
                     return self._json(200, result)
                 if request.target == "/prepared" and request.method == "GET" and not request.body:
-                    current = await _settled(self.store.read)
+                    current = await _settled(self.store.read_metadata)
                     if current:
                         await _settled(lambda: self._notify(current))
                     self._checkpoint(request, scope)
@@ -306,20 +307,19 @@ class PreparedLoadoutService:
                             or not parts[4].isascii() or not parts[4].isdecimal()
                             or len(parts[2]) > 19 or len(parts[4]) > 10):
                         return self._json(400, {"error": "invalid-plan-range"})
-                    current = await _settled(self.store.read)
-                    if (current is None or int(parts[2]) != current["generation"]
-                            or parts[3] != current["digest"] or current["plan"] is None):
-                        return self._json(409, {"error": "prepared-generation-changed"})
-                    raw = canonical(current["plan"], output=True)
-                    offset = int(parts[4])
-                    if offset >= len(raw) or offset % PLAN_CHUNK:
-                        return self._json(400, {"error": "invalid-plan-range"})
+                    raw = await _settled(lambda: self.store.read_plan_range(
+                        generation=int(parts[2]), selected_digest=parts[3], offset=int(parts[4]),
+                    ))
                     self._checkpoint(request, scope)
                     return ServiceResponse(200, (("content-type", "application/octet-stream"),),
-                                           raw[offset:offset + PLAN_CHUNK])
+                                           raw)
                 return self._json(404, {"error": "prepared-route-unavailable"})
         except PermissionError:
             return self._json(403, {"error": "prepared-scope-refused"})
+        except InvalidPlanRange:
+            return self._json(400, {"error": "invalid-plan-range"})
+        except PreparedPlanChanged:
+            return self._json(409, {"error": "prepared-generation-changed"})
         except PlanError:
             LOG.warning("loadout-preparation-refused code=prepared-state-conflict")
             return self._json(409, {"error": "prepared-state-conflict"})

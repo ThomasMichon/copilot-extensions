@@ -52,8 +52,9 @@ repository adoption owner supplies:
   `refs/heads/...` selection and one portable repository-relative `.json` path.
 - Its existing `agent_procutil.owned_process.run_caller_owned` adapter, with
   finite native process-tree custody, headless spawning, separate output
-  budgets and explicit environment/cwd. This is the repository owner's
-  existing runtime facility, not a second process supervisor installed by Fleet.
+  budgets, `on_settled` notification and explicit environment/cwd. This is the
+  repository owner's existing runtime facility, not a second process supervisor
+  installed by Fleet.
 
 The controller verifies the remote, fetches that selected published ref into
 `refs/fleet-manager/<source>`, resolves the immutable commit and reads only an
@@ -70,11 +71,13 @@ stdout/stderr and elapsed acquisition are separately bounded. Git object
 storage, filesystem quotas and transport/credential policy remain with the
 already adopted repository owner: the JSON limit is not a claim that a fetched
 Git pack is limited to 1 MiB. No clone or new source registration occurs.
-An unsettled native cleanup remains the process owner's responsibility and
-must not be disguised as an ordinary acquisition failure. The service retains
-such native adapter failures in `repository_failure` and refuses further
-requests until that owner has inspected and settled them; it does not discard
-process/Job custody or automatically retry through the failure.
+The adapter's settlement notification distinguishes a confirmed-settled refusal
+(including stdout/stderr overflow) from unresolved native custody. A settled
+failure publishes an inspectable blocked candidate; a later explicit refresh
+can recover. An unsettled failure remains the process owner's responsibility.
+The service retains it in `repository_failure` and refuses further requests
+until that owner has inspected and settled it; it does not discard process/Job
+custody or automatically retry through the failure.
 
 Configuration and an optional contributed catalog can have independently
 adopted selections. The proposal records both source IDs, adoption revisions,
@@ -95,9 +98,12 @@ the prior decision.
 
 Failed acquisition/invalid input publishes a blocked candidate without erasing
 the last valid plan. The blocked candidate cannot reuse earlier approval.
-Candidate bytes, plan identity and persisted review scope are checked on
-readback. A changed concurrent generation refuses rather than overwriting
-another controller's proposal.
+Candidate metadata and persisted review scope are checked on readback. Full
+plan reads and admission validate content; paged inspection retains one bounded
+immutable encoded plan per validated generation/digest. Metadata/status reads
+do not traverse that blob, and each range transaction rechecks the current
+generation/digest. A changed concurrent generation refuses rather than
+overwriting another controller's proposal.
 
 Confirmation accepts exactly `{"generation": ..., "digest": ...}`. It pulls
 the adopted sources again, reads current inventory, reruns the designer and
@@ -135,6 +141,9 @@ codes. Native diagnostics, source URLs and credentials are not response bodies.
 Plan paging fits the existing handler response bound even for a large resource
 grid. The thin client verifies exact byte count and plan hash; every range is
 bound to the same generation/digest. A proposal change mid-read refuses.
+Cold range access validates the full encoded plan once; subsequent pages copy
+only their range, without re-encoding the full plan on the Gateway event loop.
+The maximum 4-MiB plan needs 256 pages, not 256 full-plan validations.
 Notifications contain only bounded proposal identity/status, not raw configuration.
 Foreign/expired cursors refuse; a new producer generation requires resync.
 

@@ -8,6 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+from threading import Event
 import time
 from urllib.parse import urlsplit
 
@@ -40,8 +41,9 @@ class GitSource:
 
     The repository owner supplies its existing ``run_caller_owned`` adapter:
     finite native process-tree custody, independent stdout/stderr bounds,
-    headless spawning, explicit cwd/env, and no shell. The checkout and remote
-    are already adopted by that owner; this class never clones or enrolls one.
+    headless spawning, explicit cwd/env, settlement notification, and no shell.
+    The checkout and remote are already adopted by that owner; this class never
+    clones or enrolls one.
     """
 
     source: str
@@ -97,6 +99,7 @@ class GitSource:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise PlanError("published source acquisition deadline exceeded")
+            settled = Event()
             try:
                 result = self.run(
                     [str(self.git), "-c", "protocol.ext.allow=never",
@@ -104,9 +107,14 @@ class GitSource:
                      "-c", "maintenance.auto=false", *arguments],
                     cwd=str(self.checkout), env=environment, timeout=remaining,
                     max_stdout_bytes=limit, max_stderr_bytes=4096,
+                    on_settled=settled.set,
                 )
             except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError, UnicodeError):
                 raise PlanError("published source acquisition unavailable") from None
+            except subprocess.SubprocessError:
+                if settled.is_set():
+                    raise PlanError("published source acquisition refused") from None
+                raise
             if result.returncode != 0 or not isinstance(result.stdout, str):
                 raise PlanError("published source acquisition refused")
             if len(result.stdout.encode("utf-8")) > limit:
