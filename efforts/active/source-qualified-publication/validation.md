@@ -799,7 +799,8 @@ values; two in-process reporting tests cover this correction. Parser/ratio
 validation passed 11 Worktrees and 11 Manager cases; the corrected Manager
 reporting selector passed 13 cases without any timed rerun.
 
-The operator subsequently accepted the exact contended-tier evidence for F1
+The coordinator subsequently accepted the exact contended-tier evidence under
+the operator-authorized tier for F1
 source completion and released its source approval hold. Ordinary current-head
 review, required CI and managed merge remain required. Nominal performance work
 stays tracked by #7935/#7936/#7946; acceptance neither changes production
@@ -808,7 +809,8 @@ not the authorization: independent exact-result acceptance was.
 
 ### Accepted source disposition
 
-On 2026-10-24 the operator independently verified candidate `0ef1505b`,
+On 2026-10-24 the coordinator independently verified and accepted candidate
+`0ef1505b` under the operator-authorized tier,
 required green CI `40064027710`, owner-authored clean Comment `5636917775`,
 all resolved code threads, the complete test-only diff, no production/src/libs/
 configuration change, and byte-identical copies of all 74 evidence members.
@@ -827,3 +829,27 @@ CI, exact head/provenance, resolved threads and the configured role/profile
 still apply. Use normal readiness and managed merge, with the configured
 CODEOWNER exception only; never bypass a new finding or required check.
 No rollout is authorized by source completion.
+
+### Actual source-slice outcome
+
+#8217 actually merged at `2026-10-24T06:02:01Z`, merge commit
+`b9c55780f1b5a68d7afa0621691421905ee108d2`, from final reviewed head
+`40afd0b50dc0aaa191eae3ed96798063c06c5024`. The final acceptance-only
+delta changed two effort documents, not source, tests, production configuration
+or the already-verified evidence. Current-head review `5637082320` approved
+the bounded source scope with no open issues, all inline threads were resolved,
+and current required CI passed.
+
+Managed `pr-merge --now` verified actual completion through the resolved
+`pr-self-merge` profile and its configured Maintainer/CODEOWNER exception.
+No failing check, code finding or parent-goal hold was silently bypassed.
+Parent #7935/#7936/#7937/#7946 were checked OPEN after the merge.
+Normal `pr-complete` then reconciled the verified merged history with backup
+retained and no unique post-merge commit discarded.
+
+This closes only the F1 source slice under coordinator acceptance of the
+operator-authorized contended tier. All nominal qualification fields remain
+false; production deadlines/configuration are unchanged. Nominal performance,
+F2/F3/F4, GUI, installed, release/rollout and whole-effort completion remain
+with the parent/coordinator and their existing owners. No new functional work
+or timing job is part of this outcome journal.

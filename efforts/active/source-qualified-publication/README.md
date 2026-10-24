@@ -5,8 +5,9 @@
 - **Branch(es):** independent, dependency-ordered PRs against `dev`
 - **Created:** 2026-10-22
 - **Status:** Blocked
-- **F1 source gate:** Recorded contended-tier results accepted; source approval
-  hold released. Ordinary current-head review/CI/merge remain required.
+- **F1 source gate:** Complete under the coordinator-accepted,
+  operator-authorized contended tier; #8217 merged. Nominal performance and
+  later effort phases remain open.
 - **Vision:** `visions/plugins/agent-worktrees/README.md`, resident authoritative live-state database; `visions/picker/README.md`, consumer presentation
 - **Umbrella issue:** #7937
 - **Sub-issues:** #7936 · #7946
@@ -102,7 +103,7 @@ or additional execution authorization.
 - [x] Preserve atomic head, row, order, observation and deletion publication.
 - [x] Accept the explicitly authorized contended-host tier for F1 source
   completion, retaining nominal performance work in #7935/#7936/#7946.
-- [ ] Complete the scoped F1 source review/merge and transfer remaining
+- [x] Complete the scoped F1 source review/merge and transfer remaining
   consumer, effect and installed qualification to their existing owners.
 
 ### F2 — Owner receipts
@@ -158,8 +159,28 @@ it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
 
+### 2026-10-24 — F1 source slice merged; remaining campaign retained
+- #8217 actually merged at 06:02:01Z as
+  `b9c55780f1b5a68d7afa0621691421905ee108d2`, from final head
+  `40afd0b50dc0aaa191eae3ed96798063c06c5024`. Current-head review
+  `5637082320` approved the bounded source scope; required CI was green.
+- The coordinator independently verified and accepted the exact source result
+  under the operator-authorized 2x/3x tier. This does not assert that the
+  operator personally inspected every archived byte or that nominal 2s passed.
+- The normal resolved `pr-self-merge` flow completed the actual squash merge
+  using only its configured Maintainer/CODEOWNER review exception. Required
+  checks, current head and resolved threads were verified; no CI bypass.
+- Normal `pr-complete` reconciled the worktree past the verified squash with
+  a retained backup. Source evidence and original nominal failures are
+  preserved; no rollout or additional timed run occurred.
+- Only the F1 source episode is complete. Parent/coordinator responsibilities
+  retain nominal #7935/#7936/#7946, F2 owner receipts, F3 source-store/UI,
+  F4 maintenance convergence and F5 GUI/installed/integrated qualification.
+  This effort remains open, not Done; no parent tracker is closed here.
+
 ### 2026-10-24 — F1 source-tier acceptance; approval hold released
-- The operator independently accepted exact candidate `0ef1505b`, current
+- The coordinator independently verified and accepted exact candidate
+  `0ef1505b` under the operator-authorized tier, current
   green CI `40064027710`, clean owner-authored Comment `5636917775` and
   all resolved code-finding threads. All 74 archived evidence members and
   the Manager/Worktrees JUnit/results were independently byte-verified.
