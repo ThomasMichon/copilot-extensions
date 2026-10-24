@@ -32,6 +32,32 @@ distribution-neutral denial.
 Malformed or unreadable policy fails visibly rather than falling back to an
 allow.
 
+## Independently upgraded callers and receivers
+
+Managed producers pass `--require-agent-hosting` to Bridge `create`, `resume`
+and potentially cold-resuming `send`. A legacy CLI refuses the unknown flag;
+a current CLI requires the running daemon's `/health` response to advertise
+`capabilities.repository_agent_hosting: 1` (a literal integer). A current CLI
+paired with an older daemon therefore refuses too. This is an additive named
+capability, not a claim that an installed payload has updated a running daemon
+or a change to HTTP protocol 47.
+
+The capability composes with existing protocol floors. It is checked afresh
+before every request attempt, including safe retries after endpoint
+re-resolution; underlying transparent retries cannot bypass the check.
+Missing, malformed or lower capability versions fail before the request is
+sent. As with protocol floors, the probe-to-request listener-replacement race
+is not an atomic receiver negotiation. A capability is a compatibility fence,
+not cached policy admission: the receiving daemon still checks the actual
+execution checkout. `--cli` forwarding does not implement this daemon contract
+and refuses that flag combination.
+
+Dispatch also passes the mandatory flag to the receiving Worktrees `embody`
+owner. Its parser acknowledges actual-checkout enforcement; a legacy owner
+cannot silently allocate from a different default-branch policy and launch.
+Caller-side checks remain in place, but are never proof of receiver support.
+Historical receipt-only reads do not require new launch admission.
+
 ## Admission boundaries
 
 `hosting_policy.py` separates fresh admission from roster visibility. Checks run
@@ -141,6 +167,8 @@ The isolated effect-ledger coverage is in:
   refusal, namespace readiness and opaque provider refusal.
 - `tests/test_repository_hosting_surfaces.py`: keyed reservation retention,
   UI/CLI pre-seed gates and continued live delivery.
+- `tests/test_hosting_capability.py`: actual command wiring, mixed-version
+  daemon refusal, per-attempt capability/protocol composition and health support.
 
 These selectors are intended for the repository's isolated bounded runner after
 all new source/test files are included in its snapshot. They do not assert that

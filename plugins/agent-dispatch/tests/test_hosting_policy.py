@@ -2,11 +2,13 @@
 
 import json
 import subprocess
+import sys
 from unittest.mock import Mock
 
 import pytest
 
-from agent_dispatch import bridge, embody, hosting_policy, restricted_spawn
+from agent_dispatch import bridge, bridge_reclaim, embody, hosting_policy, restricted_spawn
+from agent_dispatch.procutil import no_window_kwargs
 
 
 def test_validated_selected_marketplace_overlay_is_checked_fresh(tmp_path, monkeypatch):
@@ -174,3 +176,51 @@ def test_restricted_admission_precedes_claim_binding_and_credentials(monkeypatch
     client.claim.assert_not_called()
     client.record_restricted_delivery.assert_not_called()
     client.task_grant.assert_not_called()
+
+
+_LEGACY_RECEIVER = """
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--json', action='store_true')
+commands = parser.add_subparsers(dest='command')
+for command in ('create', 'resume', 'send', 'embody'):
+    sub = commands.add_parser(command)
+    sub.add_argument('target', nargs='?')
+    sub.add_argument('prompt', nargs='?')
+    sub.add_argument('--caller')
+    sub.add_argument('--no-wait', action='store_true')
+    sub.add_argument('--new', action='store_true')
+    sub.add_argument('--seed')
+    sub.add_argument('--driver')
+    sub.add_argument('--json', action='store_true')
+args = parser.parse_args()
+print('LEGACY LAUNCH REACHED')
+"""
+
+
+@pytest.mark.parametrize("receiver", ["bridge", "worktrees", "reclaim"])
+def test_mixed_version_owner_refuses_before_any_legacy_launch(monkeypatch, receiver):
+    prefix = [sys.executable, "-c", _LEGACY_RECEIVER]
+    # An old receiver would accept the same ordinary command without the
+    # mandatory contract, so the regression exercises actual argparse refusal.
+    control = subprocess.run(
+        [*prefix, "embody", "--new"], capture_output=True, text=True, check=False,
+        **no_window_kwargs(),
+    )
+    assert control.returncode == 0 and "LEGACY LAUNCH REACHED" in control.stdout
+    if receiver == "bridge":
+        monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: prefix)
+        monkeypatch.setattr(bridge, "_resolve_agent_record", lambda *a, **kw: {"type": "remote"})
+        result = bridge.spawn_worker("task", worker_id="worker", agent="namespace:target")
+    elif receiver == "worktrees":
+        monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: prefix)
+        monkeypatch.setattr(hosting_policy, "require_embodiment_harness", lambda **kw: None)
+        result = embody.spawn_embodied_worker("task", worker_id="worker")
+    else:
+        result = bridge_reclaim.resume_worktree_and_send(
+            "worktree", "seed", exe=prefix, agent="worker", caller="dispatch",
+            wait=False, json_output=True, timeout=10,
+        )
+    assert result.returncode == 2
+    assert "--require-agent-hosting" in result.stderr
+    assert "LEGACY LAUNCH REACHED" not in result.stdout

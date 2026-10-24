@@ -214,6 +214,12 @@ The new work is consistent resolution and enforcement, not another flag name.
 The implementation must not special-case a repository name or confuse
 machine metadata/project enumeration with hosting eligibility.
 
+Mixed-version enforcement is part of that contract. Managed producers require
+a receiving CLI which recognizes hosting enforcement, and Bridge additionally
+checks the running daemon's independent versioned capability before every
+request attempt. Installing a current caller is not evidence that its receiving
+daemon or separately resolved Worktrees owner has upgraded.
+
 ## Journal
 
 ### 2026-10-23 - Planning intake
@@ -389,3 +395,27 @@ machine metadata/project enumeration with hosting eligibility.
   the strict Worktrees denial before mux probing remains unchanged.
   The CodeSpace cohort passes 146 cases; both venue cohorts include a
   journal-disappearance race proving recovery cannot become launch authority.
+
+### 2026-10-23 - Mixed-version receiving-owner compatibility
+
+- Provider feedback identified independently resolved legacy Bridge and
+  Worktrees executables which could ignore caller-side admission. Managed
+  Dispatch create, resume and potentially cold-resuming send now require
+  `--require-agent-hosting`; legacy parsers refuse before launch rather than
+  falling back. The ordinary managed creation/resume route is covered too.
+- A current Bridge CLI also requires the actual running daemon's independent
+  `repository_agent_hosting: 1` capability. The existing per-attempt protocol
+  fence composes both requirements and rechecks each safe retry after endpoint
+  re-resolution. Old daemons cannot inherit admission from a newer CLI.
+  Historical receipt-only reads remain state-preserving.
+- The disconnected correction cohorts pass 153 Bridge capability/retry cases,
+  223 Dispatch command/reclaim cases, 93 owner/registry cases, and 360
+  launch/parser cases with 31 platform skips. Literal-path launch fixtures use
+  a real policy-backed workspace without writing to operating-system roots;
+  registry adoption fixtures now provide an actual checkout. Existing command,
+  reclaim, identity and exit assertions remain strict.
+- Extracted the shared Worktrees launch-argument parser to its existing focused
+  module rather than widening the 1,000-line cap. The source remains a
+  qualification candidate; updated native proof, current semantic capture,
+  accepted review/merge, the repository marker, release and authorized adoption
+  remain distinct completion gates.

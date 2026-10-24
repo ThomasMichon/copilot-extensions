@@ -230,7 +230,7 @@ def _spawn_worker_via_worktree(
             json_output=json_output, timeout=timeout,
         )
 
-    resume_cmd = [*exe, "resume", ensured_worktree_id]
+    resume_cmd = [*exe, "resume", ensured_worktree_id, "--require-agent-hosting"]
     resumed = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved via shutil.which
         resume_cmd,
         check=False,
@@ -242,7 +242,10 @@ def _spawn_worker_via_worktree(
     if resumed.returncode != 0:
         return resumed
 
-    send_cmd = [*exe, "send", ensured_worktree_id, "--prompt-file", "-", "--caller"]
+    send_cmd = [
+        *exe, "send", ensured_worktree_id, "--require-agent-hosting",
+        "--prompt-file", "-", "--caller",
+    ]
     send_cmd.append(f"agent-dispatch:{worker_id}")
     if not wait:
         send_cmd.append("--no-wait")
@@ -451,7 +454,7 @@ def spawn_worker(
     cmd = [*exe]
     if json_output:
         cmd.append("--json")
-    cmd += ["create"]
+    cmd += ["create", "--require-agent-hosting"]
     if target_dir:
         cmd += ["--target-dir", target_dir]
     if worktree_id:
@@ -646,7 +649,7 @@ def resume_worker(
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         return False
-    argv = ["send", session_id, "--prompt-file", "-"]
+    argv = ["send", session_id, "--require-agent-hosting", "--prompt-file", "-"]
     if not wait:
         argv.append("--no-wait")
     argv.extend([
@@ -716,7 +719,7 @@ def resume_session(
         return False
     # marketplace-isolation: allow remote-management
     bin_name = "agent-bridge"
-    cmd = [bin_name, "send", session_id, "--prompt-file", "-"]
+    cmd = [bin_name, "send", session_id, "--require-agent-hosting", "--prompt-file", "-"]
     if not wait:
         cmd.append("--no-wait")
     remote_cmd = " ".join(shlex.quote(arg) for arg in cmd)

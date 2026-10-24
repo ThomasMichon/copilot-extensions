@@ -504,7 +504,7 @@ def spawn_embodied_worker(
         # `embody` subcommand. It lets a CWD-neutral caller name the target
         # project instead of relying on git-like CWD discovery.
         cmd += ["--project", project]
-    cmd += ["embody"]
+    cmd += ["embody", "--require-agent-hosting"]
     if worktree_id:
         cmd += ["--worktree-id", worktree_id]
         if resume_head:

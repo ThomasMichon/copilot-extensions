@@ -148,8 +148,8 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     )
     assert result.returncode == 0
     cmd = calls["cmd"]
-    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "task-worker"]
-    assert "task42" in cmd[3]  # the prompt carries the task id
+    assert cmd[:4] == ["/usr/bin/agent-bridge", "create", "--require-agent-hosting", "task-worker"]
+    assert "task42" in cmd[4]  # the prompt carries the task id
     assert cmd[-1] == "--no-wait"  # wait=False -> --no-wait
 
 
@@ -174,7 +174,7 @@ def test_spawn_worker_charter_appends_to_direct_create(monkeypatch):
     )
     assert result.returncode == 0
     cmd = calls["cmd"]
-    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "Atlas-Core-wsl"]
+    assert cmd[:4] == ["/usr/bin/agent-bridge", "create", "--require-agent-hosting", "Atlas-Core-wsl"]
     assert "--charter" in cmd
     assert cmd[cmd.index("--charter") + 1] == "cab-sweep-reconciler"
 
@@ -218,8 +218,10 @@ def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkey
 
     assert result.returncode == 0
     assert json.loads(result.stdout)["session_id"] == "sid-123"
-    assert calls[0][0] == ["/usr/bin/agent-bridge", "resume", "wt-1"]
-    assert calls[1][0][:4] == ["/usr/bin/agent-bridge", "send", "wt-1", "--prompt-file"]
+    assert calls[0][0] == ["/usr/bin/agent-bridge", "resume", "wt-1", "--require-agent-hosting"]
+    assert calls[1][0][:5] == [
+        "/usr/bin/agent-bridge", "send", "wt-1", "--require-agent-hosting", "--prompt-file",
+    ]
     assert calls[1][1]["input"]
     assert calls[2][0] == [
         "/usr/bin/agent-bridge",
@@ -431,8 +433,10 @@ def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch, admission_owner):
     assert result.returncode == 0
     assert len(calls) == 3
     assert calls[0][1:4] == ["--json", "agent-show", "task-worker"]
-    assert calls[1] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1"]
-    assert calls[2][:4] == ["/usr/bin/agent-bridge", "send", "resumed-9", "--prompt-file"]
+    assert calls[1] == ["/usr/bin/agent-bridge", "--json", "resume", "wt-1", "--require-agent-hosting"]
+    assert calls[2][:5] == [
+        "/usr/bin/agent-bridge", "send", "resumed-9", "--require-agent-hosting", "--prompt-file",
+    ]
     assert "--no-wait" in calls[2]
 
 
@@ -608,6 +612,7 @@ def test_resume_worker_sends_to_existing_session(monkeypatch):
         "/usr/bin/agent-bridge",
         "send",
         "session-1",
+        "--require-agent-hosting",
         "--prompt-file",
         "-",
         "--no-wait",
@@ -656,7 +661,7 @@ def test_resume_session_fleet_normalizes_host_and_runs_over_ssh(monkeypatch):
         "/usr/bin/ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
     ]
     assert calls["argv"][5] == "pool-a"  # normalized: stripped + lowercased
-    assert "agent-bridge send session-1 --prompt-file - --no-wait" in calls["argv"][6]
+    assert "agent-bridge send session-1 --require-agent-hosting --prompt-file - --no-wait" in calls["argv"][6]
     assert calls["input"] == "continue"
 
 

@@ -32,6 +32,13 @@ def _unexpected(*args: object, **kwargs: object) -> None:
     pytest.fail("denied hosting reached an effectful boundary")
 
 
+def test_embodiment_parser_proves_receiving_owner_supports_hosting_policy() -> None:
+    parser = argparse.ArgumentParser()
+    handoff_cli.add_parsers(parser.add_subparsers())
+    args = parser.parse_args(["embody", "--new", "--require-agent-hosting"])
+    assert args.require_agent_hosting is True
+
+
 @pytest.fixture(autouse=True)
 def _neutral_installation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(registry_paths, "installation_context", lambda: None)

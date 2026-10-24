@@ -374,7 +374,9 @@ def start(
                 raise BridgeCarriedSessionBusy(f"retained ordinary agent is not idle: {status}")
             store_info()
             if status == "stopped":
-                resumed = run(["--json", "resume", session_id, "--strict"])
+                resumed = run([
+                    "--json", "resume", session_id, "--require-agent-hosting", "--strict",
+                ])
                 response = _json_result(resumed)
                 if resumed.returncode or response.get("session_id") != session_id:
                     raise BridgeCarriedSessionBusy("strict ordinary resume did not preserve the retained bridge identity")
@@ -407,7 +409,10 @@ def start(
                         "legacy allocation has no immutable ordinary invocation; explicit reconciliation required"
                     )
                 try:
-                    resumed = run(["--json", "resume", reservation["worktree"], "--strict"])
+                    resumed = run([
+                        "--json", "resume", reservation["worktree"],
+                        "--require-agent-hosting", "--strict",
+                    ])
                     if resumed.returncode:
                         raise BridgeCarriedSessionBusy(resumed.stderr or resumed.stdout or "strict worktree resume refused")
                     response = _json_result(resumed)
@@ -431,7 +436,8 @@ def start(
         if not info:
             target = f"{project}@{agent}" if project and "@" not in agent else agent
             from .ordinary_invocation import KEYED_NATIVE_PROTOCOL
-            argv = ["--json", "create", target, "--creation-key", reservation["creation_key"],
+            argv = ["--json", "create", target, "--require-agent-hosting",
+                    "--creation-key", reservation["creation_key"],
                     "--min-daemon-protocol", str(KEYED_NATIVE_PROTOCOL)]
             if assigned:
                 argv += ["--worktree-id", reservation["worktree"]]
