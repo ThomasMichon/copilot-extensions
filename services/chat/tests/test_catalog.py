@@ -7,7 +7,83 @@ from types import SimpleNamespace
 import pytest
 
 from agent_chat_service import ClientError
+import agent_chat_service as chat
 import agent_chat_service.catalog as catalog
+
+
+@pytest.mark.parametrize(("version", "quote"), [
+    ("0.1.20-dev1", '"'), ("1.2.3", "'"),
+])
+def test_source_version_reads_only_its_own_project_metadata(
+    tmp_path, monkeypatch, version, quote,
+):
+    project = tmp_path / "source"
+    package = project / "src/agent_chat_service"
+    package.mkdir(parents=True)
+    monkeypatch.setattr(chat, "__file__", str(package / "__init__.py"))
+    (project / "pyproject.toml").write_text(
+        f"[project]\nname = {quote}agent-chat-service{quote}\n"
+        f"version = {quote}{version}{quote}\n[project.optional-dependencies]\nclient=[]\n",
+        encoding="utf-8",
+    )
+    def missing(name):
+        assert name == "agent-chat-service"
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(metadata, "version", missing)
+    assert chat._resolve_version() == version
+
+
+@pytest.mark.parametrize("text", [
+    '[project]\nname = "another-package"\nversion = "0.1.20-dev1"\n',
+    '[project]\nname = "agent-chat-service"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "not-a-version"\n',
+    '[other]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\nversion = "9.9.9"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n[project]\nname = "other"\n',
+])
+def test_source_version_refuses_invalid_metadata_without_installed_fallback(
+    tmp_path, monkeypatch, text,
+):
+    project = tmp_path / "source"
+    package = project / "src/agent_chat_service"
+    package.mkdir(parents=True)
+    monkeypatch.setattr(chat, "__file__", str(package / "__init__.py"))
+    (project / "pyproject.toml").write_text(text, encoding="utf-8")
+    def missing(name):
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(metadata, "version", missing)
+    with pytest.raises(ValueError, match="source project version metadata is invalid"):
+        chat._resolve_version()
+    (project / "pyproject.toml").unlink()
+    with pytest.raises(metadata.PackageNotFoundError):
+        chat._resolve_version()
+
+
+@pytest.mark.parametrize(("version", "expected"), [
+    ("0.1.20.dev1", "0.1.20-dev1"), ("1.2.3", "1.2.3"),
+])
+def test_installed_version_uses_distribution_metadata_and_preserves_display(
+    tmp_path, monkeypatch, version, expected,
+):
+    package = tmp_path / "site-packages/agent_chat_service"
+    package.mkdir(parents=True)
+    monkeypatch.setattr(chat, "__file__", str(package / "__init__.py"))
+
+    def installed(name):
+        assert name == "agent-chat-service"
+        return version
+
+    monkeypatch.setattr(metadata, "version", installed)
+    assert chat._resolve_version() == expected
+
+    def missing(name):
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(metadata, "version", missing)
+    with pytest.raises(metadata.PackageNotFoundError):
+        chat._resolve_version()
 
 
 @pytest.fixture

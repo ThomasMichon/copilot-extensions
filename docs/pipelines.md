@@ -167,6 +167,14 @@ controller retains `source-units-v2` until its independent reviewed activation.
 Historical raw-source and legacy-CI packets retain their original verification;
 neither can be relabeled as candidate execution.
 
+Chat's enrolled package initializer resolves its version from distribution
+metadata, with a source-project metadata fallback when uninstalled. Its
+registered version contract forbids a checked-in Python version literal:
+ordinary Main seeding and changefile allocation must not change imported unit
+source bytes. All enrolled Python files and the raw byte-equivalence verifier
+remain required; no version normalization or source omission bypasses that
+verification.
+
 Job-only retries retain the original producing attempt and archive rather than
 rerunning units or demanding that the still-executing controller already be
 complete. Publication revalidates that exact packet and source composition.
@@ -1541,6 +1549,10 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > exposes a Python `__version__` must bump it to match the
 > `pyproject.toml` version in the **same** commit — it is a *fourth* file
 > for that plugin, easy to miss because the marketplace doesn't read it.
+> Registered metadata-only standalone contracts are the explicit exception:
+> `services/chat` resolves the existing distribution/project version instead
+> of embedding a Python literal. Its version guard requires the declared
+> resolver assignment, keeping admitted unit code unchanged during allocation.
 >
 > **Enforced by `tools/check-version-consistency.py`** (pre-push): fails
 > if any plugin's `plugin.json` / `pyproject.toml` / `marketplace.json`

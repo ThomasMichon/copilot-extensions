@@ -479,7 +479,8 @@ Use the bounded test supervisor around:
 python tools/run-promotion-unit-tests.py --source-sha <full-source-commit> --output-dir <new-evidence-directory>
 ```
 
-The command requires the existing `pytest` and `coverage` test dependencies.
+The command requires the existing `pytest`, `coverage>=7.7`, `packaging` and
+`PyYAML` test dependencies, matching the source CI/promotion jobs.
 On Windows, pytest's existing Colorama console adapter is initialized before
 unit observation starts. Unit-side native-loader attempts remain rejected;
 `tools/test_promotion_unit_windows_io.py` exercises that distinction in a fresh
@@ -489,6 +490,11 @@ native process outside the admitted unit packet.
 from landed Main: unlanded aliases do not change versions, dependency/checkout
 changes retain distinct source content, exact retries preserve the candidate,
 and a newly landed Main version advances the next changed plugin normally.
+Its Chat cases also compose first-release and Main-seeded standalone versions
+through the real promoter, retain every enrolled Chat Python input byte, and
+prove that an actual candidate code mutation still fails the unchanged
+equivalence verifier. Source-removed Chat wheel tests separately exercise both
+the source version and a different promoted metadata version on native hosts.
 It also proves a malformed unrelated plugin-version alias cannot block source
 composition; current-source tag and artifact validation remain independent.
 Run this existing development cohort under the bounded supervisor, not

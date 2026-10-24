@@ -48,6 +48,14 @@ are only Python's standard library; Copilot and a source checkout are not needed
 The caller supplies its owned data directory and nonsecret installation identity.
 Use one owning store instance per directory, and close it during owned cleanup.
 
+`__version__`, CLI version output and store health use the installed
+distribution's metadata, retaining the `-devN` display spelling. A source tree
+without installed metadata reads its own matching `[project]` name and version;
+missing, malformed or ambiguous metadata fails explicitly. Python 3.10 remains
+supported without another runtime dependency. Version allocation changes
+package metadata, not imported Python bytes, so promotion can retain exact
+source-unit equivalence.
+
 ```python
 from agent_chat_service import ChatStore, json_bytes, strict_json
 

@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import sys
@@ -130,7 +131,7 @@ def run_artifact(argv, *, cwd=None, input_text=None, timeout=30):
 
 
 @pytest.fixture(scope="session")
-def installed_chat(tmp_path_factory):
+def installed_chat(tmp_path_factory, request):
     root = tmp_path_factory.mktemp("chat-wheels")
     project = Path(__file__).resolve().parents[1]
     wheels = root / "wheels"
@@ -149,6 +150,15 @@ def installed_chat(tmp_path_factory):
                                          ".venv", ".pytest_cache"),
         )
         sources.append(source)
+    version = getattr(request, "param", None)
+    if version is not None:
+        manifest = sources[0] / "pyproject.toml"
+        text, count = re.subn(
+            r'(?m)^version = "[^"]+"$', f'version = "{version}"',
+            manifest.read_text(encoding="utf-8"), count=1,
+        )
+        assert count == 1
+        manifest.write_text(text, encoding="utf-8")
     resources = root / "libs"
     for name in ("versioned-runtime", "installer-engine"):
         shutil.copytree(

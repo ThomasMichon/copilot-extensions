@@ -1,16 +1,21 @@
 """Main-derived versions are independent of unlanded plugin-version aliases."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tomllib
 
 import pytest
 
 import accumulate_bumps
 import promote_release as promotion
 from promotion_python_artifacts import PromotionArtifactError, validate_source_binding
+from candidate_qualification_receipt import UnitQualificationError, input_equivalence
 from test_promote_release import (
     _commit, _git, no_ambient_git_identity as _identity_fixture,
     repo as _repo_fixture,
@@ -38,6 +43,71 @@ def _runtime(repo):
     source = plugin / "src/demo"
     source.mkdir(parents=True)
     (source / "__init__.py").write_text('VALUE = "initial"\n', encoding="utf-8")
+
+
+@pytest.mark.parametrize(("main_version", "expected"), [
+    ("0.1.0-dev1", "0.1.1-dev1"),
+    ("0.1.19-dev1", "0.1.20-dev1"),
+])
+def test_standalone_version_allocation_preserves_enrolled_python_source(
+    repo, main_version, expected,
+):
+    source = Path(__file__).resolve().parents[1]
+    project = source / "services/chat"
+    component = repo / "services/chat"
+    version = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]["version"]
+
+    def copy_source(value):
+        shutil.copytree(
+            project / "src", component / "src", dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        (component / "pyproject.toml").write_text(
+            f'[project]\nname = "agent-chat-service"\nversion = "{value}"\n',
+            encoding="utf-8",
+        )
+
+    copy_source(main_version)
+    accumulate_bumps._write_source_fallbacks(component, version, main_version)
+    _commit(repo, "land initial standalone package")
+    _git(["branch", "-f", "dev"], repo)
+    _git(["checkout", "-q", "dev"], repo)
+    copy_source(version)
+    changes = repo / ".changefiles"
+    changes.mkdir()
+    (changes / "chat.json").write_text(json.dumps({
+        "comment": "standalone source change",
+        "changes": [{"plugin": "services/chat", "type": "patch"}],
+    }), encoding="utf-8")
+    _commit(repo, "prepare standalone source")
+    manifest = json.loads((source / "tools/promotion-unit-manifest.json").read_text())
+    inputs = {
+        name: hashlib.sha256((repo / name).read_bytes()).hexdigest()
+        for name in manifest["sources"]
+        if name.startswith("services/chat/src/")
+    }
+    initializer = "services/chat/src/agent_chat_service/__init__.py"
+    assert initializer in inputs
+    report = promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", promotion_time="2026-10-24T02:00:00Z",
+    )
+    candidate = promotion.add_scratch_worktree(report["commit"], repo=repo)
+    try:
+        assert report["bumps"]["services/chat"][1] == expected
+        assert tomllib.loads((candidate / "services/chat/pyproject.toml").read_text())[
+            "project"
+        ]["version"] == expected
+        input_equivalence(repo, candidate, {"sources": inputs})
+        assert (candidate / initializer).read_bytes() == (repo / initializer).read_bytes()
+        with (candidate / initializer).open("a", encoding="utf-8") as stream:
+            stream.write("\nSOURCE_CHANGED = True\n")
+        with pytest.raises(UnitQualificationError, match="candidate unit source differs"):
+            input_equivalence(repo, candidate, {"sources": inputs})
+    finally:
+        promotion.remove_scratch_worktree(candidate, repo=repo)
+    assert tomllib.loads((component / "pyproject.toml").read_text())["project"]["version"] == version
 
 
 def test_unlanded_alias_does_not_change_main_derived_dependency_versions(repo):

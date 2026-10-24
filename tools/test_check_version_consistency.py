@@ -4,6 +4,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent / "check-version-consistency.py"
 _spec = importlib.util.spec_from_file_location("check_version_consistency", SCRIPT)
 assert _spec and _spec.loader
@@ -179,3 +181,43 @@ def test_standalone_index_service_version_surfaces_must_match(tmp_path: Path) ->
     init.write_text('__version__ = "0.1.0-dev2"\n', encoding="utf-8")
     [violation] = checker._standalone_version_violations(service, "agent-index-service")
     assert violation.startswith("agent-index-service: version mismatch")
+
+
+@pytest.mark.parametrize("version", ["0.1.0-dev1", "0.1.20-dev1"])
+def test_chat_version_contract_uses_metadata_without_stamped_python(tmp_path, version):
+    service = tmp_path / "services/chat"
+    package = service / "src/agent_chat_service"
+    package.mkdir(parents=True)
+    (service / "pyproject.toml").write_text(
+        f'[project]\nname = "agent-chat-service"\nversion = "{version}"\n',
+        encoding="utf-8",
+    )
+    production = SCRIPT.parents[1] / "services/chat/src/agent_chat_service/__init__.py"
+    (package / "__init__.py").write_bytes(production.read_bytes())
+    assert checker._standalone_version_violations(service, "services/chat") == []
+    assert any(
+        "not a constant string" in value
+        for value in checker._standalone_version_violations(service, "another-component")
+    )
+
+
+@pytest.mark.parametrize("text", [
+    '__version__ = "0.1.0-dev1"\n',
+    '__version__ = resolve()\n__version__ = "0.1.0-dev1"\n',
+    '_FALLBACK_VERSION = "0.1.0-dev1"\n__version__ = resolve()\n',
+    "VERSION = resolve()\n",
+    "__version__ = 42\n",
+    "__version__ = another_resolver()\n",
+    '__version__ = _resolve_version("foreign")\n',
+])
+def test_chat_version_contract_refuses_literal_or_missing_resolvers(tmp_path, text):
+    service = tmp_path / "services/chat"
+    package = service / "src/agent_chat_service"
+    package.mkdir(parents=True)
+    (service / "pyproject.toml").write_text(
+        '[project]\nname = "agent-chat-service"\nversion = "0.1.0-dev1"\n',
+        encoding="utf-8",
+    )
+    (package / "__init__.py").write_text(text, encoding="utf-8")
+    [violation] = checker._standalone_version_violations(service, "services/chat")
+    assert "without a checked-in version literal" in violation

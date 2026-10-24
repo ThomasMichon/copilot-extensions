@@ -57,6 +57,8 @@ print(json.dumps({"installed_transport":checks}),flush=True)
     ]}
 
 
+@pytest.mark.parametrize("installed_chat", [None, "0.1.20-dev1"], indirect=True,
+                         ids=["source-metadata", "promoted-metadata"])
 def test_source_independent_wheel(tmp_path, installed_chat):
     run = installed_chat.run
     probe = """

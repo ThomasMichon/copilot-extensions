@@ -88,6 +88,9 @@ _DYNAMIC_PRIMARY_FALLBACKS = {
     ("agent-ssh", "src/agent_ssh/__init__.py"),
     ("agent-vault", "src/agent_vault/__init__.py"),
 }
+_STANDALONE_METADATA_VERSIONS = {
+    ("services/chat", "src/agent_chat_service/__init__.py"),
+}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -236,6 +239,24 @@ def _standalone_version_violations(package_dir: Path, component: str) -> list[st
     )
     init_relative = f"src/{module}/__init__.py"
     init_path = package_dir / init_relative
+    if (component, init_relative) in _STANDALONE_METADATA_VERSIONS:
+        assignments, read_error = _source_fallback_assignments(init_path)
+        shape = tuple((assignment.variable, assignment.value) for assignment in assignments)
+        if read_error:
+            violations.append(f"{component}: {init_relative}: {read_error}")
+        else:
+            tree = ast.parse(init_path.read_text(encoding="utf-8"))
+            expected = ast.dump(ast.parse("__version__ = _resolve_version()").body[0])
+            if shape != (("__version__", None),) or not any(
+                ast.dump(node) == expected for node in tree.body
+            ):
+                violations.append(
+                    f"{component}: {init_relative} must resolve __version__ from package metadata "
+                    "without a checked-in version literal"
+                )
+        if pyproject_version and not _VERSION_LITERAL.fullmatch(pyproject_version):
+            violations.append(f"{component}: pyproject.toml has an invalid version literal")
+        return violations
     fallback_versions, fallback_errors = _source_fallback_versions(init_path)
     for error in fallback_errors:
         violations.append(f"{component}: {init_relative}: {error}")

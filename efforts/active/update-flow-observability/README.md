@@ -218,6 +218,9 @@ not replace the held #6859 / #7833 lifetime repair.
 
 ### Phase 4 - Land, prove and finish
 
+- [ ] Close #8411's version/source-byte collision through the bounded
+  source-only compatibility repair, retaining exact unit evidence, normal
+  Main-derived allocation and the existing release owner's authority.
 - [ ] Update source-owned documentation and per-plugin changefiles, then drive
   each implementation through required review, CI, merge and source-worktree
   finalization.
@@ -294,6 +297,38 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-23 - Keep the release-byte repair in source metadata
+
+- The operator accepted a bounded source-only #8411 repair. The public
+  discussion claim is recorded on that issue; Main control/adoption,
+  signing, publication and installed acceptance remain with their existing
+  owners. This closes the existing once-only source-unit/versioning intent,
+  not a new release controller or an exception to qualification.
+- Real Git promotion reproduced the exact initializer byte mismatch for
+  both first-release and Main-seeded version allocation. Chat now resolves
+  its existing version through installed metadata or its matching source
+  project instead of a rewritten Python literal. The version guard requires
+  that declared metadata resolver and rejects literal/missing/substituted
+  assignments. Other consumers' version contracts are unchanged.
+- Every unit node and source remains enrolled. Only Chat's declared
+  initializer digest changes; the raw equivalence verifier, normal version
+  allocation and unit effect/no-skip/300-second rules are unchanged.
+  Candidate code mutation still refuses through the actual verifier.
+- The complete required Linux packet passed all 1,156 nodes with coverage
+  recorded once in 68.134 seconds, under the original 300-second limit.
+  Focused version/allocation/catalog/membership controls and both actual
+  source-removed wheel versions pass on Windows and Linux. Native fixture
+  cohorts retain the separately authorized congested-CPU allowances.
+- An extra Windows packet remained unqualified: 874 cases passed, one
+  platform skip occurred, then the observer refused the existing native
+  preservation adapter's `ctypes.dlopen`. The already claimed #1303/#6234
+  wrapper repair in #8399 owns that exact boundary. Shared the fresh
+  observation there without changing its wrappers, native implementation,
+  observer or manifest scope. It is not counted as Windows packet proof.
+- Source review, required CI and an actual subsequent natural promotion
+  remain required before this repair closes the release failure. No
+  installed update, forced rerun, tag mutation or Main edit was performed.
 
 ### 2026-10-23 - Repair source merged; release remains blocked
 

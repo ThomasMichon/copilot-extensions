@@ -45,6 +45,9 @@ test_workspace_cli_requires_exact_explicit_initialization_before_owner
 test_installed_workspace_uses_trusted_cwd_and_selected_owner_without_source_or_environment
 """,
     "test_catalog.py": """
+test_source_version_reads_only_its_own_project_metadata
+test_source_version_refuses_invalid_metadata_without_installed_fallback
+test_installed_version_uses_distribution_metadata_and_preserves_display
 test_exact_current_interpreter_not_path_or_source_selection
 test_catalog_refuses_unusable_installed_evidence
 test_missing_distribution_is_an_explicit_offline_error
@@ -191,6 +194,9 @@ PARAMETER_COUNTS.update({
     "test_workspace.py::test_malformed_owner_json_has_the_client_response_error_boundary": 4,
     "test_workspace.py::test_anchor_source_type_is_checked_before_configured_provenance": 6,
     "test_workspace.py::test_workspace_cli_requires_exact_explicit_initialization_before_owner": 4,
+    "test_catalog.py::test_source_version_reads_only_its_own_project_metadata": 2,
+    "test_catalog.py::test_source_version_refuses_invalid_metadata_without_installed_fallback": 6,
+    "test_catalog.py::test_installed_version_uses_distribution_metadata_and_preserves_display": 2,
     "test_catalog.py::test_catalog_includes_the_host_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_collaboration_in_its_verified_closure": 3,
@@ -209,6 +215,7 @@ PARAMETER_COUNTS.update({
     "test_client.py::test_scan_validates_body_free_returned_only_progress_without_reading": 4,
     "test_distribution.py::test_installed_catalog_worker_preserves_isolation": 2,
     "test_setup_distribution.py::test_independent_sdist_refuses_missing_construction_input": 3,
+    "test_distribution.py::test_source_independent_wheel": 2,
     "test_hosting.py::test_absolute_ingress_deadline_retires_slow_input_and_releases_admission": 2,
     "test_hosting.py::test_configuration_refuses_without_echoing_values": 7,
     "test_hosting.py::test_held_wait_drain_and_health_keep_independent_requests_responsive": 2,
