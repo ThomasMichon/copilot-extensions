@@ -729,6 +729,9 @@ def _validate_contract(
             if isinstance(data, dict):
                 loaded[fixture["path"]] = (fixture["sha256"], data)
         validate_families(fixtures, loaded, errors)
+        if current >= 47:
+            from bridge_http47_validation import validate_http47
+            validate_http47(REPO, {"contracts": [contract]}, loaded, errors)
 
     missing_generations = sorted(evidence_generations - fixture_generations)
     if missing_generations:

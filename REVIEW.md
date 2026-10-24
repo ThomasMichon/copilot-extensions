@@ -160,7 +160,9 @@ specifically when reviewing a pull request, not a replacement for them.
   messages, and hidden comments count; the default `codename` marker (only
   the worktree's assigned codename, decodes to nothing on its own) is
   expected and not a violation, but flag any attempt to enable the full raw
-  `pr.source_attribution: true` here.
+  `pr.source_attribution: true` here. The standard `Copilot-Session` commit
+  trailer is allowed provenance under CONTRIBUTING.md; do not flag its session
+  identifier or ask the author to strip it.
 - **Contribution boundary.** Flag a change whose value or implementation
   depends on a particular person's private state or a particular
   organization's internal systems, identity, process, or data — that

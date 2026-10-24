@@ -11,6 +11,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from .session_preferences import client_preferences
+from .cold_outages import admitted_recovery, guarded_resume
 from .models import SessionStatus
 from .startup_progress import lifecycle_lock, observed, phase
 from .transport import SpawnTarget
@@ -103,6 +104,8 @@ class _SessionResumeMixin:
         self._sessions[session_id] = session
         return session
 
+    @admitted_recovery
+    @guarded_resume
     @observed
     async def resume_session(
         self,
@@ -169,6 +172,15 @@ class _SessionResumeMixin:
             return resumed
 
         async with lifecycle_lock(session._lifecycle_lock):
+            from .cold_outages import resume_policy
+
+            cold_outage = resume_policy(self, session)
+            cold_pending = cold_outage is not None and cold_outage["state"] != "reconnected"
+            if cold_outage is not None:
+                allow_recreate = False
+                drain = False
+                if cold_pending and session.target.project and not session.target.worktree_id:
+                    raise ValueError("cold native recovery has no retained project workspace")
             from .acquisition_gates import assert_resume_allowed
             assert_resume_allowed(self._db, session)
             if relay_agent(session.target) is not None or CONTEXT_KEY in (session.target.venue or {}):
@@ -197,6 +209,11 @@ class _SessionResumeMixin:
                 raise RuntimeError(
                     f"Session {session_id} has no ACP session ID -- cannot resume"
                 )
+            if cold_outage is not None:
+                from .cold_outages import settle_partial_replacement
+
+                await settle_partial_replacement(self, session)
+                cold_outage = resume_policy(self, session)
             self._set_background_recovery_enabled(session, True)
             self._clear_disconnected_reattach_retry_state(session_id)
 
@@ -219,20 +236,26 @@ class _SessionResumeMixin:
             # request-override provenance -- even though a perfectly
             # reattachable Session Host was waiting on the other end.
             with phase("session-host-reattach"):
-                reattached = await self._try_reattach_live_host(session)
+                reattached = (
+                    not cold_pending or cold_outage["recovery_phase"] == "registered"
+                ) and await self._try_reattach_live_host(session)
             if reattached:
                 log.info(
                     "Session %s (%s) resumed by reattaching to its live "
                     "Session Host (no respawn)", session_id, session.name,
                 )
                 session.touch()
+                if cold_pending:
+                    from .cold_outages import reconnect
+
+                    await reconnect(self, session, cold_outage)
                 return session
 
             with phase("provider-target"):
                 await self._refresh_provider_target(session)
             original_target = session.target
             resume_target = original_target
-            if owner_native_resume:
+            if owner_native_resume or (cold_outage is not None and session.target.project):
                 resume_target = replace(
                     session.target, native_resume_id=session.acp_session_id,
                 )
@@ -254,13 +277,29 @@ class _SessionResumeMixin:
                 try:
                     session.target = resume_target
                     load_existing = bool(session.acp_session_id)
+                    if cold_outage is not None:
+                        from .cold_outages import launching
+
+                        launching(self, session)
                     with phase("session-host-preparation"):
-                        host_result = await self._resume_via_new_remote_host(
-                            session,
-                            on_acp_event=on_acp_event,
-                            permission_callback=permission_callback,
-                            load_existing=load_existing,
-                        )
+                        if cold_outage is not None and session.target.type == "local":
+                            from .connect import ConnectTracker
+
+                            host_result = await self._connect_via_session_host(
+                                session.target, tracker=ConnectTracker(),
+                                session_id=session.session_id, on_acp_event=on_acp_event,
+                                permission_callback=permission_callback,
+                                mcp_servers=session.mcp_servers,
+                                load_session_id=session.acp_session_id,
+                                model=session.model_override, effort=session.effort_override,
+                            )
+                        else:
+                            host_result = await self._resume_via_new_remote_host(
+                                session,
+                                on_acp_event=on_acp_event,
+                                permission_callback=permission_callback,
+                                load_existing=load_existing,
+                            )
                     resumed_acp_id = (
                         host_result[1] if host_result is not None else None
                     )
@@ -315,6 +354,10 @@ class _SessionResumeMixin:
 
                     if load_existing and resumed_acp_id != session.acp_session_id:
                         raise RuntimeError("native resume returned a different conversation identity")
+                    if cold_outage is not None:
+                        from .cold_outages import registered
+
+                        registered(self, session)
                     if resumed_acp_id and (
                         resumed_acp_id != session.acp_session_id
                     ):
@@ -380,6 +423,13 @@ class _SessionResumeMixin:
                         with contextlib.suppress(Exception):
                             await client.shutdown()
                     session.client = None
+                    if cold_outage is not None:
+                        session.status = SessionStatus.STOPPED
+                        self._db.update_session_status(
+                            session_id, SessionStatus.STOPPED.value, time.time(),
+                        )
+                        log.error("Cold native launch remains fenced for %s: %s", session_id, exc_desc)
+                        raise
                     if isinstance(exc, PrivilegedLaunchRefused):
                         session.status = SessionStatus.STOPPED
                         self._db.update_session_status(
@@ -550,6 +600,10 @@ class _SessionResumeMixin:
                     raise
 
         session.touch()
+        if cold_outage is not None and cold_outage["state"] != "reconnected":
+            from .cold_outages import reconnect
+
+            await reconnect(self, session, cold_outage)
         # Queue outlived the restart? Deliver it now that the session is IDLE.
         # Outside the lifecycle lock (drain submits a fresh turn). Skipped by the
         # auto-resume-from-submit path (drain=False) to avoid a double turn.
@@ -557,8 +611,12 @@ class _SessionResumeMixin:
             await self._drain_pending_prompts(session)
         return session
 
+    @admitted_recovery
     async def resync_session(self, session_id: str) -> int:
         """Rebuild a session's event log from the agent's authoritative replay.
+
+        Cold-outage series instead use guarded same-native resume and return
+        the current Bridge event count, without native history replay/rebuild.
 
         Reattaches to the persisted ACP session and captures the full
         conversation history the agent streams back during load (per the ACP
@@ -582,6 +640,11 @@ class _SessionResumeMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .cold_outages import latest
+
+        if latest(self._db, session_id) is not None:
+            await self.resume_session(session_id, drain=False, allow_recreate=False)
+            return len(session.event_log.get_events(0)) if session.event_log else 0
         if session.target.type == "remote-acp":
             raise ValueError("Remote ACP history is loaded through explicit stop/resume, not process resync")
         if not session.acp_session_id:
