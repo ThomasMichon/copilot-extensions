@@ -546,6 +546,8 @@ def _validate_ci(path: Path) -> list[str]:
                     or scans[0].get("timeout-minutes") != "6"
                     or "continue-on-error" in scans[0]
                     or check_steps.index(ast_impact[0]) >= check_steps.index(scans[0])
+                    or len(code_impact) != 1
+                    or check_steps.index(code_impact[0]) >= check_steps.index(scans[0])
                 ):
                     errors.append("source AST guards must follow validated admission without weakening scans")
             inventory = [
@@ -557,6 +559,8 @@ def _validate_ci(path: Path) -> list[str]:
                 inventory[0].get("run") != "python tools/check-marketplace-isolation.py"
                 or inventory[0].get("if") != CODE_CONDITION + " && github.event_name != 'pull_request'"
                 or "continue-on-error" in inventory[0]
+                or len(code_impact) != 1
+                or check_steps.index(code_impact[0]) >= check_steps.index(inventory[0])
             ):
                 errors.append("report-only inventory must remain on non-PR CI without becoming a strict PR gate")
             units = _mapping(ci_jobs.get("unit-tests"))
