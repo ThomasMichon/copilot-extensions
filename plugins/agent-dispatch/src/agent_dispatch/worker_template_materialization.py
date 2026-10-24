@@ -107,6 +107,19 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
         if Path(resources.resolve(origin)) != Path(resources.resolve(effective)):
             raise RegistrarError("effort worker identity source context cannot yet be materialized safely")
     for declaration in original:
+        policy = (
+            declaration.evaluator if declaration.kind == "supervised-lane"
+            else declaration.spec.get("evaluator") if declaration.kind == "evaluator" else None
+        )
+        if isinstance(policy, str) and _absolute_or_named(policy) and not policy.startswith("repo:"):
+            path = Path(policy).expanduser()
+            if any(
+                path.is_relative_to(root) or path.resolve().is_relative_to(root)
+                for root in suppliers.values()
+            ):
+                raise RegistrarError(
+                    "supplier-owned file-backed evaluator policies cannot retain named source context"
+                )
         if declaration.kind == "supervised-lane" and declaration.evaluator and (
             not _absolute_or_named(declaration.evaluator)
             or declaration.evaluator.startswith("repo:")

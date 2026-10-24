@@ -223,6 +223,12 @@ Relative evaluator script contexts or other dependencies whose meaning cannot
 be preserved refuse explicitly. File-backed evaluator policies require an
 absolute local path; their existing runtime loader does not accept named
 repository resources, whether selected directly or by a lane.
+An absolute policy owned by a named supplier also refuses: that file loader
+cannot retain supplier admission for script contexts inside the policy.
+The shared dependency validator uses the actual evaluator loader to inspect
+absolute policy files and the selected script's executable, script path and
+explicit working directory read-only, without evaluating a task or executing
+the script. Unselected script entries do not become required dependencies.
 Effort-loop identity relocation also refuses until its
 expansion owner can preserve a distinct defining context.
 A `composite` fragment without a supported

@@ -152,6 +152,44 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
     return data, declarations
 
 
+def _validate_command_dependency(command: list[str], directory: Path, *, explicit_cwd: bool) -> None:
+    if explicit_cwd and not directory.is_dir():
+        raise RegistrarError(f"missing working directory dependency: {directory}")
+    executable = command[0]
+    if not shutil.which(executable) and not (
+        (Path(executable).is_absolute() or Path(executable).parent != Path("."))
+        and (directory / executable).is_file()
+    ):
+        raise RegistrarError(f"missing command dependency: {executable}")
+    if len(command) > 1 and Path(command[1]).suffix in {".py", ".sh", ".ps1"}:
+        if not (directory / command[1]).is_file():
+            raise RegistrarError(f"missing script dependency: {command[1]}")
+
+
+def _validate_evaluator_dependency(declaration, resources) -> None:
+    from .producers.evaluator import ScriptEvaluator, load_registration_evaluator
+
+    if declaration.kind == "evaluator":
+        spec = dict(declaration.spec)
+    elif declaration.kind == "supervised-lane" and declaration.evaluator:
+        spec = {"evaluator": declaration.evaluator}
+    else:
+        return
+    try:
+        policy = spec.get("evaluator") if spec.get("evaluator_spec") is None else None
+        if isinstance(policy, str) and policy.startswith("repo:"):
+            raise RegistrarError("file-backed evaluator does not support named repository resources")
+        evaluator = load_registration_evaluator(spec)
+        if isinstance(evaluator, ScriptEvaluator):
+            command = [resources.resolve(part) for part in evaluator.argv]
+            directory = Path(resources.resolve(
+                evaluator.cwd, directory=True,
+            )) if evaluator.cwd else Path.cwd()
+            _validate_command_dependency(command, directory, explicit_cwd=bool(evaluator.cwd))
+    except (OSError, ValueError) as exc:
+        raise RegistrarError(f"missing or invalid evaluator dependency: {exc}") from exc
+
+
 def _validate_dependencies(
     declarations: tuple, repo_root: str, *, available_declarations: tuple | None = None,
 ) -> None:
@@ -162,6 +200,7 @@ def _validate_dependencies(
     for declaration in declarations:
         if declaration.fleet.enabled and not shutil.which("ssh"):
             raise RegistrarError("missing fleet dependency: ssh transport")
+        _validate_evaluator_dependency(declaration, resources)
         command = declaration.spec.get("command")
         if isinstance(command, list) and command:
             if declaration.kind == RegistrationKind.EMITTER:
@@ -169,18 +208,12 @@ def _validate_dependencies(
 
                 command = _render_command(command)
             command = [resources.resolve(part) for part in command]
-            executable = command[0]
             directory = Path(resources.resolve(
                 str(declaration.spec.get("cwd") or repo_root or active_dir()), directory=True,
             ))
-            if not shutil.which(executable) and not (
-                (Path(executable).is_absolute() or Path(executable).parent != Path("."))
-                and (directory / executable).is_file()
-            ):
-                raise RegistrarError(f"missing command dependency: {executable}")
-            if len(command) > 1 and Path(command[1]).suffix in {".py", ".sh", ".ps1"}:
-                if not (directory / command[1]).is_file():
-                    raise RegistrarError(f"missing script dependency: {command[1]}")
+            _validate_command_dependency(
+                command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
+            )
         if declaration.kind == RegistrationKind.SUPERVISED_LANE:
             # The registrar validates named identities on composed issue loops.
             # A basic lane may name a custom body agent; do not fabricate a

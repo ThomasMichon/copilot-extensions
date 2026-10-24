@@ -526,3 +526,104 @@ def test_inherited_evaluator_supplier_cwd_retains_actual_runtime_admission(monke
     )
     with pytest.raises(EvaluatorRuntimeError, match="reference-only"):
         evaluator.evaluate({})
+
+
+@pytest.mark.parametrize("kind", ["evaluator", "supervised-lane"])
+def test_supplier_owned_absolute_file_policy_refuses_unrepresentable_named_context(
+    monkeypatch, tmp_path, kind,
+):
+    from agent_dispatch import repository_resources
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    policy = supplier / "rules.json"
+    policy.write_text(json.dumps({
+        "scripts": {"policy": [sys.executable, "-c", "print('never-executed')"]},
+        "cwd": str(supplier),
+    }), encoding="utf-8")
+    document = (
+        {"kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy", "evaluator": str(policy),
+        }} if kind == "evaluator" else {**pool(), "evaluator": str(policy)}
+    )
+    (supplier / "base.json").write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda *a, **k: (supplier, "reference"))
+    _, row = provider({"extends": "repo:library:base.json"}, kind=kind)
+    with pytest.raises(RegistrarError, match="supplier-owned file-backed"):
+        save(row, activate=True)
+    assert not instance_dir().exists() and not active_dir().exists()
+
+
+@pytest.mark.parametrize("kind", ["evaluator", "supervised-lane"])
+def test_missing_file_policy_refuses_before_persistence(tmp_path, kind):
+    policy = str(tmp_path / "missing-policy.json")
+    document = (
+        {"kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy", "evaluator": policy,
+        }} if kind == "evaluator" else {**pool(), "evaluator": policy}
+    )
+    _, row = provider(document)
+    with pytest.raises(RegistrarError, match="evaluator dependency"):
+        save(row, activate=True)
+    assert not instance_dir().exists() and not active_dir().exists()
+
+
+@pytest.mark.parametrize("file_backed", [False, True])
+@pytest.mark.parametrize("missing", ["executable", "script", "cwd"])
+def test_selected_evaluator_script_dependencies_are_checked_read_only(tmp_path, file_backed, missing):
+    command = (
+        ["not-installed-evaluator-fixture"] if missing == "executable"
+        else [sys.executable, str(tmp_path / "missing.py")] if missing == "script"
+        else [sys.executable, "-c", "print('never-executed')"]
+    )
+    policy = {
+        "scripts": {"policy": command},
+        "cwd": str(tmp_path / "missing-directory" if missing == "cwd" else tmp_path),
+    }
+    if file_backed:
+        path = tmp_path / "policy.json"
+        path.write_text(json.dumps(policy), encoding="utf-8")
+        selected = {"evaluator": str(path)}
+    else:
+        selected = {"evaluator_spec": policy}
+    _, row = provider({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy", **selected,
+        },
+    })
+    with pytest.raises(RegistrarError, match="dependency"):
+        save(row, activate=True)
+    assert not instance_dir().exists() and not active_dir().exists()
+
+
+@pytest.mark.parametrize("kind", ["evaluator", "supervised-lane"])
+def test_valid_absolute_rule_policy_remains_supported(tmp_path, kind):
+    policy = tmp_path / "rules.json"
+    policy.write_text('{"rules":[]}', encoding="utf-8")
+    document = (
+        {"kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy", "evaluator": str(policy),
+        }} if kind == "evaluator" else {**pool(), "evaluator": str(policy)}
+    )
+    _, row = provider(document)
+    assert save(row)["persisted"]
+
+
+def test_policy_inspection_checks_selected_script_without_running_it(tmp_path):
+    marker = tmp_path / "executed"
+    script = tmp_path / "policy.py"
+    script.write_text(f"from pathlib import Path; Path({str(marker)!r}).touch()", encoding="utf-8")
+    policy = tmp_path / "policy.json"
+    policy.write_text(json.dumps({
+        "scripts": {
+            "policy": [sys.executable, str(script)], "unused": ["not-installed-unused-fixture"],
+        },
+        "cwd": str(tmp_path),
+    }), encoding="utf-8")
+    _, row = provider({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy", "evaluator": str(policy),
+        },
+    })
+    assert save(row)["persisted"]
+    assert not marker.exists() and not active_dir().exists()
