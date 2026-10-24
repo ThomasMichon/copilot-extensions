@@ -93,6 +93,8 @@ def test_ambiguous_invalid_or_unprofiled_intent_refuses(
         {"approvals": {}},
         {"preferArtifact": False},
         {"Backend": "cpu"},
+        {"": False},
+        {"\n": False},
     ],
 )
 def test_configuration_is_not_a_self_approved_record(context_module, value):

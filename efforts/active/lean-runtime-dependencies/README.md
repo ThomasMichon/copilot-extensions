@@ -816,3 +816,15 @@ profile-record API or a competing admission constructor.
   rerunning the canonical owner synchronized those copies. This correction
   still requires current-head CI/review; the earlier passing jobs do not
   authorize merging a failed guard.
+- Review found a real Bash parity defect: blank/newline profile property names
+  were discarded by line-oriented key enumeration. The canonical reader now
+  compares recognized fields with the declared object size, preserving a true
+  empty object while refusing blank keys. Synchronized all native copies and
+  added exact blank, newline-only and mixed-key parity cases. The corrected
+  focused cohorts passed 90 API/pure cases and 38 actual Python/PowerShell
+  reader cases. An earlier broader invocation exceeded its unchanged
+  300-second limit and is not counted as a full pass.
+- Required workflow validation also refused a dynamic matrix runner route.
+  The optional reader lane now uses explicit hosted Linux/Windows jobs with
+  the same shared steps; the trusted-CI contract passes locally. Current-head
+  hosted native acceptance, full required CI and a fresh review remain gates.

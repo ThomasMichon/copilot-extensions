@@ -4849,11 +4849,12 @@ deployment_policy_snapshot() {
             "Repair the installation-owned runtime deployment policy explicitly."
         return
     fi
-    local profiles="" profile_type field profile_value separator="" property_count
+    local profiles="" profile_type field profile_value separator="" property_count profile_count recognized=0
     property_count="$(json_length_path "$document" "")"
     if [[ "$property_count" == 5 ]]; then
         profile_type="$(json_type_path "$document" runtimeProfiles)"
         [[ "$profile_type" == object ]] || fail "runtimeProfiles must be a JSON object."
+        profile_count="$(json_length_path "$document" runtimeProfiles)"
         profiles="{"
         while IFS= read -r field; do
             [[ -n "$field" ]] || continue
@@ -4876,7 +4877,10 @@ deployment_policy_snapshot() {
             esac
             profiles="$profiles$separator$(json_quote "$field"):$profile_value"
             separator=","
+            recognized=$((recognized + 1))
         done < <(json_object_keys "$document" runtimeProfiles)
+        [[ "$recognized" == "$profile_count" ]] ||
+            fail "runtimeProfiles supports only allowSourceFallback and backend."
         profiles="$profiles}"
     elif [[ "$property_count" != 4 ]]; then
         fail "Runtime deployment policy has missing or unsupported fields."

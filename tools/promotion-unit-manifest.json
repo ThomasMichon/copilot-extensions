@@ -1450,7 +1450,9 @@
     "tools/promotion_unit_tests/test_runtime_profile_intent.py::test_unresolved_owner_or_policy_never_falls_back_to_cpu[ready-unsupported]",
     "tools/promotion_unit_tests/test_runtime_profile_intent.py::test_effective_policy_change_invalidates_identity_without_widening_publication",
     "tools/promotion_unit_tests/test_runtime_profile_intent.py::test_cli_routes_policy_arguments_and_preserves_refusal[True]",
-    "tools/promotion_unit_tests/test_runtime_profile_intent.py::test_cli_routes_policy_arguments_and_preserves_refusal[False]"
+    "tools/promotion_unit_tests/test_runtime_profile_intent.py::test_cli_routes_policy_arguments_and_preserves_refusal[False]",
+    "tools/promotion_unit_tests/test_runtime_profile_intent.py::test_configuration_is_not_a_self_approved_record[value14]",
+    "tools/promotion_unit_tests/test_runtime_profile_intent.py::test_configuration_is_not_a_self_approved_record[value15]"
   ],
   "sources": {
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
@@ -1581,7 +1583,7 @@
     "tools/promotion_unit_tests/test_plugin_resolve.py": "57ca4d8f030c2d0919e600595e06ff8cb91f7133cad6aea9fb343824ce39738f",
     "tools/promotion_unit_tests/test_qualification.py": "594d19390861616ddd99d1e0697262a38cc6028af6eeb0920ebdc30684c82369",
     "tools/promotion_unit_tests/test_remote_login_shell.py": "41030272e7d66953e8ce740aac239228d0c75ba7de9a18e48f9a57b9e9f10da0",
-    "tools/promotion_unit_tests/test_runtime_profile_intent.py": "7484182d6bdc8aa1f5ffee4192cb548366cd92d8082afbde1d403d1d8e88add7",
+    "tools/promotion_unit_tests/test_runtime_profile_intent.py": "01844bff5d54c42a34a1d188574e342cd155d4d7f4fc24cdd22da779bb688163",
     "tools/promotion_unit_tests/test_runtime_profile_wheels.py": "faf8100559e2336a452715528de06afe5440f14342a578cfec072cc1be5552ad",
     "tools/promotion_unit_tests/test_runtime_regressions.py": "b0446a8331406cc7d475df2b27d33d27ac5c6c7a17883f0fa8f51bc5cd3ff49e",
     "tools/promotion_unit_tests/test_selection.py": "cc0c254e2c96dd2594f772e7181e3b2f501b69c09aab6d468b55046b738fe94b",

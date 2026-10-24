@@ -90,16 +90,12 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-  runtime-profile-policy:
+  runtime-profile-policy-linux:
     if: ${{ inputs.runtime_profiles }}
-    name: Native runtime-profile policy (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Native runtime-profile policy (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
+    steps: &runtime-profile-policy-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -117,6 +113,13 @@ jobs:
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
         run: python -m pytest -q libs/installation-context/tests/test_runtime_deployment_adapters.py -k "native_policy and profile and not posix"
+
+  runtime-profile-policy-windows:
+    if: ${{ inputs.runtime_profiles }}
+    name: Native runtime-profile policy (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps: *runtime-profile-policy-steps
 
   candidate-profiles-linux:
     if: ${{ inputs.candidate_profiles }}
