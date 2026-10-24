@@ -95,6 +95,15 @@ def feed(store, epoch, frames):
     return store.admit_feed_commit(SOURCE, epoch, PROJECT, frames)
 
 
+def availability_control(revision=10, value=None, *, generation=G, empty=False):
+    return {
+        "type": "availability",
+        "projection": envelope(revision, [] if empty else None,
+                               generation=generation)["projection"],
+        "availability": deepcopy(value),
+    }
+
+
 def test_point_floor_survives_twenty_feed_ticks_without_fast_forward():
     store, epoch = seeded([row(), row("other")])
     assert point(store, epoch, envelope(11, [row(revision=11, title="unlocked")], count=2))
@@ -625,3 +634,92 @@ def test_heartbeat_noop_still_checks_shape_epoch_generation_cursor_and_barrier()
     new_epoch = store.begin_epoch(SOURCE)
     assert not feed(store, epoch, [valid])
     assert not feed(store, new_epoch, [valid])
+
+
+def test_availability_control_is_metadata_only_and_clears_at_unchanged_cursor():
+    store, epoch = seeded()
+    assert store.note_receipt(
+        SOURCE, epoch, _Receipt("waiting", PROJECT, "tree", G, "published", 11, ("session",)),
+    )
+    before_records, before_status = store.records(), state(store)
+    warning = {"status": "stale", "reason": "owner publication failed"}
+    assert feed(store, epoch, [availability_control(value=warning)])
+    assert dict(record(store)["_availability"]) == warning
+    assert dict(state(store)) == {**before_status, "stale": True}
+    assert publications._content(record(store)) == publications._content(
+        before_records[SOURCE, PROJECT, "tree"],
+    )
+    assert feed(store, epoch, [availability_control()])
+    assert store.records() == before_records and state(store) == before_status
+
+
+@pytest.mark.parametrize("point_stale", [False, True])
+def test_availability_control_cannot_override_newer_point_or_snapshot_floor(point_stale):
+    store, epoch = seeded()
+    warning = {"status": "stale", "reason": "owner publication failed"}
+    value = envelope(11, [row(revision=11, title="point")])
+    if point_stale:
+        value["availability"] = warning
+    assert point(store, epoch, value)
+    assert snapshot(store, epoch, envelope())
+    before_records, before_status = store.records(), state(store)
+    assert feed(store, epoch, [availability_control(value=None if point_stale else warning)])
+    assert store.records() == before_records and state(store) == before_status
+    assert snapshot(store, epoch, envelope(12, [row(revision=12)]))
+    with pytest.raises(ValueError, match="publication"):
+        feed(store, epoch, [availability_control(value=warning)])
+
+
+def test_availability_control_rejects_malformed_projection_scope_and_mixed_frames_atomically():
+    store, epoch = seeded()
+    before_records, before_status = store.records(), state(store)
+    for bad in (
+        availability_control(generation=H), availability_control(11),
+        {**availability_control(), "projection": None},
+        availability_control(value={"status": "unknown", "reason": "bad"}),
+        availability_control(value={"status": "stale", "reason": ""}),
+        {**availability_control(), "project": "another"},
+        {**availability_control(), "unsupported": True},
+    ):
+        with pytest.raises(ValueError):
+            feed(store, epoch, [bad])
+        assert store.records() == before_records and state(store) == before_status
+    with pytest.raises(ValueError):
+        feed(store, epoch, [availability_control(), availability_control()])
+    with pytest.raises(ValueError):
+        feed(store, epoch, [availability_control(), *update(11, [row(revision=11)])])
+    assert store.records() == before_records and state(store) == before_status
+    assert not store.admit_feed_commit(SOURCE, epoch, "another", [availability_control()])
+
+
+def test_availability_control_preserves_reset_fence_and_checks_receiver_barrier_epoch_project():
+    store, epoch = seeded()
+    assert not point(store, epoch, envelope(1, [row(revision=1)], generation=H))
+    before = state(store)
+    assert feed(store, epoch, [availability_control()])
+    assert state(store) == before and state(store)["stale"]
+    receiver = store._partitions[SOURCE, PROJECT].feed
+    receiver._begin = {"type": "update"}
+    with pytest.raises(ValueError, match="barrier"):
+        feed(store, epoch, [availability_control()])
+    receiver._begin = None
+    receiver._project = "another"
+    with pytest.raises(ValueError, match="project"):
+        feed(store, epoch, [availability_control()])
+    receiver._project = PROJECT
+    new_epoch = store.begin_epoch(SOURCE)
+    assert not feed(store, epoch, [availability_control()])
+    assert not feed(store, new_epoch, [availability_control()])
+
+
+def test_availability_control_preserves_empty_roster_tombstones_and_absence_receipts():
+    store, epoch = seeded()
+    assert feed(store, epoch, update(deleted=["tree"], order=()))
+    assert store.note_receipt(SOURCE, epoch, _Receipt("absence", PROJECT, "tree", G,
+                                                    "not-found", 12))
+    before = state(store)
+    warning = {"status": "stale", "reason": "owner publication failed"}
+    assert feed(store, epoch, [availability_control(11, warning, empty=True)])
+    assert not store.records() and dict(state(store)) == {**before, "stale": True}
+    assert feed(store, epoch, [availability_control(11, empty=True)])
+    assert state(store) == before

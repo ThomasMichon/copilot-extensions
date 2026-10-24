@@ -324,12 +324,25 @@ and absence fence before either is replaced, for both snapshots and feeds.
 Source availability has its own publication revision, separate from reload/
 generation-reset staleness. Older availability cannot override newer evidence;
 at equal revision a warning is conservative until an explicitly fresh snapshot
-clears it. A healthy point or feed cannot clear a pending snapshot/reset fence.
+or canonical current-epoch availability control clears it. A healthy point or
+feed cannot clear a pending snapshot/reset fence.
 
 A lone validated heartbeat delegates to the existing receiver's read-only
 heartbeat checks without copying the partition, feed, frames or rows. Epoch,
 frame shape, open barrier, generation and cursor checks remain intact. This
 is a no-op fast path only, not a broader copy-on-write or parser redesign.
+
+Canonical standalone F1 `availability` controls reuse `CurrentFeed.receive`:
+the selected source epoch/project, receiver barrier, generation and exact
+current feed projection must agree. They update availability metadata only,
+without a synthetic commit, cursor/row-floor advance, tombstone, observation
+renewal or receipt settlement. A newer point/snapshot availability revision
+continues to outrank an older feed control. At the same publication revision,
+an admitted current-epoch control can report stale or clear stale in normal
+serialized feed order. Pending reload/generation-reset fences remain separate.
+The existing admission method returns true for accepted metadata controls;
+that return does not claim a semantic publication. Mixed controls/transactions
+are refused. There is no new shared parser, wire field, generic API or importer.
 
 `_Receipt` is an optional **private intent**, not an F2 response decoder or
 evidence that any owner endpoint exists. A future adapter would have to prove
