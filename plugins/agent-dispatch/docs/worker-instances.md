@@ -245,7 +245,11 @@ remain runtime data.
 Only the selected evaluator entry receives strict option/dependency checks.
 Unsupported unused entries stay inert with conservative named supplier paths,
 so they neither reject the current selection nor lose source admission if
-retained for a later selection. No dependency check executes provider code.
+retained for a later selection. Ordinary trusted-pointer discovery uses
+qualification only, not Save-time grammar admission: existing commands that the
+bounded Save validator cannot interpret remain discoverable with their named
+supplier paths and normal runtime admission. No dependency check executes
+provider code.
 Legacy webhook emitters keep their existing runtime builder; command/builtin
 validation applies only when the registration owner selects that shape.
 A worker identity must retain its defining

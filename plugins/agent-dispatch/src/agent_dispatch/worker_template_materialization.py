@@ -105,6 +105,7 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
             qualify_supplier_context(
                 declaration, repository, root,
                 implicit=source["provider"] == f"repo:{repository}",
+                strict_commands=True,
             )
             for declaration in original
         )

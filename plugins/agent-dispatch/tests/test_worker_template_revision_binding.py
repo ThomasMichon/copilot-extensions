@@ -280,3 +280,42 @@ def test_shell_execution_roles_do_not_treat_later_script_arguments_as_code(comma
     from agent_dispatch.command_operands import execution_operand_indices
 
     assert all("{change_ref}" not in command[index] for index in execution_operand_indices(command))
+
+
+@pytest.mark.parametrize("kind", ["emitter", "evaluator"])
+def test_direct_read_only_pointer_discovery_does_not_apply_save_time_grammar(
+    monkeypatch, tmp_path, kind,
+):
+    from dropin_registry import ScanAuthority
+    from agent_dispatch import repo_config
+    from agent_dispatch.registrar_pointer import Pointer
+
+    supplier, execution = tmp_path / "supplier", tmp_path / "execution"
+    execution.mkdir()
+    directory = supplier / repo_config.CANONICAL_REPO_CONFIG_DIR / "registrar"
+    directory.mkdir(parents=True)
+    script = supplier / "existing.ps1"
+    script.write_text("Write-Output '[]'", encoding="utf-8")
+    command = ["pwsh", "-File", str(script)]
+    spec = (
+        {"id": "fixture", "command": command, "cwd": "repo:execution:.", "interval_seconds": 60}
+        if kind == "emitter" else {
+            "repo": "example/project", "evaluator_ref": "selected",
+            "evaluator_spec": {"cwd": "repo:execution:.", "scripts": {"selected": command}},
+        }
+    )
+    source = directory / "existing.json"
+    source.write_text(json.dumps({"kind": kind, "name": "existing", "spec": spec}), encoding="utf-8")
+    before = source.read_bytes()
+    roots = {"library": (supplier, "reference"), "execution": (execution, "worktree")}
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda name, **k: roots[name])
+    authority, declarations = rd.discover_trusted([
+        Pointer(name="library", kind="repo", repository="library"),
+    ])
+    assert authority == ScanAuthority.COMPLETE and len(declarations) == 1
+    effective = declarations[0].spec
+    argv = effective["command"] if kind == "emitter" else effective["evaluator_spec"]["scripts"]["selected"]
+    assert argv == ["pwsh", "-File", "repo:library:existing.ps1"]
+    resolved, cwd = repository_resources.resolve_execution_resources(argv, "repo:execution:.")
+    assert resolved == command and cwd == str(execution)
+    assert source.read_bytes() == before
