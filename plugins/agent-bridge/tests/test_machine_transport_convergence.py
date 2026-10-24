@@ -49,6 +49,27 @@ def test_shared_identities_keep_bridge_defaults_and_metadata(monkeypatch):
     assert parse_machines_yaml({}) == {}
 
 
+def test_normalized_profile_names_keep_missing_alias_defaults_on_their_own_logical_rows() -> None:
+    machines = parse_machines_yaml({"machines": {"desk": {
+        "ssh": {"environments": [{"name": "WIN"}, {"name": " WSL "}]},
+    }}}, normalize=True)
+    assert machines["desk"].ssh_environments[0].name == "windows"
+    assert machines["desk"].ssh_environments[0].alias == "desk"
+    assert machines["desk-wsl"].ssh_environments[0].name == "wsl"
+    assert machines["desk-wsl"].ssh_environments[0].alias == "desk-wsl"
+
+
+@pytest.mark.parametrize("alias", [None, ""])
+def test_normalization_never_fills_an_explicit_alias_from_a_peer_missing_alias(alias: str | None) -> None:
+    machines = parse_machines_yaml({"machines": {"desk": {
+        "ssh": {"environments": [
+            {"name": "legacy-label", "alias": alias},
+            {"name": "legacy-label"},
+        ]},
+    }}}, normalize=True)
+    assert [profile.alias for profile in machines["desk"].ssh_environments] == [alias, "desk"]
+
+
 def test_ssh_alias_binding_conflicts_and_acp_command_are_preserved(monkeypatch):
     monkeypatch.setattr("socket.gethostname", lambda: "elsewhere")
     machines = _machines()

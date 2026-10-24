@@ -28,7 +28,10 @@ from .execution_identity import (
 )
 from .identity import is_local_machine, local_execution_platform, is_observed_local_name
 from .local_execution import LocalExecutionContext, resolve_local_execution_context
-from .machine_environment import MachineEnvironment, legacy_alias_forms, normalize_environment, split_machine_environment
+from .machine_environment import (
+    MachineEnvironment, known_environment_label, legacy_alias_forms,
+    normalize_environment, split_machine_environment,
+)
 from .registry import (
     AmbiguousMachineError,
     MachineEntry,
@@ -65,6 +68,7 @@ __all__ = [
     "MachineSelection",
     "entry_physical_host",
     "normalize_environment",
+    "known_environment_label",
     "legacy_alias_forms",
     "resolve_machine_selection",
     "find_machine_metadata",

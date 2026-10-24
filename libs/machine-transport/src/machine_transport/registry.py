@@ -29,7 +29,13 @@ from typing import Any, Generic, Protocol, TypeVar
 
 import yaml
 
-from .machine_environment import MachineEnvironment, legacy_alias_forms, normalize_environment, split_machine_environment
+from .machine_environment import (
+    MachineEnvironment,
+    known_environment_label,
+    legacy_alias_forms,
+    normalize_environment,
+    split_machine_environment,
+)
 
 _SafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
@@ -96,7 +102,7 @@ def _profile_conflicts(entry: MachineIdentity, name: str, environment: str) -> b
             continue
         if not isinstance(env.name, str):
             raise ValueError("SSH environment name must be a string or null")
-        profile_environment = normalize_environment(env.name)
+        profile_environment = known_environment_label(env.name)
         if profile_environment and profile_environment != environment:
             return True
     return False
@@ -264,7 +270,9 @@ def parse_machines_yaml(
             raise ValueError("execution-space keys must be nonempty canonical names, not paths or references")
         if not isinstance(physical_host, str):
             raise ValueError(f"execution space '{key}' physical_host must be a string")
-        if execution_platform and any(env.name != execution_platform for env in ssh_envs):
+        if execution_platform and any(
+            known_environment_label(env.name) != execution_platform for env in ssh_envs
+        ):
             raise ValueError(f"execution space '{key}' cannot contain another space's SSH environment")
         compatibility_aliases = data.get("compatibility_aliases", []) or []
         if not isinstance(compatibility_aliases, (list, tuple)) or any(
@@ -377,7 +385,13 @@ def normalize_machine_entries(
         result[entry.key] = entry
 
     for entry in entries.values():
-        platforms = [env.name for env in entry.ssh_environments]
+        platforms = [known_environment_label(env.name) for env in entry.ssh_environments]
+        canonical_profiles = [
+            replace(env, name=platform) if platform is not None and env.name != platform else env
+            for env, platform in zip(entry.ssh_environments, platforms)
+        ]
+        if canonical_profiles != entry.ssh_environments:
+            entry = replace(entry, ssh_environments=canonical_profiles)
         for platform_name in ("windows", "wsl", "linux"):
             if platforms.count(platform_name) > 1:
                 raise AmbiguousMachineError(
@@ -699,7 +713,10 @@ def resolve_machine_selection(
             if (
                 target.environment == "wsl" and not getattr(entry, "execution_platform", "")
                 and split_machine_environment(entry.key).environment != "wsl"
-                and not any(env.name == "wsl" for env in getattr(entry, "ssh_environments", ()))
+                and not any(
+                    known_environment_label(env.name) == "wsl"
+                    for env in getattr(entry, "ssh_environments", ())
+                )
             ):
                 physical = entry_physical_host(entry)
                 guest_key = MachineEnvironment(physical, "wsl").logical_machine

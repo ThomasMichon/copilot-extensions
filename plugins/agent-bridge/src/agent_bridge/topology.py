@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from machine_transport import ControlPlaneError, load_control_plane, normalize_machine_entries
+from machine_transport import ControlPlaneError, known_environment_label, load_control_plane, normalize_machine_entries
 from machine_transport import parse_machines_yaml as parse_machine_entries
 
 log = logging.getLogger("agent-bridge")
@@ -144,17 +144,21 @@ def parse_machines_yaml(
         # Shared identities are normalized; Bridge-only metadata stays at the edge.
         mdata = metadata[entry.legacy_key or key]
         ssh_block = mdata.get("ssh") or {}
-        missing_alias_names = [
-            env.get("name", "") for env in (ssh_block.get("environments") or [])
-            if isinstance(env, dict) and "alias" not in env
+        source_profiles = [
+            env for env in (ssh_block.get("environments") or []) if isinstance(env, dict)
         ]
+        if entry.legacy_key:
+            source_profiles = [
+                env for env in source_profiles
+                if known_environment_label(env.get("name")) == entry.execution_platform
+            ]
         ssh_envs = [
             SshEnvironment(
                 name=env.name,
-                alias=key if normalize and env.name in missing_alias_names else env.alias,
+                alias=key if normalize and "alias" not in source else env.alias,
                 port=env.port, user=env.user, shell=env.shell,
             )
-            for env in entry.ssh_environments
+            for env, source in zip(entry.ssh_environments, source_profiles, strict=True)
         ]
 
         # Parse auth hooks

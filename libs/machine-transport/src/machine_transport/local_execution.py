@@ -31,10 +31,17 @@ class LocalExecutionContext:
     customization_key: str | None = None
 
 
-def _name(value: str, label: str) -> str:
+def _clean_name(value: str, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise IdentityError(f"{label} must be a nonempty string")
     cleaned = value.strip()
+    if any(char in cleaned for char in ("\r", "\n", "\0")):
+        raise IdentityError(f"{label} must be a clean string")
+    return cleaned
+
+
+def _name(value: str, label: str) -> str:
+    cleaned = _clean_name(value, label)
     if any(char.isspace() or char in "/\\#" for char in cleaned):
         raise IdentityError(f"{label} must be a single machine name")
     return cleaned
@@ -86,7 +93,7 @@ def _context(
     platform: str, execution: str, customization_key: str | None,
 ) -> LocalExecutionContext:
     selected = registry.get(customization_key) if customization_key is not None else None
-    physical = _name(physical, "physical machine")
+    physical = _clean_name(physical, "physical machine")
     execution = (
         _entry_execution(selected, observed) if selected is not None and execution == selected.key
         else execution
@@ -155,7 +162,7 @@ def resolve_local_execution_context(
     configuration provenance and receiving-project/ledger fences remain with the
     caller. Registry errors propagate; absence is not an error.
     """
-    observed = _name(hostname, "observed hostname")
+    observed = _clean_name(hostname, "observed hostname")
     platform = normalize_environment(environment)
     if platform not in ("windows", "wsl", "linux"):
         raise IdentityError("local execution environment must be windows, wsl or linux")
@@ -164,6 +171,8 @@ def resolve_local_execution_context(
         if not isinstance(configured_machine, str) or not configured_machine.strip():
             raise IdentityError("configured machine must be a nonempty string")
         configured = configured_machine.strip()
+        if "\0" in configured:
+            raise IdentityError("configured machine must not contain a null byte")
         if not any(configured.casefold() == key.casefold() for key in registry) and any(
             _profile_conflicts(entry, configured, platform) for entry in registry.values()
         ):
@@ -174,11 +183,14 @@ def resolve_local_execution_context(
             entry.display_name.casefold()
             for entry in registry.values() if _matches_observation(entry, observed)
         }
+        legacy_display_selector = any(char.isspace() for char in configured)
         target_registry = {
             key: replace(
                 entry,
                 hostname="" if entry.hostname.strip().casefold() == observed.casefold() else entry.hostname,
-                display_name=entry.display_name if entry.display_name.casefold() in local_displays else "",
+                display_name=entry.display_name if (
+                    legacy_display_selector or entry.display_name.casefold() in local_displays
+                ) else "",
             )
             for key, entry in registry.items()
         }

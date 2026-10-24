@@ -94,6 +94,8 @@ An empty map or a map containing only other machines does not deny this local
 context. A matching map can customize physical and execution names. An observed
 physical hostname resembling `-wsl`, `-win` or a parenthesized environment label
 is literal, not address syntax.
+Physical grouping names are structured clean strings, not execution-reference
+tokens. Allocation callers still own portable path/Git-ref validation.
 
 This is an additive API for the reviewed local-first correction, not an
 activation of tuple producers or an automatic migration of existing consumers.
@@ -127,20 +129,28 @@ than regenerating it from aliases or physical metadata.
 Locally associated legacy display-name bindings use the shared selector before
 literal-host format handling; keys and aliases retain precedence, and ambiguous
 local display lookups remain errors. Unrelated display metadata cannot replace
-an established configured execution identity. A derived guest with no guest
+an established one-term configured execution identity. An explicitly multi-term
+legacy display selector may resolve uniquely without hostname metadata.
+A derived guest with no guest
 declaration has no `customization_key`: borrowing a physical name does not
 declare guest roles or loadouts.
 Legacy parenthesized presentation keys are projected to one-term execution
 names while retaining their original `customization_key`; explicit canonical
 keys are not reformatted. Contextual normalization receives the literal observed
 hostname so native/guest sibling labels cannot trim it before selection.
-Ordinary `normalize_machine_entries(entries)` behavior is unchanged; the
-optional `observed_hostname` keyword is current-OS context, not target authority.
+The optional `observed_hostname` keyword is current-OS context, not target
+authority. Logical projection canonicalizes recognized profile environment
+labels in copies; original raw inputs, machine keys, aliases and other
+transport fields are retained. `known_environment_label()` classifies legacy
+metadata without validating it; `normalize_environment()` remains the strict
+requested-environment validator.
 The same context is used for legacy hostname-address collision checks.
 Mixed scoped/unscoped registries resolve an existing legacy guest before
 generating a fallback, while named native profiles retain their environment
 refusals even through qualified aliases. Profile environment labels use the
 shared environment normalizer.
+The Bridge adapter correlates missing-alias defaults with their exact source
+profile, so canonical role names cannot fill an explicitly empty/null alias.
 
 Consumers must separately prove the receiving project, namespace, ledger and
 retained allocation before writing or replaying. New naming facts do not
