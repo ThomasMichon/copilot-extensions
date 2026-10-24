@@ -509,6 +509,12 @@ def add_resource_claim(
     save: bool = True,
 ) -> ResourceClaim:
     tracking = _tracking()
+    from . import paired_claims
+
+    if claim.ref == paired_claims.paired_ref(record) and (
+        claim.kind != "worktree" or claim.state != obligations.ACTIVE
+    ):
+        paired_claims.require_clearable(record, claim.ref)
     if claim.has_producer:
         raise ValueError("producer claims require resource-producer reserve")
     if (
@@ -573,6 +579,9 @@ def settle_resource_claim(
         return None
     if match.has_producer:
         raise ValueError("producer claims require verified close or accepted handoff")
+    from . import paired_claims
+    if obligations.normalize(disposition) != obligations.ACTIVE:
+        paired_claims.require_clearable(record, ref)
     match.state = obligations.normalize(disposition)
     if save:
         tracking.save_record(record, path)
@@ -592,6 +601,8 @@ def release_resource_claim(
         return None
     if match.has_producer:
         raise ValueError("producer claims require verified close or accepted handoff")
+    from . import paired_claims
+    paired_claims.require_clearable(record, ref)
     match.state = obligations.RELEASED
     if save:
         tracking.save_record(record, path)
@@ -698,11 +709,17 @@ def sweep_abandoned_obligations(
     path: Path | None = None,
 ) -> list[ResourceClaim]:
     tracking = _tracking()
+    from . import paired_claims
+
     reclaimed: list[ResourceClaim] = []
     for claim in record.resources:
         if claim.has_producer:
             continue
         if not claim.is_unsettled or claim_handoff_reservation(record, claim):
+            continue
+        try:
+            paired_claims.require_clearable(record, claim.ref)
+        except ValueError:
             continue
         try:
             gone = gone_of(claim)
@@ -756,6 +773,9 @@ def release_all_resources(
         claim for claim in record.resources
         if claim.is_live and claim.kind != "session" and not claim.has_producer
     ]
+    from . import paired_claims
+    for claim in released:
+        paired_claims.require_clearable(record, claim.ref)
     for claim in released:
         claim.state = "released"
     # worktree-finality-and-obligations Phase 2: snapshot exactly what THIS
@@ -797,6 +817,9 @@ def release_at_rest_resources(
         claim for claim in record.resources
         if claim.is_at_rest and claim.kind != "session" and not claim.has_producer
     ]
+    from . import paired_claims
+    for claim in released:
+        paired_claims.require_clearable(record, claim.ref)
     for claim in released:
         claim.state = "released"
     if released and save:

@@ -32,6 +32,7 @@ def _repos_usage() -> None:
     print()
     print("Commands:")
     print("  list [--class reference|singleton|worktree|knowledge] [--strict] [--json]")
+    print("  map --json                         Read the resident's flattened registered repository map")
     print("  find <name> [--registered-only]      Resolve a repo to its local path")
     print("                                      --registered-only refuses discovery fallback")
     print("  add <name> <path>                   Register a repo at a known path")
@@ -174,6 +175,10 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
 
     if sub == "list":
         from .repos_list_cli import command
+        return command(rest)
+
+    if sub == "map":
+        from .repository_map_client import command
         return command(rest)
 
     if sub == "find":

@@ -370,18 +370,16 @@ def create_app(
             handoff_fallback_health.name: handoff_fallback_health,
             worktree_status_health.name: worktree_status_health,
         }
-        sweeper = (
-            asyncio.create_task(
-                _gc_loop(
-                    queue,
-                    sweep_interval,
-                    bus,
-                    health=sweeper_health,
-                    governance=governance,
-                )
+        # The existing lifespan-owned loop also maintains diagnostics when task
+        # GC is disabled; its disabled branch never reconciles queue state.
+        sweeper = asyncio.create_task(
+            _gc_loop(
+                queue,
+                sweep_interval,
+                bus,
+                health=sweeper_health,
+                governance=governance,
             )
-            if sweep_interval and sweep_interval > 0
-            else None
         )
         orphan_reaper = (
             asyncio.create_task(

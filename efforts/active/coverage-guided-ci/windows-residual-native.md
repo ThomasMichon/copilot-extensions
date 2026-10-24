@@ -23,7 +23,8 @@ The coordinator owns integration with the other census reports.
   normalized to LF. Identical copied hunks intentionally share hashes; path
   remains part of their key.
 
-The source operating policy and the complete wave plan were read. No source
+At census creation, the source operating policy and complete wave plan were read.
+No source
 files, Git state, installed payloads, or dependencies were changed; no tests,
 builds, native launches, or network operations were performed for this census.
 Evidence is model-neutral; no model registry or eligibility is inferred.
@@ -62,6 +63,39 @@ all nine checked receipts match. Path-specific history identifies #7304 or
 literals are not to be replayed. Receipts for installers with still-blocked
 copier changes instead belong to B6909, not an already-merged claim.
 
+### Subsequent actual-merge settlement
+
+At Dev `0f5b38374525c7dfbc11b47212a7a9905a9b6ec8`, the following eight
+independent contracts have actually merged. Their **22 exact census keys**
+now carry the corresponding merged code below, not their former retained
+batch label. The linked merged PRs retain their scoped implementation, review,
+checks and validation context. This is a semantic contract disposition, not
+an assertion that historical patches were replayed byte-for-byte.
+
+| Code | Former batch | Keys | Actual PR and merge commit |
+|------|--------------|------|----------------------------|
+| M8249 | W4-TRANSPORT | 5 | #8249, `f0f6122a92cc3a4f555a1310c6bee1da1fde7dd0` |
+| M8252 | W4-PANE | 3 | #8252, `a8c2a87e788cfe7b41eaa8a5217d32e0ce3c98a5` |
+| M8255 | W4-ATTR-ENCODING | 4 | #8255, `505dd427d48d15b73052f487bab7a42a10d5424f` |
+| M8258 | W4-WATCH-BURST | 2 | #8258, `77ef5e78ee99b155a1af95d7de17776e146adcfd` |
+| M8310 | W4-VAULT-COMPILER | 1 | #8310, `d3965f75c949ff388c7ae117d80315970d0e0b36` |
+| M8425 | W4-VAULT-NOSERVICE | 2 | #8425, `cf2cfd14ca9fb9129bfc4dbc15e3c24691d23bdd` |
+| M8437 | W4-INDEX-SHUTDOWN | 4 | #8437, `1f711668a1950a0cdbbafc85243d33fd57b116b7` |
+| M8444 | W4-BRIDGE-STDIO | 1 | #8444, `0f5b38374525c7dfbc11b47212a7a9905a9b6ec8` |
+
+The batch descriptions below preserve their original scope, not permission to
+republish settled work. In particular, the pane tests moved into the existing
+Windows-guarded argv module without adding skips; Index retains real services
+and adds explicit shutdown failure controls; Bridge's mocked forwarding
+assertion is accompanied by actual isolated native pipe/exit controls.
+Vault's compiler and NoService contracts remain separate, with their failed
+diagnostics retained rather than converted to timing qualification.
+No other retained, blocked or retirement-proposed key changes disposition.
+The 62 carried-forward retained keys are custody labels, not newly verified
+findings that every associated behavior is absent from current Dev.
+The parent remains #5682; the operator-closed #5694 is preserved history,
+not an open publication objective.
+
 ### Blocked existing owner
 
 - **B6909 — blocked by the existing ThomasMichon/copilot-extensions#6909
@@ -95,7 +129,7 @@ copier changes instead belong to B6909, not an already-merged claim.
   coordinator reviews this partition. No source edit or skip waiver is
   authorized by the proposed split.
 
-### Retained named narrow batches and exact contracts
+### Named narrow batch contracts
 
 - **W4-PANE:** compiler-free native pane Job Object binding.
   `worktree-manager/bin/pane-wrapper.ps1`, its `bin/README.md`, and
@@ -225,7 +259,8 @@ reconciliation blocks admission rather than expanding a batch.
 
 ### Subsequent admission: W4-WATCH-BURST
 
-This candidate admits only `9de716138927` and `8e164df76d48` in the original
+Merged in #8258 as M8258 for only `9de716138927` and `8e164df76d48` in the
+original
 Pull Requests `test_watch_delivery.py`. The fixture holds its snapshot fetch
 until all 20 subscribers are registered, asserts that no callback has started,
 then releases the burst. The existing eight-worker limit, exact peak of eight,
@@ -241,12 +276,13 @@ daemon, durable registration and callback scheduler, not a mocked scheduling
 proxy. There is no installer/bootstrap or fresh-machine behavior change, and
 no external venue is needed for this local threading contract. Existing plugin
 usage documentation remains accurate; this ledger records the test setup
-change. Review and required CI still gate merge. Wider residual disposition
+change. Review and required CI passed before the actual merge. Wider residual
+disposition
 and repeated complete-plugin timing qualification remain open.
 
 ### Subsequent admission: W4-ATTR-ENCODING
 
-This candidate admits only `f4aafb2aa54f`, `978cd04361f6`, `ba6c4547c0e7`
+Merged in #8255 as M8255 for only `f4aafb2aa54f`, `978cd04361f6`, `ba6c4547c0e7`
 and `4e163bc20889`, under the original attribution README, policy script
 and policy-test paths. The four keys retain their original semantic contract:
 the normally invoked PowerShell entrypoint temporarily selects UTF-8 for native
@@ -269,12 +305,12 @@ limit and all default process/memory/temp bounds. Touched-Python lint and
 whitespace checks passed. A new changefile names only `ai-attribution`.
 The real local Git/PowerShell consumer is exercised directly; no install,
 bootstrap or runtime change requires a fresh-machine or separate external
-venue here. This is not full-plugin or parent timing qualification, and review
-plus required CI still gate merge.
+venue here. Review and required CI passed before merge; this is not full-plugin
+or parent timing qualification.
 
 ### Subsequent admission: W4-PANE
 
-This candidate carries only the W4-PANE source keys `818365a959b9`,
+Merged in #8252 as M8252 for only the W4-PANE source keys `818365a959b9`,
 `6eced593549d`, and `ea2912aeeebb`, plus their directly dependent native
 validation and release metadata. The README and wrapper retain their original
 paths. Both original Job Object test names move from the proposed new
@@ -309,12 +345,13 @@ passed. No runtime was installed or updated; the available live local consumer
 was tested directly, rather than provisioning a separate external venue.
 This is functional/native consumer acceptance for this residual, not normal
 group or complete-plugin performance qualification. Review and required CI
-still gate merge; all wider census and parent timing obligations remain open.
+passed before merge; all wider census and parent timing obligations remain open.
 
 ### Subsequent admission: W4-TRANSPORT
 
-The original census and its counts below remain historical. This narrowly
-admitted implementation carries only the five W4-TRANSPORT keys:
+Merged in #8249 as M8249. The pinned keys remain historical; their dispositions
+and totals below include this settlement. This implementation carries only the
+five W4-TRANSPORT keys:
 `96d6672d87b3`, `d6741aa0c62f`, `fcc53c6c01ac`, `50309299da22`, and
 `2bf4983b2622`, under their original three paths. The accepted candidate uses
 the available safe C loader without caching parsed topology or changing
@@ -329,7 +366,7 @@ Both required consumer inventories identify `agent-bridge`, `agent-machines`,
 consumers, with no physical machine-transport copies to patch. A newly scoped
 patch changefile names all five. No installer, command-binding, control-plane,
 runtime installation, test selection, skip, timeout or containment policy is
-changed. Review and required CI still gate merge.
+changed. Review and required CI passed before the actual merge.
 
 Native Windows validation used exactly two workers and unchanged 30-second
 item, 240-second diagnostic and default process/memory/temp bounds. The complete
@@ -354,17 +391,17 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `libs/machine-transport/README.md`
 
-- `@@ -5,6 +5,11 @@ identity, and local-vs-SSH transport resolution, vendored (shared, not` — `96d6672d87b3` — W4-TRANSPORT
+- `@@ -5,6 +5,11 @@ identity, and local-vs-SSH transport resolution, vendored (shared, not` — `96d6672d87b3` — M8249
 
 ### `libs/machine-transport/src/machine_transport/registry.py`
 
-- `@@ -31,6 +31,8 @@ import yaml` — `d6741aa0c62f` — W4-TRANSPORT
-- `@@ -139,7 +141,7 @@ def parse_machines_yaml_file(` — `fcc53c6c01ac` — W4-TRANSPORT
+- `@@ -31,6 +31,8 @@ import yaml` — `d6741aa0c62f` — M8249
+- `@@ -139,7 +141,7 @@ def parse_machines_yaml_file(` — `fcc53c6c01ac` — M8249
 
 ### `libs/machine-transport/tests/test_registry.py`
 
-- `@@ -4,7 +4,9 @@ from dataclasses import replace` — `50309299da22` — W4-TRANSPORT
-- `@@ -157,7 +159,48 @@ def test_legacy_guest_hostname_and_display_metadata_do_not_alias_native_identity` — `2bf4983b2622` — W4-TRANSPORT
+- `@@ -4,7 +4,9 @@ from dataclasses import replace` — `50309299da22` — M8249
+- `@@ -157,7 +159,48 @@ def test_legacy_guest_hostname_and_display_metadata_do_not_alias_native_identity` — `2bf4983b2622` — M8249
 
 ### `libs/payload-invocation/README.md`
 
@@ -429,7 +466,7 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-bridge/tests/test_worktree_owner_launch.py`
 
-- `@@ -77,6 +77,25 @@ def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypa` — `dc3ef0c9e847` — W4-BRIDGE-STDIO
+- `@@ -77,6 +77,25 @@ def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypa` — `dc3ef0c9e847` — M8444
 
 ### `plugins/agent-codespaces/scripts/install.human-output.json`
 
@@ -515,10 +552,10 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-index/tests/test_installation_cells.py`
 
-- `@@ -4432,6 +4432,8 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `81f4541aef45` — W4-INDEX-SHUTDOWN
-- `@@ -4536,20 +4538,19 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `2af627149899` — W4-INDEX-SHUTDOWN
-- `@@ -4560,17 +4561,22 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `1515dab41eb1` — W4-INDEX-SHUTDOWN
-- `@@ -4579,21 +4585,25 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `98155104f7ca` — W4-INDEX-SHUTDOWN
+- `@@ -4432,6 +4432,8 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `81f4541aef45` — M8437
+- `@@ -4536,20 +4538,19 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `2af627149899` — M8437
+- `@@ -4560,17 +4561,22 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `1515dab41eb1` — M8437
+- `@@ -4579,21 +4585,25 @@ def test_two_cell_local_services_bind_distinct_os_assigned_ports(` — `98155104f7ca` — M8437
 
 ### `plugins/agent-logger/scripts/install.human-output.json`
 
@@ -558,8 +595,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-pull-requests/tests/test_watch_delivery.py`
 
-- `@@ -445,6 +445,7 @@ def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):` — `9de716138927` — W4-WATCH-BURST
-- `@@ -463,16 +464,23 @@ def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):` — `8e164df76d48` — W4-WATCH-BURST
+- `@@ -445,6 +445,7 @@ def test_unchanged_snapshots_do_not_rewrite_registry(make, monkeypatch):` — `9de716138927` — M8258
+- `@@ -463,16 +464,23 @@ def test_callback_burst_has_bounded_concurrency_and_no_lost_events(make):` — `8e164df76d48` — M8258
 
 ### `plugins/agent-ssh/scripts/install.human-output.json`
 
@@ -589,22 +626,22 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-vault/tests/test_install_snapshot_ps1.py`
 
-- `@@ -265,19 +265,22 @@ public class OfflineUv {` — `dac8b6718c26` — W4-VAULT-COMPILER
-- `@@ -574,6 +577,17 @@ def provisioned_snapshot(stamped_snapshot):` — `bfddebeed21e` — W4-VAULT-NOSERVICE
-- `@@ -581,10 +595,8 @@ def provisioned_snapshot(stamped_snapshot):` — `def46d35da51` — W4-VAULT-NOSERVICE
+- `@@ -265,19 +265,22 @@ public class OfflineUv {` — `dac8b6718c26` — M8310
+- `@@ -574,6 +577,17 @@ def provisioned_snapshot(stamped_snapshot):` — `bfddebeed21e` — M8425
+- `@@ -581,10 +595,8 @@ def provisioned_snapshot(stamped_snapshot):` — `def46d35da51` — M8425
 
 ### `plugins/ai-attribution/README.md`
 
-- `@@ -107,7 +107,9 @@ grammar, keys, precedence, authority boundaries, and diagnostics.` — `f4aafb2aa54f` — W4-ATTR-ENCODING
+- `@@ -107,7 +107,9 @@ grammar, keys, precedence, authority boundaries, and diagnostics.` — `f4aafb2aa54f` — M8255
 
 ### `plugins/ai-attribution/scripts/emit-policy.ps1`
 
-- `@@ -651,6 +651,13 @@ function Invoke-Policy {` — `978cd04361f6` — W4-ATTR-ENCODING
+- `@@ -651,6 +651,13 @@ function Invoke-Policy {` — `978cd04361f6` — M8255
 
 ### `plugins/ai-attribution/tests/test_emit_policy.py`
 
-- `@@ -91,10 +91,11 @@ def _run(` — `ba6c4547c0e7` — W4-ATTR-ENCODING
-- `@@ -252,11 +253,21 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(` — `4e163bc20889` — W4-ATTR-ENCODING
+- `@@ -91,10 +91,11 @@ def _run(` — `ba6c4547c0e7` — M8255
+- `@@ -252,11 +253,21 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(` — `4e163bc20889` — M8255
 
 ### `plugins/ai-attribution/tests/test_write_session_guidance.py`
 
@@ -627,15 +664,15 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `worktree-manager/bin/README.md`
 
-- `@@ -12,6 +12,10 @@ of the `worktree-manager-control-plane` effort.` — `818365a959b9` — W4-PANE
+- `@@ -12,6 +12,10 @@ of the `worktree-manager-control-plane` effort.` — `818365a959b9` — M8252
 
 ### `worktree-manager/bin/pane-wrapper.ps1`
 
-- `@@ -54,31 +54,43 @@ function Set-AwPaneKillOnCloseJob {` — `6eced593549d` — W4-PANE
+- `@@ -54,31 +54,43 @@ function Set-AwPaneKillOnCloseJob {` — `6eced593549d` — M8252
 
 ### `worktree-manager/tests/test_pane_wrapper_job.py`
 
-- `@@ -0,0 +1,180 @@` — `ea2912aeeebb` — W4-PANE
+- `@@ -0,0 +1,180 @@` — `ea2912aeeebb` — M8252
 
 ### `plugins/agent-worktrees/scripts/emit-command-catalog.ps1`
 
@@ -696,15 +733,16 @@ keys.
 
 ## Completion boundaries and mechanical verification
 
-The report's only completion claim is census coverage. Every continuation
+The report claims census coverage and the explicitly named merged contracts, not
+completion of the native wave or parent effort. Every continuation
 path/header/hash must occur exactly once, with one disposition, and be
 mechanically compared with the pinned unified-3 diff. Published-only receipt
 handling is separately counted. No unspecified hunk is silently retired.
 
 Mechanical self-check passed against freshly read immutable Git objects:
 **62 distinct paths, 128 distinct exact keys, zero missing/extra/duplicate
-keys, and one disposition on every row**. Totals are **17 actual-merged,
-25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 84 retained, and 2
+keys, and one disposition on every row**. Updated totals are **39 actual-merged,
+25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 62 retained, and 2
 proposed-retirement** continuation hunks. The blocked mixed key additionally
 partitions retained portability subspans from the R-BASH-SKIP review proposal;
 these are not additional full-hunk census rows.

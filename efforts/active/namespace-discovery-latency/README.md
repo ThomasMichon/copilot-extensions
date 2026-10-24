@@ -96,6 +96,35 @@ the complete source-keyed artifact set and all current-source verification.
 This supersedes the reservation approach for this repair; it does not
 authorize live Main-control activation or installed rollout.
 
+Subsequent operator selections, captured verbatim:
+
+> Activate and deploy
+
+> Great. Continue driving now that you have a container to try in
+
+**Selection summary:** Coordinate reviewed control adoption with its existing
+owner, use normal authorized local rollout, and continue bounded source
+diagnosis and isolated container qualification. This does not authorize a
+timeout waiver, installed-code patch, control takeover or fleet-wide change.
+
+Subsequent operator direction, captured verbatim:
+
+> Identify what takes up 8 seconds; break down the architecture and figure out what we can spare
+
+**Direction summary:** Attribute the complete call chain and distinguish
+necessary authority checks from removable startup or unrelated configuration
+work before selecting another implementation. This is not approval to remove
+the validation process boundary.
+
+Subsequent operator direction, captured verbatim:
+
+> Great. Build out an effort plan and tackle it
+
+**Authorization summary:** Develop and execute the measured startup-headroom
+follow-up below through reviewed source changes. Reuse this canonical effort;
+retain the unchanged eight-second requirement, process isolation and existing
+release, installation and lifetime ownership.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -132,12 +161,25 @@ authorize live Main-control activation or installed rollout.
   cases, within unchanged caller budgets.
 - [x] Land the implementation through review and required CI. #7998 merged to
   `dev`; that merge is not a qualified Main release.
-- [ ] Repair the blocking source-publication failure on #8033 through normal
+- [x] Repair the blocking source-publication failure on #8033 through normal
   Dev review. Use the current source's complete signed artifact set rather
   than another source's per-plugin version aliases; preserve source binding,
   immutable bytes, consumer readback and legacy publication compatibility.
-  Main-control activation remains with its separately authorized owner.
-- [ ] Confirm qualified promotion to `main` separately from the `dev` merge.
+  #8115 merged as `c66e0bd7570ef4262d1f9c312a3593fbef52fd30`.
+- [ ] Have the existing #3336/#6237 control owner adopt the reviewed helper;
+  source publication and a containing release do not change the live pin.
+- [x] Confirm qualified promotion to `main` separately from the `dev` merge.
+  Natural #8287 contains the source repair; #8302 separately contains the
+  registered-Manager launcher repair.
+- [x] Land the bounded state-root follow-up through review and required CI.
+  #8414 merged as `5a2b202b5ae94b9695f04f4a05c4c424731d3ab7`.
+- [ ] Land the reviewed [startup-headroom follow-up](startup-headroom.md)
+  before its implementation; preserve existing source and control owners.
+- [ ] Execute that follow-up in independently reviewable source slices:
+  omit unused state-root preferences first, then qualify the canonical
+  fresh-process evaluator selection without weakening bootstrap admission.
+- [ ] Requalify the remaining installed reader latency after a reviewed
+  state-root follow-up, preserving complete discovery within eight seconds.
 - [ ] Retain release/rollout responsibility explicitly. Apply a local rollout
   only through the unified updater with its required authorization; verify the
   actual running generation and complete target discovery before claiming live
@@ -173,6 +215,9 @@ All items are agent-recommended means of proving the requested repair.
   runtime changes.
 - [ ] Promotion and authorized running-state proof are distinct receipts; an
   installed selector version alone is not evidence of a running repaired daemon.
+- [ ] The startup follow-up's [qualification matrix](startup-headroom.md#validation-plan)
+  proves equivalent source/installation refusals, first-touch behavior and
+  complete native discovery; a faster status microbenchmark alone is not a pass.
 
 ## Proposal
 
@@ -182,6 +227,203 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Architecture attribution before selecting the next repair
+
+- The actual path is Bridge's registered command, a CMD/PowerShell launcher,
+  a separate canonical installation-context PowerShell evaluator, Containers
+  Python, a second CMD/PowerShell/Worktrees Python stack to locate the state
+  root, then Docker version/list queries. Most wall time precedes Docker.
+- A correlated, low-overhead diagnostic took 7.438 seconds: launcher and
+  runtime selection 0.841; installation-mode validation 2.336; Containers
+  runtime initialization before the peer read 0.802; the complete Worktrees
+  peer read 2.890; backend/serialization/exit remainder 0.569. These are
+  non-overlapping intervals of one invocation, not a sum of unrelated
+  profiles. The observer used 0.031 seconds of thread CPU. A preceding
+  low-overhead 8.437-second result remains an over-budget result.
+- Frequent process-tree polling was rejected for latency attribution: it
+  used 6.703 seconds of observer CPU and stretched its diagnostic to 14.360
+  seconds. It established nesting and verified the private candidate
+  interpreter was actually reached, but its wall times are not credited.
+- Three alternating fresh-process controls of the existing canonical status
+  implementations returned identical complete JSON: PowerShell took
+  2.141/1.797/1.797 seconds; isolated no-site Python took
+  0.687/0.406/0.453. The roughly 1.34-1.45-second difference is a more
+  promising candidate than removing process isolation. This is only a
+  positive legacy-mode comparison: trusted bootstrap selection, native
+  refusal/parity cases and the real consumer still need qualification.
+- The state-root result uses launch policy, the machine-local knowledge
+  binding and canonical registry checks. Its current full config loader also
+  resolves portable launch preferences (`copilot_profiles`,
+  `profile_assignment`, `headless`, `auto_fast_forward`) that this result
+  does not consume. That unrelated preference read and unrelated eager CLI
+  imports are narrower candidates; the existing approximately one-second
+  configuration and 1.14-second import profiles include required work too,
+  so their whole totals are not claimed as removable savings.
+- The separate Docker version preflight is another small candidate because
+  the subsequent list operation already observes daemon availability.
+  Preserve actionable missing-provider/daemon errors, source and installation
+  ownership, binding refusal, native holder accounting and incomplete-roster
+  semantics. No candidate from this attribution is implemented or deployed.
+
+### 2026-10-24 - Full native boundary still misses the unchanged deadline
+
+- The merged #8414 state-root source was built through the canonical native
+  developer installer into an isolated profile. Its monitor transition was a
+  no-op with no predecessor. The executing `context_cli.py` hash matches the
+  reviewed source; the complete state-root JSON matches the installed reader,
+  including the knowledge binding. Shared runtime selectors and deployment
+  manifests remained unchanged.
+- With that candidate reader behind the selected Containers command, five
+  fresh full PowerShell invocations took 7.421, 6.968, 6.672, 6.922 and
+  8.031 seconds. All returned the actual empty container inventory without
+  stderr. The fifth result fails the eight-second requirement; neither its
+  small overrun nor the four faster results is a waiver.
+- The exact registered CMD command was then exercised through Bridge's real
+  namespace resolver and native CPU/lifetime observer. One fresh process
+  completed in 7.875 seconds with native success, both holders settled and
+  five consistent warm reads. The first process of the required fresh
+  five-process cohort instead reached the unchanged eight-second foreground
+  timeout and reported incomplete enumeration. The cohort stopped there and
+  is not credited as passing. An earlier fixture that supplied a PowerShell
+  script as a native executable was invalid and is not acceptance evidence.
+- Read-only profiling still attributes 3.891 seconds of the provider core to
+  its nested state-root command. The candidate Worktrees core takes 3.187
+  seconds wall time in that diagnostic sample, including roughly 1.14 seconds
+  of import work and 1.00 second of layered configuration reads. Existing
+  per-load committed-config snapshot reuse is already present; no second
+  cache, skipped committed policy read or native-command shortcut was added.
+- A separate read-only control of the canonical installation-context status
+  script returned identical JSON and exit codes through separate-host and
+  scoped invocation, taking 2.152 and 1.567 seconds respectively. This is only
+  a potential startup-cost observation, not approval to remove a process
+  isolation boundary or a qualified invocation change. All canonical
+  validation, publication and installed code remains untouched.
+- Release remains independently blocked by #8411's active `ticking-forge`
+  source-only repair. The #3336/#6237 control owner retains reviewed helper
+  adoption; #7743's `rusty-kiln` owner retains its explicitly assigned stdio
+  and confirmed-no-launch settlement repair. #6859 and held #7833 retain
+  lifetime ownership. Coordination supplied the real initializer import and
+  exact-byte refusal boundary without opening a competing repair.
+- Complete native discovery, qualified containing release, authorized normal
+  rollout and the parent consumer task remain open. This effort is Active.
+
+### 2026-10-23 - State-root follow-up merged; native consumption still open
+
+- #8414 merged to Dev as
+  `5a2b202b5ae94b9695f04f4a05c4c424731d3ab7` after actual Copilot
+  approval of final head `f36181de7165b2400b5ec87801b05c3da1909390`,
+  empty complete feedback/thread reads and all required green checks.
+  Normal repository-authorized Maintainer handling omitted only the separate
+  CODEOWNER vote; no CI or blocking-feedback gate was bypassed.
+- Publication preserved the concurrent contributor's additional unit:
+  final-head admission has 1,156 nodes, 51 targets and the unchanged
+  300-second bound. Required CI qualified that actual source head.
+- The owned review waiter was stopped after its fresh cursor revealed that
+  the passing review had already arrived. No review or build was cancelled.
+  The merged worktree was pulled forward only after exact-head, clean-tree
+  and merged-ancestor checks, retaining its accepted-head backup.
+- This is source merged, not a containing qualified Main release or actual
+  complete eight-second running discovery. Follow the normal release and
+  authorized consumer path next. Existing control adoption and installer
+  integration scopes, broader #5761 outcomes and the parent guidance task
+  remain open.
+
+### 2026-10-23 - State-root continuation and fresh-container qualification
+
+- Fresh credential-free Linux source-install witnesses at
+  `c66e0bd7570ef4262d1f9c312a3593fbef52fd30` pass all six stages for
+  Containers and CodeSpaces: real source preparation/installation, exact
+  completed generation, operation without the source checkout, and immutable
+  identical reuse. Their containers were removed through the existing rig.
+- The first container attempt exposed a stale caller PATH missing Docker's
+  already installed credential helper. Only the test process's PATH was
+  refreshed from the installer's registered directory. The next fresh run
+  correctly refused the blocked public Python feed. A separate fresh witness
+  passed with the rig's explicit governed-index fixture; the failed receipt
+  remains a failure. No credentials were injected or TLS checks disabled.
+- These are fresh-source installation witnesses, not a full Linux suite,
+  authenticated remote enumeration, or native Windows deadline qualification.
+- The installed container reader still takes 12.406 seconds. Read-only core
+  attribution places 7.474 seconds in its optional knowledge-overlay lookup.
+  The nested Worktrees state-root read spends about 4.0 seconds composing
+  foreign PR overlays, including the enabled-plugin corpus. Docker calls and
+  imports do not account for that dominant delay.
+- The bounded source follow-up reuses the existing
+  `include_control_plane_related_pr=False` option only for the state-root
+  reader. Normal publication policy, binding layers, parser/output contracts,
+  native command ownership and the eight-second bound remain unchanged.
+- The eight new handler cases pass the canonical unit effect observer in
+  2.969 seconds with one coverage collection. All 1,147 original packet nodes
+  and their source hashes remain admitted; the new packet has 1,155 nodes,
+  one additional production coverage target and the same 300-second bound.
+- The existing contained state-root and paired-worktree selection passes all
+  129 cases after updating its coupled config-loader fixture to accept the
+  existing explicit keyword. Its first 128-pass/one-failure result was a real
+  fixture incompatibility and was corrected, not waived.
+- A real native CLI core read from the prepared source-test environment returns
+  the exact installed state-root JSON, with its knowledge binding intact.
+  The observed candidate core process takes 1.818 seconds versus an installed
+  core read of 5.975 seconds. These different-source environment observations
+  are not a controlled speedup or production-shim/aggregate deadline proof.
+  Required review/CI, qualified release and complete native caller acceptance
+  remain open.
+- The exact committed follow-up source
+  `f4cb9e8d4bf9cb4a88c9c06c27893321c804091b` also passes the complete
+  canonical Linux unit packet in a credential-free container: 1,155 nodes,
+  3,465 phase reports, 51 coverage targets, no prohibited effects and 40.006
+  seconds within the unchanged 300-second bound. The container received only
+  a read-only committed-source archive and was removed after its receipts
+  were captured.
+- The complete native Windows packet is not credited: after 873 passes and
+  one skip it reaches the retained #1303 preservation boundary's forbidden
+  `ctypes.dlopen`. No observer exemption or skipped identity was added.
+  The independent Linux packet, focused native units and binding/pair
+  selection remain distinct results.
+
+### 2026-10-23 - Containing releases and retained installed acceptance
+
+- #8115 merged after current-head Copilot approval, resolved findings and
+  required green CI with 911 admitted units. Natural #8287 qualified its
+  containing Dev source `9c2b429b1473b0fda70d2b0a88f0cda31a23f417`;
+  source publication/readback succeeded before the Main PR.
+- Reviewed launcher repair #8297 merged as
+  `85e977e6beb7059f6d29ddb4566ba292a57aae68`. Natural run
+  `40020841398`, attempt one, qualified that exact source and #8302 landed
+  Main `58c60f60b9d5e890f9c3ae6fc5ffdba7c925a098`.
+- Normal authorized local rollout reached Manager `0.6.108-dev1` and
+  Worktrees `1.24.229-dev1` activation, but the remaining suite handoff
+  failed without its child diagnostic. Existing #7743 owners retain both
+  reached no-window stdio hops and native settlement/lifetime integration;
+  #6859 and held #7833 retain their distinct lifetime repair.
+- The operator-authorized Docker prerequisite is now installed with its
+  WSL 2 Linux engine running. Container enumeration succeeds, but native
+  execution still exceeds the foreground budget and strict streaming reports
+  HTTP 503. No shared restart, deadline increase or provider disablement was
+  used. This is not completed rollout or complete-roster acceptance.
+- The existing Main-control owner was asked to coordinate helper adoption.
+  An unanswered comment is not a transfer. Current control, complete native
+  consumption, broader #5761 outcomes and the parent guidance objective stay
+  open; this effort is Active.
+
+### 2026-10-22 - Retained postmerge journal
+
+- #7998 merged as `958d3e2046bb395d54c7fe8d63280a5bd68e848b` after
+  current-head review and required source CI. Its first natural promotion
+  `39884763835` rejected candidate
+  `79c140926bd984de53a667e315c2a0999f3fbbc2` with
+  `manifest source closure differs from candidate`; candidate merge and
+  landing recording were skipped. The earlier `39883715115` failed at the
+  same boundary and its watchdog created #8033.
+- That historical controller was Main
+  `9489a0fe8e4284538c3e00d5aaad2ac0cf474f75` with helper
+  `ce77da58017442f83bf3d82a5f80b111b63b9737`. No failed-source retry,
+  closure waiver, control edit or installed rollout was performed then.
+- The original postmerge journal is retained by its local backup. Its
+  publication/source facts are reconciled above rather than replaying an
+  obsolete checklist over current Dev. The historical partial Linux
+  portfolio and all seven failing families remain with #1303; they are not a
+  complete-suite passing claim.
 
 ### 2026-10-23 - Single verified source-set readback
 

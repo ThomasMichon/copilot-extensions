@@ -52,9 +52,13 @@ class _RecoveryDormancyMixin:
     def _set_background_recovery_enabled(
         self, session: "Session", enabled: bool
     ) -> None:
-        session.background_recovery_enabled = enabled
-        self._db.update_session_background_recovery(session.session_id, enabled)
-        if not enabled:
+        from .cold_outages import manual_recovery_stop_token
+
+        session.background_recovery_enabled = self._db.update_session_background_recovery(
+            session.session_id, enabled,
+            expected_stop_token=manual_recovery_stop_token(self, session.session_id),
+        )
+        if not session.background_recovery_enabled:
             self._clear_disconnected_reattach_retry_state(session.session_id)
 
     def _can_background_dormant_after_failure(

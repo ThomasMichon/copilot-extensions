@@ -2,12 +2,11 @@
 
 import json
 import os
-import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from test_update_engine_repair import repair_case as shared_repair_case
+from test_update_engine_repair import _copy_fixture_tree, repair_case as shared_repair_case
 
 repair_case = shared_repair_case
 pytestmark = pytest.mark.skipif(
@@ -18,7 +17,7 @@ pytestmark = pytest.mark.skipif(
 
 def _historical_snapshot(case: SimpleNamespace) -> Path:
     snapshot = case.runtime / "snapshots/1.0.0"
-    shutil.copytree(case.incumbent, snapshot)
+    _copy_fixture_tree(case.incumbent, snapshot)
     resolution = case.primitive.resolve_context(
         payload_root=case.incumbent, plugin_id="agent-worktrees",
         durable_home=case.home / ".copilot-extensions",

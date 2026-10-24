@@ -28,7 +28,7 @@ def archive(directory, extra=None):
 
 
 @pytest.fixture
-def case(packet_case):
+def case(packet_case):  # noqa: F811 -- pytest fixture re-export
     directory, manifest, _, _, root = packet_case
     environment = {
         "GITHUB_EVENT_NAME": "pull_request",
@@ -445,6 +445,8 @@ def test_installed_dependency_byte_change_changes_binding_without_a_version_chan
     )
     monkeypatch.setattr(reuse.sys, "prefix", str(tmp_path))
     monkeypatch.setattr(reuse.sys, "executable", str(executable))
+    monkeypatch.setattr(reuse.platform, "machine", lambda: "fixture-machine")
+    monkeypatch.setattr(reuse.platform, "release", lambda: "fixture-kernel")
     monkeypatch.setattr(
         reuse.importlib.metadata, "distributions", lambda: [distribution]
     )

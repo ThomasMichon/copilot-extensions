@@ -3111,9 +3111,18 @@ configuration over token flags where process arguments may be observable.
   `AGENT_DISPATCH_NO_AUTOSTART` is set, a remote `--url`/`--shared` is used, or
   the caller is in WSL (the Windows host owns the coordinator).
 - `scripts/install.{sh,ps1} status` reports the deployed version/manifest, the
-  coordinator service, and every supervisor profile. Runtime logs live under
-  `~/.agent-dispatch/` (`serve-service.log`, `reconcile.err.log`,
-  `running-version.json`, `current-version`). The stdio of detached launches
+  coordinator service, and every supervisor profile. `agent-dispatch logs`
+  discovers the **local** installation's active, archived and known native/
+  fallback diagnostic locations as JSON without starting a service. Paths
+  come from the existing installation resolver, including installation-cell
+  overrides, not an assumed machine-global root. Application diagnostics are
+  UTC JSONL under `logs/diagnostics/{coordinator,supervisor}.jsonl`, with
+  record-age retention of 30 elapsed days. See
+  [Diagnostic logs](docs/diagnostic-logs.md) for attribution, maintenance,
+  compatibility and explicitly uncovered writers.
+  Native runtime logs include `serve-service.log` and `reconcile.err.log`.
+  `running-version.json` and `current-version` are **state, not logs**.
+  The stdio of detached launches
   is appended under `logs/`: `coordinator-generation.log` (a cutover's
   replacement coordinator), `supervisor-daemon.log`,
   `supervisor-successor.log` (a self-update respawn) and `self-deploy.log`.

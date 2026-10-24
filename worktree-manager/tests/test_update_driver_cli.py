@@ -45,6 +45,38 @@ def test_detach_json_is_an_observer_option_not_an_installer_argument():
 
 
 @pytest.mark.parametrize("flags", [
+    ["--recover-for-repair", "--force"],
+    ["--recover-for-repair", "--auth-report"],
+    ["--recover-for-repair", "--detach"],
+])
+def test_operator_recovery_rejects_unrelated_modes(flags):
+    with pytest.raises(SystemExit):
+        driver.parse_options(flags)
+
+
+def test_explicit_operator_recovery_reports_authority_not_native_proof(queued, monkeypatch, capsys):
+    import json
+    import update_driver
+
+    seen, request = queued
+    request.state = "interrupted"
+    request.recovery_authority, request.released_at = "operator_repair", 2.0
+    request.settled_at = request.settlement_kind = None
+
+    def recover(*, authorized):
+        assert authorized is True
+        return (request,)
+
+    monkeypatch.setattr(update_driver, "recover_for_repair", recover)
+    assert driver.cmd_update_request(["--recover-for-repair", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["replayed"] is False
+    assert result["released"][0]["recovery_authority"] == "operator_repair"
+    assert result["released"][0]["settlement_kind"] is None
+    assert seen == {}
+
+
+@pytest.mark.parametrize("flags", [
     ["--detach", "--wait"],
     ["--detach", "--supervised-debug"],
     ["--request-status", "one", "--force"],

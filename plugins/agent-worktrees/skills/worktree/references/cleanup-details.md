@@ -39,6 +39,30 @@ outbound resource obligations. It deliberately bypasses dirty/WIP,
 inbound-claimant, follow-up and branch-merge checks, not responsibility for
 unfinished PRs or owned children.
 
+Before physical removal, cleanup also checks for live processes whose current
+directory is inside the checkout. Any observed holder defers removal, including
+with `--force`: the checkout, branch, trust and tracking record stay intact.
+Finalize can mark landed work finalized while retaining its checkout and branch
+for the same reason. Neither path kills mux sessions or cwd-matched processes.
+A matching cwd shows use, not teardown ownership; let the process owner stop it,
+then retry ordinary cleanup.
+Unavailable inspection also defers removal; the current cwd reader supports
+Windows and Linux, not macOS. A deferred single-item cleanup reports
+`removed: false`, `skipped: true` and its reason in JSON and text, rather than
+claiming the checkout was removed.
+If the checkout was removed but later branch cleanup fails, the result instead
+reports `removed: true`, `skipped: false`, `ok: false` and retains the warning;
+text output shows the removal and warning rather than claiming a deferral.
+Strict retirement inspection resolves the checkout root and observed cwd paths
+before matching, so symlinked ancestors do not hide a live holder.
+The retirement guard also includes the inspecting process itself, even though
+the legacy general-purpose process enumerator excludes its caller.
+Strict enumeration must contain the inspecting PID; an empty/unmounted `/proc`
+or an empty Windows census is unavailable evidence, not an empty holder set.
+Retaining a checkout does not waive finality checks: PR finalization rechecks
+landed content after holder inspection before marking either a retained or a
+removed checkout finalized.
+
 Open PRs override `finalized` tracking and Git-completed content. The same
 obligation check runs before retiring a missing checkout and before archiving
 its tracking record. A stale open PR remains a hold until `--reconcile-prs`
@@ -118,3 +142,27 @@ mode-only bit or a stale generated file), that is itself a defect worth
 tracking or fixing at the source — reaping the symptom once, by hand, after
 verifying it's genuinely inert, is reasonable; silently normalizing
 `--force` as the standing remedy for that pattern is not.
+
+### Reconcile repeated noise without discarding real work
+
+For suspected CRLF-only changes, prove byte equality after **only** the intended
+line-ending normalization, separately for the index and working tree against
+their Git blobs. A whitespace-ignoring diff, file count, or one representative
+checkout is not that proof. Review untracked files separately. With the
+required discard authorization, restore only the proven noise paths, then
+recheck staged and unstaged state; preserve any other difference.
+
+For committed or locally modified work that appears superseded, fetch the
+current default/PR bases and inspect the actual code hunks and provider state.
+Squash merges can preserve the change without preserving commit ancestry.
+Likewise, an old patch export whose only differences are path headers is not
+automatically a distinct fix. Record which current content or merged PR covers
+the intent; an open PR from another author is not permission to replace it.
+Do not blindly reapply an old implementation merely because its commit is not
+an ancestor of the default branch.
+
+Give each unique remaining change a disposition: already landed/superseded,
+still needed with an accountable driver, or an explicit rejection/retention
+decision. A backup branch or archive is recovery storage, not reconciliation.
+Unsupported causal claims in old documentation or session conclusions need
+fresh evidence or an owner decision, not publication to make cleanup pass.
