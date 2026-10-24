@@ -219,7 +219,7 @@ def test_http47_capture_reproducible_real_commit_preserves_history(repository, m
     calls = stub_transport(monkeypatch)
     outputs = capture.capture(root, commit, write=True)
     registry = json.loads(outputs[evidence.REGISTRY])
-    assert outputs[evidence.REGISTRY] == evidence.encode(registry, indent=1)
+    assert outputs[evidence.REGISTRY] == evidence.encode(registry, indent=None)
     after = public_hashes(root)
     for path, sha in before.items():
         if path not in outputs:
