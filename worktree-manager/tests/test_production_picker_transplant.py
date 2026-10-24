@@ -460,6 +460,40 @@ def test_production_runner_mock_skips_mutating_startup(monkeypatch):
         runner.context.reset()
 
 
+def test_capture_binds_complete_bootstrap_without_scalar_fallbacks(monkeypatch, tmp_path):
+    from worktree_manager.production_picker import project_config
+    from worktree_manager.production_picker.picker_tui import capture as picker_capture
+
+    fields = {
+        "config_dir": str(tmp_path / "config"),
+        "repo_dir": str(tmp_path / "configured-repo"),
+        "machine": "host",
+    }
+    monkeypatch.setattr(runner.engine_group_b, "picker_bootstrap", lambda project: {
+        "project": "resolved", "default_live": True, "project_config": fields,
+    })
+
+    def unexpected(*args, **kwargs):
+        pytest.fail(f"capture must use the complete bootstrap: {args}")
+
+    monkeypatch.setattr(project_config.engine_client, "get_value", unexpected)
+    monkeypatch.setattr(runner, "_start_anchor_heal_check", unexpected)
+
+    def capture(*args, **kwargs):
+        assert runner.context.project() == "resolved"
+        assert project_config._project_dir("resolved") == tmp_path / "config"
+        assert project_config._repo_dir("resolved") == fields["repo_dir"]
+        assert project_config._machine_name("resolved") == "host"
+        return {"text": "current"}
+
+    monkeypatch.setattr(picker_capture, "capture", capture)
+    try:
+        assert runner.capture("requested", live=True) == {"text": "current"}
+    finally:
+        project_config.clear_caches(reset_binding=True)
+        runner.context.reset()
+
+
 def test_production_capture_uses_read_only_prepare(monkeypatch):
     from worktree_manager.production_picker.picker_tui import capture as picker_capture
 

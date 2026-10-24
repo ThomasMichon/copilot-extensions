@@ -345,6 +345,14 @@ and installation-control state, and converges on its explicitly selected code.
 An old installer cannot veto its replacement. Competing repair callers still
 converge on one active writer rather than repeatedly killing one another.
 
+An explicit operator order to repair, clean-install or force-reinstall is
+sufficient authorization for that recovery mode. Historical cleanup proof,
+an audited pre-launch failure or cooperation from the broken installer is not
+an additional prerequisite. Audited pre-launch recovery remains available as
+a separate path, not a mandatory ceremony before repair. Status distinguishes
+operator-authorized recovery from native-confirmed settlement and preserves
+the prior failure without turning it back into installation authority.
+
 A successful repair leaves old generations inert: no older managed installer
 or daemon remains serving or able to reactivate itself through stale launch,
 routing or maintenance state. Inert rollback artifacts need not be physically

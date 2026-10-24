@@ -308,6 +308,8 @@ class PreparedCutover:
             type(response.get(key)) is not bool for key in ("drained", "clean", "forced")
         ):
             raise CutoverError("conditional drain response has invalid boolean evidence")
+        if response.get("mode") == "incompatible-contract-cold":
+            raise CutoverError("conditional drain selected cold mode; retirement refused")
         if response["forced"]:
             raise CutoverError("conditional drain was forced; retirement refused")
         if response["drained"] and not response["clean"]:

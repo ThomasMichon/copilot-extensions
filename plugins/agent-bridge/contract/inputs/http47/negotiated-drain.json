@@ -1,0 +1,28 @@
+{
+  "description": "Independent expected control vectors, not a captured deployment or native recovery receipt.",
+  "advertised": {
+    "protocol_version": 47,
+    "min_protocol_version": 1,
+    "drain_contract": {"minimum": 1, "maximum": 1}
+  },
+  "cold_request": {
+    "timeout": 0,
+    "drain_contract": {"minimum": 2, "maximum": 2}
+  },
+  "empty_cold_response": {
+    "mode": "incompatible-contract-cold",
+    "drained": true,
+    "clean": false,
+    "forced": true,
+    "interrupted": [],
+    "nonresumable": [],
+    "preserved": [],
+    "failures": [],
+    "busy_sessions": [],
+    "live_host_count": 0,
+    "timeout": 0.0,
+    "contract_status": "incompatible",
+    "drain_contract": 1
+  },
+  "reconnect_prompt": "Resume. Host agent-bridge updated."
+}

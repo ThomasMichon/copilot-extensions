@@ -25,7 +25,7 @@ from .boot import kernel_boot_identity
 from .foundation_state import FoundationOperation
 from .recovery import (
     RecoveryError, RecoveryRefusal, RecoveryStatus, recover_after_restart,
-    recover_foundation_after_restart, recovery_status,
+    recover_for_repair, recover_foundation_after_restart, recovery_status,
 )
 
 __all__ = [
@@ -37,5 +37,5 @@ __all__ = [
     "borrowed_custody", "participant",
     "participant_environment",
     "kernel_boot_identity", "RecoveryError", "RecoveryRefusal", "RecoveryStatus",
-    "recover_after_restart", "recovery_status",
+    "recover_after_restart", "recover_for_repair", "recovery_status",
 ]

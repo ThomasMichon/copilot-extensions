@@ -20,6 +20,7 @@ require a second topology registration, duplicate agent roster, or blind repair.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Plan owner | Proposal, integration and subsequent serial PR stewardship | Managed upstream worktree and #7206 |
+| Session guidance implementer | Read-only source/profile snapshot and exact-session delivery under #7527 | Separate managed upstream worktree and #7527 |
 | Operator | Plan review and explicit actuation/rollout authorization | Proposal PR |
 
 ## Coordination
@@ -29,6 +30,10 @@ require a second topology registration, duplicate agent roster, or blind repair.
 - **Host (owns PRs):** Plan owner; implementation slice ownership is assigned
   through #7206 before edits, not inferred from this proposal.
 - **Delegates:** None assigned. This proposal does not reserve peer-owned code.
+- **Session guidance slice:** #7527 owns the read-only snapshot and writer in a
+  separate worktree. It may consume the existing source contract but does not
+  take profile refresh, provider mapping, Bridge discovery or identity-migration
+  ownership. Review this additive slice before implementation.
 - **Handoff:** Resume this canonical README and the issue, then claim one slice.
 - **Confirmed boundary:** The configuration-consolidation owner retains
   canonical source/configuration consolidation and per-environment bindings;
@@ -122,6 +127,35 @@ context redacted; no private transcript is published or linked:
   already-authorized maintenance action. Retain report-first diagnostics, durable
   source provenance and atomic fragment publication on validation failure.
 
+### Session snapshot - Declared topology and this client's profiles
+
+Additional operator direction, captured without downstream-specific identifiers:
+
+> We would expect SSH guidance to be dyanmically computed as session-guidance by
+> the agent-ssh addon, given the machines config and the generated ssh profiles on
+> the current machine.
+
+Execution structure below is agent-recommended:
+
+- [ ] Review and merge this additive plan before implementing #7527.
+- [ ] Add a read-only snapshot using the existing topology parser and managed
+  fragment classifier. Resolve the caller's conventional source and, when the
+  authoritative optional Worktrees peer declares an external state root, compose
+  its topology without guessing private binding paths or redefining source
+  priority. Preserve selected-source errors and same-installation peer refusal.
+- [ ] Distinguish declared aliases/readiness, generated fragment coverage and
+  provenance, and unknown connectivity. Missing generated coverage must not mean
+  a host is down; a file on disk must not imply an active effective route.
+- [ ] Deliver a bounded, fresh exact-session snapshot through the existing
+  writer, preserving the command catalog and atomic replacement. Reuse the
+  payload's no-self-provision boundary: absent runtimes or optional peers remain
+  explicit unavailable evidence, not implicit setup or another installation.
+- [ ] Prove no network probes, OpenSSH `Match exec`, profile generation, service
+  startup or configuration writes occur during snapshot production. Use
+  non-executing fragment validation; retain stale and indeterminate evidence.
+- [ ] Update SSH operating guidance and record source merge, release and any
+  separately authorized rollout without claiming the wider campaign complete.
+
 ### Phase 3 - Derive Bridge discovery without a second roster
 - [ ] Discover conventional repository topology on cold start when no explicit
   profile controls the scope, deriving configured targets without writing user
@@ -144,6 +178,12 @@ context redacted; no private transcript is published or linked:
 
 ## Validation Plan
 
+- [ ] Session snapshot fixtures cover caller and external-state topology,
+  absent/refused optional peers, local managed-profile coverage, stale and
+  indeterminate sources, hostile configuration strings, output budgets and
+  resume replacement. Exercise the actual writer/CLI boundary in isolated homes
+  and assert it neither probes nor self-provisions; report unsupported runtime
+  availability explicitly.
 - [ ] Native isolated source-to-profile proof on Linux and Windows, with WSL
   environment coverage: use synthetic topology, redirected home/config/install
   roots, actual emitter and `ssh -G`; prove alias/user/port/key-path/proxy choices
@@ -196,3 +236,11 @@ execution structure for the requested outcome, not authorization to implement.
   state-root composition, Bridge cold-start discovery and rollout gates remain
   open. No schema, provider inventory or configuration authority is introduced
   by this slice.
+
+### 2026-10-21 - Proposed exact-session snapshot slice
+
+- Claimed #7527 after checking existing SSH work. The requested snapshot is
+  complementary to #5973's identity migration and #4224's live-probe repair.
+- Proposed consuming the reviewed conventional-source contract and this
+  client's generated fragments without activating transports or changing
+  profiles. This amendment does not claim runtime implementation or rollout.

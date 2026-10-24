@@ -11,7 +11,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Protocol
+from typing import Callable, Protocol
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
@@ -388,6 +388,7 @@ def _run_owned(
     capture: bool = True, inherit_process_group: bool = False,
     capture_limits: tuple[int, int] | None = None, pass_fds: tuple[int, ...] = (),
     confirm_posix_group: bool = False,
+    on_settled: Callable[[], None] | None = None,
 ) -> subprocess.CompletedProcess:
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("native child timeout must be finite and positive")
@@ -400,6 +401,8 @@ def _run_owned(
         _require_posix_execution_support()
     deadline = time.monotonic() + timeout
     bounded_windows = windows and capture_limits is not None
+    if on_settled is not None and not (bounded_windows or confirm_posix_group):
+        raise ValueError("settlement notification requires whole-scope native confirmation")
     spawn = spawn_sync_in_kill_on_close_job
     if bounded_windows:
         from agent_procutil._windows_caller_owned import spawn
@@ -465,6 +468,8 @@ def _run_owned(
                         stream.close()
                 if bounded_windows:
                     process.close()
+                if on_settled is not None:
+                    on_settled()
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
@@ -509,6 +514,7 @@ def require_caller_owned_support() -> None:
 def run_caller_owned(
     argv: list[str], *, timeout: float, max_stdout_bytes: int, max_stderr_bytes: int,
     input_text: str | None = None, capture: bool = True,
+    on_settled: Callable[[], None] | None = None,
 ) -> subprocess.CompletedProcess:
     """Execute with caller-lifetime ownership and explicit, separate raw-byte budgets."""
     from agent_procutil._caller_owned import run
@@ -516,4 +522,5 @@ def run_caller_owned(
     return run(
         argv, timeout=timeout, max_stdout_bytes=max_stdout_bytes,
         max_stderr_bytes=max_stderr_bytes, input_text=input_text, capture=capture,
+        on_settled=on_settled,
     )
