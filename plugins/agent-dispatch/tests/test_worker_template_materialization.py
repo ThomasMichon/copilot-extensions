@@ -113,6 +113,39 @@ def test_source_and_recipe_closure_revisions_refuse_stale_save(change):
     assert not instance_dir().exists()
 
 
+@pytest.mark.parametrize("during_save", [False, True])
+@pytest.mark.parametrize("nonregular", ["reported", "directory", "fifo"])
+def test_nonregular_inherited_recipe_refuses_without_opening_it(monkeypatch, during_save, nonregular):
+    path, _ = provider({"extends": "./base.json"}, kind="supervised-lane")
+    base = path.parent / "base.json"
+    base.write_text(json.dumps(pool()), encoding="utf-8")
+    if during_save:
+        row = next(row for row in catalog()["entries"] if row["id"].startswith("template:provider:"))
+    if nonregular != "reported":
+        base.unlink()
+        if nonregular == "directory":
+            base.mkdir()
+        elif hasattr(os, "mkfifo"):
+            os.mkfifo(base)
+        else:
+            pytest.skip("POSIX FIFO fixture")
+    is_file, read_text = Path.is_file, Path.read_text
+    def regular(candidate):
+        return False if nonregular == "reported" and candidate == base else is_file(candidate)
+    def read(candidate, *args, **kwargs):
+        assert candidate != base, "nonregular inherited recipe was opened"
+        return read_text(candidate, *args, **kwargs)
+    monkeypatch.setattr(Path, "is_file", regular)
+    monkeypatch.setattr(Path, "read_text", read)
+    if during_save:
+        with pytest.raises(RegistrarError, match="absent or changed|regular file"):
+            save(row)
+        assert not instance_dir().exists()
+    else:
+        row = next(row for row in catalog()["entries"] if row["id"].startswith("template:provider:"))
+        assert row["instantiable"] == "false" and "regular file" in row["unsupported_reason"]
+
+
 def test_source_change_during_validation_refuses_before_record_write(monkeypatch):
     import agent_dispatch.worker_instances as wi
     path, row = provider(pool())

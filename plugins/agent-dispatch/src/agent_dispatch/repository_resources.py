@@ -208,5 +208,5 @@ def resolve_execution_resources(
     if resolved_argv and resolved_cwd and not Path(resolved_argv[0]).is_absolute() and any(
         separator in resolved_argv[0] for separator in (os.sep, os.altsep) if separator
     ):
-        resolved_argv[0] = os.path.abspath(os.path.join(resolved_cwd, resolved_argv[0]))
+        resolved_argv[0] = str(Path.cwd() / resolved_cwd / resolved_argv[0])
     return resolved_argv, resolved_cwd

@@ -188,6 +188,35 @@ def test_relative_executable_binds_to_the_explicit_directory(tmp_path, monkeypat
     )
 
 
+def test_relative_executable_keeps_parent_components_for_native_resolution(tmp_path):
+    argv, cwd = resources.resolve_execution_resources(
+        [os.path.join("nested", "..", "worker")], str(tmp_path),
+    )
+    assert argv == [str(tmp_path / "nested" / ".." / "worker")] and cwd == str(tmp_path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink/parent traversal semantics")
+def test_relative_executable_preserves_symlink_parent_traversal(tmp_path):
+    directory = tmp_path / "policy"
+    other = tmp_path / "other"
+    directory.mkdir()
+    (other / "nested").mkdir(parents=True)
+    expected = other / "worker"
+    expected.write_text("#!/bin/sh\nprintf intended", encoding="utf-8")
+    (directory / "worker").write_text("#!/bin/sh\nprintf wrong", encoding="utf-8")
+    try:
+        (directory / "link").symlink_to(other / "nested", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+    argv, cwd = resources.resolve_execution_resources(
+        [os.path.join("link", "..", "worker")], str(directory),
+    )
+    assert os.path.samefile(argv[0], expected)
+    if os.name != "nt":
+        expected.chmod(0o700)
+        assert subprocess.check_output(argv, cwd=cwd, text=True) == "intended"
+
+
 def test_relative_executable_keeps_named_cwd_admission(tmp_path, monkeypatch):
     calls = _registry(monkeypatch, tmp_path)
     argv, cwd = resources.resolve_execution_resources([f".{os.sep}worker"], "repo:tools:.")

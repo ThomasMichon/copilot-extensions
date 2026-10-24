@@ -185,6 +185,8 @@ The ID is stable while that context is stable; relocating a provider root
 produces a distinct variant. Revisions fingerprint the index entry, raw
 declaration object, resolved inherited recipe documents and resolution context.
 Equal bytes at different relative dependency roots are distinct contributions.
+Inherited recipe files must be regular files; discovery and Save refuse
+nonregular sources without opening them.
 Details retain all provider-reported applicability scopes, root kind, index,
 declaration path, requirements and revision. Raw commands/specs/environment
 values are not returned by this discovery projection.
@@ -239,7 +241,9 @@ Script policies, including file-backed ones, require an explicit absolute or
 named working directory; the CLI's current directory is not evidence of the
 future evaluator process's context.
 Path-containing evaluator executables are checked and invoked relative to
-that admitted policy directory on both platforms. Selected inline policies
+that admitted policy directory on both platforms, preserving parent traversal
+for native filesystem resolution rather than collapsing symlink-sensitive paths.
+Selected inline policies
 retain precedence over ignored file-policy fields, as in the evaluator owner.
 Policy files must be regular files before the owner loader is called.
 Effort-loop identity relocation also refuses until its

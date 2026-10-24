@@ -402,6 +402,8 @@ def _read_recipe_document(path: Path, *, ref: str) -> Mapping[str, Any]:
             f"suffix {path.suffix!r}; expected one of {list(_RECIPE_SUFFIXES)}"
         )
     try:
+        if path.exists() and not path.is_file():
+            raise RegistrarError(f"extends: recipe file {ref!r} must be a regular file")
         text = path.read_text(encoding="utf-8")
     except UnicodeError as exc:
         raise RegistrarError(
