@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -48,6 +48,8 @@ contribution checks, not as a first discovery during release qualification.
   landed commit; operational provenance, not a competing source identity.
 - **Release control:** separately governed execution and recovery authority,
   following the [main-owned control vision](../main-owned-workflow-control/README.md).
+- **Complete source snapshot:** reconstructible final release source, including
+  its admitted Main-owned controls, retained alongside the release artifacts.
 
 ## Features
 
@@ -81,6 +83,26 @@ representation of a source release. Version state, materialization and approved
 control inputs are explicit where they affect the result. Re-reading mutable
 release state at another stage must not make the same admitted artifact appear
 to belong to a different release.
+
+### complete-before-promotion-pr
+
+The final promotion PR is a proposal to land an already constructed, qualified
+and published release view. Its complete source snapshot, declared artifact
+inventory and admission evidence exist and have been read back before the PR
+is opened or updated. They bind known source and composition identities, not
+an unknowable future Main merge commit. Landing does not build missing release
+artifacts or silently replace published bytes.
+
+### late-main-control-reconciliation
+
+Independently governed Main controls may advance while a release is prepared.
+Promotion preserves the latest admitted controls without overwriting newer
+Main payload or silently enlarging the control exception. A control-only
+refresh may reuse artifacts whose complete inputs remain equivalent, but its
+new complete source snapshot and landing admission must describe the actual
+composite being proposed. Changed control policy can invalidate earlier
+admission even when package bytes are unchanged. Stale-base refusal and
+server-enforced freshness protect the final merge.
 
 ### qualified-before-complete
 
