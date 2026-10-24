@@ -51,8 +51,9 @@ At effort start, Manager saved prompt-only history from the confirmation widget.
 Storage #8505 and confirmation #8542 now preserve known-target intent before
 effects. Truthful unresolved-locality refusal recording merged in #8574 and Manager
 boundary observations merged in #8588. Negotiated remote prompted admission and
-target receipt binding merged in #8605. Full local/seedless engine and native
-outcome correlation remains incomplete. Engine activity
+target receipt binding merged in #8605. Local and seedless resolution receipts
+and both-hop attempt propagation merged in #8615. Native process, conversation
+and handoff outcome correlation remains incomplete. Engine activity
 has rolling lifecycle and preparation-phase events, but attempts before
 allocation lack a worktree identity, prompt text is
 deliberately absent there, and phase step IDs are not a whole-attempt ID.
@@ -112,7 +113,7 @@ The following decomposition and detailed evidence rules are agent-recommended.
 
 - [x] Retain the confirmed attempt through Manager resolution, launch, Restore,
   task embodiment and provider handoff, recording only Manager observations.
-- [ ] Carry the attempt ID through local and SSH boundaries, binding the
+- [x] Carry the attempt ID through local and SSH boundaries, binding the
   target receipt and allocated worktree ID before later launch phases.
 - [ ] Record per-owner progress, refusal, error and exit events without putting
   prompt contents in shared logs. Distinguish allocated, launcher started,
@@ -184,6 +185,32 @@ prompt text through general telemetry. Select the concrete schema and latency
 budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
+
+### 2026-10-24 -- Deferred execution observations prepared
+
+- Added bounded prompt-free execution receipts to the existing tracking-write
+  owner. Explicit wrapper arguments bind the confirmed attempt, exact
+  resolution, unique execution operation and parent operation; no ambient
+  current-attempt pointer or new acceptance backend was introduced.
+- Retain requested, seed-claimed, actual OS spawn and observed launch/child
+  return evidence. Missing or unconfirmed receipts remain unknown. A process
+  start is not a Copilot conversation or accepted turn, and post-effect audit
+  uncertainty never repeats the command or skips seed settlement.
+- Standard PowerShell/Bash setup propagates the additive attempt boundary;
+  legacy seed-only setup must opt in rather than receive unsupported flags.
+  Source checks include real daemon/backend processes, loss after seed claim,
+  native PowerShell/Bash argument forwarding and two consoleless Windows
+  cycles. The latter exposed Windows NUL reporting a TTY without a console;
+  launch now also checks actual console attachment.
+- [Native receipt measurements](execution-receipts-windows.json) retain all
+  102 successful metadata-write samples across 51 operations against an
+  already-running resident. No per-write child was allowed. These synthetic
+  Windows results do not qualify composed launch/UI latency, native POSIX
+  engine behavior, a live installed Copilot conversation or tail performance.
+- This is a source candidate, not yet a merged or deployed completion.
+  Native conversation/acceptance, joined readers, retention/legacy cleanup,
+  sweeps and the original installed local/SSH same-conversation gates remain
+  open; no Plan checkbox was closed by this partial outcome slice.
 
 ### 2026-10-23 -- Confirmed operator intent and current gap
 
@@ -539,3 +566,23 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 - This is source preparation, not a merged or installed repair. Native process,
   source-aware conversation, handoff/acceptance, retention/migration,
   inspection/sweeps and same-conversation local/SSH acceptance remain open.
+
+### 2026-10-24 -- Local and seedless resolution slice merged
+
+- #8615 merged as `4a2aca5ee437d1c4e004c58c0bcaa6bf65fb133c` after
+  current-head approval with no findings, green required CI and empty closing
+  references. Both parent issues remain open. The final source packet passes
+  400 engine cases with two platform skips and 240 Manager cases with twelve
+  skips; native process/IPC tests are explicitly selected, not default unit CI.
+- Re-read both canonical plans. Only the bounded local/SSH resolution identity
+  item is newly complete. Resolution, forwarding and target admission remain
+  distinct from native process start, conversation identity and prompt uptake.
+  No installed prompt-loss or same-conversation repair is asserted.
+- All 27 authored path blobs matched the provider-confirmed merge exactly.
+  Retained a recovery backup and advanced the clean source without replay.
+  The next slice connects the saved attempt to the existing deferred/backend
+  execution owner, preserving source-aware native ownership and treating process
+  spawn or argv handoff as weaker evidence than accepted prompt delivery.
+- Retention/legacy migration, readers/sweeps, containing release, authorized
+  rollout and complete installed local/SSH acceptance remain active. Keep this
+  worktree and both efforts open rather than finalizing a completed phase.

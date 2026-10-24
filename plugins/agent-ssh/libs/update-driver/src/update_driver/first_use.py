@@ -22,6 +22,7 @@ RECIPES = {
     "agent-vault": "AGENT_VAULT",
     "agent-pull-requests": "AGENT_PULL_REQUESTS",
     "agent-ssh": "AGENT_SSH",
+    "agent-codespaces": "AGENT_CODESPACES",
 }
 PROTOCOL = 1
 INSTALLER_ACTIONS = ("provision", "stamp", "stamp-provision")
@@ -40,6 +41,11 @@ SSH_CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "AGENT_SSH_HOME", "AGENT_SSH_INSTALLATION_ID",
     "AGENT_SSH_NO_SELFPROVISION", "AGENT_SSH_PINNED_CONTEXT",
+)
+CODESPACES_CONTEXT_KEYS = (
+    "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "AGENT_CODESPACES_HOME", "AGENT_CODESPACES_INSTALLATION_ID",
+    "AGENT_CODESPACES_NO_SELFPROVISION", "AGENT_CODESPACES_PINNED_CONTEXT",
 )
 
 
@@ -68,6 +74,8 @@ def _environment(payload: Path) -> dict[str, str]:
         "AGENT_PULL_REQUESTS_INSTALL_DIR",
         "AGENT_SSH_VALIDATED_CONTEXT", "AGENT_SSH_PAYLOAD_ROOT",
         "AGENT_SSH_ACTION", "AGENT_SSH_DRY_RUN",
+        "AGENT_CODESPACES_VALIDATED_CONTEXT", "AGENT_CODESPACES_PAYLOAD_ROOT",
+        "AGENT_CODESPACES_ACTION", "AGENT_CODESPACES_FORCE", "AGENT_CODESPACES_DRY_RUN",
     ):
         result.pop(key, None)
     return result
@@ -101,7 +109,7 @@ def _inspect(
         or manifest.get("command") != plugin
         or manifest.get("installationContext") != "required"
         or manifest.get("provisionMode", "snapshot") != (
-            "snapshot" if plugin == "agent-ssh" else "direct"
+            "snapshot" if plugin in ("agent-ssh", "agent-codespaces") else "direct"
         )
         or manifest.get("installer", "install") != "install"
         or manifest.get("noSelfProvisionEnv") != no_self
@@ -111,16 +119,24 @@ def _inspect(
         raise ProvisionError("owning plugin self-provisioning is disabled")
     if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
-    if plugin == "agent-ssh":
+    if plugin in ("agent-ssh", "agent-codespaces"):
+        label = "SSH" if plugin == "agent-ssh" else "CodeSpaces"
         if (
-            manifest.get("module") != "agent_ssh"
-            or manifest.get("legacyRuntimeRoot") != ".agent-ssh"
-            or manifest.get("payloadRootEnv") != "AGENT_SSH_PAYLOAD_ROOT"
+            manifest.get("module") != plugin.replace("-", "_")
+            or manifest.get("legacyRuntimeRoot") != "." + plugin
+            or manifest.get("payloadRootEnv") != prefix + "_PAYLOAD_ROOT"
             or manifest.get("payloadDispatcher") != {
                 "posix": "scripts/runtime-gate.sh", "windows": "scripts/runtime-gate.ps1",
             }
         ):
-            raise ProvisionError("SSH first use requires its declared native runtime gate")
+            raise ProvisionError(f"{label} first use requires its declared native runtime gate")
+    if plugin == "agent-codespaces" and (
+        "AGENT_CODESPACES_INSTALLATION_ID" in os.environ
+        or runtime_root != Path.home() / ".agent-codespaces"
+        or payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
+        or payload.name != plugin
+    ):
+        raise ProvisionError("CodeSpaces first use requires its canonical installed payload and default legacy root")
     if plugin in ("agent-pull-requests", "agent-ssh"):
         label = "SSH" if plugin == "agent-ssh" else "Pull Requests"
         installed = (
@@ -246,6 +262,7 @@ def enqueue(
         "agent-vault": CONTEXT_KEYS,
         "agent-pull-requests": PULL_REQUESTS_CONTEXT_KEYS,
         "agent-ssh": SSH_CONTEXT_KEYS,
+        "agent-codespaces": CODESPACES_CONTEXT_KEYS,
     }[admission["plugin"]]
     context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
@@ -288,7 +305,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
 
         # Reuse the canonical complete-input copier under this request's custody.
         # Keep these files: native publication may retain a source path into them.
-        legacy_stage = admission["plugin"] in {"agent-pull-requests", "agent-ssh"}
+        legacy_stage = admission["plugin"] in {"agent-pull-requests", "agent-ssh", "agent-codespaces"}
         inputs = _path(
             runtime_root / ".install-stage" if legacy_stage
             else root / "provision-inputs"

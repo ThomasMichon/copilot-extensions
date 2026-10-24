@@ -2,6 +2,7 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+- [2026-10-24 - CodeSpaces bootstrap adoption](<journal/2026/10.24 codespaces-bootstrap.md>)
 - [2026-10-24 - CodeSpaces fixed-recipe prerequisite](<journal/2026/10.24 codespaces-first-use.md>)
 - [2026-10-24 - SSH command adoption](<journal/2026/10.24 ssh-commands.md>)
 - [2026-10-24 - Direct all-service backlog intake](<journal/2026/10.24 backlog-intake.md>)

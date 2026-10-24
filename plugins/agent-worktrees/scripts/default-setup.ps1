@@ -1,4 +1,5 @@
 # agent-worktrees:launch-seed-boundary-v1
+# agent-worktrees:launch-attempt-boundary-v1
 <#
 .SYNOPSIS
     Default / normalized session setup script for repos.
@@ -61,6 +62,9 @@ param(
     [string]$LaunchSeedRecord,
     [string]$LaunchSeedId,
     [string]$LaunchSeedRuntimePython,
+    [string]$LaunchAttemptId,
+    [string]$LaunchResolutionId,
+    [string]$LaunchParentId,
     [string]$NativeArgumentsJson,
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$CopilotArgs
@@ -310,8 +314,16 @@ function Invoke-CopilotBackend {
         $LeadingArgs = @('-NoProfile', '-NoLogo', '-File', $Executable) + $LeadingArgs
         $Executable = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     }
+    $attemptArgs = @()
+    if ($LaunchAttemptId -or $LaunchResolutionId -or $LaunchParentId) {
+        if (-not $LaunchAttemptId -or -not $LaunchResolutionId) {
+            throw 'Launch-attempt correlation is incomplete; no backend started.'
+        }
+        $attemptArgs = @('--launch-attempt-id', $LaunchAttemptId, '--launch-resolution-id', $LaunchResolutionId)
+        if ($LaunchParentId) { $attemptArgs += @('--launch-parent-id', $LaunchParentId) }
+    }
     & $LaunchSeedRuntimePython -I -m agent_worktrees.launch_seed_exec `
-        --invoke --record $LaunchSeedRecord --seed-id $LaunchSeedId -- $Executable @LeadingArgs @CopilotArgs
+        --invoke --record $LaunchSeedRecord --seed-id $LaunchSeedId @attemptArgs -- $Executable @LeadingArgs @CopilotArgs
 }
 
 $copilotCmd = Resolve-CopilotApplication

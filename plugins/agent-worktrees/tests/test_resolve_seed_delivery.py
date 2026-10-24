@@ -31,6 +31,7 @@ from agent_worktrees.sessions import LiveVerdict
 
 
 def _stub_launch_plumbing(monkeypatch, config: cfg.Config) -> None:
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", config.repo_name)
     for record in tracking.list_records(cfg.tracking_dir()):
         Path(record.worktree_path).mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)

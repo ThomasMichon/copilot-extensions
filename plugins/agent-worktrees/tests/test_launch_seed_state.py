@@ -25,6 +25,7 @@ def _cold_probe_boundary(monkeypatch):
 
 
 def _record(tmp_path):
+    (tmp_path / "checkout").mkdir(exist_ok=True)
     project_dir = cfg.project_dir("demo")
     project_dir.mkdir(parents=True, exist_ok=True)
     (project_dir / "config.yaml").write_text(json.dumps({
@@ -33,7 +34,7 @@ def _record(tmp_path):
     }), encoding="utf-8")
     return tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "checkout"), "demo", "test",
-        "windows", tmp_path,
+        "windows", project_dir / "worktrees",
     ).yaml_path
 
 
@@ -41,7 +42,7 @@ def _settled_pair_receipt(path):
     from agent_worktrees import terminal_pair_progress
 
     sibling = tracking.load_record(path)
-    sibling.kind, sibling.status = "bridge", "complete"
+    sibling.kind, sibling.status = "bridge", "finalized"
     sibling.origin, sibling.owner = "delegate", "dispatcher"
     sibling.worktree_path = str(path.parent / sibling.worktree_id)
     sibling.pair_id, sibling.pair_role, sibling.pair_kind = "fixture-pair", "knowledge", "worktree"
@@ -49,13 +50,14 @@ def _settled_pair_receipt(path):
     primary = dataclasses.replace(
         sibling, worktree_id="wt-primary", branch="worktree/wt-primary",
         worktree_path=str(path.parent / "wt-primary"), pair_role="harness",
+        status="complete",
         pair_ref=tracking.format_claim_ref("test", "demo", sibling.worktree_id),
     )
     primary_path = path.parent / "wt-primary.yaml"
     tracking.save_record(primary, primary_path)
     tracking.save_record(sibling, path)
     terminal_pair_progress.publish(primary, sibling, path, primary_path=primary_path)
-    for record, record_path in ((primary, primary_path), (sibling, path)):
+    for record, record_path in ((sibling, path), (primary, primary_path)):
         for name in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
             setattr(record, name, None)
         tracking.save_record(record, record_path)
@@ -272,7 +274,7 @@ def test_real_daemon_retains_failed_attempt_and_finishes_exactly_one_handoff(
     )
     try:
         seed = state.stage(path, kind=kind, text="quotes ' \"\nsecond line")
-        assert state.state_path(path) == tmp_path / "wt-a" / "launch-seed.json"
+        assert state.state_path(path) == path.parent / "wt-a" / "launch-seed.json"
         assert state.peek(path) == seed
         first = state.take(path, seed_id=seed.seed_id)
         assert state.peek(path).text == seed.text
@@ -383,7 +385,8 @@ def test_legacy_new_seed_migrates_without_two_owners(tmp_path):
     assert state.pending(path) == seed
 
 
-def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkeypatch, capsys, interrupted):
     path = _record(tmp_path)
     seed = state.stage(path, kind="resume", text="next turn")
     calls = []
@@ -398,7 +401,9 @@ def test_uncertain_cleanup_retains_handoff_without_resubmission(tmp_path, monkey
     monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", spawn)
     monkeypatch.setattr(
         state, "finish",
-        lambda *a, **k: (_ for _ in ()).throw(tracking_write.AmbiguousWriteOutcome("late ack")),
+        lambda *a, **k: (_ for _ in ()).throw(
+            KeyboardInterrupt() if interrupted else tracking_write.AmbiguousWriteOutcome("late ack"),
+        ),
     )
     assert launch_seed_exec.launch(path, ["copilot"], invoke=True, seed_id=seed.seed_id) == 3
     assert state.peek(path).text == seed.text and state.peek(path).handoff_id
@@ -469,7 +474,7 @@ def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeyp
     monkeypatch.setattr(reap_cli.disposition_history, "remove", lambda *a: None)
     monkeypatch.setattr(reap_cli.handoff_trace, "remove_trace", lambda *a: None)
     removed, warnings = reap_cli._remove_managed_worktree(
-        record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+        record, SimpleNamespace(anchor=str(tmp_path)), path.parent,
     )
     assert removed and not warnings
     assert not path.exists() and not state.state_path(path).exists()
@@ -542,7 +547,7 @@ def test_pair_gc_primary_preserved_during_sibling_record_rollback(tmp_path, monk
             primary = tracking.load_record(primary_path)
             primary.branch = primary.worktree_path = ""
             removed, reasons = reap_cli._remove_managed_worktree(
-                primary, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+                primary, SimpleNamespace(anchor=str(tmp_path)), path.parent,
             )
             assert not removed and any("terminal-pair" in reason for reason in reasons)
             raise OSError("injected sibling YAML rollback")
@@ -656,6 +661,7 @@ def test_terminal_pair_sidecar_removal_crash_keeps_authority_until_last(
         "wt-newer", "worktree/wt-newer", str(tmp_path / "newer-checkout"),
         "demo", "test", "windows", tmp_path,
     ).yaml_path
+    (tmp_path / "newer-checkout").mkdir()
     state.stage(newer, kind="new", text="newer allocation stays owned")
     newer_receipt = newer.with_suffix(".terminal-pair.json")
     newer_receipt.write_text('{"version":1,"owner":"newer"}', encoding="utf-8")
@@ -776,7 +782,7 @@ def test_native_reap_terminal_pair_sidecar_failure_preserves_evidence(tmp_path, 
     if failure == "receipt":
         monkeypatch.setattr(Path, "unlink", fail)
     removed, warnings = reap_cli._remove_managed_worktree(
-        record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+        record, SimpleNamespace(anchor=str(tmp_path)), path.parent,
     )
     assert removed is False
     assert warnings and ("live mux" if failure == "live" else "injected native receipt") in warnings[0]
@@ -784,7 +790,7 @@ def test_native_reap_terminal_pair_sidecar_failure_preserves_evidence(tmp_path, 
     if failure == "receipt":
         monkeypatch.setattr(Path, "unlink", unlink)
         assert reap_cli._remove_managed_worktree(
-            record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+            record, SimpleNamespace(anchor=str(tmp_path)), path.parent,
         ) == (True, [])
         assert not any(file.exists() for file in before)
 

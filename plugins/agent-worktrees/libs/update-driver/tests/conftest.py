@@ -91,11 +91,14 @@ def owning_context(area, monkeypatch):
     for key in (
         *provision.CONTEXT_KEYS, *provision.PULL_REQUESTS_CONTEXT_KEYS,
         *provision.SSH_CONTEXT_KEYS,
+        *provision.CODESPACES_CONTEXT_KEYS,
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
         "AGENT_PULL_REQUESTS_INSTALL_DIR", "UPDATE_DRIVER_WITNESS",
         "AGENT_SSH_VALIDATED_CONTEXT", "AGENT_SSH_PAYLOAD_ROOT",
         "AGENT_SSH_ACTION", "AGENT_SSH_DRY_RUN",
+        "AGENT_CODESPACES_VALIDATED_CONTEXT", "AGENT_CODESPACES_PAYLOAD_ROOT",
+        "AGENT_CODESPACES_ACTION", "AGENT_CODESPACES_FORCE", "AGENT_CODESPACES_DRY_RUN",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HOME", str(profile))
@@ -225,3 +228,19 @@ def owning_ssh(owning_pull_requests):
             "AGENT_SSH_INSTALL_DIR", "AGENT_SSH_PAYLOAD_ROOT",
         ), encoding="utf-8")
     return payload, installation.with_name(".agent-ssh"), project
+
+
+@pytest.fixture
+def owning_codespaces(owning_ssh):
+    payload, installation, project = owning_ssh
+    payload = payload.rename(payload.with_name("agent-codespaces"))
+    for name in ("plugin.json", "payload-invocation.json", "pyproject.toml",
+                 "scripts/install.ps1", "scripts/install.sh"):
+        path = payload / name
+        path.write_text(
+            path.read_text().replace("agent-ssh", "agent-codespaces").replace(
+                "agent_ssh", "agent_codespaces",
+            ).replace("AGENT_SSH", "AGENT_CODESPACES"),
+            encoding="utf-8",
+        )
+    return payload, installation.with_name(".agent-codespaces"), project

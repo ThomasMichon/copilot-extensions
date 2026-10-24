@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # agent-worktrees:launch-seed-boundary-v1
+# agent-worktrees:launch-attempt-boundary-v1
 # Default / normalized session setup script for repos.
 #
 # Used by agent-worktrees as the normalized launcher. Prepends any
@@ -29,6 +30,9 @@ RUNTIME_PYTHON=""
 LAUNCH_SEED_RECORD=""
 LAUNCH_SEED_ID=""
 LAUNCH_SEED_RUNTIME_PYTHON=""
+LAUNCH_ATTEMPT_ID=""
+LAUNCH_RESOLUTION_ID=""
+LAUNCH_PARENT_ID=""
 COPILOT_ARGS=()
 native_value_option() {
     case "$1" in
@@ -67,6 +71,9 @@ while [[ $# -gt 0 ]]; do
         --launch-seed-record) LAUNCH_SEED_RECORD="$2"; shift 2 ;;
         --launch-seed-id) LAUNCH_SEED_ID="$2"; shift 2 ;;
         --launch-seed-runtime-python) LAUNCH_SEED_RUNTIME_PYTHON="$2"; shift 2 ;;
+        --launch-attempt-id) LAUNCH_ATTEMPT_ID="$2"; shift 2 ;;
+        --launch-resolution-id) LAUNCH_RESOLUTION_ID="$2"; shift 2 ;;
+        --launch-parent-id) LAUNCH_PARENT_ID="$2"; shift 2 ;;
         *)              COPILOT_ARGS+=("$1"); shift ;;
     esac
 done
@@ -226,8 +233,20 @@ _exec_copilot_backend() {
             echo 'ERROR: Launch-seed runtime is unavailable; the prompt remains staged.' >&2
             exit 3
         fi
+        local attempt_args=()
+        if [[ -n "$LAUNCH_ATTEMPT_ID$LAUNCH_RESOLUTION_ID$LAUNCH_PARENT_ID" ]]; then
+            if [[ -z "$LAUNCH_ATTEMPT_ID" || -z "$LAUNCH_RESOLUTION_ID" ]]; then
+                printf 'Launch-attempt correlation is incomplete; no backend started.\n' >&2
+                return 3
+            fi
+            attempt_args=(--launch-attempt-id "$LAUNCH_ATTEMPT_ID" --launch-resolution-id "$LAUNCH_RESOLUTION_ID")
+            if [[ -n "$LAUNCH_PARENT_ID" ]]; then
+                attempt_args+=(--launch-parent-id "$LAUNCH_PARENT_ID")
+            fi
+        fi
         exec "$LAUNCH_SEED_RUNTIME_PYTHON" -I -m agent_worktrees.launch_seed_exec \
-            --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" -- "$@" "${COPILOT_ARGS[@]}"
+            --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" \
+            "${attempt_args[@]}" -- "$@" "${COPILOT_ARGS[@]}"
     fi
     exec "$@" "${COPILOT_ARGS[@]}"
 }

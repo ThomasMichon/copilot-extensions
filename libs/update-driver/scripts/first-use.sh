@@ -60,20 +60,30 @@ case "$plugin" in
     agent-vault) prefix=AGENT_VAULT ;;
     agent-pull-requests) prefix=AGENT_PULL_REQUESTS ;;
     agent-ssh) prefix=AGENT_SSH ;;
+    agent-codespaces) prefix=AGENT_CODESPACES ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
     printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
 fi
-if [[ "$plugin" == agent-ssh ]]; then
-    [[ "$(query "$manifest" module)" == agent_ssh &&
-        "$(query "$manifest" legacyRuntimeRoot)" == .agent-ssh &&
-        "$(query "$manifest" payloadRootEnv)" == AGENT_SSH_PAYLOAD_ROOT &&
+if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces ]]; then
+    label=SSH; [[ "$plugin" != agent-codespaces ]] || label=CodeSpaces
+    [[ "$(query "$manifest" module)" == "${plugin//-/_}" &&
+        "$(query "$manifest" legacyRuntimeRoot)" == ".$plugin" &&
+        "$(query "$manifest" payloadRootEnv)" == "${prefix}_PAYLOAD_ROOT" &&
         "$(query "$manifest" $'payloadDispatcher\034posix')" == scripts/runtime-gate.sh &&
         "$(query "$manifest" $'payloadDispatcher\034windows')" == scripts/runtime-gate.ps1 &&
         "$(printf '%s' "$manifest" | LC_ALL=C awk -f "$__foundation_assets/json-query.awk" \
             -v mode=len -v query_path=payloadDispatcher)" == 2 ]] || {
-        printf 'SSH first use requires its declared native runtime gate.\n' >&2; exit 1;
+        printf '%s first use requires its declared native runtime gate.\n' "$label" >&2; exit 1;
+    }
+fi
+if [[ "$plugin" == agent-codespaces ]]; then
+    [[ ! -v AGENT_CODESPACES_INSTALLATION_ID && "$runtime" == "$HOME/.agent-codespaces" &&
+        "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
+        "$(basename -- "$payload")" == "$plugin" ]] || {
+        printf 'CodeSpaces first use requires its canonical installed payload and default legacy root.\n' >&2
+        exit 1
     }
 fi
 if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh ]]; then
@@ -112,7 +122,7 @@ else
     [[ "$code" == 3 ]] || exit "$code"
     installer=install
 fi
-if [[ "$plugin" == agent-ssh ]]; then
+if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces ]]; then
     if provision_type="$(query_type "$manifest" provisionMode)"; then
         [[ "$provision_type" == string && "$(query "$manifest" provisionMode)" == snapshot ]] || {
             printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1;
