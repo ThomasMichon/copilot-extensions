@@ -136,11 +136,14 @@ def _resolve_machine_identity(args: argparse.Namespace) -> _identity.MachineIden
         else:
             candidate = Path(selector).expanduser()
             if candidate.is_dir():
-                topology_repos.append(candidate)
+                try:
+                    topology_repos.append(_layout.resolve_cwd_repo(candidate)[2])
+                except _layout.NotGitRepositoryError:
+                    topology_repos.append(candidate)
     else:
         topology_repos.extend(candidate.path for candidate in _discover.candidate_repos())
         try:
-            topology_repos.append(_layout.resolve_cwd_repo()[1])
+            topology_repos.append(_layout.resolve_cwd_repo()[2])
         except _layout.NotGitRepositoryError:
             pass
     return _identity.resolve_machine(
