@@ -451,6 +451,10 @@ shared-multiplex contracts above.
 - The adjacent qualification guard was stale after PR units moved to
   `ci_pr_unit_reuse.py`; it now checks that exact CI owner and retains the
   direct promotion producer check. No workflow or required CI matrix changes.
+  The initial PR CI correctly refused the changed standalone declaration's
+  stale source hash. Refresh only that admitted hash; the complete1274-node
+  packet then passed locally with coverage in110.468s, preserving its unit
+  inventory, effects policy, coverage targets and execution budget.
   Native Linux artifact qualification and selected manual-client setup/removal
   remain open. No runtime rollout, service activation, migration or native
   attachment is performed by this slice.
