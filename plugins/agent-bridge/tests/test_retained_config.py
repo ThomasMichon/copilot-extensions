@@ -23,6 +23,16 @@ def wait_for(predicate):
         time.sleep(0.01)
 
 
+def offer(event):
+    writer = telemetry._slot.sink
+    before = writer.stats()["accepted"]
+    def admitted():
+        if writer.stats()["accepted"] == before:
+            telemetry.emit(event)
+        return writer.stats()["accepted"] > before
+    wait_for(admitted)
+
+
 @pytest.fixture(autouse=True)
 def isolated_slot(monkeypatch):
     slot = SinkSlot()
@@ -67,7 +77,7 @@ def test_actual_config_loads_buffered_sink_without_adopting_legacy(
     assert telemetry.load_sink_from_config(path)
     event = {"ts": int(time.time() * 1000), "kind": "state", "name": "λ🚀",
              "nested": {"count": 1}}
-    telemetry.emit(event)
+    offer(event)
     wait_for(lambda: isolated_slot.sink.stats()["delivered"] == 1)
     assert rows(directory) == [event]
     assert legacy.read_bytes() == before
@@ -140,7 +150,7 @@ def test_construction_and_storage_stay_off_loop_and_close_never_joins(
         release.set()
         wait_for(lambda: writer.join(0))
         assert telemetry.load_sink_from_config(path)
-        telemetry.emit({"kind": "new"})
+        offer({"kind": "new"})
         wait_for(lambda: isolated_slot.sink.stats()["delivered"] == 1)
     try:
         asyncio.run(run())
@@ -243,6 +253,27 @@ def test_configured_cleanup_failure_is_optional(tmp_path, monkeypatch):
     telemetry.close_configured_retained_sink()
 
 
+def test_delivery_control_retries_only_unaccepted_offers(tmp_path, monkeypatch):
+    path, directory = config(tmp_path)
+    assert telemetry.load_sink_from_config(path)
+    writer = telemetry._slot.sink
+    original = telemetry.emit
+    calls = []
+    def first_contended(event):
+        calls.append(None)
+        if len(calls) == 1:
+            with writer._lock:
+                original(event)
+        else:
+            original(event)
+    monkeypatch.setattr(telemetry, "emit", first_contended)
+    offer({"kind": "one"})
+    wait_for(lambda: writer.stats()["delivered"] == 1)
+    assert writer.stats()["contended"] >= 1
+    assert writer.stats()["accepted"] == 1
+    assert len(rows(directory)) == 1
+
+
 def test_real_configured_processes_append_complete_unicode_rows(tmp_path):
     path, directory = config(tmp_path)
     script = """
@@ -256,8 +287,14 @@ def bounded(base):
 t.make_retained_spool_sink=bounded
 assert t.load_sink_from_config(sys.argv[1])
 w=t._slot.sink
-for i in range(24): t.emit({"ts":int(time.time()*1000),"writer":sys.argv[2],"i":i,"text":"λ🚀"})
 end=time.monotonic()+10
+for i in range(24):
+    before=w.stats()["accepted"]
+    event={"ts":int(time.time()*1000),"writer":sys.argv[2],"i":i,"text":"λ🚀"}
+    while w.stats()["accepted"]==before:
+        t.emit(event)
+        assert time.monotonic()<end
+        if w.stats()["accepted"]==before: time.sleep(.001)
 while w.stats()["delivered"]<24:
     assert time.monotonic()<end
     time.sleep(.01)

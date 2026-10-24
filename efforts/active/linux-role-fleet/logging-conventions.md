@@ -498,3 +498,12 @@ captured wire owners, deployment helpers and live state remain outside this slic
   The seeded byte-size observer uses explicit UTF-8/LF, avoiding platform text
   newline translation. Corrected full native portfolios pass again: 133 Bridge
   and 190 Dispatch tests; touched-code Ruff F/E9 and whitespace checks pass.
+- 2026-10-24 UTC — Re-review identified a test assumption of lossless admission.
+  Delivery controls now retry only offers not reflected in the existing accepted
+  counter, within unchanged bounded deadlines, before checking persisted records.
+  A forced first-offer contention regression proves one accepted/persisted event,
+  not duplicate retries. The real three-process rotation control uses the same
+  admission boundary. Production drop/queue/shutdown semantics are unchanged.
+  Native managed revalidation passes 134 Bridge and 51 Dispatch focused tests;
+  the earlier 190-test coordinator portfolio remains recorded at its actual
+  revision. Touched-test Ruff F/E9 and whitespace checks pass.

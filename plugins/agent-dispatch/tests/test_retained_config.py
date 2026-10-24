@@ -37,8 +37,13 @@ def test_actual_config_loader_and_real_lifespan_cleanup(configured, tmp_path):
     assert telemetry.load_sink_from_config(path)
     writer = slot.sink
     event = {"ts": int(time.time() * 1000), "kind": "state", "name": "λ🚀"}
-    telemetry.emit(event)
     end = time.monotonic() + 5
+    before = writer.stats()["accepted"]
+    while writer.stats()["accepted"] == before:
+        telemetry.emit(event)
+        assert time.monotonic() < end
+        if writer.stats()["accepted"] == before:
+            time.sleep(0.01)
     while writer.stats()["delivered"] < 1:
         assert time.monotonic() < end
         time.sleep(0.01)
