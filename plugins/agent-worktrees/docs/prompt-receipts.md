@@ -43,6 +43,9 @@ not pretend that OS I/O or fsync can be interrupted.
 Before recording, the backend reserves row and byte capacity for the receipt
 and any separator newline. It refuses an append that would put the new receipt
 beyond the bounded query window, rather than creating an unreconcilable commit.
+Both writers also refuse a separator that would grow an unterminated terminal
+record beyond 64 KiB. An already-matching maximum-sized record can still replay
+without adding a separator or changing history.
 
 Only an exact qualified query can return `absent`. Missing association,
 unqualified matching legacy rows, oversized input and exhausted budgets are
@@ -56,6 +59,10 @@ append/fsync. Exact resident queries and recording replays synchronize the
 matching existing trace under the same admission and trace locks before
 reporting `received`. A failed or late synchronization remains `unknown`;
 reconciliation does not append another receipt.
+The resident reader keeps the matching descriptor open through owner
+revalidation and synchronization. A rolling-log replacement cannot redirect
+that synchronization to a different pathname target. The bounded history
+descriptors close before the trace and record guards are released.
 
 ## Focused source integration
 

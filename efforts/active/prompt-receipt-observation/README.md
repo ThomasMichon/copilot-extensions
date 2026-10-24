@@ -493,3 +493,48 @@ new authority or ownership behavior requires a separate proposal.
   fences. No native/timing suite, archived fixture or historical raw evidence
   was rerun or modified. The original native hold and absent readiness marker
   remain unchanged; the source follow-up needs its own normal CI/review.
+
+### Evidence-backed review resolution and remaining source correctness
+
+- Replied to each of the eight fixed/superseded review threads separately with
+  immutable source/test citations and resolved only those evidenced findings.
+  The bounded fresh-review wait returned current-head review `5636717318` on
+  `e86990aacbf71667d0c323055c1364984672632f`: COMMENTED, independently confirming
+  the eight resolutions and identifying three further actual blockers.
+- Fixed the terminal-row separator boundary in both compatibility and resident
+  writers. They retain terminal-row length from the existing bounded scan and
+  refuse an append whose separator would make that row exceed 64 KiB. Existing
+  matching maximum-sized unterminated receipts still replay without mutation.
+  No additional history scan, capacity widening or clock change was introduced.
+- Fixed replay synchronization across rolling-log replacement: bounded resident
+  history handles now remain open in an ExitStack through owner revalidation
+  and fsync. Replay synchronizes the descriptor that produced its match rather
+  than reopening a possibly replaced pathname. All handles close before guard
+  release, including failure paths.
+- Eleven selected functional Python units pass with lint, covering both
+  writers at 65,535/65,536-byte terminal boundaries, maximum matching replay,
+  actual replacement/blocked replacement at the post-match revalidation
+  boundary, matching descriptor identity/closure, failed fsync, association
+  refusal, actual activity-query durability and record-before-trace ordering.
+  One additional focused unit confirms the retained matching descriptor closes
+  when post-match owner revalidation refuses admission. These were not
+  native/timing runs or performance acceptance.
+- Fresh-state pending identity persistence remains open. The current scheduler
+  retains it only in the passed state object; production recreates that object
+  on extension startup. Existing handoff-request storage represents baton/
+  consumption state and performs synchronous writes/directory creation, so it
+  must not be silently repurposed as an observation journal. A selected existing
+  session-owned persistence API/storage seam needs architecture admission
+  before implementing durable receipt-pending state; no new ledger, fabricated
+  session directory or test-only mock is claimed as a production solution.
+- The prematurely reserved quiet window was cancelled before admission. Other
+  lanes are released, and no H2 native GO has been issued. The user now accepts
+  a separately reported contended test tier starting at 2x, at most 3x on
+  explicit continuation; there is no mandatory zero-CPU condition. The
+  nominal performance targets and production defaults remain unchanged, and
+  the test-only factor mechanism is still a proposal, not an applied override.
+- Original historical evidence remains unchanged. Candidate source changes
+  invalidate use of the earlier prepared e869 manifest as proof for a newer
+  head; fixture manifests must be regenerated before any future admitted run.
+  Readiness, draft/merge, source CI/review and installed/platform gates remain
+  separate; cancellation and scaled-test intent are not completion.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import json
 import math
@@ -38,7 +39,10 @@ def _validate(locator: str, session_id: str | None, *, record: bool) -> None:
         raise ValueError("prompt receipt requires a known session")
 
 
-def _matching(path: Path, worktree_id: str, locator: str, session_id: str | None) -> bool:
+def _matching(
+    path: Path, worktree_id: str, locator: str, session_id: str | None,
+    *, terminal_row_bytes: list[int] | None = None,
+) -> bool:
     try:
         handle = path.open("r+b")
     except FileNotFoundError:
@@ -47,6 +51,8 @@ def _matching(path: Path, worktree_id: str, locator: str, session_id: str | None
         while line := handle.readline(_MAX_RECORD_BYTES + 1):
             if len(line) > _MAX_RECORD_BYTES:
                 raise ValueError("receipt history record exceeds the bounded reader")
+            if terminal_row_bytes is not None:
+                terminal_row_bytes[0] = 0 if line.endswith(b"\n") else len(line)
             try:
                 event = json.loads(line)
             except (ValueError, UnicodeDecodeError):
@@ -74,13 +80,18 @@ def prompt_receipt(
     _validate(locator, session_id, record=record)
     path = trace_path(project, worktree_id)
     with _append_lock(path.with_suffix(path.suffix + ".lock")):
-        if _matching(path, worktree_id, locator, session_id):
+        terminal_row_bytes = [0]
+        if _matching(
+            path, worktree_id, locator, session_id, terminal_row_bytes=terminal_row_bytes,
+        ):
             return {"received": True, "replayed": True}
         legacy = legacy_path is not None and _matching(
             legacy_path, worktree_id, locator, session_id,
         )
         if not record:
             return {"received": legacy, "replayed": legacy}
+        if terminal_row_bytes[0] >= _MAX_RECORD_BYTES:
+            raise ValueError("record-limit")
         event = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "event": EVENT, "worktree_id": worktree_id, "session_id": session_id,
@@ -112,6 +123,8 @@ class _ScanBudget:
         self.deadline = min(deadline, time.monotonic() + MAX_SCAN_SECONDS)
         self.bytes = 0
         self.rows = 0
+        self.terminal_row_bytes = 0
+        self.matching_handle = None
 
     def check(self):
         if time.monotonic() >= self.deadline:
@@ -119,49 +132,51 @@ class _ScanBudget:
         if self.bytes > MAX_SCAN_BYTES or self.rows > MAX_SCAN_ROWS:
             raise _ReceiptUnavailable("scan-limit")
 
-    def match(self, path, worktree_id, locator, session_id, creation_nonce):
+    def match(self, path, worktree_id, locator, session_id, creation_nonce, files):
         self.check()
+        self.terminal_row_bytes = 0
         try:
-            handle = path.open("rb")
+            handle = files.enter_context(path.open("r+b"))
         except FileNotFoundError:
             self.check()
             return False
-        with handle:
-            remaining = os.fstat(handle.fileno()).st_size
-            while remaining:
-                self.check()
-                if self.rows >= MAX_SCAN_ROWS or self.bytes >= MAX_SCAN_BYTES:
-                    raise _ReceiptUnavailable("scan-limit")
-                line = handle.readline(min(_MAX_RECORD_BYTES, MAX_SCAN_BYTES - self.bytes, remaining))
-                if not line:
-                    raise _ReceiptUnavailable("history-changed")
-                remaining -= len(line)
-                self.bytes += len(line)
-                self.rows += 1
-                self.check()
-                if len(line) == _MAX_RECORD_BYTES and not line.endswith(b"\n") and remaining:
-                    raise _ReceiptUnavailable("record-limit")
-                if self.bytes == MAX_SCAN_BYTES and not line.endswith(b"\n") and remaining:
-                    raise _ReceiptUnavailable("scan-limit")
-                try:
-                    event = json.loads(line)
-                except (ValueError, UnicodeDecodeError):
-                    self.check()
-                    continue
-                self.check()
-                if (
-                    isinstance(event, dict) and event.get("event") == EVENT
-                    and event.get("worktree_id") == worktree_id
-                    and event.get("locator") == locator
-                    and event.get("session_id") == session_id
-                ):
-                    nonce = event.get("creation_nonce")
-                    if not isinstance(nonce, str) or not nonce:
-                        raise _ReceiptUnavailable("legacy-incarnation-unavailable")
-                    if nonce == creation_nonce:
-                        return True
+        remaining = os.fstat(handle.fileno()).st_size
+        while remaining:
             self.check()
-            return False
+            if self.rows >= MAX_SCAN_ROWS or self.bytes >= MAX_SCAN_BYTES:
+                raise _ReceiptUnavailable("scan-limit")
+            line = handle.readline(min(_MAX_RECORD_BYTES, MAX_SCAN_BYTES - self.bytes, remaining))
+            if not line:
+                raise _ReceiptUnavailable("history-changed")
+            remaining -= len(line)
+            self.bytes += len(line)
+            self.rows += 1
+            self.terminal_row_bytes = 0 if line.endswith(b"\n") else len(line)
+            self.check()
+            if len(line) == _MAX_RECORD_BYTES and not line.endswith(b"\n") and remaining:
+                raise _ReceiptUnavailable("record-limit")
+            if self.bytes == MAX_SCAN_BYTES and not line.endswith(b"\n") and remaining:
+                raise _ReceiptUnavailable("scan-limit")
+            try:
+                event = json.loads(line)
+            except (ValueError, UnicodeDecodeError):
+                self.check()
+                continue
+            self.check()
+            if (
+                isinstance(event, dict) and event.get("event") == EVENT
+                and event.get("worktree_id") == worktree_id
+                and event.get("locator") == locator
+                and event.get("session_id") == session_id
+            ):
+                nonce = event.get("creation_nonce")
+                if not isinstance(nonce, str) or not nonce:
+                    raise _ReceiptUnavailable("legacy-incarnation-unavailable")
+                if nonce == creation_nonce:
+                    self.matching_handle = handle
+                    return True
+        self.check()
+        return False
 
 
 def resident_prompt_receipt(
@@ -203,19 +218,20 @@ def resident_prompt_receipt(
             with _append_lock(
                 path.with_suffix(path.suffix + ".lock"),
                 deadline=min(pre_effect_deadline, time.monotonic() + MAX_LOCK_SECONDS),
-            ):
+            ), ExitStack() as files:
                 revalidate()
                 check()
                 budget = _ScanBudget(pre_effect_deadline)
-                received_path = path
-                received = budget.match(path, worktree_id, locator, session_id, creation_nonce)
+                received = budget.match(
+                    path, worktree_id, locator, session_id, creation_nonce, files,
+                )
+                terminal_row_bytes = budget.terminal_row_bytes
                 if not received:
                     from . import config as cfg
 
-                    received_path = cfg.install_dir() / "logs" / "activity.jsonl"
                     received = budget.match(
-                        received_path,
-                        worktree_id, locator, session_id, creation_nonce,
+                        cfg.install_dir() / "logs" / "activity.jsonl",
+                        worktree_id, locator, session_id, creation_nonce, files,
                     )
                 revalidate()
                 check()
@@ -223,15 +239,16 @@ def resident_prompt_receipt(
                     # A readable row can survive a failed append fsync. Confirm
                     # durability under the same lock before clearing uncertainty.
                     may_have_committed = True
-                    with received_path.open("r+b", buffering=0) as handle:
-                        revalidate()
-                        check()
-                        os.fsync(handle.fileno())
+                    revalidate()
+                    check()
+                    os.fsync(budget.matching_handle.fileno())
                     if time.monotonic() >= deadline:
                         return result("unknown", "completion-after-deadline")
                     return result("received", "exact-replay", True)
                 if not record:
                     return result("absent", "exact-query-absent")
+                if terminal_row_bytes >= _MAX_RECORD_BYTES:
+                    return result("unavailable", "record-limit")
                 event = {
                     "ts": datetime.now(timezone.utc).isoformat(),
                     "event": EVENT, "worktree_id": worktree_id,

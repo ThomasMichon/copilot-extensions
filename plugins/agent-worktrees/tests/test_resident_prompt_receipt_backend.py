@@ -3,6 +3,8 @@
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import os
+from pathlib import Path
 import time
 from types import SimpleNamespace
 
@@ -323,3 +325,135 @@ def test_record_reserves_queryable_bytes_and_separator(capacity_store, partial_t
         assert path.read_bytes() == before + (b"\n" if partial_tail else b"") + encoded
         assert invoke()["status"] == "received"
         assert invoke(record=True)["replayed"] is True
+
+
+@pytest.mark.parametrize("writer", ["compatibility", "resident"])
+@pytest.mark.parametrize("terminal_size", [65535, 65536])
+def test_terminal_record_separator_preserves_individual_limit(store, writer, terminal_size):
+    path = handoff_trace.trace_path("project", "worktree")
+    path.parent.mkdir(parents=True)
+    prefix, suffix = b'{"noise":"', b'"}'
+    before = prefix + b"x" * (terminal_size - len(prefix) - len(suffix)) + suffix
+    path.write_bytes(before)
+    if terminal_size == 65536:
+        if writer == "compatibility":
+            with pytest.raises(ValueError, match="record-limit"):
+                receipt.prompt_receipt("project", "worktree", "task:one", "subject", record=True)
+        else:
+            result = invoke(record=True)
+            assert result["status"] == "unavailable" and result["reason"] == "record-limit"
+        assert path.read_bytes() == before
+    else:
+        if writer == "compatibility":
+            assert receipt.prompt_receipt(
+                "project", "worktree", "task:one", "subject", record=True,
+            )["received"] is True
+            assert receipt.prompt_receipt("project", "worktree", "task:one")["received"] is True
+        else:
+            assert invoke(record=True)["status"] == invoke()["status"] == "received"
+        assert len(path.read_bytes().splitlines(keepends=True)[0]) == 65536
+
+
+@pytest.mark.parametrize("writer", ["compatibility", "resident"])
+def test_maximum_unterminated_matching_receipt_replays_without_separator(store, writer):
+    path = handoff_trace.trace_path("project", "worktree")
+    path.parent.mkdir(parents=True)
+    event = {
+        "event": receipt.EVENT, "worktree_id": "worktree", "session_id": "subject",
+        "creation_nonce": "incarnation", "locator": "task:one", "padding": "",
+    }
+    event["padding"] = "x" * (65536 - len(json.dumps(event).encode("utf-8")))
+    before = json.dumps(event).encode("utf-8")
+    assert len(before) == 65536
+    path.write_bytes(before)
+    if writer == "compatibility":
+        assert receipt.prompt_receipt(
+            "project", "worktree", "task:one", "subject", record=True,
+        )["replayed"] is True
+    else:
+        result = invoke(record=True)
+        assert result["status"] == "received" and result["replayed"] is True
+    assert path.read_bytes() == before
+
+
+def test_rotated_legacy_replay_syncs_the_matching_descriptor_not_replacement(store, monkeypatch):
+    legacy = store / "logs" / "activity.jsonl"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(json.dumps({
+        "event": receipt.EVENT, "worktree_id": "worktree", "session_id": "subject",
+        "creation_nonce": "incarnation", "locator": "task:one",
+    }) + "\n", encoding="utf-8")
+    replacement = legacy.with_name("replacement.jsonl")
+    replacement.write_text('{"event":"unrelated"}\n', encoding="utf-8")
+    original_identity = (legacy.stat().st_dev, legacy.stat().st_ino)
+    opened, synced, rotation = [], [], []
+    path_open, fsync = Path.open, receipt.os.fsync
+
+    def capture_open(path, *args, **kwargs):
+        handle = path_open(path, *args, **kwargs)
+        if path == legacy:
+            opened.append(handle)
+        return handle
+
+    def capture_sync(fd):
+        info = os.fstat(fd)
+        synced.append((info.st_dev, info.st_ino))
+        fsync(fd)
+
+    @contextmanager
+    def rotating_admission():
+        calls = 0
+
+        def revalidate():
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                try:
+                    replacement.replace(legacy)
+                    rotation.append("replaced")
+                except PermissionError:
+                    assert os.name == "nt"
+                    rotation.append("blocked-by-open-descriptor")
+
+        yield revalidate
+
+    monkeypatch.setattr(Path, "open", capture_open)
+    monkeypatch.setattr(receipt.os, "fsync", capture_sync)
+    result = invoke(admission=rotating_admission)
+    assert result["status"] == "received" and result["replayed"] is True
+    assert rotation and synced == [original_identity]
+    assert len(opened) == 1 and opened[0].closed
+
+
+def test_matching_descriptor_closes_after_revalidation_refusal(store, monkeypatch):
+    path = handoff_trace.trace_path("project", "worktree")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({
+        "event": receipt.EVENT, "worktree_id": "worktree", "session_id": "subject",
+        "creation_nonce": "incarnation", "locator": "task:one",
+    }) + "\n", encoding="utf-8")
+    opened = []
+    path_open = Path.open
+
+    def capture_open(candidate, *args, **kwargs):
+        handle = path_open(candidate, *args, **kwargs)
+        if candidate == path:
+            opened.append(handle)
+        return handle
+
+    @contextmanager
+    def refusing_admission():
+        calls = 0
+
+        def revalidate():
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise ValueError("subject-association-unavailable")
+
+        yield revalidate
+
+    monkeypatch.setattr(Path, "open", capture_open)
+    result = invoke(admission=refusing_admission)
+    assert result["status"] == "unavailable" and result["reason"] == "subject-association-unavailable"
+    assert len(opened) == 1 and opened[0].closed
