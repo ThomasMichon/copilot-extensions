@@ -31,6 +31,7 @@ _NATIVE_END = "# native-executable:end"
 PYTHON_FILES = (
     "installer_engine.py", "installer_engine_process.py", "runtime_launcher.py",
     "installer_wheel_inputs.py",
+    "installer_wheel_snapshot.py",
 )
 PYTHON_ADOPTERS = ("agent-worktrees", "agent-vault", "agent-pull-requests")
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")

@@ -236,6 +236,9 @@ refusals and the installation authority's explicit path selection.
 
 ### Phase 3 - Verified consumption with correct fallback
 
+- [x] Provide the bounded shared wheel-inspection component and complete-set
+      actual-byte verification (#8419). Inspection facts do not authenticate
+      approval, enable a consumer or replace retained-construction evidence.
 - [ ] Implement the reviewed [wheel-input admission slice](wheel-input-admission.md):
       compare actual wheel bytes with the exact selected record before retained
       construction, then integrate owned reuse evidence without creating approval.
@@ -645,6 +648,27 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Bounded inspection component merged; retained assembly next
+
+- #8419 merged as `90663eab5b44d2d63032fa8a0ac95cf016ce8d6d`.
+  Its shared stdlib archive verifier is synchronized across all five Python
+  consumers. The existing complete-profile API retains exact complete sets,
+  actual metadata, closure budgets, strong runtime RECORD hashes and strict
+  first-party promotion policy; no production profile consumer was enabled.
+- On the reviewed final head, required CI passed all 1,414 selected cases and
+  all four Linux/Windows inspection and real-built/offline artifact jobs passed.
+  The admitted coverage report is 16,547,830 bytes under the unchanged
+  16,777,216-byte cap. Redundant test labels were reduced with all prior cases,
+  bodies and assertions retained; the final-EOF regression adds one case.
+- The next owned stretch retains the exact selected inputs under explicit
+  count/total-byte/storage/deadline budgets, then composes closed offline UV
+  assembly and mode/profile/policy/source/artifact receipts through the existing
+  constructor and retention owner. Ordinary source-policy refusal of
+  `--no-deps` must not be bypassed to obtain an offline transaction.
+  Authenticated approval/acquisition, reuse/revocation, source fallback,
+  native/fresh construction, retention and authorized rollout remain open.
+  The effort stays Active; neither this component nor its merge is completion.
 
 ### 2026-10-24 - Shared-installer wheel-input continuation
 

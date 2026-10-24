@@ -77,6 +77,23 @@ the required unit-only CI packet to include native processes.
 These are inspector-component tests, not proof of authenticated profile/feed
 admission, retained offline assembly or installed runtime activation.
 
+`tools/test_installer_wheel_snapshot.py` covers exact-set byte custody through
+`installer_wheel_snapshot.retain_wheel_inputs`. The helper reuses the installer's
+private temporary-input owner, copies only ordinary unlinked files, bounds
+wheel count, per-wheel/aggregate bytes and temporary archive storage, and shares
+the caller's deadline through streamed copying and custody rechecks. It yields
+read-only filename/path and filename/stream maps for the existing complete-profile
+verifier. Call `snapshot.verify()` before a dependent publication boundary;
+normal context exit also rechecks custody, then closes streams and removes only
+owned copies. Caller files need not remain unchanged after the snapshot yields.
+The expected SHA-256 map is byte evidence, not authenticated profile/feed policy.
+
+Fresh/cache parity, exact inclusive budgets, pre-open replacement, mutation of an
+earlier source, growth during copying, read/write errors, final-EOF deadline,
+retained mutation, cancellation cleanup and an actual `-I -S` bootstrap child
+are exercised in the same optional `wheel_inputs=true` native lane. No resolver,
+backend, venv constructor or production profile consumer is enabled by this API.
+
 ## Optional Dispatch service replay
 
 `tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py

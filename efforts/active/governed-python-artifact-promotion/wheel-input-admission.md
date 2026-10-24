@@ -61,6 +61,9 @@ Do not modify another contributor's open candidate/profile PR to obtain inputs.
 
 ## Validation and completion
 
+- [x] The bounded archive/file-inspection component and complete-profile byte
+  comparison are integrated through one shared verifier (#8419). This closes
+  neither complete retained-set custody nor consumer approval/construction.
 - [x] Actual wheel fixtures match the full selected record; independently
   changed hash, name/version, tags, dependency metadata, extras and Python
   requirement refuse before construction.
@@ -87,6 +90,27 @@ an explicit named receiving objective accepts a residual. The parent effort
 retains all acquisition, platform, fallback, retention and rollout obligations.
 
 ## Journal
+
+### Exact-set byte custody, 2026-10-24
+
+The next component adds `installer_wheel_snapshot.retain_wheel_inputs` beneath
+the existing private temporary-input owner, with explicit count, per-wheel,
+closure-byte, temporary-storage and shared-deadline budgets. Read-only retained
+copies/streams compose with the complete-profile verifier; originals remain
+caller-owned. Source identity/mutation checks, custody rechecks and cancellation/
+partial-copy cleanup do not confer approval or introduce another constructor.
+Offline UV assembly, installed receipts/reuse, authenticated adapters, fallback
+and the parent effort's broader acceptance remain open.
+
+### Component delivery and next stretch, 2026-10-24
+
+#8419 merged as `90663eab5b44d2d63032fa8a0ac95cf016ce8d6d`.
+The reviewed final head passed the required 1,414-case packet and all four
+Linux/Windows native inspection and real-built/offline artifact jobs. Its
+16,547,830-byte coverage report remains under the unchanged 16 MiB bound.
+The existing worktree is pulled forward for retained exact-set snapshots and
+canonical offline constructor/receipt integration. All broader validation items
+above remain open until their actual consumer contracts are proven.
 
 ### Component validation, 2026-10-23
 
