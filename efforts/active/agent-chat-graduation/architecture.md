@@ -393,6 +393,25 @@ state. The parent's platform, clean-room and portfolio gates remain unchanged.
 Neither this derivation nor a client-only implementation closes managed service
 lifecycle, native assignment/shared-feed, migration or live adoption.
 
+### Container role and Komodo-driven composition
+
+The [Chat container role specification](container-service.md) makes the
+fleet-hosted realization explicit: an independently built service image and
+portable template, selected private configuration, complete support/resource
+closure, and deployment through the existing Fleet Manager/Komodo engine.
+The adopter's configuration repository owns actual placement and overrides;
+Chat does not keep a second fleet manifest or deployment controller.
+
+The Gateway owns its predeclared slot and authenticated outbound route.
+Conversation storage, compatibility and drain stay Chat-owned, while the
+manager and storage owners retain actual container execution and writer
+fencing. The existing Komodo named-resource projection is planning-only;
+supported effect execution, independent manager bootstrap and confirmed
+end-to-end readiness are explicit integration gates. Review this contract
+before container implementation or downstream configuration publication.
+Standalone manual-client setup remains independent of that optional fleet
+profile.
+
 ## Maintenance and platform ownership
 
 Routine accepted maintenance should use one current operation correlation,

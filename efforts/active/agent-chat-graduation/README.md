@@ -44,7 +44,7 @@ Use #7238 to accept a slice and record its source boundary before editing it.
 | Proposal editor | Sole shared vision/effort/service-lifecycle writer; `services/chat` core, client and hosting integration | #7238 and the proposal PR |
 | Plugin contributor | Disjoint `plugins/agent-chat` connection/native contribution; exact paths claimed before edits | #7238; input integrated by the proposal editor |
 | Collaboration contributor | Claimed continuation of the linked collaboration/thread/attention specification and its coordinated service/client slice; no transport or lifecycle takeover | [Bounded continuation claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6358796470) |
-| Chat setup adapter contributor | Derive the Chat-owned standard setup adapter and the explicitly authorized reusable role-selectable construction seam; preserve existing service lifecycle ownership | The operator's direction below and this reviewed effort |
+| Chat setup adapter contributor | Derive the Chat-owned standard setup adapter, reusable role-selectable construction seam and container/template contract; preserve existing service lifecycle ownership | The operator's direction below and this reviewed effort |
 | Qualification contributor | Installed-consumer, native lifecycle and platform-boundary cases | #7238; input integrated by the proposal editor |
 | Conduct contributor | Generic scoped-peer ambient policy and discoverable rules-of-engagement skill, after the intent amendment clears review; no Chat/Bridge/Logger source | [Accepted disjoint scope](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6303930285) |
 | Process utility contributor | Canonical `libs/agent-procutil` caller-bounded cross-OS source, tests and library docs | [Public source claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6274245326) |
@@ -145,6 +145,18 @@ This permits a canonical installer-engine extension and its generated
 consumer copies, not a Chat-specific engine or a takeover of service
 supervision, Fleet, Gateway or SSH. The no-outreach/no-comment coordination
 boundary and the absence of runtime rollout authority remain unchanged.
+
+The operator further directed:
+
+> The vision of the Gateway and Fleet Manager is continuing to build out, so ensure your effort and vision onver a proper coainer spec for Chat, with approproate configuration in dotfiles from a template, to be driven by the Komodo deployment engine.
+
+This requires a proper Chat container specification, portable templates,
+actualization in the adopter's resolved private configuration repository, and
+Komodo-driven fleet deployment. The
+[container role specification](container-service.md) is agent-recommended
+realization of that request. "Dotfiles" does not name a repository to hardcode,
+and the direction does not grant live deployment, destructive migration or
+ownership of Gateway/Fleet Manager implementation.
 
 ## Plan
 
@@ -254,6 +266,25 @@ requirements.
   runnable adapter and its readiness meanings are real. Keep the parent
   service, native, migration and adoption gates open until actually proved.
 
+#### Container role, private templates and Komodo
+
+- [ ] Review and land the [container role specification](container-service.md)
+  against the evolving Chat, Gateway and loadout visions before implementing
+  the container path or publishing downstream configuration.
+- [ ] Deliver an independently operable Chat service image and portable
+  role/configuration template with explicit artifact, storage, identity,
+  Gateway, placement and resource bindings through existing owners.
+- [ ] Actualize that template in the resolved private configuration repository's
+  dedicated worktree and publication flow, preserving overrides and selected
+  template/source revisions rather than embedding private deployment state here.
+- [ ] Bind the admitted `container.service` allocation to the existing Komodo
+  deployment engine and supported effect executor. Preserve independent Core
+  bootstrap, current fleet admission and prepared-plan confirmation; a named
+  Stack projection alone is not deployment.
+- [ ] Qualify the actual image, Gateway exposure, post-caller health,
+  persistent single-writer restart/update/rollback and preserving removal.
+  Keep unsupported owner bindings explicit instead of adding a Chat controller.
+
 ### Phase 5 - Qualified release and explicit migration
 
 - [ ] Resolve every Validation Plan item or transfer it to an exact named
@@ -347,6 +378,19 @@ requirements.
 - [ ] **Service lifecycle:** first/repeat install, different-code update,
   candidate refusal, rollback, persistence, post-caller health, resource bounds
   and preserving removal; no credential or unrelated-route regression.
+- [ ] **Container contract:** independent image build/start with declared
+  release/platform identity, read-only application content, bounded resources,
+  explicit configuration/secret references and separately retained storage;
+  no source/plugin/sibling-runtime dependency or backend exposure bypass.
+- [ ] **Private composition and Komodo:** template actualization preserves
+  private overrides/provenance; current support/capacity admission and exact
+  prepared-plan confirmation precede real manager execution. Offline
+  projection, a source merge and a submission receipt never substitute.
+- [ ] **Container recovery and route closure:** two real clients use the
+  admitted Gateway route; restart/caller loss/update/rollback preserve
+  conversations and uncertain effects, fence a possible prior writer, and
+  ordinary removal preserves data/configuration while withdrawing only owned
+  exposure and execution.
 - [ ] **Concurrency:** posts and health remain responsive under several held
   subscriptions; coupled maintenance uses one current owner/correlation and
   does not turn releases into acknowledgement loops.
@@ -360,7 +404,7 @@ requirements.
 - [ ] **Portfolio:** keep fast portable contracts in required change-scoped CI;
   isolate real process/native/fresh-environment matrices in their existing
   appropriate lanes. Record why a genuinely unavailable venue was not exercised.
-  Client qualification requires the explicit120s acceptance packet and complete
+  Client qualification requires the operator-approved180s acceptance packet and complete
   600s suite on the same immutable candidate. Their mechanically checked
   family/parameter membership must retain every existing assertion and case;
   a selected packet alone is not complete qualification.
@@ -425,6 +469,23 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-24 - Add template-owned Chat container and Komodo intent
+
+- Capture the operator's container/template/private-configuration/Komodo
+  direction without changing existing Gateway, Fleet Manager or service
+  ownership. Revise the Chat vision as pure intent and put the concrete
+  [proposed contract](container-service.md) in this effort.
+- Add explicit implementation and validation gates for the portable image and
+  template, private actualization, current Komodo execution and complete
+  Gateway/storage/credential/resource closure. Current role projection remains
+  planning evidence, not an effect or deployment receipt.
+- Container realization and private configuration publication follow review of
+  this amendment. No container, manager, private configuration or running
+  service is changed by capturing the plan.
+- The independent construction consumer and its outstanding qualification stay
+  separate. This amendment is not selected-client setup, managed service
+  installation or completion of the parent effort.
 
 ### 2026-10-24 - Deliver construction resources in Chat artifacts
 
