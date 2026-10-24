@@ -1,0 +1,9 @@
+{
+  "comment": "Use real private repository directories in registration authority tests without bypassing repository hosting policy.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
