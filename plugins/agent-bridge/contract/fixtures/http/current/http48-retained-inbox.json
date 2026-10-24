@@ -30,9 +30,11 @@
         "aliases_removed": true,
         "new_key_refused": 409,
         "original_begin_refused": 409,
+        "original_pending_visible": true,
         "original_receipt_status": 200,
         "original_retry_receipt": true,
         "original_row_unchanged": true,
+        "successor_pending_empty": true,
         "successor_receipt": 404,
         "successor_retry": 409
       },
@@ -114,9 +116,11 @@
         "aliases_removed": true,
         "new_key_refused": 409,
         "original_begin_refused": 409,
+        "original_pending_visible": true,
         "original_receipt_status": 200,
         "original_retry_receipt": true,
         "original_row_unchanged": true,
+        "successor_pending_empty": true,
         "successor_receipt": 404,
         "successor_retry": 409
       },
@@ -1008,8 +1012,8 @@
       "sha256": "e900f12a8fa567d75e872ee4cd818865ee83c4cab5448d68be61725847bf87c4"
     },
     "plugins/agent-bridge/contract/inputs/http48/retained-inbox.json": {
-      "blob": "1af08e01ba65f79a85abe2c26fae310106599060",
-      "sha256": "75e6535f55fe578ef4585187c502e106a72d62af75dd9abcb82be5d6ffa8b875"
+      "blob": "de5e388563664185beed882f36351fce5eebecf6",
+      "sha256": "72358bab48be017950629294ac9d65355f59bb94fcfd40c34203fc1f3836ce3b"
     },
     "plugins/agent-bridge/contract/provenance.schema.json": {
       "blob": "a109ef5c7dfe3b9cbb80456101731365dff094dd",
@@ -1528,8 +1532,8 @@
       "sha256": "f62df1d7a81de48bd0c8c1de0dd3bcbaa8e6316ebd47f3fe574e721d580481b6"
     },
     "plugins/agent-bridge/src/agent_bridge/db_live_message_receipts.py": {
-      "blob": "9a703c854a26b64b99d7681126e464eae3224518",
-      "sha256": "5da39dddfabc6fb9dc57c73b954d0e67117754d9b2f3edee9edbf748e634c92c"
+      "blob": "091b6d0821b22887da8e9f00ee5abe8b8fa7bfa5",
+      "sha256": "4abdd062358da97fa8f8b37dde70da2d867e8734704d2b2a7f43b573108e1c6a"
     },
     "plugins/agent-bridge/src/agent_bridge/db_live_session_aliases.py": {
       "blob": "44c12a7b414feb2ab876dcf84e3e6ee75b412f24",
@@ -2472,8 +2476,8 @@
       "sha256": "c04f8bd5df6d6e69eb35413bc4e99db347ef571030f91e09b188bdd4d1f3c51e"
     },
     "plugins/agent-bridge/tests/test_http48_capture_probes.py": {
-      "blob": "640b7baa69f3212c0ebe75b40624b8f4c9a6985a",
-      "sha256": "627294796cc6f256ada8586a5ddc52cd4ed0e47077d689b104f7f59e965b983b"
+      "blob": "574094a8566b7833c8e64ba427f5c0f797f2274e",
+      "sha256": "e3a15f17e757a14baf46a4b027b51173a4e349c855916c95f47f7bf58c8f7261"
     },
     "plugins/agent-bridge/tests/test_live_inbox_runtime.py": {
       "blob": "942cf585e13d20435822296e0681c9b76b77f8c4",
@@ -3584,7 +3588,7 @@
       "sha256": "ed58b3876bcf48c89e6d327b8d5550246f626f79e68b7b77812eaf0fe606c122"
     }
   },
-  "execution_closure_sha256": "1d2e0186e3a43aa4e6bcb1075d22b1f8a9fd4f2bd7bfb1b12c312ed0ee8fd71b",
+  "execution_closure_sha256": "51a737465e2e182ebe4049c341b832b96b98fa2aa3330778dfe123c75374c604",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -3610,13 +3614,13 @@
     "plugins/agent-bridge/scripts/installation-context/_installation_context_source.py",
     "plugins/agent-bridge/scripts/installation-context/installation_context.py"
   ],
-  "input_sha256": "75e6535f55fe578ef4585187c502e106a72d62af75dd9abcb82be5d6ffa8b875",
+  "input_sha256": "72358bab48be017950629294ac9d65355f59bb94fcfd40c34203fc1f3836ce3b",
   "checked_probes": {
     "test_http48_capture_actual_observations": 2
   },
   "scope": "actual local ASGI/SQLite adapter and ordinary producer; not SDK or native qualification",
   "captured_from": {
-    "commit": "7342384d638d71b9af4d8db745e55d1a203da24e",
+    "commit": "e008e31f57455885dd352d912e830c14e8d132be",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 48,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",

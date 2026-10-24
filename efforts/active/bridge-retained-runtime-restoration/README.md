@@ -331,6 +331,11 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   before exact custody matching; zero-history and 20,000-row controls both stay
   within the 1,000-step budget. All 173 selected projection/receipt/result/alias
   cases pass without changing native identity or legacy forwarding semantics.
+- Committed source `e008e31f57455885dd352d912e830c14e8d132be` passes actual
+  HTTP-48 write/no-write capture with 77 outputs. The probe now exercises
+  pending inspection through both original and successor ids. All 124 current
+  capture/contract/maintenance cases and both contracts/659 fixtures pass;
+  independent current-head review remains required.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the
