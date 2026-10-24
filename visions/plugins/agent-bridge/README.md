@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-19
+- **Last revised:** 2026-10-23
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -107,6 +107,23 @@ logical creation request recovers the same workspace and session outcome
 rather than creating another hidden agent. An existing conversation or
 uncertain prior launch still requires its ordinary continuity and ownership
 proof; sessionless is authoritative history, not an absence guess.
+
+### repository-owned hosting eligibility
+
+Workspace allocation does not imply permission to embody an authoring agent.
+A repository's explicit denial of agent exposure governs managed creation,
+resume and successor embodiment in its selected execution workspace, even when
+machine-local registration, cached discovery or an explicit caller target says
+otherwise. Planning callers and receiving execution hosts enforce the same
+boundary, including remote and provider routes; a receiver that cannot uphold
+a required policy refuses visibly rather than launching through a weaker path.
+
+Denial preserves source-only contribution workflows and externally hosted code
+review. Agent definitions and review instructions do not grant authoring
+permission, and a caller-supplied purpose cannot turn an authoring launch into
+an exempt review. Existing live sessions and durable custody are not destroyed
+by a policy change. Inspection, saved handoffs and deliberate state-preserving
+migration remain available without silently creating a replacement agent.
 
 ### delegation control and attention boundary
 

@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-23
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -53,6 +53,25 @@ record of that posture for every repo a project relates to. A project never
 needs a second, parallel catalog of the repos it works with, their
 contribution rules, or an operator's standing in each — whatever such a
 project previously tracked on its own converges into this one record instead.
+
+### Source repositories and agent-hosting eligibility
+
+A repository may participate in the fabric as a source repository without
+offering an authoring agent. Its own explicit denial of agent exposure is
+authoritative over machine-local adoption, cached discovery and explicit target
+selection. Project adoption and suite-managed authoring launch or resume honor
+that denial before changing adoption state or creating execution effects.
+Neither a registered checkout nor review-agent instructions imply hosting
+permission. Absence of a denial preserves compatibility; it does not grant
+adoption or launch authority.
+
+The distinction preserves source-only worktree allocation, inspection, editing,
+tests and contribution workflows driven from another eligible harness. Existing
+sessions, history, tracking and claims remain intact when policy changes;
+reconciliation is deliberate and state-preserving, never automatic termination
+or unregistration. Callers receive an actionable refusal, not a silently selected
+replacement harness. This governs managed hosting, not a human's raw operating
+system invocation or externally hosted code review.
 
 ### Per-repo account identity resolution
 

@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Repository Agent Exposure Policy](active/repository-agent-exposure-policy/README.md) | Draft; planning only, repository-owned `expose_agent: false` hosting veto | #8332; implementation and rollout not authorized; source worktrees and external Code Review preserved |
+| [Repository Agent Exposure Policy](active/repository-agent-exposure-policy/README.md) | Active; implementation authorized, standing-intent review first | #8332; repository-owned hosting veto, source-only workflows and external Code Review preserved |
 | [Ready Resident Prompt Receipt](active/ready-resident-prompt-receipt/README.md) | Active; delivery/control source slice, qualified backend and subject delivery remain gated | #7942; preserves receipt/roster owners and prohibits helper/lifecycle fallbacks |
 | [Bridge Retained Runtime Restoration](active/bridge-retained-runtime-restoration/README.md) | Active; #8179 proposal merged, bounded DB/storage foundation in source review; full Phase 1 open | #8063; specializes #7268 without substituting for Dispatch/adopter acknowledgement; no rollout |
 | [Actions Dialog Isolation](active/actions-dialog-isolation/README.md) | Done (source scope); configuration and caller-refusal #8286 merged after approval and required CI | #7940 source complete; #7939 release/installed and #7935 native gates remain |
