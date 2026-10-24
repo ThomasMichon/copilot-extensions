@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** sequential managed proposal and implementation PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `picker` / `cold-start-resume-prompt` and `durable-launch-attempts`
 - **Umbrella issue:** #8375
 - **Related:** #6057, #6176, #7073, #7962
@@ -77,18 +77,22 @@ The following decomposition and detailed evidence rules are agent-recommended.
 
 ### Phase 1 -- Reviewed attempt and privacy contract
 
-- [ ] Review and merge this proposal before executable changes.
-- [ ] Inventory all Manager New/Resume/Open entry surfaces, existing private
+- [x] Review and merge this proposal before executable changes.
+- [x] Inventory all Manager New/Resume/Open entry surfaces, existing private
   history/restart stores, engine phase/lifecycle events and actual start/receipt
   owners. Define which events each can truthfully attest.
-- [ ] Specify versioned attempt/event identities and private prompt retention,
+- [x] Specify versioned attempt/event identities and private prompt retention,
   read defaults, failure behavior, cross-machine correlation and migration.
+  See [the implementation contract](attempt-contract.md) for boundary ownership,
+  storage/expiry rules and qualification budgets; execution remains incomplete.
 
 ### Phase 2 -- Durable intent before effects
 
 - [ ] Add a shared quick append path using existing private-state protections
   and transaction conventions. Persist action, exact submitted prompt/options,
   project, selected venue and attempt ID before dismissal or allocation.
+  The protected storage foundation is implemented; confirmation wiring and its
+  responsive durability wait remain pending.
 - [ ] Cover empty prompts, rejected unsupported choices and cancellation without
   treating draft text or cancellation as accepted launch intent.
 - [ ] Record failures explicitly. If required intent persistence fails, preserve
@@ -191,3 +195,46 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 - This proposal remains documentation-only. Its next normal CI execution is
   the live check of explicit unit/source-scan skips and retained Markdown lint;
   no journal implementation, crash-loss repair or SSH capability is implied.
+
+### 2026-10-24 -- Reviewed proposal admitted
+
+- Proposal #8380 merged after a current-head approving review with no findings
+  and all required checks passing. Preserved both effort-index entries while
+  reconciling upstream changes; the working source now includes the merged plan.
+- Begin Phase 1's entry-surface and receipt-owner inventory before choosing the
+  concrete journal schema. The original prompt-loss cause, target-native SSH
+  negotiation and installed acceptance gates remain open.
+
+### 2026-10-24 -- Protected storage foundation
+
+- Added a separate versioned private SQLite journal with atomic initialized-file
+  publication, one-transaction confirmed intent/first event, immutable attempt
+  identity, structured observations and bounded metadata-first readers. Exact
+  prompt/options stay in an explicitly retrieved, expirable input document.
+- Added read-only private-permission verification: evidence readers do not
+  repair permissions or create absent storage. Expiry securely erases the
+  journal's own private input; legacy seed-history migration remains pending.
+- Windows qualification covers real process exit/independent read, interrupted
+  transactions, owner/SYSTEM ACLs, broad-ACL refusal, concurrency, schema errors,
+  sidecars, lock failure and physical expiry. The focused journal/history/native
+  selection passes 101 cases with seven platform/privilege skips. Subsequent
+  metadata/input corruption coverage passes 103 ordinary journal/history cases
+  with seven skips; the four explicit Windows native checks pass separately.
+- An existing history ACL unit test exposed a legacy shell-start timeout.
+  Replaced that test's shell startup with independent raw Windows DACL/ACE/SID
+  inspection, preserving and strengthening its actual permission assertions.
+  Explicit native journal qualification retains independent PowerShell ACL
+  inspection; ordinary permission units no longer depend on shell startup.
+- Actual POSIX process-boundary smoke verifies committed input survives an
+  abrupt writer exit, owner-only permissions and physical expiry. The full
+  local POSIX runner did not finish preparation within its bounded attempts;
+  it is not counted as a passing suite. Its owned helpers were checked absent.
+- Native commit measurements are not UI qualification. An initial Windows
+  sample had a warm p95 near 27ms, but a later loaded sample reached about
+  407ms p95 and 552ms maximum; POSIX smoke measured about 14ms p95. Each warm
+  sample has 100 observations, insufficient for tail qualification. Therefore
+  confirmation integration must await durability without blocking the UI or
+  dismissing first; a synchronous callback would not meet the 100ms target.
+- This module is not yet called by confirmation, engine or launch owners.
+  No installed prompt-loss repair, remote parity, complete retention feature
+  or inspection/sweep surface is claimed by this foundation.

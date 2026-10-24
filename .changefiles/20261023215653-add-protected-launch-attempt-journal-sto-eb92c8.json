@@ -1,0 +1,9 @@
+{
+  "comment": "Add protected launch-attempt journal storage with explicit private-input expiry and read-only evidence access; UI and target receipt integration remain separately gated.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

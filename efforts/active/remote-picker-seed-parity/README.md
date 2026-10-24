@@ -167,6 +167,11 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-24** -- Linked attempt-journal proposal #8380 merged with current-head
+  approval and required CI. The reviewed plan preserves target-owned execution,
+  protected 90-day prompt retention and original installed acceptance gates.
+  Begin the journal entry-surface/receipt inventory; no runtime repair or SSH
+  acceptance is implied by the documentation merge.
 - **2026-10-10** -- Operator requested remote New/Resume prompt parity and
   confirmed the effort slug. Searched open remote-prompt issues and PRs; none
   covers this Worktrees flow. Created #6057 and verified compatible target
