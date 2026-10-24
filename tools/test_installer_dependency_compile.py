@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import zipfile
+from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 
@@ -297,6 +298,58 @@ def test_source_compile_refuses_effective_disabled_source_mappings(tmp_path, mon
             trusted_source_roots=(tmp_path,), now=NOW,
         ):
             pytest.fail("disabled source mappings reached export")
+
+
+@pytest.mark.parametrize("expire_at", [1, 2])
+def test_retained_compile_deadline_bounds_both_context_entry_probes(tmp_path, monkeypatch, expire_at):
+    project = source_project(tmp_path / "root")
+    clock = [100.0]
+    monkeypatch.setattr(policy._configuration, "clock", SimpleNamespace(monotonic=lambda: clock[0]))
+    calls = []
+
+    def probe(command, **options):
+        calls.append((command, options))
+        assert 0 < options["timeout"] <= 1
+        clock[0] = 102.0 if len(calls) == expire_at else 100.25
+        return subprocess.CompletedProcess(command, 0, compile_settings(), "")
+
+    monkeypatch.setattr(policy.subprocess, "run", probe)
+    with pytest.raises(policy.DependencyPolicyError, match="deadline"):
+        with policy.retain_uv_compile(
+            "fixture-uv", [str(project / "pyproject.toml")], env={}, cwd=tmp_path,
+            trusted_source_roots=(tmp_path,), now=NOW, deadline=101.0,
+        ):
+            pytest.fail("expired context entry reached compilation")
+    assert len(calls) == expire_at
+    if expire_at == 2:
+        assert not Path(calls[1][1]["cwd"]).exists()
+
+
+def test_retained_compile_deadline_is_checked_during_copy(tmp_path, monkeypatch):
+    project = source_project(tmp_path / "root")
+    clock = [100.0]
+    monkeypatch.setattr(policy._configuration, "clock", SimpleNamespace(monotonic=lambda: clock[0]))
+    original = policy._copy_retained_file
+    copied = []
+
+    def copy(source, destination, *, deadline=None):
+        result = original(source, destination, deadline=deadline)
+        copied.append(Path(destination))
+        clock[0] = 102.0
+        return result
+
+    monkeypatch.setattr(policy, "_copy_retained_file", copy)
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **options: subprocess.CompletedProcess(command, 0, compile_settings(), ""),
+    )
+    with pytest.raises(policy.DependencyPolicyError, match="deadline"):
+        with policy.retain_uv_compile(
+            "fixture-uv", [str(project / "pyproject.toml")], env={}, cwd=tmp_path,
+            trusted_source_roots=(tmp_path,), now=NOW, deadline=101.0,
+        ):
+            pytest.fail("expired copy reached compilation")
+    assert copied and all(not path.exists() for path in copied)
 
 
 @pytest.mark.parametrize("context", ["argument", "environment", "ambient"])

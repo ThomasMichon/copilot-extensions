@@ -130,11 +130,16 @@ small publication units below are agent-recommended execution choices.
 
 ### Phase 2 - Continuing reconciliation
 
-- [ ] Holistically sweep the eligible open backlog and build an issue/effort
+- [x] Holistically sweep the initial eligible backlog and build an issue/effort
   relationship graph; use alignment and theme to identify consolidation groups.
-- [ ] _(Agent-recommended)_ Execute the [graph-first sweep](graph-sweep.md)
+  The [initial graph snapshot](graph-overview.md) accounts for all 695 assigned
+  identities, including its explicit empty/changed-closed exceptions.
+- [ ] Maintain that graph for new inflow, changed acceptance and current custody;
+  refresh deltas rather than repeat unchanged whole-backlog research.
+- [x] _(Agent-recommended)_ Establish the [graph-first sweep](graph-sweep.md)
   through the same four researchers, with explicit primary coverage, cross-theme
-  edges, retained uncertainties and reconstructible operational state.
+  edges, retained uncertainties and reconstructible operational state. Continuing
+  consolidation and delta research remain open below.
 - [ ] Map every original requirement in a proposed consolidation to its complete
   receiving objective or a retained gap; investigate actual implementation
   evidence when claiming completion, rather than making that the prerequisite

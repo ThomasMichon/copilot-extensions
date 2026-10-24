@@ -8,7 +8,8 @@ engine application remains
 **Status: Design approved in #6795; inert record implemented in #7044.**
 Release approval adapter implemented in #8568; installation-owned policy intent
 in #8494; repository-only policy/release planning composition in #8586.
-Independent source locking/admission, real profile publication, consumer
+Explicit retained source-graph candidate export merged in #8600.
+Independent source identity/lock binding and admission, real profile publication, consumer
 admission, deployed engine selection and production rollout remain open.
 
 ## Reconciliation and existing boundaries

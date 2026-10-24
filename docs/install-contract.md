@@ -3041,6 +3041,30 @@ The caller independently verifies the selected source, retains the transaction
 through output consumption, and binds its own lock/trigger before assembly.
 An export alone proves neither source approval nor governed acquisition.
 
+The repository-only `tools/runtime_source_lock.py` adapter binds this candidate
+export to the existing installation-owned source-mode request and independently
+selected `SourceIdentity`. It uses the existing receipt/assembly validator,
+compares the complete selected identity before and after retained resolution,
+checks the actual selected interpreter's marker environment and freezes target,
+capability, extras, fallback trigger, exact pins/hashes and requirements digest.
+Native candidate mode refuses universal or overridden platform resolution,
+including `UV_PYTHON_PLATFORM`, rather than letting a lock for another marker
+environment pass as the selected interpreter's lock. Before compilation, the
+retained copy must cover the existing installer's complete source inventory and
+match the independently verified original digests; checking the original again
+after resolution is not sufficient to detect a transient edit during copying.
+The caller holds the retained payload through candidate consumption. Deadline,
+resolution, integrity and output-limit failures return no candidate and release
+invocation-owned inputs. The deadline begins before retention entry and bounds
+UV settings probes and per-chunk source copying, not only the compiler child.
+Ordinary callers retain their existing default preparation behavior.
+No artifact manifest or successful publication is
+needed. This is not an origin authenticator, feed acquisition boundary,
+complete inspected-wheel profile, reusable admission receipt or installer
+entrypoint. Existing source selection and subsequent governed acquisition own
+those decisions; the private candidate's installation policy is not a public
+release record.
+
 Retain complete admitted projects before merging their declared build-resource
 directories. A resource may be a package subdirectory of another admitted
 project; its presence must not make that parent look fully copied while its
