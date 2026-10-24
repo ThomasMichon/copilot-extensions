@@ -32,8 +32,14 @@ All references use the shared bounded identifier syntax. Generation is an
 integer 1 through `2**63-1`, not boolean.
 
 Supported shapes are `task.submit: {objective}`,
-`workspace.allocate: {repository, objective}` and
-`prompt.deliver: {session, message_ref}`. Supporting their shape does not deliver
+`workspace.allocate: {repository, objective}`,
+`prompt.deliver: {session, message_ref}` and
+`runner.converge: {preparation, allocation, deployment}`. The runner parameters
+are the exact prepared-proposal digest, allocation reference and separately
+selected deployment digest; no chart, values, command or credential is accepted
+in this operation. Its [bounded Helm owner](arc-owner.md) additionally requires
+a current, exact-content admission grant and independently admitted prerequisites.
+Supporting a record's shape does not deliver
 their execution; the `fleet-manager` CLI exposes no execute/admit command.
 Referenced messages, objective content, repository configuration and authorization
 must be resolved through a future trusted owner, not from record text.

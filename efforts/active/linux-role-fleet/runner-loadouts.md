@@ -58,6 +58,42 @@ to rebuild:
 This sequencing is **agent-recommended** and begins only after the amended
 vision and parent plan clear review.
 
+### Adoption-first priority
+
+The operator's latest direction prioritizes formally adopting the **existing**
+ARC runners into fleet-manager and the Gateway controller, preventing unrelated
+work from interfering, and replacing manual tweaks with formal Kubernetes-style
+control. The following implementation sequence is **agent-recommended**:
+
+- Reuse the existing published fleet declaration and actual host/cluster/release
+  identities. Prepare an explicit adopt-in-place transition; do not provision
+  another pool, recreate the cluster, reset runner capacity or replace a running
+  Helm release just to obtain a new ownership marker.
+- Establish durable provider/resource and service custody through their existing
+  owners. Bind the runner role to the admitted fleet/controller installation,
+  not this agent's session, worktree or expiring task lease. Unrelated borrowing,
+  task cleanup and agent retirement must not take or destroy adopted resources.
+- Bind the real controller to published desired state, current authorization,
+  selected artifacts and complete support owners. Verify actual existing-state
+  adoption before enabling reconciliation. ARC remains the sole runner/pod
+  lifecycle owner; the Gateway/fleet controller manages its declared release
+  contract rather than becoming a second Kubernetes scheduler.
+- Prove current-state inspection, unchanged repeat, drift refusal or supported
+  repair, controller/client restart independence and preservation of running
+  jobs, identities and isolation. Stale or unavailable source/authority must not
+  silently reset the pool or widen its configuration.
+- Stop ad hoc tuning once controller ownership is established. Retire the
+  protective agent lease/renewal only after real durable adoption is acknowledged
+  by the existing resource owner and its protection against unrelated work is
+  verified. Renaming a lease holder or allowing its timer to expire is not that
+  transition.
+
+Live adoption still requires inspection and approval of its exact prepared
+transition. This priority does not implicitly authorize destructive rollout,
+credential transfer, new capacity or workflow routing. A source merge,
+configuration row, observer callback or synthetic receipt is not proof of
+durable ownership or a functioning controller.
+
 ### 1. Template and allocation composition
 
 Extend the existing installed fleet-manager package rather than adding a
@@ -147,6 +183,11 @@ parallel registrar or planner.
   redaction, drain/removal preservation and one real authorized Actions job on
   the declared scale set. Report installed, running, authenticated, ready and
   used separately.
+- Existing-pool adoption proves durable provider/service custody, refusal of
+  unrelated agent borrowing/cleanup, unchanged ARC identity/capacity/isolation
+  and session-independent controller reconciliation. Only then discharge the
+  temporary agent-held resource obligation through its existing canonical owner;
+  a task-lease renewal or changed holder is not permanent adoption.
 - Every source slice follows ordinary required CI, actual review, exact-head
   merge verification and a documentation-impact assessment. No source PR or
   planner result authorizes a live pool migration, routing change, new capacity

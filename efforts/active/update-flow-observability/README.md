@@ -30,6 +30,7 @@ while retaining installation, ownership, policy and health contracts.
 | Bridge serving source implementer | Only #6826 in an independent managed worktree and source PR; no production update or recovery authority | Coordinator's bounded cooperating-session delegation |
 | Updater failure-boundary implementer | Only the two reached stdio hops and native-owner settlement of positively confirmed pre-spawn failure under #7743; no shared broker or installed recovery authority | Managed source handle `rusty-kiln`; public coordination on #7743 |
 | Directory-evidence cost implementer | Only #8679's repeated directory-marketplace parsing in native source admission and directly dependent generated consumers; no policy, provider, archival or runtime lifecycle redesign | Managed source handle `eager-widget`; public coordination on #8679 |
+| POSIX bootstrap no-op implementer | Only marker-aware completed-runtime readiness and directly dependent hook-family coverage under #7743; existing admission/lifetime owners retained | Managed source handle `tinkling-capacitor`; public coordination on #7743 |
 
 ## Coordination
 
@@ -187,6 +188,10 @@ not replace the held #6859 / #7833 lifetime repair.
   normal containing release, and report installed acceptance separately.
 
 ### Phase 3 - Remove proven unnecessary work
+
+- [ ] Complete the [bounded POSIX marker-only bootstrap readiness](posix-bootstrap-marker-readiness.md)
+  repair, retaining first-touch, changed, fallback, refusal and guidance behavior
+  without requiring legacy links or relaxing startup deadlines.
 
 - [x] Verify existing final-integration deferral with native invocation counts
   and current/changed/first-touch aggregate ordering (#6933).
