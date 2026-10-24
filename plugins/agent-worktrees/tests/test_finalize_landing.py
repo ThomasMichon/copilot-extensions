@@ -1210,7 +1210,7 @@ def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
             mux_calls.append(worktree_id)
             return False
 
-        def no_checkout_holders(worktree_path):
+        def no_checkout_holders(worktree_path, **kwargs):
             process_calls.append(Path(worktree_path))
             return []
 

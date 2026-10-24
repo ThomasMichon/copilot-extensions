@@ -292,11 +292,16 @@ def _revalidate_cleanup_safety(
         return fresh_info, active_paths, session_ctx
 
     def _do_reap(
-        latest: tracking.WorktreeRecord, fresh_info: git_ops.WorktreeStateInfo
-    ) -> tuple[int, list[str]]:
-        if reap is not None:
-            return reap(latest, fresh_info)
-        return 0, []
+        latest: tracking.WorktreeRecord, fresh_info: git_ops.WorktreeStateInfo,
+        reason: str, bucket: str,
+    ) -> RevalidationResult:
+        failures, warnings = reap(latest, fresh_info) if reap is not None else (0, [])
+        return RevalidationResult(
+            failures == 0,
+            ("; ".join(warnings) or "checkout retirement deferred") if failures else reason,
+            "retirement-deferred" if failures else bucket,
+            latest, fresh_info, failures=failures, warnings=warnings, reaped=reap is not None,
+        )
 
     try:
         with tracking._RecordLock(yaml_path, require_sidecar=True):
@@ -328,11 +333,7 @@ def _revalidate_cleanup_safety(
                     return RevalidationResult(False, blocker.reason, blocker.bucket)
 
             if force:
-                failures, warnings = _do_reap(latest, fresh_info)
-                return RevalidationResult(
-                    True, "forced", "forced", latest, fresh_info,
-                    failures=failures, warnings=warnings, reaped=reap is not None,
-                )
+                return _do_reap(latest, fresh_info, "forced", "forced")
 
             if fresh_info.state == git_ops.WorktreeState.GONE:
                 upstream = f"{repo.remote}/{repo.default_branch}"
@@ -343,11 +344,7 @@ def _revalidate_cleanup_safety(
                         False,
                         "branch has unmerged commits (worktree dir missing)",
                         "unmerged")
-                failures, warnings = _do_reap(latest, fresh_info)
-                return RevalidationResult(
-                    True, "gone; branch merged", "clean", latest, fresh_info,
-                    failures=failures, warnings=warnings, reaped=reap is not None,
-                )
+                return _do_reap(latest, fresh_info, "gone; branch merged", "clean")
 
             norm = sessions._normalize_path(latest.worktree_path) if latest.worktree_path else ""
             turns = session_ctx.turn_count.get(norm, 0)
@@ -364,11 +361,7 @@ def _revalidate_cleanup_safety(
                 blockers = _closure_blockers(latest, fresh_info, disp, turn_count=turns)
                 reason = _enrich_reason_with_blockers(disp.reason, blockers)
                 return RevalidationResult(False, reason, disp.bucket)
-            failures, warnings = _do_reap(latest, fresh_info)
-            return RevalidationResult(
-                True, disp.reason, disp.bucket, latest, fresh_info,
-                failures=failures, warnings=warnings, reaped=reap is not None,
-            )
+            return _do_reap(latest, fresh_info, disp.reason, disp.bucket)
     except TimeoutError:
         return RevalidationResult(
             False, "revalidation lock contended", "locked")

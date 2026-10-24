@@ -25,7 +25,7 @@ def test_cleanup_trust_follows_actual_directory_removal(
     monkeypatch.setattr(cleanup_reap, "retirement_blocker", lambda record: None)
     inspections = []
 
-    def inspect(path):
+    def inspect(path, **kwargs):
         inspections.append(path)
         return []
 
@@ -70,7 +70,7 @@ def test_cleanup_preserves_checkout_held_by_live_process(
     monkeypatch.setattr(cleanup_reap, "retirement_blocker", lambda record: None)
     monkeypatch.setattr(
         cleanup_reap.procs, "processes_with_cwd_under",
-        lambda path: [{"pid": 12345, "name": "holder"}],
+        lambda path, **kwargs: [{"pid": 12345, "name": "holder"}],
     )
     effects = []
     monkeypatch.setattr(sessions, "kill_tmux_session", lambda *a: effects.append("mux"))
@@ -104,9 +104,41 @@ def test_cleanup_preserves_checkout_held_by_live_process(
     assert str(checkout.resolve()) in data["trustedFolders"]
 
 
+@pytest.mark.parametrize("system", ["Darwin", "Windows", "Linux"])
+def test_cleanup_defers_when_cwd_inspection_is_unavailable(
+    tmp_path, monkeypatch, sample_record, system,
+):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    record = replace(sample_record, worktree_path=str(checkout))
+    monkeypatch.setattr(cleanup_reap, "retirement_blocker", lambda record: None)
+    monkeypatch.setattr(cleanup_reap.procs.platform, "system", lambda: system)
+
+    def unavailable(*args, **kwargs):
+        raise OSError("backend unavailable")
+
+    if system == "Windows":
+        monkeypatch.setattr(cleanup_reap.procs, "_win_kernel32", unavailable)
+    elif system == "Linux":
+        monkeypatch.setattr(cleanup_reap.procs, "_iter_processes_posix", unavailable)
+
+    def unexpected_removal(*args, **kwargs):
+        pytest.fail("Unavailable cwd inspection must not permit checkout removal")
+
+    monkeypatch.setattr(cleanup_reap.git_ops, "remove_worktree", unexpected_removal)
+    failures, warnings = cleanup_reap._reap_locked(
+        record, SimpleNamespace(state=SimpleNamespace(value="completed")),
+        SimpleNamespace(anchor=str(tmp_path / "anchor")), tmp_path,
+    )
+    assert failures == 1
+    assert any("inspection unavailable" in warning for warning in warnings)
+    assert checkout.exists()
+
+
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
+@pytest.mark.skipif(sys.platform not in {"win32", "linux"}, reason="native cwd reader unavailable")
 def test_cleanup_waits_for_real_checkout_holder_to_exit(
     tmp_path, monkeypatch, sample_record,
 ):

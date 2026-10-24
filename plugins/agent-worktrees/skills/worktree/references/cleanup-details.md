@@ -46,6 +46,10 @@ Finalize can mark landed work finalized while retaining its checkout and branch
 for the same reason. Neither path kills mux sessions or cwd-matched processes.
 A matching cwd shows use, not teardown ownership; let the process owner stop it,
 then retry ordinary cleanup.
+Unavailable inspection also defers removal; the current cwd reader supports
+Windows and Linux, not macOS. A deferred single-item cleanup reports
+`removed: false`, `skipped: true` and its reason in JSON and text, rather than
+claiming the checkout was removed.
 
 Open PRs override `finalized` tracking and Git-completed content. The same
 obligation check runs before retiring a missing checkout and before archiving

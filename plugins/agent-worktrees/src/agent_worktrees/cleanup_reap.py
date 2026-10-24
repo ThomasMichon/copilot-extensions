@@ -68,12 +68,11 @@ def _reap_locked(
         return 0, warnings
 
     if rec.worktree_path and Path(rec.worktree_path).exists():
-        holders = procs.processes_with_cwd_under(rec.worktree_path)
-        if holders:
-            names = ", ".join(f"{p['name'] or '?'}({p['pid']})" for p in holders)
+        process_blocker = procs.checkout_retirement_blocker(rec.worktree_path)
+        if process_blocker:
             return 1, [
-                f"Cannot retire {rec.worktree_id}: live process(es) still use the checkout: "
-                f"{names}. Cleanup deferred; let their owner stop them before retrying."
+                f"Cannot retire {rec.worktree_id}: {process_blocker}. "
+                "Cleanup deferred; settle process use with its owner before retrying."
             ]
 
         if not git_ops.remove_worktree(repo.anchor, rec.worktree_path):

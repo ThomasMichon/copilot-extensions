@@ -56,12 +56,14 @@ def _is_under(cwd: str, root: str) -> bool:
 # POSIX
 # ---------------------------------------------------------------------------
 
-def _iter_processes_posix():
+def _iter_processes_posix(*, strict: bool = False):
     """Yield ``(pid, cwd, name)`` for readable processes via ``/proc``."""
     proc = Path("/proc")
     try:
         entries = list(proc.iterdir())
     except OSError:
+        if strict:
+            raise
         return
     for entry in entries:
         if not entry.name.isdigit():
@@ -719,25 +721,33 @@ def count_processes_named(name: str, *, exclude_pid: int | None = None) -> int:
 
 
 def processes_with_cwd_under(
-    root: str, *, exclude_pids: set[int] | None = None,
+    root: str, *, exclude_pids: set[int] | None = None, require_available: bool = False,
 ) -> list[dict]:
     """Find processes whose cwd is at or under ``root``.
 
     Returns a list of ``{"pid": int, "name": str}`` dicts.  Best-effort: any
     process that can't be opened or read is silently skipped, and the current
     process (plus ``exclude_pids``) is never reported.
+    ``require_available`` raises ``OSError`` for unsupported platforms or an
+    unavailable enumeration backend; unreadable individual processes still skip.
     """
+    system = platform.system()
+    if require_available and system not in {"Windows", "Linux"}:
+        raise OSError(f"cwd inspection unsupported on {system}")
     excluded = {os.getpid()}
     if exclude_pids:
         excluded |= exclude_pids
     hits: list[dict] = []
 
-    if platform.system() == "Windows":
+    if system == "Windows":
         try:
             k32 = _win_kernel32()
         except OSError:
+            if require_available:
+                raise
             return hits
-        for pid in _win_enum_pids():
+        pids = _win_enum_pids(strict=True) if require_available else _win_enum_pids()
+        for pid in pids:
             if pid in excluded:
                 continue
             try:
@@ -747,12 +757,25 @@ def processes_with_cwd_under(
             if _is_under(cwd, root):
                 hits.append({"pid": pid, "name": name})
     else:
-        for pid, cwd, name in _iter_processes_posix():
+        processes = _iter_processes_posix(strict=True) if require_available else _iter_processes_posix()
+        for pid, cwd, name in processes:
             if pid in excluded:
                 continue
             if _is_under(cwd, root):
                 hits.append({"pid": pid, "name": name})
     return hits
+
+
+def checkout_retirement_blocker(root: str) -> str | None:
+    """Keep unavailable cwd discovery distinct from a supported empty result."""
+    try:
+        holders = processes_with_cwd_under(root, require_available=True)
+    except OSError as exc:
+        return f"cwd inspection unavailable: {exc}; checkout removal deferred"
+    if holders:
+        names = ", ".join(f"{p['name'] or '?'}({p['pid']})" for p in holders)
+        return f"live process(es) still use the checkout: {names}"
+    return None
 
 
 def terminate_processes_under(

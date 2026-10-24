@@ -15,7 +15,16 @@ pytestmark = pytest.mark.usefixtures("git_only_mux")
 
 
 class TestPRFinalize(PRWorkflowSetup):
-    @pytest.mark.parametrize("disposition", ["retained", "live-process", "failed-removal", "removed"])
+    @pytest.fixture(autouse=True)
+    def _isolate_resource_warning_inventory(self, monkeypatch):
+        from agent_worktrees import finalize as fin
+
+        monkeypatch.setattr(fin, "_warn_of_codespace_claims_for_worktree", lambda *a: None)
+        monkeypatch.setattr(fin, "_warn_of_dev_slot_claims_for_worktree", lambda *a: None)
+
+    @pytest.mark.parametrize(
+        "disposition", ["retained", "live-process", "unsupported-platform", "failed-removal", "removed"],
+    )
     def test_trust_lives_until_checkout_is_actually_removed(
         self, published_pr_repo, monkeypatch, disposition,
     ):
@@ -29,9 +38,12 @@ class TestPRFinalize(PRWorkflowSetup):
         permissions.ensure_trusted_folder(str(wt_path))
         monkeypatch.setattr(fin, "_has_live_session", lambda record: False)
         monkeypatch.setattr(fin.git_ops, "is_cwd_inside", lambda path: disposition == "retained")
+        real_cwd_inspection = fin.procs.processes_with_cwd_under
         monkeypatch.setattr(
             fin.procs, "processes_with_cwd_under",
-            lambda path: [{"pid": 12345, "name": "holder"}] if disposition == "live-process" else [],
+            lambda path, **kwargs: (
+                [{"pid": 12345, "name": "holder"}] if disposition == "live-process" else []
+            ),
         )
 
         def unexpected_teardown(*args, **kwargs):
@@ -39,6 +51,9 @@ class TestPRFinalize(PRWorkflowSetup):
 
         monkeypatch.setattr(fin.procs, "terminate_processes_under", unexpected_teardown)
         monkeypatch.setattr(sessions, "kill_tmux_session", unexpected_teardown)
+        if disposition == "unsupported-platform":
+            monkeypatch.setattr(fin.procs.platform, "system", lambda: "Darwin")
+            monkeypatch.setattr(fin.procs, "processes_with_cwd_under", real_cwd_inspection)
         if disposition == "failed-removal":
             monkeypatch.setattr(fin.git_ops, "remove_worktree", lambda *a, **k: False)
             monkeypatch.setattr(fin.shutil, "rmtree", lambda *a, **k: None)
@@ -49,7 +64,7 @@ class TestPRFinalize(PRWorkflowSetup):
         present = disposition != "removed"
         assert wt_path.exists() is present
         assert (str(wt_path.resolve()) in data["trustedFolders"]) is present
-        if disposition == "live-process":
+        if disposition in {"live-process", "unsupported-platform"}:
             assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
             _git("show-ref", "--verify", f"refs/heads/{rec.branch}", cwd=wt_path)
 
@@ -178,7 +193,7 @@ class TestPRFinalize(PRWorkflowSetup):
         rec.pr.state = "merged"
         tracking.save_record(rec)
 
-        def racing_inspection(worktree_path):
+        def racing_inspection(worktree_path, **kwargs):
             (wt_path / "raced_in_late.txt").write_text("landed during cleanup\n")
             git_ops.git("add", "-A", cwd=str(wt_path))
             git_ops.git("commit", "-m", "late race window commit", cwd=str(wt_path))

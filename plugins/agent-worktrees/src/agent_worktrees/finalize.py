@@ -1637,13 +1637,13 @@ def validate_and_finalize(
         _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
         from .finalized_checkout import optional_snapshot
         finalized_identity = optional_snapshot(worktree_path) if Path(worktree_path).exists() else None
-        holders = (
-            procs.processes_with_cwd_under(worktree_path)
+        process_blocker = (
+            procs.checkout_retirement_blocker(worktree_path)
             if checkout_managed and not inside_worktree and not has_live_session
             and Path(worktree_path).exists()
-            else []
+            else None
         )
-        if not checkout_managed or inside_worktree or has_live_session or holders:
+        if not checkout_managed or inside_worktree or has_live_session or process_blocker:
             reason = (
                 "the checkout is owned by an external session host"
                 if not checkout_managed
@@ -1653,8 +1653,7 @@ def validate_and_finalize(
                     else (
                         "a live session or guidance worker is still using the worktree"
                         if has_live_session
-                        else "live process(es) still use the checkout: "
-                        + ", ".join(f"{p['name'] or '?'}({p['pid']})" for p in holders)
+                        else process_blocker
                     )
                 )
             )
@@ -1688,7 +1687,7 @@ def validate_and_finalize(
                     if not checkout_managed
                     else (
                         "inside_worktree" if inside_worktree
-                        else ("live_session" if has_live_session else "live_process")
+                        else ("live_session" if has_live_session else "process_blocker")
                     )
                 ),
             )
