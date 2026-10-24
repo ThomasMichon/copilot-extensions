@@ -415,7 +415,7 @@ def test_reconcile_launch_survives_hup_with_home_cwd(tmp_path: Path) -> None:
         'printf "%s\\n%s\\n" "$BASHPID" "$PWD" >"$HOME/ready"\n'
         'sleep 1\nprintf "done" >"$HOME/completed"\n', encoding="utf-8",
     )
-    text = (ROOT / "plugins" / "agent-codespaces" / "scripts" / "bootstrap-check.sh").read_text()
+    text = (ROOT / "plugins" / "agent-logger" / "scripts" / "bootstrap-check.sh").read_text()
     launch_start = text.index('cd "$HOME" || { echo "reconcile launch failed:')
     launch_end = text.index("\n", text.index("nohup bash ", launch_start))
     launch = text[launch_start:launch_end]

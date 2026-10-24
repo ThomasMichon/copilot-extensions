@@ -31,9 +31,11 @@ dependencies = [
     "agent-session-liveness-probe",
     "agent-single-instance-lease",
     "agent-remote-login-shell",
+    "agent-update-driver",
 ]
 
 [tool.uv.sources]
+agent-update-driver = { path = "../../libs/update-driver", editable = true }
 agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 # Always resolve the vendored lib from the local path, never an index.
 # The distribution is named agent-ssh-manager (not the squatted PyPI name
