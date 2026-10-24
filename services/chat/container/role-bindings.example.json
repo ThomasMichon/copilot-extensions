@@ -1,0 +1,26 @@
+{
+  "schema": "fleet-manager.role-bindings",
+  "version": 1,
+  "providers": {
+    "manager": {
+      "implementation": "komodo",
+      "instance_ref": "core-a",
+      "target": "host-a",
+      "configuration_ref": "core-config",
+      "bootstrap_ref": "independent-bootstrap"
+    }
+  },
+  "bindings": {
+    "chat": {
+      "implementation": "container.service",
+      "provider": "manager",
+      "target": "host-a",
+      "resource": "chat-stack",
+      "artifact_ref": "approved-chat-image",
+      "configuration_ref": "chat-service-config",
+      "key_refs": ["chat-domain-identity"],
+      "requires": ["container-role", "named-resource"],
+      "depends_on": []
+    }
+  }
+}
