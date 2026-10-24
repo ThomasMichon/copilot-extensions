@@ -137,7 +137,8 @@ and agent-ssh)"`. No production credentials, remote hosts or capacity are needed
 
 The manual `installation-context-acceptance.yml` selector
 `interactive_completion=true` runs `libs/agent-procutil/tests/test_interactive.py`
-on Linux, macOS and Windows. It exercises real finite commands, normal-exit
+and `test_interactive_session_native.py` on Linux, macOS and Windows. It
+exercises real finite commands, normal-exit
 descendant cleanup, abrupt caller death, POSIX interruption and controlling-PTY
 input/resize/foreground restoration. Windows also generates a real SIGINT in
 the owned caller while its command remains blocked, then verifies descendant
@@ -145,6 +146,11 @@ exit; it does not broadcast signals to an external console. Job refusal and
 cleanup-failure confirmation remain deterministic unit controls. This is
 completion custody evidence, not a resident Picker startup benchmark or an
 installed-runtime rollout, and does not expand required unit-only PR CI.
+The separate-session native cases use a real interactive Bash with background
+job groups, preserve redirected JSON stdout and check that an explicitly
+managed detached workload remains live. Managed-detachment cases skip inside
+the contained local runner rather than bypassing its suppression; they run in
+the explicit disposable native workflow.
 
 ## Optional candidate dependency profiles
 

@@ -275,8 +275,8 @@ escape, an installation queue or macOS admission.
 
 ## Caller-owned interactive completion
 
-`interactive.run_interactive(argv, env=...)` runs a foreground command with
-unchanged stdin/stdout/stderr and returns its exit status. Use it after an
+`interactive.run_interactive(argv, env=...)` runs a foreground command and
+returns its exit status. Use it after an
 interactive UI has returned, not on the UI's first-paint path. It requires
 the main thread and settles owned descendants before returning, including on
 Ctrl-C (130) or caller death. Cleanup failure raises `OwnedCleanupError` with
@@ -285,23 +285,35 @@ Normal exit codes are preserved; POSIX signal termination uses `128 + signal`,
 and Windows' native control-C status maps to 130 rather than a wrapped CLI code.
 
 Windows requires suspended assignment to a kill-on-close Job and confirms
-Job termination. Linux and macOS use a finite same-terminal-session group
-owner, with the canonical caller-lifetime descriptor and unreaped group
-confirmation. A start gate prevents command execution before foreground
-handoff. Control/status pipes are separate from the real terminal streams;
-input, kernel resize signals and control signals reach the command directly.
-Stopped commands hand the terminal back and suspend the caller's foreground
-job group, including a shell wrapper, for normal suspend/resume. Without a
+Job termination. Linux and macOS use a finite guardian with a private session.
+With a caller terminal, it owns a separate PTY: bytes and resize events are
+relayed, the completion terminal-device identity changes, and redirected
+non-TTY streams remain inherited rather than entering the relay. The caller's
+terminal attributes are restored on every exit. A start gate precedes command
+execution and the command has its own foreground group inside that session.
+Control/status pipes remain separate from terminal data.
+
+Retirement covers every ordinary job group in the private session, not just
+the initial group. Kernel `setpgroup` admission places owned child anchors only
+in that session; unreaped anchors pin group IDs through signalling. The caller
+retains the guardian unreaped until a whole-session census confirms no live
+members. A permission failure or partial census is not settlement.
+Stopped commands suspend the caller's foreground job group, including a shell
+wrapper, for normal suspend/resume. Without a
 controlling terminal, a stopped command fails explicitly and is cleaned up
 instead of signalling an unrelated parent group.
 Foreground ownership and terminal attributes are restored on exit;
 an unrelated foreground owner is never replaced.
 
-This is finite command custody, not a terminal server, PTY relay or daemon.
-Workloads that explicitly detach through managed lifecycle APIs remain outside
-its scope. The noninteractive streaming API below is still preferred for
+This is a finite post-UI relay and custody helper, not a shared terminal server
+or daemon. Workloads that explicitly detach into another session through
+managed lifecycle APIs remain outside its scope. The noninteractive streaming
+API below is preferred for
 bounded captured commands. `tests/test_interactive.py` covers strict Windows
 teardown plus native descendant and POSIX controlling-terminal behavior.
+`tests/test_interactive_session_native.py` additionally exercises an actual
+interactive shell with separate job groups, redirected JSON stdout and the
+managed-detachment exemption.
 The `interactive_completion=true` selector in the manual
 `installation-context-acceptance.yml` lane runs this focused packet on Linux,
 macOS and Windows; it does not widen required unit-only PR CI.

@@ -78,10 +78,13 @@ action. The provider owns mux identity, cancellation, bounded result retention,
 drain and runtime lifetime; the engine owns no Textual or mux implementation.
 
 Completion uses `agent_procutil.interactive.run_interactive` only after
-attachment returns. It preserves real terminal streams and foreground signal/
-resize delivery while retaining descendant custody through interruption or
-caller death: a required Job on Windows, a finite same-session group owner
-on Linux/macOS. Owned descendants settle before return; explicitly detached
+attachment returns. Windows retains its real console streams and a required
+Job. Linux/macOS completion uses a dedicated owned session and PTY relay,
+with input/resize/suspend handling and inherited redirected non-TTY streams.
+Its completion terminal-device identity changes; the UI attachment path does
+not. Every ordinary job group in that private session settles before return,
+including shell-created groups after interruption or caller death; explicitly
+detached
 managed workloads keep their existing lifecycle. This does not add another
 interpreter to the pre-paint attachment path.
 

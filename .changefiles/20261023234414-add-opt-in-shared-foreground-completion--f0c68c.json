@@ -1,5 +1,5 @@
 {
-  "comment": "Add opt-in shared foreground completion custody with strict Windows Job teardown and same-terminal POSIX caller-lifetime supervision; use it only after resident Picker attachment returns.",
+  "comment": "Add opt-in shared foreground completion custody with strict Windows Job teardown and a private POSIX PTY/session that retires shell-created job groups while preserving managed detachment; use it only after resident Picker attachment returns.",
   "changes": [
     {
       "plugin": "agent-bridge",

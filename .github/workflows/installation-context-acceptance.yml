@@ -363,7 +363,7 @@ jobs:
       - name: Qualify real descendant and controlling-terminal ownership
         run: |
           python tools/seasoned_uv.py --uv uv -- --system pytest psutil
-          python -m pytest -q libs/agent-procutil/tests/test_interactive.py
+          python -m pytest -q libs/agent-procutil/tests/test_interactive.py libs/agent-procutil/tests/test_interactive_session_native.py
 
   interactive-completion-macos:
     if: ${{ inputs.interactive_completion }}

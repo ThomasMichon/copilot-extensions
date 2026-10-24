@@ -106,25 +106,59 @@ def test_windows_native_exit_status_preserves_normal_codes_and_normalizes_contro
 
 @pytest.mark.parametrize("confirmed", [True, False])
 def test_darwin_permission_refusal_is_not_itself_cleanup_confirmation(monkeypatch, confirmed):
-    from agent_procutil import _caller_owned, owned_process
+    from agent_procutil import _interactive_groups as groups
+
+    custody = object.__new__(groups.SessionCustody)
+    custody.census = SimpleNamespace(groups=lambda: set() if confirmed else {123})
+    monkeypatch.setattr(groups, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(groups.os, "killpg", Mock(side_effect=PermissionError), raising=False)
+    monkeypatch.setattr(groups.signal, "SIGKILL", 9, raising=False)
+    if confirmed:
+        custody._kill(123)
+    else:
+        with pytest.raises(PermissionError):
+            custody._kill(123)
+
+
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_full_session_confirmation_retains_guardian_until_all_groups_exit(monkeypatch, confirmed):
+    from agent_procutil import _interactive_groups as groups
+    from agent_procutil import owned_process
 
     process = Mock(pid=123)
-    monkeypatch.setattr(api.sys, "platform", "darwin")
-    monkeypatch.setattr(owned_process, "_retire_posix_group", Mock(side_effect=PermissionError))
+    census = Mock()
+    census.groups.return_value = set() if confirmed else {456}
+    monkeypatch.setattr(groups, "SessionCensus", Mock(return_value=census))
     monkeypatch.setattr(owned_process, "_observe_unreaped", Mock(return_value=object()))
-    confirm = Mock()
-    if not confirmed:
-        confirm.side_effect = OwnedCleanupError(process)
-    monkeypatch.setattr(_caller_owned, "_confirm_group", confirm)
     if confirmed:
-        api._settle_posix(process)
+        groups.confirm_session(process)
         process.wait.assert_called_once_with(timeout=2)
     else:
         with pytest.raises(OwnedCleanupError) as caught:
-            api._settle_posix(process)
+            groups.confirm_session(process, timeout=.001)
         assert caught.value.process is process
         process.wait.assert_not_called()
-    confirm.assert_called_once_with(process)
+    assert census.groups.called
+
+
+def test_a_recycled_group_in_another_session_is_never_signalled(monkeypatch):
+    from agent_procutil import _interactive_groups as groups
+
+    custody = object.__new__(groups.SessionCustody)
+    custody.session, custody.lifetime = 123, 17
+    custody.anchors, custody.pending = {}, []
+    custody.census = Mock()
+    custody.census.groups.side_effect = [{456}, set(), set()]
+    kill = Mock()
+    spawn = Mock(side_effect=PermissionError(1, "different session"))
+    monkeypatch.setattr(groups, "os", SimpleNamespace(
+        getpid=lambda: 123, pipe=lambda: (18, 19), close=Mock(),
+        posix_spawn=spawn, environ={}, devnull=os.devnull, O_WRONLY=os.O_WRONLY,
+        POSIX_SPAWN_DUP2=2, POSIX_SPAWN_OPEN=0, killpg=kill,
+    ))
+    custody.retire()
+    assert spawn.call_args.kwargs["setpgroup"] == 456
+    kill.assert_not_called()
 
 
 @pytest.mark.skipif(not SUPPORTED, reason="native ownership support required")
