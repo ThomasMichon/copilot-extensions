@@ -41,6 +41,14 @@ identifies the fresh existing Job-list adapter, its missing deadline/reader
 contract and the separate client promotion-before-drain boundary. Neither
 new shared creation behavior nor that client hunk is implemented or admitted.
 
+The next exact atomic/client amendments were subsequently admitted, but
+caller recovery exposed the additional unadmitted `activate_after_update`
+owner-fencing hunk documented in that proposal. Client/native implementation
+remains pending that explicit stop. Six independent contained corrections
+now have captured fail-first tests and a **133-pass** bounded source receipt;
+neither that local result nor the resolved census Medium accepts the source
+or closes the two remaining native/client boundaries.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |

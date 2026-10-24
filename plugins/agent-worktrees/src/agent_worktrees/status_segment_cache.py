@@ -40,6 +40,12 @@ class _StatusSegmentCache:
     def pending_segment() -> str:
         return "UNKNOWN (cleanup pending)"
 
+    def pending_segment_for_path(self, path: str) -> str:
+        with self._lock:
+            key = self._key(path)
+            key = self._aliases.get(key, key)
+            return self._entries.get(key, (0.0, self.pending_segment()))[1]
+
     def _blocked(self, project: str, path: str | None = None) -> bool:
         if self._closing_observations:
             return True
@@ -134,21 +140,24 @@ class _StatusSegmentCache:
 
     def settle_pending_once(self) -> int:
         with self._lock:
-            pending = [
-                (ticket, ticket.revision, (ticket.cleanup, *ticket.additional))
-                for ticket in self._observations.values()
-                if ticket.cleanup is not None and not ticket.settling
-            ]
-            for ticket, _revision, _errors in pending:
+            pending = list(self._observations.values())
+        for ticket in pending:
+            with self._lock:
+                if (self._observations.get(ticket.key) is not ticket
+                        or ticket.cleanup is None or ticket.settling):
+                    continue
+                revision = ticket.revision
+                errors = (ticket.cleanup, *ticket.additional)
                 ticket.settling = True
-        for ticket, revision, errors in pending:
-            settled = True
+            settled = False
             try:
+                results = []
                 for error in errors:
                     try:
-                        settled = error.try_settle() and settled
+                        results.append(error.try_settle() is True)
                     except Exception:
-                        settled = False
+                        results.append(False)
+                settled = all(results)
             finally:
                 with self._lock:
                     ticket.settling = False

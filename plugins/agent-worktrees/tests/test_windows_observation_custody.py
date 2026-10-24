@@ -458,7 +458,9 @@ def test_served_snapshot_and_warm_roster_share_one_carrier(owner, monkeypatch, h
 
 
 @pytest.mark.parametrize("ignore_custody", [False, True])
-def test_actual_monitor_shutdown_retains_custody_and_negative_control(owner, monkeypatch, ignore_custody):
+def test_actual_monitor_shutdown_retains_custody_and_negative_control(
+    owner, monkeypatch, ignore_custody, operation="shutdown",
+):
     import shutil
     import single_instance_lease
     from agent_worktrees import (
@@ -466,6 +468,7 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(owner, mon
         worktrees_runtime, repository_map, worktree_status_daemon, mux_link,
         handoff_prompt_receipt_control as receipt_control, resident_push,
         registry_paths, loop_governance, session_catalog, pane_reaper, locks, tracking_write,
+        status_monitor_drain,
     )
 
     settled = [False]
@@ -503,6 +506,12 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(owner, mon
         def close_admission(self, *a):
             pass
 
+        def activate(self):
+            pass
+
+        def lock_extra(self):
+            return {}
+
         def active_work_count(self):
             return 0
 
@@ -522,6 +531,36 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(owner, mon
             self.handle = handle
 
         def start(self):
+            if operation == "undrain":
+                owner.close_observation_admission()
+                assert self.handle("undrain", {}) == {"draining": False}
+                assert not owner._closing_observations, "undrain left observation admission closed"
+            if operation == "force-race":
+                owner._observations.clear()
+                enter = threading.Event()
+                acquired = threading.Event()
+                close = owner.close_observation_admission
+
+                def acquire():
+                    assert enter.wait(15)
+                    pending(owner, error=error)
+                    acquired.set()
+
+                def close_with_barrier():
+                    enter.set()
+                    assert acquired.wait(15)
+                    close()
+
+                monkeypatch.setattr(owner, "close_observation_admission", close_with_barrier)
+                worker = threading.Thread(target=acquire)
+                worker.start()
+                try:
+                    result = self.handle("drain", {"force": True, "timeout": 0})
+                    assert result["drained"] is False, "force accepted custody admitted before close"
+                finally:
+                    enter.set()
+                    worker.join(15)
+                assert not worker.is_alive()
             assert self.handle("shutdown", {})["shutdown"]
 
         def current_read_count(self, *a):
@@ -532,6 +571,7 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(owner, mon
 
     receipts = SimpleNamespace(
         close_admission=lambda: None, active_count=lambda: 0, wait_idle=lambda: None,
+        open_admission=lambda: None,
     )
     monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
@@ -561,6 +601,11 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(owner, mon
     monkeypatch.setattr(locks, "lock_is_live", lambda *a: False)
     monkeypatch.setattr(locks, "write_lock", lambda *a, **k: True)
     monkeypatch.setattr(tracking_write, "has_inflight_write", lambda: False)
+    monkeypatch.setattr(tracking_write, "_ensure_verb_modules_loaded", lambda: None)
+    monkeypatch.setattr(tracking_write, "start_server", lambda *a: fail(OSError("injected")))
+    monkeypatch.setattr(status_monitor_drain.lifecycle, "record", lambda *a, **k: True)
+    from agent_worktrees import classify_daemon
+    monkeypatch.setattr(classify_daemon, "start_server", lambda *a: fail(OSError("injected")))
     monkeypatch.setattr(monitor, "_wake_interruptible_wait", lambda *a: None)
     monkeypatch.setattr(monitor, "_SELF_RETIRE_MAX_GRACE_S", -1)
     monkeypatch.setattr(go, "git", lambda *a, **k: pytest.fail("shutdown Git"))
@@ -714,3 +759,149 @@ def test_updater_negative_control_detects_swallowed_custody(monkeypatch):
         updater._run_status_updater_loop(
             "/repo/wt", 15, state, lambda: True, lambda: False, lambda *a: None,
         )
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, SystemExit])
+def test_interrupted_settlement_preserves_every_ticket(owner, interruption):
+    first = pt.ObservationCleanupError("A")
+    second = pt.ObservationCleanupError("B")
+    first.try_settle = lambda: fail(interruption())
+    second.try_settle = lambda: True
+    pending(owner, error=first)
+    with pytest.raises(pt.ObservationCleanupError):
+        owner.run_observation("B", "/B", "/B/wt", lambda: fail(second))
+    with pytest.raises(interruption):
+        owner.settle_pending_once()
+    assert owner.observation_counts() == (0, 2)
+    assert all(not ticket.settling for ticket in owner._observations.values())
+    first.try_settle = lambda: True
+    assert owner.settle_pending_once() == 0
+
+
+@pytest.mark.parametrize("path", ["/repo/wt2", "/unresolved/wt"])
+def test_snapshot_gates_sibling_and_unknown_path_before_discovery(owner, monkeypatch, path):
+    pending(owner)
+    monkeypatch.setattr(core, "_hook_payload_cwd", lambda payload: path)
+    monkeypatch.setattr(core, "_activate_project_for_path", lambda *a, **k: pytest.fail(
+        "snapshot discovered Git before retained project hint",
+    ))
+    assert core._resident_hook_decision(
+        "snapshot", {}, segment_cache=owner, policy=object(),
+    ) == {"segment": owner.pending_segment()}
+    assert owner.observation_counts() == (0, 1)
+
+
+def test_blocked_project_cannot_fill_refresh_sample_cap(owner, monkeypatch):
+    cache = _status_cache(owner, monkeypatch)
+    pending(owner)
+    for index in range(cache._max_refresh_per_sweep):
+        key = ("A", f"blocked-{index}")
+        cache._entries[key] = (_cached_bundle(*key), 1.0, 10.0)
+    cache._entries[("B", "healthy")] = (_cached_bundle("B", "healthy"), 2.0, 10.0)
+    calls = []
+
+    def refresh(project, worktree_id):
+        calls.append(project)
+        return _cached_bundle(project, worktree_id)
+
+    assert cache.sweep_due(refresh=refresh) == 1
+    assert calls == ["B"]
+    assert owner.observation_counts() == (0, 1)
+
+
+def test_updater_replacement_waits_for_previous_generation_release(monkeypatch):
+    import single_instance_lease
+    from agent_worktrees import status_updater_cli as updater, status_monitor_runtime
+
+    calls = []
+    released = [False]
+
+    class Lease:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self):
+            calls.append("acquire")
+            if not released[0]:
+                raise single_instance_lease.AlreadyRunningError(Path("predecessor"), 101)
+
+        def release(self):
+            calls.append("replacement-release")
+
+    def wait(seconds):
+        calls.append("predecessor-release")
+        released[0] = True
+
+    monkeypatch.setattr(go, "_windows_observation", lambda: True)
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
+    monkeypatch.setattr(status_monitor_runtime, "_aw_runtime_home", lambda: Path("unused"))
+    monkeypatch.setattr(updater.time, "sleep", wait)
+    assert updater._with_updater_lease("session", lambda: calls.append("replacement-run")) is None
+    assert calls == [
+        "acquire", "predecessor-release", "acquire", "replacement-run", "replacement-release",
+    ]
+
+
+def test_actual_monitor_undrain_reopens_without_dropping_pending(owner, monkeypatch):
+    test_actual_monitor_shutdown_retains_custody_and_negative_control(
+        owner, monkeypatch, False, operation="undrain",
+    )
+
+
+def test_actual_monitor_force_sample_follows_admission_close(owner, monkeypatch):
+    test_actual_monitor_shutdown_retains_custody_and_negative_control(
+        owner, monkeypatch, False, operation="force-race",
+    )
+
+
+def test_two_updater_generations_do_not_lose_replacement_during_supersession(monkeypatch):
+    import single_instance_lease
+    from agent_worktrees import status_updater_cli as updater, status_monitor_runtime
+
+    held = threading.Lock()
+    entered, retire, retired = threading.Event(), threading.Event(), threading.Event()
+    events, failures = [], []
+
+    class Lease:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self):
+            if not held.acquire(blocking=False):
+                raise single_instance_lease.AlreadyRunningError(Path("previous"), 101)
+
+        def release(self):
+            events.append("release")
+            held.release()
+
+    def previous_work():
+        entered.set()
+        assert retire.wait(15)
+        events.append("previous-cleanup-confirmed")
+
+    def previous():
+        try:
+            updater._with_updater_lease("same-session", previous_work)
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            retired.set()
+
+    def wait(seconds):
+        retire.set()
+        assert retired.wait(15)
+
+    monkeypatch.setattr(go, "_windows_observation", lambda: True)
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", Lease)
+    monkeypatch.setattr(status_monitor_runtime, "_aw_runtime_home", lambda: Path("unused"))
+    monkeypatch.setattr(updater.time, "sleep", wait)
+    worker = threading.Thread(target=previous)
+    worker.start()
+    try:
+        assert entered.wait(15)
+        updater._with_updater_lease("same-session", lambda: events.append("replacement"))
+    finally:
+        retire.set()
+        worker.join(15)
+    assert not worker.is_alive() and not failures
+    assert events == ["previous-cleanup-confirmed", "release", "replacement", "release"]
