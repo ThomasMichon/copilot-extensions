@@ -1,0 +1,17 @@
+{
+  "comment": "Wire explicit retained telemetry configuration through owned bounded buffers and local discovery",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

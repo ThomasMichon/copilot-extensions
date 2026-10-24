@@ -381,9 +381,10 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   Retain the clean source worktree for the integration owner; no rollout or
   finalization follows from source acceptance.
 
-### Accepted API and next adapter boundary
+### Accepted API and next adapter boundary at #8495
 
-There is **no delivered retained `telemetry.json` configuration**. Existing Bridge
+At #8495 acceptance there was **no delivered retained `telemetry.json`
+configuration**. Existing Bridge
 and Dispatch loaders still read `"sink": "module:factory"`, call `factory()` with
 zero arguments, then register it synchronously with `set_telemetry_sink`.
 The legacy `"spool"` factory/path and its append behavior are unchanged. Adding a
@@ -435,3 +436,52 @@ diagnostics and Fleet/container deployment adapters remain with the named owners
 in **Remaining acceptance transferred to integration** above. No retained-spool
 configuration, native adapter, platform qualification or live state is supplied by
 this Python API or by the application-handler merge.
+
+## Explicit configuration adapter continuation
+
+This bounded #8377 continuation realizes the previously recommended additive
+`retained_spool: {directory: ...}` alternative through the existing configuration
+loaders and owned buffer. It supersedes the historical API-only prerequisite
+above only after its own source acceptance. Native/installer #8370, #6812,
+captured wire owners, deployment helpers and live state remain outside this slice.
+
+- [x] Reconcile the additive schema with the reviewed convention and existing
+  buffer/retained-sink ownership; preserve legacy zero-argument factories.
+- [x] Implement real configuration selection, off-producer construction and
+  startup/quiet maintenance, bounded clear/replacement and local discovery.
+- [x] Validate actual loader/CLI/lifetime consumers, exact age, native concurrent
+  Unicode rotation, old-path isolation and fail-open behavior on Windows.
+- [ ] Obtain exact-head review, required CI and provider-confirmed merge; journal
+  the source contract and keep unavailable platform/live acceptance explicit.
+
+### Adapter journal
+
+- 2026-10-24 UTC — The existing loader selects one owned buffer with worker-only
+  construction/maintenance; no self-registering zero-argument factory or new
+  timer/task/collector is introduced. Native capture and all legacy paths remain
+  separate. Bridge's ordinary daemon-command `finally` and Dispatch's existing
+  coordinator lifespan close only their configured buffer. Captured Bridge ASGI
+  source/registrar files stay untouched; embedded owners must explicitly clear
+  their own slot. Local discovery reads configuration/metadata, never payloads
+  or a custom factory, and explicitly leaves live health unknown.
+- 2026-10-24 UTC — Native Windows managed validation passes 133 Bridge tests
+  (configuration, legacy telemetry/privacy, diagnostics, buffer, unchanged #8334
+  append and daemon bootstrap), 190 Dispatch tests (configuration, telemetry,
+  diagnostics and coordinator), and 70 Manager source-observation tests with one
+  existing optional OTLP SDK case skipped. Actual CLI discovery is read-only;
+  three real processes preserve 72 Unicode records across forced small-segment
+  rotation. Fresh isolated owner-provisioned namespaces exercise first selection,
+  exact-cutoff startup and no-message expiry, off-loop construction/storage,
+  missing namespace, blocked-worker replacement and nonjoining close.
+- 2026-10-24 UTC — The selected coordinator portfolio exposed two observation
+  races: GC could recover an owner already declared gone before the test observed
+  its claim, and health could sample the first failed cold cycle instead of the
+  healthy cycle it intended to await. Tests now declare the owner gone only after
+  observing its claim and await a healthy completed cycle within the unchanged
+  deadlines. No production or test timeout value changed. Full selected portfolio
+  subsequently passes. Install-contract (13 plugins), immutable Bridge contracts
+  (2 contracts/656 fixtures), docs consistency, module-size and whitespace guards
+  pass. Captured Bridge application/CLI/health/route owners and fixtures are
+  untouched. Linux/macOS native, disposable-machine installation and live external
+  lanes are not exercised by this source-only Windows slice; no rollout or helper
+  integration is claimed.

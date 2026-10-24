@@ -119,6 +119,9 @@ def _cmd_start(
             logging_initializer=initialize_logging,
         )
     finally:
+        from . import telemetry
+
+        telemetry.close_configured_retained_sink()
         if handler is not None:
             try:
                 close_file_logging(handler)
