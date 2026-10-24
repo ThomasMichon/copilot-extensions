@@ -154,6 +154,57 @@ def test_closed_handle_explicit_failure(kernel):
     assert not kernel.TerminateJobObject.called
 
 
+@pytest.fixture
+def one_step_job(kernel):
+    job = pu.JobHandle(123)
+    yield job
+    job._handle = None
+
+
+def test_one_step_never_waits_and_closes_only_verified_empty(kernel, one_step_job, monkeypatch):
+    monkeypatch.setattr(pu.time, "sleep", lambda value: pytest.fail("one step slept"))
+    monkeypatch.setattr(pu.time, "monotonic", lambda: pytest.fail("one step renewed deadline"))
+    assert one_step_job.try_terminate_and_confirm_empty() is False
+    assert one_step_job.handle == 123
+    assert one_step_job.try_terminate_and_confirm_empty() is False
+    assert one_step_job.try_terminate_and_confirm_empty() is True
+    assert one_step_job.handle is None
+    assert [item[0] for item in kernel.calls] == [
+        "terminate", "query", "terminate", "query", "terminate", "query", "close",
+    ]
+
+
+@pytest.mark.parametrize("operation", ["TerminateJobObject", "QueryInformationJobObject", "CloseHandle"])
+def test_one_step_native_failure_retains_same_handle(kernel, one_step_job, operation):
+    if operation == "CloseHandle":
+        def empty(handle, kind, pointer, size, returned):
+            ctypes.cast(returned, ctypes.POINTER(ctypes.c_uint32)).contents.value = size
+            return 1
+        kernel.QueryInformationJobObject.side_effect = empty
+    getattr(kernel, operation).side_effect = None
+    getattr(kernel, operation).return_value = 0
+    with pytest.raises(OSError, match="native failure"):
+        one_step_job.try_terminate_and_confirm_empty()
+    assert one_step_job.handle == 123
+    if operation != "CloseHandle":
+        assert not kernel.CloseHandle.called
+
+
+def test_one_step_bad_accounting_retains_handle(kernel, one_step_job):
+    kernel.QueryInformationJobObject.side_effect = None
+    kernel.QueryInformationJobObject.return_value = 1
+    with pytest.raises(RuntimeError, match="structure size"):
+        one_step_job.try_terminate_and_confirm_empty()
+    assert one_step_job.handle == 123
+    assert not kernel.CloseHandle.called
+
+
+def test_one_step_closed_handle_cannot_attest_empty(kernel):
+    with pytest.raises(RuntimeError, match="closed"):
+        pu.JobHandle(None).try_terminate_and_confirm_empty()
+    assert not kernel.TerminateJobObject.called
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows Job accounting")
 def test_real_child_grandchild_strict_job_cleanup(tmp_path):
     receipt = tmp_path / "owned-pids.json"

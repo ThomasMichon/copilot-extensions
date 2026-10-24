@@ -15,7 +15,7 @@ import dataclasses
 import time
 
 from . import config as cfg
-from . import disposition_history, sessions, tracking, worktree_git_facts
+from . import disposition_history, sessions, tracking, worktree_git_facts, push_timeout, git_ops
 
 
 def _worktree_status_fact(value, *, confirmed: bool, observed_at: float) -> dict:
@@ -26,7 +26,7 @@ def _worktree_status_fact(value, *, confirmed: bool, observed_at: float) -> dict
     return {"value": value, "confirmed": confirmed, "observed_at": observed_at}
 
 
-def compute(project: str, worktree_id: str) -> dict:
+def compute(project: str, worktree_id: str, *, cleanup_owner=None) -> dict:
     """Assemble the full per-worktree status bundle
     (agent-worktrees-external-status-accelerator effort, Phase 2).
 
@@ -89,17 +89,23 @@ def compute(project: str, worktree_id: str) -> dict:
             include_control_plane_related_pr=False,
         )
         repo = config.default_repo
-        info = worktree_git_facts.compute(
-            record,
-            repo=repo,
-            fetch=True,
-            active_paths=None,
-            session_turns=record.session_turns or 0,
+        def observe():
+            return worktree_git_facts.compute(
+                record, repo=repo, fetch=True, active_paths=None,
+                session_turns=record.session_turns or 0,
+            )
+        info = (
+            cleanup_owner.run_observation(project, repo.anchor, record.worktree_path, observe)
+            if cleanup_owner is not None else observe()
         )
-        git_confirmed = not (info.fetch_requested and info.fetch_failed)
+        git_confirmed = not (info.fetch_requested and info.fetch_failed) and (
+            not git_ops._windows_observation() or info.state != git_ops.WorktreeState.UNKNOWN
+        )
         facts["git_state"] = _worktree_status_fact(
             dataclasses.asdict(info), confirmed=git_confirmed, observed_at=time.time()
         )
+    except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending):
+        raise
     except Exception:
         # A transient classification failure must not present as "no
         # information" when the durable record already carries a last-known

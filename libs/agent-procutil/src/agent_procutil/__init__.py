@@ -189,6 +189,34 @@ class JobHandle:
                 raise TimeoutError("Job still has active processes after termination timeout")
             time.sleep(min(0.05, remaining))
 
+    def try_terminate_and_confirm_empty(self) -> bool:
+        """Perform one owned-Job settlement step without waiting.
+
+        Busy/error retains the handle; only verified emptiness permits close.
+        """
+        handle = self._handle
+        if not handle:
+            raise RuntimeError("Job handle is closed; cannot confirm empty Job")
+        kernel32 = _kernel32()
+        _configure_job_teardown_api(kernel32)
+        if not kernel32.TerminateJobObject(handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+        accounting = _JobBasicAccountingInformation()
+        returned = ctypes.c_uint32()
+        if not kernel32.QueryInformationJobObject(
+            handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting),
+            ctypes.byref(returned),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if returned.value != ctypes.sizeof(accounting):
+            raise RuntimeError("Job accounting returned an unexpected structure size")
+        if accounting.ActiveProcesses:
+            return False
+        if not kernel32.CloseHandle(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+        self._handle = None
+        return True
+
     def __enter__(self) -> "JobHandle":
         return self
 

@@ -187,6 +187,8 @@ def git(
     Returns:
         CompletedProcess with stdout/stderr as strings.
     """
+    if observation_deadline is not None and not _windows_observation():
+        raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
     env = repository_identity_env() if isolated_repository else os.environ.copy()
@@ -383,22 +385,16 @@ def current_branch(
 _CLASSIFY_GIT_TIMEOUT = 15.0
 
 
+def _windows_observation() -> bool:
+    return sys.platform == "win32"
+
+
 def _observation_deadline(deadline: float | None = None) -> float:
     limit = time.monotonic() + _CLASSIFY_GIT_TIMEOUT
     return min(deadline, limit) if deadline is not None else limit
 
 
-def _observation_options(deadline: float, *, cap: float | None = None) -> dict:
-    remaining = deadline - time.monotonic()
-    if remaining <= push_timeout.OBSERVATION_CLEANUP_SECONDS:
-        error = subprocess.TimeoutExpired("git observation", max(0, remaining))
-        error.observation_started = False
-        raise error
-    return {
-        "timeout": min(remaining, cap) if cap is not None else remaining,
-        "kill_tree": True,
-        "observation_deadline": deadline,
-    }
+_observation_options = push_timeout._observation_options
 
 
 def classify_worktree(
@@ -411,21 +407,22 @@ def classify_worktree(
     active_paths: set[str] | None = None,
     observation_deadline: float | None = None,
 ) -> WorktreeStateInfo:
-    """Classify checkout content against ``remote/default_branch``.
-
-    ``branch`` is the tracked fallback; an observed HEAD drift takes precedence.
-    ``fetch=True`` attempts refresh first. ``active_paths`` names normalized
-    paths with known live owners: those remain ACTIVE even without Git metadata.
-    ``observation_deadline`` is one same-process monotonic instant, capped by
-    the existing 15 seconds total including five seconds reserved for cleanup.
-    An expired/short budget starts no Git process; incomplete evidence is UNKNOWN.
+    """Windows shares 15s D, including 5s cleanup; ACTIVE/GONE stay confirmed.
+    Ordinary POSIX retains its legacy path; explicit bounded requests refuse.
     """
+    if not _windows_observation():
+        if observation_deadline is not None:
+            raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
+        from .git_observation_legacy import classify
+        return classify(
+            sys.modules[__name__], worktree_path, branch, fetch=fetch, remote=remote,
+            default_branch=default_branch, active_paths=active_paths,
+        )
     path = Path(worktree_path)
     if not path.exists():
         return WorktreeStateInfo(state=WorktreeState.GONE)
 
-    # A directory without a .git entry (file or dir) is a zombie -- the
-    # worktree was partially removed or never fully created.
+    # A directory without .git is an incomplete/removed checkout.
     if not (path / ".git").exists():
         return WorktreeStateInfo(state=WorktreeState.GONE)
 
@@ -477,16 +474,21 @@ def _classify_git_state(
     observation_deadline: float | None = None,
 ) -> WorktreeStateInfo:
     """Git classification retaining one deadline and actual fetch-attempt state."""
-    deadline = _observation_deadline(observation_deadline)
+    if observation_deadline is not None and not _windows_observation():
+        raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
+    deadline = _observation_deadline(observation_deadline) if _windows_observation() else None
     fetch_started = False
 
     def _g(*args):
         nonlocal fetch_started
         try:
-            options = _observation_options(deadline)
+            options = (
+                _observation_options(deadline) if deadline is not None
+                else {"timeout": _CLASSIFY_GIT_TIMEOUT}
+            )
             result = git(*args, cwd=path, check=False, **options)
         except (subprocess.TimeoutExpired, push_timeout.ObservationUnavailable) as error:
-            if args[0] == "fetch" and getattr(error, "observation_started", False):
+            if args[0] == "fetch" and getattr(error, "observation_started", deadline is None):
                 fetch_started = True
             error.fetch_requested = fetch_started
             raise

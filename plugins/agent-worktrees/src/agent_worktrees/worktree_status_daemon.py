@@ -212,6 +212,7 @@ def start_sweep_thread(
     *,
     interval: float = SWEEP_INTERVAL_SECONDS,
     stop_event: threading.Event | None = None,
+    activity_event: threading.Event | None = None,
 ) -> threading.Thread:
     """Start a daemon thread that periodically calls
     ``cache.sweep_due(refresh=refresh)`` until ``stop_event`` is set.
@@ -230,10 +231,15 @@ def start_sweep_thread(
 
     def _loop() -> None:
         while not stop.wait(interval):
+            if activity_event is not None:
+                activity_event.set()
             try:
                 cache.sweep_due(refresh=refresh)
             except Exception:
                 continue
+            finally:
+                if activity_event is not None:
+                    activity_event.clear()
 
     thread = threading.Thread(
         target=_loop, name="worktree-status-sweep", daemon=True
@@ -383,14 +389,22 @@ class InProcessRuntime:
         self.cache: WorktreeStatusCache | None = None
         self._sweep_stop = threading.Event()
         self._sweep_thread: threading.Thread | None = None
+        self._sweep_active = threading.Event()
 
-    def start(self, cache_path: Path, assemble: Callable[[str, str], dict]) -> None:
+    def start(self, cache_path: Path, assemble: Callable[[str, str], dict], *, cleanup_owner=None) -> None:
         try:
-            self.cache = WorktreeStatusCache(cache_path)
+            if cleanup_owner is not None:
+                raw_assemble = assemble
+                assemble = lambda project, worktree_id: raw_assemble(
+                    project, worktree_id, cleanup_owner=cleanup_owner,
+                )
+            options = {"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}
+            self.cache = WorktreeStatusCache(cache_path, **options)
             self.server = start_server(build_cached_compute(self.cache, assemble))
             self.server.start()
             self._sweep_thread = start_sweep_thread(
-                self.cache, validated_refresh(assemble), stop_event=self._sweep_stop
+                self.cache, validated_refresh(assemble), stop_event=self._sweep_stop,
+                **({"activity_event": self._sweep_active} if cleanup_owner is not None else {}),
             )
         except Exception:
             # A partial failure (e.g. the sweep thread fails to start after
@@ -423,6 +437,12 @@ class InProcessRuntime:
         if self.server is not None and self.server.subscriber_count() > 0:
             return True
         return self.cache is not None and self.cache.has_active_demand()
+
+    def active_work_count(self) -> int:
+        count = int(self._sweep_active.is_set())
+        if self.server is not None:
+            count += self.server.active_handler_count()
+        return count
 
     def shutdown(self) -> None:
         self._sweep_stop.set()

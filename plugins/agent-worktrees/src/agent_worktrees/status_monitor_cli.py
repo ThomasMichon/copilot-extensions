@@ -380,9 +380,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if delay_s > 0:
                 time.sleep(delay_s)
                 return {"delayed": True}
-        return classify_daemon_compute(kind, payload)
+        return classify_daemon_compute(
+            kind, payload,
+            **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
+        )
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
+        if admission_closed and core.git_ops._windows_observation():
+            if kind == "snapshot":
+                return {"segment": segment_cache.pending_segment()}
+            raise HookUnavailable
         nonlocal lifecycle_count
         is_lifecycle = kind == "sessionStart"
         provisioning_start_event = threading.Event() if is_lifecycle else None
@@ -513,26 +520,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             tracking_write_server = None
 
     def _close_request_surface_admission(reason: str = "superseded") -> None:
-        """Soft-close counterpart to :func:`_close_request_surfaces`: stops
-        admitting new requests on each live request surface while leaving
-        its socket open (see ``CoalescingServer.close_admission``'s own
-        docstring for the full rationale) -- a single-shot RPC caller
-        reaching this daemon during the bounded drain-only grace window
-        (``_SELF_RETIRE_MAX_GRACE_S`` / an explicit shutdown's own grace)
-        gets a structured ``{"fallback": true, "reason": reason}`` response
-        instead of a bare OS-level connection-refused. The server objects
-        stay the live ``hook_server``/``classify_server``/
-        ``tracking_write_server`` references (never moved into the
-        ``retired_*`` lists, never set to ``None``), so the existing
-        ``_hook_busy``/``_classify_busy``/``_tracking_write_busy`` checks
-        keep seeing their in-flight handler counts unchanged. Actual socket
-        teardown happens once, unconditionally, in ``_close_request_surfaces``
-        at real process exit (this function's own callers never close a
-        socket).
+        """Soft-close without losing live handler counts or tearing sockets down.
+
+        While custody exists, read callbacks return existing degraded shapes;
+        write/lifecycle decisions still reject. Actual close follows settlement
+        in `_close_request_surfaces`, never a generic known-pending fallback.
         """
-        if hook_server is not None:
+        keep_cleanup_reads = segment_cache.observation_busy(worktree_status_runtime)
+        if hook_server is not None and not keep_cleanup_reads:
             hook_server.close_admission(reason)
-        if classify_server is not None:
+        if classify_server is not None and not keep_cleanup_reads:
             classify_server.close_admission(reason)
         if tracking_write_server is not None:
             tracking_write_server.close_admission(reason)
@@ -541,6 +538,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal admission_closed, published_lock
         admission_closed = True
         published_lock = False
+        if core.git_ops._windows_observation():
+            segment_cache.close_observation_admission()
         receipts.close_admission()
         worktrees_runtime.close_admission("draining")
         repositories_runtime.close_admission("draining")
@@ -555,6 +554,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     worktree_status_runtime.start(
         _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "worktree-status-cache.sqlite3",
         worktree_status_compute,
+        **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
     )
 
     managed_mux_runtime = mux_link.InProcessRuntime()
@@ -643,10 +643,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("repos-map-producer")
         if receipts.active_count():
             reasons.append("prompt-receipt")
+        reasons.extend(segment_cache.custody_busy_reasons(worktree_status_runtime))
         return reasons
 
     def _drain_observations() -> dict[str, int]:
-        return {
+        result = {
             "sweep": int(sweep_active),
             "hook": sum(server.active_handler_count() for server in
                         ([hook_server] if hook_server is not None else []) + retired_hook_servers),
@@ -664,6 +665,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             "prompt-receipt": receipts.active_count(),
             "lifecycle": lifecycle_count,
         }
+        result.update(segment_cache.custody_observations(worktree_status_runtime))
+        return result
 
     control_server = status_monitor_cutover.ControlServer(
         lambda action, payload: _handle_control(action, payload),
@@ -730,6 +733,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         wake_event.set()
                         return {"adopted": False, "error": "current-roster authority unavailable"}
                     receipts.open_admission()
+                    if core.git_ops._windows_observation():
+                        segment_cache.open_observation_admission()
                     with trace.stage("publish-lock"):
                         _locks.write_lock(lock, extra=_lock_extra())
             trace.emit("complete", "ok")
@@ -772,7 +777,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             return {"ok": False, "error": f"unsupported action {action!r}"}
         timeout = float(payload.get("timeout") or 0.0)
         poll = float(payload.get("poll") or 0.1)
-        force = bool(payload.get("force"))
+        force = bool(payload.get("force")) and not (
+            core.git_ops._windows_observation() and any(segment_cache.observation_counts())
+        )
         return drain_with_diagnostics(
             state_lock=state_lock, enter=_enter_drain_only_state,
             cleanup=_cleanup_retired_request_surfaces, busy=_drain_busy_reasons,
@@ -790,6 +797,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     try:
         repositories_runtime.start(interval)
         while True:
+            if core.git_ops._windows_observation():
+                segment_cache.settle_pending_once()
             _cleanup_retired_request_surfaces()
             active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
             readers_ready = (
@@ -809,17 +818,23 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if self_retire_generation is None:
                 self_retire_generation = active_generation
                 if self_retire_generation is None and runtime_superseded():
-                    break
+                    if not core.git_ops._windows_observation():
+                        break
+                    with state_lock:
+                        _enter_drain_only_state()
+                    if not any(segment_cache.observation_counts()):
+                        break
             if shutdown_requested.is_set():
                 if shutdown_requested_since is None:
                     shutdown_requested_since = time.monotonic()
                 if (
                     not _drain_busy_reasons()
-                    or time.monotonic() - shutdown_requested_since >= _SELF_RETIRE_MAX_GRACE_S
+                    or (
+                        time.monotonic() - shutdown_requested_since >= _SELF_RETIRE_MAX_GRACE_S
+                        and not segment_cache.observation_busy(worktree_status_runtime)
+                    )
                 ):
-                    # Same bounded-upper-bound discipline as self-retire below:
-                    # an explicit shutdown request must never wait on
-                    # busy_reasons() forever either.
+                    # The bounded request may report blocked; native custody stays owned.
                     break
             if self_retire_generation is not None:
                 try:
@@ -848,10 +863,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         break
                 else:
                     self_retire_confirms = 0
-                if grace_expired:
-                    # Bounded upper bound: a confirmed-superseded daemon must
-                    # never linger past this regardless of busy_reasons()
-                    # never going quiet on its own (see _SELF_RETIRE_MAX_GRACE_S).
+                if grace_expired and not segment_cache.observation_busy(worktree_status_runtime):
+                    # Grace cannot authorize dropping native custody.
                     break
             with state_lock:
                 can_sweep = published_lock and not admission_closed
@@ -887,7 +900,10 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     governance=governance,
                     managed_mux_cache=managed_mux_runtime.cache,
                     config_cache_for_project=_config_cache_for_project,
-                    roster_publisher=lambda: publish_active_project(worktrees_runtime),
+                    roster_publisher=lambda: publish_active_project(
+                        worktrees_runtime,
+                        **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
+                    ),
                     roster_failure=worktrees_runtime.producer_failed,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
@@ -956,11 +972,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 empty_strikes = 0
             _wake_interruptible_wait(wake_event, interval)
     finally:
+        if core.git_ops._windows_observation():
+            segment_cache.close_observation_admission()
         with state_lock:
             shutdown_requested.set()
             _enter_drain_only_state()
             worktrees_runtime.close_admission("shutdown")
             repositories_runtime.close_admission("shutdown")
+        segment_cache.finish_custody(
+            worktree_status_runtime, lambda: _wake_interruptible_wait(wake_event, interval),
+        )
         repositories_runtime.shutdown()
         worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
         _close_request_surfaces()

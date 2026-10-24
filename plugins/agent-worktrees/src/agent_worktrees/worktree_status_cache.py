@@ -139,6 +139,7 @@ class WorktreeStatusCache:
         demand_ttl_seconds: float = DEMAND_TTL_SECONDS,
         max_refresh_per_sweep: int = DEFAULT_MAX_REFRESH_PER_SWEEP,
         now: Callable[[], float] = time.time,
+        cleanup_owner=None,
     ) -> None:
         # Copilot review, PR #3348: an unvalidated negative
         # max_refresh_per_sweep silently defeats the cap's own purpose.
@@ -151,6 +152,7 @@ class WorktreeStatusCache:
                 "max_refresh_per_sweep must be a non-negative int, got "
                 f"{max_refresh_per_sweep!r}"
             )
+        self._cleanup_owner = cleanup_owner
         self._db_path = db_path
         self._ttl = ttl_seconds
         self._demand_ttl = demand_ttl_seconds
@@ -354,6 +356,10 @@ class WorktreeStatusCache:
         now = self._now()
         with self._lock:
             entry = self._entries.get(key)
+            if self._cleanup_owner is not None and self._cleanup_owner.observation_blocked(project):
+                return self._cleanup_owner.degraded_bundle(
+                    project, worktree_id, entry[0] if entry else None,
+                )
             fresh = entry is not None and (now - entry[1]) < self._ttl
             if fresh and not force:
                 bundle, computed_at, demanded_at = entry
@@ -398,7 +404,19 @@ class WorktreeStatusCache:
         # callers for the SAME worktree are protected instead by
         # `CoalescingServer`'s own per-(kind, key) coalescing one layer up
         # (see `worktree_status_daemon.py`), not by this cache.
-        bundle = compute()
+        from . import push_timeout
+        try:
+            bundle = compute()
+        except (push_timeout.ObservationCleanupError, push_timeout.ObservationCleanupPending) as error:
+            if self._cleanup_owner is None:
+                raise
+            if isinstance(error, push_timeout.ObservationCleanupError):
+                self._cleanup_owner.retain_unclaimed_cleanup(project, None, error)
+            with self._lock:
+                entry = self._entries.get(key)
+                return self._cleanup_owner.degraded_bundle(
+                    project, worktree_id, entry[0] if entry else None,
+                )
         # Stamp `computed_at`/`demanded_at` from completion time, not the
         # `now` sampled before `compute()` ran -- a slow git refresh can
         # exceed the TTL itself (each classification subprocess is allowed
@@ -462,6 +480,10 @@ class WorktreeStatusCache:
                 key
                 for key, (_, _computed_at, demanded_at) in self._entries.items()
                 if now - demanded_at > self._demand_ttl
+                and not (
+                    self._cleanup_owner is not None
+                    and self._cleanup_owner.observation_blocked(key[0])
+                )
             ]
             last_attempted_snapshot = dict(self._last_attempted)
         if len(sampled) > self._max_refresh_per_sweep:
@@ -503,9 +525,14 @@ class WorktreeStatusCache:
                 self._delete_row(project, worktree_id, if_demanded_at=stale_demanded_at)
         refreshed = 0
         for (project, worktree_id), sampled_computed_at in sampled.items():
+            if self._cleanup_owner is not None and self._cleanup_owner.observation_blocked(project):
+                continue
             try:
                 bundle = refresh(project, worktree_id)
-            except Exception:
+            except Exception as error:
+                from .push_timeout import ObservationCleanupError
+                if self._cleanup_owner is not None and isinstance(error, ObservationCleanupError):
+                    self._cleanup_owner.retain_unclaimed_cleanup(project, None, error)
                 # Record the attempt even on failure -- see the docstring's
                 # `_last_attempted` rationale: this is what lets a
                 # persistently-failing entry rotate out of "stalest first"

@@ -2,8 +2,45 @@
 
 Back to [the effort](README.md). Commands below are run from the owned source
 worktree root with a working Python 3 selected by normal repository tooling.
-Proposed test files do not exist yet; their commands become executable only
-after admitted implementation. No runtime tests are claimed by this plan.
+Historical planned native files below remain proposals until separately
+admitted. The current Windows-first source checkpoint has pure/injected tests,
+not native/process-survival or installed qualification.
+
+## Windows-first caller-custody checkpoint
+
+The amended implementation passes **124 tests, 99 deselected** through the
+normal isolated consumer wrapper:
+
+```powershell
+python tools\run-plugin-tests.py agent-worktrees --test-file tests\test_windows_observation_custody.py --test-file tests\test_git_observation_deadline.py --test-file tests\test_git_ops.py --test-file tests\test_status_segment.py -k "(windows_observation_custody or git_observation_deadline or Classify or TestGitWrapper or TestPushTimeout or status_segment or upstream or default_branch) and not TestPushTimeoutTreeKill"
+```
+
+Canonical `libs/agent-procutil/tests/test_job_teardown.py -k "not real_child"`
+passes **22 tests, 1 deselected**, using the isolated consumer interpreter,
+canonical shared-library import path and contained-test marker. The native
+child/grandchild case was explicitly excluded, not passed or waived.
+
+Local ignored receipts are `.venv-tools/r1a-win-first-unit-checkpoint.log`
+and `.venv-tools/r1a-win-first-job-checkpoint.log`. The unit wrapper reports
+11.26 seconds pytest / 27.94 seconds including preparation and cleanup.
+These durations are diagnostic, not production/native deadline evidence.
+
+Coverage includes actual snapshot, classify, raw bundle, request/background,
+served/warm roster and updater/monitor shutdown functions with injected
+backends; independent B, stale bytes/ages, no direct fallback, alias/race,
+invalidation, late close/transfer, zero-wait settlement, lease/token/gone/
+supersession/cancellation and ordinary POSIX work counts. Fail-first cases
+include lost served-path hints and POSIX network-timeout fallback. Negative
+controls prove the actual updater/monitor tests detect discarded custody or
+premature release; they do not claim every new test ran against an old binary.
+
+No native fixture, live production monitor/session, installed runtime,
+caller-death/zero-survivor receipt or latency qualification was exercised.
+No native GO exists for this checkpoint. Keep the PR draft and implementation
+ownership active pending independent source admission and a native window.
+POSIX #7944, R1b admission-lock concurrency, R2 fsmonitor and the broader
+#2619/#6086 acceptance gates remain open. Historical receipts below describe
+earlier source checkpoints, not superseding platform parity claims.
 
 ## P0 — docs-only gate now
 

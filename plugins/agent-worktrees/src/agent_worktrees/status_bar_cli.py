@@ -174,6 +174,8 @@ def _resolve_remote_default_branch(
     Network is used only when ``allow_remote=True`` (step 3), so hot/pollable
     callers stay cheap and offline by leaving it ``False``. See dotfiles#1046.
     """
+    if observation_deadline is not None and not git_ops._windows_observation():
+        raise git_ops.push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     override = _core_helper("_resolve_remote_default_branch", _resolve_remote_default_branch)
     if override is not _resolve_remote_default_branch:
         return override(
@@ -184,12 +186,21 @@ def _resolve_remote_default_branch(
             **({"observation_deadline": observation_deadline} if observation_deadline is not None else {}),
         )
 
-    deadline = git_ops._observation_deadline(observation_deadline)
+    deadline = (
+        git_ops._observation_deadline(observation_deadline)
+        if git_ops._windows_observation() else None
+    )
+
+    def _options(cap=None):
+        return (
+            git_ops._observation_options(deadline, cap=cap) if deadline is not None
+            else {"timeout": cap} if cap is not None else {}
+        )
 
     def _has(ref: str) -> bool:
         r = git_ops.git(
             "rev-parse", "--verify", "--quiet", ref, cwd=path, check=False,
-            **git_ops._observation_options(deadline),
+            **_options(),
         )
         return r.returncode == 0
 
@@ -198,7 +209,7 @@ def _resolve_remote_default_branch(
 
     head = git_ops.git(
         "symbolic-ref", f"refs/remotes/{remote}/HEAD", cwd=path, check=False,
-        **git_ops._observation_options(deadline),
+        **_options(),
     )
     if head.returncode == 0 and head.stdout.strip():
         return head.stdout.strip().rsplit("/", 1)[-1]
@@ -207,10 +218,14 @@ def _resolve_remote_default_branch(
         try:
             ls = git_ops.git(
                 "ls-remote", "--symref", remote, "HEAD", cwd=path, check=False,
-                **git_ops._observation_options(deadline, cap=10),
+                **_options(cap=10),
             )
+        except subprocess.TimeoutExpired:
+            if deadline is not None:
+                raise
+            ls = None
         except (
-            subprocess.TimeoutExpired, git_ops.push_timeout.ObservationUnavailable,
+            git_ops.push_timeout.ObservationUnavailable,
             git_ops.push_timeout.ObservationCleanupError,
         ):
             raise
@@ -248,6 +263,8 @@ def _detect_upstream_branch(
     the config default as a last-resort hint (may be stale) when nothing else
     resolves.
     """
+    if observation_deadline is not None and not git_ops._windows_observation():
+        raise git_ops.push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     override = _core_helper("_detect_upstream_branch", _detect_upstream_branch)
     if override is not _detect_upstream_branch:
         return override(
@@ -338,37 +355,42 @@ def _persist_segment_title(
         pass
 
 
-def _segment_git_observation(target: str, fetch: bool, deadline: float):
-    remote, config_default = "origin", None
+def _segment_git_observation(target: str, fetch: bool, deadline, cleanup_owner=None):
+    remote, config_default, anchor = "origin", None, None
     try:
         repo = cfg.load_config(include_control_plane_related_pr=False).default_repo
         remote, config_default = repo.remote, repo.default_branch
+        anchor = getattr(repo, "anchor", None)
     except Exception:
         pass
     rec = _find_record_for_path(target)
-    branch = rec.branch if rec else "HEAD"
-    try:
-        default_branch = (
-            _detect_upstream_branch(
-                target, remote, config_default, observation_deadline=deadline,
-            ) or config_default or "master"
-        )
-        if rec is None:
-            branch = git_ops._get_current_branch_safe(
-                target, **git_ops._observation_options(deadline),
-            ) or "HEAD"
-        info = git_ops.classify_worktree(
-            target, branch, fetch=bool(fetch), remote=remote,
-            default_branch=default_branch, active_paths=None,
-            observation_deadline=deadline,
-        )
-    except (subprocess.TimeoutExpired, git_ops.push_timeout.ObservationUnavailable):
-        state = (
-            git_ops.WorktreeState.UNKNOWN
-            if (Path(target) / ".git").exists() else git_ops.WorktreeState.GONE
-        )
-        info = git_ops.WorktreeStateInfo(state=state)
-    return rec, branch, info
+
+    def observe():
+        branch = rec.branch if rec else "HEAD"
+        try:
+            deadline_arg = {"observation_deadline": deadline} if deadline is not None else {}
+            default_branch = (
+                _detect_upstream_branch(target, remote, config_default, **deadline_arg)
+                or config_default or "master"
+            )
+            if rec is None:
+                options = git_ops._observation_options(deadline) if deadline is not None else {}
+                branch = git_ops._get_current_branch_safe(target, **options) or "HEAD"
+            info = git_ops.classify_worktree(
+                target, branch, fetch=bool(fetch), remote=remote,
+                default_branch=default_branch, active_paths=None, **deadline_arg,
+            )
+        except (subprocess.TimeoutExpired, git_ops.push_timeout.ObservationUnavailable):
+            state = (
+                git_ops.WorktreeState.UNKNOWN
+                if (Path(target) / ".git").exists() else git_ops.WorktreeState.GONE
+            )
+            info = git_ops.WorktreeStateInfo(state=state)
+        return rec, branch, info
+
+    if cleanup_owner is not None:
+        return cleanup_owner.run_observation(cfg.project_name(), anchor, target, observe)
+    return observe()
 
 
 def _render_status_segment(
@@ -378,6 +400,7 @@ def _render_status_segment(
     no_title: bool = False,
     persist_title: bool = False,
     observation_deadline: float | None = None,
+    cleanup_owner=None,
 ) -> str:
     """Render one styled status-bar segment for the worktree at the path/cwd.
 
@@ -428,6 +451,8 @@ def _render_status_segment(
     outside a git worktree so a misconfigured status line never spams
     errors into the bar.
     """
+    if observation_deadline is not None and not git_ops._windows_observation():
+        raise git_ops.push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     override = _core_helper("_render_status_segment", _render_status_segment)
     if override is not _render_status_segment:
         return override(
@@ -437,12 +462,14 @@ def _render_status_segment(
             no_title=no_title,
             persist_title=persist_title,
             **({"observation_deadline": observation_deadline} if observation_deadline is not None else {}),
+            **({"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}),
         )
     target = str(Path(path).resolve()) if path else os.getcwd()
-    deadline = git_ops._observation_deadline(observation_deadline)
+    deadline = git_ops._observation_deadline(observation_deadline) if git_ops._windows_observation() else None
     try:
-        rec, _branch, info = _segment_git_observation(target, fetch, deadline)
-    except git_ops.push_timeout.ObservationCleanupError:
+        options = {"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}
+        rec, _branch, info = _segment_git_observation(target, fetch, deadline, **options)
+    except (git_ops.push_timeout.ObservationCleanupError, git_ops.push_timeout.ObservationCleanupPending):
         raise
     except Exception:
         return ""  # not a worktree / git failure -> empty bar, no noise
@@ -450,7 +477,9 @@ def _render_status_segment(
     if info.state == git_ops.WorktreeState.GONE:
         return ""
 
-    if rec is not None and info.state != git_ops.WorktreeState.UNKNOWN:
+    if rec is not None and (
+        info.state != git_ops.WorktreeState.UNKNOWN or not git_ops._windows_observation()
+    ):
         info = _apply_tracking_override(rec, info)
 
     # Session activity: scan once and reuse for both the turn-count
@@ -509,7 +538,8 @@ def _render_status_segment(
             repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
             finalized_checkout_current=(
-                info.state != git_ops.WorktreeState.UNKNOWN and finalized_checkout.matches(rec)
+                (info.state != git_ops.WorktreeState.UNKNOWN or not git_ops._windows_observation())
+                and finalized_checkout.matches(rec)
             ),
         )
         display_style = descriptor.display["style"] if descriptor.display else descriptor.style
@@ -555,6 +585,7 @@ def _render_status_segment(
 def _status_segment_json(
     path: str | None = None, fetch: bool = False,
     observation_deadline: float | None = None,
+    cleanup_owner=None,
 ) -> dict | None:
     """Cheap, single-worktree JSON snapshot of the status-segment's own facts.
 
@@ -571,17 +602,21 @@ def _status_segment_json(
     Shares the rendered segment's cleanup-inclusive Git observation deadline.
     Returns ``None`` outside a git worktree, like the rendered empty segment.
     """
+    if observation_deadline is not None and not git_ops._windows_observation():
+        raise git_ops.push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     override = _core_helper("_status_segment_json", _status_segment_json)
     if override is not _status_segment_json:
         return override(
             path, fetch=fetch,
             **({"observation_deadline": observation_deadline} if observation_deadline is not None else {}),
+            **({"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}),
         )
     target = str(Path(path).resolve()) if path else os.getcwd()
-    deadline = git_ops._observation_deadline(observation_deadline)
+    deadline = git_ops._observation_deadline(observation_deadline) if git_ops._windows_observation() else None
     try:
-        rec, branch, info = _segment_git_observation(target, fetch, deadline)
-    except git_ops.push_timeout.ObservationCleanupError:
+        options = {"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}
+        rec, branch, info = _segment_git_observation(target, fetch, deadline, **options)
+    except (git_ops.push_timeout.ObservationCleanupError, git_ops.push_timeout.ObservationCleanupPending):
         raise
     except Exception:
         return None
@@ -589,7 +624,9 @@ def _status_segment_json(
     if info.state == git_ops.WorktreeState.GONE:
         return None
 
-    if rec is not None and info.state != git_ops.WorktreeState.UNKNOWN:
+    if rec is not None and (
+        info.state != git_ops.WorktreeState.UNKNOWN or not git_ops._windows_observation()
+    ):
         info = _apply_tracking_override(rec, info)
 
     turns = 0
@@ -628,7 +665,8 @@ def _status_segment_json(
             repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
             finalized_checkout_current=(
-                info.state != git_ops.WorktreeState.UNKNOWN and finalized_checkout.matches(rec)
+                (info.state != git_ops.WorktreeState.UNKNOWN or not git_ops._windows_observation())
+                and finalized_checkout.matches(rec)
             ),
         )
         closure = descriptor.to_dict()

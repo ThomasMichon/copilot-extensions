@@ -354,6 +354,7 @@ def _build_list_json_payload(
     *,
     stamp_session_state: bool = True,
     enrichment: _ListEnrichment | None = None,
+    cleanup_owner=None,
 ) -> dict:
     """Build the enriched JSON listing without reading or writing its cache."""
     if enrichment is not None and stamp_session_state:
@@ -383,12 +384,19 @@ def _build_list_json_payload(
                 "all": bool(getattr(args, "all", False)),
             }
             enrichment.state_map = _classify_records(
-                records, session_ctx, daemon_filters=daemon_filters
+                records, session_ctx, daemon_filters=daemon_filters,
+                **({"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}),
             )
         state_map = enrichment.state_map
+    if cleanup_owner is not None and cleanup_owner.observation_blocked(cfg.project_name()):
+        from .push_timeout import ObservationCleanupPending
+        raise ObservationCleanupPending("list observation cleanup pending")
+    uncertain_windows = git_ops._windows_observation() and any(
+        info.state == git_ops.WorktreeState.UNKNOWN for info in state_map.values()
+    )
     bare_orphan_wts: set[str] | None = None
     bridge_live_wts: set[str] | None = None
-    if getattr(args, "mux_details", False):
+    if getattr(args, "mux_details", False) and not uncertain_windows:
         if enrichment.reclaim_observation is None:
             try:
                 bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
@@ -422,7 +430,7 @@ def _build_list_json_payload(
         from . import delegate_cli
 
         delegate_cli.annotate_delegate_graph(worktrees)
-        if getattr(args, "classify", False) and stamp_session_state:
+        if getattr(args, "classify", False) and stamp_session_state and not uncertain_windows:
             from .picker_support.data_local import _stamp_from_raw
 
             for wt_dict, rec in zip(worktrees, records, strict=True):
@@ -430,14 +438,18 @@ def _build_list_json_payload(
     return {"worktrees": worktrees}
 
 
-def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
+def _warm_list_cache_for_active_project(*, interval: float = 15, cleanup_owner=None) -> int:
     """Refresh exact, recently requested list shapes for the active project."""
+    project = cfg.project_name()
+    if cleanup_owner is not None and cleanup_owner.observation_blocked(project):
+        return 0
     if list_cache.ttl_seconds() <= 0:
         return 0
-    project = cfg.project_name()
     warmed = 0
     enrichments: dict[tuple[str, bool, bool], _ListEnrichment] = {}
     for demand in list_cache.recent_demands(project):
+        if cleanup_owner is not None and cleanup_owner.observation_blocked(project):
+            break
         shape = demand["args"]
         args = argparse.Namespace(
             json=True,
@@ -456,8 +468,11 @@ def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
             enrichments[selection] = enrichment
         with cfg.cached_load_config_scope():
             payload = _core_helper("_build_list_json_payload", _build_list_json_payload)(
-                args, enrichment.records, stamp_session_state=False, enrichment=enrichment
+                args, enrichment.records, stamp_session_state=False, enrichment=enrichment,
+                **({"cleanup_owner": cleanup_owner} if cleanup_owner is not None else {}),
             )
+        if cleanup_owner is not None and cleanup_owner.observation_blocked(project):
+            break
         list_cache.write(
             demand["key"],
             payload,
@@ -580,7 +595,10 @@ def cmd_list(args: argparse.Namespace) -> int:
             _payload = _core_helper("_build_list_json_payload", _build_list_json_payload)(
                 args, records
             )
-        if _lc_key:
+        if _lc_key and not (
+            git_ops._windows_observation()
+            and any(row.get("state") == "unknown" for row in _payload["worktrees"])
+        ):
             list_cache.write(_lc_key, _payload)
         output._json_output(_payload)
         return 0
