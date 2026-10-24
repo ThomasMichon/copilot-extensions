@@ -25,7 +25,14 @@ UNIT_COMMAND = (
     '--output-dir "$RUNNER_TEMP/promotion-unit-evidence"'
 )
 UNIT_UPLOAD_CONDITION = "steps.units.outputs.mode == 'executed'"
-SOURCE_AST_CONDITION = "steps.source-ast-impact.outputs.run == 'true'"
+CODE_CONDITION = "steps.code-impact.outputs.run == 'true'"
+CODE_GUARD_CONDITIONS = (
+    CODE_CONDITION,
+    CODE_CONDITION + " && github.event_name == 'pull_request'",
+    CODE_CONDITION + " && github.event_name != 'pull_request'",
+    CODE_CONDITION + " && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'",
+)
+SOURCE_AST_CONDITION = CODE_CONDITION + " && steps.source-ast-impact.outputs.run == 'true'"
 SOURCE_AST_COMMANDS = ("python tools/run-source-ast-guards.py",)
 SOURCE_AST_SCRIPT = """python - <<'PY'
 import json
@@ -43,6 +50,29 @@ with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
     output.write("run=" + str(needed).lower() + "\\n")
 print(json.dumps({"run_source_ast_guards": needed}))
 PY"""
+CODE_IMPACT_SCRIPT = SOURCE_AST_SCRIPT.replace(
+    "ci_requires_source_ast_guards", "ci_requires_code_checks",
+).replace("run_source_ast_guards", "run_code_checks")
+CODE_IMPACT_ENV = {
+    "EVENT": "${{ github.event_name }}",
+    "BASE": "${{ github.event.pull_request.base.sha || github.event.before }}",
+    "HEAD": "${{ github.event.pull_request.head.sha || github.sha }}",
+}
+CODE_GUARD_COMMANDS = (
+    "python tools/check-version-consistency.py",
+    "python tools/check-no-agent-machines-packages.py",
+    "python tools/check-install-contract.py",
+    "python tools/check-runtime-resolution.py --strict",
+    "python libs/payload-invocation/generate.py --all --check",
+    "python tools/sync-installation-context.py --check",
+    "python tools/sync-bootstrap-killswitch.py --check",
+    "python tools/sync-peer-launch.py --check",
+    "python tools/check-vendored-libs-sync.py",
+    "python tools/check-picker-inbox-discipline.py",
+    "python tools/check-hook-process-hygiene.py",
+    "python tools/check-feed-neutrality.py",
+    "ruff check --select F,E9 --output-format=github .",
+)
 UNIT_GATE_SCRIPT = """python - <<'PY'
 import json
 import os
@@ -452,6 +482,34 @@ def _validate_ci(path: Path) -> list[str]:
             if set(ci_jobs) != {"checks", "unit-tests", "pr-gate"}:
                 errors.append("unit-only CI must contain only guards, combined units and aggregate")
             check_steps = (_mapping(ci_jobs.get("checks")) or {}).get("steps", [])
+            code_impact = [
+                step for step in check_steps if isinstance(step, dict)
+                and step.get("id") == "code-impact"
+            ]
+            if len(code_impact) != 1 or (
+                str(code_impact[0].get("run", "")).strip() != CODE_IMPACT_SCRIPT
+                or code_impact[0].get("timeout-minutes") != "2"
+                or code_impact[0].get("env") != CODE_IMPACT_ENV
+                or any(key in code_impact[0] for key in ("if", "continue-on-error"))
+            ):
+                errors.append("code guards require conservative pinned-input coverage admission")
+            for step in check_steps:
+                if not isinstance(step, dict):
+                    continue
+                command = str(step.get("run", "")).strip()
+                code_guard = command in CODE_GUARD_COMMANDS or command.startswith((
+                    "python tools/check-changefile-presence.py",
+                    "python tools/check-module-size.py",
+                    "python tools/prepare_bridge_contract_evidence.py",
+                    "python tools/check-agent-bridge-contracts.py",
+                ))
+                if code_guard and (
+                    step.get("if") not in CODE_GUARD_CONDITIONS
+                    or len(code_impact) != 1
+                    or check_steps.index(code_impact[0]) >= check_steps.index(step)
+                    or "continue-on-error" in step
+                ):
+                    errors.append("code guards must follow validated executable coverage admission")
             ast_impact = [
                 step for step in check_steps if isinstance(step, dict)
                 and step.get("id") == "source-ast-impact"
@@ -486,7 +544,7 @@ def _validate_ci(path: Path) -> list[str]:
             ]
             if len(inventory) != 1 or (
                 inventory[0].get("run") != "python tools/check-marketplace-isolation.py"
-                or inventory[0].get("if") != "github.event_name != 'pull_request'"
+                or inventory[0].get("if") != CODE_CONDITION + " && github.event_name != 'pull_request'"
                 or "continue-on-error" in inventory[0]
             ):
                 errors.append("report-only inventory must remain on non-PR CI without becoming a strict PR gate")

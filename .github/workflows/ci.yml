@@ -34,6 +34,30 @@ jobs:
     - uses: actions/setup-python@v5
       with:
         python-version: '3.12'
+    - id: code-impact
+      name: Resolve executable coverage and source-guard overlap
+      timeout-minutes: 2
+      env:
+        EVENT: ${{ github.event_name }}
+        BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        import subprocess
+        from pathlib import Path
+        import sys
+        sys.path.insert(0, str(Path("tools").resolve()))
+        from promotion_unit_contract import ci_requires_code_checks
+        needed = ci_requires_code_checks(
+            os.environ["EVENT"], os.environ["BASE"], os.environ["HEAD"],
+            subprocess.check_output,
+        )
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write("run=" + str(needed).lower() + "\n")
+        print(json.dumps({"run_code_checks": needed}))
+        PY
     - uses: astral-sh/setup-uv@v9.0.0
       with:
         version: 0.12.6
@@ -64,15 +88,16 @@ jobs:
       timeout-minutes: 5
       run: python tools/check-dependency-age.py
     - name: Version consistency
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-version-consistency.py
     - name: Changefile presence (touched plugins must have a pending changefile; PR-into-dev only)
-      if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
+      if: steps.code-impact.outputs.run == 'true' && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
       run: python tools/check-changefile-presence.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
     - name: Module size (hard cap + shrink-only baseline, PR diff only)
-      if: github.event_name == 'pull_request'
+      if: steps.code-impact.outputs.run == 'true' && github.event_name == 'pull_request'
       run: python tools/check-module-size.py --changed-since ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
     - name: Module size (hard cap + shrink-only baseline, full sweep)
-      if: github.event_name != 'pull_request'
+      if: steps.code-impact.outputs.run == 'true' && github.event_name != 'pull_request'
       run: python tools/check-module-size.py
     - name: Large files (generous image cap, tight default cap, PR diff only)
       if: github.event_name == 'pull_request'
@@ -81,6 +106,7 @@ jobs:
       if: github.event_name != 'pull_request'
       run: python tools/check-large-files.py --all
     - name: No agent-machines consuming-side packages in this repo
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-no-agent-machines-packages.py
     - id: source-ast-impact
       name: Resolve source AST guard inputs
@@ -107,39 +133,49 @@ jobs:
         print(json.dumps({"run_source_ast_guards": needed}))
         PY
     - name: Full source AST guards (three bounded workers)
-      if: steps.source-ast-impact.outputs.run == 'true'
+      if: steps.code-impact.outputs.run == 'true' && steps.source-ast-impact.outputs.run == 'true'
       timeout-minutes: 6
       run: python tools/run-source-ast-guards.py
     - name: Install contract
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-install-contract.py
     - name: Runtime resolution (marker-only, uniform)
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-runtime-resolution.py --strict
     - name: Marketplace isolation inventory (report-only)
-      if: github.event_name != 'pull_request'
+      if: steps.code-impact.outputs.run == 'true' && github.event_name != 'pull_request'
       run: python tools/check-marketplace-isolation.py
     - name: Retain exact historical Bridge source evidence
+      if: steps.code-impact.outputs.run == 'true'
       run: >-
         python tools/prepare_bridge_contract_evidence.py
         --remote "${{ github.server_url }}/${{ github.repository }}.git"
     - name: Agent Bridge contract registry
-      if: github.event_name != 'pull_request'
+      if: steps.code-impact.outputs.run == 'true' && github.event_name != 'pull_request'
       run: python tools/check-agent-bridge-contracts.py
     - name: Agent Bridge contract source coverage (PR diff only)
-      if: github.event_name == 'pull_request'
+      if: steps.code-impact.outputs.run == 'true' && github.event_name == 'pull_request'
       run: python tools/check-agent-bridge-contracts.py --base ${{ github.event.pull_request.base.sha }}
     - name: Payload invocation generated files
+      if: steps.code-impact.outputs.run == 'true'
       run: python libs/payload-invocation/generate.py --all --check
     - name: Installation context vendoring
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/sync-installation-context.py --check
     - name: Bootstrap-killswitch guard vendoring
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/sync-bootstrap-killswitch.py --check
     - name: Same-cell peer launcher vendoring
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/sync-peer-launch.py --check
     - name: Vendored library synchronization
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-vendored-libs-sync.py
     - name: Picker inbox discipline
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-picker-inbox-discipline.py
     - name: Hook process hygiene
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-hook-process-hygiene.py
     - name: Skills
       run: python tools/check-skills.py
@@ -157,8 +193,10 @@ jobs:
     - name: gh-aw compiler version guard
       run: python tools/check-gh-aw-compiler-version.py
     - name: Feed neutrality (no hardcoded public package-feed pins)
+      if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-feed-neutrality.py
     - name: Ruff (F, E9)
+      if: steps.code-impact.outputs.run == 'true'
       run: ruff check --select F,E9 --output-format=github .
   unit-tests:
     name: Eligible units with coverage

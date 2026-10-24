@@ -40,7 +40,7 @@ def declarations():
                 "run": "python tools/check-trusted-ci.py",
             }, {
                 "name": "Marketplace isolation inventory (report-only)",
-                "if": "github.event_name != 'pull_request'",
+                "if": GUARD.CODE_CONDITION + " && github.event_name != 'pull_request'",
                 "run": "python tools/check-marketplace-isolation.py",
             }]},
             "unit-tests": {
@@ -94,6 +94,10 @@ def declarations():
         "run": GUARD.SOURCE_AST_SCRIPT,
     }, *({"run": command, "if": GUARD.SOURCE_AST_CONDITION, "timeout-minutes": 6}
          for command in GUARD.SOURCE_AST_COMMANDS)])
+    ci["jobs"]["checks"]["steps"].append({
+        "id": "code-impact", "timeout-minutes": 2,
+        "env": GUARD.CODE_IMPACT_ENV, "run": GUARD.CODE_IMPACT_SCRIPT,
+    })
     return routing, ci
 
 
@@ -177,7 +181,7 @@ def test_source_ast_runner_requires_the_bounded_join_step(tmp_path, budget):
     assert "source AST guards must follow validated admission without weakening scans" in validate(tmp_path, routing, ci)
 
 
-def execute_source_ast_selector(output, event, read_diff):
+def execute_source_ast_selector(output, event, read_diff, *, script=None):
     routing, ci = declarations()
     assert validate(output.parent, routing, ci) == []
     modules = {
@@ -192,10 +196,68 @@ def execute_source_ast_selector(output, event, read_diff):
     def imports(name, *args, **kwargs):
         return modules[name] if name in modules else builtins.__import__(name, *args, **kwargs)
 
-    body = "\n".join(GUARD.SOURCE_AST_SCRIPT.splitlines()[1:-1])
+    body = "\n".join((script or GUARD.SOURCE_AST_SCRIPT).splitlines()[1:-1])
     exec(compile(body, "<source-ast-impact>", "exec"), {
         "__builtins__": {**vars(builtins), "__import__": imports},
     })
+
+
+@pytest.mark.parametrize("change", [
+    {"if": "false"}, {"continue-on-error": True}, {"run": "echo run=false"},
+    {"timeout-minutes": 20}, {"env": {}},
+])
+def test_code_impact_cannot_omit_diff_evidence_or_ignore_errors(tmp_path, change):
+    routing, ci = declarations()
+    ci["jobs"]["checks"]["steps"][-1].update(change)
+    assert "code guards require conservative pinned-input coverage admission" in validate(tmp_path, routing, ci)
+
+
+@pytest.mark.parametrize("event,paths,expected", [
+    ("pull_request", ["plugins/example/README.md"], False),
+    ("pull_request", ["AGENTS.md", "worktree-manager/docs/usage.md"], False),
+    ("push", ["plugins/example/skills/demo/SKILL.md"], False),
+    ("pull_request", ["tools/deleted.py", "docs/moved.md"], True),
+    ("pull_request", ["README.md", ".github/workflows/ci.yml"], True),
+    ("pull_request", [], True), ("workflow_dispatch", [], True),
+])
+def test_actual_code_impact_script_reports_markdown_no_overlap(tmp_path, event, paths, expected):
+    output = tmp_path / "outputs"
+    execute_source_ast_selector(
+        output, event, lambda _: ("\0".join(paths) + "\0").encode(),
+        script=GUARD.CODE_IMPACT_SCRIPT,
+    )
+    assert output.read_text() == "run=" + str(expected).lower() + "\n"
+
+
+def test_unavailable_code_impact_diff_does_not_emit_no_overlap(tmp_path):
+    output = tmp_path / "outputs"
+
+    def unavailable(_):
+        raise RuntimeError("diff unavailable")
+
+    with pytest.raises(RuntimeError, match="diff unavailable"):
+        execute_source_ast_selector(
+            output, "pull_request", unavailable, script=GUARD.CODE_IMPACT_SCRIPT,
+        )
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("command", [
+    "python tools/check-agent-bridge-contracts.py --base " + "a" * 40,
+    "python tools/check-install-contract.py",
+])
+def test_code_guards_cannot_run_without_prior_coverage_impact(tmp_path, command):
+    routing, ci = declarations()
+    steps = ci["jobs"]["checks"]["steps"]
+    scan = {"run": command, "if": GUARD.CODE_CONDITION}
+    steps.append(scan)
+    assert validate(tmp_path, routing, ci) == []
+    scan.pop("if")
+    assert "code guards must follow validated executable coverage admission" in validate(tmp_path, routing, ci)
+    scan["if"] = GUARD.CODE_CONDITION
+    steps.remove(scan)
+    steps.insert(0, scan)
+    assert "code guards must follow validated executable coverage admission" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("event,paths,expected", [
