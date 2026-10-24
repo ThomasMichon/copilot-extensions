@@ -1,0 +1,9 @@
+{
+  "comment": "Allow bounded SSH command establishment to use its selected execution budget.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

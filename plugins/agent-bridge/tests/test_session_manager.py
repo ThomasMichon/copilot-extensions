@@ -12,7 +12,7 @@ import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
@@ -698,15 +698,17 @@ async def _start_codespace_session(tmp_db, monkeypatch):
         lambda *args, **kwargs: ("", None),
     )
     transport = object()
+    factory = Mock(return_value=SimpleNamespace(transport=transport))
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
-        lambda *args, **kwargs: SimpleNamespace(transport=transport),
+        factory,
     )
     monkeypatch.setattr(
         "agent_bridge.venue_plugins.prepare_venue_plugins",
         AsyncMock(return_value=[]),
     )
     manager = SessionManager(tmp_db)
+    manager._timeouts.session_host_ready = 150.0
     captured: dict[str, list[str] | None] = {}
 
     async def fake_connect(self, target, **kwargs):
@@ -730,6 +732,7 @@ async def _start_codespace_session(tmp_db, monkeypatch):
     )
 
     await manager.start_session(target, agent_name="codespace:example")
+    assert factory.call_args.kwargs["ready_timeout"] == 150.0
     return acp_command, captured["remote_child_argv"]
 
 
@@ -749,6 +752,36 @@ class TestCodespaceSessionHostAcpCommand:
         acp_command, remote_argv = await _start_codespace_session(tmp_db, monkeypatch)
 
         assert remote_argv == ["bash", "-lc", acp_command]
+
+
+@pytest.mark.asyncio
+async def test_codespace_replacement_factory_receives_configured_readiness(
+    tmp_db, monkeypatch,
+):
+    manager = SessionManager(tmp_db)
+    manager._timeouts.session_host_ready = 150.0
+    session = Session(
+        "synthetic", "synthetic",
+        SpawnTarget(type="command", codespace={"name": "example", "repo": "example/repo"}),
+        "codespace:example",
+    )
+    factory = Mock(side_effect=RuntimeError("factory boundary reached"))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner", factory,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.venue_plugins.resolve_controller_cwd", AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_relay_launch_env", lambda *args: ("", None),
+    )
+    monkeypatch.setattr(manager, "_acquire_codespace_lock", Mock())
+    monkeypatch.setattr(manager, "_release_codespace_lock", Mock())
+    with pytest.raises(RuntimeError, match="factory boundary reached"):
+        await manager._resume_via_new_remote_host(
+            session, on_acp_event=None, permission_callback=None,
+        )
+    assert factory.call_args.kwargs["ready_timeout"] == 150.0
 
 
 @pytest.mark.asyncio

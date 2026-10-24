@@ -377,6 +377,7 @@ class _SessionHostRecoveryMixin:
                     spawner = build_codespace_spawner(
                         codespace_name,
                         cs_target.get("repo") or "",
+                        ready_timeout=self._timeouts.session_host_ready,
                         relay_port=get_live_relay_port(),
                         unexpected_reap_seconds=(
                             self._session_host_unexpected_reap_seconds
@@ -836,6 +837,7 @@ class _SessionHostRecoveryMixin:
             spawner = build_codespace_spawner(
                 cs_target["name"],
                 cs_target.get("repo") or "",
+                ready_timeout=self._timeouts.session_host_ready,
                 relay_port=relay_port,
                 provision_prelude=relay_prelude,
                 unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,

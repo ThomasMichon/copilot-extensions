@@ -69,8 +69,7 @@ async def wait_for_relay_serving(
         if remaining <= 0:
             break
         try:
-            async with asyncio.timeout(remaining):
-                serving = await probe()
+            serving = await asyncio.wait_for(probe(), timeout=remaining)
             if serving:
                 return
         except asyncio.CancelledError:
@@ -289,7 +288,9 @@ def endpoint_serving_probe_factory(
 
     def _for_port(relay_port: int) -> Callable[[], Awaitable[bool]]:
         probe = build_relay_ping_probe_command(relay_port)
-        argv = build_remote_exec_args(config, wrap_login_shell(probe))
+        argv = build_remote_exec_args(
+            config, wrap_login_shell(probe), connect_timeout=timeout,
+        )
 
         async def _probe() -> bool:
             proc = None

@@ -158,7 +158,8 @@ async def test_slow_valid_probe_uses_selected_transport_budget(
     async def selected_wait_for(awaitable, *, timeout):
         assert timeout == budget
         assert timeout > elapsed
-        now[0] += elapsed
+        if reconstructed and now[0] == 0.0:
+            now[0] += elapsed
         return await real_wait_for(awaitable, timeout=timeout)
 
     async def run(command, *, timeout):
@@ -182,6 +183,11 @@ async def test_slow_valid_probe_uses_selected_transport_budget(
     await endpoints.wait_for_relay_serving(probe, timeout=budget)
     assert now[0] == elapsed
     probe_runtime.cleanup.assert_not_awaited()
+    if reconstructed:
+        assert probe_runtime.build_args.call_args.kwargs["connect_timeout"] == budget
+        argv = probe_runtime.spawn.await_args.args
+        assert "ConnectTimeout=90" in argv
+        assert "ConnectTimeout=15" not in argv
 
 
 async def test_spawner_propagates_configured_readiness_budget():
@@ -239,3 +245,27 @@ async def test_readiness_failure_exhausts_fake_monotonic_budget(monkeypatch):
 
     with pytest.raises(endpoints.CredentialRelayReadinessError):
         await endpoints.wait_for_relay_serving(failed_probe, timeout=90.0)
+
+
+@pytest.mark.parametrize("budget", [17.25, 90.0, 150.0])
+async def test_transport_command_uses_selected_ssh_connection_budget(monkeypatch, budget):
+    import math
+    from ssh_manager import ConnectionManager, SSHConfig
+    from ssh_manager import manager as ssh_manager
+
+    process = SimpleNamespace(
+        returncode=0, communicate=AsyncMock(return_value=(b"OK\n", b"")),
+    )
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(ssh_manager, "create_ssh_subprocess", spawn)
+    manager = ConnectionManager.__new__(ConnectionManager)
+    manager._connections = {
+        "example": SimpleNamespace(
+            config=SSHConfig(host_alias="example.test"), multiplexed=True,
+            socket_path="owned-socket", env={}, child_processes=[],
+        ),
+    }
+    result = await manager.exec_command("example", "relay-ping", timeout=budget)
+    assert result.ok
+    options = [arg for arg in spawn.await_args.args if arg.startswith("ConnectTimeout=")]
+    assert options == [f"ConnectTimeout={math.ceil(budget)}"]
