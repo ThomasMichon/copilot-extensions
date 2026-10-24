@@ -128,7 +128,9 @@ binding examples through Fleet Manager's existing data-only schemas. It requires
 explicit image, configuration, credential, retained-storage, Gateway, manager,
 network and resource inputs; it does not install or run Fleet Manager.
 Private template actualization preserves the adopter's selected provenance and
-overrides. The contribution is not a delivered image, supported Gateway
+overrides. The accompanying offline image recipe selects retained-only storage, a separate
+disposable endpoint directory and authenticated application health. The
+contribution is not an admitted image release, supported Gateway
 connector, applied Stack, private configuration or deployment readiness.
 Those remain open under the reviewed container contract and parent effort.
 
@@ -218,6 +220,16 @@ Configuration is strict bounded nonsecret JSON:
   "token_file": "/path/to/owned/private-access-key"
 }
 ```
+
+The optional `--run-dir <absolute-directory>` separates disposable endpoints
+from retained data. `--require-existing-storage` refuses a missing database or
+mismatched retained identity/schema instead of creating a new conversation.
+`--initialize-storage` is the explicit empty-directory-only first-creation
+operation; its directory must already be private and provisioned. `--health`
+queries the authenticated running application through that run directory
+without opening its live database. None registers or supervises a process.
+The [container recipe](container/README.md) selects these existing-host
+bindings explicitly; the ordinary local foreground defaults are unchanged.
 
 Supply actual absolute paths for the host platform. The deployment's existing
 credential owner supplies a private regular file containing 32-1024 printable

@@ -6,6 +6,7 @@ import json
 import math
 import re
 import sqlite3
+import stat
 import threading
 import time
 import uuid
@@ -239,6 +240,7 @@ class ChatStore:
         max_message_bytes=64 * 1024 * 1024, max_channels=256,
         max_actors=4096, max_memberships=4096, max_channel_members=256,
         max_waiters=16,
+        create=True,
     ):
         _unicode(installation_id)
         _printable(installation_id, "installation_id", 128)
@@ -267,13 +269,32 @@ class ChatStore:
         self._service_generation = object()
         self._active_waiters = 0
         directory = Path(data_dir)
-        directory.mkdir(parents=True, exist_ok=True)
+        if create:
+            directory.mkdir(parents=True, exist_ok=True)
+        database = directory / "chat.sqlite3"
+        if not create:
+            for path in (database, directory / "chat.sqlite3-wal", directory / "chat.sqlite3-shm"):
+                if path == database or path.exists() or path.is_symlink():
+                    info = path.lstat()
+                    if not stat.S_ISREG(info.st_mode) or (
+                        getattr(info, "st_file_attributes", 0) & 0x400
+                    ):
+                        raise ChatError("conflict", "Retained store must use ordinary files.")
         self._db = sqlite3.connect(
-            directory / "chat.sqlite3", timeout=0.25, check_same_thread=False,
+            database if create else database.absolute().as_uri() + "?mode=rw",
+            uri=not create, timeout=0.25, check_same_thread=False,
             isolation_level=None,
         )
         self._db.row_factory = sqlite3.Row
         try:
+            if not create:
+                settings = dict(self._db.execute("SELECT key, value FROM settings"))
+                if (
+                    settings.get("installation_id") != installation_id
+                    or settings.get("schema") != "1"
+                    or not re.fullmatch(r"[a-f0-9]{32}", settings.get("log_epoch", ""))
+                ):
+                    raise ChatError("conflict", "Retained store identity or schema mismatch.")
             self._db.execute("PRAGMA foreign_keys=ON")
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA synchronous=FULL")

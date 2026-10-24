@@ -1,0 +1,7 @@
+{
+  "schema": "agent-chat.host",
+  "version": 1,
+  "data_dir": "/data",
+  "installation_id": "example-chat-installation",
+  "token_file": "/run/secrets/chat-domain"
+}

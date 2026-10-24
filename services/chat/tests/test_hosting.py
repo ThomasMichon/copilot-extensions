@@ -124,6 +124,106 @@ def test_real_singleton_refuses_second_host_before_store_open(tmp_path):
         assert rpc(host, {"op": "members", "channel": "room"})[0] == 404
 
 
+def test_explicit_storage_initialization_and_separate_run_state(tmp_path):
+    config = configuration(tmp_path)
+    data = Path(config["data_dir"])
+    run = tmp_path / "ephemeral"
+    with pytest.raises(FileNotFoundError):
+        hosting.HostedChat(config, run_dir=str(run), require_existing_storage=True)
+    assert not data.exists() and not run.exists()
+    data.mkdir(mode=0o700)
+    assert hosting.initialize_storage(config)["installation_id"] == config["installation_id"]
+    with pytest.raises(hosting.HostError, match="host_storage_not_empty"):
+        hosting.initialize_storage(config)
+    with hosting.HostedChat(
+        config, run_dir=str(run), require_existing_storage=True,
+    ) as host:
+        assert host.run_dir == run and not (data / "run").exists()
+        assert (run / "endpoint.json").is_file()
+        with pytest.raises(hosting.HostError, match="host_already_running"):
+            hosting.HostedChat(config, run_dir=str(tmp_path / "other"),
+                               require_existing_storage=True)
+        with pytest.raises(hosting.HostError, match="host_already_running"):
+            hosting.initialize_storage(config)
+    assert not (run / "endpoint.json").exists()
+    assert (data / "chat.sqlite3").is_file()
+
+
+@pytest.mark.parametrize("damage", ["missing", "empty", "identity", "schema", "epoch", "redirect"])
+def test_retained_storage_refuses_replacement_without_creating_history(
+    tmp_path, monkeypatch, damage,
+):
+    config = configuration(tmp_path)
+    data = Path(config["data_dir"])
+    data.mkdir(mode=0o700)
+    database = data / "chat.sqlite3"
+    if damage != "missing":
+        hosting.initialize_storage(config)
+        if damage == "empty":
+            database.write_bytes(b"")
+        elif damage != "redirect":
+            import sqlite3
+            with sqlite3.connect(database) as connection:
+                connection.execute("UPDATE settings SET value=? WHERE key=?",
+                                   ("foreign", {"identity": "installation_id", "schema": "schema",
+                                                "epoch": "log_epoch"}[damage]))
+        else:
+            from types import SimpleNamespace
+            original = Path.lstat
+
+            def redirected(path, *args, **kwargs):
+                info = original(path, *args, **kwargs)
+                return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400) \
+                    if path == database else info
+
+            monkeypatch.setattr(Path, "lstat", redirected)
+    before = database.read_bytes() if database.exists() else None
+    with pytest.raises((OSError, hosting.sqlite3.Error, ChatError)):
+        hosting.HostedChat(config, run_dir=str(tmp_path / "ephemeral"),
+                           require_existing_storage=True)
+    assert (database.read_bytes() if database.exists() else None) == before
+
+
+def test_authenticated_health_probes_serving_identity_and_drain_without_store_open(
+    tmp_path, monkeypatch,
+):
+    config = configuration(tmp_path)
+    with running(config) as host:
+        monkeypatch.setattr(hosting, "ChatStore", lambda *_a, **_k: pytest.fail("probe opened store"))
+        assert hosting.probe_health(config, str(host.run_dir))["accepting"]
+        with pytest.raises(hosting.HostError, match="host_unready"):
+            hosting.probe_health({**config, "installation_id": "other"}, str(host.run_dir))
+        Path(config["token_file"]).write_text("wrong-" + "x" * 32, encoding="ascii")
+        with pytest.raises(hosting.HostError, match="host_unready"):
+            hosting.probe_health(config, str(host.run_dir))
+        Path(config["token_file"]).write_text(TOKEN, encoding="ascii")
+        host.drain()
+        with pytest.raises(hosting.HostError, match="host_unready"):
+            hosting.probe_health(config, str(host.run_dir))
+
+        def trickle(handler):
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", "4096")
+            handler.end_headers()
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline:
+                try:
+                    handler.wfile.write(b" ")
+                    handler.wfile.flush()
+                except OSError:
+                    return
+                time.sleep(.05)
+
+        monkeypatch.setattr(hosting._Handler, "do_GET", trickle)
+        begin = time.monotonic()
+        with pytest.raises(hosting.HostError, match="host_unready"):
+            hosting.probe_health(config, str(host.run_dir))
+        assert time.monotonic() - begin < 3
+    with pytest.raises(hosting.HostError, match="host_unready"):
+        hosting.probe_health(config, str(host.run_dir))
+
+
 @pytest.mark.parametrize("waiters", [1, 3])
 def test_held_wait_drain_and_health_keep_independent_requests_responsive(tmp_path, waiters):
     with running(configuration(tmp_path)) as host:

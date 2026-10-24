@@ -43,7 +43,22 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
         "assert importlib.util.find_spec('agent_procutil') is None; "
         "print(json.dumps({'installed':True}))", str(target),
     ], cwd=tmp_path))["installed"]
-    run_dir = Path(config["data_dir"]) / "run"
+    run_dir = tmp_path / "disposable-run"
+    host_args = [
+        "--config", str(config_file), "--run-dir", str(run_dir),
+        "--require-existing-storage",
+    ]
+    absent = subprocess.run([
+        str(interpreter), "-I", "-m", "agent_chat_service.hosting", *host_args,
+    ], cwd=tmp_path, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    assert absent.returncode == 1 and not Path(config["data_dir"]).exists()
+    Path(config["data_dir"]).mkdir(mode=0o700)
+    initialized = json.loads(run([
+        str(interpreter), "-I", "-m", "agent_chat_service.hosting",
+        "--config", str(config_file), "--initialize-storage",
+    ], cwd=tmp_path))
+    assert initialized["installation_id"] == config["installation_id"]
     environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
     options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
 
@@ -54,7 +69,7 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
         try:
             process, job = spawn_sync_in_kill_on_close_job([
                 str(interpreter), "-I", "-m", "agent_chat_service.hosting",
-                "--config", str(config_file),
+                *host_args,
             ], cwd=tmp_path, env=environment, stdin=subprocess.DEVNULL,
                 stdout=stdout, stderr=stderr, require_job=True, allow_breakaway=False, **options)
         finally:
@@ -148,6 +163,12 @@ print(json.dumps(results),flush=True)
     read = {"op": "read", "channel": "room", "codename": "agent-b"}
     process, job, endpoint = start()
     try:
+        healthy = json.loads(run([
+            str(interpreter), "-I", "-m", "agent_chat_service.hosting",
+            *host_args, "--health",
+        ], cwd=tmp_path))
+        assert healthy["accepting"] and healthy["installation_id"] == config["installation_id"]
+        assert not (Path(config["data_dir"]) / "run").exists()
         joined, posted = requests(endpoint, [
             {"op": "join", "channel": "room", "actor": {"codename": "agent-a"}}, post,
         ])
