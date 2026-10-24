@@ -130,6 +130,7 @@ that pattern to this repository.
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 | [Per-Worktree Activity State](active/per-worktree-activity-state/README.md) | Active | #5664 |
+| [Persistent Installer Diagnostics](active/persistent-installer-diagnostics/README.md) | Draft; durable native attempt logs and non-blocking upstream coordination | #8370; independent diagnostics delivery, separately qualified #6859 continuation |
 | [Update Flow Observability](active/update-flow-observability/README.md) | Active; reviewed audit, accurate outcomes and machine-result framing next | #6812; #6826, #6827; existing installer repair owners retained |
 | [Native Target Preference Authority](active/native-target-preference-authority/README.md) | Active; proposal merged, native adapters and Windows/Linux execution proof before inheritance remain open | #5708; preserves #7069/#6987/#5839/#7057 owners |
 
