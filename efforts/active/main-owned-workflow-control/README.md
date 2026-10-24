@@ -278,6 +278,14 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 1 - Earliest safe run and check reductions
 
+- [ ] Qualify and land operator-authorized exact-input reuse for repeated
+  source PR unit qualification. Bind complete source/workflow/manifest,
+  platform/interpreter/dependency and provider run/attempt identities;
+  missing or incompatible proof retains fresh execution. Preserve current
+  guards/metadata/retarget/aggregate behavior and independent execution for
+  every Main release. Source implementation and synthetic refusal tests are
+  not real consumer, current-CI or whole-flow performance acceptance.
+
 - [x] Land the bounded source-CI job consolidation and remove duplicate
   report-only PR inventory (#7656), preserving real selected-unit outcomes,
   every admitted unit, parallel guards and the independent release pass.
@@ -310,10 +318,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
   whole-flow latency; the full source-CI invocation remains.
 - [ ] Observe qualified release adoption of #8213 separately from source-CI
   execution and comparable whole-flow timing; this changes no controller pin.
-- [ ] Land and observe necessary parsed-root admission for the sibling
+- [x] Land and observe necessary parsed-root admission for the sibling
   tracking-write guard, retaining every read/parse, alias fixed point, dynamic
-  import/reflection boundary and ordered diagnostic. Keep recipe timing,
-  required source CI and qualified release adoption distinct.
+  import/reflection boundary and ordered diagnostic (#8227). Actual source CI
+  retains all three scanners and all 1,012 admitted units. Local recipe timing
+  and omitted analysis are not controlled whole-flow latency.
+- [ ] Observe qualified release adoption of #8227 separately from source-CI
+  execution and comparable whole-flow timing; this changes no controller pin.
 - [x] Land and observe conservative narrative-only PR omission of the three
   source AST scans (#7706), retaining full non-narrative and non-PR execution,
   pinned input/error handling, every other guard and all required unit evidence.

@@ -51,17 +51,24 @@ controller/Gateway and its selected deployment-manager integration. Worker hosts
 run only their explicitly adopted connectors and service roles.
 
 Before a Gateway exists, the local CLI provides explicitly authorized bootstrap
-and recovery through the selected substrate owner. Once ready, that Gateway is
-the central service for CLI, workspace-manager and harness clients; ordinary
-clients do not become competing coordinators when it is unavailable.
+and recovery from the operator's logged-in interactive machine through the
+selected substrate owner. Explicit setup composes the user-side controller
+heartbeat/authentication pump, selected Gateway host, deployment manager and
+mesh relay; merely installing the thin client starts none of them.
+Once ready, that Gateway is the central service for ordinary CLI,
+workspace-manager and harness clients. Bootstrap/whole-machine management and
+the explicitly installed credential-provider role retain their separate
+authority; ordinary clients do not become competing coordinators on an outage.
 
 ### Harness-declared fleet
 
-Harness-side configuration declares the selected fleet driver, machine membership,
-roles, desired service placement, permitted operations, and credential-provider
-references. Private inventories, accounts, and deployment policy remain with the
-adopter, not the portable controller. Effective configuration and its provenance
-are inspectable; installing connection tooling alone does not enroll a machine
+An adopted harness and its explicitly paired knowledge/configuration repository
+jointly define persistent desired state. The harness supplies reusable templates
+and behavior; the private paired repository selects the actual loadout,
+membership, placement, permitted operations and credential-provider references.
+Private inventories, accounts and deployment policy remain with the adopter,
+not the portable controller. Effective configuration and both source revisions
+are inspectable. Installing connection tooling alone does not enroll a machine
 or enable background services.
 
 ### Logical machines and physical association
@@ -208,6 +215,11 @@ channel needed to answer fresh-token requests. This responder is an installed
 credential-provider service, independent of an interactive client invocation.
 Reuse the credential owner's lifecycle rather than adding a fleet-local duplicate
 custodian or requiring a roaming client to keep remote work alive.
+Explicit bootstrap establishes this user-side heartbeat/authentication pump
+and its declared connectivity responsibilities. Its standing configuration
+refresh follows the paired private repository and any adopted slow-sync control
+channel, keeping admitted topology, public-key propagation and Gateway
+subscriptions aligned. The pump is not the Gateway's machine scheduler.
 
 ### Recommended fleet templates and owned configuration
 
@@ -363,18 +375,61 @@ and outcomes, not arbitrary command execution or a claim that every host updated
 ### repository-led-deployment-preparation
 
 The Gateway or a designated deployment controller should obtain desired state
-from explicitly adopted repositories itself. It should resolve the expected
+from its adopted harness/knowledge repository pairing itself. It should retain
+that pairing and refresh it on a schedule, or accept reviewed-source updates
+or an authorized refresh request from a fleet-manager driver. Event-driven
+repository notifications can compose the same path. It should resolve the expected
 service/module layout and selected package versions, prepare an inspectable
 generation, and distinguish source acquisition, preparation, activation and
 observed health. A development-machine client should be able to say "go" for
 that prepared generation without manually supplying configuration documents.
 
-Preparation should not activate a deployment. Activation should remain bound to
-the reviewed source/version selection and current authority; changed or invalid
-inputs should not silently become a different approved deployment. Repository
-access and credentials stay with their existing owners. Komodo or another
+Preparation should not activate a deployment. Initial adoption computes the
+delta and deployment steps, notifies subscribed fleet-manager instances, and
+waits for confirmation by an authorized operator or agent through that surface.
+Activation remains bound to the actual prepared source/version selection and
+current authority; changed or invalid inputs cannot become a different approved
+deployment. Repository access and credentials stay with their existing owners. Komodo or another
 selected deployment manager retains container lifecycle, while fleet-manager
 coordinates intent rather than becoming another package manager or supervisor.
+
+### repository-backed-config-and-temporary-control
+
+Fleet-manager can edit configuration locally, inspect live state, confirm
+prepared deployments and invoke supported diagnostic/debug operations.
+Temporary or preview adjustments remain distinguishable from durable desired
+state. Persistent configuration follows its owning repositories' pull-request
+review/merge flow and then propagates normally; a local edit, confirmation,
+debug override or successful deployment does not silently rewrite that source.
+
+The repository pair governs desired configuration, not every live fact:
+credential providers still supply current authentication/revocation evidence,
+and existing task, worktree and operation owners retain their durable records.
+
+### slow-sync-bootstrap-and-control-dispatch
+
+An explicitly adopted eventually consistent synchronization channel can carry
+encrypted vault material and per-machine control/refresh information between
+fleet-manager installations. Other operator machines can notice required
+repropagation or configuration refresh before they have a Gateway connection.
+This is a slow-sync fallback and configuration-dispatch path, not the live
+fleet event stream, a second desired-state authority or permission to execute
+an unreviewed configuration.
+
+Stale/conflicting copies remain visible and cannot roll back newer accepted
+intent. Credential custody, vault unlock authority and access stay with their
+existing owners; syncing encrypted material does not grant fleet membership
+or publish plaintext secrets.
+
+### operator-owned-whole-machine-lifecycle
+
+Only fleet-manager's explicit operator-side management path can create or
+remove whole machines, using the selected provider's existing authority and
+admission. The Gateway can repurpose already admitted machines and reconcile
+service/container roles within that capacity; it can report a capacity need
+but cannot satisfy it by provisioning or deleting a host. A deployment
+confirmation or a template change does not transfer whole-machine authority
+to the Gateway or its container manager.
 
 ### declarative-setup-modules
 
@@ -460,12 +515,14 @@ are separate approved operations; a template difference alone cannot authorize
 them. Stale inventory or uncertain ownership cannot produce a cleanup plan
 presented as safe convergence.
 
-An adopted Gateway can subscribe to the user's versioned configuration and
-reconcile approved changes and releases without continuous client supervision.
-Private configuration repositories need not provide CI: local validation and
-explicit user approval gate major reconfiguration. Approval binds the actual
-change, not arbitrary later revisions. Invalid or unapproved desired state
-preserves the last valid deployment.
+An adopted Gateway can refresh the paired repositories and prepare changes
+without continuous client supervision. Initial reconciliation waits for explicit
+confirmation through fleet-manager for the computed deployment, including
+ordinary changes; repository arrival is not deployment consent. Private
+configuration repositories need not provide CI. Local validation and exact-plan
+approval remain distinct from source PR approval, and bind the actual change,
+not arbitrary later revisions. Invalid or unapproved desired state preserves
+the last valid deployment.
 
 ### user-controlled-fleet-observation
 
@@ -602,6 +659,8 @@ replacement.
   issuer, session host or package manager merely from fleet enrollment.
 - No arbitrary shell/script payloads hidden inside deployment broadcasts,
   automatic capacity expansion, or destructive provider actions on mere enrollment.
+- No whole-machine creation/removal by the Gateway, and no persistent
+  configuration fork created by a diagnostic override or slow-sync fallback.
 - No claim of transparent exactly-once side effects from transport retries.
 - No dependency on an unreleased session protocol before basic control is useful.
 - No pinned wire protocol, schema, port, package layout, or rollout plan in this

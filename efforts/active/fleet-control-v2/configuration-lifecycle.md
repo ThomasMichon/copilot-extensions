@@ -11,13 +11,20 @@ The operator requires a developer-repeatable product, not a one-time deployment:
 selected harness template or user-owned configuration, cold bootstrap,
 incremental updates, migrations, recovery and rollback.
 
-The local CLI bootstraps or recovers the explicitly selected Gateway when its
-API cannot yet serve the operation. After readiness, the Gateway is the central
-service for ordinary clients. The local background role is the authenticated
-credential responder on logged-in provider machines, not another fleet
-coordinator. The Gateway can subscribe to user-owned configuration and
-self-update, with local validation/approval before major reconfiguration.
-Private configuration repositories are not assumed to have CI.
+The local CLI explicitly bootstraps the fleet from the user's logged-in
+interactive machine, or recovers the selected Gateway when its API cannot yet
+serve the operation. Setup composes the user-side heartbeat/authentication
+pump, Gateway host, selected deployment manager and mesh relay. After readiness,
+the Gateway is the central service for ordinary clients, not the owner of
+whole-machine provisioning/removal. The local background credential/connection
+role remains independent of the invoking CLI and is not another fleet coordinator.
+
+The [bootstrap and authority amendment](bootstrap-and-authority.md) owns the
+operator's clarification: the harness/knowledge repository pair defines
+persistent desired configuration; Gateway maintains and refreshes that pairing,
+prepares deployment deltas, and initially waits for fleet-manager confirmation
+for every computed deployment. A source PR is not that confirmation. Private
+configuration repositories are not assumed to have CI.
 
 Implementation detail below is **agent-recommended**:
 
@@ -40,9 +47,11 @@ retirement or data deletion.
 
 Produce an inspectable plan bound to exact input revisions, policy, artifacts,
 target identities and current-state assumptions. Approval binds that plan;
-changed content or stale inventory requires re-admission. Classify risk before
-automatic reconciliation. An unclassified or major change remains pending
-until local validation/explicit approval; a repository commit is not approval.
+changed content or stale inventory requires re-admission. Initial reconciliation
+computes and reports the delta, then waits for explicit confirmation through a
+subscribed fleet-manager instance for ordinary as well as major changes. Do not
+infer standing auto-apply authority from a risk classification, schedule or
+repository commit.
 Do not borrow a public repository's CI verdict for private desired state.
 
 Config subscription discovers proposed revisions, not executable hooks from the
@@ -59,8 +68,10 @@ Persist attributable operation/target receipts through the existing contracts.
 Rerun reconciles actual resources and uncertain effects instead of allocating
 duplicate capacity, containers, volumes, registrations or writers.
 
-After authenticated Gateway readiness is established, ordinary mutations use its
-API. Recovery is explicit and generation-fenced, not an automatic alternate
+After authenticated Gateway readiness is established, ordinary service/workload
+mutations use its API. Whole-machine create/remove remains an explicit
+operator-side fleet-manager/provider operation; Gateway can propose a need but
+only repurpose already admitted hosts. Recovery is explicit and generation-fenced, not an automatic alternate
 write path when a selected Gateway is offline. Accepted execution and durable
 index state survive local CLI exit.
 
@@ -113,8 +124,17 @@ uncertainty contract. No anonymous, wrong-account or stale-token fallback.
   and uncertain outcomes without blind reissue.
 - [ ] Reject invalid config, stale plans and mismatched approval; preserve the
   last valid deployment.
-- [ ] Subscribe to a proposed config revision; major/unclassified changes remain
-  pending until exact local approval, then reconcile through the common path.
+- [ ] Refresh both paired repositories on the declared schedule and an authorized
+  driver request, and accept driver-delivered source updates under the same
+  repository provenance; notify subscribed fleet-manager clients of the actual delta.
+  Ordinary and major deployments remain pending until exact-plan confirmation,
+  then reconcile through the common path.
+- [ ] Prove only operator-side fleet-manager creates/removes whole machines,
+  while Gateway/deployment-manager can repurpose already admitted capacity
+  without obtaining provider administration.
+- [ ] Prove slow-sync refresh/config dispatch works before Gateway connectivity
+  and cannot activate unapproved changes, replace canonical repository intent,
+  expose plaintext vault contents or regress newer accepted configuration.
 - [ ] Exercise failed candidate activation, compatible rollback and refusal of
   irreversible data downgrade with forward-recovery evidence.
 - [ ] Prove CLI exit does not terminate the Gateway or accepted remote workload.
