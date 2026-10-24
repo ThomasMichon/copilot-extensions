@@ -70,6 +70,8 @@ def test_fresh_cli_discovery_is_json_only_read_only_and_names_native_fallbacks(t
 
 
 def test_real_log_consumer_formats_offthread_and_keeps_explicit_attribution(handler):
+    from zdd.diagnostics import process_start_time
+
     item = record("operation %s", "failed")
     item.correlation_id = "synthetic"
     item.private_extra = "not-an-approved-field"
@@ -78,11 +80,30 @@ def test_real_log_consumer_formats_offthread_and_keeps_explicit_attribution(hand
     event = json.loads(handler.store.path.read_text(encoding="utf-8"))
     assert event["message"] == "operation failed"
     assert event["component"] == "daemon" and event["service"] == "agent-bridge"
-    assert event["pid"] == os.getpid() and event["process_start_token"]
+    assert event["pid"] == os.getpid()
+    assert event["process_start_token"] == process_start_time(os.getpid())
     assert event["runtime_prefix"] == sys.prefix
     assert event["correlation_id"] == "synthetic"
     assert "private_extra" not in event
     assert datetime.fromisoformat(event["ts"]).utcoffset() == timedelta(0)
+
+
+def test_unavailable_process_start_token_stays_explicitly_unknown(tmp_path, monkeypatch):
+    import zdd.diagnostics
+
+    monkeypatch.setattr(zdd.diagnostics, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(logs, "_last_handler", None)
+    handler = logs.configure_file_logging(tmp_path)
+    try:
+        handler.handle(record())
+        wait_for(lambda: handler.writer.stats()["delivered"] >= 1)
+        event = json.loads(handler.store.path.read_text(encoding="utf-8"))
+        assert event["pid"] == os.getpid()
+        assert event["process_start_token"] is None
+    finally:
+        logs.close_file_logging(handler)
+        assert handler.writer.join(2)
+        monkeypatch.setattr(logs, "_last_handler", None)
 
 
 def test_both_existing_bridge_logger_namespaces_use_one_application_writer(handler):

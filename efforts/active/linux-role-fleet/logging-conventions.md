@@ -345,3 +345,13 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   buffer startup/iteration hooks. An owner adapter must connect that lifecycle
   and a newly provisioned exclusive namespace before any retained configuration
   or running-retention claim; legacy factories and paths stay unchanged.
+- 2026-10-24 UTC — Native managed publication recovered without persistent
+  configuration, credential, hook or lock changes. Provider head readback matches
+  the published maintenance fix and historical journal; current-head required CI
+  passes. Fresh review identified a platform-specific test assumption: process
+  identity lookup legitimately returns no start token on unsupported platforms.
+  The actual consumer now checks the existing identity authority's result and a
+  separate regression preserves an explicit unknown token rather than inventing
+  attribution. This is a source-test correction, not macOS/live qualification.
+  Native Windows managed Bridge diagnostic portfolio: 28 passed; touched-test
+  Ruff F/E9 and diff whitespace checks pass.
