@@ -177,6 +177,11 @@ without repair or fallback to another installation. Older admission/resolver
 helpers produce an explicit readiness error instead of running an unchecked
 installer.
 
+PowerShell first-use callers retry native Windows sharing violations and POSIX
+`EAGAIN` while another owner holds the provisioning lock, then reuse the
+owner's healthy runtime without running another installer. Other I/O errors
+remain fatal rather than becoming an indefinite contention wait.
+
 An active installation cell or explicitly selected custom root uses its own
 healthy runtime, never another root. Cold cell/custom-root provisioning reports
 explicit unsupported readiness: Dispatch's native installer still stages under
@@ -190,7 +195,10 @@ The actual process-boundary portfolio is the explicit T3 suite
 `libs/payload-invocation/tests/test_dispatch_first_use_publication.py`. Run it
 through the repository test runner with `--allow-explicit-tiers`; select
 `not cell`, `cell`, or a narrower `-k` expression to keep each job bounded.
-It is not part of required unit-only PR CI.
+The shared OS-contention and unrelated-I/O controls are in
+`libs/payload-invocation/tests/test_containers_review_regressions.py`, selected
+with `-k "cold_caller or unrelated_io"`. These process-boundary controls are not
+part of required unit-only PR CI.
 
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: coordinator and

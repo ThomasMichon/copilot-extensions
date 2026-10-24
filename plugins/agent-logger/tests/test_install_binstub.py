@@ -276,6 +276,7 @@ def _stage_payload(tmp_path: Path) -> Path:
         "dropin-registry",
         "plugin-resolve",
         "single-instance-lease",
+        "update-driver",
         "plugin-activation",
     ):
         shutil.copytree(_PLUGIN_ROOT.parents[1] / "libs" / lib, staged_libs / lib)
@@ -335,6 +336,10 @@ def test_release_payload_materializes_activation_closure(tmp_path: Path) -> None
     lease = payload / "libs" / "single-instance-lease"
     assert (lease / "pyproject.toml").is_file()
     assert (lease / "src" / "single_instance_lease" / "operation.py").is_file()
+    driver = payload / "libs" / "update-driver"
+    assert (driver / "src/update_driver/first_use.py").is_file()
+    assert (driver / "scripts/first-use.ps1").is_file()
+    assert (driver / "scripts/first-use.sh").is_file()
 
 
 @pytest.mark.guard
@@ -1025,6 +1030,15 @@ def test_installers_install_plugin_activation_after_its_own_transitive_deps(
     positions = positions_fn()
     assert positions["plugin-activation"] > positions["dropin-registry"]
     assert positions["plugin-activation"] > positions["plugin-resolve"]
+
+
+@pytest.mark.parametrize(
+    "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
+)
+def test_installers_install_driver_after_its_own_transitive_deps(positions_fn) -> None:
+    positions = positions_fn()
+    assert positions["update-driver"] > positions["agent-procutil"]
+    assert positions["update-driver"] > positions["single-instance-lease"]
 
 
 def test_install_ps1_falls_back_to_monorepo_libs_dir() -> None:

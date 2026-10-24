@@ -169,7 +169,8 @@ def owning_payload(owning_context):
 @pytest.fixture
 def owning_pull_requests(owning_payload):
     payload, installation, project = owning_payload
-    payload = payload.rename(payload.with_name("agent-pull-requests"))
+    # Keep fixture inputs until framework cleanup; no directory-rename custody is needed.
+    payload = Path(shutil.copytree(payload, payload.with_name("agent-pull-requests")))
     for name in ("plugin.json", "payload-invocation.json", "pyproject.toml"):
         path = payload / name
         path.write_text(
@@ -209,7 +210,7 @@ def owning_pull_requests(owning_payload):
 @pytest.fixture
 def owning_ssh(owning_pull_requests):
     payload, installation, project = owning_pull_requests
-    payload = payload.rename(payload.with_name("agent-ssh"))
+    payload = Path(shutil.copytree(payload, payload.with_name("agent-ssh")))
     for name in ("plugin.json", "payload-invocation.json", "pyproject.toml"):
         path = payload / name
         path.write_text(
@@ -241,7 +242,7 @@ def owning_ssh(owning_pull_requests):
 @pytest.fixture
 def owning_codespaces(owning_ssh):
     payload, installation, project = owning_ssh
-    payload = payload.rename(payload.with_name("agent-codespaces"))
+    payload = Path(shutil.copytree(payload, payload.with_name("agent-codespaces")))
     for name in ("plugin.json", "payload-invocation.json", "pyproject.toml",
                  "scripts/install.ps1", "scripts/install.sh"):
         path = payload / name
@@ -257,7 +258,7 @@ def owning_codespaces(owning_ssh):
 @pytest.fixture
 def owning_logger(owning_codespaces):
     payload, installation, project = owning_codespaces
-    payload = payload.rename(payload.with_name("agent-logger"))
+    payload = Path(shutil.copytree(payload, payload.with_name("agent-logger")))
     for name in ("plugin.json", "pyproject.toml", "scripts/install.ps1", "scripts/install.sh"):
         path = payload / name
         path.write_text(path.read_text().replace(

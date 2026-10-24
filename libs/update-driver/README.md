@@ -707,9 +707,24 @@ Python-free caller loss/concurrency and no-write controls. It also executes
 the actual materialized `install` action behind isolated ScheduledTasks and
 `systemctl` adapters, inspecting registration/reuse/reconciliation and fatal
 or tolerated registration outcomes without starting a periodic worker. No
-personal sessions are processed. Adding these recipes does not migrate Logger's command,
-bootstrap or explicit installer publishers, qualify selected snapshots,
+personal sessions are processed. Adding these recipes does not migrate Logger's command
+or explicit installer publishers, qualify selected snapshots,
 admit cells/custom roots, enroll a periodic worker or authorize host rollout.
+
+Logger's legacy session bootstrap now submits `stamp` for a missing deployment
+manifest and `install` for runtime drift through its canonically packaged
+foundation. Both paths admit without Python on the caller PATH. The native
+`logger-install-v1` capability marker distinguishes this contract from the
+older stamp-only helpers. It preserves the originating project and the same
+canonical lifecycle source while the Driver executes frozen inputs. The hook
+has no second lock, PID/age reaper or direct installer fallback. Its bounded
+launch acknowledgement is not durable request acceptance; inspect the ordinary
+receipt/result for installation completion. The independent cold-store provider
+and exact-session guidance hooks keep their own deadlines and payload identity.
+The manual `logger-bootstrap` portfolio exercises actual native hooks, caller
+loss/concurrency, drift registration behind isolated adapters, failed candidates
+and source-independent commands. It does not qualify a live periodic worker,
+selected-snapshot recipes, explicit publishers, cells/custom roots or rollout.
 
 Pull Requests' legacy cold payload and generated primary commands use the same
 fixed recipe before outer provisioning locks or cold resolver writes. The

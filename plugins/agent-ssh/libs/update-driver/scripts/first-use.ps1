@@ -1,4 +1,5 @@
 # Installation driver lifecycle contract: vault-stamp-v1
+# Installation driver lifecycle contract: logger-install-v1
 # Installation driver lifecycle contract: ssh-command-v1
 param(
     [Parameter(Mandatory)][string]$Root,

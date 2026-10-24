@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Installation driver lifecycle contract: vault-stamp-v1
+# Installation driver lifecycle contract: logger-install-v1
 # Installation driver lifecycle contract: ssh-command-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail

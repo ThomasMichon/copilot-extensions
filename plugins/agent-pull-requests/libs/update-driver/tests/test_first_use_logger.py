@@ -398,6 +398,16 @@ def test_logger_raw_checkout_stamp_keeps_complete_dependency_mapping_without_sou
         env=dict(os.environ), cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr
+    foundation = subprocess.run(
+        [sys.executable, "-I", "-B", "-c",
+         "import sys; from pathlib import Path; root=Path(sys.argv[1]); "
+         "sys.path.insert(0,str(root/'libs/update-driver/src')); "
+         "from update_driver.foundation_inputs import inspect,PACKAGES; "
+         "assert {p.name for p in inspect(root/'libs/update-driver').packages} == set(PACKAGES)",
+         str(snapshot)],
+        env=dict(os.environ), cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert foundation.returncode == 0, foundation.stdout + foundation.stderr
     assert_no_periodic_worker(installation)
 
 
