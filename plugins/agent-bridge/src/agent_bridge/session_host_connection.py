@@ -518,7 +518,9 @@ class _SessionHostConnectionMixin:
         relays = relay_forwards_from_endpoint(
             endpoint,
             host_port_resolver=get_live_relay_port,
-            serving_probe_for_port=endpoint_serving_probe_factory(endpoint),
+            serving_probe_for_port=endpoint_serving_probe_factory(
+                endpoint, timeout=self._timeouts.session_host_ready,
+            ),
         )
         relay_ports = relay_ports_from_reverse_forwards(reverse_forwards)
         if require_ready and not relay_ports:
@@ -529,6 +531,7 @@ class _SessionHostConnectionMixin:
         strict_probe_for_port = endpoint_serving_probe_factory(
             endpoint,
             fail_open=False,
+            timeout=self._timeouts.session_host_ready,
         )
         started = []
         for relay, relay_port in zip(relays, relay_ports, strict=True):
@@ -538,7 +541,7 @@ class _SessionHostConnectionMixin:
                     try:
                         await wait_for_relay_serving(
                             strict_probe_for_port(relay_port),
-                            timeout=5.0,
+                            timeout=self._timeouts.session_host_ready,
                         )
                     except Exception as exc:
                         raise CredentialRelayReadinessError(

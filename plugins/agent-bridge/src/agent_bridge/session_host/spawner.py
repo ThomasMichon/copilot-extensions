@@ -370,7 +370,7 @@ class CodeSpaceSpawner:
         unexpected_reap_seconds: float = 60.0,
         active_reap_seconds: float = 0.0,
         require_relay_ready: bool = False,
-        relay_ready_timeout: float = 5.0,
+        relay_ready_timeout: float | None = None,
         provision_prelude: str = "",
     ) -> None:
         self._transport = transport
@@ -382,7 +382,9 @@ class CodeSpaceSpawner:
         self._unexpected_reap_seconds = unexpected_reap_seconds
         self._active_reap_seconds = active_reap_seconds
         self._require_relay_ready = require_relay_ready
-        self._relay_ready_timeout = relay_ready_timeout
+        self._relay_ready_timeout = (
+            ready_timeout if relay_ready_timeout is None else relay_ready_timeout
+        )
         self.prepare_child: Callable[[list[str]], Awaitable[list[str]]] | None = None
         self.provision_prelude = provision_prelude
 
@@ -976,7 +978,10 @@ print("__REAPED__")
         fail_open: bool = True,
     ) -> Callable[[], Awaitable[bool]]:
         from .endpoints import transport_serving_probe
-        return transport_serving_probe(self._transport, relay_port, fail_open=fail_open)
+        return transport_serving_probe(
+            self._transport, relay_port, fail_open=fail_open,
+            timeout=max(self._ready_timeout, self._relay_ready_timeout),
+        )
 
     async def _poll_state(
         self,

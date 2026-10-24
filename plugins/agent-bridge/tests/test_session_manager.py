@@ -2313,11 +2313,18 @@ class TestRemoteForwardRelaySupervision:
         async def ready_probe():
             return True
 
+        probe_budgets = []
+
+        def probe_factory(_endpoint, *, fail_open=True, timeout=60.0):
+            probe_budgets.append((fail_open, timeout))
+            return lambda _port: ready_probe
+
+        manager._timeouts.session_host_ready = 150.0
         monkeypatch.setattr(relay_state, "get_live_relay_port", lambda: 62000)
         monkeypatch.setattr(
             endpoints_mod,
             "endpoint_serving_probe_factory",
-            lambda _endpoint, fail_open=True: lambda _port: ready_probe,
+            probe_factory,
         )
 
         await manager._ensure_forward(
@@ -2332,6 +2339,7 @@ class TestRemoteForwardRelaySupervision:
         assert current.kw["host_port_resolver"]() == 62000
         assert current.started == 1
         assert manager._relays["s1"] == [current]
+        assert probe_budgets == [(True, 150.0), (False, 150.0)]
 
     @pytest.mark.asyncio
     async def test_stopped_container_relay_failure_is_explicit(
@@ -2360,7 +2368,7 @@ class TestRemoteForwardRelaySupervision:
         monkeypatch.setattr(
             endpoints_mod,
             "endpoint_serving_probe_factory",
-            lambda _endpoint, fail_open=True: lambda _port: AsyncMock(
+            lambda _endpoint, fail_open=True, timeout=60.0: lambda _port: AsyncMock(
                 return_value=True
             ),
         )
@@ -3299,6 +3307,12 @@ async def test_stopped_container_resume_reattaches_without_refresh(
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "acp-1"
     manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id, name=session.name,
+        agent_name=session.agent_name, caller_id=session.caller_id,
+        target_dir=None, target_type="command", status=SessionStatus.STOPPED.value,
+        now=1, target_json=session.target.to_json(),
+    )
 
     class Resolver:
         async def resolve_async(self, _name):
@@ -3354,6 +3368,12 @@ async def test_stopped_legacy_container_resume_reattaches_despite_missing_overri
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "acp-1"
     manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id, name=session.name,
+        agent_name=session.agent_name, caller_id=session.caller_id,
+        target_dir=None, target_type="command", status=SessionStatus.STOPPED.value,
+        now=1, target_json=session.target.to_json(),
+    )
 
     class Resolver:
         async def resolve_async(self, _name):
@@ -3447,6 +3467,12 @@ async def test_stopped_container_relay_failure_prevents_prompt_admission(
     session.status = SessionStatus.STOPPED
     session.acp_session_id = "acp-1"
     manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id, name=session.name,
+        agent_name=session.agent_name, caller_id=session.caller_id,
+        target_dir=None, target_type="command", status=SessionStatus.STOPPED.value,
+        now=1, target_json=session.target.to_json(),
+    )
     monkeypatch.setattr(
         manager,
         "_refresh_provider_target",
