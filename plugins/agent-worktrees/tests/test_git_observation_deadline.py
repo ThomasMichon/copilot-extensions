@@ -14,7 +14,12 @@ from agent_worktrees import status_bar_cli as sb
 
 @pytest.fixture
 def clock(monkeypatch):
+    from agent_procutil import owned_process
+
     value = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(go, "_windows_observation", lambda: True)
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
     monkeypatch.setattr(go.time, "monotonic", lambda: value.now)
     return value
 
@@ -293,7 +298,7 @@ def test_legacy_timeout_still_has_its_original_cleanup_allowance(monkeypatch):
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("unsupported"), PermissionError("denied"), OSError("no proc")])
-def test_full_posix_capability_failure_prevents_spawn(monkeypatch, clock, failure):
+def test_full_capability_failure_prevents_spawn(monkeypatch, clock, failure):
     from agent_procutil import owned_process
 
     calls = []
@@ -302,7 +307,7 @@ def test_full_posix_capability_failure_prevents_spawn(monkeypatch, clock, failur
         calls.append("preflight")
         raise failure
 
-    monkeypatch.setattr(pt.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
     monkeypatch.setattr(pt, "detached_kwargs", lambda: {"start_new_session": True})
     monkeypatch.setattr(owned_process, "_require_posix_execution_support", lambda: None)
     monkeypatch.setattr(owned_process, "require_caller_owned_support", require_support)

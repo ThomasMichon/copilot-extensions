@@ -24,7 +24,6 @@ from __future__ import annotations
 import os
 import math
 import platform
-import selectors
 import subprocess
 import time
 from typing import Literal, overload
@@ -49,6 +48,42 @@ class ObservationUnavailable(subprocess.SubprocessError):
 class ObservationCleanupError(subprocess.SubprocessError):
     """An owned observation did not confirm complete cleanup."""
 
+    def try_settle(self) -> bool:
+        if getattr(self, "_settled", False):
+            return True
+        if not getattr(self, "_job_empty_confirmed", False):
+            if self.job is None:
+                raise RuntimeError("no owned Job to confirm")
+            if not self.job.try_terminate_and_confirm_empty():
+                return False
+            self._job_empty_confirmed = True
+        try:
+            self.process.communicate(timeout=0)
+            self.process.wait(timeout=0)
+        except subprocess.TimeoutExpired:
+            return False
+        for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+            if stream is not None:
+                stream.close()
+        self._settled = True
+        return True
+
+
+class ObservationCleanupPending(subprocess.SubprocessError):
+    """The existing observation owner has not released this scope."""
+
+
+def _observation_options(deadline: float, *, cap: float | None = None) -> dict:
+    remaining = deadline - time.monotonic()
+    if remaining <= OBSERVATION_CLEANUP_SECONDS:
+        error = subprocess.TimeoutExpired("git observation", max(0, remaining))
+        error.observation_started = False
+        raise error
+    return {
+        "timeout": min(remaining, cap) if cap is not None else remaining,
+        "kill_tree": True, "observation_deadline": deadline,
+    }
+
 
 def _observation_wait(cmd: list[str], deadline: float, reserve: float = 0) -> float:
     remaining = deadline - time.monotonic() - reserve
@@ -59,40 +94,15 @@ def _observation_wait(cmd: list[str], deadline: float, reserve: float = 0) -> fl
     return remaining
 
 
-def _read_observation(proc, cmd: list[str], deadline: float) -> tuple[str, str]:
-    """Read POSIX pipes without reaping the group leader or reader threads."""
-    from agent_procutil.owned_process import _observe_unreaped
-
-    output = (bytearray(), bytearray())
-    try:
-        with selectors.DefaultSelector() as selector:
-            for index, stream in enumerate((proc.stdout, proc.stderr)):
-                os.set_blocking(stream.fileno(), False)
-                selector.register(stream, selectors.EVENT_READ, index)
-            while selector.get_map():
-                for key, _ in selector.select(_observation_wait(cmd, deadline)):
-                    try:
-                        chunk = os.read(key.fd, 65536)
-                    except BlockingIOError:
-                        continue
-                    if chunk:
-                        output[key.data].extend(chunk)
-                    else:
-                        selector.unregister(key.fileobj)
-            while _observe_unreaped(proc) is None:
-                time.sleep(min(.01, _observation_wait(cmd, deadline)))
-    except subprocess.TimeoutExpired as error:
-        error.stdout, error.stderr = (
-            data.decode("utf-8", errors="replace") for data in output
-        )
-        raise
-    return tuple(
-        data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
-        for data in output
-    )
-
-
 def _run_observation(cmd: list[str], *, cwd, env: dict, timeout, deadline: float):
+    if platform.system() != "Windows":
+        raise ObservationUnavailable("bounded observation is Windows-only; POSIX work remains open")
+    from agent_procutil.owned_process import require_caller_owned_support
+
+    try:
+        require_caller_owned_support()
+    except (RuntimeError, OSError) as error:
+        raise ObservationUnavailable(str(error)) from error
     wait = _observation_wait(cmd, deadline, OBSERVATION_CLEANUP_SECONDS)
     if timeout is not None:
         wait = min(wait, timeout)
@@ -101,55 +111,39 @@ def _run_observation(cmd: list[str], *, cwd, env: dict, timeout, deadline: float
         error.observation_started = False
         raise error
     command_deadline = min(deadline - OBSERVATION_CLEANUP_SECONDS, time.monotonic() + wait)
-    windows = platform.system() == "Windows"
-    spawn_options = no_window_kwargs() if windows else detached_kwargs()
-    if not windows:
-        from agent_procutil.owned_process import require_caller_owned_support
-
-        if not spawn_options.get("start_new_session"):
-            raise ObservationUnavailable("independent observation group unavailable")
-        try:
-            require_caller_owned_support()
-        except (RuntimeError, OSError) as error:
-            raise ObservationUnavailable(str(error)) from error
     _observation_wait(cmd, command_deadline)
     try:
         proc, job = spawn_sync_in_kill_on_close_job(
             cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace",
-            require_job=windows, allow_breakaway=False, **spawn_options,
+            require_job=True, allow_breakaway=False, **no_window_kwargs(),
         )
-    except RuntimeError as error:
+    except (RuntimeError, OSError) as error:
         raise ObservationUnavailable(str(error)) from error
+    if job is None:
+        failure = ObservationCleanupError("strict observation Job unavailable after launch")
+        failure.process, failure.job = proc, job
+        failure.observation_deadline, failure.observation_path = deadline, cwd
+        raise failure
     stdout = stderr = ""
+    job_empty_confirmed = False
+    operation_error = None
     try:
         try:
-            if windows:
-                if job is None:
-                    raise ObservationUnavailable("observation Job unavailable")
-                stdout, stderr = proc.communicate(
-                    timeout=_observation_wait(cmd, command_deadline),
-                )
-            else:
-                stdout, stderr = _read_observation(proc, cmd, command_deadline)
-        except subprocess.TimeoutExpired as error:
-            error.observation_started = True
+            stdout, stderr = proc.communicate(
+                timeout=_observation_wait(cmd, command_deadline),
+            )
+        except BaseException as error:
+            operation_error = error
+            if isinstance(error, subprocess.TimeoutExpired):
+                error.observation_started = True
             raise
     finally:
         try:
-            if job is not None:
-                job.terminate_and_wait(_observation_wait(cmd, deadline))
-                # Join Popen's pipe readers within the same remaining deadline.
-                proc.communicate(timeout=_observation_wait(cmd, deadline))
-            else:
-                from agent_procutil._caller_owned import _confirm_group
-                from agent_procutil.owned_process import _retire_posix_group
-
-                _retire_posix_group(proc)
-                if _observation_wait(cmd, deadline) < 2:
-                    raise ObservationCleanupError("insufficient time to confirm observation group")
-                _confirm_group(proc)
+            job.terminate_and_wait(_observation_wait(cmd, deadline))
+            job_empty_confirmed = True
+            proc.communicate(timeout=_observation_wait(cmd, deadline))
             proc.wait(timeout=_observation_wait(cmd, deadline))
             for stream in (proc.stdin, proc.stdout, proc.stderr):
                 if stream is not None:
@@ -157,6 +151,9 @@ def _run_observation(cmd: list[str], *, cwd, env: dict, timeout, deadline: float
         except BaseException as error:
             failure = ObservationCleanupError("observation cleanup was not confirmed")
             failure.process, failure.job = proc, job
+            failure._job_empty_confirmed = job_empty_confirmed
+            failure.operation_error = operation_error
+            failure.observation_deadline, failure.observation_path = deadline, cwd
             raise failure from error
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 

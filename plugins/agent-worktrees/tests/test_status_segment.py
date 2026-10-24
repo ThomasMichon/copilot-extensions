@@ -95,6 +95,7 @@ def test_status_segment_skips_control_plane_pr_overlay(monkeypatch):
 
 def test_unknown_observation_cannot_reuse_finalized_assertion(monkeypatch):
     from agent_worktrees import finalized_checkout
+    monkeypatch.setattr(git_ops, "_windows_observation", lambda: True)
 
     target = str(Path("unknown-finalized").resolve())
     rec = _wire(monkeypatch, target, state=git_ops.WorktreeState.UNKNOWN, turns=0)
