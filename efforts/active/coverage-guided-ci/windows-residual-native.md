@@ -65,8 +65,8 @@ copier changes instead belong to B6909, not an already-merged claim.
 
 ### Subsequent actual-merge settlement
 
-At Dev `abe1c6a7b0ae52807a9d41db5a4efa3a37d0797d`, the following nine
-independent contracts have actually merged. Their **34 exact census keys**
+At Dev `0ccade9ed65dcd4ff3797df3bfbb5ec5c0281e75`, the following ten
+independent contracts have actually merged. Their **62 exact census keys**
 now carry the corresponding merged code below, not their former retained
 batch label. The linked merged PRs retain their scoped implementation, review,
 checks and validation context. This is a semantic contract disposition, not
@@ -83,6 +83,7 @@ an assertion that historical patches were replayed byte-for-byte.
 | M8437 | W4-INDEX-SHUTDOWN | 4 | #8437, `1f711668a1950a0cdbbafc85243d33fd57b116b7` |
 | M8444 | W4-BRIDGE-STDIO | 1 | #8444, `0f5b38374525c7dfbc11b47212a7a9905a9b6ec8` |
 | M8470 | W4-BIND | 12 | #8470, `abe1c6a7b0ae52807a9d41db5a4efa3a37d0797d` |
+| M8487 | W4-DEPENDENCY-METADATA | 28 | #8487, `0ccade9ed65dcd4ff3797df3bfbb5ec5c0281e75` |
 
 The batch descriptions below preserve their original scope, not permission to
 republish settled work. In particular, the pane tests moved into the existing
@@ -92,7 +93,7 @@ assertion is accompanied by actual isolated native pipe/exit controls.
 Vault's compiler and NoService contracts remain separate, with their failed
 diagnostics retained rather than converted to timing qualification.
 No other retained, blocked or retirement-proposed key changes disposition.
-The 50 carried-forward retained keys are custody labels, not newly verified
+The 22 carried-forward retained keys are custody labels, not newly verified
 findings that every associated behavior is absent from current Dev.
 The parent remains #5682; the operator-closed #5694 is preserved history,
 not an open publication objective.
@@ -116,6 +117,38 @@ run and the earlier unexplained worker-loss diagnostic. Neither the passing
 rerun nor its small before/after launch sample qualifies complete same-head
 timing. No other disposition changes, no new skip or budget increase, and no
 installer-owner or retirement acceptance is implied.
+
+### Subsequent admission: W4-DEPENDENCY-METADATA
+
+M8487 settles the two historical metadata hunks under each of the canonical
+library and thirteen plugin paths: **28 exact path/header/hash keys**, not two
+keys total. The current implementation keeps the policy call at the retained
+static-setuptools layout rewrite and moves ConfigParser into the existing
+configuration companion. Its import and rewrite realize the historical
+contract semantically rather than replaying the former run_uv_install hunk.
+Both existing generators synchronize the current canonical-plus-15-derived
+policy/configuration pairs; the additional current consumers do not add
+historical census keys.
+
+The rewrite preserves raw values and case-distinct option names while setting
+egg_info.egg_base to the private retained project. Malformed configuration and
+read/write errors fail explicitly before installation. The existing real
+setuptools regression requires private egg-info, unchanged original files and
+an editable .pth targeting the live source. Lightweight controls cover missing
+and authored configuration, percent text, unrelated build options, case-distinct
+data-file keys and failure cleanup. The review's duplicate-key regression
+failed before optionxform=str and passes afterward. The unchanged module-size
+guard also passes through the existing companion, not a raised cap.
+
+Complete native policy, cleanup, compile and sync suites passed 380 tests with
+one existing platform skip, exactly two workers and unchanged item/containment
+limits, in 226.81 seconds including preparation and cleanup. The existing
+six-mode real-UV live-edit/cleanup controls remain intact. This does not settle
+the tools ledger's mixed S076 or S087 hunks: their assertion-level partition,
+real installed-setuptools consumer obligations and separate layout/immutability/
+support dependencies remain with that ledger. No #6909 copier or private
+overlay is adopted, and no complete-plugin performance qualification,
+retirement approval, rollout or parent completion is implied.
 
 ### Blocked existing owner
 
@@ -245,12 +278,11 @@ installer-owner or retirement acceptance is implied.
   explicitly on configuration/filesystem errors, and leave the full dependency
   graph, seven-day seasoning and resolution/retention checks intact.
   Copies are derived from the canonical library, not independent patches.
-  Dev moved the surrounding retained-input preparation (including package-dir
-  rewriting) into its current helper, but still has no proposed setup.cfg/
-  egg_base addition; rebase the contract onto that actual helper, not the old
+  Settled as M8487 at the retained-input preparation/helper seam, not the old
   run_uv_install line coordinates. The separately owned
   `tools/test_installer_dependency_policy.py` assertions must accompany the
-  canonical contract at integration, with their own census disposition.
+  canonical contract at integration, with their own census disposition; the
+  mixed S076/S087 tools keys are not wholly settled by this native disposition.
   This batch is not permission to take #6909's snapshot copier or overlay.
 
 Each batch above also needs the reviewed plan, its own newly scoped
@@ -407,8 +439,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `libs/installer-engine/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `libs/machine-transport/README.md`
 
@@ -467,8 +499,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-bridge/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-bridge/src/agent_bridge/agent_registry_resolver.py`
 
@@ -501,8 +533,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-codespaces/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-codespaces/tests/test_install_ps1_recovery.py`
 
@@ -530,8 +562,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-containers/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-dispatch/scripts/install.human-output.json`
 
@@ -545,8 +577,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-dispatch/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-dispatch/tests/test_install_ps1_build_snapshot.py`
 
@@ -568,8 +600,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-index/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-index/tests/test_installation_cells.py`
 
@@ -588,18 +620,18 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-logger/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-machines/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-mcp/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-pull-requests/scripts/install.human-output.json`
 
@@ -611,8 +643,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-pull-requests/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-pull-requests/tests/test_watch_delivery.py`
 
@@ -629,8 +661,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-ssh/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-vault/scripts/install.human-output.json`
 
@@ -642,8 +674,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-vault/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `plugins/agent-vault/tests/test_install_snapshot_ps1.py`
 
@@ -680,8 +712,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/budget-guidance/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ### `worktree-manager/bin/README.md`
 
@@ -712,8 +744,8 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-worktrees/scripts/installer_dependency_policy.py`
 
-- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — W4-DEPENDENCY-METADATA
-- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — W4-DEPENDENCY-METADATA
+- `@@ -8,6 +8,7 @@ Captured settings may contain credentials and must never be printed.` — `7c3a2f974941` — M8487
+- `@@ -876,6 +877,19 @@ def run_uv_install(` — `d498636ff61a` — M8487
 
 ## Published-only residual reconciliation
 
@@ -762,8 +794,8 @@ handling is separately counted. No unspecified hunk is silently retired.
 
 Mechanical self-check passed against freshly read immutable Git objects:
 **62 distinct paths, 128 distinct exact keys, zero missing/extra/duplicate
-keys, and one disposition on every row**. Updated totals are **51 actual-merged,
-25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 50 retained, and 2
+keys, and one disposition on every row**. Updated totals are **79 actual-merged,
+25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 22 retained, and 2
 proposed-retirement** continuation hunks. The blocked mixed key additionally
 partitions retained portability subspans from the R-BASH-SKIP review proposal;
 these are not additional full-hunk census rows.
