@@ -14,7 +14,10 @@ def assert_producers_settled(
     *,
     emit_error: Callable[[str], None],
 ) -> bool:
-    """Apply the same non-bypassable producer gate before and during cleanup."""
+    """Apply non-bypassable producer and pair gates before and during cleanup."""
+    from . import paired_claims
+    if not paired_claims.assert_settled(record, emit_error=emit_error):
+        return False
     if record is not None and any(c.has_producer and c.is_unsettled for c in record.resources):
         emit_error(
             f"Worktree {worktree_id} owns unsettled protected producer obligations; "

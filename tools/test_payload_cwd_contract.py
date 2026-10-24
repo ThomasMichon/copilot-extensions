@@ -27,6 +27,102 @@ def _block(path: Path, name: str) -> str:
     return text[start:end]
 
 
+def _stage_copy_function() -> str:
+    return _block(ROOT / "plugins/agent-worktrees/scripts/install.ps1", "payload-copy")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native payload copying")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("links", [False, True], ids=["ordinary", "links"])
+def test_native_stage_copy_retains_provider_tree(
+    tmp_path: Path, host: str, links: bool,
+) -> None:
+    powershell = shutil.which(host)
+    if powershell is None:
+        pytest.skip(f"{host} unavailable")
+    source = tmp_path / "payload [literal] \u00e9"
+    (source / ".hidden" / "nested").mkdir(parents=True)
+    (source / "empty").mkdir()
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "cached.pyc").write_bytes(b"retained staging input")
+    (source / ".hidden" / "nested" / "payload.bin").write_bytes(bytes(range(256)))
+    readonly = source / "readonly.txt"
+    readonly.write_bytes(b"readonly payload")
+    readonly.chmod(0o444)
+    if links:
+        try:
+            (source / "file-link").symlink_to(readonly)
+            (source / "directory-link").symlink_to(source / ".hidden", target_is_directory=True)
+        except OSError as error:
+            readonly.chmod(0o666)
+            pytest.skip(f"symbolic links unavailable: {error}")
+    expected = tmp_path / "provider"
+    expected.mkdir()
+    actual = tmp_path / "native"
+    script = tmp_path / "copy.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n" + _stage_copy_function()
+        + "\n[IO.File]::SetAttributes((Join-Path $args[0] '.hidden'), "
+        "[IO.FileAttributes]::Directory -bor [IO.FileAttributes]::Hidden)\n"
+        + "Copy-Item -LiteralPath $args[0] -Destination $args[1] -Recurse -Force\n"
+        + "Copy-InstallerStageDirectory $args[0] $args[2]\n",
+        encoding="utf-8",
+    )
+    try:
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-File", str(script), str(source), str(expected), str(actual)],
+            capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        baseline = expected / source.name
+        paths = {path.relative_to(baseline) for path in baseline.rglob("*")}
+        assert paths == {path.relative_to(actual) for path in actual.rglob("*")}
+        for relative in paths:
+            before, after = baseline / relative, actual / relative
+            assert after.is_symlink() == before.is_symlink(), relative
+            assert after.stat().st_file_attributes == before.stat().st_file_attributes, relative
+            if before.is_file():
+                assert after.read_bytes() == before.read_bytes(), relative
+                assert after.stat().st_mtime_ns == before.stat().st_mtime_ns, relative
+    finally:
+        for directory in (source, expected, actual):
+            for path in directory.rglob("*"):
+                if path.is_file():
+                    path.chmod(0o666)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native payload copying")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("failure", ["missing-source", "blocked-destination"])
+def test_native_stage_copy_reports_io_failure(
+    tmp_path: Path, host: str, failure: str,
+) -> None:
+    powershell = shutil.which(host)
+    if powershell is None:
+        pytest.skip(f"{host} unavailable")
+    source, destination = tmp_path / "source", tmp_path / "destination"
+    if failure == "blocked-destination":
+        source.mkdir()
+        (source / "payload").write_bytes(b"source")
+        destination.write_bytes(b"not a directory")
+    script = tmp_path / "copy.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n" + _stage_copy_function()
+        + "\nCopy-InstallerStageDirectory $args[0] $args[1]\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(script), str(source), str(destination)],
+        capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode != 0
+    assert result.stderr
+    if failure == "blocked-destination":
+        assert destination.read_bytes() == b"not a directory"
+
+
 def _env(home: Path) -> dict[str, str]:
     env = {
         key: value for key, value in os.environ.items()
@@ -52,6 +148,8 @@ def _entry(tmp_path: Path, extension: str, contextual: bool = False) -> tuple[Pa
     (payload / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
     canonical = ROOT / "plugins" / "agent-worktrees" / "scripts" / f"install.{extension}"
     header = "param([string]$Action = 'install')\n" if extension == "ps1" else "#!/usr/bin/env bash\nset -e\n"
+    if extension == "ps1":
+        header += _stage_copy_function() + "\n"
     staging = _block(canonical, "self-stage")
     if contextual:
         text = canonical.read_text(encoding="utf-8")

@@ -204,7 +204,7 @@ def reciprocal_snapshot(record, sibling, sibling_path: Path):
     """Return retained reciprocal evidence only for an exact interrupted unlink."""
     if any(getattr(sibling, name) for name in _PAIR_FIELDS):
         return None
-    if (sibling.kind not in tracking.MANAGED_KINDS or sibling.status != "complete"
+    if (sibling.kind not in tracking.MANAGED_KINDS or sibling.status not in {"complete", "finalized"}
             or sibling.owner != record.owner or sibling.resolved_origin != "delegate"):
         return None
     try:

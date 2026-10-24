@@ -450,6 +450,11 @@ comments, docs, `AGENTS.md`. Never put downstream-private material in them.
 When in doubt, write the issue/commit as if you were an unaffiliated open-source
 contributor — because to a reader, you are.
 
+**Allowed commit provenance:** preserve the standard `Copilot-Session` trailer
+when supplied by the runtime or operator. Do not ask to strip it solely because
+it contains a session ID. This narrow exception does not allow private session
+content, paths, links, other identifiers, or raw source-attribution fields.
+
 ## Reference
 
 `CONTRIBUTING.md` (contributor process), `docs/pipelines.md` (CI/CD gating,

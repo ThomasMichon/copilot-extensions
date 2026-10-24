@@ -44,6 +44,7 @@ Use #7238 to accept a slice and record its source boundary before editing it.
 | Proposal editor | Sole shared vision/effort/service-lifecycle writer; `services/chat` core, client and hosting integration | #7238 and the proposal PR |
 | Plugin contributor | Disjoint `plugins/agent-chat` connection/native contribution; exact paths claimed before edits | #7238; input integrated by the proposal editor |
 | Collaboration contributor | Claimed continuation of the linked collaboration/thread/attention specification and its coordinated service/client slice; no transport or lifecycle takeover | [Bounded continuation claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6358796470) |
+| Chat setup adapter contributor | Derive the Chat-owned standard setup adapter and the explicitly authorized reusable role-selectable construction seam; preserve existing service lifecycle ownership | The operator's direction below and this reviewed effort |
 | Qualification contributor | Installed-consumer, native lifecycle and platform-boundary cases | #7238; input integrated by the proposal editor |
 | Conduct contributor | Generic scoped-peer ambient policy and discoverable rules-of-engagement skill, after the intent amendment clears review; no Chat/Bridge/Logger source | [Accepted disjoint scope](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6303930285) |
 | Process utility contributor | Canonical `libs/agent-procutil` caller-bounded cross-OS source, tests and library docs | [Public source claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6274245326) |
@@ -126,6 +127,24 @@ outside bounded ambient history. This public-safe summary does not identify
 private research sources or add another transport/controller. The
 [collaboration contract](collaboration.md) is agent-recommended realization of
 that existing intent, not installation or activation authority.
+
+Further operator direction:
+
+> Derive the Chat-owned standard setup adapter; only coordinate by making scoped changes, don't reach out to other agents directly or via PR/issue comments
+
+This extends the source derivation, not deployment authority or another
+component's implementation ownership. The proposed realization is in
+[Standard Chat setup adapter](architecture.md#standard-chat-setup-adapter).
+
+After the construction trace identified the all-local-package admission
+boundary, the operator explicitly authorized its narrow shared prerequisite:
+
+> Let's provide a reusable role-selectable install flow.
+
+This permits a canonical installer-engine extension and its generated
+consumer copies, not a Chat-specific engine or a takeover of service
+supervision, Fleet, Gateway or SSH. The no-outreach/no-comment coordination
+boundary and the absence of runtime rollout authority remain unchanged.
 
 ## Plan
 
@@ -212,6 +231,29 @@ requirements.
 - [ ] Keep provider-specific templates, credential acquisition and organization
   policy in their own adapters, not the generic conversation package.
 
+#### Standard Chat setup adapter
+
+- [x] Review the [Chat-owned adapter derivation](architecture.md#standard-chat-setup-adapter),
+  including the standard Manager baseline and the exact current construction/
+  selection/supervision gaps. No neighboring implementation is claimed.
+  #8401 merged after current-head approval and required CI. This resolves the
+  derivation review, not an executable installer or any adoption gate.
+- [x] Establish a canonical role-selective construction input before implementing
+  client-only setup. #8430 adds explicit `local_packages` alongside selected
+  extras, retaining the complete admitted source graph and canonical custody.
+  Final-head native Linux/Windows controls prove client/service closure,
+  omitted-distribution refusal and immutable reuse. This is a construction
+  prerequisite, not selected Chat setup or an installed command publication.
+- [ ] Implement selected manual-client setup and preserving removal through
+  supported canonical custody, then qualify independently installed invocation.
+  Do not turn the existing local wheel catalog into release-selection authority.
+- [ ] Integrate the existing service lifecycle owner's stable-launcher,
+  health/cutover and recovery binding; no second Chat supervisor, installer
+  engine, command ledger or prerequisite Fleet deployment.
+- [ ] Add optional Manager/readiness discovery only after the independently
+  runnable adapter and its readiness meanings are real. Keep the parent
+  service, native, migration and adoption gates open until actually proved.
+
 ### Phase 5 - Qualified release and explicit migration
 
 - [ ] Resolve every Validation Plan item or transfer it to an exact named
@@ -239,13 +281,20 @@ requirements.
 
 #### Collaboration contract continuation
 
-- [ ] Review and merge the claimed [collaboration/thread/recipient contract](collaboration.md)
+- [x] Review and merge the claimed [collaboration/thread/recipient contract](collaboration.md)
   over existing Chat state before dependent implementation, preserving the
   coordinated client/service/plugin extension points.
-- [ ] Implement and qualify optional structured posts and non-consuming
+  Reviewed contract #8134 merged as
+  `85942fd63be8c298ba880bf0d42b5a5747f15c24`; its portable implementation
+  subsequently merged in #8159. Broader native and lifecycle gates remain open.
+- [x] Implement and qualify optional structured posts and non-consuming
   thread/inbox projections through the existing store and installed client.
   Pending reply attention must outlive an ambient window without becoming a
   task queue, native inbox assignment or another delivery authority.
+  #8159 qualified the current Windows source/installed-artifact slice and
+  required Linux source units. Current native Linux, genuine multi-machine
+  use, assignment, attachment and managed adoption remain in the parent
+  Validation Plan; they are not inferred from this source completion.
 
 #### Retained conduct and ingress integration
 
@@ -357,7 +406,7 @@ an independent SDK version or live native qualification.
 | Recipient inbox and eligible sources | The client accepts explicit actor/channel controls; Bridge `inspect_live_inbox` projects direct-message receipts | No examined client API supplies authoritative Chat recipient/source assignment. The client/service writer coordinates that versioned assignment and its isolation/rebind errors with the existing local service/Bridge owner. A direct-message receipt projection is not this API. |
 | Shared notification intake | Bounded Chat `scan` v1; Bridge remote-event multiplexing and protocol13 `remote/events` | Remote runtime events do not subscribe to the conversation store. The service writer and existing host/Bridge owner must publish the Chat-feed registration, generation, finite callback, cancellation and quiescence binding. No per-session Python helper or continuous Node polling is an acceptable substitute. |
 | Native admission and completion | SDK `session.send`, primary final-ID semantics and optional `originatingMessageId`; bounded queue/event-log observations | Exact own primary correlation is usable. Unknown or non-primary admission remains held until its native host supplies authoritative reconciliation; queue absence, unrelated idle and expired history do not supply it. |
-| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with eight checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
+| Commands, discovery and setup | SDK tools/commands, source-qualified extension identities and host-only reconciliation; installed client-catalog v1 with nine checked resources | The connection writer can expose the supported inert/manual surface. The client and existing lifecycle owners still owe governed selection/setup; a local wheel RECORD or a loaded tool is not that authority. Host reconciliation stays host-owned. |
 | Resident cost | The native host's ordinary extension process is the baseline | Existing service/host multiplexing owns shared listening. Measure increasing recipients, bounded callback time/bytes, zero quiet/self/irrelevant/reconnect-only model turns and exact deregistration separately from that baseline. |
 
 Repository API homes are `services/chat/src/agent_chat_service/`,
@@ -376,6 +425,263 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-24 - Deliver construction resources in Chat artifacts
+
+- The Chat-owned build now consumes the existing canonical
+  `standalone_build.py` hooks for the complete runtime family and Python
+  constructor/dependency-policy companions. Wheels contain unchanged canonical
+  bytes; sdists also carry the same helper so a subsequent wheel build needs
+  no checkout. Standalone preparation retains both canonical resource owners.
+  This is artifact delivery, not another construction engine or an executable
+  selected-installation adapter.
+- The installed wheel catalog covers all eighteen Python resources through
+  RECORD without changing its local-only evidence meaning. Source-independent
+  wheel/sdist equality, incomplete-sdist refusal, installed constructor imports
+  and resource-drift controls exercise the actual artifact boundary.
+- Native Windows qualification retained all410 parameter nodes: acceptance
+  passed371 with2 platform skips and37 explicit full-only deselections in106.28s
+  within120s; full passed408 with2 platform skips in147.40s within600s.
+  That initial resource inventory's membership digest is
+  `3ade790e12cd7539612d26b19525eb8b2e16d896389979c7480246ee87ddd5fb`.
+  An earlier acceptance attempt exhausted120s; a duration-reporting run of the
+  same unfiltered lane passed without changing its budget. A missing-helper
+  negative control was corrected to recognize the native exception type rather
+  than requiring a POSIX English diagnostic.
+- The adjacent qualification guard was stale after PR units moved to
+  `ci_pr_unit_reuse.py`; it now checks that exact CI owner and retains the
+  direct promotion producer check. No workflow or required CI matrix changes.
+  The initial PR CI correctly refused the changed standalone declaration's
+  stale source hash. Refresh only that admitted hash; the complete1274-node
+  packet then passed locally with coverage in110.468s, preserving its unit
+  inventory, effects policy, coverage targets and execution budget.
+- Review exposed the separate Python floors and an old preparation fixture.
+  Keep core/client Python3.10 support and the canonical constructor's3.11+
+  bootstrap requirement distinct. The installed resource control proves the
+  constructor's expected3.10 refusal without skipping the case; its positive
+  artifact-contained import remains exercised on a compatible interpreter.
+  Actual Python3.10.21 full qualification passed408 with2 POSIX-only skips
+  in147.84s,410/410 nodes, execution complete, with updated membership digest
+  `0e9bb0cd4a83e6baf022e674d418a5ef873266336d08015a19da1e7af529520a`.
+  The compatible-interpreter artifact/inventory controls separately passed10
+  cases in13.93s. All six real fresh-preparation resource expectations and the
+  adjacent qualification contracts passed54 cases in6.51s; Chat retains the
+  installer engine, while the extra procutil build resource remains Fleet/PR-only.
+  These fixes do not add a parser dependency, lower the canonical constructor's
+  floor or change any workflow.
+  Native Linux artifact qualification and selected manual-client setup/removal
+  remain open. No runtime rollout, service activation, migration or native
+  attachment is performed by this slice.
+
+### 2026-10-24 - Reusable role-selectable construction merged
+
+- #8430 merged to `dev` as `93f4546a0d65a3b2ead03de8872886fcfdd9429c`
+  at 03:47:17Z. Current-head review approved
+  `bf7f1596c64e6e72fd832c38e8e2402afbbf525e` with no open findings;
+  both review threads were resolved and required CI passed. The managed merge
+  used only the authorized additional-CODEOWNER exception, not a CI bypass.
+  #7238 remains open.
+- The shared constructor installs the caller's exact local distribution closure
+  and declared extras while retaining/fingerprinting all admitted sources.
+  Canonical dependency policy owns generated exclusion constraints, including
+  their path canonicalization and source-layout-independent retention.
+  UV remains the resolver; no Chat installer fork, project mutation or
+  registry fallback for an omitted first-party distribution is introduced.
+  Default callers retain their previous construction/profile behavior.
+- Final-head manual acceptance run `40059200321` passed all 16 selected role
+  cases on each fresh platform: native Linux 7.91s and Windows 16.64s, with 52
+  existing unrelated candidate-engine cases explicitly deselected per lane.
+  The final local workflow/policy selection passed 69 cases, including actual
+  short-path offline builds and canonical owned-temp aliases. Required source
+  CI, install-contract checks, canonical synchronization, module-size checks
+  and focused lint also passed. These are reusable construction controls,
+  not full Chat installed-adopter, native-host or service-lifecycle proof.
+- Re-read the complete parent Plan and Validation Plan after merge. Resolve
+  only the canonical role-input prerequisite; continue independently packaged
+  Chat manual-client setup, selected invocation and preserving removal through
+  supported custody. Service supervision, host assignment/shared feed,
+  migration and live adoption remain open. No runtime rollout was performed.
+
+### 2026-10-24 - Derive the standard Chat setup adapter
+
+- #8401 merged to `dev` as `e7a4b2f349cd7042522d566e236501d387df9e49`
+  at02:09:40Z. Current-head Copilot review approved with no findings, all
+  review threads were clear and required CI passed. The managed merge used
+  the authorized Maintainer exception for the additional CODEOWNER vote,
+  not a CI bypass. Re-read the full parent Plan/Validation after merge and
+  resolve only derivation review. Continue role-selective canonical input
+  before executable setup; the effort remains Active with no rollout.
+- The operator extends this slice to the Chat-owned adapter, with coordination
+  through scoped changes only and no direct agent outreach or PR/issue comments.
+  The [derivation](architecture.md#standard-chat-setup-adapter) is proposed
+  realization under the existing intent, not a runtime rollout or transfer of
+  neighboring source.
+- Read-only tracing distinguishes Manager bootstrap/catalog knowledge,
+  installer/readiness discovery/planning, canonical construction/retention and
+  Chat's local wheel catalog from governed selected-client/service setup.
+  Optional Fleet source transitions remain with their existing owners.
+- The current canonical package-root constructor traverses all local sources;
+  Chat declares both optional role closures. Role-selective construction must
+  therefore be established, not inferred from the client extra or achieved by
+  copying the engine. Chat's workspace result still explicitly lacks assignment;
+  Bridge live-message receipts and remote hosted-session events do not supply
+  Chat recipient assignment or shared conversation-feed registration.
+- No installer, service, credential, native attachment or migration was invoked.
+  No executable adapter is claimed by this documentation change. Review the
+  derivation before dependent code and preserve the full Plan/Validation gate.
+
+### 2026-10-24 - Portable collaboration merged; full graduation stays active
+
+- #8159 actually merged to `dev` as
+  `bc6fec54992c80293170c867be37775ab1dc6f9f` at00:18:37Z, from qualified
+  `c902cdaa25bf95a3cc839d6a717326fb3ec7976b`. Current-head Copilot review
+  `5635745409` approved with no open findings, every review thread was resolved
+  and required Linux source-unit/guard CI passed. Managed completion used the
+  repository-authorized Maintainer exception for the additional CODEOWNER
+  vote; no CI gate was bypassed.
+- Re-read the complete parent Plan and Validation Plan after merge. Resolve
+  only the portable collaboration implementation item. Native assignment,
+  shared feed/multiplexing, governed selection/setup, lifecycle, migration,
+  current platform qualification and genuine multi-machine adoption remain
+  open with their existing owners. The effort and #7238 stay Active.
+- The same immutable candidate passed both unchanged native Windows lanes:
+  acceptance361 passes, two specifically allowed POSIX skips and33 full-only
+  deselections in95.79 seconds under120; full394 passes and the same skips
+  in129.46 seconds under600. Both complete396-node maps have identical
+  membership digest
+  `74ef7d3dd3f75955377d23a4e729adb8d01b1cf10c9b6847bd7e35d718c6670d`,
+  without missing, unexpected, rejected or duplicate calls. All326 original
+  cases remain;70 are additive. Eighteen pure metadata/control units stay in
+  the existing admitted packet, not an expanded native CI matrix.
+- Review-driven regressions close the lock-held query class for unrelated,
+  pending and settled histories. Each indexed inbox branch and their merge
+  bound candidate examination before retirement. An empty scan page can
+  continue within its captured head without skipping an omitted pending entry;
+  exact returned counts and SDK progress guards preserve that contract.
+  Answered, resolved and superseded100-to5000 histories satisfy the unchanged
+  1000-instruction growth bound. The publication-race control injects only
+  after a successful real read, so stale existence checks cannot bypass it;
+  normal/fault cases keep actual child identity, crash and five-second bounds.
+- #8271's canonical Windows discovery repair pairs shared reads with native
+  retained-reader replacement and synchronizes the three intentional consumer
+  mirrors. Its131 native library contracts and the actual source-removed host
+  crash/rebind case pass. PID/strict parsing, mutation locks, record shape and
+  POSIX replacement remain unchanged; #5903/#5904 are separate.
+- Validation tiers retain real CLI/provider/HTTP, independent installed
+  participants, source-removed fresh core/client/service artifacts and actual
+  caller death before observer cleanup. No installer/bootstrap changed, so a
+  separate full-machine clean-room rig was not run. The configured local
+  Docker engine refused connection; no service was started and no native
+  Linux result is claimed. Actual model wake, external deployment and managed
+  adoption were not exercised or authorized. Earlier failed/stale-snapshot
+  diagnostics do not substitute for this final candidate.
+- Next bounded stretch _(agent-recommended)_: inspect the current workspace,
+  Bridge and lifecycle owners' published selection/setup and assignment/feed
+  seams, then claim the smallest supported Chat-owned consumer continuation.
+  Do not invent a missing host API, duplicate an installer or take neighboring
+  source. Keep current native Linux qualification explicit with its existing
+  owner rather than letting an unavailable local lane block unrelated
+  supported manual/client work. No runtime rollout is implied.
+
+### 2026-10-23 - Bound each pending branch before lookahead merge
+
+- The second review on `8d2d8fab9a` confirmed the first two findings resolved,
+  but its body retained a real Medium issue despite the overview's
+  "No open issues" label: small inbox pages still sorted an entire genuinely
+  pending backlog. No merge followed that ambiguous summary.
+- Regression-first measurement reproduced4634 versus205357 SQLite instructions
+  for100 versus5000 unanswered directed questions. Each indexed branch now
+  applies its snapshot/retirement filters and ordered lookahead limit before
+  merging their bounded IDs and loading canonical bodies.
+- Two additive cases cover unanswered requests and mixed answer/question
+  backlogs without changing pending semantics, captured paging, reader progress
+  or the120/600-second qualification allowances. The387-node acceptance packet
+  passes with352 passes, two allowed POSIX skips and33 full-only deselections
+  in78.78 seconds. Final full qualification and the next real-head review/CI
+  remain open.
+
+### 2026-10-23 - Review-driven projection work bounds
+
+- The first current-head review of #8159 found two real lock-held query costs:
+  an empty inbox scanned unrelated questions and a sparse thread scanned
+  unrelated channel events. Regression-first measurements reproduced growth
+  from5373 to225511 and1698 to75166 SQLite instructions, respectively, as
+  unrelated history grew from100 to5000 events.
+- Candidate selection now starts with indexed channel/recipient or canonical
+  reply-author relationships; thread IDs and the root are bounded before event
+  bodies are loaded. Derived channel/reply-author scalars are committed with
+  the canonical event and metadata, not writable attention state. No native
+  listener, transport or lifecycle source is involved.
+- Three additive regressions include unrelated questions, the viewer's own
+  ambient messages, another channel's correspondence and sparse-thread
+  pagination. Each requires no more than1000 extra SQLite instructions between
+  the small and large fixtures. The existing120-second acceptance lane passes
+  with349 passes, two allowed POSIX skips and33 full-only deselections in98.14
+  seconds;384 nodes are collected. Final same-candidate full qualification and
+  the next actual-head review/CI remain required before merge.
+- That full run exposed a Windows fixture race: the reader-lock child's ready
+  pathname became visible while replacement still temporarily denied reading
+  it. The fixture now requires a readable complete record within its unchanged
+  five-second deadline, still proves the same live child/lock and actual crash
+  release before Job cleanup, and adds one deterministic publication-race case
+  without removing the normal case. This does not change production reader
+  logic or hide a permanent publication failure.
+- Final candidate `d3265690f7` passed the unchanged full and acceptance lanes
+  without further source edits: full383 passes and two allowed POSIX skips
+  in108.58 seconds; acceptance350 passes, the same skips and33 full-only
+  deselections in77.97 seconds. Both complete385-node maps share
+  `e1b8371d38ee3691daed1058b305eae2ba63f393d2927fbdd7a0a4c02464f4e1`.
+  The original326 cases remain and59 cases are additive. The next current-head
+  review and required CI remain merge gates, not implied approvals.
+
+### 2026-10-23 - Portable collaboration candidate qualified
+
+- Implementation candidate `f95502367dc4880be906de48f22b30eb897ba95b`
+  adds optional typed posts, atomic canonical metadata/recipient indexes,
+  stable annotated recovery and non-consuming captured thread/inbox views.
+  Existing text event/page shapes, ordinary cursor settlement and the
+  transport/lifecycle/workspace owners remain unchanged.
+- The unchanged native Windows acceptance and full lanes exercised that same
+  immutable candidate: acceptance selected348 of381 nodes, with346 passes,
+  two allowed POSIX-only skips and33 full-only deselections in81.26 seconds;
+  full selected381, with379 passes and the same two allowed skips in98.72
+  seconds. Both maps were complete and shared membership digest
+  `b1fd10b81848876c5b93a22d5d65fb1ed2c2ef9f0f92b24ab3305afa59d51ac4`.
+  The original326 nodes remain;55 cases were added.
+- Simple end-to-end and fresh-artifact tiers use the existing real HTTP,
+  provider and source-removed installed client/core/service fixtures. They
+  cover lost structured responses, explicit original-ID recovery, recipient
+  and thread projections, and unchanged ordinary reading. No installer or
+  bootstrap changed, so a separate fresh-machine clean-room rig was not
+  required; these artifact environments are not managed-host deployment.
+- Eighteen focused pure metadata/control cases pass locally and are enrolled
+  additively in the existing source-unit manifest. Whole-packet Windows
+  qualification is not claimed: the earlier canonical packet refused a
+  native loader in activation-preservation after856 passes and one platform
+  skip. The exact boundary is retained with the existing portfolio owner in
+  [#1303](https://github.com/ThomasMichon/copilot-extensions/issues/1303#issuecomment-6360280182);
+  no observer or neighboring implementation was weakened. The complete
+  required Linux source-unit packet still has to pass on the review head.
+- Changed-source lint, install-contract and documentation checks pass.
+  The registered `services/chat` consumer has one generated patch changefile;
+  no release version is hand-selected. Native Linux Chat, native feed
+  assignment, foreground attachment and managed adoption are not inferred
+  from these Windows source/artifact results.
+- Review/merge and the parent completion gate remain open. No runtime update,
+  deployment, private provider or external venue activation is authorized or
+  performed by this qualification.
+
+### 2026-10-23 - Collaboration contract reviewed
+
+- The four-document specification merged in #8134 at
+  `85942fd63be8c298ba880bf0d42b5a5747f15c24`, after current-head Copilot
+  approval with no findings and passing required checks.
+- Re-read the complete Plan and Validation Plan after merge. Only the contract
+  review item is resolved; structured post/view implementation, installed
+  qualification and the broader native/lifecycle/adoption gates remain open.
+- Continue in the same source worktree from the reviewed contract. Claim the
+  exact service/client/test boundary before code rather than finalizing the
+  still-Active parent effort.
 
 ### 2026-10-23 - Collaboration contract continuation
 

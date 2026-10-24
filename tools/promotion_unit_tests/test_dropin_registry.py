@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import stat
 import sys
 from pathlib import Path
 
@@ -24,6 +26,22 @@ _original = _load_source(
     "promotion_original_dropin_registry", LIBRARY / "tests/test_dropin_registry.py"
 )
 for _name, _function in vars(_original).items():
-    if _name.startswith("test_"):
+    if _name.startswith("test_") and _name != "test_fifo_is_rejected_without_calling_classifier":
         assert _name not in globals(), f"duplicate original registry test: {_name}"
         globals()[_name] = _function
+
+
+def test_fifo_is_rejected_without_calling_classifier(tmp_path, monkeypatch):
+    """Keep the original refusal assertions; native FIFO creation stays outside units."""
+    entry = tmp_path / "blocking.json"
+    original_lstat = Path.lstat
+
+    def lstat(path, *args, **kwargs):
+        observed = original_lstat(path, *args, **kwargs)
+        if path == entry:
+            return os.stat_result((stat.S_IFIFO | 0o600, *observed[1:]))
+        return observed
+
+    monkeypatch.setattr(_original.os, "mkfifo", lambda path: path.touch(), raising=False)
+    monkeypatch.setattr(Path, "lstat", lstat)
+    _original.test_fifo_is_rejected_without_calling_classifier(tmp_path)

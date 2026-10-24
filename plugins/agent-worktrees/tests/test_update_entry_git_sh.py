@@ -74,6 +74,7 @@ def test_update_entry_git_sh_delegates_before_windows_provider_parsing(
     ["update", "--request-status=synthetic-request"],
     ["update", "--recovery-status"],
     ["update", "--recover-after-restart"],
+    ["update", "--recover-for-repair"],
 ])
 def test_update_entry_git_sh_does_not_redirect_other_dispatch(
     update_entry_case, native_bash, monkeypatch, args,

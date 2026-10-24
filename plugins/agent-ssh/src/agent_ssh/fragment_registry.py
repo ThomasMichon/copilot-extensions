@@ -139,6 +139,7 @@ class FragmentRegistryReport:
     findings: tuple[Finding, ...]
     blocked_aliases: frozenset[str]
     unscoped_blocking: bool = False
+    indeterminate_aliases: frozenset[str] = frozenset()
 
     @property
     def active_aliases(self) -> frozenset[str]:
@@ -966,6 +967,13 @@ def scan_fragment_registry(
         not entry_claims.complete and entry not in entries
         for entry, entry_claims in claims.items()
     )
+    indeterminate_aliases = {
+        alias.casefold()
+        for entry, entry_claims in claims.items()
+        if decisions[entry].status is EntryStatus.INDETERMINATE
+        for alias in entry_claims.aliases
+        if alias.casefold() not in active_aliases
+    }
     snapshot = ScanSnapshot(
         registry=REGISTRY_NAME,
         authority=ScanAuthority.COMPLETE,
@@ -978,6 +986,7 @@ def scan_fragment_registry(
         findings=tuple(findings),
         blocked_aliases=frozenset(blocked_aliases),
         unscoped_blocking=unscoped_blocking,
+        indeterminate_aliases=frozenset(indeterminate_aliases),
     )
 
 
@@ -1123,25 +1132,9 @@ def doctor_payload(
 ) -> dict[str, object]:
     root = Path(directory) if directory is not None else managed_config_dir()
     shadow_findings = find_shadowed_aliases(report, ssh_config)
-    return {
-        "registry": REGISTRY_NAME,
-        "path": str(root),
-        "authority": report.snapshot.authority.value,
-        "active": [
-            fragment.to_dict()
-            for _, fragment in sorted(report.entries.items())
-        ],
-        "findings": [
-            finding.to_dict() for finding in (*report.findings, *shadow_findings)
-        ],
-        "fix_available": False,
-        "active_basis": "current-evidence-only",
-        "retention_possible": (
-            report.snapshot.authority is ScanAuthority.INDETERMINATE
-            or any(finding.status == "indeterminate" for finding in report.findings)
-        ),
-        "unscoped_blocking": report.unscoped_blocking,
-    }
+    from ._fragment_report import render_payload
+
+    return render_payload(report, REGISTRY_NAME, root, shadow_findings)
 
 
 def format_doctor(
@@ -1152,44 +1145,6 @@ def format_doctor(
 ) -> str:
     root = Path(directory) if directory is not None else managed_config_dir()
     shadow_findings = find_shadowed_aliases(report, ssh_config)
-    label = "[WARN]" if (report.findings or shadow_findings) else "[OK]"
-    lines = [
-        f"{label} {REGISTRY_NAME} is {report.snapshot.authority.value}; "
-        f"{len(report.entries)} managed fragment(s) confirmed active by current evidence.",
-        f"  path: {root}",
-    ]
-    for finding in shadow_findings:
-        lines.append(f"  [WARN] {finding.entry}: {finding.remedy}")
-    if (
-        report.snapshot.authority is ScanAuthority.INDETERMINATE
-        or any(finding.status == "indeterminate" for finding in report.findings)
-    ):
-        lines.append(
-            "  A running process may retain only matching last-known fragments "
-            "for indeterminate entries."
-        )
-    if report.unscoped_blocking:
-        lines.append(
-            "  Incomplete managed-fragment identity blocks fresh alias probes "
-            "until every managed entry can be classified."
-        )
-    for _, fragment in sorted(report.entries.items()):
-        lines.append(
-            f"  + {fragment.transport}: {fragment.path} "
-            f"[{', '.join(fragment.aliases) or 'no aliases'}]"
-        )
-        if fragment.metadata is None:
-            lines.append("    class: legacy-managed")
-        else:
-            lines.append("    class: managed")
-            lines.append(f"    registry: {fragment.metadata.registry}")
-            lines.append(f"    module: {fragment.metadata.module}")
-    for finding in report.findings:
-        target = f" -> {finding.target}" if finding.target else ""
-        lines.append(f"  - {finding.reason}: {finding.entry}{target}")
-        if finding.detail:
-            lines.append(f"    {finding.detail}")
-        if finding.remedy:
-            lines.append(f"    {finding.remedy}")
-    lines.append("  Cleanup is report-only; no --fix operation is available.")
-    return "\n".join(lines)
+    from ._fragment_report import render_text
+
+    return render_text(report, REGISTRY_NAME, root, shadow_findings)
