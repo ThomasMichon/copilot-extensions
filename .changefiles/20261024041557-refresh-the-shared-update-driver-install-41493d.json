@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh the shared update-driver installer process helper from its canonical source",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

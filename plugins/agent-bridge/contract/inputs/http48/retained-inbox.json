@@ -36,6 +36,11 @@
     },
     "wrong_epoch": 409,
     "begin": [{"begin": true}, {"begin": false}],
+    "native_rename": {
+      "original_row_unchanged": true,
+      "original_begin_refused": 409,
+      "aliases_removed": true
+    },
     "outcomes_after_close": [
       {"stage": "unknown"},
       {"stage": "sdk_accepted"},

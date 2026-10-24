@@ -151,7 +151,12 @@ admission require the exact current enrollment as well as fresh registration;
 concurrent reload and final admission therefore have one serial order. An
 already-committed final attempt stays outstanding after reload, and its original
 consumer can still report outcomes. A successor cannot inherit its old handoff.
-Unoffered original messages remain intact for the newly enrolled consumer.
+Unoffered original messages remain intact for a newly enrolled consumer of the
+same native session. A native-session rename does not move associated messages
+or handoffs to its successor; only unassociated legacy messages follow aliases.
+The original retained target, input and producer association therefore survive
+alias cleanup, and an original-URL keyed retry still recovers that same row
+after deregistration or purge without granting a new send opportunity.
 
 Enrollment history is immutable apart from irreversible retirement, survives
 registration cleanup and participates in DB revision/inventory observations.

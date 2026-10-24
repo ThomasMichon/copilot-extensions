@@ -331,7 +331,10 @@ def _fold_in_predecessor(
         (session_id, predecessor_id),
     )
     conn.execute(
-        "UPDATE live_messages SET session_id=? WHERE session_id=?",
+        # Retained custody belongs to the original native context, not its
+        # temporary routing alias. Legacy messages still follow the rename.
+        "UPDATE live_messages SET session_id=? WHERE session_id=? "
+        "AND runtime_custody_json IS NULL AND handoff_json IS NULL",
         (session_id, predecessor_id),
     )
     conn.execute(

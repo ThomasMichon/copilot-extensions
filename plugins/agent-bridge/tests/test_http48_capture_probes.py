@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 import pytest
@@ -46,6 +47,15 @@ def test_http48_capture_actual_observations(
     bound = capture_request()
     vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
     app, client, db, consumer = serving
+    assert db.create_cli_mode_reservation("synthetic-worktree", now=time.time())
+    registration = {
+        "machine": "machine-a", "worktree_id": "synthetic-worktree",
+        "pid": consumer.pid, "process_started_at": consumer.process_started_at,
+    }
+    registered = client.post("/api/v1/live-sessions", json={
+        **registration, "session_id": consumer.session_id,
+    })
+    assert registered.status_code == 200, registered.text
     observed: dict[str, Any] = {}
     health = client.get("/health")
     assert health.status_code == 200
@@ -104,11 +114,24 @@ def test_http48_capture_actual_observations(
         reply = client.post(PREFIX + "/begin", json=attempt(body, row))
         assert reply.status_code == 200, reply.text
         observed["begin"].append(reply.json())
+    original = dict(db.execute_read("SELECT * FROM live_messages")[0])
+    for successor in ("native-b", "native-c"):
+        renamed = client.post("/api/v1/live-sessions", json={
+            **registration, "session_id": successor,
+        })
+        assert renamed.status_code == 200, renamed.text
+    observed["native_rename"] = {
+        "original_row_unchanged": dict(db.execute_read("SELECT * FROM live_messages")[0]) == original,
+        "original_begin_refused": client.post(PREFIX + "/begin", json=attempt(body, row)).status_code,
+    }
     db.close_runtime_epoch(
         owner, db.runtime_epoch(owner), transition_id="synthetic-transition",
         target_assembly="synthetic-retained", predecessor=app.state.live_inbox_runtime._producer,
     )
-    db.deregister_live_session(consumer.session_id)
+    assert db.deregister_live_session("native-c")
+    observed["native_rename"]["aliases_removed"] = (
+        db.execute_read("SELECT * FROM live_session_aliases") == []
+    )
     app.state.ready = False
     app.state.session_manager.is_draining = True
     app.state.loop_governance = None

@@ -91,6 +91,80 @@ def test_lost_admission_reply_reopens_original_key_after_closure_and_registratio
         reopened.close()
 
 
+@pytest.mark.parametrize("cleanup", ["deregister", "purge"])
+@pytest.mark.parametrize("stage", ["admitted", "offered", "sending"])
+def test_original_key_recovers_after_native_renames_and_alias_cleanup(serving, cleanup, stage) -> None:
+    app, client, db, consumer = serving
+    now = time.time()
+    assert db.create_cli_mode_reservation("worktree-a", now=now)
+    registration = {
+        "machine": "machine-a", "worktree_id": "worktree-a",
+        "pid": consumer.pid, "process_started_at": consumer.process_started_at,
+    }
+    assert client.post("/api/v1/live-sessions", json={
+        **registration, "session_id": consumer.session_id,
+    }).status_code == 200
+    body = enroll(client, consumer)
+    payload = {**PAYLOAD, "expected_session_id": consumer.session_id}
+    first = client.post(MESSAGES, json=payload)
+    assert first.status_code == 200, first.text
+    if stage != "admitted":
+        row = poll(client, body)
+        if stage == "sending":
+            assert client.post(PREFIX + "/begin", json=attempt(body, row)).json()["begin"]
+    original = dict(db.execute_read("SELECT * FROM live_messages")[0])
+    for successor in ("native-b", "native-c"):
+        renamed = client.post("/api/v1/live-sessions", json={
+            **registration, "session_id": successor,
+        })
+        assert renamed.status_code == 200, renamed.text
+    assert db.resolve_live_session_id(consumer.session_id) == "native-c"
+    assert dict(db.execute_read("SELECT * FROM live_messages")[0]) == original
+    successor_prefix = "/api/v1/live-sessions/native-c/retained-inbox"
+    successor_request = {
+        "contract": body["contract"],
+        "consumer": {**consumer.document(), "session_id": "native-c", "incarnation": "consumer-c"},
+    }
+    observation = client.post(successor_prefix + "/negotiate", json=successor_request)
+    assert observation.status_code == 200, observation.text
+    successor_body = {**successor_request, **observation.json()}
+    enrolled = client.post(successor_prefix + "/enroll", json=successor_body)
+    assert enrolled.status_code == 200, enrolled.text
+    successor_body.pop("expected_incarnation")
+    pending = client.post(successor_prefix + "/poll", json=successor_body)
+    assert pending.status_code == 200 and pending.json()["messages"] == []
+    if stage != "admitted":
+        assert client.post(PREFIX + "/begin", json=attempt(body, row)).status_code == 409
+    if cleanup == "deregister":
+        assert db.deregister_live_session("native-c")
+    else:
+        db.reap_stale_live_sessions(now=now + 1000, stale_seconds=1, purge_seconds=1,
+                                   pid_alive=lambda _: False)
+    assert db.execute_read("SELECT * FROM live_sessions") == []
+    assert db.execute_read("SELECT * FROM live_session_aliases") == []
+    reopened = Database(db.db_path)
+    app.state.db = reopened
+    app.state.ready = False
+    app.state.live_inbox_runtime = LiveInboxRuntime()
+    try:
+        retry = client.post(MESSAGES, json=payload)
+        assert retry.status_code == 200, retry.text
+        assert retry.json()["duplicate"] and retry.json()["message_id"] == first.json()["message_id"]
+        for changed in ({"body": "changed"}, {"expected_session_id": "foreign"}):
+            assert client.post(MESSAGES, json={**payload, **changed}).status_code == 409
+        assert client.post("/api/v1/live-sessions/foreign/messages", json=payload).status_code == 409
+        assert dict(reopened.execute_read("SELECT * FROM live_messages")[0]) == original
+        assert len(reopened.execute_read("SELECT * FROM live_messages")) == 1
+        if stage == "sending":
+            handoff = json.loads(original["handoff_json"])
+            assert reopened.record_live_message_handoff(
+                consumer, original["id"], handoff["id"], outcome="sdk_accepted", now=now + 1001,
+            ) == "sdk_accepted"
+    finally:
+        app.state.db = db
+        reopened.close()
+
+
 @pytest.mark.parametrize("problem", [
     "frontend", "database", "closed", "draining", "proxy", "public-bind", "incarnation",
     "pid", "expiry", "installation", "readonly",

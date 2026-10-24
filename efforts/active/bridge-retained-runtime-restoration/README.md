@@ -279,6 +279,15 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   copies, without changing canonical behavior. Six bounded Python-engine
   vendoring controls, the install contract and both canonical Bridge contracts
   pass on that integrated source. Fresh current-head CI/review remain required.
+- Review reproduced original-key recovery failure after same-process native
+  renames and registration cleanup. The alias owner now forwards only legacy
+  rows: retained messages keep their original native target and handoff.
+  Twelve actual ASGI cases cover repeated renames, deregistration/purge,
+  unoffered/offered/started messages, reopened storage, refused changed input
+  and wrong targets, a successor that cannot inherit input, and late original
+  outcomes. The combined retained/legacy regression cohort passes 291 cases.
+  Fresh committed-source HTTP-48 evidence and current-head review remain owed;
+  this correction does not complete the actual SDK or parent restoration gates.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the
