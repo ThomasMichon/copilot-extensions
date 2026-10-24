@@ -1278,8 +1278,8 @@
   ],
   "sources": {
     "tools/promotion_unit_tests/test_legacy_version_evidence.py": "741716970463c8ae8bf53cbd7d046faa02450593eb13f88d46984ba821d3668d",
-    "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "d71c64cd963d2d92d4e59581b9ec427fa5edb73d0227872f87b59cef1bd20ef2",
-    "tools/promotion_unit_tests/test_state_root_read.py": "d6a76e3af9ac42c30240a94d29543a0c57f0f75a503a36e1a2a94ec0958fe228",
+    "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "bc017afcd4e8a02f893e9e9cc231121c60767e1825b186386d91ab648627dd7d",
+    "tools/promotion_unit_tests/test_state_root_read.py": "53bf31651afa639058e1a16115da39b32f3f99ece4bc42d8c6be918984dd6a43",
     "tools/artifact_source_build.py": "e991e7c9dfc9b9a268f392b97facecc44ba83c8bcd06b76c336fe009faee178d",
     "tools/standalone_python_artifacts.py": "f0be60291f3d4987bc8bc8cfab6f8e7edb877d6991da92bdad22d9e6ce04b598",
     "tools/standalone_consumers.py": "168987556a18f4820f1b4869d090306827b2587e93b392eebe25ef497db5e910",

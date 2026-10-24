@@ -273,8 +273,14 @@ task-specific sibling of the current tracked worktree and exits `3` when no
 pair is available.
 
 The unpaired state-root read keeps the normal layered binding configuration
-without composing foreign-repository PR overlays. It does not enumerate enabled
-plugins to answer a state-location query; publication commands retain their
+without composing foreign-repository PR overlays. Plain and JSON reads also
+omit the knowledge repo's portable launch-preference overlay (profiles, profile
+assignment, headless and auto-fast-forward preferences), which does not affect
+state-location resolution. Committed repository policy, the knowledge binding,
+registered checkout checks and binding errors remain unchanged. `--conduct`
+and `--pair` retain their existing preference loading; ordinary configuration
+and publication callers still load preferences by default. The state-location
+query does not enumerate enabled plugins; publication commands retain their
 normal PR-policy resolution.
 
 From a registered repository anchor, `--pair` exits `3` because the anchor does

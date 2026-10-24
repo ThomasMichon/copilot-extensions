@@ -173,7 +173,7 @@ release, installation and lifetime ownership.
   registered-Manager launcher repair.
 - [x] Land the bounded state-root follow-up through review and required CI.
   #8414 merged as `5a2b202b5ae94b9695f04f4a05c4c424731d3ab7`.
-- [ ] Land the reviewed [startup-headroom follow-up](startup-headroom.md)
+- [x] Land the reviewed [startup-headroom follow-up](startup-headroom.md)
   before its implementation; preserve existing source and control owners.
 - [ ] Execute that follow-up in independently reviewable source slices:
   omit unused state-root preferences first, then qualify the canonical
@@ -227,6 +227,43 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Narrow state-root preference read implemented
+
+- Refreshed the active source ownership and newly opened Worktrees PR files;
+  the preference-read slice has no direct file conflict.
+- Added a default-on knowledge-preference option at the existing config owner.
+  Plain/JSON `state-root` disables only that unused contribution. Conduct and
+  pair modes retain their preference paths; ordinary configuration callers
+  remain full by default. Per-scope cache keys distinguish the two loads.
+- The contained configuration, state-root, context-resolution and profile
+  cohort passed 396 tests. New cases observe actual overlay reads in both
+  cache orders and compare complete real resolver/handler results for bound,
+  unbound, unregistered, explicit, self-hosted and absent-config inputs.
+- Updated the CLI owner reference and Worktrees changefile. The existing eight
+  effect-free handler nodes retain their identities; only their two changed
+  source hashes are refreshed in the unit manifest. Lint and the 13-plugin
+  install-contract gate passed.
+- Current-head review, required CI and merge remain pending. This is not native
+  eight-second acceptance, release adoption or installed rollout. The separate
+  evaluator slice still requires an independently admitted bootstrap selector.
+
+### 2026-10-24 - Startup-headroom plan reviewed and merged
+
+- #8461 merged to Dev as
+  `6b793523de1d38b70173c65bbd5eb64cf0537a24` after actual Copilot
+  approval `5636807744` of head
+  `c492262b19b1c7c18985e429f322a1f8fab999bc`, complete empty inline
+  and thread reads, and passing required CI.
+- The managed Maintainer merge omitted only the provider-confirmed separate
+  CODEOWNER vote; no CI, hold or blocking feedback was bypassed. The clean
+  accepted source was pulled forward after merge/provenance checks, preserving
+  its backup when routine sync refused the deleted publication ref.
+- The reviewed implementation order starts with the independent unused
+  state-root preference read. Fresh-process evaluator selection still needs
+  its explicit trusted-bootstrap admission and refusal qualification.
+  Implementation, complete native discovery, release/control adoption and
+  authorized running acceptance remain open; the effort is Active.
 
 ### 2026-10-24 - Architecture attribution before selecting the next repair
 

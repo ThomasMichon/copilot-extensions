@@ -54,8 +54,8 @@ launch/ownership patterns. It does not introduce another SDK or state resolver.
 
 ### 1. Review and establish implementation admission
 
-- [ ] Land this sub-plan through ordinary review and required CI before code.
-- [ ] Refresh current source, relevant open PR files and issue ownership;
+- [x] Land this sub-plan through ordinary review and required CI before code.
+- [x] Refresh current source, relevant open PR files and issue ownership;
   document any actual conflict and retain the existing owner.
 - [ ] Locate the existing independent, attributable bootstrap-interpreter
   selector usable before installation-mode validation. Prove what authorizes
@@ -69,18 +69,18 @@ launch/ownership patterns. It does not introduce another SDK or state resolver.
 
 ### 2. Narrow the state-root preference read
 
-- [ ] Separate the unused portable preference contribution from required
+- [x] Separate the unused portable preference contribution from required
   configuration resolution at the existing owner. Reuse existing helpers;
   do not duplicate the state-root algorithm in a provider.
-- [ ] Have the plain state-root read omit preference work only after tracing
+- [x] Have the plain state-root read omit preference work only after tracing
   every field it consumes. Preserve explicit `--repo`, bound/unbound,
   self-hosted, JSON/text and failure behavior.
-- [ ] Preserve pairing and conduct behavior, or leave those modes on their
+- [x] Preserve pairing and conduct behavior, or leave those modes on their
   existing full path when their additional inputs require it.
-- [ ] Keep ordinary configuration and publication callers unchanged by default.
+- [x] Keep ordinary configuration and publication callers unchanged by default.
   Preserve committed-default-branch reads, registry validation, binding errors
   and the existing per-load snapshot scope; add no persistent cache.
-- [ ] Add focused regressions, directly related documentation and a Worktrees
+- [x] Add focused regressions, directly related documentation and a Worktrees
   changefile. Prove equal complete results and absence of the unused preference
   read, rather than only mocking a faster elapsed time.
 - [ ] Obtain current-head review, required CI and a real merge before recording

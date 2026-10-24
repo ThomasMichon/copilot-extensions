@@ -42,13 +42,16 @@ def reader(monkeypatch):
     return module
 
 
-def _config(reader):
+def _config(reader, *, conduct=False):
     config = types.SimpleNamespace(
         default_repo=types.SimpleNamespace(anchor="/synthetic/harness")
     )
 
-    def load_config(*, include_control_plane_related_pr=True):
+    def load_config(
+        *, include_control_plane_related_pr=True, include_knowledge_preferences=True
+    ):
         assert include_control_plane_related_pr is False
+        assert include_knowledge_preferences is conduct
         return config
 
     reader.cfg.load_config = load_config
@@ -105,7 +108,7 @@ def test_state_root_read_preserves_response_without_pr_overlays(
 
 
 def test_state_root_conduct_preserves_pair_and_launch_context(reader, capsys):
-    config = _config(reader)
+    config = _config(reader, conduct=True)
     result = object()
     pair = object()
     reader.state_root_mod.resolve_state_root = lambda actual, **kw: result
@@ -133,8 +136,11 @@ def test_state_root_conduct_preserves_pair_and_launch_context(reader, capsys):
 
 
 def test_state_root_keeps_config_refusal_visible(reader):
-    def refused(*, include_control_plane_related_pr=True):
+    def refused(
+        *, include_control_plane_related_pr=True, include_knowledge_preferences=True
+    ):
         assert include_control_plane_related_pr is False
+        assert include_knowledge_preferences is False
         raise ValueError("invalid state-root binding")
 
     reader.cfg.load_config = refused

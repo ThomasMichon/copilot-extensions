@@ -732,7 +732,10 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     if args.pair:
         return _state_root_pair(args.json)
 
-    config = cfg.load_config(include_control_plane_related_pr=False)
+    config = cfg.load_config(
+        include_control_plane_related_pr=False,
+        include_knowledge_preferences=args.conduct,
+    )
     res = state_root_mod.resolve_state_root(config, repo_override=args.repo)
 
     if args.conduct:
