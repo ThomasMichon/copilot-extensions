@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize the exact published Manager CMD launcher during fresh update ownership admission.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
