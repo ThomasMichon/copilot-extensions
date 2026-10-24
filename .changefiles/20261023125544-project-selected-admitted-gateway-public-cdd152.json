@@ -1,5 +1,5 @@
 {
-  "comment": "Project selected admitted Gateway public bindings through directional SSH policy for canonical profiles and independent native login authorization, including the admitted target host pin for native verification",
+  "comment": "Project admitted Gateway SSH public bindings and add authenticated service-directory enrollment, bounded notifications and reconnect catch-up through the existing service caller",
   "changes": [
     {
       "plugin": "fleet-manager",

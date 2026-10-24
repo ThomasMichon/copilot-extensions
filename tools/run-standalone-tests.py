@@ -37,6 +37,7 @@ COMPONENT_ALIASES = {
     "agent-dispatch-service": "services/dispatch",
     "agent-chat-service": "services/chat",
     "agent-pull-requests-service": "services/pr",
+    "agent-ssh-service": "services/ssh",
 }
 
 
@@ -180,6 +181,11 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             str(REPO / "plugins" / "agent-pull-requests") + "[fleet]",
             str(REPO / "fleet-manager") + "[service-gateway]",
         ]
+    elif component == "services/ssh":
+        sources = [
+            str(REPO / "fleet-manager") + "[service-gateway]",
+            str(REPO / "libs" / "single-instance-lease"),
+        ]
     extra = ("test" if smoke else "native,test") if component == "services/index" else "dev"
     if component == "worktree-manager":
         # The Manager distribution includes sibling bin/references payloads,
@@ -220,6 +226,15 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             override.write_text(
                 f"agent-pull-requests[fleet] @ {core}\n"
                 f"fleet-manager[service-gateway] @ {fleet}\n", encoding="utf-8",
+            )
+            overrides = ["--override", str(override)]
+        elif component == "services/ssh":
+            override = Path(temporary) / "overrides.txt"
+            fleet = (REPO / "fleet-manager").resolve().as_uri()
+            lease = (REPO / "libs" / "single-instance-lease").resolve().as_uri()
+            override.write_text(
+                f"fleet-manager[service-gateway] @ {fleet}\n"
+                f"agent-single-instance-lease @ {lease}\n", encoding="utf-8",
             )
             overrides = ["--override", str(override)]
         run_uv_install(

@@ -131,6 +131,18 @@ file, and keeps its native child within the owner's process lifetime. It is
 not a new supervisor or complete Gateway setup installer. See
 [native listener integration](docs/gateway-transport.md#native-listener-integration).
 
+For an already authenticated
+[Fleet SSH service directory notification](../../services/ssh/README.md),
+`agent_ssh.gateway_directory.apply_update` is the fixed local consumer selected
+by the machine's existing Fleet setup/lifetime owner. It verifies the local
+policy/controller and local public key, then uses the same profile builder and
+target-local authorization writer. A later admitted peer therefore gains both
+its strict-pinned route and the appropriate login-key grant without a service
+restart. Each writer retains its existing monotonic revision and conflict
+checks; a partial write fails visibly and does not acknowledge convergence.
+No new operator command, listener, private-key transfer or background owner is
+introduced. Profile-only emission is not a complete native authorization update.
+
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates
 both through the emitter, and returns an `agent-fleet.driver-snapshot` schema-v1
