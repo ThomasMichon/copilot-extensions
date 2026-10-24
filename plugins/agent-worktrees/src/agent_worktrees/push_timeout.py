@@ -104,13 +104,13 @@ def _run_observation(cmd: list[str], *, cwd, env: dict, timeout, deadline: float
     windows = platform.system() == "Windows"
     spawn_options = no_window_kwargs() if windows else detached_kwargs()
     if not windows:
-        from agent_procutil.owned_process import _require_posix_execution_support
+        from agent_procutil.owned_process import require_caller_owned_support
 
         if not spawn_options.get("start_new_session"):
             raise ObservationUnavailable("independent observation group unavailable")
         try:
-            _require_posix_execution_support()
-        except RuntimeError as error:
+            require_caller_owned_support()
+        except (RuntimeError, OSError) as error:
             raise ObservationUnavailable(str(error)) from error
     _observation_wait(cmd, command_deadline)
     try:
@@ -158,9 +158,6 @@ def _run_observation(cmd: list[str], *, cwd, env: dict, timeout, deadline: float
             failure = ObservationCleanupError("observation cleanup was not confirmed")
             failure.process, failure.job = proc, job
             raise failure from error
-        finally:
-            if job is not None:
-                job.close()
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
