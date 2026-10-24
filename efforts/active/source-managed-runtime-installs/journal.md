@@ -2,6 +2,7 @@
 
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
+- [2026-10-24 - Direct all-service backlog intake](<journal/2026/10.24 backlog-intake.md>)
 - [2026-10-24 - SSH selected-snapshot recipe](<journal/2026/10.24 ssh-selected-snapshot.md>)
 - [2026-10-24 - SSH fixed installation recipes](<journal/2026/10.24 ssh-first-use.md>)
 - [2026-10-24 - SSH legacy bootstrap adoption](<journal/2026/10.24 ssh-bootstrap.md>)
