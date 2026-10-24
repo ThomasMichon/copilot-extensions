@@ -217,6 +217,10 @@ cannot retain that qualification refuse rather than publishing plain paths.
 Named defining-hop suppliers remain qualified even when the selected outer
 template is local or plugin-owned and the inherited cwd was written as an
 absolute path.
+Absolute command arguments inside a named supplier retain `repo:` qualification
+as well, including emitter side-load and inline evaluator argv. Only an
+independently admitted named execution cwd permits read-only source arguments;
+an omitted cwd or unrelated plain path does not erase source admission.
 Overlapping named supplier roots refuse materialization rather than selecting
 one namespace's execution authority by iteration order. Inherited suppliers
 qualify explicit execution contexts only; they do not manufacture a missing

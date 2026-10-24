@@ -9,7 +9,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from types import SimpleNamespace
 
 from dropin_registry import ScanAuthority
 from plugin_activation import ActivationReport
@@ -760,6 +759,80 @@ def test_external_file_policy_cannot_drop_read_only_supplier_admission(
         with pytest.raises(RegistrarError, match="file-backed.*read-only supplier"):
             save(row, document={"params": {"label": "fixture"}})
         assert not instance_dir().exists()
+
+
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+@pytest.mark.parametrize("kind,cwd_mode", [
+    ("emitter", "omitted"), ("emitter", "absolute"), ("emitter", "named"),
+    ("side-load", "absolute"), ("side-load", "named"),
+    ("evaluator", "absolute"), ("evaluator", "named"),
+])
+def test_inherited_absolute_command_arguments_retain_supplier_execution_admission(
+    monkeypatch, tmp_path, repo_class, kind, cwd_mode,
+):
+    from agent_dispatch import repository_resources
+    from agent_dispatch.producers import emitter
+    from agent_dispatch.producers.evaluator import EvaluatorRuntimeError, load_registration_evaluator
+    from tests.test_producers_emitter import FakeClient
+
+    supplier, execution = tmp_path / "supplier", tmp_path / "execution"
+    supplier.mkdir()
+    execution.mkdir()
+    script = supplier / "producer.py"
+    output = '{"decision":"noop","reason":"named source"}' if kind == "evaluator" else "[]"
+    script.write_text(f"print({output!r})", encoding="utf-8")
+    command = [sys.executable, str(script)]
+    cwd = "repo:execution:." if cwd_mode == "named" else str(execution)
+    if kind == "evaluator":
+        document = {"kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy",
+            "evaluator_spec": {"scripts": {"policy": command}, "cwd": cwd},
+        }}
+    else:
+        spec = {"id": "{name}", "command": command, "interval_seconds": 60, "task_output": "json"}
+        if cwd_mode != "omitted":
+            spec["cwd"] = cwd
+        if kind == "side-load":
+            spec["side_load"] = {"command": [*command, "{change_ref}"]}
+        document = {"kind": "emitter", "spec": spec}
+    (supplier / "base.json").write_text(json.dumps(document), encoding="utf-8")
+    roots = {"library": (supplier, repo_class), "execution": (execution, "worktree")}
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda name, **k: roots[name])
+    _, row = provider({"extends": "repo:library:base.json"}, kind=document["kind"])
+    assert save(row, activate=True)["activation"] == "pending"
+    declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
+    spec = dict(declaration.spec)
+    argv = spec["evaluator_spec"]["scripts"]["policy"] if kind == "evaluator" else spec["command"]
+    assert argv[1] == "repo:library:producer.py"
+    if kind == "side-load":
+        assert spec["side_load"]["command"][1] == "repo:library:producer.py"
+    def run(argv, **kwargs):
+        assert cwd_mode == "named", "read-only supplier executed without independent named admission"
+        return subprocess.run(argv, **kwargs)
+    if kind == "evaluator":
+        evaluator = load_registration_evaluator(spec, runner=run)
+        if cwd_mode == "named":
+            assert evaluator.evaluate({})[0].reason == "named source"
+        else:
+            with pytest.raises(EvaluatorRuntimeError, match=f"{repo_class}-only"):
+                evaluator.evaluate({})
+    else:
+        client = FakeClient()
+        monkeypatch.setattr(emitter, "receipts_path", lambda *a: tmp_path / "receipts.json")
+        if kind == "side-load":
+            if cwd_mode == "named":
+                emitter.run_side_load(client, {"kind": "emitter", "spec": spec}, "fixture", runner=run)
+            else:
+                with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
+                    emitter.run_side_load(client, {"kind": "emitter", "spec": spec}, "fixture", runner=run)
+        else:
+            if cwd_mode == "named":
+                result = emitter.run_tick(client, spec, holder="fixture", runner=run)
+                assert result["returncode"] == 0
+            else:
+                with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
+                    emitter.run_tick(client, spec, holder="fixture", runner=run)
+        assert not client.created
 
 
 @pytest.mark.parametrize("repo_class", ["reference", "knowledge"])

@@ -66,10 +66,23 @@ def qualify_supplier_context(
             return f"repo:{repository}:{relative.as_posix()}"
         return value  # An explicit cwd outside the supplier is not its context.
 
+    def qualify_command(command):
+        if not isinstance(command, (list, tuple)):
+            return command
+        return [
+            qualify(part, implicit=False) if isinstance(part, str) else part
+            for part in command
+        ]
+
     spec = dict(declaration.spec)
     if declaration.kind == "emitter":
         if "cwd" in spec or implicit:
             spec["cwd"] = qualify(spec.get("cwd"))
+        if "command" in spec:
+            spec["command"] = qualify_command(spec["command"])
+        side_load = spec.get("side_load")
+        if isinstance(side_load, Mapping) and "command" in side_load:
+            spec["side_load"] = {**side_load, "command": qualify_command(side_load["command"])}
         if "worker_identity_cwd" in spec:
             spec["worker_identity_cwd"] = qualify(spec["worker_identity_cwd"])
         loop = spec.get("repository_issue_loop")
@@ -77,13 +90,21 @@ def qualify_supplier_context(
             forge = dict(loop["forge"])
             if "cwd" in forge:
                 forge["cwd"] = qualify(forge["cwd"], implicit=False)
-                spec["repository_issue_loop"] = {**loop, "forge": forge}
+            if "command" in forge:
+                forge["command"] = qualify_command(forge["command"])
+            spec["repository_issue_loop"] = {**loop, "forge": forge}
     elif declaration.kind == "evaluator":
         evaluator = spec.get("evaluator_spec")
         if not isinstance(evaluator, Mapping) or "scripts" not in evaluator:
             return declaration
+        qualified = dict(evaluator)
         if "cwd" in evaluator or implicit:
-            spec["evaluator_spec"] = {**evaluator, "cwd": qualify(evaluator.get("cwd"))}
+            qualified["cwd"] = qualify(evaluator.get("cwd"))
+        if isinstance(evaluator["scripts"], Mapping):
+            qualified["scripts"] = {
+                name: qualify_command(command) for name, command in evaluator["scripts"].items()
+            }
+        spec["evaluator_spec"] = qualified
     else:
         return declaration
     return replace(declaration, spec=spec)
