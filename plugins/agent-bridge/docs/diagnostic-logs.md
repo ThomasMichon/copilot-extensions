@@ -137,7 +137,8 @@ exclusive `directory/retained` first; neither the loader nor producer creates it
 Do not share this namespace with legacy/nonparticipating writers. The active
 file is `directory/retained/agent-bridge-telemetry.jsonl`; UTC-named archives,
 exact elapsed 30-day retention and record timestamps use the shared policy.
-Missing `ts` becomes integer epoch milliseconds; existing producer fields remain
+Missing `ts` becomes integer epoch milliseconds at bounded producer admission,
+before any delayed draining; existing producer fields remain
 unchanged. Unknown/out-of-range timestamps stay retained with degraded evidence.
 
 The retained object accepts exactly `directory` and is mutually exclusive with
@@ -153,7 +154,9 @@ Asynchronous initialization failure warns without replacing primary startup;
 the optional buffer reports failed callbacks. Producers never wait on history,
 storage or file custody. Clear/replacement rejects immediately without joining;
 if a previous worker remains alive, replacement fails open instead of creating
-a second one. Retry configuration after that worker exits. The daemon command
+a second one. Cleanup compares current configured ownership and clears it under
+the existing slot configuration lock, never clearing a concurrently selected
+legacy/custom replacement. Retry configuration after that worker exits. The daemon command
 owner closes this configured buffer in its existing `finally`; embedded callers
 must call `clear_telemetry_sink()` at their own lifecycle boundary. No captured
 ASGI/wire owner or health response is changed.

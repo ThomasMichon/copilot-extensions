@@ -179,6 +179,12 @@ Their local `logs` inventories report configured paths with unknown live health,
 without importing arbitrary factories or reading event payloads. Old factories
 remain synchronous and unchanged; explicit clear/lifecycle closure remains
 nonjoining, and a still-running previous buffer prevents replacement.
+Configured buffers opt into `stamp_missing_ts=True`: only absent timestamps are
+generated on their already-bounded producer snapshot, before enqueue, with budget
+reserved for that field. Existing timestamps and default buffer behavior remain
+unchanged. Configured cleanup checks the slot's actual owned buffer type and
+clears it atomically under its existing configuration lock; there is no second
+plugin-global cleanup reference to go stale after rejected or concurrent reloads.
 
 ## Measurements and reports
 

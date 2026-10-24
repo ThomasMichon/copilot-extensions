@@ -17,7 +17,6 @@ from agent_dispatch import telemetry
 def configured(tmp_path, monkeypatch):
     slot = SinkSlot()
     monkeypatch.setattr(telemetry, "_slot", slot)
-    monkeypatch.setattr(telemetry, "_configured_retained_writer", None)
     directory = tmp_path / "bucket"
     (directory / "retained").mkdir(parents=True)
     path = tmp_path / "telemetry.json"

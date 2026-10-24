@@ -37,7 +37,6 @@ def offer(event):
 def isolated_slot(monkeypatch):
     slot = SinkSlot()
     monkeypatch.setattr(telemetry, "_slot", slot)
-    monkeypatch.setattr(telemetry, "_configured_retained_writer", None)
     yield slot
     slot.set(None)
     if slot._last_buffer is not None:
@@ -249,8 +248,68 @@ def test_configured_cleanup_failure_is_optional(tmp_path, monkeypatch):
     assert telemetry.load_sink_from_config(path)
     def unavailable():
         raise RuntimeError("synthetic cleanup failure")
-    monkeypatch.setattr(telemetry, "clear_telemetry_sink", unavailable)
-    telemetry.close_configured_retained_sink()
+    with monkeypatch.context() as patch:
+        patch.setattr(telemetry._slot, "set", lambda _sink: unavailable())
+        telemetry.close_configured_retained_sink()
+
+
+def test_cleanup_cannot_clear_a_concurrent_replacement(tmp_path, monkeypatch):
+    path, _ = config(tmp_path)
+    assert telemetry.load_sink_from_config(path)
+    slot = telemetry._slot
+    attempted = threading.Event()
+    underlying = slot._configuration_lock
+    main_thread = threading.get_ident()
+    class ObservedLock:
+        def __enter__(self):
+            if threading.get_ident() != main_thread:
+                attempted.set()
+            return underlying.__enter__()
+
+        def __exit__(self, *args):
+            return underlying.__exit__(*args)
+    monkeypatch.setattr(slot, "_configuration_lock", ObservedLock())
+    replacement = lambda event: None
+    with slot._configuration_lock:
+        cleanup = threading.Thread(target=telemetry.close_configured_retained_sink)
+        cleanup.start()
+        assert attempted.wait(1)
+        telemetry.set_telemetry_sink(replacement)
+    cleanup.join(1)
+    assert not cleanup.is_alive()
+    assert slot.sink is replacement
+
+
+def test_missing_ts_is_stamped_at_admission_before_delayed_drain(tmp_path, monkeypatch):
+    from process_telemetry import buffer
+
+    path, directory = config(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+    original = telemetry.make_retained_spool_sink
+    clock = [time.time()]
+    first_stamp = int(clock[0] * 1000)
+    def slow_factory(base):
+        entered.set()
+        assert release.wait(3)
+        return original(base)
+    monkeypatch.setattr(telemetry, "make_retained_spool_sink", slow_factory)
+    monkeypatch.setattr(buffer.time, "time", lambda: clock[0])
+    try:
+        assert telemetry.load_sink_from_config(path)
+        assert entered.wait(1)
+        missing = {"kind": "missing"}
+        offer(missing)
+        supplied = {"kind": "supplied", "ts": first_stamp + 123}
+        offer(supplied)
+        clock[0] += 3600
+        release.set()
+        wait_for(lambda: telemetry._slot.sink.stats()["delivered"] == 2)
+    finally:
+        release.set()
+    assert "ts" not in missing
+    assert rows(directory) == [
+        {"kind": "missing", "ts": first_stamp}, supplied,
+    ]
 
 
 def test_delivery_control_retries_only_unaccepted_offers(tmp_path, monkeypatch):

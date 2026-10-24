@@ -68,10 +68,22 @@ def install_retained(data, slot, factory, logger):
         slot.set(None)
         return slot.set_buffered(
             owner, on_start=owner.start, on_iteration=owner.maintain,
+            stamp_missing_ts=True,
         )
     except Exception:
         _warn(logger)
         return None
+
+
+def close_configured(slot):
+    """Check current ownership and close under the existing configuration lock."""
+    try:
+        with slot._configuration_lock:
+            writer = slot._owned_buffer
+            if writer is not None and isinstance(writer._sink, _ConfiguredSpool):
+                slot.set(None)
+    except Exception:
+        pass  # optional cleanup never replaces a primary service outcome
 
 
 def configured_inventory(path, *, component, service):

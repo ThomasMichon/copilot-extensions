@@ -63,16 +63,13 @@ CONFIG_FILENAME = "telemetry.json"
 SPOOL_SINK_SPEC = "agent_dispatch.telemetry:make_spool_sink"
 
 _slot = SinkSlot()
-_configured_retained_writer = None
 
 
 def close_configured_retained_sink() -> None:
     """Close only the buffer selected by retained configuration, without a join."""
-    if _slot.sink is _configured_retained_writer and _configured_retained_writer is not None:
-        try:
-            clear_telemetry_sink()
-        except Exception:
-            pass  # optional cleanup never replaces a primary service outcome
+    from process_telemetry.configured_spool import close_configured
+
+    close_configured(_slot)
 
 
 def configured_sink_inventory() -> dict:
@@ -192,12 +189,7 @@ def load_sink_from_config(path: str | os.PathLike[str] | None = None) -> bool:
     if isinstance(data, dict) and "retained_spool" in data:
         from process_telemetry.configured_spool import install_retained
 
-        global _configured_retained_writer
-        writer = install_retained(data, _slot, make_retained_spool_sink, log)
-        if writer is None:
-            return False
-        _configured_retained_writer = writer
-        return True
+        return install_retained(data, _slot, make_retained_spool_sink, log) is not None
     spec = str(data.get("sink") or "").strip() if isinstance(data, dict) else ""
     sink = load_sink_from_spec(spec)
     if sink is None:

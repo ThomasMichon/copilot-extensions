@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from collections import deque
 from itertools import count
 
@@ -73,6 +74,7 @@ class BufferedSink:
     def __init__(
         self, sink: TelemetrySink, *, capacity: int = 128, max_bytes: int = 4096,
         batch_size: int = 32, batch_sink: bool = False,
+        stamp_missing_ts: bool = False,
         on_start=None,
         on_iteration=None,
     ) -> None:
@@ -86,8 +88,8 @@ class BufferedSink:
         self._on_iteration = on_iteration
         if any(type(value) is not int for value in (capacity, max_bytes, batch_size)):
             raise ValueError("queue bounds must be integers")
-        if type(batch_sink) is not bool:
-            raise ValueError("batch_sink must be boolean")
+        if type(batch_sink) is not bool or type(stamp_missing_ts) is not bool:
+            raise ValueError("buffer flags must be boolean")
         if not 1 <= capacity <= 4096 or not 128 <= max_bytes <= 65536:
             raise ValueError("invalid queue bounds")
         if not 1 <= batch_size <= capacity:
@@ -97,6 +99,7 @@ class BufferedSink:
         self._max_bytes = max_bytes
         self._batch_size = batch_size
         self._batch_sink = batch_sink
+        self._stamp_missing_ts = stamp_missing_ts
         self._queue: deque[dict] = deque()
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -128,8 +131,12 @@ class BufferedSink:
             next(self._counts["inactive"])
             return
         try:
-            record = snapshot(event, max_bytes=self._max_bytes)
-        except (ValueError, UnicodeError, RuntimeError):
+            stamp = self._stamp_missing_ts and type(event) is dict and "ts" not in event
+            # Reserve the generated key/value's snapshot budget before copying.
+            record = snapshot(event, max_bytes=self._max_bytes - (96 if stamp else 0))
+            if stamp:
+                record["ts"] = int(time.time() * 1000)
+        except (ValueError, UnicodeError, RuntimeError, OSError, OverflowError):
             next(self._counts["invalid"])
             return
         if not self._lock.acquire(blocking=False):

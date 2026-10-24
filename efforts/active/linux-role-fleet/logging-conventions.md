@@ -507,3 +507,15 @@ captured wire owners, deployment helpers and live state remain outside this slic
   Native managed revalidation passes 134 Bridge and 51 Dispatch focused tests;
   the earlier 190-test coordinator portfolio remains recorded at its actual
   revision. Touched-test Ruff F/E9 and whitespace checks pass.
+- 2026-10-24 UTC — Further re-review identified a concurrent check/clear race
+  and delayed default timestamps. Configured cleanup now uses the slot's actual
+  owned buffer under its existing configuration lock, without a second mutable
+  plugin reference. A barrier-controlled replacement regression preserves the
+  newly selected sink. Only configured buffers opt into missing-`ts` stamping
+  on the bounded producer snapshot before enqueue, reserving field budget and
+  preserving supplied timestamps. A blocked-construction/delayed-drain regression
+  checks the original admission timestamp and unchanged input. No history/storage
+  I/O moves to the producer; old factories and default buffers remain unchanged.
+  Native managed validation passes 136 Bridge tests, 51 focused Dispatch tests
+  and 70 Manager tests with the same one optional SDK skip. Earlier full
+  coordinator validation remains recorded separately.
