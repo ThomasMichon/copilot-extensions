@@ -102,23 +102,26 @@ def _combine_results(results: list[CaptureResult]) -> CaptureResult:
 
 def _capture_batch(source: Path, sessions: list[str]) -> CaptureResult:
     gaps: list[str] = []
+    split = False
     try:
         stored = read_sqlite_usage(source / "session-store.db", set(sessions))
         store_coverage = "captured"
     except UsageRowLimitError as exc:
         if len(sessions) == 1:
             return CaptureResult(failures=(f"{sessions[0]}: session-store capture: {exc}",))
-        middle = len(sessions) // 2
-        return _combine_results([
-            _capture_batch(source, sessions[:middle]),
-            _capture_batch(source, sessions[middle:]),
-        ])
+        split = True
     except UsageStoreMissingError:
         stored = {}
         store_coverage = "missing"
         gaps.append("session-store accounting source is missing")
     except (UsageReadError, OSError) as exc:
         return CaptureResult(failures=(f"session-store capture: {exc}",))
+    if split:
+        middle = len(sessions) // 2
+        return _combine_results([
+            _capture_batch(source, sessions[:middle]),
+            _capture_batch(source, sessions[middle:]),
+        ])
     failures: list[str] = []
     updated = 0
     for session_id in sorted(sessions):

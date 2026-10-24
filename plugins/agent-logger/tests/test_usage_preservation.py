@@ -6,6 +6,7 @@ import json
 import sqlite3
 import tarfile
 import zipfile
+import weakref
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
@@ -118,6 +119,34 @@ def test_usage_capture_retains_oversized_session_failure_and_captures_siblings(t
     )
     assert not (sessions["oversized"] / ARTIFACT).exists()
     assert (sessions["healthy"] / ARTIFACT).is_file()
+
+
+def test_usage_split_releases_failed_reader_buffers_before_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger import usage_capture
+
+    class DiscardedRows:
+        pass
+
+    live = weakref.WeakSet()
+    calls = []
+
+    def read_store(path: Path, session_ids: set[str]) -> dict:
+        assert not live, "a failed reader's traceback still retains its row buffer"
+        calls.append(len(session_ids))
+        discarded = DiscardedRows()
+        live.add(discarded)
+        if len(session_ids) > 1:
+            raise UsageRowLimitError("row budget")
+        return {}
+
+    for index in range(4):
+        _session(tmp_path, f"s{index}")
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", read_store)
+    assert capture_usage(tmp_path, None).complete
+    assert calls == [4, 2, 1, 1, 2, 1, 1]
+    assert not live
 
 
 @pytest.mark.parametrize("include", [None, {"s1"}])
