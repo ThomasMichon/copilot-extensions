@@ -76,7 +76,7 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
         text = text.replace("RETAINED_INBOX_PROTOCOL_VERSION = 48\n", "")
         text = text.replace("RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION = 49\n", "")
         text = re.sub(r"(?m)^HTTP_PROTOCOL_VERSION = \d+$", "HTTP_PROTOCOL_VERSION = 47", text)
-        protocol.write_text(text, encoding="utf-8")
+        protocol.write_text(text, encoding="utf-8", newline="\n")
         http["declared_range"].update(current=47, previous_generation=46)
         http["capability_versions"].pop("retained_inbox", None)
         http["capability_versions"].pop("retained_inbox_producer", None)
@@ -109,6 +109,14 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
     return seed
+
+
+def test_http47_shared_capture_seed_has_owned_committed_inputs(source_seed):
+    registry = read_registry(source_seed)
+    http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
+    assert http["declared_range"]["current"] == 47
+    packet = json.loads((source_seed / evidence.PRIMARY).read_bytes())
+    assert fixture_git(source_seed, "rev-parse", "HEAD") == packet["captured_from"]["commit"]
 
 
 def commit_fixture(root: Path, message: str) -> str:

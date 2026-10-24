@@ -19,12 +19,39 @@ on:
           - codespaces-recipes
           - codespaces-bootstrap
           - logger-recipes
+          - bridge-contracts
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  bridge-contracts-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-contracts'
+    name: Bridge historical source proof (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Validate canonical historical evidence
+        run: python tools/check-agent-bridge-contracts.py
+      - name: Exercise immutable bytes and historical publication guards
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_http48_source_retention.py
+          --test-file tests/test_http48_capture_guards.py
+          --test-file tests/test_http47_capture_guards.py
+          -k "http48 or shared_capture_seed_has_owned_committed_inputs or capture_reproducible_real_commit_preserves_history"
+
   logger-recipes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'
     name: Logger fixed recipes (Ubuntu)
