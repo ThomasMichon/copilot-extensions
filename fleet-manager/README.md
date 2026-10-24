@@ -67,6 +67,13 @@ requirements without contacting Core, installing a manager or authorizing
 effects. Default planning preserves its optional configuration namespace without
 selecting it; actual managed lifecycle and production readiness remain separate.
 
+The explicit [ARC Helm owner API](docs/arc-owner.md) supplies fixed, journaled
+scale-set convergence through an independently adopted Helm 3/cluster owner.
+It consumes the exact reviewed preparation and a separately content-bound
+runtime permit; it is not enabled by the planner or an SDK review. Production
+controller wiring, complete lifecycle, support-owner authentication and live
+readiness/job acceptance remain open. It never supervises ARC pods through Komodo.
+
 ## Output and safety
 
 The JSON `fleet-manager.plan` includes preserved suggested config, per-role

@@ -1,0 +1,9 @@
+{
+  "comment": "Add exact-content admitted, journaled official ARC Helm convergence through an explicitly adopted owner.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

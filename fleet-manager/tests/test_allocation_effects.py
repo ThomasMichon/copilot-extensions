@@ -196,6 +196,7 @@ def test_schema_one_upgrade_preserves_acceptance_and_effect_tables_without_claim
     with closing(sqlite3.connect(path)) as connection:
         connection.execute("DROP TABLE allocation_owners")
         connection.execute("DROP TABLE allocation_releases")
+        connection.execute("DROP TABLE external_owners")
         connection.execute("PRAGMA user_version=1")
         connection.execute("CREATE TABLE effects(value TEXT)")
         connection.execute("INSERT INTO effects VALUES('legacy')")
@@ -209,7 +210,7 @@ def test_schema_one_upgrade_preserves_acceptance_and_effect_tables_without_claim
     with pytest.raises(PlanError, match="does not own"):
         upgraded.accept_allocation(intent, resource="workspace-1")
     with closing(sqlite3.connect(path)) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
 
 
 @pytest.mark.parametrize("sql", [
@@ -223,6 +224,7 @@ def test_schema_upgrade_refuses_reserved_collision_or_changed_core_without_mutat
     with closing(sqlite3.connect(path)) as connection:
         connection.execute("DROP TABLE allocation_owners")
         connection.execute("DROP TABLE allocation_releases")
+        connection.execute("DROP TABLE external_owners")
         connection.execute("PRAGMA user_version=1")
         connection.execute(sql)
         before = connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall()
