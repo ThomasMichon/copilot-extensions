@@ -1512,8 +1512,8 @@
     "tools/promotion_unit_tests/test_release_evidence.py::test_evidence_capacity_preflight_distinguishes_new_upload_from_existing_readback[64-True]"
   ],
   "sources": {
-    "libs/installer-engine/installer_dependency_policy.py": "71172f6954218fa8b1c5fc5f01f42936589d10e7b31e3f03314f641879cecd67",
-    "libs/installer-engine/installer_dependency_config.py": "8f6108a0a5cdad38c5803732d9229ec05bdb2e7845172ee6f5c99d1dd50f802b",
+    "libs/installer-engine/installer_dependency_policy.py": "a29a7ee450991c21b07acb0bc2406b29c69e51a1e753c777a6a5283f7ce374bb",
+    "libs/installer-engine/installer_dependency_config.py": "76986624c2f47a09a47da97cf858a4aec3997065d2955204f9acab503f97b9c2",
     "tools/accumulate_bumps.py": "64055cbc51a33c70882ea3e6ed863ec8b34c8bdb8b3b77c297d44e6cd08eecf0",
     "tools/changefile.py": "5eb39b6273af7bec09e54c4168967a17f3c3d1e7b57d196cc1dac4763529555f",
     "tools/uv_editable_ref.py": "cf1cb7324f4ba057e0ea2f1d63b78f635ea2d7925b8ea8835fda8a000444f8aa",

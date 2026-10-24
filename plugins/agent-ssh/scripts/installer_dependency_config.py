@@ -5,16 +5,99 @@ import configparser
 import errno
 import hashlib
 import json
+import math
 import os
 import re
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
+import time as clock
 from contextlib import contextmanager
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 _WINDOWS = os.name == "nt"
+
+
+def remaining_timeout(deadline, *, error_type, cap=None):
+    if deadline is None:
+        return cap
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+        raise error_type("retained UV inputs require a finite monotonic deadline")
+    remaining = deadline - clock.monotonic()
+    if remaining <= 0:
+        raise error_type("retained UV input deadline exceeded")
+    return remaining if cap is None else min(remaining, cap)
+
+
+def copy_retained_file(source, destination, *, native_path, deadline, error_type):
+    remaining_timeout(deadline, error_type=error_type)
+    if deadline is None:
+        return shutil.copy2(native_path(source), native_path(destination))
+    with open(native_path(source), "rb") as incoming, open(native_path(destination), "wb") as output:
+        while True:
+            remaining_timeout(deadline, error_type=error_type)
+            chunk = incoming.read(1 << 20)
+            if not chunk:
+                break
+            output.write(chunk)
+    shutil.copystat(native_path(source), native_path(destination))
+    remaining_timeout(deadline, error_type=error_type)
+    return destination
+
+
+def prepare_uv_install(
+    uv, arguments, *, environment, cwd, now, trusted_source_roots, projection,
+    operation, deadline, native_target, compile_inputs, source_inputs, select_uv,
+    cutoff, argument_pairs, balanced, error_type, settings_timeout, headless,
+):
+    remaining_timeout(deadline, error_type=error_type)
+    if native_target and environment.get("UV_PYTHON_PLATFORM"):
+        raise error_type("native source lock export cannot override its selected target")
+    if operation in ("compile", "source-compile"):
+        arguments = compile_inputs(arguments, environment, cwd, trusted_source_roots, operation)
+    source_inputs(
+        arguments, environment, cwd, trusted_source_roots,
+        **({"operation": operation} if operation != "install" else {}),
+    )
+    remaining_timeout(deadline, error_type=error_type)
+    uv = select_uv(uv)
+    probe_arguments = [arg for arg in arguments if arg != "--quiet" and not re.fullmatch(r"-q+", arg)]
+    native_operation = "compile" if operation == "source-compile" else operation
+    try:
+        result = subprocess.run(
+            [uv, "pip", native_operation, "--show-settings", *probe_arguments],
+            capture_output=True, text=True, env=environment, cwd=cwd,
+            timeout=remaining_timeout(deadline, error_type=error_type, cap=settings_timeout),
+            creationflags=headless,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise error_type("UV seasoning configuration probe failed or timed out") from exc
+    remaining_timeout(deadline, error_type=error_type)
+    if result.returncode:
+        raise error_type("UV seasoning configuration probe failed")
+    admitted = cutoff(result.stdout, now=now, _operation=native_operation)
+    if native_operation == "compile":
+        check_compile_projection(
+            result.stdout, arguments, argument_pairs=argument_pairs,
+            balanced=balanced, error_type=error_type,
+            source_graph=operation == "source-compile", native_target=native_target,
+        )
+    elif native_target:
+        raise error_type("native target binding requires a compile transaction")
+    if projection is not None:
+        projection.append(result.stdout)
+    cleaned = []
+    iterator = iter(arguments)
+    for argument in iterator:
+        if argument in ("--exclude-newer", "--exclude-newer-package"):
+            next(iterator, None)
+        elif (not argument.startswith(("--exclude-newer=", "--exclude-newer-package="))
+              and argument not in ("--reinstall", "--force-reinstall")):
+            cleaned.append(argument)
+    return [*cleaned, *admitted]
 
 # native-executable:begin
 def physical_executable(path: str) -> str | None:
@@ -572,7 +655,9 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
             *[argument for name in source_packages for argument in ("--no-emit-package", name)]]
 
 
-def check_compile_projection(projection, arguments, *, argument_pairs, balanced, error_type, source_graph=False):
+def check_compile_projection(
+    projection, arguments, *, argument_pairs, balanced, error_type, source_graph=False, native_target=False,
+):
     """Output policy is effective configuration, not merely a CLI intention."""
     for field, expected in (
         ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
@@ -599,6 +684,11 @@ def check_compile_projection(projection, arguments, *, argument_pairs, balanced,
         raise error_type("UV lock export output omissions differ from the retained source graph")
     if source_graph and not re.search(r"(?m)^\s*sources:\s*None,\s*$", projection):
         raise error_type("source lock export cannot disable its retained source mappings")
+    if native_target and (
+        not re.search(r"(?m)^\s*python_platform:\s*None,\s*$", projection)
+        or not re.search(r"(?m)^\s*universal:\s*false,\s*$", projection)
+    ):
+        raise error_type("native source lock export cannot override its selected target")
     outputs = [value for option, value in argument_pairs(arguments) if option in ("-o", "--output-file")]
     output = re.search(r"(?m)^\s*output_file:\s*(None,|Some\()", projection)
     if output is None:

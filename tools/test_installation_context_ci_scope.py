@@ -557,10 +557,11 @@ def test_compile_acceptance_is_bounded_native_and_independently_selected() -> No
         assert not job.get("strategy")
         commands = [step["run"] for step in job["steps"] if "run" in step]
         assert commands == [
-            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest",
+            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml",
             'python -m pytest -q tools/test_installer_dependency_compile.py '
             'tools/test_installer_dependency_policy.py '
-            '-k "compile or real_uv_registry_transitive_and_isolated_build_age"',
+            'tools/test_runtime_source_lock.py '
+            '-k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock"',
         ]
 
 
