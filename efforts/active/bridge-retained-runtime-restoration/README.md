@@ -336,6 +336,20 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   pending inspection through both original and successor ids. All 124 current
   capture/contract/maintenance cases and both contracts/659 fixtures pass;
   independent current-head review remains required.
+- Review then found ordinary admission's consumer lookup scanning unrelated
+  retired history inside the writer transaction. Six real-SQLite controls
+  reproduced unbounded work for current, retired and never-enrolled targets.
+  Schema 32 adds a nonpartial session-history index through the existing schema
+  owner; current selection and history existence are separate indexed lookups,
+  never a filter that erases retirement. Ten zero/20,000-row controls cover both
+  unrelated history and the target's own retired incarnations within the
+  10,000-VM-step admission budget.
+- Normal schema-31 preparation adds only the index and preserves complete
+  enrollment, message, handoff, epoch and producer rows. Read-only/adoption
+  paths refuse old or damaged prepared state without repair; current-schema
+  missing-index controls refuse too. The 143 migration/custody/adoption controls
+  and 120 final producer/enrollment/index controls pass. No running database
+  was migrated and no target-state compatibility is inferred.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

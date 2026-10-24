@@ -7,6 +7,7 @@
     "outcomes": ["unknown", "sdk_accepted", "consumed"]
   },
   "expected": {
+    "consumer_schema": {"version": 32, "history_index": true},
     "advertised": {"protocol_version": 48, "min_protocol_version": 1},
     "unsupported_contract": 422,
     "negotiate": {

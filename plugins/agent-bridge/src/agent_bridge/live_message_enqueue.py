@@ -77,16 +77,20 @@ def _enrolled_admission(
 ) -> RuntimeAdmission | None:
     rows = conn.execute(
         "SELECT * FROM bridge_inbox_consumers "
-        f"WHERE session_id=? OR session_id={_CANON} ORDER BY current DESC",
+        f"WHERE current=1 AND (session_id=? OR session_id={_CANON}) LIMIT 1",
         (request.session_id, request.session_id, request.session_id),
     ).fetchall()
-    retained = conn.execute(
-        f"SELECT 1 FROM live_messages WHERE (session_id=? OR session_id={_CANON}) "
-        "AND (runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL) LIMIT 1",
-        (request.session_id, request.session_id, request.session_id),
-    ).fetchone()
-    if not rows and retained is None:
-        return None
+    if not rows:
+        history = conn.execute(
+            f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? OR session_id={_CANON} LIMIT 1",
+            (request.session_id, request.session_id, request.session_id),
+        ).fetchone()
+        if history is None and conn.execute(
+            f"SELECT 1 FROM live_messages WHERE (session_id=? OR session_id={_CANON}) "
+            "AND (runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL) LIMIT 1",
+            (request.session_id, request.session_id, request.session_id),
+        ).fetchone() is None:
+            return None
     if refusal is not None:
         raise RuntimeCustodyError(refusal)
     if frontend is None or not rows or rows[0]["current"] != 1:

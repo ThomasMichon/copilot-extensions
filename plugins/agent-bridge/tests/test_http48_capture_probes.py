@@ -47,6 +47,18 @@ def test_http48_capture_actual_observations(
     bound = capture_request()
     vector = json.loads(evidence.safe(ROOT, evidence.INPUT).read_bytes())
     app, client, db, consumer = serving
+    history_index, = db.execute_read(
+        "SELECT sql FROM sqlite_master WHERE name='bridge_inbox_consumers_session'",
+    )
+    observed_schema = {
+        "version": db.execute_read("SELECT version FROM schema_version")[0][0],
+        "history_index": (
+            "WHERE" not in history_index["sql"].upper()
+            and [row["name"] for row in db.execute_read(
+                "PRAGMA index_info(bridge_inbox_consumers_session)",
+            )] == ["session_id"]
+        ),
+    }
     assert db.create_cli_mode_reservation("synthetic-worktree", now=time.time())
     registration = {
         "machine": "machine-a", "worktree_id": "synthetic-worktree",
@@ -56,7 +68,7 @@ def test_http48_capture_actual_observations(
         **registration, "session_id": consumer.session_id,
     })
     assert registered.status_code == 200, registered.text
-    observed: dict[str, Any] = {}
+    observed: dict[str, Any] = {"consumer_schema": observed_schema}
     health = client.get("/health")
     assert health.status_code == 200
     observed["advertised"] = {

@@ -253,9 +253,51 @@ def test_actual_same_process_alias_fold_retires_old_enrollment_without_inheritin
     assert history["session_id"] == consumer.session_id
 
 
+def test_v31_history_index_migration_preserves_original_custody_and_requires_preparation(enrolled):
+    db, owner, admission, consumer = enrolled
+    message(*enrolled)
+    successor = replace(consumer, incarnation="consumer-b")
+    enroll(db, owner, admission, successor, consumer.incarnation)
+    passive = Database(db.db_path, read_only=True)
+    db.execute_write("DROP INDEX bridge_inbox_consumers_session")
+    db.execute_write("UPDATE schema_version SET version=31")
+    tables = ("live_messages", "bridge_inbox_consumers", "bridge_runtime_epoch",
+              "bridge_runtime_producers")
+    before = {table: [dict(row) for row in db.execute_read(f"SELECT * FROM {table}")]
+              for table in tables}
+    dump = "\n".join(db._get_conn().iterdump())
+    try:
+        with pytest.raises(ValueError, match="current schema"):
+            Database(db.db_path, read_only=True)
+        with pytest.raises(ValueError, match="prepared schema"):
+            open_existing_writable(passive)
+        assert "\n".join(db._get_conn().iterdump()) == dump
+    finally:
+        passive.close()
+    migrated = Database(db.db_path)
+    try:
+        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == 32
+        validate_schema(migrated._get_conn())
+        for table, history in before.items():
+            assert [dict(row) for row in migrated.execute_read(f"SELECT * FROM {table}")] == history
+        index, = migrated.execute_read(
+            "SELECT sql FROM sqlite_master WHERE name='bridge_inbox_consumers_session'",
+        )
+        assert "WHERE" not in index["sql"].upper()
+        prepared = Database(db.db_path, read_only=True)
+        try:
+            adopted = open_existing_writable(prepared)
+            adopted.close()
+        finally:
+            prepared.close()
+    finally:
+        migrated.close()
+
+
 @pytest.mark.parametrize("damage", [
     "DROP TABLE bridge_inbox_consumers",
     "DROP INDEX bridge_inbox_consumers_current",
+    "DROP INDEX bridge_inbox_consumers_session",
     "DROP TRIGGER live_sessions_retire_inbox_consumer_delete",
 ])
 def test_prepared_storage_never_repairs_missing_enrollment_history(enrolled, damage):

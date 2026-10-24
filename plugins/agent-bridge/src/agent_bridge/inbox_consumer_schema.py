@@ -19,6 +19,8 @@ def definitions() -> dict[str, tuple[str, str, str]]:
         "bridge_inbox_consumers_current": ("index", table,
             f"CREATE UNIQUE INDEX IF NOT EXISTS bridge_inbox_consumers_current ON {table}"
             "(session_id) WHERE current=1"),
+        "bridge_inbox_consumers_session": ("index", table,
+            f"CREATE INDEX IF NOT EXISTS bridge_inbox_consumers_session ON {table}(session_id)"),
         "bridge_inbox_consumers_immutable": ("trigger", table,
             "CREATE TRIGGER IF NOT EXISTS bridge_inbox_consumers_immutable "
             f"BEFORE UPDATE ON {table} WHEN "
@@ -60,9 +62,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-def validate_schema(conn: sqlite3.Connection) -> None:
+def validate_schema(conn: sqlite3.Connection, *, require_history_index: bool = True) -> None:
     """Never repair missing enrollment history on a prepared database."""
     for name, (kind, table, statement) in definitions().items():
+        if name == "bridge_inbox_consumers_session" and not require_history_index:
+            continue
         row = conn.execute(
             "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,),
         ).fetchone()
