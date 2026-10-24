@@ -1982,6 +1982,14 @@ synthetic read/write tokens and an in-memory HTTP adapter; it makes no live API
 requests or review writes. This catches bundled dependency/import differences
 that an injected unit-test client cannot reproduce.
 
+CI first runs `tools/prepare_bridge_contract_evidence.py` against its explicitly
+selected repository URL. If the exact HTTP-47 capture checkpoint is absent, this
+bounded preparation retains it without moving a branch or changing capture
+evidence. Full ordinary history does not include every squash-orphaned commit.
+Missing or malformed checkpoints fail rather than waiving closure validation.
+The targeted tests cover existing and missing objects, exact remote/revision
+selection, failed preparation and a real unreferenced Git commit.
+
 The pre-push agent-bridge contract guard (`tools/check-agent-bridge-contracts.py`)
 requires Git 2.45+ for enforced `GIT_NO_LAZY_FETCH` support; older versions
 fail before object reads, including in partial clones. This contributor

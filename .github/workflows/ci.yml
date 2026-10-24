@@ -117,6 +117,10 @@ jobs:
     - name: Marketplace isolation inventory (report-only)
       if: github.event_name != 'pull_request'
       run: python tools/check-marketplace-isolation.py
+    - name: Retain exact historical Bridge source evidence
+      run: >-
+        python tools/prepare_bridge_contract_evidence.py
+        --remote "${{ github.server_url }}/${{ github.repository }}.git"
     - name: Agent Bridge contract registry
       if: github.event_name != 'pull_request'
       run: python tools/check-agent-bridge-contracts.py
