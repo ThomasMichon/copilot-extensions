@@ -224,6 +224,46 @@ def test_literal_host_alias_does_not_override_explicit_native_space() -> None:
         )
 
 
+@pytest.mark.parametrize("hostname", ["literal-wsl", "literal(WSL)"])
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+def test_unique_display_binding_preserves_the_literal_observed_host(
+    hostname: str, environment: str,
+) -> None:
+    entry = MachineEntry(hostname, "Friendly", hostname=hostname)
+    entries = {entry.key: entry}
+    display = resolve_local_execution_context(
+        entries, hostname=hostname, environment=environment, configured_machine="Friendly",
+    )
+    keyed = resolve_local_execution_context(
+        entries, hostname=hostname, environment=environment, configured_machine=entry.key,
+    )
+    assert display == keyed
+
+
+@pytest.mark.parametrize("shadow", ["key", "alias"])
+def test_literal_display_name_cannot_shadow_an_explicit_identity(shadow: str) -> None:
+    local = MachineEntry("literal-wsl", "Friendly", hostname="literal-wsl")
+    foreign = MachineEntry(
+        "Friendly" if shadow == "key" else "foreign", "", execution_platform="windows",
+        alias="Friendly" if shadow == "alias" else "",
+    )
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(
+            {local.key: local, foreign.key: foreign}, hostname="literal-wsl", environment="wsl",
+            configured_machine="Friendly",
+        )
+
+
+def test_literal_display_name_binding_must_be_unique() -> None:
+    local = MachineEntry("literal-wsl", "Friendly", hostname="literal-wsl")
+    other = MachineEntry("other", "Friendly", hostname="other")
+    with pytest.raises(ValueError, match="multiple machines|ambiguous"):
+        resolve_local_execution_context(
+            {local.key: local, other.key: other}, hostname="literal-wsl", environment="wsl",
+            configured_machine="Friendly",
+        )
+
+
 @pytest.mark.parametrize(("environment", "profile"), [
     ("windows", "linux"), ("wsl", "windows"), ("linux", "windows"),
 ])

@@ -116,6 +116,9 @@ Aliases of a literal observed host retain the same naming facts; an explicit
 profile/environment conflict is still a refusal. Actual-platform entries take precedence over
 unscoped native fallbacks, and a selected entry keeps its registry key rather
 than regenerating it from aliases or physical metadata.
+Unique legacy display-name bindings use the shared selector before literal-host
+format handling; keys and aliases retain precedence, and ambiguous displays
+remain errors.
 Legacy parenthesized presentation keys are projected to one-term execution
 names while retaining their original `customization_key`; explicit canonical
 keys are not reformatted. Contextual normalization receives the literal observed

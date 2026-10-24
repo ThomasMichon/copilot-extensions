@@ -10,7 +10,9 @@ from .machine_environment import normalize_environment, split_machine_environmen
 from .registry import (
     MachineEntry,
     MissingExecutionSpaceError,
+    PhysicalMachineError,
     entry_physical_host,
+    find_machine_entry,
     machine_identity_names,
     normalize_machine_entries,
     resolve_machine_selection,
@@ -106,11 +108,18 @@ def _literal_binding(
     if not direct:
         if configured.casefold() == observed.casefold():
             return True
-        parsed = split_machine_environment(configured)
-        if parsed.machine.casefold() == observed.casefold():
-            if parsed.environment and parsed.environment != platform:
-                raise IdentityError("configured machine conflicts with the current execution environment")
-            return True
+        try:
+            selected = find_machine_entry(registry, configured, reject_ambiguous=True)
+        except (PhysicalMachineError, MissingExecutionSpaceError):
+            return False
+        if selected is not None:
+            direct = [selected]
+        else:
+            parsed = split_machine_environment(configured)
+            if parsed.machine.casefold() == observed.casefold():
+                if parsed.environment and parsed.environment != platform:
+                    raise IdentityError("configured machine conflicts with the current execution environment")
+                return True
     return (
         len(direct) == 1 and direct[0].key.casefold() == observed.casefold()
         and not direct[0].execution_platform and not _platform(direct[0], observed)
@@ -147,15 +156,15 @@ def resolve_local_execution_context(
             for entry in registry.values() for profile in entry.ssh_environments
         ):
             raise IdentityError("configured SSH profile conflicts with the current execution environment")
-        if _literal_binding(registry, configured, observed, platform):
-            configured_machine = None
-    if configured_machine is not None:
-        # Literal current-host metadata has already been resolved above; do not
-        # feed that OS observation back through target-shaped suffix inference.
+        # Keep the OS observation out of target-shaped suffix inference; keys,
+        # aliases and display labels still use the shared selector.
         target_registry = {
             key: replace(entry, hostname="") if entry.hostname.casefold() == observed.casefold() else entry
             for key, entry in registry.items()
         }
+        if _literal_binding(target_registry, configured, observed, platform):
+            configured_machine = None
+    if configured_machine is not None:
         try:
             selected = resolve_machine_selection(target_registry, configured, platform)
         except MissingExecutionSpaceError:
