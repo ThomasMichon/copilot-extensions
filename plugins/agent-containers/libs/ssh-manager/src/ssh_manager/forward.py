@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import socket
 
 from .config_sources import SSHConfig
@@ -140,6 +141,7 @@ def build_remote_exec_args(
     *,
     reverse_forwards: list[str] | None = None,
     pty: bool = False,
+    connect_timeout: float = 15.0,
 ) -> list[str]:
     """Build an ``ssh`` argv that runs a one-shot remote ``command`` over a
     fresh, non-multiplexed connection.
@@ -169,7 +171,7 @@ def build_remote_exec_args(
     if config.identity_file:
         args += ["-i", config.identity_file]
     args += [
-        "-o", "ConnectTimeout=15",
+        "-o", f"ConnectTimeout={max(1, math.ceil(connect_timeout))}",
         "-o", "ServerAliveInterval=30",
         "-o", "ServerAliveCountMax=3",
         "-o", "BatchMode=yes",

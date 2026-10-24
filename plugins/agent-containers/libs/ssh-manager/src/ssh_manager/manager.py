@@ -11,6 +11,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -571,6 +572,11 @@ class ConnectionManager:
 
         info = self._connections[host]
         args = self._mux_ssh_args(info)
+        # The command's selected lifetime includes a fresh direct-mode SSH dial.
+        if timeout is not None and "ConnectTimeout=15" in args:
+            args[args.index("ConnectTimeout=15")] = (
+                f"ConnectTimeout={max(1, math.ceil(timeout))}"
+            )
         args.append(info.config.ssh_target)
         args.append(command)
 

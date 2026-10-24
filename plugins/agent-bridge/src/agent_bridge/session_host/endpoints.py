@@ -37,34 +37,40 @@ class CredentialRelayReadinessError(RuntimeError):
     """A required remote credential-relay listener could not be proven ready."""
 
 
-def transport_serving_probe(transport, relay_port: int, *, fail_open: bool = True):
+def transport_serving_probe(
+    transport, relay_port: int, *, fail_open: bool = True, timeout: float = 60.0,
+):
     """Use the selected transport for the existing relay-protocol round trip."""
     async def probe() -> bool:
         try:
             rc, out, _err = await transport.run(
-                wrap_login_shell(build_relay_ping_probe_command(relay_port)), timeout=5.0,
+                wrap_login_shell(build_relay_ping_probe_command(relay_port)), timeout=timeout,
             )
         except Exception:
             if fail_open:
                 return True
             raise
-        return rc == 0 and "OK" in (out or "")
+        return rc == 0 and (out or "").strip() == "OK"
     return probe
 
 
 async def wait_for_relay_serving(
     probe: Callable[[], Awaitable[bool]],
     *,
-    timeout: float = 5.0,
+    timeout: float = 60.0,
     interval: float = 0.25,
 ) -> None:
-    """Wait briefly for a required far-side relay listener to accept."""
+    """Bound all attempts, including SSH establishment, by one readiness budget."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(0.0, timeout)
     last_error: Exception | None = None
     while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
         try:
-            if await probe():
+            serving = await asyncio.wait_for(probe(), timeout=remaining)
+            if serving:
                 return
         except asyncio.CancelledError:
             raise
@@ -257,6 +263,7 @@ def endpoint_serving_probe_factory(
     endpoint: dict[str, Any],
     *,
     fail_open: bool = True,
+    timeout: float = 60.0,
 ) -> Callable[[int], Callable[[], Awaitable[bool]]]:
     """Build a ``serving_probe_for_port`` factory for a persisted endpoint.
 
@@ -281,7 +288,9 @@ def endpoint_serving_probe_factory(
 
     def _for_port(relay_port: int) -> Callable[[], Awaitable[bool]]:
         probe = build_relay_ping_probe_command(relay_port)
-        argv = build_remote_exec_args(config, wrap_login_shell(probe))
+        argv = build_remote_exec_args(
+            config, wrap_login_shell(probe), connect_timeout=timeout,
+        )
 
         async def _probe() -> bool:
             proc = None
@@ -293,7 +302,7 @@ def endpoint_serving_probe_factory(
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
-                out, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             except BaseException as exc:
                 if proc is not None:
                     try:
@@ -303,7 +312,7 @@ def endpoint_serving_probe_factory(
                 if fail_open and isinstance(exc, Exception):
                     return True
                 raise
-            return proc.returncode == 0 and b"OK" in (out or b"")
+            return proc.returncode == 0 and (out or b"").strip() == b"OK"
 
         return _probe
 
