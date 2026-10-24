@@ -220,34 +220,35 @@ are **agent-recommended**; the existing unit-only policy remains governing.
 **Source milestone:** #8454 merged as
 `27af9d62dc9dffae83c794e43f534957c6b90b35` after current-head review and
 required CI (1,385 units, 19.751 seconds, coverage once). This delivers the
-mechanisms and regressions below, not activation or a containing qualified
-release. Combined runtime gates remain open until their live readback.
+mechanisms and regressions below. The bounded slice subsequently completed
+with Source #8508, Main adoption #8543, Dev mirror #8548 and natural
+run `40085094788`; its exact release evidence and timing are recorded below.
 
-- [ ] Reuse the release composer to freeze version state, vendoring, governed
+- [x] Reuse the release composer to freeze version state, vendoring, governed
       control inputs and the candidate before authoritative release tests.
       Dev remains the release owner; candidate content identity describes
       its tested composition, not another source release.
-- [ ] Execute the positively admitted unit portfolio once on that composition
+- [x] Execute the positively admitted unit portfolio once on that composition
       and its actual vendored/import closure. Preserve node, effect and time
       limits. Raw-Dev PR checks remain source admission, not automatic proof
       of later transformed release bytes.
-- [ ] Build and validate artifacts from the same frozen composition. Preserve
+- [x] Build and validate artifacts from the same frozen composition. Preserve
       safe unsigned-build overlap, but gate attestation, publication and merge
       on successful exact-candidate qualification. Do not restamp or
       rematerialize mutable inputs after tests.
-- [ ] Preserve raw candidate coverage and a deterministic candidate-to-Dev
+- [x] Preserve raw candidate coverage and a deterministic candidate-to-Dev
       projection bound to both source contents and the actual transformation.
       Retain vendored-copy origins before combining attribution. Explicitly
       classify changed version statements and generated/unmapped regions;
       projected coordinates do not claim that raw Dev bytes executed.
-- [ ] Extend existing packet/receipt and coverage admission coherently.
+- [x] Extend existing packet/receipt and coverage admission coherently.
       Preserve validated historical formats, but never reinterpret a raw-source
       packet or an unverified path relabel as candidate execution. Reuse only
       evidence for identical admitted candidate and execution inputs.
-- [ ] Land Source changes normally, then use the existing independently reviewed
+- [x] Land Source changes normally, then use the existing independently reviewed
       Main-control activation path. No implicit resume, guard bypass, competing
       publisher or revival of the superseded full/native profile.
-- [ ] Verify a containing natural release and coverage readback under the
+- [x] Verify a containing natural release and coverage readback under the
       existing thirty-minute gate. Broader Phase 9, periodic integration and
       adopter acceptance retain their existing owners.
 
@@ -256,7 +257,7 @@ release. Combined runtime gates remain open until their live readback.
 - [x] Reproduce the version-fallback mismatch through composition, unit-input
       and qualification decision boundaries using eligible units. Test changed
       stamped bytes rather than stripping them during source comparison.
-- [ ] Prove execution loads candidate and vendored inputs, not ambient installs
+- [x] Prove execution loads candidate and vendored inputs, not ambient installs
       or raw Dev. Missing/extra nodes, sources, targets, outcomes and prohibited
       effects remain refusals.
 - [x] Reject post-test mutation, changed stamping/materialization inputs,
@@ -269,10 +270,41 @@ release. Combined runtime gates remain open until their live readback.
 - [x] Preserve historical coverage/receipt admission without claiming projected
       coverage executed raw Dev. Different candidate contents sharing a Dev
       anchor cannot collide or reuse incompatible evidence.
-- [ ] Keep effectful composition/import/installed checks in their admitted
+- [x] Keep effectful composition/import/installed checks in their admitted
       bounded or periodic lanes, not as new required-unit dependencies.
       Measure the real unit/build/publication/merge critical path and mapped
       coverage readback before marking the slice complete.
+
+**Bounded Phase 9c closure:** natural `repository_dispatch` run
+`40085094788`, attempt 1, used Main control
+`bb29073ec7490a168d5add8c23db87ac52ce4426` and exact reviewed helpers
+`60e2f720930a8f249c71c54af73e6ec91ed7955b`. It froze candidate
+`34a9dea255356fb10518f66e11783a9c8cabf93d` for Dev
+`442c9d38c8826bbb59947b225367e85a884f2fa1` before all 1,494 admitted
+units passed once in 39.424 seconds with zero prohibited effects.
+Qualification, attestation, raw publication readback, generated Main #8550
+merge and tag recording all succeeded without a test/effect/deadline waiver.
+Main landed at `e549f040e3e3f7b82cfeade3f1446fb000aed162`; the annotated
+`promote-dev-442c9d38c8826bbb59947b225367e85a884f2fa1` tag points there.
+
+Independent consumer readback of the existing Dev release's 1,006,225-byte ZIP
+verified SHA-256
+`59eb13263259a34b2ae6cae3c07107b5018e241a8569b4c7a628105cd68e7252`,
+all three packet-file digests, exact original producing qualification bytes,
+run/job/source/candidate bindings, 150 admitted Dev and 457 candidate source
+blobs, and the canonical 64-production-file coverage projection. The complete
+original-format report is 68,424,911 bytes under the operator-selected
+134,217,728-byte file limit; no coverage was stripped. Reports and archives
+remain release assets, not Git contents. Generated Main retains only nine
+tiny historical baseline-pointer records, not baseline report data.
+
+Event creation and execution both began at `10:14:04Z`; Main merged at
+`10:22:32Z`, its annotated tag was recorded at `10:23:28Z`, and the entire
+workflow completed at `10:23:33Z`. Event-to-landed-tag is therefore **9m24s
+including queueing**, and even whole-workflow completion is 9m29s, below
+thirty minutes. The publisher remained the existing owner. Broader Phase 9,
+periodic capacity and client/adopter acceptance retain their existing owners;
+this closes Phase 9c, not the whole effort or any installed-runtime claim.
 
 ## Validation and closure
 
@@ -289,7 +321,7 @@ release. Combined runtime gates remain open until their live readback.
       failures have owners and are not silently treated as passing releases.
 - [ ] Production authority, source/lock/byte integrity, signing, Main freshness,
       publication, merge and tagging remain enforced.
-- [ ] An actual normal promotion, measured from event creation through landed
+- [x] An actual normal promotion, measured from event creation through landed
       tag, completes in less than thirty minutes including queueing.
 - [x] Canonical resume and two natural qualified cycles demonstrate stable
       source operation; client acceptance remains separate.

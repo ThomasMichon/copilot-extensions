@@ -937,21 +937,24 @@ periodic corpus and broader tournament ownership remain intact.)_
 ### Phase 9c - Stamped-candidate tests and development coverage
 
 _(Agent-recommended realization of the 2026-10-23 operator direction.
-Participant: Stamped-candidate contributor; bounded tracker: #8390.)_
+Participant: Stamped-candidate contributor; bounded tracker: #8390.
+Status: Done for this bounded slice after natural run `40085094788`;
+broader effort and adopter acceptance remain separately owned.)_
 
 - [x] Review this ordering and coverage amendment before runtime/helper changes.
 - [x] Land the Source implementation and regressions through current-head review
       and required CI: #8454, `27af9d62dc9dffae83c794e43f534957c6b90b35`.
-- [ ] Execute the [bounded ordering and coverage plan](promotion-burndown.md#stamped-candidate-ordering-and-coverage),
+- [x] Execute the [bounded ordering and coverage plan](promotion-burndown.md#stamped-candidate-ordering-and-coverage),
       retaining other Phase 9 and independently governed control owners.
 - [x] Apply the operator-authorized 128 MiB generated-evidence file bound
       consistently to collection and hosted archive admission, retaining the
       expanded coverage format and all source/context/integrity budgets:
       #8508, `60e2f720930a8f249c71c54af73e6ec91ed7955b`.
-- [ ] Retain the exact qualified packet and qualification receipt as an
+- [x] Retain the exact qualified packet and qualification receipt as an
       immutable, raw-read-back asset on the existing Dev-owned release,
       never in Source or generated Main; preserve exact code-artifact reuse
-      and independently governed Main activation.
+      and independently governed Main activation: natural run `40085094788`,
+      generated Main #8550, independently verified release archive.
 
 ## Validation Plan
 
@@ -1156,9 +1159,9 @@ test witnesses run periodically and cannot hold promotion.
 
 ### Phase 9c validation
 
-- [ ] Resolve the [ordering, mapping and mutation regressions](promotion-burndown.md#stamped-candidate-validation),
+- [x] Resolve the [ordering, mapping and mutation regressions](promotion-burndown.md#stamped-candidate-validation),
       without weakening the admitted unit/effect/time contract.
-- [ ] Verify the containing qualified release and coverage readback within the
+- [x] Verify the containing qualified release and coverage readback within the
       existing cadence gate before completing this bounded slice.
 
 ## Proposal
@@ -1494,6 +1497,44 @@ Pipeline state, budgets and runtime rollout are unchanged. Source delivery is
 complete, but natural qualification, actual durable release-asset readback,
 Main merge/tag, under-thirty-minute timing and adopter acceptance remain open.
 The overall effort remains Active with its other owners and gates retained.
+
+### 2026-10-24 - Phase 9c released and independently verified in 9m24s
+
+Main adoption #8543 merged as
+`bb29073ec7490a168d5add8c23db87ac52ce4426` after exact-head approval and
+green gates, changing only the helper pin. Dev mirror #8548 merged as
+`7a6f37f45e106fd659980ca1b2a76abfad136d91` after its own exact-head
+approval, required CI and no open findings. Both select final reviewed Source
+#8508 merge `60e2f720930a8f249c71c54af73e6ec91ed7955b`.
+
+The first natural run on the adopted controller, `40085094788` attempt 1,
+completed successfully. It froze the actual stamped/vendored candidate before
+all 1,494 units passed once in 39.424 seconds with zero prohibited effects.
+Qualification v3, attestation, immutable publication and consumer readback
+passed before generated Main #8550 merged at
+`e549f040e3e3f7b82cfeade3f1446fb000aed162`. The annotated source tag
+points at that actual merged commit. There was no forced promotion replay,
+extra publisher, pause change, unit/effect/deadline waiver or runtime rollout.
+
+Independent readback verified the retained 1,006,225-byte release ZIP's
+SHA-256, exact original producing qualification, every packet hash and
+run/job/source/candidate binding, 150 Dev and 457 candidate source blobs, and
+the canonical 64-file Dev-coordinate projection. Complete coverage remains
+68,424,911 bytes in original format, below 128 MiB; no report or archive is
+checked into Source or generated Main. The nine tiny historical
+baseline-pointer records are metadata references, not report data.
+
+The run's event and execution began `10:14:04Z`; Main merged `10:22:32Z`,
+its annotated tag was recorded `10:23:28Z`, and workflow completion was
+`10:23:33Z`. Thus event-to-landed-tag is **9m24s including queueing**,
+and complete workflow time is 9m29s. Exact identities and archive digest are
+in the [bounded closure record](promotion-burndown.md#stamped-candidate-validation).
+
+Phase 9c's Plan and Validation Plan are resolved. The umbrella effort remains
+Active with broader Phase 7/9, periodic-capacity and client/adopter gates
+retained by their existing owners; this is not whole-effort completion or
+installed-runtime acceptance. The original adopter safety rollout remains
+with its requesting owner under its separate authorization.
 
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as
