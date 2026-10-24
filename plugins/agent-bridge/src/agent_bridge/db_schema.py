@@ -40,7 +40,10 @@ class _SchemaMixin:
                 if recorded is not None and recorded["version"] >= 30:
                     validate_inbox_schema(conn)
                 if recorded is not None and recorded["version"] >= 31:
-                    validate_consumer_schema(conn, require_history_indexes=recorded["version"] >= 32)
+                    validate_consumer_schema(
+                        conn, require_history_indexes=recorded["version"] >= 32,
+                        require_recovery_index=recorded["version"] >= 33,
+                    )
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -748,3 +751,12 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (32,))
             conn.commit()
             log.info("Schema migrated to version 32: indexed retained inbox admission history")
+
+        if from_version < 33:
+            from .inbox_consumer_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (33,))
+            conn.commit()
+            log.info("Schema migrated to version 33: indexed pending inbox handoff recovery")

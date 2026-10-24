@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; local HTTP-48 transport merged; ordinary producer/SDK integration and full Phase 1 open
+- **Status:** Active; HTTP-48 transport and HTTP-49 ordinary producer merged; SDK integration and full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -152,8 +152,11 @@ require their own review and qualification.
 - [ ] Bind the existing installation and current SDK consumer through the
       established user-owned boundary; keep cross-container ingress under
       authenticated proxy owners and reject unsupported exposure.
-      The explicit local HTTP-48 adapter merged in #8540; ordinary producer and
-      actual extension SDK enrollment/delivery remain open.
+      The explicit local HTTP-48 adapter merged in #8540 and ordinary HTTP-49
+      producer admission/recovery merged in #8569. Actual extension SDK
+      enrollment/delivery remains open. The next source prerequisite adds
+      bounded, read-only original-handoff recovery and one-message polling
+      through the existing inbox/receipt owners before SDK wiring.
 - [ ] Preserve original durable messages, handoffs and outcomes across
       disconnect, timeout, restart and lost replies; reconcile uncertainty
       without dropping work or blindly resending it.
@@ -240,6 +243,60 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, authenticated consumer/SDK integration and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Qualify original-handoff recovery before SDK integration
+- Source `50581e0f432c50c679d449ea3b0302c49a384d29` adds bounded,
+  exact-native original-handoff observations through the existing receipt owner.
+  Reads preserve the original consumer after replacement, closure and passive
+  reopen; they return no message body, producer admission or send permission.
+  The legacy receipt shape and omitted poll-limit behavior remain unchanged.
+- HTTP 50 advertises recovery separately from transport 48 and producer 49.
+  Optional one-message polling retains only the selected original before a
+  crash. Schema 33 prepares a partial pending-handoff index through the normal
+  writable migration owner; passive adoption and damaged current storage refuse
+  without repair. No extension default or running installation changes.
+- The coupled SQLite/ASGI cohort passes 303 cases. All three retained
+  generation policies, current actual observations and version negotiation pass
+  131 cases; collection-capability skips are outside the selected current
+  observer. Actual source-bound write/no-write capture executes both
+  installation modes and reproduces 78 outputs, preserving every older packet
+  and provenance record. The canonical checker accepts two contracts and
+  814 fixtures; scoped module, install and documentation contracts pass.
+- Expanded historical/adoption replay exposed stale schema-version assertions
+  and a checker that selected generation 50 from a synthetic older receiver's
+  evidence window rather than its declared current protocol. The checker now
+  follows the existing current-generation dispatch rule; old migration controls
+  assert the actual prepared schema. All five focused regression cases pass.
+  Source `8804bfac32c64e69705bf67b98d2203b454a649f` then passes genuine
+  write/no-write recovery capture in both installation modes, preserving the
+  same 78-output and historical-evidence boundaries.
+- Normal review/merge remain owed. The receiving extension's actual SDK
+  enrollment, delivery and durable attributed-consumption recovery are next.
+  Keep retained delivery opt-in with legacy defaults unchanged; preserve
+  unknown work without replay. Full Phase 1b, guarded restoration, native
+  platform qualification and separately authorized adoption remain open.
+
+### 2026-10-24 - Ordinary producer merged; continue at the actual SDK boundary
+- #8569 merged as `09366035ad37b38a2091dd1ed2242ea0d5f8ab7b` at
+  07:15:20 PDT after the independent current-head review
+  `5638553814` reported no open issues on
+  `8c20c050038110c018daf31e2cb6cb986ded3516`, all required checks passed
+  and all eight concrete finding threads were resolved.
+- Reread this effort's full Plan and Validation Plan. Only the ordinary
+  retained-producer source dependency is landed; no full Phase 1b item, actual
+  SDK/native effect or remaining restoration gate closes from this merge.
+  HTTP 49 distinguishes producer custody from transport-only HTTP 48, with
+  schema-32 prepared indexes and all historical evidence retained.
+- Next connect explicit consumer enrollment, serialized retained polling,
+  invocation-only final admission and original outcome/consumption recovery
+  through the existing extension helpers. Settle activation and older-receiver
+  compatibility before changing default delivery behavior. Keep event handlers
+  nonblocking; bounded represented-event or in-flight caches must never become
+  the only copy of custody or attributed consumption evidence.
+- Preserve unknown original work rather than aborting/resending, manufacturing
+  an SDK idempotency key or downgrading selected retained delivery to legacy.
+  Target compatibility, guarded installation, native qualification, release and
+  separately authorized adoption remain distinct open gates.
 
 ### 2026-10-24 - Wire ordinary keyed producer admission through current enrollment
 - The ordinary message route now asks the existing SQLite inbox owner to

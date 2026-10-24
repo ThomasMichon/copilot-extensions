@@ -99,7 +99,37 @@ When a wire contract does change:
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
-## HTTP-49 ordinary retained-producer evidence
+## HTTP-50 original-handoff recovery evidence
+
+HTTP generation 50 adds the distinct
+`RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION` floor for bounded original-handoff
+metadata reads and optional bounded polling. Earlier transport/producer floors
+and the supported minimum remain unchanged. The
+[recovery contract](../docs/runtime-custody-foundation.md#original-handoff-recovery)
+owns request, response and unsupported-case semantics.
+
+Independent expectations are in `inputs/http50/retained-recovery.json`.
+`test_http50_capture_probes.py` exercises both installation fixture modes,
+ordinary producer admission, one-message handoff retention, consumer replacement,
+closure and passive recovery without SDK invocation or new send authority.
+It preserves the legacy receipt shape and distinguishes acceptance, consumption
+and unknown outcome. This is source-bound ASGI/SQLite evidence, not actual SDK,
+native-platform, installed-runtime or restoration qualification.
+
+Commit matching source and declarations before running:
+
+```text
+python tools/capture_bridge_http50.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http50.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+The existing shared capture/validation/publication owners enforce source and
+interpreter binding. HTTP-50 packets cannot replace HTTP-49 or older inputs,
+captures or provenance. Historical drivers require their own source generation;
+the current driver must execute both installation cases without skips.
+
+## Historical HTTP-49 ordinary retained-producer evidence
 
 HTTP generation 49 advertises ordinary keyed producer association and original
 admission recovery through `RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION`.

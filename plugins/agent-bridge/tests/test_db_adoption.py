@@ -45,7 +45,7 @@ def test_pre_relationship_v26_requires_preparation_before_passive_adoption(tmp_p
 
     prepared = Database(path)
     try:
-        assert SCHEMA_VERSION == 32
+        assert prepared.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         assert prepared.get_session("retained")["status"] == "stopped"
         identity = prepared.execute_read(
             "SELECT id FROM remote_acp_relationship_authority WHERE singleton=1"

@@ -58,6 +58,10 @@ class InboxEnrollRequest(InboxCurrentRequest):
     expected_incarnation: str | None
 
 
+class InboxPollRequest(InboxCurrentRequest):
+    limit: int | None = Field(default=None, ge=1, le=100)
+
+
 class InboxHandoffRequest(InboxCurrentRequest):
     message_id: int = Field(gt=0)
     handoff_id: str = Field(min_length=1)
@@ -90,3 +94,22 @@ class InboxBeginResult(BaseModel):
 
 class InboxOutcomeResult(BaseModel):
     stage: InboxStage
+
+
+class InboxHandoffReceipt(BaseModel):
+    """Original observations only; neither a message body nor send permission."""
+
+    session_id: str
+    message_id: int
+    handoff_id: str
+    consumer: InboxConsumerInfo
+    stage: InboxStage
+    admitted_at: float
+    handoff_started_at: float | None
+    sdk_accepted_at: float | None
+    consumed_at: float | None
+
+
+class InboxRecoveryResult(BaseModel):
+    messages: list[InboxHandoffReceipt]
+    next_after: int | None

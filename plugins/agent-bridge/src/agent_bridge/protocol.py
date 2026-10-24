@@ -219,7 +219,9 @@ RETAINED_INBOX_PROTOCOL_VERSION = 48
 # Ordinary message ingress associates and recovers keyed retained admissions.
 # HTTP 48 exposes the transport only, not this producer guarantee.
 RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION = 49
-HTTP_PROTOCOL_VERSION = 49
+# Original handoff recovery observations are available without reenrollment.
+RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION = 50
+HTTP_PROTOCOL_VERSION = 50
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

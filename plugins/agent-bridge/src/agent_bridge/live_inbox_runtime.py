@@ -111,10 +111,10 @@ class LiveInboxRuntime:
 
     def poll(
         self, db: Database, governance: LoopGovernance, consumer: InboxConsumer,
-        binding: InboxBinding, *, now: float,
+        binding: InboxBinding, *, now: float, limit: int | None = None,
     ) -> list[dict[str, object]]:
         installation, admission = self._context(db, governance, binding=binding)
-        return db.poll_live_message_handoffs(installation, admission, consumer, now=now)
+        return db.poll_live_message_handoffs(installation, admission, consumer, now=now, limit=limit)
 
     def begin(
         self, db: Database, governance: LoopGovernance, consumer: InboxConsumer,

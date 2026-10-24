@@ -69,6 +69,19 @@ def decode_handoff(raw: str) -> dict[str, object]:
         raise RuntimeCustodyError("Malformed retained inbox handoff") from exc
 
 
+def original_handoff(row: sqlite3.Row | dict) -> dict[str, object]:
+    """Validate retained row association without acquiring final-send authority."""
+    retained = decode_handoff(row["handoff_json"])
+    consumer = retained["consumer"]
+    if (
+        retained["message_id"] != row["id"]
+        or not isinstance(consumer, dict) or consumer["session_id"] != row["session_id"]
+        or retained["admission"] != row["runtime_custody_json"]
+    ):
+        raise RuntimeCustodyError("Original inbox handoff observations changed")
+    return retained
+
+
 def handoff_stage(row: sqlite3.Row | dict) -> str:
     """SDK acceptance, observed consumption and unknown send outcome stay distinct."""
     if row["consumed_at"] is not None:
