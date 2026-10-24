@@ -240,6 +240,56 @@ manifest's `auth.copilot: none` prevents host-token lookup or injection.
 The report records the actual source commit and runtime generation; a
 successful preparation or installer exit alone is not the acceptance result.
 
+### Fresh installer failure and durable lifecycle records
+
+`fresh-installer-failure` is an opt-in, credential-free **Linux Tier-P** negative
+witness for Bridge and Dispatch. Run each in its own fresh container against
+the same full merged dev commit. It prepares a clean canonical source payload,
+creates an empty UV cache, verifies the runner's package-feed isolation and
+disables Python downloads, then invokes the actual first-install entry point.
+Dispatch uses its normal
+`--no-service --no-supervisor` options. It does not replace UV, edit the
+installer, import a recorder directly, or repair the fixture.
+
+```bash
+CR_SOURCE_COMMIT=<full-merged-commit> CR_SOURCE_PLUGIN=agent-bridge \
+  ./run.sh --scenario fresh-installer-failure --name-suffix failure-bridge \
+  --block-public-feeds --pass-env CR_SOURCE_COMMIT --pass-env CR_SOURCE_PLUGIN run
+
+CR_SOURCE_COMMIT=<same-full-merged-commit> CR_SOURCE_PLUGIN=agent-dispatch \
+  ./run.sh --scenario fresh-installer-failure --name-suffix failure-dispatch \
+  --block-public-feeds --pass-env CR_SOURCE_COMMIT --pass-env CR_SOURCE_PLUGIN run
+```
+
+The deliberately narrow failure is **real dependency resolution/build
+preparation refusing an unreachable package feed**, after interpreter creation.
+The scenario requires the standard anonymous public Python feed and verifies
+that its hostname and the public PyPI names resolve only to container loopback.
+UV uses the empty cache with a five-second HTTP timeout and no request retries.
+It does not use `UV_OFFLINE`: that option conflicts with the actual installer's
+refresh options and would stop before the intended dependency boundary.
+The verifier requires a fetch failure for a package on that feed and a native
+connection-refused diagnostic, a nonzero nonsignal installer exit,
+and exactly one durable `install` `begin`/`fail` pair whose PIDs match the actual
+installer and whose terminal version matches the prepared source generation.
+No selection, deploy manifest, completed generation or running endpoint may be
+published. An incomplete candidate may be cleaned by the installer itself.
+Missing tools, malformed source, clone/preparation failures, timeouts, unrelated
+nonzero exits, malformed records and any success record fail the scenario.
+
+The normal report records the commit, plugin and installer status. Its copied
+`cr-logs/` retain the actual installer output, PID, status, prepared identity,
+durable JSONL and `failure-witness.json`. No host credentials are consulted or
+injected (`auth.copilot/gh/ado: none`). This manual scenario adds no required-PR
+matrix and does not qualify Windows, daemon cutover, production deployment or
+offline-install support or failed-update preservation; see `merged-dev-runtime` for the separate successful
+source-install witness. Containers remain available for inspection until
+explicit teardown.
+
+Give simultaneous runs distinct `CR_RESULTS_DIR` paths outside the checkout;
+the runner's second-resolution default can otherwise select the same report
+directory even when the container suffixes differ.
+
 ### Credential-free budget-guidance snapshot
 
 The Tier-P/F1 `budget-guidance-solo` scenario requires no Copilot or forge
