@@ -260,8 +260,11 @@ refusals and the installation authority's explicit path selection.
 - [x] Provide explicit retained source-graph candidate export (#8600).
       Only unconditional locally mapped dependencies may be omitted from
       third-party output; ordinary compile retains its directory refusal.
-      Selected-source identity binding, exact installation receipt, actual
+      Exact installation receipt, actual
       governed acquisition and consumer realization remain open.
+- [x] Bind independently selected source, native target, declared extras,
+      fallback trigger and exact candidate lock through retained resolution
+      (#8705). This freezes inputs, not origin approval or governed admission.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -523,6 +526,13 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify selected source-lock binding with canonical retained inventory,
+      copy-time mutation/restoration refusal, native target override refusal,
+      whole-preflight deadlines and context-owned cleanup. #8705's repaired
+      head passes 562 development controls (one POSIX-only Windows skip), the
+      unchanged 1509-unit packet, required CI, both selected Linux/Windows
+      compiler jobs and approval with no unresolved findings. No production
+      consumer, origin authentication or governed acquisition is credited.
 - [x] Qualify the bounded source compiler with native dated-feed retention,
       transitive seasoning/hashes, recursive local mappings, root-metadata
       registry identity preservation, inactive marker/extra and context-only
@@ -710,6 +720,27 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Source candidate binding merged; acquisition next
+
+- #8705 merged as `06ae28c96f9f8cf7961b4328cbe07ee2e44ab962`.
+  Copilot review `5640331781` approved the repaired head
+  `203ef28e19f9a71f08acad0a179f9220b0eaba24` with no open issues;
+  all four original review threads are resolved. Required CI `40139089677`
+  and native qualification `40139139807` pass, including both selected
+  Linux/Windows retained compiler jobs. The managed merge used the existing
+  Maintainer CODEOWNER exception, not a CI override.
+- Re-read this Plan and Validation Plan after merge and marked only selected
+  source/lock input binding complete. The parent remains **Active**; #4876 and
+  the accepted helper-consumer gates remain open. No runtime or service
+  activation, installed-source receipt or rollout is enabled.
+- Next realize bounded governed acquisition from the existing policy/feed
+  configuration into the existing inspected/retained wheel boundary, preserving
+  named-index credentials, OS trust, explicit download/redirect trust, file
+  admission/seasoning/yank evidence, finite budgets and a shared deadline.
+  The build-tool trust helper's default-index allowlist is not by itself a
+  runtime download-chain authority; no second resolver or personal policy file
+  is introduced.
 
 ### 2026-10-24 - Source candidate review repairs
 
