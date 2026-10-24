@@ -603,6 +603,7 @@ class _SessionStartMixin:
                     )
                     cs_spawner = build_codespace_spawner(
                         cs_target["name"], cs_target["repo"], relay_port=relay_port,
+                        ready_timeout=self._timeouts.session_host_ready,
                         provision_prelude=relay_prelude,
                         unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
                         active_reap_seconds=self._session_host_active_reap_seconds,

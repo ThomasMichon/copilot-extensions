@@ -623,7 +623,10 @@ class PhasedTimeouts(BaseModel):
         "sub-daemon host cold-started under AV real-time scanning) can exceed a "
         "tight 30s budget, which previously surfaced as a spurious "
         "LAUNCH_ACP/new_session internal error. Raise this in config.yaml if a "
-        "local host still times out on a very slow box.",
+        "local host still times out on a very slow box. Also bounds remote "
+        "credential-relay admission and reconnect readiness, including each "
+        "fresh SSH probe's transport establishment; the relay ping itself "
+        "retains its separate three-second response limit.",
     )
 
 

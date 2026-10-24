@@ -19,6 +19,17 @@ is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
 requires HTTP 50 recovery and never silently downgrades or resends an ambiguous
 original. Native qualification and installed adoption remain separate.
 
+Remote credential-relay admission and persisted-session reconnect use
+`timeouts.session_host_ready` (90 seconds by default) as a bounded readiness
+budget, including fresh SSH establishment and retries. Each probe receives
+that budget rather than a separate five- or ten-second transport ceiling;
+the outer monotonic deadline cancels an unfinished probe and awaits its owned
+process cleanup. The remote ping still requires the exact relay `pong` within
+three seconds once the command runs. Inconclusive readiness remains a failure;
+periodic supervisor probes retain their existing transport-error health-hint
+semantics and a bounded execution budget. This is startup/readiness policy,
+not a turn execution timeout or a progress-renewed communication clock.
+
 Windows installation captures unavailable optional Python-launcher versions as
 verbose diagnostics, not install failures. Signed-base discovery stops at the
 first accepted candidate and reuses it only within that installer process,

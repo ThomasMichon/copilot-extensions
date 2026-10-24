@@ -6,6 +6,15 @@ Provides a single `ConnectionManager` that owns one SSH ControlMaster
 connection per remote host. Plugins that need SSH (agent-bridge,
 agent-codespaces) import this library instead of spawning SSH directly.
 
+Bounded `exec_command(timeout=...)` uses the selected command budget for
+OpenSSH connection establishment as well as command completion, rather than
+silently retaining the base 15-second connection cap. The subprocess deadline
+still bounds the whole command. Unbounded commands and other operations retain
+the base connection policy. `build_remote_exec_args(connect_timeout=...)`
+also accepts an explicit establishment budget for one-shot probes; its default
+remains 15 seconds. OpenSSH's integer-second budget rounds up; the caller's
+outer process deadline remains authoritative.
+
 ## Features
 
 - **Connection multiplexing** -- one ControlMaster per host, all commands
