@@ -162,3 +162,8 @@ now remain independent of directory/aggregate budgets; first-party promotion
 keeps its own stricter bounds. A failing-first final-fact-parsing deadline case
 also closes the direct stdlib return boundary, not just its higher-level callers.
 No approval or budget gate is bypassed by these corrections.
+
+Concurrent upstream work added `agent-pull-requests` to the Python installer
+consumer roster before this component merged. The reconciliation preserves
+that new consumer and synchronizes the verifier into its payload too, rather
+than restoring the older roster. Its patch changefile was already included.
