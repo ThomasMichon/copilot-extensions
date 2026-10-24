@@ -88,6 +88,47 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-REPLAY-OBSERVE existing fresh range and raw-message assertions
+
+This settles only these four original keys; the historical candidate table's
+three-hunk summary does not replace the exact census keys below:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_rebase.py:6` | `bd3815a8dda8a1783fcef5592fb95758900a2ef287699bd7bdc68fe871a8396d` |
+| `tests/test_pr_rebase.py:7` | `ea9bfbef4b732769d73f200b6fee9037f3fe6eeb787e7cf8e46d8f5aff407063` |
+| `tests/test_pr_rebase.py:8` | `dc35785bd8c4ced8aee47605c7949d6f35b29419d563b3538da58de1a90fac4c` |
+| `tests/test_pr_rebase.py:9` | `517fd04c1940e27f7252a51d77d96392901713aa1f2b9b9dfcac896b16a6406c` |
+
+Actual merged #7893 commit `39e1ec02de5d4aa46bf0e230e4d868093eb3e9cd`
+already contains these observations. The complete original-lease and
+unstripped-conflict-message test functions have identical ASTs in that merge,
+the immutable source and accepted comparison
+`1e994739bd0f993ad3a5969281fdf7a723660cb1`.
+
+The original-lease consumer wraps the real `_commit_rows` reader and requires
+exactly two range reads for verification. A later manual publication requires
+two new reads with equal contents but distinct list objects. Actual temporary
+Git histories still exercise snapshot/refspec publication, sync/manual flows,
+the original lease, source-feedback preservation, tracking/base/patch IDs,
+credential-free proof serialization and subsequent incremental publication.
+The conflict-message double supplies complete pinned IDs and raw tree rows,
+then requires both unstripped author/message reads before refusing either a
+leading-space or extra-newline change. These observations do not authorize
+replay or replace the independently owned R implementation.
+
+All four original-lease variants and both raw-message variants pass with the
+existing exhaustive opt-in enabled: 6 cases, 163.42 pytest seconds and
+203.09 seconds including preparation and cleanup, exactly two contained
+native Windows workers. Existing item marks, deadlines and process/memory/temp
+bounds remain unchanged. This is focused functional evidence only. The
+previous complete replay-module timing failure remains recorded below;
+neither this selection nor its timing qualifies a normal group or repeated
+complete same-head plugin run.
+
+No runtime/test edit is needed. Fixture reuse, other residual keys and full
+Windows qualification remain separate and open.
+
 ### B-RECOVERY-FAULT existing binary-transport fault injection
 
 This settles only these three original keys, not the separately partitioned
