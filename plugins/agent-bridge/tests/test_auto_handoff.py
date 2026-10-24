@@ -374,7 +374,12 @@ class TestNoResume:
                                                                "stop_reason": "end_turn"})
         sm = _sm(tmp_db, enabled=True)
         pred = await sm.start_session(spawn_target, caller_id="wt-1")
-        pred._stop_requested = True  # the notice was admitted while the brief was being written
+
+        async def author_then_stop(prompt: str) -> dict[str, str]:
+            pred._stop_requested = True
+            return {"response_text": "## Objective\nX", "stop_reason": "end_turn"}
+
+        mock_acp_client.send_prompt.side_effect = author_then_stop
         before = set(sm._sessions)
         with pytest.raises(RuntimeError, match="stop was requested"):
             await sm.handoff_session(pred.session_id, reason="context-pressure")

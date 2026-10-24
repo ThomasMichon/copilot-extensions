@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Large-Corpus Session Sync](active/large-corpus-session-sync/README.md) | Draft; reviewed plan before bounded accounting and scheduled-consumer changes | #8735; follows delivered #8460/#8688 without disabling accounting |
 | [Installation-Independent Sessions](active/installation-independent-sessions/README.md) | Draft; reviewed contract and real uninstall/reinstall survival proof before production changes | #8669; coordinates with #5579 and existing installer/updater owners; no host rollout |
 | [Native Anchor Custody](active/native-anchor-custody/README.md) | Draft; explicit current-custody claims proposal, no live repair | #4488 bounded claims slice; preserves contributor-owned #6009 and broader lineage/handoff scope |
 | [Bounded Passive Git Observation](active/bounded-passive-git-observation/README.md) | Draft; reviewed R1 deadline/R2 passive fsmonitor proposal, implementation admission pending | #7944/#7945; preserves roster/publication, resident-control/storage and broader #2619/#6086 ownership; no rollout |

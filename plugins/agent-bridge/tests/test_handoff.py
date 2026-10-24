@@ -226,9 +226,11 @@ class TestHandoffPrimitive:
             cwd="/workspaces/repo",
             spawn_command=["gh", "codespace", "ssh", "-c", "cs-name"],
         )
-        sess = await session_manager.start_session(target, agent_name="cs-agent")
-        with pytest.raises(ValueError, match="single-checkout"):
-            await session_manager.handoff_session(sess.session_id)
+        # Isolate the single-checkout guard from the separately tested receiver policy.
+        with patch("agent_bridge.hosting_policy.require_target_hosting", new=AsyncMock()):
+            sess = await session_manager.start_session(target, agent_name="cs-agent")
+            with pytest.raises(ValueError, match="single-checkout"):
+                await session_manager.handoff_session(sess.session_id)
 
     @pytest.mark.asyncio
     async def test_handoff_refused_mid_turn(
@@ -246,10 +248,10 @@ class TestHandoffGroundLayerLineage:
     and seeds the ACP successor with its role + the worktree history digest."""
 
     @staticmethod
-    def _local_wt_target() -> SpawnTarget:
+    def _local_wt_target(cwd: str) -> SpawnTarget:
         # A local target carrying a ground-layer worktree id activates the
         # Phase 4 writes (the default fixture has no worktree_id, so it doesn't).
-        return SpawnTarget(type="local", cwd="/tmp/test-dir", worktree_id="wt-gl")
+        return SpawnTarget(type="local", cwd=cwd, worktree_id="wt-gl")
 
     @pytest.mark.asyncio
     async def test_handoff_writes_ground_layer_and_seeds_role(
@@ -259,7 +261,7 @@ class TestHandoffGroundLayerLineage:
         mock_acp_client.send_prompt = AsyncMock(return_value={
             "response_text": "## Objective\nShip it", "stop_reason": "end_turn",
         })
-        target = self._local_wt_target()
+        target = self._local_wt_target(spawn_target.cwd)
 
         with patch("agent_bridge.worktree_lineage.register_session") as m_reg, \
                 patch("agent_bridge.worktree_lineage.link_succession") as m_link, \
