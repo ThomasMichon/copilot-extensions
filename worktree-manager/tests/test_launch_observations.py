@@ -65,6 +65,39 @@ def test_launch_records_only_manager_boundaries(attempt, monkeypatch, action, co
     assert "private fixture" not in json.dumps(recorded)
 
 
+@pytest.mark.parametrize("mode", ["new", "resume"])
+@pytest.mark.parametrize("worktree_id", [
+    "d\u00e8sktop-wsl-20261021-010203-abcd",
+    "de\u0301sktop-wsl-20261021-010203-abcd",
+    "\u65e5\u672c-\U0001f5a5-wsl-20261021-010203-abcd",
+])
+def test_journaled_unicode_worktree_identity_reaches_launch_unchanged(
+    attempt, monkeypatch, mode, worktree_id,
+):
+    store, _ = attempt
+    identity = uuid4().hex
+    selected = worktree_id if mode == "resume" else None
+    store.record_intent(
+        identity, action=mode, project="example", surface="picker-action",
+        is_local=True, worktree_id=selected,
+    )
+    request = LaunchRequest(
+        project="example", mode=mode, worktree_id=selected, attempt_id=identity,
+    )
+    monkeypatch.setattr(
+        engine_client, "resolve_launch_plan", lambda *a, **kw: plan(worktree_id=worktree_id),
+    )
+    def launch(returned, **kwargs):
+        assert returned.worktree_id == worktree_id
+        return 0
+    monkeypatch.setattr(launcher, "launch", launch)
+    assert main._run_launch(request) == 0
+    detail = store.detail(identity)
+    assert detail["action"] == mode and detail["worktree_id"] == selected
+    assert detail["events"][2]["details"]["worktree_id"] == worktree_id
+    assert detail["events"][-1]["phase"] == "launcher-returned"
+
+
 def test_seed_guard_refusal_precedes_engine(attempt, monkeypatch):
     monkeypatch.setattr(engine_client, "resolve_launch_plan", lambda *a, **kw: pytest.fail("engine"))
     request = replace(attempt[1], machine="remote-host", environment="linux", seed_prompt="fixture")

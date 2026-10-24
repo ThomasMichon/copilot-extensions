@@ -67,7 +67,8 @@ before invoking the existing owner, then `launcher-returned` with its exit
 code if control returns. That code may describe a wrapper or spawned-window
 handoff, not Copilot. AHP's requested boundary precedes hosted-session
 preparation too, because preparation can create a session and persist its
-binding before the final launcher runs. POSIX process replacement and abrupt process exit may
+binding before the final launcher runs. POSIX process replacement and abrupt
+process exit may
 leave only the requested boundary. Missing completion evidence remains
 unknown; the journal never fills it in or replays the action.
 
@@ -104,6 +105,10 @@ unknown attempts. Owner labels are attribution, not authentication or proof of
 acceptance; consumers must validate the actual owner's receipt before appending
 such an observation. A plan, zero process exit or missing event never implies a
 launched Copilot, consumed prompt or safe replay.
+Worktree observation IDs preserve engine-provided Unicode verbatim, including
+combining characters. They are bounded opaque identifiers that reject ASCII
+whitespace and controls, not filesystem paths or a reason to normalize the engine's identity. Other
+observation identity fields retain their existing restricted encoding.
 
 ## Private readers and expiry
 

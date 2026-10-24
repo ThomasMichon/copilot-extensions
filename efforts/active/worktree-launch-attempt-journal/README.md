@@ -439,3 +439,11 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   for write refusal before preparation, preparation failure and a normal
   hosted launch. The affected AHP/launch/admission portfolio passes 112 cases
   with 10 skips. Current-head review and CI remain publication gates.
+- The next review found that the journal's ASCII observation-ID restriction
+  was narrower than supported engine worktree names. Worktree observations
+  now preserve composed/decomposed Unicode and non-Latin/non-BMP characters
+  verbatim, with the existing bound and ASCII whitespace/control rejection;
+  request/seed/conversation ID validation remains restricted. New and Resume
+  seam regressions prove that valid Unicode resolution does not block launch.
+  The affected storage/outcome/AHP/production portfolio passes 188 cases with
+  four skips; current-head review and CI still apply.
