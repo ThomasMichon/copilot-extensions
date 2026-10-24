@@ -205,12 +205,21 @@ collision validation before persistence. Inherited emitter/reviewer cwd values
 retain their defining directories. Registered repository references remain
 `repo:` resources through persistence and publication, retaining their owner's
 execution admission (including refusal of a reference-only checkout).
+Absolute and implicit source-local execution contexts are qualified by the
+same supplier-context owner used by registrar discovery; composed forms that
+cannot retain that qualification refuse rather than publishing plain paths.
+Dependency inspection resolves named command/cwd resources read-only without
+replacing their persisted names or granting execution authority.
 A worker identity must retain its defining
 repository context; a changed execution root is not permission to select an
 unrelated identity. The existing cross-repository relative script-forge guard
 is applied before flattening and remains a refusal, not a solved limitation.
 Relative evaluator script contexts or other dependencies whose meaning cannot
-be preserved refuse explicitly. A `composite` fragment without a supported
+be preserved refuse explicitly. File-backed evaluator policies require an
+absolute local path; their existing runtime loader does not accept named
+repository resources. Effort-loop identity relocation also refuses until its
+expansion owner can preserve a distinct defining context.
+A `composite` fragment without a supported
 ordinary declaration shape remains unsupported. Ambiguous multi-root `plugin:`
 dependencies also refuse; browsing each distinct provider root remains valid.
 

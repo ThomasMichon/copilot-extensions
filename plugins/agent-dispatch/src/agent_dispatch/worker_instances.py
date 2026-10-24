@@ -156,13 +156,19 @@ def _validate_dependencies(
     declarations: tuple, repo_root: str, *, available_declarations: tuple | None = None,
 ) -> None:
     from .registrations import RegistrationKind
+    from .repository_resources import RepositoryResourceSnapshot
+
+    resources = RepositoryResourceSnapshot(execution=False)
     for declaration in declarations:
         if declaration.fleet.enabled and not shutil.which("ssh"):
             raise RegistrarError("missing fleet dependency: ssh transport")
         command = declaration.spec.get("command")
         if isinstance(command, list) and command:
+            command = [resources.resolve(part) for part in command]
             executable = command[0]
-            directory = Path(declaration.spec.get("cwd") or repo_root or active_dir())
+            directory = Path(resources.resolve(
+                str(declaration.spec.get("cwd") or repo_root or active_dir()), directory=True,
+            ))
             if not shutil.which(executable) and not (
                 (Path(executable).is_absolute() or Path(executable).parent != Path("."))
                 and (directory / executable).is_file()

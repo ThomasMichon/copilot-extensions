@@ -313,16 +313,21 @@ def test_template_plugin_activation_is_fresh_not_process_cached(monkeypatch, tmp
     assert not instance_dir().exists()
 
 
-def test_registered_repository_context_stays_named_through_local_publication(monkeypatch, tmp_path):
+@pytest.mark.parametrize("absolute_cwd", [False, True])
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_registered_repository_context_stays_named_through_local_publication(
+    monkeypatch, tmp_path, absolute_cwd, repo_class,
+):
     from agent_dispatch import repository_resources
 
     root = tmp_path / "reference-library"
     index = root / ".copilot-extensions" / "agent-dispatch" / "templates" / "index.json"
     index.parent.mkdir(parents=True)
+    (index.parent / "producer.py").write_text("print('[]')", encoding="utf-8")
     (index.parent / "source.json").write_text(json.dumps({
         "kind": "emitter", "spec": {
-            "id": "{name}", "command": [sys.executable, "-c", "print('[]')"],
-            "cwd": ".", "interval_seconds": 60,
+            "id": "{name}", "command": [sys.executable, "producer.py"],
+            "cwd": str(index.parent) if absolute_cwd else ".", "interval_seconds": 60,
         },
     }), encoding="utf-8")
     index.write_text(json.dumps({
@@ -334,12 +339,13 @@ def test_registered_repository_context_stays_named_through_local_publication(mon
     monkeypatch.setattr(wt, "run_agent_worktrees_capture", lambda *a, **k: SimpleNamespace(
         returncode=0, stdout='{"inventory_authority":"complete","repos":[{"name":"library"}]}', stderr="",
     ))
-    monkeypatch.setattr(repository_resources, "_registered_repository", lambda *a, **k: (root, "reference"))
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda *a, **k: (root, repo_class))
     row = wt.discover_templates(activation())[0][0]
     assert save(row, root=str(root), activate=True)["activation"] == "pending"
     declaration, = rd.read_declaration_file_set(active_dir() / "local.json")
     assert declaration.spec["cwd"] == "repo:library:.copilot-extensions/agent-dispatch/templates"
-    with pytest.raises(RegistrarError, match="reference-only"):
+    assert declaration.spec["command"] == [sys.executable, "producer.py"]
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
         repository_resources.resolve_execution_resources(
             declaration.spec["command"], declaration.spec["cwd"],
         )
@@ -395,3 +401,55 @@ def test_legacy_repository_pointer_is_browsable_but_not_instantiable(tmp_path):
     rd.add_pointer("legacy", root, kind="repo")
     row = wt.discover_templates(activation())[0][0]
     assert row["instantiable"] == "false" and "canonical registered" in row["unsupported_reason"]
+
+
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_composed_repository_source_cannot_lose_implicit_supplier_context(monkeypatch, repo_class):
+    from agent_dispatch import repository_resources
+    from tests.test_repository_issue_loops import _config
+
+    path, _ = provider(_config())
+    root = rd.registrar_dir()
+    monkeypatch.setattr(wt, "_repository_sources", lambda findings: [wt.TemplateSource(
+        "repo:library", root, path.parent / "index.json", ("repo:library",),
+        "repository-layer:templates",
+    )])
+    monkeypatch.setattr(repository_resources, "_registered_repository", lambda *a, **k: (root, repo_class))
+    row = next(r for r in catalog()["entries"] if r["provenance"] == "repo:library")
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
+        save(row, root=str(root), activate=True)
+    assert not instance_dir().exists() and not active_dir().exists()
+
+
+@pytest.mark.parametrize("policy", ["./rules.json", "repo:library:rules.json"])
+def test_relative_file_backed_evaluator_refuses_instead_of_rebasing(policy):
+    _, row = provider({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "fixture", "evaluator": policy,
+        },
+    })
+    with pytest.raises(RegistrarError, match="file-backed evaluator"):
+        save(row)
+    assert not instance_dir().exists()
+
+
+def test_effort_identity_relocation_refuses_before_selecting_target_rules(tmp_path):
+    from tests.test_registrar_path_origins import _identity
+
+    source = rd.registrar_dir()
+    source.mkdir()
+    (source / ".git").mkdir()
+    _identity(source, "SOURCE-RULES")
+    target = tmp_path / "target"
+    _identity(target, "WRONG-TARGET-RULES")
+    _, row = provider({
+        "kind": "effort-driver-loop", "repo": "example/project",
+        "source": "fixture", "task_label": "fixture", "cadence_seconds": 60,
+        "effort_slugs": ["fixture-effort"],
+        "worker_identity": "worker", "state_root": str(tmp_path),
+        "pool": {"body": {"type": "headless", "agent": "task-worker"}},
+    })
+    with pytest.raises(RegistrarError, match="effort worker identity source context"):
+        save(row, root=str(target))
+    assert not instance_dir().exists()
+    assert save(row, root=str(source))["persisted"]

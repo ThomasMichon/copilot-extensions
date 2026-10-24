@@ -50,7 +50,9 @@ def _absolute_or_named(value: object) -> bool:
 
 def materialize_template(selected: dict, overrides: dict, name: str, repo_root: str) -> dict:
     from . import registrar_discovery as rd
+    from .registrar_document import _identity_origin_root, qualify_supplier_context
     from .registrar_reconcile import declaration_to_registration
+    from .repository_resources import RepositoryResourceSnapshot
     from .worker_instances import OWNER, validate_configuration
 
     if "extends" in overrides:
@@ -76,10 +78,29 @@ def materialize_template(selected: dict, overrides: dict, name: str, repo_root: 
         request, directory=directory, repo_root=repo_root or None,
         activation=selected["activation"],
     )
+    source = selected["row"]["source"]
+    if source["provider"].startswith("repo:"):
+        repository = source["provider"].removeprefix("repo:")
+        original = tuple(
+            qualify_supplier_context(declaration, repository, Path(source["root"]))
+            for declaration in original
+        )
+        if document.get("kind") in {"emitter", "evaluator"}:
+            document["spec"] = dict(original[0].spec)
+    if document.get("kind") == "effort-driver-loop" and document.get("worker_identity"):
+        resources = RepositoryResourceSnapshot(execution=False)
+        origin = _identity_origin_root(origins.get("worker_identity", directory), directory)
+        emitter = next(d for d in original if d.kind == "emitter")
+        effective = str(emitter.spec.get("cwd") or directory)
+        if Path(resources.resolve(origin)) != Path(resources.resolve(effective)):
+            raise RegistrarError("effort worker identity source context cannot yet be materialized safely")
     for declaration in original:
         if declaration.kind == "supervised-lane" and declaration.evaluator and not _absolute_or_named(declaration.evaluator):
             raise RegistrarError("source-relative evaluator paths cannot yet be materialized safely")
         if declaration.kind == "evaluator":
+            path = declaration.spec.get("evaluator")
+            if path and (not _absolute_or_named(path) or path.startswith("repo:")):
+                raise RegistrarError("file-backed evaluator materialization requires an absolute local path")
             spec = declaration.spec.get("evaluator_spec")
             if isinstance(spec, dict) and spec.get("scripts") and not _absolute_or_named(spec.get("cwd")):
                 raise RegistrarError("source-relative evaluator script cwd cannot yet be materialized safely")
