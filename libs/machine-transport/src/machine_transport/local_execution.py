@@ -59,33 +59,38 @@ def _platform(entry: MachineEntry, observed: str) -> str:
     return split_machine_environment(entry.key).environment
 
 
+def _entry_execution(entry: MachineEntry, observed: str) -> str:
+    execution = entry.key.strip()
+    presentation = (
+        not entry.execution_platform and execution.endswith(")")
+        and bool(_platform(entry, observed))
+    )
+    if presentation:
+        execution = split_machine_environment(execution).logical_machine
+    return _name(execution, "execution machine")
+
+
 def _context(
     registry: Mapping[str, MachineEntry], observed: str, physical: str,
     platform: str, execution: str, customization_key: str | None,
 ) -> LocalExecutionContext:
     selected = registry.get(customization_key) if customization_key is not None else None
-    presentation = (
-        selected is not None and not selected.execution_platform
-        and execution == selected.key and execution.endswith(")")
-        and bool(_platform(selected, observed))
+    physical = _name(physical, "physical machine")
+    execution = (
+        _entry_execution(selected, observed) if selected is not None and execution == selected.key
+        else _name(execution, "execution machine")
     )
-    if presentation:
-        execution = split_machine_environment(execution, platform).logical_machine
-    collision = next((
-        entry for entry in registry.values()
+    for collision in registry.values():
         if execution.casefold() in {
-            name.casefold() for name in machine_identity_names(entry, include_metadata=False)
-        }
-    ), None)
-    if collision is not None and (
-        collision.key != customization_key
-        or (collision.key.casefold() != execution.casefold() and not presentation)
-        or collision.execution_platform not in ("", platform)
-    ):
-        raise IdentityError(f"local execution identity {execution!r} conflicts with a registered machine")
+            name.strip().casefold() for name in machine_identity_names(collision, include_metadata=False)
+        } and (
+            collision.key != customization_key
+            or _entry_execution(collision, observed).casefold() != execution.casefold()
+            or collision.execution_platform not in ("", platform)
+        ):
+            raise IdentityError(f"local execution identity {execution!r} conflicts with a registered machine")
     return LocalExecutionContext(
-        observed, _name(physical, "physical machine"), platform,
-        _name(execution, "execution machine"), customization_key,
+        observed, physical, platform, execution, customization_key,
     )
 
 
@@ -137,7 +142,8 @@ def resolve_local_execution_context(
             raise IdentityError("configured machine must be a nonempty string")
         configured = configured_machine.strip()
         if not any(configured.casefold() == key.casefold() for key in registry) and any(
-            profile.alias.casefold() == configured.casefold() and profile.name != platform
+            profile.alias.casefold() == configured.casefold()
+            and profile.name and profile.name != platform
             for entry in registry.values() for profile in entry.ssh_environments
         ):
             raise IdentityError("configured SSH profile conflicts with the current execution environment")

@@ -310,6 +310,44 @@ def test_guest_only_entry_does_not_require_optional_host_metadata(
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+def test_unnamed_profile_does_not_assert_a_conflicting_environment(environment: str) -> None:
+    key = "desk-wsl" if environment == "wsl" else "desk"
+    entry = MachineEntry(key, "", hostname="raw-host", ssh_environments=[SSHEnvironment("", "generic")])
+    context = resolve_local_execution_context(
+        {key: entry}, hostname="raw-host", environment=environment, configured_machine="generic",
+    )
+    assert (context.machine, context.execution_machine, context.customization_key) == ("desk", key, key)
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_execution_whitespace_is_normalized_before_collision_validation(configured: bool) -> None:
+    entry = MachineEntry(" desk-wsl ", "", hostname="raw-host", alias="guest-binding")
+    foreign = MachineEntry("desk-wsl", "", execution_platform="windows")
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(
+            {entry.key: entry, foreign.key: foreign}, hostname="raw-host", environment="wsl",
+            configured_machine="guest-binding" if configured else None,
+        )
+
+
+@pytest.mark.parametrize("foreign_alias", ["desk-wsl", " desk-wsl "])
+def test_normalized_execution_checks_every_colliding_entry(foreign_alias: str) -> None:
+    entry = MachineEntry(" desk-wsl ", "", hostname="raw-host", alias="desk-wsl")
+    foreign = MachineEntry("foreign", "", alias=foreign_alias, execution_platform="windows")
+    with pytest.raises(ValueError, match="ambiguous|conflicts"):
+        resolve_local_execution_context(
+            {entry.key: entry, foreign.key: foreign}, hostname="raw-host", environment="wsl",
+        )
+
+
+@pytest.mark.parametrize("key", [" desk-wsl ", " desk (WSL) "])
+def test_execution_normalization_keeps_original_customization_key(key: str) -> None:
+    entry = MachineEntry(key, "", hostname="raw-host", alias="desk-wsl")
+    context = resolve_local_execution_context({key: entry}, hostname="raw-host", environment="wsl")
+    assert (context.machine, context.execution_machine, context.customization_key) == ("desk", "desk-wsl", key)
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 def test_existing_configured_binding_remains_distinct_from_observation(environment: str) -> None:
     configured = "custom-wsl" if environment == "wsl" else "custom"
     context = resolve_local_execution_context(
