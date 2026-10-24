@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh vendored installer process helper from the reviewed canonical engine",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

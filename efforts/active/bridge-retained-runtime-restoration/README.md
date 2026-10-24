@@ -273,6 +273,12 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
 - Normal review/merge remain required. Actual extension
   enrollment, SDK invocation/outcome/consumption recovery, native qualification
   and all remaining parent Plan/Validation items stay open.
+- The managed publication refreshed the base and exposed a required
+  install-contract failure: three Python installer helper copies lagged the
+  canonical engine. Its existing generator refreshed exactly those three
+  copies, without changing canonical behavior. Six bounded Python-engine
+  vendoring controls, the install contract and both canonical Bridge contracts
+  pass on that integrated source. Fresh current-head CI/review remain required.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the
