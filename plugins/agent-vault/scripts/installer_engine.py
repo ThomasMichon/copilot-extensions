@@ -11,6 +11,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -89,8 +90,9 @@ def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:
 def _construction_hash(
     files: tuple[Path, ...], extras: tuple[str, ...],
     local_packages: tuple[str, ...] | None = None,
+    *, file_hashes: dict[Path, str] | None = None,
 ) -> str:
-    source_hash = runtime.fingerprint_source(files)
+    source_hash = runtime.fingerprint_source(files, file_hashes=file_hashes)
     if not extras and local_packages is None:
         return source_hash
     profile: dict[str, object] = {"source_hash": source_hash, "extras": extras}
@@ -236,14 +238,31 @@ def freeze_inputs(plugin: Path, destination: Path) -> FrozenInputs:
         if destination == root or destination.is_relative_to(root):
             raise ValueError(f"Frozen input destination is inside runtime source: {destination}")
     files = _source_files(roots)
-    before = runtime.fingerprint_source(files)
     destination.mkdir(parents=True, exist_ok=False)
     try:
-        for source in files:
-            target = destination / source.relative_to(common)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, target, follow_symlinks=False)
-            shutil.copymode(source, target, follow_symlinks=False)
+        buffer_limit = 32 * 1024 * 1024
+        with tempfile.SpooledTemporaryFile(max_size=buffer_limit, dir=destination) as buffer:
+            offsets: dict[Path, tuple[int, int]] = {}
+
+            def retain_source(source: Path, data: bytes) -> None:
+                offsets[source] = (buffer.tell(), len(data))
+                if buffer.tell() + len(data) > buffer_limit:
+                    buffer.rollover()
+                if buffer.write(data) != len(data):
+                    raise OSError("Frozen source buffer write was incomplete")
+
+            before = runtime.fingerprint_source(files, on_file=retain_source)
+            # Finish the full baseline before copying, preserving the mutation barrier.
+            for source in files:
+                offset, length = offsets[source]
+                buffer.seek(offset)
+                data = buffer.read(length)
+                if len(data) != length:
+                    raise OSError("Frozen source buffer read was incomplete")
+                target = destination / source.relative_to(common)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+                shutil.copymode(source, target, follow_symlinks=False)
         frozen_roots = tuple(destination / root.relative_to(common) for root in roots)
         frozen_plugin = destination / plugin.relative_to(common)
         if _package_roots(frozen_plugin) != tuple(sorted(frozen_roots)):
@@ -322,17 +341,20 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
     ) as transaction:
         if set(transaction.sources) != set(inputs.packages):
             raise RuntimeError("Retained UV inputs differ from the runtime dependency graph")
+        file_hashes: dict[Path, str] = {}
         if (
             _package_roots(inputs.plugin) != inputs.packages
             or _source_files(inputs.packages) != files
-            or _construction_hash(files, inputs.extras, inputs.local_packages) != inputs.payload_hash
+            or _construction_hash(
+                files, inputs.extras, inputs.local_packages, file_hashes=file_hashes,
+            ) != inputs.payload_hash
         ):
             raise RuntimeError("Runtime inputs changed while retaining UV inputs")
         if not set(files) <= set(transaction.source_hashes):
             raise RuntimeError("Retained UV inputs do not cover the runtime source files")
         changed = [
             path for path in files
-            if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path]
+            if file_hashes[path] != transaction.source_hashes[path]
         ]
         if changed:
             raise RuntimeError(
@@ -627,9 +649,14 @@ def numbered_candidate(
     extras: tuple[str, ...] = (),
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | None = None,
+    expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
-    """Construct or reuse an immutable identity; lifecycle owns cutover/governance."""
+    """Construct or reuse an immutable identity; lifecycle owns cutover/governance.
+
+    A prior freeze's expected payload hash avoids another initial scan, not
+    retained-input validation before construction or source validation on reuse.
+    """
     if version == "dev":
         raise ValueError("Mutable dev construction requires its explicit owning lifecycle")
     return _candidate(
@@ -641,12 +668,13 @@ def numbered_candidate(
         extras=extras,
         local_packages=local_packages,
         wheel_inputs=wheel_inputs,
+        expected_payload_hash=expected_payload_hash,
         wait_timeout=wait_timeout, child_timeout=child_timeout,
     )
 
 
 def dev_candidate(root: Path, *, owner: str, **kwargs):
-    """Refresh only the explicitly claimed mutable slot under its outer lifecycle."""
+    """Construct or reuse immutable source content under its explicit dev claim."""
     return _candidate(root, runtime.DEV_VERSION, dev_owner=owner, **kwargs)
 
 
@@ -654,7 +682,20 @@ def _check_dev_owner(root: Path, owner: str) -> None:
     with runtime._publication_lease(root):
         claim = runtime.read_dev_claim(root, strict=True)
         if claim is None or claim["owner"] != owner:
-            raise RuntimeError("Mutable runtime construction requires this owner's explicit dev claim")
+            raise RuntimeError("Development construction requires this owner's explicit dev claim")
+
+
+def _revalidate_input_content(inputs: FrozenInputs) -> None:
+    if (
+        _package_roots(inputs.plugin) != inputs.packages
+        or _wheel_construction_hash(
+            _construction_hash(
+                _source_files(inputs.packages), inputs.extras, inputs.local_packages,
+            ),
+            inputs.wheel_inputs,
+        ) != inputs.payload_hash
+    ):
+        raise RuntimeError("Runtime inputs changed from expected frozen content")
 
 
 @contextmanager
@@ -668,8 +709,11 @@ def _candidate(
     extras: tuple[str, ...] = (),
     local_packages: tuple[str, ...] | None = None,
     wheel_inputs: WheelInstallInputs | None = None,
+    expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
+    if expected_payload_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", expected_payload_hash):
+        raise ValueError("Expected runtime payload hash must be a full source SHA256")
     root = root.resolve()
     _assert_source_pin(plugin, expected_source_identity)
     extras = _selected_extras(plugin, extras)
@@ -689,7 +733,7 @@ def _candidate(
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     inputs = FrozenInputs(
         plugin.resolve(strict=True), packages,
-        _wheel_construction_hash(
+        expected_payload_hash if expected_payload_hash is not None else _wheel_construction_hash(
             _construction_hash(_source_files(packages), extras, local_packages), wheel_inputs,
         ),
         extras=extras, local_packages=local_packages, wheel_inputs=wheel_inputs,
@@ -697,6 +741,7 @@ def _candidate(
     with ExitStack() as retained:
         if dev_owner is not None:
             _check_dev_owner(root, dev_owner)
+            version = f"dev-{inputs.payload_hash}"
         if reuse_generations:
             if dev_owner is not None or runtime.package_version(version) != version:
                 raise ValueError("Generation discovery requires an ordinary package version")
@@ -712,15 +757,14 @@ def _candidate(
                 ):
                     version = generation
                     break
-        decision = (
-            runtime.ADMIT_CONSTRUCT if dev_owner is not None else
-            runtime.check_admission(root, version, payload_hash=inputs.payload_hash)
-        )
+        decision = runtime.check_admission(root, version, payload_hash=inputs.payload_hash)
         _refuse(decision, version)
         if decision == runtime.ADMIT_REUSE:
             with runtime.retention_custody(
                 root, version, payload_hash=inputs.payload_hash, timeout=wait_timeout,
             ) as (slot, descriptor):
+                if expected_payload_hash is not None:
+                    _revalidate_input_content(inputs)
                 _assert_source_pin(plugin, expected_source_identity)
                 _verify_installed(
                     inputs, slot, runtime.slot_python(root, version), health_module,
@@ -728,6 +772,8 @@ def _candidate(
                     require_frozen_origin=False,
                 )
                 _assert_source_pin(plugin, expected_source_identity)
+                if dev_owner is not None:
+                    _check_dev_owner(root, dev_owner)
                 yield ReadyCandidate(
                     slot, inputs.payload_hash, True, descriptor, inputs.plugin, inputs.extras,
                     inputs.local_packages,
@@ -738,22 +784,16 @@ def _candidate(
                 _assert_source_pin(plugin, expected_source_identity)
                 if dev_owner is not None:
                     _check_dev_owner(root, dev_owner)
-                decision = (
-                    runtime.ADMIT_CONSTRUCT if dev_owner is not None else
-                    runtime.check_admission(root, version, payload_hash=inputs.payload_hash)
-                )
+                decision = runtime.check_admission(root, version, payload_hash=inputs.payload_hash)
                 _refuse(decision, version)
                 reused = decision == runtime.ADMIT_REUSE
                 if not reused:
-                    slot = runtime.slot(root, version, clean_incomplete=dev_owner is None)
-                    if dev_owner is not None:
-                        runtime.marker_path(root, version).unlink(missing_ok=True)
+                    slot = runtime.slot(root, version)
                     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
                     inputs = retained.enter_context(_retained_inputs(
-                        inputs, uv, python, refresh=dev_owner is not None,
+                        inputs, uv, python, refresh=False,
                     ))
-                    arguments = {"refresh": True} if dev_owner is not None else {}
-                    python = _construct(inputs, slot, uv, base_python, descriptor, child_timeout, **arguments)
+                    python = _construct(inputs, slot, uv, base_python, descriptor, child_timeout)
                     origin_proof = slot / ".runtime-input-origins.json"
                     if origin_proof.is_symlink():
                         raise RuntimeError("Frozen installation origin evidence cannot be a symlink")
@@ -771,7 +811,7 @@ def _candidate(
                         bootstrap = slot / ".runtime-bootstrap"
                         if bootstrap.is_symlink():
                             raise RuntimeError("Runtime bootstrap cannot be a symlink")
-                        bootstrap.mkdir(exist_ok=dev_owner is not None)
+                        bootstrap.mkdir()
                         for name in (
                             "runtime_launcher.py", "versioned_runtime.py",
                             "versioned_runtime_leases.py", "versioned_runtime_source.py",
@@ -794,7 +834,9 @@ def _candidate(
                     _assert_source_pin(plugin, expected_source_identity)
                     if dev_owner is not None:
                         _check_dev_owner(root, dev_owner)
-                    runtime.mark_complete(root, version, payload_hash=inputs.payload_hash)
+                    runtime.mark_complete(
+                        root, version, payload_hash=inputs.payload_hash, dev_owner=dev_owner,
+                    )
                 # Transfer to retention while construction is still owned. The
                 # caller never joins cutover coordination holding construction.
                 slot, retention_descriptor = construction.enter_context(
@@ -803,12 +845,16 @@ def _candidate(
                     )
                 )
             if reused:
+                if expected_payload_hash is not None:
+                    _revalidate_input_content(inputs)
                 _verify_installed(
                     inputs, slot, runtime.slot_python(root, version), health_module,
                     retention_descriptor, child_timeout, health_callable=health_callable,
                     require_frozen_origin=False,
                 )
             _assert_source_pin(plugin, expected_source_identity)
+            if dev_owner is not None:
+                _check_dev_owner(root, dev_owner)
             yield ReadyCandidate(
                 slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin, inputs.extras,
                 inputs.local_packages,

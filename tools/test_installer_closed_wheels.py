@@ -112,6 +112,34 @@ def snapshot(tmp_path, *, closure=False, version="1.0"):
     )
 
 
+@pytest.mark.parametrize("mutation", ["source", "binding"])
+def test_expected_payload_pin_revalidates_source_and_closed_binding(
+    tmp_path, engine, plugin, mutation,
+):
+    from dataclasses import replace
+
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        packages = engine._package_roots(plugin)
+        source_hash = engine._construction_hash(
+            engine._source_files(packages), (), ("demo-pkg",),
+        )
+        inputs = engine.FrozenInputs(
+            plugin.resolve(), packages, engine._wheel_construction_hash(source_hash, wheels),
+            local_packages=("demo-pkg",), wheel_inputs=wheels,
+        )
+        engine._revalidate_input_content(inputs)
+        if mutation == "source":
+            manifest = plugin / "pyproject.toml"
+            manifest.write_text(manifest.read_text(encoding="utf-8") + "\n# changed source\n")
+        else:
+            inputs = replace(
+                inputs, wheel_inputs=inspected(retained, approval_source="other-fixture-authority"),
+            )
+        with pytest.raises(RuntimeError, match="expected frozen content"):
+            engine._revalidate_input_content(inputs)
+
+
 @pytest.mark.parametrize("executable", ["path", "command"])
 def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, executable):
     uv = shutil.which("uv")

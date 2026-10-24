@@ -65,25 +65,38 @@ import re
 import shutil
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
 from contextlib import contextmanager
+from collections.abc import Callable
 
 
 _runtime_components = globals().get("_retained_runtime_components", {})
+_runtime_components_lock = threading.RLock()
+
+
+def _reset_runtime_component_lock() -> None:
+    global _runtime_components_lock
+    _runtime_components_lock = threading.RLock()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_runtime_component_lock)
 
 
 def _runtime_component(name: str):
-    if name not in _runtime_components:
-        source = Path(__file__).with_name(name + ".py")
-        spec = importlib.util.spec_from_file_location(__name__ + "_" + name, source)
-        if spec is None or spec.loader is None:
-            raise FileNotFoundError(f"Runtime component is unavailable: {name}")
-        component = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = component
-        exec(compile(source.read_bytes(), str(source), "exec"), component.__dict__)
-        _runtime_components[name] = component
-    return _runtime_components[name]
+    with _runtime_components_lock:
+        if name not in _runtime_components:
+            source = Path(__file__).with_name(name + ".py")
+            spec = importlib.util.spec_from_file_location(__name__ + "_" + name, source)
+            if spec is None or spec.loader is None:
+                raise FileNotFoundError(f"Runtime component is unavailable: {name}")
+            component = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = component
+            exec(compile(source.read_bytes(), str(source), "exec"), component.__dict__)
+            _runtime_components[name] = component
+        return _runtime_components[name]
 
 
 _leases = _runtime_component("versioned_runtime_leases")
@@ -1082,7 +1095,8 @@ def dev_claim_path(root: Path) -> Path:
 
 
 def is_dev_generation(version: str) -> bool:
-    return bool(re.fullmatch(r"dev-[0-9a-f]{32}", version))
+    """Recognize legacy UUID generations and immutable full source hashes."""
+    return bool(re.fullmatch(r"dev-(?:[0-9a-f]{32}|[0-9a-f]{64})", version))
 
 
 def _require_dev_owner(root: Path, owner: str | None) -> dict:
@@ -1550,8 +1564,18 @@ def _normalize_windows_extended_path(target: str) -> str:
     return target
 
 
-def fingerprint_source(paths) -> str:
+def fingerprint_source(
+    paths, *, file_hashes: dict[Path, str] | None = None,
+    on_file: Callable[[Path, bytes], None] | None = None,
+) -> str:
     """Return a stable sha256 fingerprint over a frozen set of source paths.
+
+    An optional empty ``file_hashes`` dictionary collects resolved regular-file
+    paths and SHA256 values from the same bytes, without reopening files.
+    Consume these collected values only after the entire fingerprint succeeds.
+    ``on_file`` receives each resolved regular-file path and the immutable
+    bytes already being hashed. Callback failures propagate; callers own any
+    side effects and must not consume an incomplete fingerprint as proof.
 
     Covers the FULL attributable runtime install input, not just one
     manifest file -- an adopter must pass every path whose content changing
@@ -1648,8 +1672,10 @@ def fingerprint_source(paths) -> str:
     regular file can never hash identically to a symlink merely because
     its raw bytes happen to equal some symlink's encoded target text.
     """
-    import hashlib
     import os as _os
+
+    if file_hashes:
+        raise ValueError("fingerprint_source file_hashes collector must be empty")
 
     def _lstat_mode(p: Path, context: str) -> int:
         # An explicit lstat (never following the final symlink component),
@@ -1666,6 +1692,8 @@ def fingerprint_source(paths) -> str:
         except OSError as exc:
             raise OSError(f"fingerprint_source: could not stat {p} ({context})") from exc
 
+    resolved_parents: dict[Path, Path] = {}
+
     def _declared_root_path(p) -> Path:
         # Resolve the PARENT chain (handles relative paths, intermediate
         # symlinks, '..' components) to get a canonical absolute path, but
@@ -1676,7 +1704,10 @@ def fingerprint_source(paths) -> str:
         raw = Path(p)
         if not raw.is_absolute():
             raw = Path.cwd() / raw
-        return raw.parent.resolve() / raw.name
+        parent = raw.parent
+        if parent not in resolved_parents:
+            resolved_parents[parent] = parent.resolve()
+        return resolved_parents[parent] / raw.name
 
     roots = [_declared_root_path(p) for p in paths]
     root_modes: dict[Path, int] = {}
@@ -1851,61 +1882,11 @@ def fingerprint_source(paths) -> str:
             return _root_label(root_path) + "/" + rel.as_posix()
         return f.as_posix()
 
-    def _frame(data: bytes) -> bytes:
-        return len(data).to_bytes(8, "big") + data
-
-    digest = hashlib.sha256()
-    for f in sorted(entries, key=_label):
-        kind = entries[f]
-        if kind == "symlink":
-            try:
-                target = _os.readlink(f)
-            except OSError as exc:
-                raise OSError(
-                    f"fingerprint_source: could not read symlink {f}: {exc}"
-                ) from exc
-            target = _normalize_windows_extended_path(target)
-            if _os.path.isabs(target):
-                # An absolute target is only made relocation-invariant
-                # when it actually falls INSIDE one of the DECLARED roots
-                # themselves (never merely under their common ancestor,
-                # which can include undeclared sibling paths the caller
-                # never opted into relocating together with the rest --
-                # e.g. roots `project/src` and `project/pyproject.toml`
-                # share ancestor `project/`, but `project/shared.py` was
-                # never declared and is not guaranteed to move with the
-                # declared roots). Relocating the WHOLE declared set then
-                # moves the target's effective position the same way it
-                # moves everything else, so the relative form stays
-                # stable. A target outside every declared root (a fixed
-                # external location, or on a different drive on Windows)
-                # is NOT part of what gets relocated -- its raw absolute
-                # text is already the stable identity in that case.
-                try:
-                    target_resolved = Path(target).resolve()
-                except OSError:
-                    target_resolved = None
-                if target_resolved is not None and any(
-                    target_resolved == r or target_resolved.is_relative_to(r)
-                    for r in roots
-                ):
-                    target = _root_label(target_resolved)
-            data = Path(target).as_posix().encode("utf-8")
-        else:
-            try:
-                data = f.read_bytes()
-            except OSError as exc:
-                raise OSError(f"fingerprint_source: could not read {f}: {exc}") from exc
-        digest.update(_frame(_label(f).encode("utf-8")))
-        # The entry's kind is framed as ITS OWN length-prefixed record,
-        # never concatenated into `data` as a string prefix: a regular
-        # file whose raw bytes happen to equal some symlink's encoded
-        # "target text" must never hash identically to that symlink (or
-        # vice versa) just because the two kind tags were distinguished
-        # only by unframed leading bytes.
-        digest.update(_frame(kind.encode("utf-8")))
-        digest.update(_frame(data))
-    return digest.hexdigest()
+    return _runtime_component("versioned_runtime_source").fingerprint_entries(
+        entries, label=_label, root_label=_root_label, roots=roots,
+        normalize_link=_normalize_windows_extended_path, path_type=Path,
+        file_hashes=file_hashes, on_file=on_file,
+    )
 
 
 def check_admission(root: Path, version: str, *, payload_hash: str | None) -> str:

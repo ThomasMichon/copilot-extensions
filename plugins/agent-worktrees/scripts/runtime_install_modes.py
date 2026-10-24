@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,112 @@ from pathlib import Path
 
 import runtime_install as lifecycle
 import tomllib
+
+
+_MODE_OWNER_ABI = 1
+_CONTEXT_CHILD_TIMEOUT = 480
+
+
+def _retained_control(
+    root: Path, admitted: lifecycle.engine.FrozenInputs, custody: ExitStack,
+    *, mode: str, wait_timeout: float, child_timeout: float,
+) -> tuple[Path, int, str] | None:
+    current = lifecycle.runtime.current_version(root)
+    previous = lifecycle.runtime.read_last_known_good(root)
+    if mode == "repair":
+        versions = [previous] if previous != current else []
+    elif mode == "dev-release":
+        claim = lifecycle.runtime.read_dev_claim(root, strict=True)
+        versions = [claim["previous_version"]] if claim is not None else []
+    else:
+        versions = [current, previous]
+    probe = """
+import importlib, importlib.util, json, pathlib, sys
+slot = pathlib.Path(sys.argv[1]).resolve()
+assert pathlib.Path(sys.prefix).resolve() == slot, "control interpreter differs"
+package = importlib.util.find_spec("agent_worktrees")
+assert package is not None and isinstance(package.origin, str), "control package is missing"
+assert pathlib.Path(package.origin).resolve().is_relative_to(slot), "control package escaped"
+candidate_spec = importlib.util.find_spec("agent_worktrees.runtime_candidate")
+if candidate_spec is None:
+    print(json.dumps({"version": 1, "compatible": False}))
+    raise SystemExit(0)
+assert isinstance(candidate_spec.origin, str), "control health module has no ordinary origin"
+assert pathlib.Path(candidate_spec.origin).resolve().is_relative_to(slot), "control health escaped"
+candidate = importlib.import_module("agent_worktrees.runtime_candidate")
+assert pathlib.Path(candidate.__file__).resolve().is_relative_to(slot), "control import escaped"
+abi = getattr(candidate, "MODE_OWNER_ABI", None)
+compatible = type(abi) is int and abi == int(sys.argv[2])
+if compatible:
+    assert (slot / ".runtime-input-origins.json").is_file(), "control has no origin receipt"
+    candidate.verify_runtime_candidate()
+    candidate.verify_installed_origins()
+print(json.dumps({"version": 1, "compatible": compatible}))
+"""
+    environment = dict(os.environ)
+    for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+        environment.pop(name, None)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    for version in dict.fromkeys(versions):
+        if version is None or version == lifecycle.runtime.DEV_VERSION:
+            continue
+        with ExitStack() as trial:
+            try:
+                slot, descriptor = trial.enter_context(
+                    lifecycle.runtime.retention_custody(root, version, timeout=wait_timeout)
+                )
+            except FileNotFoundError:
+                print(f"Control runtime {version}: no longer installed", flush=True)
+                continue
+            marker = lifecycle.runtime.read_marker(root, version)
+            if marker is None:
+                raise lifecycle.InstallationRefused(
+                    f"Control runtime {version} has malformed or missing completion evidence"
+                )
+            payload_hash = marker.get("payload_hash")
+            if not isinstance(payload_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", payload_hash):
+                print(f"Control runtime {version}: no full admitted content identity", flush=True)
+                continue
+            if lifecycle.runtime.check_admission(root, version, payload_hash=payload_hash) != (
+                lifecycle.runtime.ADMIT_REUSE
+            ):
+                raise lifecycle.InstallationRefused(f"Control runtime {version} failed admission")
+            python = lifecycle.runtime.slot_python(root, version)
+            if python is None:
+                raise lifecycle.InstallationRefused(
+                    f"Control runtime {version} has no installed interpreter"
+                )
+            try:
+                completed = lifecycle.engine.run_owned(
+                    [str(python), "-I", "-B", "-c", probe, str(slot), str(_MODE_OWNER_ABI)],
+                    cwd=Path(root.anchor), env=environment, timeout=child_timeout,
+                    procutil=lifecycle.engine._procutil(admitted), construction_fd=descriptor,
+                    runtime_root=root, runtime_version=version,
+                    runtime_path=Path(lifecycle.runtime.__file__),
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                if error.stdout:
+                    print(error.stdout, end="", file=sys.stderr, flush=True)
+                if error.stderr:
+                    print(error.stderr, end="", file=sys.stderr, flush=True)
+                raise
+            result = json.loads(completed.stdout)
+            if (
+                not isinstance(result, dict) or set(result) != {"version", "compatible"}
+                or type(result["version"]) is not int or result["version"] != 1
+                or type(result["compatible"]) is not bool
+            ):
+                raise lifecycle.InstallationRefused("Installed control returned invalid health evidence")
+            if not result["compatible"]:
+                print(f"Control runtime {version}: incompatible mode-owner ABI", flush=True)
+                continue
+            print(
+                f"Control runtime {version}: installed mode-owner ABI {_MODE_OWNER_ABI} verified",
+                file=sys.stderr, flush=True,
+            )
+            custody.enter_context(trial.pop_all())
+            return python, descriptor, version
+    return None
 
 
 def run(
@@ -63,29 +170,43 @@ def run(
                 if source_identity is not None:
                     plugin = lifecycle.runtime_source.publish_source_snapshot(plugin, root, source_identity)
                 admitted = lifecycle.engine.freeze_inputs(plugin, control_root / "admitted-inputs")
-                control = custody.enter_context(
-                    lifecycle.engine.numbered_candidate(
-                        control_root,
-                        "control",
-                        plugin=admitted.plugin,
-                        uv=uv,
-                        base_python=base_python,
-                        health_module="agent_worktrees.runtime_candidate",
-                        health_callable="verify_runtime_candidate",
-                        construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
-                        construction_data=provenance,
-                        process_retention=True,
-                        expected_source_identity=lifecycle.runtime_source.manifest_fields(source_identity),
-                        wait_timeout=wait_timeout,
-                        child_timeout=child_timeout,
+                retained = (
+                    _retained_control(
+                        root, admitted, custody, mode=mode,
+                        wait_timeout=wait_timeout, child_timeout=child_timeout,
                     )
+                    if os.name == "nt" else None
                 )
+                if retained is None:
+                    control = custody.enter_context(
+                        lifecycle.engine.numbered_candidate(
+                            control_root,
+                            "control",
+                            plugin=admitted.plugin,
+                            uv=uv,
+                            base_python=base_python,
+                            health_module="agent_worktrees.runtime_candidate",
+                            health_callable="verify_runtime_candidate",
+                            construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
+                            construction_data=provenance,
+                            process_retention=True,
+                            expected_source_identity=lifecycle.runtime_source.manifest_fields(source_identity),
+                            expected_payload_hash=admitted.payload_hash,
+                            wait_timeout=wait_timeout,
+                            child_timeout=child_timeout,
+                        )
+                    )
+                    control_python = lifecycle.runtime.slot_python(control_root, "control")
+                    control_script = control.frozen_plugin / "scripts" / "runtime_install.py"
+                else:
+                    control_python = retained[0]
+                    control_script = admitted.plugin / "scripts" / "runtime_install.py"
             result_path = control_root / "result.json"
             argv = [
-                str(lifecycle.runtime.slot_python(control_root, "control")),
+                str(control_python),
                 "-I",
                 "-B",
-                str(control.frozen_plugin / "scripts" / "runtime_install.py"),
+                str(control_script),
                 "--root",
                 str(root),
                 "--plugin",
@@ -101,6 +222,8 @@ def run(
                 "--mode",
                 mode,
                 "--mode-owner",
+                "--payload-hash",
+                admitted.payload_hash,
                 "--governance-generation",
                 json.dumps(governance.signature()),
                 "--wait-timeout",
@@ -108,6 +231,8 @@ def run(
                 "--child-timeout",
                 str(child_timeout),
             ]
+            if retained is not None:
+                argv.extend(["--construction-provenance", json.dumps(provenance)])
             if frontend is not None:
                 content = admitted.plugin
                 argv.extend(["--frontend", json.dumps(frontend),
@@ -118,6 +243,29 @@ def run(
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            if retained is not None:
+                try:
+                    completed = lifecycle.engine.run_owned(
+                        argv, cwd=Path(root.anchor), env=environment,
+                        timeout=_CONTEXT_CHILD_TIMEOUT,
+                        procutil=lifecycle.engine._procutil(admitted),
+                        construction_fd=retained[1],
+                        runtime_root=root, runtime_version=retained[2],
+                        runtime_path=Path(lifecycle.runtime.__file__),
+                        allow_breakaway=True,
+                        retention_scope=control_root / "retention-scope",
+                    )
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                    if error.stdout:
+                        print(error.stdout, end="", file=sys.stderr, flush=True)
+                    if error.stderr:
+                        print(error.stderr, end="", file=sys.stderr, flush=True)
+                    raise
+                if completed.stdout:
+                    print(completed.stdout, end="", flush=True)
+                if completed.stderr:
+                    print(completed.stderr, end="", file=sys.stderr, flush=True)
+                return json.loads(result_path.read_text(encoding="utf-8"))
             process = subprocess.Popen(
                 argv,
                 executable=argv[0] if os.name == "nt" else None,
@@ -146,6 +294,8 @@ def run_owned(
     base_python: Path | None = None,
     mode: str,
     expected_governance: dict,
+    expected_payload_hash: str | None = None,
+    construction_provenance: dict[str, str] | None = None,
     owner: Path | None = None,
     wait_timeout: float = 180,
     child_timeout: float = 180,
@@ -156,6 +306,20 @@ def run_owned(
         raise lifecycle.InstallationRefused(f"Unsupported whole-operation runtime mode: {mode}")
     if mode != "dev-release" and (uv is None or base_python is None):
         raise lifecycle.InstallationRefused("Runtime construction requires uv and its base interpreter")
+    fields = ("version", "source", "commit", "branch", "deployment_source")
+    if construction_provenance is not None and (
+        not isinstance(expected_payload_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", expected_payload_hash) is None
+        or not isinstance(construction_provenance, dict)
+        or set(construction_provenance) != set(fields)
+        or any(
+            not isinstance(construction_provenance[field], str)
+            or not construction_provenance[field] for field in fields
+        )
+    ):
+        raise lifecycle.InstallationRefused(
+            "Retained control requires complete frozen construction provenance"
+        )
     control_slot = Path(sys.prefix).resolve()
     lifecycle._load_installed(control_slot)
     from agent_worktrees import status_monitor_cutover as cutover
@@ -216,10 +380,10 @@ def run_owned(
                 version = f"{generation_base}{separator}repair.{uuid.uuid4().hex}"
             from agent_worktrees._build_info import BUILD_INFO
 
-            provenance = {
-                field: BUILD_INFO[field]
-                for field in ("version", "source", "commit", "branch", "deployment_source")
-            }
+            if construction_provenance is not None:
+                provenance = dict(construction_provenance)
+            else:
+                provenance = {field: BUILD_INFO[field] for field in fields}
             if provenance["version"] != package_version:
                 raise lifecycle.InstallationRefused(
                     "Frozen control provenance differs from candidate package version"
@@ -238,12 +402,16 @@ def run_owned(
             )
             if mode != "dev":
                 candidate_arguments["expected_source_identity"] = lifecycle.runtime_source.manifest_fields(source_identity)
+            if expected_payload_hash is not None:
+                candidate_arguments["expected_payload_hash"] = expected_payload_hash
             candidate_context = (
                 lifecycle.engine.dev_candidate(root, owner=str(owner), **candidate_arguments)
                 if mode == "dev"
                 else lifecycle.engine.numbered_candidate(root, version, **candidate_arguments)
             )
             candidate = custody.enter_context(candidate_context)
+            if mode == "dev":
+                version = candidate.slot.name
         result = lifecycle.settle_candidate(
             root,
             version,
@@ -255,8 +423,9 @@ def run_owned(
             cutover_guard=guard,
             lifecycle_slot=control_slot,
             package_version=package_version,
-            force_monitor_transition=mode == "dev",
+            dev_owner=str(owner) if mode == "dev" else None,
             frontend=frontend,
+            publication_payload_hash=expected_payload_hash,
             publication_source_root=(
                 (publication_source_root if publication_source_root is not None else candidate.frozen_plugin)
                 if frontend is not None else None
@@ -314,7 +483,7 @@ def _release(
         previous = claim.get("previous_version")
         if previous is None or previous == lifecycle.runtime.DEV_VERSION:
             raise lifecycle.InstallationRefused(
-                "Dev claim has no numbered rollback target; repair before releasing it"
+                "Dev claim has no immutable rollback target; repair before releasing it"
             )
         _slot, descriptor = custody.enter_context(
             lifecycle.runtime.retention_custody(
@@ -355,6 +524,8 @@ def _release(
              str(Path(runtime_candidate.__file__).resolve())],
             cwd=Path(root.anchor), env=environment, procutil=agent_procutil,
             construction_fd=descriptor, timeout=child_timeout,
+            runtime_root=root, runtime_version=previous,
+            runtime_path=Path(lifecycle.runtime.__file__),
         )
         package_version = json.loads(health.stdout)
     # Keep the claim's original rollback reference until promotion and actual
@@ -371,9 +542,13 @@ def _release(
         lifecycle_slot=control_slot,
         package_version=package_version,
         governance=governance,
+        dev_owner=str(owner),
     )
     with governance.held(timeout=wait_timeout):
-        if lifecycle.runtime.read_dev_claim(root, strict=True) != claim:
+        expected_claim = dict(claim)
+        if lifecycle.runtime.is_dev_generation(previous):
+            expected_claim["selected_generation"] = previous
+        if lifecycle.runtime.read_dev_claim(root, strict=True) != expected_claim:
             raise lifecycle.InstallationRefused("Dev claim changed before its settled release")
         lifecycle.runtime.release_dev(root, str(owner))
     result["reused"] = True

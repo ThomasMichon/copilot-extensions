@@ -3624,12 +3624,17 @@ descriptor to owned children; `retention_lease()` remains the compatible
 path-only context over that same protocol. `ReadyCandidate.descriptor` is
 valid only within the candidate context and must not be closed by its caller.
 This keeps read-only health children under actual custody without taking a
-construction lease on reuse. The single-file, independently vendored helper's
-reviewable ceiling increases from 2,362 to 2,376 lines for this accessor; it
-introduces no deploy-time import or alternate lock protocol.
+construction lease on reuse. Fingerprint framing lives in the existing
+colocated source component; the deep-Windows UV command adapter lives in its
+existing configuration companion. Canonical synchronization carries those
+resources to each independent adopter, without a sibling-runtime or checkout
+lookup. Component initialization is serialized and its lock is reinitialized
+after fork. The checked-in module-size baseline remains shrink-only rather
+than widening ceilings to accommodate these changes.
 
-`installer_engine_process.py` owns bounded child execution. Windows uses the
-frozen canonical `agent-procutil` strict, non-breakaway Job implementation.
+`installer_engine_process.py` owns bounded child execution. Windows construction
+uses the frozen canonical `agent-procutil` strict, non-breakaway Job implementation
+by default.
 For candidate-backed Windows children, a finite guardian acquires the existing
 canonical candidate retention lease before starting the Job. It observes its
 caller's liveness pipe and retains that lease until the Job is settled even
@@ -3637,6 +3642,21 @@ after caller death; release of the caller's construction byte lock alone does
 not admit destructive cleanup. The supplied runtime root, version and helper
 path must form a complete custody context. Child launch and settled-timeout
 outcomes retain their existing explicit error classes.
+The explicit `allow_breakaway` option is reserved for a whole-operation lifecycle
+owner that launches durable services, not ordinary constructors. An optional
+Windows `retention_scope` lets that same finite guardian co-retain each nested
+constructor target before its writers start. Private, create-once request/ack
+packets bind the operation nonce, exact root and runtime version; acknowledgement
+follows actual canonical lease acquisition. The guardian keeps all registered
+leases until its owned Job is verified empty, including when nested guardians
+are terminated with that Job. This is retention bookkeeping, never a cutover
+guard or a publication-authority ticket.
+The scope guardian explicitly leaves the caller's Job so caller-Job teardown
+cannot revoke those fences first; unavailable native escape refuses rather than
+silently inheriting the unsafe lifetime. Contained tests preserve their existing
+escape suppression and qualify the process-death variant separately from the
+uncontained caller-Job-close proof. Scope registration time counts against the
+child's existing timeout; no operation or production watchdog is enlarged.
 POSIX uses an owner-death pipe guardian retaining the construction descriptor,
 an unreaped process-group leader and verified process-group teardown. The
 canonical POSIX lease releases on final descriptor close, not an explicit

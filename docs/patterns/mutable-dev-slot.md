@@ -6,8 +6,10 @@ existing links; it does not retain a mutable/editable deployment exception.
 This is the required target, not a claim that every installer has adopted it.
 
 **Owners:** `libs/versioned-runtime` supplies claim, construction, completion,
-selection and retention primitives. `agent-codespaces` supplies the explicit
-development installer and deployed `dev-release` / `dev-status` verbs.
+selection and retention primitives. `agent-worktrees` integrates shared frozen,
+non-editable construction with explicit development and deployed
+`dev-release` / `dev-status` verbs. `agent-codespaces` retains its separately
+owned pilot and remaining migration.
 
 ## Problem
 
@@ -60,7 +62,13 @@ implicitly enables development mode for ordinary install/update.
 
 ## Legacy behavior and migration
 
-The existing pilot's `dev` action installs editable packages against its
+Worktrees selects `dev-<source-sha256>` through ordinary immutable admission:
+exact healthy source content is reused without writers, while each changed
+source graph builds beside the prior generation. Full selected dependency/build
+assembly identity and the remaining service/native portfolio acceptance stay
+open under #5472; source hashing alone does not close them.
+
+The agent-codespaces pilot's `dev` action installs editable packages against its
 owner's worktree, even when dependency environments are distinct protected
 generations. That is legacy behavior to replace, not full immutable deployment.
 Do not advertise source edits as immediately deployed or hot-patch a completed
