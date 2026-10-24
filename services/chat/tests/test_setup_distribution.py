@@ -32,7 +32,7 @@ def test_independent_sdist_refuses_missing_construction_input(tmp_path, installe
     assert "missing" in result.stderr or "FileNotFoundError" in result.stderr
 
 
-def test_installed_constructor_imports_only_its_delivered_resource_family(tmp_path, installed_chat):
+def test_installed_constructor_preserves_the_separate_bootstrap_floor(tmp_path, installed_chat):
     probe = """
 import importlib,json,sys
 from pathlib import Path
@@ -41,6 +41,15 @@ root=Path(chat.__file__).parent
 runtime=importlib.import_module("agent_chat_service._versioned_runtime")
 sys.modules["versioned_runtime"]=runtime
 sys.path.insert(0,str(root))
+if sys.version_info < (3,11):
+    try:
+        import installer_engine
+    except ModuleNotFoundError as error:
+        assert error.name=="tomllib"
+    else:
+        raise AssertionError("canonical constructor unexpectedly supports this bootstrap")
+    print(json.dumps({"construction":"requires-python-3.11"}))
+    raise SystemExit(0)
 import installer_engine as engine
 assert Path(engine.__file__).parent == root
 assert engine.runtime is runtime
@@ -50,11 +59,14 @@ policy=sys.modules["installer_dependency_policy"]
 assert Path(policy._configuration_path).parent == root
 assert callable(engine.numbered_candidate)
 assert callable(runtime.remove_owned_candidate)
-print(json.dumps({"artifact_contained":True}))
+print(json.dumps({"construction":"ready","artifact_contained":True}))
 """
     import json
 
     result = json.loads(installed_chat.run(
         [str(installed_chat.core_python), "-I", "-B", "-c", probe], cwd=tmp_path,
     ))
-    assert result == {"artifact_contained": True}
+    assert result == (
+        {"construction": "requires-python-3.11"} if sys.version_info < (3, 11)
+        else {"construction": "ready", "artifact_contained": True}
+    )

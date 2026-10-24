@@ -442,7 +442,7 @@ shared-multiplex contracts above.
 - Native Windows qualification retained all410 parameter nodes: acceptance
   passed371 with2 platform skips and37 explicit full-only deselections in106.28s
   within120s; full passed408 with2 platform skips in147.40s within600s.
-  Membership digest is
+  That initial resource inventory's membership digest is
   `3ade790e12cd7539612d26b19525eb8b2e16d896389979c7480246ee87ddd5fb`.
   An earlier acceptance attempt exhausted120s; a duration-reporting run of the
   same unfiltered lane passed without changing its budget. A missing-helper
@@ -455,6 +455,20 @@ shared-multiplex contracts above.
   stale source hash. Refresh only that admitted hash; the complete1274-node
   packet then passed locally with coverage in110.468s, preserving its unit
   inventory, effects policy, coverage targets and execution budget.
+- Review exposed the separate Python floors and an old preparation fixture.
+  Keep core/client Python3.10 support and the canonical constructor's3.11+
+  bootstrap requirement distinct. The installed resource control proves the
+  constructor's expected3.10 refusal without skipping the case; its positive
+  artifact-contained import remains exercised on a compatible interpreter.
+  Actual Python3.10.21 full qualification passed408 with2 POSIX-only skips
+  in147.84s,410/410 nodes, execution complete, with updated membership digest
+  `0e9bb0cd4a83e6baf022e674d418a5ef873266336d08015a19da1e7af529520a`.
+  The compatible-interpreter artifact/inventory controls separately passed10
+  cases in13.93s. All six real fresh-preparation resource expectations and the
+  adjacent qualification contracts passed54 cases in6.51s; Chat retains the
+  installer engine, while the extra procutil build resource remains Fleet/PR-only.
+  These fixes do not add a parser dependency, lower the canonical constructor's
+  floor or change any workflow.
   Native Linux artifact qualification and selected manual-client setup/removal
   remain open. No runtime rollout, service activation, migration or native
   attachment is performed by this slice.

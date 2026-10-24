@@ -25,6 +25,14 @@ sibling installation. A checkout build requires the canonical inputs and
 refuses conflicting included copies. There is no second maintained constructor
 or dependency resolver in Chat.
 
+Chat's callable core and installed client retain their Python3.10 minimum.
+The delivered canonical constructor has a separate **Python3.11+ bootstrap
+requirement**, as specified by the standard installation contract. Its presence
+does not add a TOML parser dependency to a core/client environment or make that
+environment a construction-compatible interpreter. Constructor import
+qualification runs positively on Python3.11+ and verifies that separate
+requirement, rather than claiming construction support, on Python3.10.
+
 The offline installed catalog verifies these resources against this wheel's
 RECORD along with Chat's own modules. This remains **local installed-resource
 evidence**, not release selection, installation authority, a runnable setup

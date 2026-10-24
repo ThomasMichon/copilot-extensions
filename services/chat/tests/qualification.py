@@ -93,7 +93,7 @@ test_fresh_installed_host_source_removed_independent_participants_and_crash_rest
 """,
     "test_setup_distribution.py": """
 test_independent_sdist_refuses_missing_construction_input
-test_installed_constructor_imports_only_its_delivered_resource_family
+test_installed_constructor_preserves_the_separate_bootstrap_floor
 """,
     "test_local_endpoint.py": """
 test_local_endpoint_offline_status_never_resolves_or_executes
