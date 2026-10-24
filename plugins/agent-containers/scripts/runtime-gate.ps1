@@ -30,6 +30,10 @@ if (
     )
     exit 126
 }
+if (-not (Select-String -LiteralPath $runtimeResolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+    [Console]::Error.WriteLine('[agent-containers] read-only runtime resolver is unavailable; update the owning installation.')
+    exit 126
+}
 
 $hostExe = (Get-Process -Id $PID).Path
 if (-not $hostExe) {
@@ -68,32 +72,26 @@ try {
     exit 126
 }
 
+function Test-LegacyInvocationAllowed($Decision) {
+    return (($Decision.status -ceq 'ready' -and $Decision.actualMode -ceq 'legacy' -and
+             $Decision.desiredMode -ceq 'legacy') -or
+        ($Decision.status -ceq 'provenance-blocked' -and -not $env:COPILOT_EXTENSIONS_CONTEXT -and
+         $Decision.policy.enabled -is [bool] -and -not $Decision.policy.enabled -and
+         $null -eq $Decision.legacy.tombstone -and $Decision.legacy.disposition -ceq 'active'))
+}
+
 $resolutionStatus = [string]$resolution.status
 $resolutionReason = [string]$resolution.reason
 $actualMode = [string]$resolution.actualMode
-$desiredMode = [string]$resolution.desiredMode
 $installGeneration = [string]$resolution.installGeneration
 
-if (
-    $resolutionStatus -ceq 'ready' -and
-    $actualMode -ceq 'legacy' -and
-    $desiredMode -ceq 'legacy'
-) {
+if (Test-LegacyInvocationAllowed $resolution) {
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
         [Console]::Error.WriteLine(
             '[agent-containers] requested installation context is not active.'
         )
         exit 126
     }
-}
-elseif (
-    -not $env:COPILOT_EXTENSIONS_CONTEXT -and
-    $resolutionStatus -ceq 'provenance-blocked' -and
-    $resolution.policy.enabled -is [bool] -and
-    -not $resolution.policy.enabled -and
-    $null -eq $resolution.legacy.tombstone -and
-    [string]$resolution.legacy.disposition -ceq 'active'
-) {
 }
 elseif (
     (
@@ -144,7 +142,8 @@ elseif (
         )
         exit 126
     }
-    if ([string]$validatedContext.generation -cne $installGeneration) {
+    if ([string]$validatedContext.generation -cne $installGeneration -or
+        [string]$validatedContext.pluginRoot -cne $runtimeRoot) {
         [Console]::Error.WriteLine(
             '[agent-containers] installation context generation does not match governance.'
         )
@@ -159,10 +158,21 @@ else {
     exit 126
 }
 
-function Resolve-RuntimePython {
+if (-not $context) { $runtimeRoot = [string]$resolution.legacy.root }
+if (-not $runtimeRoot -or -not [IO.Path]::IsPathRooted($runtimeRoot)) {
+    [Console]::Error.WriteLine('[agent-containers] installation context is missing the canonical runtime root.')
+    exit 126
+}
+
+function Resolve-RuntimePython([string]$TraceMode = 'ready') {
     $script:AgentRtPy = $null
     $env:AGENT_RT_ROOT = $runtimeRoot
-    . $runtimeResolver
+    try {
+        . $runtimeResolver -TraceMode $TraceMode
+    } catch {
+        [Console]::Error.WriteLine("[agent-containers] runtime resolver failed; update the owning installation: $($_.Exception.Message)")
+        exit 126
+    }
     return $AgentRtPy
 }
 
@@ -176,14 +186,17 @@ function Invoke-Runtime {
     } else {
         Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
     }
-    # Relax EAP for just this forwarding call: the wrapped module's own
-    # exit code is the only contract this dispatcher relays, so a
-    # legitimate stderr diagnostic from a non-zero exit must never become
-    # a terminating exception here (copilot-extensions#5494).
+    $nativeArgs = $forwardArgs
+    $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+    if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+        $nativeArgs = @($forwardArgs | ForEach-Object {
+            '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+        })
+    }
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_containers @forwardArgs
+        & $Python -m agent_containers @nativeArgs
     } finally {
         $ErrorActionPreference = $previousEap
     }
@@ -202,7 +215,58 @@ if ($env:AGENT_CONTAINERS_NO_SELFPROVISION) {
     exit 1
 }
 
-New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
+function Assert-RuntimePublication {
+    $publicationArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+        'probe-plugin-publication', '-PayloadRoot', $payloadRoot,
+        '-PluginId', 'agent-containers', '-LegacyRoot', $runtimeRoot
+    )
+    if ($context) {
+        $publicationArgs += @('-Context', $context, '-DurableHome', $validationDurableHome)
+    }
+    try {
+        $global:LASTEXITCODE = 3
+        $response = @(& $hostExe @publicationArgs)
+        $code = $LASTEXITCODE
+        $decision = ($response -join "`n") | ConvertFrom-Json -ErrorAction Stop
+        $selected = if ($context) { [string]$decision.runtimeRoot } else { [string]$decision.legacy.root }
+        if ($code -ne 0 -or $decision.deployment.allowPluginPublication -isnot [bool] -or
+            -not $decision.deployment.allowPluginPublication -or $selected -cne $runtimeRoot -or
+            [string]$decision.deployment.path -cne (Join-Path $runtimeRoot 'runtime-deployment.json')) {
+            throw ($response -join ' ')
+        }
+        if ($context) {
+            if ($decision.status -cnotin @('ready', 'deactivation-required') -or
+                $decision.actualMode -cne 'namespaced' -or [string]$decision.context -cne $context -or
+                [string]$decision.installGeneration -cne $installGeneration) {
+                throw 'Decision no longer admits the validated installation context.'
+            }
+        } else {
+            if (-not (Test-LegacyInvocationAllowed $decision)) { throw ($response -join ' ') }
+            $legacyArgs = @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+                'probe-legacy', '-PayloadRoot', $payloadRoot,
+                '-PluginId', 'agent-containers', '-LegacyRoot', $runtimeRoot
+            )
+            $global:LASTEXITCODE = 3
+            $response = @(& $hostExe @legacyArgs)
+            $code = $LASTEXITCODE
+            $legacy = ($response -join "`n") | ConvertFrom-Json -ErrorAction Stop
+            if ($code -ne 0 -or $legacy.allowMutation -isnot [bool] -or -not $legacy.allowMutation -or
+                [string]$legacy.legacy.root -cne $runtimeRoot -or
+                -not (Test-LegacyInvocationAllowed $legacy)) { throw ($response -join ' ') }
+        }
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-containers] Runtime publication refused: $($_.Exception.Message) Use explicit installation management to install or repair this runtime."
+        )
+        exit 3
+    }
+}
+Assert-RuntimePublication
+$runtimePython = Resolve-RuntimePython normal
+if ($runtimePython) { Invoke-Runtime -Python $runtimePython }
+[void][IO.Directory]::CreateDirectory($runtimeRoot)
 $statusPath = Join-Path $runtimeRoot '.provision-status'
 $_lockPath = Join-Path $runtimeRoot '.provision.lock'
 $_lock = $null
@@ -214,7 +278,10 @@ while (-not $_lock) {
             [IO.FileAccess]::ReadWrite,
             [IO.FileShare]::None
         )
-    } catch {
+    } catch [IO.IOException] {
+        $code = $_.Exception.HResult -band 0xffff
+        $posixContention = [Environment]::OSVersion.Platform -eq [PlatformID]::Unix -and $code -eq 11
+        if ($code -notin @(32, 33) -and -not $posixContention) { throw }
         Start-Sleep -Milliseconds 200
     }
 }
@@ -224,6 +291,7 @@ $_provisionRc = 0
 try {
     $_provisionedPy = Resolve-RuntimePython
     if (-not $_provisionedPy) {
+        Assert-RuntimePublication
         [Console]::Error.WriteLine(
             '[agent-containers] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout.'
         )
@@ -235,9 +303,19 @@ try {
                 Set-Content -LiteralPath $statusPath -Encoding utf8
         } catch {}
 
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
-        $_provisionRc = $LASTEXITCODE
+        $env:AGENT_CONTAINERS_HOME = $runtimeRoot
+        $env:AGENT_CONTAINERS_STATE_DIR = $runtimeRoot
+        if ($context) { $env:COPILOT_EXTENSIONS_CONTEXT = $context } else {
+            Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
+        }
+        $previousEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $global:LASTEXITCODE = 1
+        try {
+            & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
+                ForEach-Object { [Console]::Error.WriteLine($_) }
+            $_provisionRc = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousEap }
         if ($_provisionRc -eq 0) {
             $_provisionedPy = Resolve-RuntimePython
         }

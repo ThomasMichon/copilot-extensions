@@ -76,8 +76,8 @@ def _posix(path: Path) -> str:
 
 
 def _rendered_lock_section(tmp_path: Path, entry: str) -> str:
-    if entry == "bridge":
-        dispatcher = SCRIPT.parents[2] / "plugins/agent-bridge/scripts/runtime-gate.sh"
+    if entry in {"bridge", "containers"}:
+        dispatcher = SCRIPT.parents[2] / f"plugins/agent-{entry}/scripts/runtime-gate.sh"
         text = dispatcher.read_text(encoding="utf-8")
         start = text.index(LOCK_START)
         return 'RUNTIME_ROOT="$_runtime_root"\n' + text[start:text.index("\nresolve_runtime\n", start)]
@@ -159,7 +159,7 @@ def _assert_lock_scenario(tmp_path: Path, entry: str, hooks: str) -> None:
     assert status == "acquired" and holder == pid
 
 
-@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
 def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
     tmp_path: Path, entry: str,
 ) -> None:
@@ -179,7 +179,7 @@ def test_posix_shim_reaper_never_unlinks_a_newer_holder_released_mid_check(
     _assert_lock_scenario(tmp_path, entry, hooks)
 
 
-@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
 @pytest.mark.parametrize(("signal", "exit_code"), [("TERM", 143), ("INT", 130)])
 def test_interrupted_reaper_releases_only_its_mutex(
     tmp_path: Path, entry: str, signal: str, exit_code: int,
@@ -205,7 +205,7 @@ def test_interrupted_reaper_releases_only_its_mutex(
     assert not (root / ".provision.reap.mutex").exists()
 
 
-@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
 @pytest.mark.parametrize("peer", [False, True], ids=["abandoned", "live-peer"])
 def test_unowned_reaper_mutex_refuses_within_bounded_attempts(
     tmp_path: Path, entry: str, peer: bool,
@@ -236,7 +236,7 @@ def test_unowned_reaper_mutex_refuses_within_bounded_attempts(
     assert "acquired" not in result.stdout
 
 
-@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
 @pytest.mark.parametrize(("signal", "exit_code"), [("TERM", 143), ("INT", 130)])
 def test_reaper_release_signal_preserves_reacquired_peer_mutex(
     tmp_path: Path, entry: str, signal: str, exit_code: int,
@@ -264,7 +264,7 @@ def test_reaper_release_signal_preserves_reacquired_peer_mutex(
     assert "acquired" not in result.stdout
 
 
-@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
 def test_live_provision_holder_wait_is_not_reaper_timeout(
     tmp_path: Path, entry: str,
 ) -> None:
@@ -286,7 +286,7 @@ def test_live_provision_holder_wait_is_not_reaper_timeout(
     assert not (state / "violations").exists()
 
 
-@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge", "containers"])
 def test_posix_reaper_serializes_another_reaper_after_final_read(
     tmp_path: Path, entry: str,
 ) -> None:

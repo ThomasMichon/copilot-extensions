@@ -24,8 +24,9 @@ in. It does not enable a repair worker or supply inference/repository authority.
    already on PATH:
    - Windows: `pwsh -NoProfile -ExecutionPolicy Bypass -File <plugin>\scripts\init.ps1 stamp`
    - POSIX: `bash <plugin>/scripts/init.sh stamp`
-2. First use self-provisions the runtime under `~/.agent-containers/` (or
-   `%USERPROFILE%\.agent-containers\`) if the versioned venv is not built yet.
+2. First use self-provisions a standalone runtime under `~/.agent-containers/`
+   (or `%USERPROFILE%\.agent-containers\`) if the versioned venv is not built
+   yet and the selected installation admits plugin publication.
 3. Define a fleet in `containers.yaml`, run `agent-containers up <fleet>`, borrow
    with `agent-containers borrow <effort>`, and release when done.
 4. If agent-bridge is present, the session-start hook also drops a provider
@@ -33,6 +34,33 @@ in. It does not enable a repair worker or supply inference/repository authority.
    `container:<name>` on demand. The manifest carries provider provenance; a
    missing binstub/payload makes only that namespace inactive and is diagnosed
    by `agent-bridge doctor`.
+
+Payload commands and stamped global stubs check the selected installation's
+runtime-deployment policy before cold provisioning creates a root, lock, status
+or boot trace, and refresh that decision under the provisioning lock. Managed,
+malformed and unsupported policies refuse first-use publication with an explicit
+installation-management diagnostic. A healthy current/LKG runtime still starts
+without provisioning or runtime repair; existing ready-runtime boot tracing is
+unchanged. Standalone
+provisioning retains the exact selected root, context, installer exit code and
+stderr; `AGENT_CONTAINERS_NO_SELFPROVISION` remains an opt-out.
+
+Global stubs retain the exact publisher, canonical install root and selected
+context rather than searching other marketplaces or ambient commands. Equivalent
+root spellings bind to the same installation. Fresh direct provisioning publishes
+its original publisher binding before emitting the command; no prior stamp is
+required. Stamping reads
+the shared installation decision; only a positively identified legacy binding
+can use the resolver-only fallback. A cell-bound command restores its retained
+context even in an ordinary shell and revalidates activation/generation through
+the gate. If its source pointer or retained gate is unavailable, it refuses
+rather than running that cell as legacy. A healthy known-legacy runtime can
+still use its co-deployed readiness resolver; cold provisioning and
+explicit-context fallback refuse.
+On POSIX systems without `flock`, stale PID-link recovery serializes reapers
+and only cleans up its own mutex. An unknown/abandoned reaper mutex is not
+deleted: after 30 one-second retries the command refuses with exit 126 and an
+explicit repair diagnostic. Live provisioning owners retain their separate wait.
 
 The Windows installer declares its `init.ps1` human-output boundary for the
 existing updater's timed capture. Direct invocation retains its original

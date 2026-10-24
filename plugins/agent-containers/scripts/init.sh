@@ -352,58 +352,89 @@ deploy_binstub() {
     STUB="$LOCAL_BIN/agent-containers"
     mkdir -p "$LOCAL_BIN"
     deploy_resolver
-    cat > "$STUB" << 'STUBEOF'
-#!/usr/bin/env bash
-# agent-containers binstub -- self-provisioning (install-on-first-use).
-# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
-# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
-# version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
-# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
-# provision on first use rather than silently binding the system interpreter.
-export PYTHONUTF8=1
-_name="agent-containers"
-_root="$HOME/.$_name"
-_resolver="$_root/bin/resolve-runtime.sh"
-_resolve() {
-    AGENT_RT_PY=""
-    if [ -f "$_resolver" ]; then
-        AGENT_RT_ROOT="$_root"
-        . "$_resolver"
+    local source_root="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    local bound_context="${COPILOT_EXTENSIONS_CONTEXT:-}" bound_mode=unknown bound_root="" decision="" durable=""
+    local -a binding_args=(status --payload-root "$source_root" --plugin-id agent-containers --legacy-root "$INSTALL_DIR")
+    if [[ -n "$bound_context" ]]; then
+        durable="$bound_context"
+        for _part in 1 2 3 4 5; do durable="$(dirname -- "$durable")"; done
+        binding_args+=(--context "$bound_context" --durable-home "$durable")
     fi
-}
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_containers "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/init.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
-    exit 127
+    decision="$(bash "$SCRIPT_DIR/installation-context/installation-context.sh" "${binding_args[@]}")" || {
+        _fail 'Cannot bind the global command to its installation context'
+        return 126
+    }
+    binding_value() {
+        LC_ALL=C awk -f "$SCRIPT_DIR/installation-context/json-query.awk" \
+            -v mode="${2:-get}" -v "query_path=$1" <<<"$decision"
+    }
+    bound_root="$(binding_value $'legacy\034root')"
+    if [[ "$bound_root" != /* ]]; then
+        _fail 'Cannot bind the global command to a canonical installation root'
+        return 126
+    fi
+    if [[ "$(binding_value actualMode)" == namespaced &&
+          "$(binding_value runtimeRoot)" == "$bound_root" &&
+          -n "$(binding_value context)" ]]; then
+        bound_mode=namespaced
+        bound_context="$(binding_value context)"
+    elif [[ -z "$bound_context" && ! -e "$bound_root/install.json" ]] &&
+         { [[ "$(binding_value status)" == ready && "$(binding_value actualMode)" == legacy &&
+              "$(binding_value desiredMode)" == legacy ]] ||
+           [[ "$(binding_value status)" == provenance-blocked &&
+              "$(binding_value $'policy\034enabled' type)" == boolean &&
+              "$(binding_value $'policy\034enabled')" == false &&
+              "$(binding_value $'legacy\034disposition')" == active &&
+              -z "$(binding_value $'legacy\034tombstone')" ]]; }; then
+        bound_mode=legacy
+    fi
+    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n_bound_context=%q\n_bound_mode=%q\n' \
+        "$bound_root" "$source_root" "$bound_context" "$bound_mode" > "$STUB"
+    cat >> "$STUB" << 'STUBEOF'
+set -euo pipefail
+export PYTHONUTF8=1
+if [[ -n "$_bound_context" ]]; then
+    if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
+          "$COPILOT_EXTENSIONS_CONTEXT" != "$_bound_context" ]]; then
+        printf '[agent-containers] requested context does not match the bound global command.\n' >&2
+        exit 126
+    fi
+    export COPILOT_EXTENSIONS_CONTEXT="$_bound_context"
 fi
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_containers "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_containers "$@"
+_snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
+_payload="$_snap"
+# Old ordinary snapshots have no canonical source receipt. Bind their exact
+# publisher while it exists; never discover another marketplace through a glob.
+if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
+    _payload=""
+    if [[ -n "$_snap" && -f "$_source/scripts/runtime-gate.sh" ]]; then _payload="$_source"; fi
 fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
+if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
+    if [[ "$_bound_mode" == legacy && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+        _resolver="$_root/bin/resolve-runtime.sh"
+        if [[ -f "$_resolver" ]] &&
+           grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+            AGENT_RT_ROOT="$_root"
+            AGENT_RT_RESOLVE_TRACE_MODE=ready
+            AGENT_RT_PY=""
+            if ! . "$_resolver"; then
+                printf '[agent-containers] runtime resolver failed; update the owning installation.\n' >&2
+                exit 126
+            fi
+            if [[ -n "$AGENT_RT_PY" ]]; then
+                export AGENT_CONTAINERS_HOME="$_root"
+                export AGENT_CONTAINERS_STATE_DIR="$_root"
+                exec "$AGENT_RT_PY" -m agent_containers "$@"
+            fi
+        fi
+    fi
+    printf '[agent-containers] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.\n' >&2
+    exit 126
 fi
-exit "$_rc"
+export AGENT_CONTAINERS_HOME="$_root"
+export AGENT_CONTAINERS_STATE_DIR="$_root"
+export AGENT_CONTAINERS_PAYLOAD_ROOT="$_payload"
+exec bash "$_payload/scripts/runtime-gate.sh" "$@"
 STUBEOF
     chmod +x "$STUB"
     _ok "Binstub: $STUB (self-provisioning)"
@@ -687,6 +718,15 @@ fi
 if [[ "$SOURCE_SELECTED" != 1 ]]; then _assert_source_runtime_identity || exit 1; fi
 IFS=$'\t' read -r RUNTIME_PROFILE RUNTIME_VERSION VENV_DIR VENV_PYTHON <<< "$profile_result"
 _ok "Runtime profile: $RUNTIME_PROFILE ($RUNTIME_VERSION)"
+
+if [[ "$SOURCE_SELECTED" != 1 ]]; then
+    "$PYTHON_CMD" -I "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+        publish-redirects --payload-dir "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+        --version "$RUNTIME_VERSION" || {
+        _fail 'Failed to publish the runtime payload binding'
+        exit 1
+    }
+fi
 
 # -- 4. Binstub --------------------------------------------------------
 deploy_binstub
