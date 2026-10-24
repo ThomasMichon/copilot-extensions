@@ -27,7 +27,7 @@ class _Counter:
             return next(self._events) - next(self._reads)
 
 
-def snapshot(event: dict, *, max_bytes: int = 4096) -> dict:
+def snapshot(event: dict, *, max_bytes: int = 4096, stamp_missing_ts: bool = False) -> dict:
     """Copy a bounded primitive event without JSON, arbitrary repr or user hooks."""
     remaining = max_bytes
 
@@ -60,7 +60,12 @@ def snapshot(event: dict, *, max_bytes: int = 4096) -> dict:
 
     if type(event) is not dict:
         raise ValueError("event must be a dict")
-    return copy(event)
+    result = copy(event)
+    if stamp_missing_ts is True and "ts" not in result:
+        if len(result) >= 64:
+            raise ValueError("event limit")
+        result[copy("ts")] = copy(int(time.time() * 1000))
+    return result
 
 
 class BufferedSink:
@@ -131,11 +136,9 @@ class BufferedSink:
             next(self._counts["inactive"])
             return
         try:
-            stamp = self._stamp_missing_ts and type(event) is dict and "ts" not in event
-            # Reserve the generated key/value's snapshot budget before copying.
-            record = snapshot(event, max_bytes=self._max_bytes - (96 if stamp else 0))
-            if stamp:
-                record["ts"] = int(time.time() * 1000)
+            record = snapshot(
+                event, max_bytes=self._max_bytes, stamp_missing_ts=self._stamp_missing_ts,
+            )
         except (ValueError, UnicodeError, RuntimeError, OSError, OverflowError):
             next(self._counts["invalid"])
             return

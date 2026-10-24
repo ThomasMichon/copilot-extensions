@@ -519,3 +519,14 @@ captured wire owners, deployment helpers and live state remain outside this slic
   Native managed validation passes 136 Bridge tests, 51 focused Dispatch tests
   and 70 Manager tests with the same one optional SDK skip. Earlier full
   coordinator validation remains recorded separately.
+- 2026-10-24 UTC — The rebased contribution base exposed unrelated installer
+  vendoring drift in the global install-contract guard. Supported managed sync
+  retained a recovery ref and incorporated the upstream correction; the guard
+  again passes for all 13 plugins. No installer implementation or vendored
+  installer file was edited by this logging contributor.
+- 2026-10-24 UTC — Generated timestamp fields consume the same snapshot budget
+  and are added only after rejecting arbitrary keys/values; a hostile key cannot
+  run comparison hooks during a missing-`ts` probe. Current managed-synced source
+  passes 137 Bridge, 51 focused Dispatch and 70 Manager tests (one optional SDK
+  skip), plus install-contract, immutable contracts, docs/module-size and
+  whitespace guards. This is source qualification, not deployment evidence.

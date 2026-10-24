@@ -312,6 +312,27 @@ def test_missing_ts_is_stamped_at_admission_before_delayed_drain(tmp_path, monke
     ]
 
 
+def test_generated_timestamp_shares_budget_and_never_probes_rejected_keys(tmp_path):
+    from process_telemetry.buffer import snapshot
+
+    path, _ = config(tmp_path)
+    assert telemetry.load_sink_from_config(path)
+    probed = []
+    class Key:
+        def __hash__(self):
+            return hash("ts")
+
+        def __eq__(self, other):
+            probed.append(None)
+            raise AssertionError("producer must not compare arbitrary keys")
+    telemetry.emit({Key(): 1})
+    assert probed == []
+    assert telemetry._slot.sink.stats()["invalid"] == 1
+    assert snapshot({"x": 1}, max_bytes=160) == {"x": 1}
+    with pytest.raises(ValueError, match="event limit"):
+        snapshot({"x": 1}, max_bytes=160, stamp_missing_ts=True)
+
+
 def test_delivery_control_retries_only_unaccepted_offers(tmp_path, monkeypatch):
     path, directory = config(tmp_path)
     assert telemetry.load_sink_from_config(path)
