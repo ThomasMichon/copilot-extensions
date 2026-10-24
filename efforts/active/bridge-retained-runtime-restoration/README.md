@@ -392,6 +392,15 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   source rather than the current HTTP-49 checkout; two unrelated collection
   capability skips are not execution evidence. The current HTTP-49 selected
   ASGI driver executes both installation modes without a skip.
+- Genuine source `7c61179a52beb96699f3e9f3191e54b52e7d958c` passes actual
+  HTTP-49 write/no-write capture in both installation modes with 78 outputs.
+  Every one of the 77 HTTP-48 packets and its independent input remains
+  byte-identical. The canonical checker accepts both contracts and 737 fixtures;
+  the complete current/historical reader, protocol and writer portfolio passes
+  194 cases, and the final HTTP-49 custody/adoption/producer/index portfolio
+  passes 199. The live contribution base still advertises 48, so 49 is not
+  reused from an independently landed capability. Fresh review and required CI
+  remain owed for the resulting evidence head.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

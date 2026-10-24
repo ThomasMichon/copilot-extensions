@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http49-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http48-source-remote_acp_sessions-py-9bf67df773d0.json",
+    "sha256": "77ef00860b89d9a6c37a44b38b03b9d88157181aa8a6ffe534a5a81668bfaf01"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http49-retained-producer.json",
+    "sha256": "bc5fc8664decb1a72bd3f0ec444f5c55894165d817060b2a4d1845b5df32a1cc"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "7c61179a52beb96699f3e9f3191e54b52e7d958c",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 49,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/remote_acp_sessions.py",
+    "source_git_blob": "0425fcff2907612477d1a1f715aaae7bfd1cd76a",
+    "source_sha256": "8e46f2713647ff7fc626e1db28c0402d1d236017581709df949c2fe450169ecf"
+  }
+}
