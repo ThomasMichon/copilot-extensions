@@ -23,7 +23,7 @@ from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import boot, foundation_state
 from ._directory import create_queue_directory
 
-SCHEMA = 3
+SCHEMA = 4
 STATES = frozenset({"pending", "running", "completed", "interrupted", "blocked"})
 _active_transaction = ContextVar("update_driver_active_transaction", default=None)
 
@@ -91,6 +91,15 @@ class Request:
     settled_boot_id: str | None = None
     settled_at: float | None = None
     settlement_kind: str | None = None
+    recovery_authority: str | None = None
+    released_at: float | None = None
+
+    @property
+    def unresolved(self) -> bool:
+        return (
+            self.state in {"running", "interrupted", "blocked"}
+            and self.settled_at is None and self.released_at is None
+        )
 
 
 def default_root() -> Path:
@@ -219,15 +228,17 @@ def _json(value: object) -> str:
 
 def _validate_db(db: sqlite3.Connection) -> None:
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version not in {2, SCHEMA}:
+    if version not in {2, 3, SCHEMA}:
         raise StateError("unsupported update-driver schema")
     columns = {row[1] for row in db.execute("PRAGMA table_info(requests)")}
     expected = {
         "id", "identity", "spec", "runner", "state", "exit_code", "error",
         "created_at", "started_at", "finished_at", "boot_id", "settled_boot_id", "settled_at",
     }
-    if version == SCHEMA:
+    if version >= 3:
         expected.add("settlement_kind")
+    if version >= 4:
+        expected.update({"recovery_authority", "released_at"})
     if columns != expected:
         raise StateError("malformed update-driver schema")
 
@@ -238,14 +249,18 @@ def _upgrade_schema(db: sqlite3.Connection, root: Path, custody: OperationLock) 
         raise StateError("schema migration requires installation custody and a transaction")
     custody.assert_owned()
     _validate_db(db)
-    if db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA:
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    if version == SCHEMA:
         return
     for row in db.execute("SELECT * FROM requests"):
         _request(row, root)
-    db.execute("ALTER TABLE requests ADD COLUMN settlement_kind TEXT")
-    db.execute(
-        "UPDATE requests SET settlement_kind='kernel_restart' WHERE settled_at IS NOT NULL",
-    )
+    if version == 2:
+        db.execute("ALTER TABLE requests ADD COLUMN settlement_kind TEXT")
+        db.execute(
+            "UPDATE requests SET settlement_kind='kernel_restart' WHERE settled_at IS NOT NULL",
+        )
+    db.execute("ALTER TABLE requests ADD COLUMN recovery_authority TEXT")
+    db.execute("ALTER TABLE requests ADD COLUMN released_at REAL")
     db.execute(f"PRAGMA user_version={SCHEMA}")
     _validate_db(db)
 
@@ -292,7 +307,8 @@ def _database(
                       CHECK(state IN ('pending','running','completed','interrupted','blocked')),
                     exit_code INTEGER, error TEXT, created_at REAL NOT NULL,
                     started_at REAL, finished_at REAL, boot_id TEXT,
-                    settled_boot_id TEXT, settled_at REAL, settlement_kind TEXT)"""
+                    settled_boot_id TEXT, settled_at REAL, settlement_kind TEXT,
+                    recovery_authority TEXT, released_at REAL)"""
                 )
                 db.execute(
                     "CREATE UNIQUE INDEX pending_identity ON requests(identity) WHERE state='pending'"
@@ -356,6 +372,19 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
             ))
         ):
             raise StateError("malformed positive-settlement evidence")
+        authority = row["recovery_authority"] if "recovery_authority" in row.keys() else None
+        released = row["released_at"] if "released_at" in row.keys() else None
+        if (
+            (authority is None) != (released is None)
+            or (authority is not None and (
+                authority != "operator_repair" or settled
+                or row["state"] not in {"interrupted", "blocked"}
+                or row["finished_at"] is None or not row["error"]
+                or type(released) not in (int, float)
+                or not math.isfinite(released) or released < 0
+            ))
+        ):
+            raise StateError("malformed recovery-authorization evidence")
         expected = hashlib.sha256(
             (_json(asdict(spec)) + "\n" + _json(asdict(runner))).encode(),
         ).hexdigest()
@@ -364,7 +393,7 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
         return Request(
             identifier, spec, runner, row["state"], code, row["error"], row["created_at"],
             row["started_at"], row["finished_at"], root / f"{identifier}.log",
-            row["boot_id"], row["settled_boot_id"], row["settled_at"], kind,
+            row["boot_id"], row["settled_boot_id"], row["settled_at"], kind, authority, released,
         )
     except (ValueError, TypeError, InvalidRequestError) as error:
         raise StateError("malformed durable request") from error
@@ -446,7 +475,7 @@ def _has_fence(db: sqlite3.Connection, root: Path) -> bool:
         "SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')",
     ))
     return any(
-        request.state in {"interrupted", "blocked"} and request.settled_at is None
+        request.state in {"interrupted", "blocked"} and request.unresolved
         for request in requests
     )
 
@@ -522,7 +551,7 @@ def ensure_worker(
     _reconcile_lost_owner(root)
     _assert_foundation_clear(root)
     if any(
-        row.state in {"interrupted", "blocked"} and row.settled_at is None
+        row.state in {"interrupted", "blocked"} and row.unresolved
         for row in status(root=root)
     ):
         raise InterruptedError("installation queue fenced; explicit positive settlement required")
@@ -792,7 +821,7 @@ def wait(
         if request.state == "pending" and request.error:
             raise SpawnError(request.error)
         if request.state == "pending" and any(
-            item.state in {"interrupted", "blocked"} and item.settled_at is None
+            item.state in {"interrupted", "blocked"} and item.unresolved
             for item in status(root=root)
         ):
             raise InterruptedError("installation queue fenced by unsettled prior transaction")

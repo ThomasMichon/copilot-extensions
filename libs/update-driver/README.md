@@ -244,14 +244,15 @@ executor exceptions and owner death do not produce that proof. Their fences
 remain. Native foundation progress keeps its independent interruption checks;
 a settled queue request cannot clear an uncertain foundation operation.
 
-Schema **3** adds the explicit settlement kind. Read-only status and enqueue
-also accept schema 2 without migrating it. A drainer migrates a valid schema-2
+Schema **4** retains schema 3's explicit settlement kind and adds separate
+`recovery_authority` and `released_at` fields. Read-only status and enqueue
+also accept schemas 2 and 3 without migrating them. A drainer migrates a valid older
 queue only while holding the existing installation lock and an immediate
 SQLite transaction: requests and pending identities are preserved, existing
 changed-boot settlement becomes `kernel_restart`, and old interrupted records
 remain unsettled. Migration never invents native cleanup evidence for them.
-Downlevel code that supports only schema 2 refuses the upgraded database rather
-than silently interpreting the new proof. Schema 1 remains unsupported.
+Downlevel code that does not support schema 4 refuses the upgraded database rather
+than silently interpreting authorization as cleanup proof. Schema 1 remains unsupported.
 
 ### Explicit positive settlement after kernel restart
 
@@ -286,16 +287,43 @@ settled_requests = recover_after_restart()  # explicit mutation, same OperationL
   `settlement_kind=kernel_restart`, `settled_boot_id` and `settled_at`, preserving the interrupted state, failure
   text, absent exit status, and original admission identity. A crashed
   `running` record becomes `interrupted`, never successful or replayed.
-- Only those positively settled fences stop blocking later work. Existing
+- In this restart-evidence path, only positively settled fences stop blocking later work. Existing
   pending work stays pending until an explicit normal worker/update runs.
   Repeating settlement is idempotent. There is no force/TTL/PID reset, manual
   database-edit/delete recipe, root rotation escape, or reboot command.
 
 Schema 1 predates admission boot evidence and is explicitly unsupported rather
 than silently upgraded into fabricated recovery authority. Malformed state
-also refuses. Same-boot repair for older interrupted records and bounded
-operator-approved takeover remain unimplemented; this new proof does not
-authorize manual journal surgery, a reboot, or a live repair.
+also refuses. Neither this proof nor the distinct authorization path below
+authorizes manual journal surgery, a reboot, or an unrequested live repair.
+
+### Explicit operator-authorized queue release
+
+`recover_for_repair(*, authorized=False, root=None) -> tuple[Request, ...]`
+requires literal `authorized=True` from an explicitly authorized repair adapter.
+It releases valid running/interrupted/blocked queue records without requiring
+historical cleanup, pre-launch, boot or old-owner evidence. This is **authorization,
+not positive settlement**: `recovery_authority=operator_repair` and `released_at`
+record the release, while `settlement_kind`, `settled_at` and `settled_boot_id`
+remain absent. Failed outcomes, error text, admission identity and pending work
+are preserved. A crashed running record becomes interrupted, never successful.
+
+The operation acquires the existing installation lock nonblockingly and upgrades
+valid schema-2/3 records under one immediate SQLite transaction. Missing/replaced/
+malformed state or a current lock owner refuses without partial release. Repeated
+calls are idempotent; ordinary admission never chooses this policy implicitly.
+Restart assessment, queue admission, worker startup, pending waiters and foundation
+queue admission all distinguish this authority from native cleanup proof.
+
+Manager and Worktrees expose `update --recover-for-repair [--json]` without
+requiring a project or starting an installer. That command authorizes
+only queue release; it runs no installer and replays nothing. A subsequent
+explicit ordinary update uses the same canonical queue and executor.
+This bounded API is not a complete force-reinstall operation: active-installer
+retirement, corrupt-journal reconstruction and independent native-foundation
+repair remain separate work. An unsettled foundation record is never cleared by
+queue release. Optional audited pre-launch recovery is also separate, never a
+historical-proof prerequisite for operator-authorized repair.
 
 ### Native foundation progress and interruption
 
@@ -304,7 +332,7 @@ progress record, **not another request queue or installation owner**:
 `<execution-root>/foundation-operation.json`. It uses
 `copilot-extensions.installation-foundation-operation`, version `1`, and the
 same `<execution-root>/execution.lock`. Its native progress remains version 1,
-independent of the schema-3 queue; no request history is deleted or moved to
+independent of the schema-4 queue; no request history is deleted or moved to
 another execution root.
 
 `foundation_status(root=...) -> FoundationOperation | None` reads that bounded,

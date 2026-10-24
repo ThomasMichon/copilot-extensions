@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve explicit operator repair authorization and truthful legacy queue history through the shared execution driver.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

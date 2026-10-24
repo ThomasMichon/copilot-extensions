@@ -75,6 +75,11 @@ recorded result; `--detach --json` returns an acceptance receipt, and
 `--recovery-status` inspects restart-proven settlement availability, and
 `--recover-after-restart` settles only old-boot interruptions without replaying
 them; neither requires a project.
+`--recover-for-repair` explicitly authorizes queue release without historical
+cleanup evidence, retaining the failure and reporting authorization separately
+from native settlement. It runs no installation; see the
+[shared recovery contract](../../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+for its bounded scope and remaining takeover/foundation limitations.
 `--no-manager` selects the standalone updater but still queues it.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.

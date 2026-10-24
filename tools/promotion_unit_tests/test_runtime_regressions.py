@@ -92,6 +92,7 @@ def test_native_execution_check_is_project_independent():
         (["update", "--request-status=synthetic-request", "--json"], True),
         (["update", "--recovery-status", "--json"], True),
         (["update", "--recover-after-restart"], True),
+        (["update", "--recover-for-repair"], True),
         (["update"], False),
         (["update", "--detach"], False),
         (["update", "--supervised-debug"], False),

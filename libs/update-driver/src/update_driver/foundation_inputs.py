@@ -114,7 +114,7 @@ def check_health() -> None:
     from .participant import MAX_FRAME
 
     if (
-        core.SCHEMA != 3 or foundation_state.VERSION != 1
+        core.SCHEMA != 4 or foundation_state.VERSION != 1
         or first_use.PROTOCOL != 1 or MAX_FRAME != 16384
     ):
         raise FoundationInputError("unsupported foundation execution protocol")

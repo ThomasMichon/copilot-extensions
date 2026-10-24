@@ -85,7 +85,7 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
     ):
         return True
     if command == "update" and any(
-        arg in {"--request-status", "--recovery-status", "--recover-after-restart"}
+        arg in {"--request-status", "--recovery-status", "--recover-after-restart", "--recover-for-repair"}
         or arg.startswith("--request-status=") for arg in args_list[1:]
     ):
         return True

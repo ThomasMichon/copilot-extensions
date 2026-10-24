@@ -78,6 +78,10 @@ def add_parsers(sub) -> None:
         "--recover-after-restart", action="store_true",
         help="Settle interrupted requests only after a kernel-confirmed restart; never replay",
     )
+    mode.add_argument(
+        "--recover-for-repair", action="store_true",
+        help="Authorize release of interrupted queue fences for repair, without cleanup proof; no update runs",
+    )
     p.add_argument(
         "--recreate-venv",
         action="store_true",

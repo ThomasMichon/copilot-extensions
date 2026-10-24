@@ -57,7 +57,7 @@ def test_exclusive_drain_migrates_schema_two_preserving_pending_identity(area):
     queued = request(area, root)
     observed = []
     assert drain(root=root, executor=lambda tx: observed.append(tx.request.id) or 7) == 0
-    assert observed == [queued.id] and version(root) == 3
+    assert observed == [queued.id] and version(root) == core.SCHEMA
     result = status(queued.id, root=root)
     assert result.state == "completed" and result.exit_code == 7
     assert result.settlement_kind is None and result.spec == queued.spec
@@ -74,7 +74,7 @@ def test_legacy_interruption_is_never_migrated_into_native_proof(area):
     before = status(queued.id, root=root)
     with pytest.raises(InterruptedError):
         drain(root=root, executor=lambda tx: pytest.fail("legacy fence executed"))
-    assert version(root) == 3
+    assert version(root) == core.SCHEMA
     assert status(queued.id, root=root) == before
     assert before.settled_at is None and before.settlement_kind is None
 
@@ -93,7 +93,7 @@ def test_schema_two_changed_boot_proof_migrates_without_rewriting_history(area):
     prior = status(queued.id, root=root)
     assert prior.settlement_kind == "kernel_restart"
     assert drain(root=root, executor=lambda tx: pytest.fail("old failure replayed")) == 0
-    assert status(queued.id, root=root) == prior and version(root) == 3
+    assert status(queued.id, root=root) == prior and version(root) == core.SCHEMA
 
 
 def test_schema_migration_requires_actual_installation_custody(area):
@@ -113,7 +113,7 @@ def test_failed_schema_migration_rolls_back_columns_and_version(area, monkeypatc
 
     def reject_new_schema(db):
         validate(db)
-        if db.execute("PRAGMA user_version").fetchone()[0] == 3:
+        if db.execute("PRAGMA user_version").fetchone()[0] == core.SCHEMA:
             raise StateError("synthetic migration verification failure")
 
     monkeypatch.setattr(core, "_validate_db", reject_new_schema)

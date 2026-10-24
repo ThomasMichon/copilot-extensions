@@ -687,6 +687,7 @@ worktree-manager update --detach --json
 worktree-manager update --request-status <request-id> --json
 worktree-manager update --recovery-status --json
 worktree-manager update --recover-after-restart --json
+worktree-manager update --recover-for-repair --json
 worktree-manager update --supervised-debug
 ```
 
@@ -734,6 +735,14 @@ exclusive authority. It refuses same-boot, missing, malformed or unsupported
 boot evidence; age and PID disappearance are not substitutes. Settlement retains
 the interrupted failure and does not replay it or start an update. Submit a new
 ordinary update explicitly after recovery.
+
+`--recover-for-repair` instead records explicit operator authorization to release
+valid queue fences without historical cleanup or boot evidence. It preserves the
+failed outcome and reports `recovery_authority`/`released_at`, not native
+settlement. It neither runs nor replays an installation. The
+[driver recovery contract](../libs/update-driver/README.md#explicit-operator-authorized-queue-release)
+defines its scope, atomic migration, current-owner refusal and remaining
+foundation/active-takeover limitations.
 
 The same authority wraps public `stage-update` acquisition and
 `reconcile-plugins --apply`, including the session provisioning hook. They

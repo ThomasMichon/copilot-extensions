@@ -60,6 +60,8 @@ def _report(request, as_json: bool = False) -> None:
         "error": request.error, "log_path": str(request.log_path),
         "settled_at": getattr(request, "settled_at", None),
         "settlement_kind": getattr(request, "settlement_kind", None),
+        "recovery_authority": getattr(request, "recovery_authority", None),
+        "released_at": getattr(request, "released_at", None),
     }
     if as_json:
         print(json.dumps(data))
@@ -67,6 +69,8 @@ def _report(request, as_json: bool = False) -> None:
         print(f"Update request {request.id}: {request.state}; log: {request.log_path}")
         if request.error:
             print(request.error, file=sys.stderr)
+        if data["recovery_authority"]:
+            print(f"Repair release: {data['recovery_authority']}; cleanup remains unconfirmed.")
 
 
 def _flags(args: argparse.Namespace) -> list[str]:
@@ -110,6 +114,24 @@ def cmd_update_request(args: argparse.Namespace) -> int:
             }
             print(json.dumps(data) if getattr(args, "json", False) else
                   f"Settled {len(settled)} interrupted request(s); no update was run.")
+            return 0
+        if getattr(args, "recover_for_repair", False):
+            if _flags(args):
+                raise ValueError("repair recovery does not accept installation options")
+            released = driver.recover_for_repair(authorized=True)
+            data = {
+                "released": [
+                    {
+                        "request_id": row.id, "state": row.state,
+                        "recovery_authority": row.recovery_authority, "released_at": row.released_at,
+                        "settled_at": row.settled_at, "settlement_kind": row.settlement_kind,
+                    } for row in released
+                ],
+                "replayed": False,
+            }
+            print(json.dumps(data) if getattr(args, "json", False) else
+                  f"Released {len(released)} queue fence(s) by operator authorization; "
+                  "cleanup remains unconfirmed; no update was run.")
             return 0
         request_id = getattr(args, "request_status", None)
         if request_id:
