@@ -11,14 +11,50 @@ on:
         options:
           - context
           - foundation
+          - pull-requests-commands
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  pull-requests-commands:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-commands'
+    name: Pull Requests commands (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual cold commands, refusal, caller loss and healthy dispatch
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_pull_requests_command.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify healthy namespaced dispatch and unsupported cold cells
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_cell_invocation.py
+          -k "dispatch_preserves or command_cannot"
+          --test-timeout 60 --timeout 180
   exhaustive:
-    if: github.event_name != 'workflow_dispatch' || inputs.portfolio != 'foundation'
+    if: github.event_name != 'workflow_dispatch' || inputs.portfolio == 'context'
     name: exhaustive adapters
     runs-on: ubuntu-latest
     timeout-minutes: 90

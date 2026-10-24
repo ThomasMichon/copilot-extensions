@@ -138,17 +138,19 @@ if ($Mode -ceq 'launch') {
         $Root, $Payload, $RuntimeRoot, $Project, 'owner', $source, $log, $ServiceMode, $InstallerAction
     ) -WorkingDirectory $Project -LogPath $log
     try {
+        $acknowledgement = @{
+            launched = $true; log = $log; pid = $worker.Id
+            created = $worker.StartTime.ToUniversalTime().ToFileTimeUtc()
+        } | ConvertTo-Json -Compress
         if ($Wait) {
+            [Console]::Error.WriteLine("[installation-driver] launch acknowledgement: $acknowledgement")
             $worker.WaitForExit()
             $code = $worker.ExitCode
             Get-Content -LiteralPath $log -Encoding UTF8 | ForEach-Object { [Console]::Error.WriteLine($_) }
             exit $code
         }
         # This is launch acknowledgement, never a durable ordinary-request receipt.
-        [Console]::Out.WriteLine((@{
-            launched = $true; log = $log; pid = $worker.Id
-            created = $worker.StartTime.ToUniversalTime().ToFileTimeUtc()
-        } | ConvertTo-Json -Compress))
+        [Console]::Out.WriteLine($acknowledgement)
     } finally { $worker.Dispose() }
     exit 0
 }

@@ -284,12 +284,19 @@ transaction execution from the existing recurring-maintenance assignment.
   command, failed-candidate selection and native caller-loss outcomes before
   adopting any ordinary Pull Requests publisher. Do not infer service options,
   namespaced support or production command/bootstrap adoption from recipe proof.
-- [ ] **Agent-recommended bounded source handoff:** qualify Pull Requests'
+- [x] **Agent-recommended bounded source handoff:** qualify Pull Requests'
   exact selected legacy snapshot through the same fixed recipe and native
   staged-origin reader before adopting its ordinary primary command. Preserve
   canonical snapshot provenance, live publication policy, exact queued source,
   ordinary-copy refusal and unavailable/reselected-source outcomes; do not
   replace the retained snapshot with the currently installed payload.
+- [ ] **Agent-recommended bounded publisher adoption:** route Pull Requests'
+  actual generated legacy primary/payload cold commands through the packaged
+  foundation and canonical queue before cold trace or outer-lock writes.
+  Qualify generated commands, exact selected snapshot, caller loss, healthy
+  dispatch and no-write refusals on native Windows/Linux. Refuse unsupported
+  cold custom roots and cells without changing healthy dispatch or adopting
+  bootstrap/explicit installer publishers.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

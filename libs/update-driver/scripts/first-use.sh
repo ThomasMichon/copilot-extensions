@@ -129,6 +129,8 @@ if [[ "$run_owner" == 0 ]]; then
         "$root" "$payload" "$runtime" "$project" --run-owner "$source_id" \
         --installer-action "$installer_action" "${service_mode[@]}"
     if [[ "$wait_for_owner" == 1 ]]; then
+        printf '[installation-driver] launch acknowledgement: launched:%s log:%s\n' \
+            "$__native_daemon_pid" "$log" >&2
         code=0
         wait "$__native_daemon_pid" || code=$?
         cat -- "$log" >&2

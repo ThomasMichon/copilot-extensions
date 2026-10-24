@@ -656,7 +656,7 @@ stay explicit, separate boundaries. The single foundation progress snapshot
 is not durable ordinary-request history; ordinary publication adapters need
 canonical queued request receipts.
 
-### Fixed first-use recipes and Vault command adoption
+### Fixed first-use recipes and command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
 support the owning Agent Vault and Agent Pull Requests payloads' existing legacy
@@ -670,8 +670,14 @@ Explicit installer entry points remain separate, unadopted callers.
 Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
 
-Pull Requests' fixed recipe is a separately qualified adapter, not adoption of
-its ordinary command, bootstrap or explicit installer publishers. It uses the
+Pull Requests' legacy cold payload and generated primary commands use the same
+fixed recipe before outer provisioning locks or cold resolver writes. The
+primary delegates to its exact selected snapshot's versioned dispatcher;
+missing/older dispatchers and custom roots refuse without a foreground fallback.
+Healthy commands retain their existing runtime path without touching the queue.
+Cold namespaced commands refuse before activation or provisioning until that
+recipe is qualified. Bootstrap and explicit installer publishers remain separate.
+The recipe uses the
 same canonical queue and frozen-input owner, projects its own context instead of
 Vault's, and clears legacy shell action/force/root hints before invoking the
 fixed native action. Its no-self-provision control retains presence semantics.
@@ -733,7 +739,10 @@ stamp with client-only selection refuses before state creation. The recipe does
 not authorize arbitrary lifecycle actions or adopt explicit installer callers.
 The optional Windows `-Wait` and Linux `--wait` keep the launching client as an
 observer of its independently launched finite supervisor and relay its diagnostics
-and exit status. They do not move installation into the caller. Launch-only
+and exit status. Waiting emits the same positive supervisor acknowledgement on
+stderr, so diagnostics can identify and observe that exact owner even if the
+caller disappears; this still does not certify ordinary queue acceptance.
+They do not move installation into the caller. Launch-only
 acknowledgement remains the default for existing native clients.
 
 Vault's bootstrap first reads its existing deployment/version/selected-runtime

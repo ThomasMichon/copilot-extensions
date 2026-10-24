@@ -354,6 +354,34 @@ def test_first_touch_uses_canonical_receipt_and_activation_without_owner(first_t
     assert not (profile / ".agent-pull-requests").exists()
 
 
+def test_command_cannot_activate_an_unqualified_cold_cell(first_touch, monkeypatch):
+    module, profile = first_touch
+    before = set(profile.rglob("*"))
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "ordinary cold command must not start an installer",
+    ))
+    with pytest.raises(PermissionError, match="qualified installation driver"):
+        module.execute(["--help"])
+    assert set(profile.rglob("*")) == before
+
+
+def test_command_cannot_provision_an_empty_active_cell(selected, monkeypatch):
+    module, installation, runtime, current, _ = selected
+    adapter = SimpleNamespace(
+        foundation=lambda: api, management_version=lambda: runtime.payload_version,
+    )
+    monkeypatch.setattr(module, "installer", lambda: adapter)
+    monkeypatch.setattr(module, "discover", lambda _: (
+        current, installation.durable_home, installation.os_profile, {},
+    ))
+    monkeypatch.setattr(module, "selection", lambda *args: None)
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "ordinary cold command must not start an installer",
+    ))
+    with pytest.raises(PermissionError, match="qualified installation driver"):
+        module.execute(["--help"])
+
+
 def test_existing_unactivated_receipt_requires_explicit_decision(first_touch):
     module, profile = first_touch
     status, durable, _, probe = module.discover(api)

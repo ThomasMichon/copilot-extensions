@@ -300,6 +300,41 @@ def test_foundation_snapshot_staging_is_disposable_and_bounded() -> None:
         ]
 
 
+def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "pull-requests-commands" in (
+        trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    )
+    assert workflow["jobs"]["exhaustive"]["if"] == (
+        "github.event_name != 'workflow_dispatch' || inputs.portfolio == 'context'"
+    )
+    job = workflow["jobs"]["pull-requests-commands"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-commands'"
+    )
+    assert job["timeout-minutes"] == 25
+    assert job["strategy"] == {
+        "fail-fast": False, "matrix": {"os": ["ubuntu-latest", "windows-latest"]},
+    }
+    steps = [step["run"] for step in job["steps"] if "run" in step]
+    assert len(steps) == 2
+    assert steps[0].split() == [
+        "python", "tools/run-plugin-tests.py", "update-driver",
+        "--test-file", "tests/test_first_use_pull_requests_command.py",
+        "--test-timeout", "900", "--timeout", "1080",
+    ]
+    assert steps[1].split() == [
+        "python", "tools/run-plugin-tests.py", "agent-pull-requests",
+        "--test-file", "tests/test_cell_invocation.py",
+        "-k", '"dispatch_preserves', "or", 'command_cannot"',
+        "--test-timeout", "60", "--timeout", "180",
+    ]
+    assert not job.get("continue-on-error")
+
+
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

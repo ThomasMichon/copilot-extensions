@@ -71,12 +71,21 @@ payloads cannot borrow an installed origin through environment hints.
 A replaced or
 unavailable origin fails closed rather than guessing its marketplace.
 
-The standalone installation driver's fixed legacy stamp/provision recipe is
-qualified separately from ordinary publishers. It uses this same installed
-payload, default legacy root, native staging layout and installer, and does
-not accept a service option or an arbitrary source/root. Ordinary command,
-bootstrap, cell and explicit installer callers are not migrated by that
-recipe alone.
+The legacy cold payload command and generated primary command submit provisioning
+to the packaged standalone installation driver before any outer provisioning
+lock or cold trace write. Waiting observes the caller-independent owner and
+relays its result; there is no foreground fallback. The primary command retains
+its exact selected snapshot rather than switching to the current marketplace
+payload. Healthy runtime dispatch does not require the driver or permission to
+publish. Missing/older helpers, nested installation custody, pinned reads and
+no-self-provision controls refuse cold provisioning explicitly.
+
+The fixed recipe requires the default legacy root, canonical installed payload
+or selected snapshot, native staging layout and existing installer. It accepts
+neither a service option nor an arbitrary source/root. Cold custom-root and
+namespaced command provisioning require explicit installation management;
+healthy namespaced dispatch remains supported. Session bootstrap and explicit
+installer callers are separate, not migrated by command adoption.
 
 ## Verbs
 
