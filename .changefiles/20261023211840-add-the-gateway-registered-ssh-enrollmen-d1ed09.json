@@ -1,0 +1,9 @@
+{
+  "comment": "Add the Gateway-registered SSH enrollment/public-directory service, persistent admission and bounded connected-machine notifications.",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

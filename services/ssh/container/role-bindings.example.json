@@ -1,0 +1,26 @@
+{
+  "schema": "fleet-manager.role-bindings",
+  "version": 1,
+  "providers": {
+    "manager": {
+      "implementation": "komodo",
+      "instance_ref": "core-a",
+      "target": "host-a",
+      "configuration_ref": "core-config",
+      "bootstrap_ref": "independent-bootstrap"
+    }
+  },
+  "bindings": {
+    "ssh": {
+      "implementation": "container.service",
+      "provider": "manager",
+      "target": "host-a",
+      "resource": "ssh-service-stack",
+      "artifact_ref": "approved-ssh-service-image",
+      "configuration_ref": "ssh-service-config",
+      "key_refs": ["ssh-service-identity"],
+      "requires": ["container-role", "named-resource"],
+      "depends_on": []
+    }
+  }
+}

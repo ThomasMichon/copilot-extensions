@@ -1,0 +1,9 @@
+{
+  "comment": "Add strict Gateway profiles, monotonic native login authorization and principal/host-pin-verified listener consumption; converge authenticated directory notifications through both existing writers under selected local policy.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

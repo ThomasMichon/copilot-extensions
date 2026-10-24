@@ -65,7 +65,7 @@ PASSWORD_MUTATION_MAX_QUEUE_SECONDS = 30.0
 UNLOCK_REQUIRED_ACTIONS = frozenset({
     "get", "has", "search", "add", "set-password", "set-username",
     "import-key", "export-key", "list", "ls", "show", "remove", "rm",
-    "move", "mv", "identity-key-setup",
+    "move", "mv", "identity-key-setup", "ssh-key-prepare", "ssh-key-read",
 })
 
 log = logging.getLogger("agent-vault.service")  # marketplace-isolation: allow logger-namespace
@@ -574,6 +574,11 @@ class VaultService:
                 )
             except IdentityKeyError as exc:
                 return {"ok": False, "code": exc.code, "error": str(exc)}
+
+        if action in ("ssh-key-prepare", "ssh-key-read"):
+            from .ssh_key import handle_prepare_request
+
+            return handle_prepare_request(self, kpdb, group, request)
 
         if action == "get":
             entry = request.get("entry", "")

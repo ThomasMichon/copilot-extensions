@@ -99,11 +99,21 @@ jobs:
     - name: Module size (hard cap + shrink-only baseline, full sweep)
       if: steps.code-impact.outputs.run == 'true' && github.event_name != 'pull_request'
       run: python tools/check-module-size.py
-    - name: Large files (generous image cap, tight default cap, PR diff only)
+    - name: Large files (new blob objects relative to PR base)
       if: github.event_name == 'pull_request'
       run: python tools/check-large-files.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
-    - name: Large files (full sweep)
-      if: github.event_name != 'pull_request'
+    - name: Large files (new blob objects in this push)
+      if: github.event_name == 'push'
+      env:
+        BASE: ${{ github.event.before }}
+        HEAD: ${{ github.sha }}
+      run: |
+        if [[ ! "$BASE" =~ ^0+$ ]] && ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          git fetch --no-tags --depth=1 origin "$BASE"
+        fi
+        python tools/check-large-files.py --base "$BASE" --head "$HEAD"
+    - name: Large files (explicit manual full-tree audit)
+      if: github.event_name == 'workflow_dispatch'
       run: python tools/check-large-files.py --all
     - name: No agent-machines consuming-side packages in this repo
       if: steps.code-impact.outputs.run == 'true'
