@@ -65,7 +65,10 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
                     unusable = True
                     refs[field] = {"probe_error": type(exc).__name__, "errno": getattr(exc, "errno", None)}
                 else:
-                    refs[field] = (result.returncode, result.stdout.strip())
+                    head = result.stdout.strip()
+                    refs[field] = (result.returncode, head)
+                    if result.returncode or head != point.get(field.replace("_ref", "_head")):
+                        unusable = True
     return _fingerprint({"bytes": hashlib.sha256(raw).hexdigest(), "refs": refs}), unusable
 
 

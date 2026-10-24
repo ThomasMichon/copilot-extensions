@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -47,3 +48,36 @@ def test_source_lineage_settlement_requires_normal_mode_and_intact_evidence(
     assert operation.source_head == "b" * 40
     assert operation.expected_head == "c" * 40
     assert bool(operation.evidence_fingerprint) == forward
+
+
+@pytest.mark.parametrize("shape", ["legacy", "collection"])
+@pytest.mark.parametrize("field", ["local_ref", "published_ref", "lineage_ref"])
+@pytest.mark.parametrize("state", ["valid", "repointed", "missing"])
+def test_retained_ref_integrity_distinguishes_absent_and_corrupt_evidence(
+    tmp_path, monkeypatch, shape, field, state,
+):
+    pr = tracking.PRRecord(pr_id="owned-pr")
+    point = {
+        "local_ref": "refs/recovery/local", "local_head": "a" * 40,
+        "published_ref": "refs/recovery/published", "published_head": "b" * 40,
+        "lineage_ref": "refs/recovery/lineage", "lineage_head": "c" * 40,
+    }
+    path = tmp_path / "checkpoint.json"
+    path.write_text(json.dumps(
+        point if shape == "legacy" else {"checkpoints": {pr.pr_id: point}},
+    ))
+    monkeypatch.setattr(pr_recovery, "_path", lambda *a: path)
+
+    def probe(*args, **kwargs):
+        selected = next(key for key in point if key.endswith("_ref") and point[key] == args[-1])
+        head = point[selected.replace("_ref", "_head")]
+        if selected == field and state == "repointed":
+            head = "d" * 40
+        if selected == field and state == "missing":
+            return SimpleNamespace(returncode=1, stdout="")
+        return SimpleNamespace(returncode=0, stdout=head + "\n")
+
+    monkeypatch.setattr(git_ops, "git", probe)
+    fingerprint, unusable = pr_recovery_plan._evidence_snapshot(pr, "/synthetic/owned")
+    assert len(fingerprint) == 64
+    assert unusable is (state != "valid")
