@@ -27,9 +27,6 @@ while [[ "$#" -gt 0 ]]; do
             run_owner=1; expected_source="$2"; shift 2 ;;
         *) exit 2 ;;
     esac
-    if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
-        printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
-    fi
 done
 [[ "$run_owner" == 0 || "$wait_for_owner" == 0 ]] || exit 2
 [[ "$installer_action" == provision || "${#service_mode[@]}" == 0 ]] || {
@@ -65,6 +62,9 @@ case "$plugin" in
     agent-ssh) prefix=AGENT_SSH ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
+if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
+    printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
+fi
 if [[ "$plugin" == agent-ssh ]]; then
     [[ "$(query "$manifest" module)" == agent_ssh &&
         "$(query "$manifest" legacyRuntimeRoot)" == .agent-ssh &&

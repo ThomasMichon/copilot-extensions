@@ -29,7 +29,7 @@ pytestmark = pytest.mark.skipif(
 def owning_command(fixture, entry, *, custom=False):
     payload, installation, project = fixture
     if entry == "primary":
-        if custom:
+        if custom and os.name == "nt":
             installation = installation.with_name("custom-ssh")
         installer = payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
         command = command_for(installer)[:-1] + (
@@ -45,6 +45,22 @@ def owning_command(fixture, entry, *, custom=False):
         script = installation.parent / ".local" / "bin" / (
             "agent-ssh.ps1" if os.name == "nt" else "agent-ssh"
         )
+        if custom and os.name != "nt":
+            # POSIX's retained installer shifts custom options before staging.
+            # Exercise the actual shared renderer's custom-root contract instead.
+            installation = installation.with_name("custom-ssh")
+            result = subprocess.run(
+                ["/bin/bash", "-c",
+                 'source "$1"; write_simple_binstub agent-ssh agent_ssh "$2" "$3" '
+                 '"$2/bin" scripts/install.sh AGENT_SSH_NO_SELFPROVISION '
+                 '"$4/resolve-runtime.ps1" "$4/resolve-runtime.sh"',
+                 "bash", str(source / "scripts" / "installer-engine.sh"),
+                 str(installation), str(script.parent), str(source / "scripts")],
+                env=dict(os.environ), cwd=project, capture_output=True, text=True,
+                timeout=30, **agent_procutil.no_window_kwargs(),
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            (installation / "payload-dir").write_text(str(source), encoding="utf-8")
     else:
         source = payload
         script = payload / "bin" / ("agent-ssh.ps1" if os.name == "nt" else "agent-ssh")
