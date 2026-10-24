@@ -326,7 +326,7 @@ def test_actual_source_ast_selector_preserves_non_narrative_and_non_pr_execution
     execute_source_ast_selector(output, event, read_diff)
     assert output.read_text() == "run=" + str(expected).lower() + "\n"
     assert calls == ([
-        ["git", "diff", "--no-renames", "--name-only", "-z", "a" * 40, "b" * 40],
+        ["git", "diff", "--no-renames", "--name-only", "-z", "--merge-base", "a" * 40, "b" * 40],
     ] if event == "pull_request" else [])
 
 

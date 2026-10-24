@@ -1193,7 +1193,9 @@
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_scan_commands_and_outcomes_cannot_be_weakened[6-change1]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_scan_commands_and_outcomes_cannot_be_weakened[6-change2]",
     "tools/promotion_unit_tests/test_ci_contract.py::test_every_code_impact_consumer_requires_prior_selector[Marketplace isolation inventory (report-only)-report-only inventory must remain on non-PR CI without becoming a strict PR gate]",
-    "tools/promotion_unit_tests/test_ci_contract.py::test_every_code_impact_consumer_requires_prior_selector[ast-source AST guards must follow validated admission without weakening scans]"
+    "tools/promotion_unit_tests/test_ci_contract.py::test_every_code_impact_consumer_requires_prior_selector[ast-source AST guards must follow validated admission without weakening scans]",
+    "tools/promotion_unit_tests/test_contract.py::test_pr_scope_uses_merge_base_while_push_scope_retains_both_tips[pull_request-True]",
+    "tools/promotion_unit_tests/test_contract.py::test_pr_scope_uses_merge_base_while_push_scope_retains_both_tips[push-False]"
   ],
   "sources": {
     "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "d71c64cd963d2d92d4e59581b9ec427fa5edb73d0227872f87b59cef1bd20ef2",
@@ -1252,13 +1254,13 @@
     "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
     "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
     "tools/promotion_python_artifacts.py": "ae0a564c0f49a387ce744e182dab9a5c2106257399cd4b4f557354ce21739da9",
-    "tools/promotion_unit_contract.py": "1b23371621b2dbffc90e010d62be632cd3ecab04c69e92c5e91992fb4a78026f",
+    "tools/promotion_unit_contract.py": "a9b628efecfd9c6899922fb9269a4fc464b18324ab6dcbbfa0de335b740151c0",
     "tools/promotion_unit_effects.py": "bc724db0e33571f32fc80b016eb7a852935adeb08a7aa0cd4bfa4ca4513c3519",
     "tools/promotion_unit_packet.py": "9ece0640290877c82c6c4268b221eeb8a1df726ccf366985065726bd16f7e5af",
-    "tools/promotion_unit_tests/test_ci_contract.py": "5fdd9d37b1afd253ea392ed58ddb7181af945136bcd40cb562699ecbddf4a6ef",
+    "tools/promotion_unit_tests/test_ci_contract.py": "eec98fb219e6395ec7e4ca5e2a7b2f53558109629800f4867ccbaf7849e13ce0",
     "tools/promotion_unit_tests/test_collector.py": "0571c811a72e9bfa78de60f9b8fa88791141db3e52ef39e85d246736be453f23",
     "tools/promotion_unit_tests/test_config_migrate.py": "2fffbe90f4829c339f9e1905bb33c25031f9c8b8776f8661e0f3233a77c397a4",
-    "tools/promotion_unit_tests/test_contract.py": "fd9064f439aec9bbd13fcabbf29b161a2117aa1b14124dbbe3ac19677a2b2e5b",
+    "tools/promotion_unit_tests/test_contract.py": "177101218135c9e41817d33a0be0a6c3134387636a81612ab6abef561b057f3c",
     "tools/promotion_unit_tests/test_dispatch.py": "ea6025b25daa8810be340a0f7ad53f453ad5c3667e0a8b245607b7d890dba7ff",
     "tools/promotion_unit_tests/test_dropin_registry.py": "54623a8b92867d5c3090f601038873ee63722984e2aa5605ce7e78ee5a8ee210",
     "tools/promotion_unit_tests/test_effects.py": "2fbb5d87e781f3a9acc83e6194d2f0c9822e46d6d6b37a907a92a8367e9d0007",

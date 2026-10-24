@@ -25,6 +25,11 @@ tests. Markdown-only changes have no executable coverage overlap and select
 no unit tests, including nested plugin documentation, skills and root policy
 documents. Unknown, code or
 configuration impact runs only the positively admitted unit packet.
+PR impact uses the merge base of the exact event base/head commits, matching
+the provider's PR change set even when the target branch advances. Comparing
+the two tips would incorrectly include unrelated upstream code as a reverted
+change. Push impact retains its before/after comparison. Missing common
+history is a failure, never an empty-change result.
 It never falls back to standalone services, fleet, native or general plugin
 suites. Guards and the unit job remain independent and parallel. Combining
 impact and execution removes the separate planning runner and duplicate

@@ -193,3 +193,17 @@ def test_unavailable_code_guard_inputs_never_claim_no_overlap(event, base, head)
         pytest.fail("unavailable input must not be mistaken for an empty diff")
 
     assert ci_requires_code_checks(event, base, head, no_diff)
+
+
+@pytest.mark.parametrize("event,merge_base", [("pull_request", True), ("push", False)])
+def test_pr_scope_uses_merge_base_while_push_scope_retains_both_tips(event, merge_base):
+    calls = []
+
+    def read(argv):
+        calls.append(argv)
+        return b"docs/guide.md\0" if "--merge-base" in argv else b"tools/upstream.py\0docs/guide.md\0"
+
+    assert ci_requires_code_checks(event, "a" * 40, "b" * 40, read) is (not merge_base)
+    assert ("--merge-base" in calls[0]) is merge_base
+    if merge_base:
+        assert not ci_requires_units(event, "a" * 40, "b" * 40, read)
