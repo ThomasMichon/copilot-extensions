@@ -18,6 +18,11 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
         "execution_closure_sha256"
     ) != evidence.digest(evidence.encode(proof)):
         raise ValueError("HTTP-47 execution closure manifest/digest missing or invalid")
+    evidence.git_evidence.prefetch_objects(
+        identity["blob"] for identity in proof.values()
+        if isinstance(identity, dict) and isinstance(identity.get("blob"), str)
+        and re.fullmatch(r"[0-9a-f]{40}", identity["blob"])
+    )
     captured = packet["captured_from"]
     commit = captured["commit"]
     tree_result = evidence.git_evidence.git("ls-tree", "-r", commit)

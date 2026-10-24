@@ -176,7 +176,7 @@ def test_remote_cli_start_supplies_explicit_project_to_request(monkeypatch, targ
 
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "demo")
     monkeypatch.setattr(cli, "_get_caller_id", lambda: None)
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/wt#new")
     monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
     requests = []
     client = BridgeClient.__new__(BridgeClient)
@@ -198,7 +198,7 @@ def test_remote_cli_reuse_and_takeover_require_daemon_binding_resolution(monkeyp
 
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "selected")
     monkeypatch.setattr(cli, "_get_caller_id", lambda: "caller")
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/wt#new")
     monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
     requests = []
     client = BridgeClient.__new__(BridgeClient)
@@ -215,13 +215,13 @@ def test_remote_cli_reuse_and_takeover_require_daemon_binding_resolution(monkeyp
     assert requests[0][2][0]["caller_id"] == "caller"
 
 
-@pytest.mark.parametrize("version", [38, 39, 40, 41])
-def test_named_remote_reuse_keeps_legacy_daemon_continuity(monkeypatch, version):
+@pytest.mark.parametrize("version", [38, 39, 40, 41, 43])
+def test_named_remote_reuse_requires_ownership_capability(monkeypatch, version):
     from agent_bridge.client import BridgeClient
 
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "selected")
     monkeypatch.setattr(cli, "_get_caller_id", lambda: "caller")
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/wt#new")
     monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
     requests = []
     client = BridgeClient.__new__(BridgeClient)
@@ -238,9 +238,10 @@ def test_named_remote_reuse_keeps_legacy_daemon_continuity(monkeypatch, version)
         return {"session_id": "validated", "name": "example", "status": "idle"}
 
     client._request = request
-    assert _start_agent_session(client, "remote-acp:example") == (
-        "validated" if version == 41 else "legacy"
-    )
-    assert requests == [(
-        "POST" if version == 41 else "GET", "/api/v1/sessions",
-    )]
+    if version < 43:
+        with pytest.raises(BridgeClientError, match="retained remote host ownership"):
+            _start_agent_session(client, "remote-acp:example")
+        assert requests == []
+    else:
+        assert _start_agent_session(client, "remote-acp:example") == "validated"
+        assert requests == [("POST", "/api/v1/sessions")]

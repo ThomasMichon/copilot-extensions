@@ -434,11 +434,16 @@ def test_current_refresh_fixture_matches_real_http_producer_and_consumer(
     # These pre-existing optional null fields are outside the frozen projection.
     for field in ("caller_session_id", "parity_fault_result", "remote_relationship"):
         assert observed.pop(field) is None
-    assert observed == expected
+    # Linked re-attestations retain their predecessor's advertisement.
+    assert observed.pop("protocol_version") == protocol.HTTP_PROTOCOL_VERSION
+    assert observed == {key: value for key, value in expected.items() if key != "protocol_version"}
     consumed = StartSessionResponse.model_validate(response.json())
     assert consumed.creation == expected["creation"]
-    assert consumed.protocol_version == expected["protocol_version"]
+    assert consumed.protocol_version == protocol.HTTP_PROTOCOL_VERSION
     assert consumed.min_protocol_version == expected["min_protocol_version"]
+    historical = StartSessionResponse.model_validate(expected)
+    assert historical.creation == consumed.creation
+    assert historical.protocol_version == expected["protocol_version"]
     capability = fixture["capability"]
     assert fixture["captured_from"]["protocol_generation"] == 45
     assert protocol.HTTP_PROTOCOL_MIN_SUPPORTED <= 45 <= protocol.HTTP_PROTOCOL_VERSION

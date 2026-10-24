@@ -28,6 +28,14 @@ The checker still rejects unrefreshed source hashes, unjustified non-semantic
 classification, uncovered semantic changes and corrupt historical provenance.
 Never bulk-rebaseline goldens to make an implementation-only update pass.
 
+Local Git observations are batched by object and by each commit's requested
+paths, with the same per-command deadline and no lazy fetch. Hash normalization,
+actual commit/path/blob bindings, missing-object handling, and the complete
+HTTP-47 closure checks remain unchanged. The isolated maintenance replay carries
+that closure and borrows immutable local object history read-only; its own Git
+writes stay in the fixture. It exercises an ordinary CLI flow source, not a
+critical wire owner whose exact current semantic binding requires a capture.
+
 When a wire contract does change:
 
 1. Change the owning source and its tests.
@@ -287,7 +295,9 @@ HTTP packets to accommodate that bounded change.
 
 Only the three current `wrapper-authority-v1`, `wrapper-exec` and
 `wrapper-consent` fixtures and their registry hashes/provenance are written.
-Historical fixtures remain unchanged. Review these four outputs; do not replace
+The registry keeps its existing indentation; a focused capture must not reformat
+unrelated contract records. Historical fixtures remain unchanged.
+Review these four outputs; do not replace
 the captured commit with a guessed future publication commit. A squash may make
 the genuine capture commit unavailable: the checker treats historical commit
 lookup as opportunistic, verifies a resolvable blob against its SHA-256, and

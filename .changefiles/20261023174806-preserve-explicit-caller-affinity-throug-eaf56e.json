@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve explicit caller affinity through ordinary named-agent create and send, including local plugin preparation.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

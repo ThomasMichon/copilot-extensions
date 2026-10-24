@@ -354,6 +354,41 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-23 - Preserve the explicit caller through ordinary CLI creation
+
+- An actual installed Bridge local ACP launch exposed a client-side gap:
+  ordinary `create --caller` selected a delivery cursor but recomputed the
+  caller before creation. The target-native skill loaded, while the eligible
+  controller-selected plugin was absent. This failed acceptance is not credited.
+- Ordinary create and named-agent send now retain one selected caller through
+  affinity lookup, creation, conflict retry, and prompt delivery. Qualified
+  ownership checks and target-local precedence remain unchanged.
+- The corrected source CLI reached the actual installed Bridge HTTP and native
+  launch owner. It registered the original same-world controller payload path,
+  retained target disablement, and completed both projected and target-native
+  skill invocations in one child. Controller catalog, target base settings, and
+  user-global preferences remained unchanged. The successful test body ended.
+  This is candidate integration evidence, not published or installed-client
+  acceptance.
+- The directly affected CLI suites pass 315 tests. Related parser and ownership
+  fixtures now supply current immutable-invocation and qualified-owner facts.
+  Provider replay separately checks the current advertisement while retaining
+  the linked predecessor packet; no historical golden was rewritten.
+- Reconciliation with the concurrent HTTP-47 change preserves its full source
+  closure and strict critical-owner bindings. The ordinary-flow maintenance
+  fixture now carries the required tools, source inventory, and read-only local
+  object history. Batched local Git observations make the full 583-fixture check
+  complete in about 31 seconds without increasing its per-command deadline or
+  the fixture's 90-second check limit. Nine focused maintenance/batch tests,
+  41 existing checker regressions, and 331 reconciled client/capture tests pass.
+- The owned authority capture refreshes only its three current vectors and
+  their registry records from a real committed source checkpoint, reproducing
+  the output without writes and retaining the registry's existing indentation.
+- The final complete guard tier passes 391 tests with nine expected skips.
+- Publication, authorized rollout, deployed local acceptance, the remaining
+  headed/SSH/privileged lanes, and the blocked trusted-container proof remain
+  open.
+
 ### 2026-10-23 - Prepare the remote-container controller and isolate bootstrap failure
 
 - The operator selected a remote container host and a client-only controller

@@ -256,6 +256,7 @@ def _start_agent_session(
     worktree_id: str | None = None,
     agent_inventory: list[dict] | None = None,
     sender_preference: _SenderPreference | None = None,
+    caller_id: str | None = None,
 ) -> str:
     core = _core()
     from .client import BridgeClientError
@@ -266,7 +267,8 @@ def _start_agent_session(
     if sender_preference is not None and sender_preference.agent_name != agent_name:
         print("[FAIL] Prepared sender preference belongs to a different target.", file=sys.stderr)
         raise SystemExit(2)
-    caller_id = core._get_caller_id()
+    if caller_id is None:
+        caller_id = core._get_caller_id()
     caller_owner_ref = core._worktrees_get("owner-ref") if is_remote_address(agent_name) else None
     if is_remote_address(agent_name):
         from .protocol import REMOTE_ACP_OWNERSHIP_PROTOCOL_VERSION
@@ -355,6 +357,7 @@ def _start_agent_session(
                     worktree_id=worktree_id,
                     agent_inventory=agent_inventory,
                     sender_preference=sender_preference,
+                    caller_id=caller_id,
                 )
             if session.get("status", "") == "running":
                 if not force:
@@ -378,6 +381,7 @@ def _start_agent_session(
                     worktree_id=worktree_id,
                     agent_inventory=agent_inventory,
                     sender_preference=sender_preference,
+                    caller_id=caller_id,
                 )
             return _reuse_existing(client, session, agent_name)
         raise

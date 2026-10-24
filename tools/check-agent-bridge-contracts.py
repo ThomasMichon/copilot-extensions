@@ -890,6 +890,17 @@ def check(base_ref: str | None = None) -> tuple[int, list[str], int, int]:
     if not isinstance(contracts, list) or not contracts:
         errors.append("registry.contracts: must be a non-empty array")
         contracts = []
+    _eg.prefetch_sources(
+        (row["commit"], row["source_path"], row["source_git_blob"])
+        for contract in contracts if isinstance(contract, dict)
+        for row in (
+            contract["provenance"] if isinstance(contract.get("provenance"), list) else []
+        ) if isinstance(row, dict)
+        and isinstance(row.get("commit"), str) and _GIT_OBJECT_RE.fullmatch(row["commit"])
+        and isinstance(row.get("source_path"), str) and row["source_path"]
+        and isinstance(row.get("source_git_blob"), str)
+        and _GIT_OBJECT_RE.fullmatch(row["source_git_blob"])
+    )
     for index, contract in enumerate(contracts):
         count, _ = _validate_contract(
             contract, index, errors, ids, authorities, source_paths
