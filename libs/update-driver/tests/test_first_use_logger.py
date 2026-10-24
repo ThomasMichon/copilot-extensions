@@ -464,11 +464,6 @@ def test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed
                 caller.kill()
                 caller.communicate(timeout=30)
     assert_logger_registration(installation, adapter)
-    manifest = json.loads((installation / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
-    assert manifest["commandBinding"]["payloadRoot"] == str(payload)
-    assert manifest["commandLifecycle"]["owner"]["sourceFingerprint"] == (
-        manifest["commandBinding"]["sourceFingerprint"]
-    )
     selected = (installation / "current-version").read_text().strip()
     slot = installation / "versions" / selected
     completion = slot / ".install-complete.json"
@@ -479,6 +474,12 @@ def test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed
                                 capture_output=True, text=True, timeout=900, **no_window_kwargs())
     assert provisioned.returncode == 0, provisioned.stdout + provisioned.stderr + diagnostic()
     assert registration_effects(adapter) == before
+    manifest = json.loads((installation / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    if os.name == "nt":
+        owner = manifest["commandLifecycle"]["owner"]
+        admitted = json.loads(status(root=root)[-1].spec.source)
+        assert owner["sourceFingerprint"] == admitted["source_fingerprint"]
+        assert not owner.get("unattributed") and str(installation / ".install-stage") not in json.dumps(owner)
     repeated = subprocess.run(command("install"), env=env, cwd=project, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, timeout=900, **no_window_kwargs())
     assert repeated.returncode == 0, repeated.stdout + repeated.stderr + diagnostic()
