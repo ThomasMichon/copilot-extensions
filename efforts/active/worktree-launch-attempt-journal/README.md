@@ -238,3 +238,14 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 - This module is not yet called by confirmation, engine or launch owners.
   No installed prompt-loss repair, remote parity, complete retention feature
   or inspection/sweep surface is claimed by this foundation.
+- Foundation review exposed a wildcard schema-prefix error and a stale
+  existence observation during concurrent publication. Literal-prefix matching
+  now refuses lookalike tables, views, indexes and triggers, including an expiry
+  trigger that would otherwise retain private input. The sidecar check refreshes
+  main-file existence before declaring an orphan. Deterministic regressions
+  cover both cases.
+- A loaded concurrent-write check also showed that the initial 100ms SQLite
+  contention deadline could reject legitimate first writers. Reuse the existing
+  private-history five-second contention convention instead; the required UI
+  acknowledgement remains asynchronous and separate. The focused storage
+  portfolio passes 46 cases with three platform/privilege skips.

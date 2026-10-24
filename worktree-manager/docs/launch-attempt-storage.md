@@ -19,8 +19,9 @@ The intent and initial `confirmed` observation commit in one SQLite transaction,
 with `synchronous=FULL` and DELETE journaling. An initialized, protected database
 is published atomically. Existing unrelated schemas, uninitialized files,
 orphaned sidecars, unsafe links and incompatible journal modes are errors,
-not empty history or permission to reset a store. Writer contention has a short
-SQLite deadline and surfaces failure. Callers must preserve drafts and refuse
+not empty history or permission to reset a store. Writer contention uses the
+existing private-history convention of a five-second SQLite deadline and
+surfaces failure. Callers must preserve drafts and refuse
 launch effects until required intent persistence succeeds.
 
 `append` records structured owner/phase observations and a small allowlist of

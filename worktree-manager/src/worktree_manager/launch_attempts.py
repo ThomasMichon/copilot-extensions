@@ -116,7 +116,9 @@ class LaunchAttempts:
             sidecar = self.path.with_name(self.path.name + suffix)
             reject_links(sidecar)
             if sidecar.exists() and not exists:
-                raise LaunchAttemptError("Launch journal is missing but a SQLite sidecar remains.")
+                exists = self.path.exists()
+                if not exists:
+                    raise LaunchAttemptError("Launch journal is missing but a SQLite sidecar remains.")
         return exists
 
     def _protect(self) -> None:
@@ -145,7 +147,7 @@ class LaunchAttempts:
     @staticmethod
     def _schema(connection: sqlite3.Connection) -> None:
         objects = dict(connection.execute(
-            "SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+            "SELECT name, sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
         ))
         if (
             connection.execute("PRAGMA application_id").fetchone()[0] != _APPLICATION_ID
@@ -190,7 +192,7 @@ class LaunchAttempts:
             self._verify_private()
         mode = "rw" if write else "ro"
         with closing(sqlite3.connect(
-            self.path.absolute().as_uri() + f"?mode={mode}", uri=True, timeout=0.1,
+            self.path.absolute().as_uri() + f"?mode={mode}", uri=True, timeout=5,
         )) as connection, connection:
             connection.row_factory = sqlite3.Row
             if write:

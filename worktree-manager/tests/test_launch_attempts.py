@@ -142,6 +142,29 @@ def test_concurrent_first_writers_publish_one_complete_database_and_all_intents(
     assert list(store.path.parent.iterdir()) == [store.path]
 
 
+def test_initial_existence_observation_can_lag_a_concurrent_publish_and_journal(tmp_path, monkeypatch):
+    store = journal.LaunchAttempts(tmp_path)
+    attempt_id = record(store)
+    exists = type(store.path).exists
+    stale = []
+    def stale_first_observation(path):
+        if path == store.path and not stale:
+            stale.append(path)
+            return False
+        return exists(path)
+    with sqlite3.connect(store.path) as writer:
+        writer.execute(
+            "INSERT INTO events(attempt_id, observed_at, owner, phase, details) "
+            "VALUES (?, ?, 'manager', 'unknown', '{}')", (attempt_id, journal.time.time()),
+        )
+        assert store.path.with_name(store.path.name + "-journal").exists()
+        with monkeypatch.context() as patch:
+            patch.setattr(type(store.path), "exists", stale_first_observation)
+            assert store._exists() is True
+    assert stale == [store.path]
+    assert len(store.entries()) == 1
+
+
 @pytest.mark.parametrize("action", [
     "new", "resume", "open", "restore", "base", "bare-resume", "open-venue",
 ])
@@ -273,6 +296,45 @@ def test_corrupt_or_foreign_state_is_never_adopted_or_repaired(tmp_path, kind):
         assert store.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("statement", [
+    "CREATE TABLE sqlitex_hidden(value TEXT)",
+    "CREATE VIEW sqlitex_hidden AS SELECT 'example' AS value",
+    "CREATE INDEX sqlitex_hidden ON attempts(project)",
+    "CREATE TRIGGER sqlitex_hidden BEFORE UPDATE ON attempts BEGIN SELECT 1; END",
+])
+def test_schema_rejects_sqlite_prefix_lookalike_objects(tmp_path, statement):
+    store = journal.LaunchAttempts(tmp_path)
+    record(store)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(statement)
+    before = store.path.read_bytes()
+    for operation in (store.entries, lambda: record(store), store.expire):
+        with pytest.raises(journal.LaunchAttemptError, match="schema"):
+            operation()
+        assert store.path.read_bytes() == before
+
+
+def test_lookalike_archive_trigger_cannot_copy_expiring_private_input(tmp_path, monkeypatch):
+    store = journal.LaunchAttempts(tmp_path)
+    clock = 2_000_000_000.0
+    monkeypatch.setattr(journal.time, "time", lambda: clock)
+    attempt_id = record(store)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("CREATE TABLE sqlitex_archive(value TEXT)")
+        connection.execute(
+            "CREATE TRIGGER sqlitex_keep AFTER UPDATE OF inputs ON attempts "
+            "BEGIN INSERT INTO sqlitex_archive VALUES (OLD.inputs); END"
+        )
+    clock += journal.RETENTION_SECONDS
+    with pytest.raises(journal.LaunchAttemptError, match="schema"):
+        store.expire()
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT count(*) FROM sqlitex_archive").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT inputs IS NOT NULL FROM attempts WHERE attempt_id=?", (attempt_id,),
+        ).fetchone()[0] == 1
+
+
 @pytest.mark.parametrize("statement,value", [
     ("UPDATE attempts SET action=?", "unexpected"),
     ("UPDATE attempts SET is_local=?", 3),
@@ -319,13 +381,22 @@ def test_intent_and_first_event_are_one_rollback_boundary(tmp_path, monkeypatch)
     assert list(store.path.parent.iterdir()) == [store.path]
 
 
-def test_lock_contention_refuses_without_losing_the_prior_attempt(tmp_path):
+def test_lock_contention_refuses_without_losing_the_prior_attempt(tmp_path, monkeypatch):
     store = journal.LaunchAttempts(tmp_path)
     original = record(store)
+    connect = sqlite3.connect
+    observed = []
+    def short_contention_probe(*args, **kwargs):
+        assert kwargs["timeout"] == 5
+        observed.append(kwargs["timeout"])
+        return connect(*args, **{**kwargs, "timeout": 0.01})
     with sqlite3.connect(store.path) as lock:
         lock.execute("BEGIN IMMEDIATE")
-        with pytest.raises(journal.LaunchAttemptError, match="not been authorized"):
-            record(store)
+        with monkeypatch.context() as patch:
+            patch.setattr(journal.sqlite3, "connect", short_contention_probe)
+            with pytest.raises(journal.LaunchAttemptError, match="not been authorized"):
+                record(store)
+    assert observed == [5]
     assert [row["attempt_id"] for row in store.entries()] == [original]
 
 
