@@ -309,6 +309,15 @@ def test_native_index_five_project_release_closure_uses_library_changefile(repo)
         "name": "native-index", "version": "0.10.76-dev1",
     }), encoding="utf-8")
     accumulate_bumps._write_project_version(plugin / "pyproject.toml", "0.10.76-dev1")
+    accumulate_bumps._write_project_version(
+        repo / "libs/agent-procutil/pyproject.toml", "0.1.0-dev7",
+    )
+    service = tomllib.loads((repo / "services/index/pyproject.toml").read_text())["project"]
+    required = next(
+        Requirement(value) for value in service["dependencies"]
+        if Requirement(value).name == "agent-procutil"
+    )
+    assert not required.specifier.contains(Version("0.1.0.dev7"), prereleases=True)
     for relative in (
         "plugins/native-index/src/agent_index/http_auth.py",
     ):
