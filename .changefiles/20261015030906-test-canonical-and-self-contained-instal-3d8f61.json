@@ -32,6 +32,14 @@
     {
       "plugin": "agent-vault",
       "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
     }
   ]
 }
