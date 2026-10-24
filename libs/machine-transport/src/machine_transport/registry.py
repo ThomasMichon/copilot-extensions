@@ -91,11 +91,15 @@ _Machine = TypeVar("_Machine", bound=MachineIdentity)
 def _profile_conflicts(entry: MachineIdentity, name: str, environment: str) -> bool:
     if name.casefold() == entry.key.casefold():
         return False
-    return any(
-        env.alias.casefold() == name.casefold() and bool(env.name.strip())
-        and normalize_environment(env.name) != environment
-        for env in getattr(entry, "ssh_environments", ())
-    )
+    for env in getattr(entry, "ssh_environments", ()):
+        if not isinstance(env.alias, str) or env.alias.casefold() != name.casefold() or env.name is None:
+            continue
+        if not isinstance(env.name, str):
+            raise ValueError("SSH environment name must be a string or null")
+        profile_environment = normalize_environment(env.name)
+        if profile_environment and profile_environment != environment:
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -665,7 +669,7 @@ def resolve_machine_selection(
             raise ValueError(f"registered machine {raw!r} conflicts with the requested environment")
         if wanted and implied and implied != wanted:
             profile_only = raw.casefold() != direct.key.casefold() and any(
-                raw.casefold() == env.alias.casefold()
+                isinstance(env.alias, str) and raw.casefold() == env.alias.casefold()
                 for env in getattr(direct, "ssh_environments", ())
             )
             physical = raw.casefold() == entry_physical_host(direct).casefold()

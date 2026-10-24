@@ -117,7 +117,9 @@ or presentation conversion cannot bypass that check. The scan includes other
 entries' projected execution keys, not just their original presentation labels.
 Registry-key whitespace does not change a literal OS observation.
 An unnamed legacy SSH
-profile does not assert a contradictory environment.
+profile does not assert a contradictory environment. Legacy null profile names
+and aliases remain absent metadata, not fabricated identity labels or foreign
+environment assertions; invalid selected non-string names raise `ValueError`.
 Aliases of a literal observed host retain the same naming facts; an explicit
 profile/environment conflict is still a refusal. Actual-platform entries take precedence over
 unscoped native fallbacks, and a selected entry keeps its registry key rather

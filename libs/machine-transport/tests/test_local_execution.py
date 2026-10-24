@@ -7,6 +7,7 @@ from machine_transport import (
     MachineEntry,
     SSHEnvironment,
     normalize_machine_entries,
+    parse_machines_yaml,
     resolve_local_execution_context,
     resolve_machine_selection,
 )
@@ -404,6 +405,51 @@ def test_unnamed_profile_does_not_assert_a_conflicting_environment(environment: 
         {key: entry}, hostname="raw-host", environment=environment, configured_machine="generic",
     )
     assert (context.machine, context.execution_machine, context.customization_key) == ("desk", key, key)
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("nullable", ["name", "alias", "both"])
+@pytest.mark.parametrize("policy", ["preserved", "required-alias"])
+def test_legacy_nullable_profile_metadata_remains_non_authoritative(
+    environment: str, nullable: str, policy: str,
+) -> None:
+    name = None if nullable in ("name", "both") else environment
+    alias = None if nullable in ("alias", "both") else "profile"
+    entries = parse_machines_yaml({"machines": {"desk": {
+        "alias": "friendly", "hostname": "raw-host",
+        "ssh": {"environments": [{"name": name, "alias": alias}]},
+    }}}, preserve_environment_values=policy == "preserved",
+        require_alias=policy == "required-alias", keep_unnamed_environments=True)
+    query = alias or "friendly"
+    selected = resolve_machine_selection(entries, query, environment)
+    assert (selected.target.machine, selected.target.environment) == ("desk", environment)
+    context = resolve_local_execution_context(
+        entries, hostname="raw-host", environment=environment, configured_machine=query,
+    )
+    assert (context.machine, context.environment, context.execution_machine) == (
+        "desk", environment, "desk-wsl" if environment == "wsl" else "desk",
+    )
+    profile = entries["desk"].ssh_environments[0]
+    assert (profile.name, profile.alias) == (name, alias)
+
+
+@pytest.mark.parametrize("policy", ["preserved", "required-alias"])
+def test_nullable_profile_alias_does_not_hide_an_explicit_platform_conflict(policy: str) -> None:
+    entries = parse_machines_yaml({"machines": {"native": {
+        "alias": "friendly", "execution_platform": "windows",
+        "ssh": {"environments": [{"name": "windows", "alias": None}]},
+    }}}, preserve_environment_values=policy == "preserved", require_alias=policy == "required-alias")
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_machine_selection(entries, "friendly", "wsl")
+
+
+@pytest.mark.parametrize("policy", ["preserved", "required-alias"])
+def test_non_string_profile_environment_is_an_explicit_validation_error(policy: str) -> None:
+    entries = parse_machines_yaml({"machines": {"desk": {
+        "ssh": {"environments": [{"name": 123, "alias": "profile"}]},
+    }}}, preserve_environment_values=policy == "preserved", require_alias=policy == "required-alias")
+    with pytest.raises(ValueError, match="string or null"):
+        resolve_machine_selection(entries, "profile", "linux")
 
 
 @pytest.mark.parametrize("configured", [False, True])
