@@ -590,3 +590,22 @@ new authority or ownership behavior requires a separate proposal.
   historical first-message order. Multiple logical handoff episodes under one
   native session ID are refused, not implemented as another ledger. This
   initialization boundary remains explicit for coordinator acceptance.
+
+### Current-source test preparation, no native execution
+
+- The metadata implementation published at `b12982076` passed source CI and
+  current-head Copilot review5637716402 with no open issues. All review threads
+  were resolved without clearing the separate native/installed/platform holds.
+- Added a test-local factor hook with default1 and exact `1|2|3` spelling.
+  It validates matching explicit client/provider experimental time constants
+  before resident construction and scales only test wall-clock guards and
+  monkeypatched in-process lock/scan/pre-effect budgets. Production sources,
+  limits and defaults remain unchanged; factor3 is never an automatic retry.
+- Actual elapsed/callback measurements remain unscaled, with separate nominal
+  and experiment budgets/outcomes. Negative scan delay stays above the active
+  scan budget; polling cadence and semantic resource/custody/cleanup assertions
+  do not change. The native case inventory remains33.
+- Pure factor/fixture-contract checks and the existing driver's syntax/argument
+  smoke mode do not construct a resident, import the observer, invoke a backend,
+  connect to an SDK host or create a native session. Preparation is not native
+  execution permission or evidence of passing the retained failed gates.

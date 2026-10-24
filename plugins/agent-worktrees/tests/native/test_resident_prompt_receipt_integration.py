@@ -20,6 +20,7 @@ import pytest
 
 from agent_worktrees import config, handoff_prompt_receipt, handoff_trace, installer, tracking
 from agent_procutil.owned_process import run_caller_owned
+from receipt_budget_fixture import receipt_budget_factor, validate_receipt_fixture_budgets
 
 
 def load_provider(name, monkeypatch):
@@ -40,6 +41,18 @@ def load_provider(name, monkeypatch):
 
 @pytest.fixture
 def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
+    factor = receipt_budget_factor()
+    provider_root = os.environ.get("RECEIPT_PROVIDER_SOURCE") or (
+        Path(__file__).parents[2] / "src" / "agent_worktrees"
+    )
+    budgets = validate_receipt_fixture_budgets(
+        os.environ["RECEIPT_CLIENT_ROOT"], provider_root, factor,
+    )
+    for name, nominal in (
+        ("MAX_LOCK_SECONDS", 0.1), ("MAX_SCAN_SECONDS", 0.2),
+        ("MAX_PRE_EFFECT_SECONDS", 1.0),
+    ):
+        monkeypatch.setattr(handoff_prompt_receipt, name, nominal * factor)
     adapter = load_provider("handoff_prompt_receipt_control", monkeypatch)
     control = load_provider("status_monitor_cutover", monkeypatch)
     node = shutil.which("node")
@@ -78,6 +91,7 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
                             release_sync=release_sync, counts=counts, cancel_path=None,
                             hold_backend=False, release_backend=threading.Event(),
                             oversized_reply=False)
+    state.factor = factor
     popen = subprocess.Popen
     driver = Path(__file__).with_name("receipt_node_driver.mjs")
 
@@ -101,7 +115,7 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
             hold_sync.set()
             if state.cancel_path is not None:
                 state.cancel_path.write_text("admitted", encoding="utf-8")
-            assert release_sync.wait(8), "fixture fsync was not released"
+            assert release_sync.wait(8 * factor), "fixture fsync was not released"
         fsync(fd)
 
     monkeypatch.setattr(handoff_prompt_receipt.os, "fsync", controlled_sync)
@@ -111,7 +125,7 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         counts["maxActive"] = max(counts["maxActive"], runtime.active_count())
         counts["record" if kwargs["record"] else "query"] += 1
         if state.hold_backend:
-            assert state.release_backend.wait(8), "fixture backend was not released"
+            assert state.release_backend.wait(8 * factor), "fixture backend was not released"
         return handoff_prompt_receipt.resident_prompt_receipt(*args, **kwargs)
 
     runtime = adapter.ReceiptControl(lambda: dict(owner), backend=backend)
@@ -181,11 +195,12 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
             "locator": locator, "pending": pending or {}, "concurrent": concurrent,
             "distinct": distinct,
             "callback": callback,
+            "budgetFactor": factor,
             "cancelBefore": cancel_before,
             **({"cancelFile": str(state.cancel_path)} if state.cancel_path is not None else {}),
         }), encoding="utf-8")
         result = run_caller_owned(
-            [node, str(driver), str(request_file)], timeout=6,
+            [node, str(driver), str(request_file)], timeout=6 * factor,
             max_stdout_bytes=16384, max_stderr_bytes=16384,
         )
         assert result.returncode == 0, result.stderr
@@ -195,9 +210,14 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
             "elapsedMs": value["elapsedMs"], "helperCalls": value["helperCalls"],
             "socketCalls": value["socketCalls"], "callbackMs": value.get("callbackMs"),
             "active": runtime.active_count(), "counts": dict(counts),
+            **budgets, "nominalMet": value["nominalMet"], "scaledMet": value["scaledMet"],
+            "callbackNominalMet": value["callbackNominalMet"],
+            "callbackScaledMet": value["callbackScaledMet"],
+            "metadataMode": value["metadataMode"],
         }), flush=True)
         assert value["helperCalls"] == 0
-        assert value["elapsedMs"] < 2000
+        assert value["budgetFactor"] == factor
+        assert value["elapsedMs"] < 2000 * factor
         return value
 
     state.observe = observe
@@ -224,7 +244,7 @@ def resident(sample_record, tmp_tracking_dir, tmp_path, monkeypatch):
         runtime.wait_idle()
         assert runtime.active_count() == 0
         assert not server.thread.is_alive()
-        end = time.monotonic() + 2
+        end = time.monotonic() + 2 * factor
         while any(thread.ident not in threads_before for thread in threading.enumerate()):
             assert time.monotonic() < end, "owned fixture handler did not settle"
             time.sleep(0.01)
@@ -276,7 +296,7 @@ def test_exact_pending_successor_is_supported_without_head_promotion(resident):
     tracking.save_record(resident.record, resident.record_path)
     observed = resident.observe(callback=True)
     assert observed["status"] == "logged"
-    assert observed["callbackBeforeIO"] is True and observed["callbackMs"] < 100
+    assert observed["callbackBeforeIO"] is True and observed["callbackMs"] < 100 * resident.factor
     assert observed["socketCalls"] == 2
     assert tracking.load_record(resident.record_path).head_session == "different-head"
 
@@ -290,7 +310,7 @@ def test_disconnected_client_drain_keeps_real_fsync_owned_until_settlement(resid
     assert resident.observe(pending=first["pending"])["status"] == "unknown"
     assert resident.runtime.active_count() == 1
     resident.release_sync.set()
-    end = time.monotonic() + 3
+    end = time.monotonic() + 3 * resident.factor
     while resident.runtime.active_count():
         assert time.monotonic() < end
         time.sleep(0.01)
@@ -349,7 +369,7 @@ def test_total_scan_budgets_through_actual_server(resident, monkeypatch, limit):
 
         def slow_loads(data, *args, **kwargs):
             if threading.current_thread() is not threading.main_thread() and data == b"{}\n":
-                time.sleep(0.21)
+                time.sleep(0.21 * resident.factor)
             return loads(data, *args, **kwargs)
 
         monkeypatch.setattr(handoff_prompt_receipt.json, "loads", slow_loads)
@@ -506,7 +526,7 @@ def test_actual_registration_producer_composes_with_resident_and_node(registrati
     assert tracking._load_record_uncached(resident.record_path).resolved_head_session == "different-head"
     observed = resident.observe(callback=True)
     assert observed["status"] == "logged"
-    assert observed["callbackBeforeIO"] is True and observed["callbackMs"] < 100
+    assert observed["callbackBeforeIO"] is True and observed["callbackMs"] < 100 * resident.factor
     assert observed["socketCalls"] == 2
     assert resident.counts["record"] == 1 and resident.counts["helpers"] == 0
 
@@ -563,7 +583,7 @@ def test_actual_server_receipt_request_frame_boundary(resident, frame_size):
     payload = {
         "contractVersion": 1, "operation": "record",
         "subject": {**resident.subject, "locator": "task:frame"},
-        "expectedOwner": resident.owner, "remainingMs": 1000,
+        "expectedOwner": resident.owner, "remainingMs": 1000 * resident.factor,
     }
     data = json.dumps({
         "version": 1, "token": "fixture-token",
@@ -571,7 +591,7 @@ def test_actual_server_receipt_request_frame_boundary(resident, frame_size):
     }).encode("utf-8")
     data += b" " * (frame_size - len(data) - 1) + b"\n"
     assert len(data) == frame_size
-    with socket.create_connection(("127.0.0.1", resident.port), timeout=2) as peer:
+    with socket.create_connection(("127.0.0.1", resident.port), timeout=2 * resident.factor) as peer:
         peer.sendall(data)
         with peer.makefile("rb") as response:
             raw = response.readline(8193)

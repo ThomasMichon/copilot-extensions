@@ -87,3 +87,20 @@ owned provider can be supplied through `RECEIPT_PROVIDER_SOURCE` as an
 immutable, byte-verified source fixture; it is never a production fallback.
 These contained source tests do not establish installed/native-host readiness
 or authorize enabling the backend's ready capability.
+
+The native fixture alone accepts `RECEIPT_TEST_BUDGET_FACTOR=1|2|3` (default
+`1`, exact integer spelling). It verifies that explicitly selected experimental
+client/provider copies have matching observation/reserve/caller time constants
+before constructing a resident. Only its in-process lock/scan/pre-effect
+budgets and wall-clock test guards scale; production files/defaults, polling
+cadences and all byte/row/count/identity/custody/cleanup assertions stay intact.
+The deliberately slow scan remains above the active scan budget. Raw elapsed
+and callback measurements are never normalized; nominal and experiment budgets
+and outcomes are reported separately. A scaled pass is not a nominal pass, and
+factor `3` requires separate run authorization rather than automatic retry.
+
+Pure `tests/test_receipt_budget_fixture.py`, Node syntax checks, and the existing
+driver's `--fixture-contract-smoke` mode validate factor/argument representation
+without importing the observer, opening a socket, creating a native session or
+invoking the backend. Fixture preparation and smoke validation are not permission
+to execute the native selector.
