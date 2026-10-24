@@ -49,13 +49,25 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
     point = None
     if isinstance(data, dict):
         points = data.get("checkpoints")
-        point = points.get(pr.pr_id) if isinstance(points, dict) else data
+        point = points.get(pr.pr_id) if isinstance(points, dict) else (
+            data if data.get("pr_id") == pr.pr_id else None
+        )
     refs = {}
     unusable = False
     if isinstance(point, dict):
+        if point.get("pr_id") != pr.pr_id:
+            unusable = True
+        if any(
+            not isinstance(point.get(field), str)
+            or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", point[field])
+            for field in ("local_head", "target_head", "published_head", "lineage_head", "synced_head")
+        ):
+            unusable = True
         for field in ("local_ref", "published_ref", "lineage_ref"):
             ref = point.get(field)
-            if isinstance(ref, str) and ref:
+            if not isinstance(ref, str) or not ref:
+                unusable = True
+            else:
                 try:
                     result = git_ops.git(
                         "--no-replace-objects", "rev-parse", "--verify", "--end-of-options",
@@ -69,6 +81,26 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
                     refs[field] = (result.returncode, head)
                     if result.returncode or head != point.get(field.replace("_ref", "_head")):
                         unusable = True
+        if not unusable:
+            try:
+                commits = pr_recovery._commits((
+                    point["local_ref"], point["published_ref"], point["lineage_ref"],
+                    point["target_head"], point["synced_head"],
+                ), cwd)
+                lineage = git_ops.is_commit_ancestor(
+                    point["published_head"], point["lineage_head"], cwd=cwd,
+                )
+                target = git_ops.is_commit_ancestor(
+                    point["target_head"], point["synced_head"], cwd=cwd,
+                )
+                refs["integrity"] = (commits, lineage, target)
+                if commits != tuple(point[field] for field in (
+                    "local_head", "published_head", "lineage_head", "target_head", "synced_head",
+                )) or not lineage or not target:
+                    unusable = True
+            except (ValueError, OSError, git_ops.GitError) as exc:
+                refs["integrity"] = {"probe_error": type(exc).__name__, "errno": getattr(exc, "errno", None)}
+                unusable = True
     return _fingerprint({"bytes": hashlib.sha256(raw).hexdigest(), "refs": refs}), unusable
 
 
@@ -91,8 +123,10 @@ def build(
         if unusable:
             point = None
             output.warn(
-                "Recovery settlement evidence is unusable; the preview requires explicit rewrite sign-off. "
-                "Historical evidence is preserved, not repaired or treated as publication authority."
+                ("Recovery settlement evidence is unusable; normal publication is refused. "
+                 if routine else
+                 "Recovery settlement evidence is unusable; the preview requires explicit rewrite sign-off. ")
+                + "Historical evidence is preserved, not repaired or treated as publication authority."
             )
         if point is not None and point.synced_head != expected_head:
             point = None
