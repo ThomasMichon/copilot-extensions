@@ -10,9 +10,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
+import time
 import unittest
 from unittest import mock
 import uuid
@@ -63,6 +65,11 @@ class ContractTests(unittest.TestCase):
     def setUp(self):
         self.work = ROOT.parents[1] / ".trusted-base-test-runs" / uuid.uuid4().hex
         self.work.mkdir(parents=True)
+        if os.name == "nt":
+            # The real builder requires Linux's directory durability primitive.
+            patch = mock.patch.object(builder, "fsync_directory")
+            patch.start()
+            self.addCleanup(patch.stop)
         self.files = builder.context_files()
         self.inputs = {"schema_version": 1, "source_revision": "a" * 40,
                        "context_sha256": builder.context_digest(self.files),
@@ -160,6 +167,159 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(subprocess.TimeoutExpired):
             builder.execute([sys.executable, "-B", "-c", "import time; time.sleep(60)"], timeout=0.1)
 
+    def test_actual_descendant_pipe_timeout_is_bounded_and_contained(self):
+        pid_file = self.work / "descendant.pid"
+        descendant = (
+            "import os,pathlib,signal,sys,time; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)"
+        )
+        parent = (
+            "import os,pathlib,subprocess,sys,time; "
+            "flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}; "
+            "subprocess.Popen([sys.executable,'-B','-c',sys.argv[1],sys.argv[2]], "
+            "stdin=subprocess.DEVNULL, **flags); "
+            "path=pathlib.Path(sys.argv[2]); "
+            "exec('while not path.exists(): time.sleep(0.01)')"
+        )
+        started = time.monotonic()
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                builder.execute([sys.executable, "-B", "-c", parent, descendant, str(pid_file)],
+                                timeout=1)
+            self.assertLess(time.monotonic() - started, 5)
+            pid = int(pid_file.read_text())
+            if os.name == "nt":
+                import ctypes
+                from ctypes import wintypes
+                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+                kernel.OpenProcess.restype = wintypes.HANDLE
+                kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+                kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+                handle = kernel.OpenProcess(0x00100000, False, pid)
+                if handle:
+                    try:
+                        self.assertEqual(kernel.WaitForSingleObject(handle, 2000), 0)
+                    finally:
+                        kernel.CloseHandle(handle)
+            else:
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    # An orphan awaiting its system reaper is no longer executing.
+                    stat = Path("/proc") / str(pid) / "stat"
+                    if stat.exists() and stat.read_text().split(") ", 1)[1].startswith("Z "):
+                        break
+                    time.sleep(0.01)
+                else:
+                    self.fail("Invocation-owned descendant survived cleanup")
+        finally:
+            if pid_file.exists() and os.name != "nt":
+                try:
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_cleanup_bounds_final_pipe_drain_and_child_wait(self):
+        process = mock.Mock()
+        process.pid = 123
+        process.communicate.side_effect = [
+            subprocess.TimeoutExpired(["fixture"], 0.1),
+            subprocess.TimeoutExpired(["fixture"], builder.CLEANUP_TIMEOUT),
+            subprocess.TimeoutExpired(["fixture"], builder.CLEANUP_TIMEOUT),
+        ]
+        process.poll.return_value = None
+        process.wait.side_effect = subprocess.TimeoutExpired(["fixture"], builder.CLEANUP_TIMEOUT)
+        with mock.patch.object(builder.subprocess, "Popen", return_value=process):
+            with self.assertRaises(subprocess.TimeoutExpired) as caught:
+                builder.execute_contained(["fixture"], ["fixture"], 0.1, mock.Mock(), mock.Mock())
+        self.assertEqual(caught.exception.timeout, 0.1)
+        self.assertEqual([call.kwargs["timeout"] for call in process.communicate.call_args_list],
+                         [0.1, builder.CLEANUP_TIMEOUT, builder.CLEANUP_TIMEOUT])
+        process.wait.assert_called_once_with(timeout=builder.CLEANUP_TIMEOUT)
+
+    def test_output_and_receipt_directory_entries_sync_before_buildx(self):
+        output = self.work / "new-parent" / "new-child" / "artifact"
+        events = []
+        real_fsync = os.fsync
+
+        def sync_file(descriptor):
+            events.append("file")
+            real_fsync(descriptor)
+
+        def sync_directory(path):
+            events.append(path)
+
+        def runner(argv, *, timeout):
+            if argv[3:5] != ["buildx", "build"]:
+                return self.inspect(argv)
+            self.assertEqual(events, [self.work, output.parent.parent, output.parent,
+                                      "file", output])
+            self.assertEqual(json.loads((output / "build-receipt.json").read_text())["status"],
+                             "build-started-outcome-unconfirmed")
+            archive(output / "image.oci.tar")
+            return ""
+
+        with mock.patch.object(builder.os, "fsync", side_effect=sync_file):
+            with mock.patch.object(builder, "fsync_directory", side_effect=sync_directory):
+                builder.build(self.inputs, output, runner=runner, now=NOW)
+        self.assertEqual(events[-2:], ["file", output])
+
+    def test_failed_directory_sync_never_launches_buildx(self):
+        for failure in ("ancestor", "receipt"):
+            with self.subTest(failure=failure):
+                output = self.work / failure / "artifact"
+                build_calls = []
+
+                def sync_directory(path):
+                    if (failure == "ancestor" and path == self.work) or path == output:
+                        raise OSError("directory durability unavailable")
+
+                def runner(argv, *, timeout):
+                    if argv[3:5] == ["buildx", "build"]:
+                        build_calls.append(argv)
+                        self.fail("Buildx launched without a durable initial receipt")
+                    return self.inspect(argv)
+
+                with mock.patch.object(builder, "fsync_directory", side_effect=sync_directory):
+                    with self.assertRaisesRegex(OSError, "directory durability unavailable"):
+                        builder.build(self.inputs, output, runner=runner, now=NOW)
+                self.assertEqual(build_calls, [])
+                if failure == "receipt":
+                    receipt = json.loads((output / "build-receipt.json").read_text())
+                    self.assertEqual(receipt["status"], "build-started-outcome-unconfirmed")
+                else:
+                    self.assertFalse((output / "build-receipt.json").exists())
+
+    def test_final_receipt_sync_failure_does_not_claim_durable_success(self):
+        output = self.work / "final-sync-failure"
+        syncs = 0
+
+        def sync_directory(path):
+            nonlocal syncs
+            if path == output:
+                syncs += 1
+                if syncs == 2:
+                    raise OSError("final receipt sync failed")
+
+        def runner(argv, *, timeout):
+            if argv[3:5] != ["buildx", "build"]:
+                return self.inspect(argv)
+            archive(output / "image.oci.tar")
+            return ""
+
+        with mock.patch.object(builder, "fsync_directory", side_effect=sync_directory):
+            with self.assertRaisesRegex(OSError, "final receipt sync failed"):
+                builder.build(self.inputs, output, runner=runner, now=NOW)
+
+    @unittest.skipIf(os.name == "nt", "Directory fsync requires the Linux build host")
+    def test_actual_directory_fsync(self):
+        builder.fsync_directory(self.work)
+
     def test_build_stages_only_approved_bytes_and_inspects_archive(self):
         output = self.work / "artifact directory"
 
@@ -249,18 +409,21 @@ class ContractTests(unittest.TestCase):
                                         self.inputs["context_sha256"])
 
     def test_cancelled_build_retains_unknown_outcome(self):
-        output = self.work / "cancelled"
-        def runner(argv, *, timeout):
-            if argv[3:5] != ["buildx", "build"]:
-                return self.inspect(argv)
-            raise subprocess.TimeoutExpired(argv, timeout)
-        with self.assertRaises(subprocess.TimeoutExpired):
-            builder.build(self.inputs, output, runner=runner, now=NOW)
-        receipt = json.loads((output / "build-receipt.json").read_text())
-        self.assertEqual(receipt["status"], "cancellation-requested-builder-outcome-unconfirmed")
-        self.assertNotIn("manifest_digest", receipt)
-        self.assertEqual(receipt["builder_container_id"], "b" * 64)
-        self.assertEqual(len(receipt["approval_sha256"]), 64)
+        for error in (subprocess.TimeoutExpired(["fixture"], 60), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__):
+                output = self.work / type(error).__name__
+                def runner(argv, *, timeout):
+                    if argv[3:5] != ["buildx", "build"]:
+                        return self.inspect(argv)
+                    raise error
+                with self.assertRaises(type(error)):
+                    builder.build(self.inputs, output, runner=runner, now=NOW)
+                receipt = json.loads((output / "build-receipt.json").read_text())
+                self.assertEqual(receipt["status"],
+                                 "cancellation-requested-builder-outcome-unconfirmed")
+                self.assertNotIn("manifest_digest", receipt)
+                self.assertEqual(receipt["builder_container_id"], "b" * 64)
+                self.assertEqual(len(receipt["approval_sha256"]), 64)
 
     def test_foreign_node_endpoint_cannot_borrow_local_container_limits(self):
         for endpoint in ("other-context", "ssh://remote.invalid", "unix:///other/socket"):
@@ -313,6 +476,18 @@ class ContractTests(unittest.TestCase):
         self.assertIn('findmnt -n -o PROPAGATION /', entry)
         self.assertIn('!= private', entry)
         self.assertIn("python3 /opt/trusted-harness/recipe/install.py --runtime", entry)
+        pins = [
+            "if ! mountpoint -q /run || [ -L /run ] || [ -L /run/systemd ]; then",
+            "install -d -m 755 /run/systemd",
+            "mount --bind /run/systemd /run/systemd",
+            "if ! mountpoint -q /run/systemd; then",
+            "python3 /opt/trusted-harness/recipe/install.py --runtime",
+            "exec /lib/systemd/systemd",
+        ]
+        for pin in pins:
+            self.assertIn(pin, entry)
+        self.assertEqual([entry.index(pin) for pin in pins],
+                         sorted(entry.index(pin) for pin in pins))
         self.assertNotIn("chown -R", entry)
         self.assertNotIn("rm -rf", entry)
         ssh = self.files["sshd.conf"].decode()

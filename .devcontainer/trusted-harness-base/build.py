@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import tarfile
@@ -82,23 +84,143 @@ def validate_age(lock: dict, now: datetime | None = None) -> None:
         raise ValueError("The frozen dependency index must also be seasoned")
 
 
+CLEANUP_TIMEOUT = 1
+
+
+@contextmanager
+def windows_job():
+    """Contain only this invocation, before its gated launcher can spawn the CLI."""
+    import ctypes
+    from ctypes import wintypes
+
+    class BasicLimits(ctypes.Structure):
+        _fields_ = [("process_time", ctypes.c_int64), ("job_time", ctypes.c_int64),
+                    ("flags", wintypes.DWORD), ("minimum", ctypes.c_size_t),
+                    ("maximum", ctypes.c_size_t), ("active", wintypes.DWORD),
+                    ("affinity", ctypes.c_size_t), ("priority", wintypes.DWORD),
+                    ("scheduling", wintypes.DWORD)]
+
+    class ExtendedLimits(ctypes.Structure):
+        _fields_ = [("basic", BasicLimits), ("io", ctypes.c_uint64 * 6),
+                    ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
+                    ("peak_process", ctypes.c_size_t), ("peak_job", ctypes.c_size_t)]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    job = kernel.CreateJobObjectW(None, None)
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        limits = ExtendedLimits()
+        limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        def assign(process):
+            if not kernel.AssignProcessToJobObject(job, int(process._handle)):
+                raise ctypes.WinError(ctypes.get_last_error())
+
+        def terminate():
+            if not kernel.TerminateJobObject(job, 1):
+                raise ctypes.WinError(ctypes.get_last_error())
+
+        yield assign, terminate
+    finally:
+        kernel.CloseHandle(job)
+
+
 def execute(argv: list[str], *, timeout: float = 30) -> str:
-    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-    with subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True, **flags) as process:
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            process.terminate()
+    if os.name == "nt":
+        with windows_job() as (assign, terminate):
+            # The job assignment precedes the byte that allows any CLI descendant.
+            launcher = (
+                "import json,subprocess,sys; "
+                "gate=sys.stdin.buffer.read(1); "
+                "sys.exit(subprocess.call(json.loads(sys.argv[1]), stdin=subprocess.DEVNULL, "
+                "creationflags=subprocess.CREATE_NO_WINDOW) if gate == b'1' else 1)"
+            )
+            return execute_contained(
+                [sys.executable, "-B", "-c", launcher, json.dumps(argv)], argv,
+                timeout, assign, terminate, creationflags=subprocess.CREATE_NO_WINDOW,
+                stdin=subprocess.PIPE,
+            )
+    return execute_contained(argv, argv, timeout, lambda p: None, None,
+                             start_new_session=True, stdin=subprocess.DEVNULL)
+
+
+def execute_contained(command, argv, timeout, assign, terminate, **flags):
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, **flags)
+
+    def stop(force=False):
+        if terminate is not None:
+            terminate()
+        else:
             try:
-                process.communicate(timeout=10)
+                os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    try:
+        assign(process)
+        try:
+            stdout, stderr = process.communicate(
+                input="1" if terminate is not None else None, timeout=timeout,
+            )
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            stop()
+            try:
+                process.communicate(timeout=CLEANUP_TIMEOUT)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.communicate()
+                stop(force=True)
+                try:
+                    process.communicate(timeout=CLEANUP_TIMEOUT)
+                except subprocess.TimeoutExpired:
+                    pass
             raise
         if process.returncode:
             raise subprocess.CalledProcessError(process.returncode, argv, stdout, stderr)
         return stdout
+    finally:
+        stop(force=True)
+        if process.poll() is None:
+            process.kill()
+        try:
+            process.wait(timeout=CLEANUP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            pass
+        finally:
+            for stream in (process.stdin, process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+
+
+def fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def create_output(path: Path) -> None:
+    missing = []
+    parent = path
+    while not parent.exists():
+        missing.append(parent)
+        parent = parent.parent
+    for directory in reversed(missing):
+        directory.mkdir()
+        fsync_directory(directory.parent)
+    if not missing:
+        raise FileExistsError(path)
 
 
 def verify_builder(engine: str, selected: dict, runner) -> dict:
@@ -218,7 +340,7 @@ def build(inputs: object, output: Path, engine: str = "docker", runner=execute,
     if "," in str(output) or "\n" in str(output) or "\r" in str(output):
         raise ValueError("Unsupported artifact path")
     bounds = verify_builder(engine, approval["builder"], runner)
-    output.mkdir(parents=True, exist_ok=False)
+    create_output(output)
     context = output / "context"
     context.mkdir()
     for name, content in files.items():
@@ -242,6 +364,7 @@ def build(inputs: object, output: Path, engine: str = "docker", runner=execute,
             stream.flush()
             os.fsync(stream.fileno())
         staged.replace(output / "build-receipt.json")
+        fsync_directory(output)
 
     save_receipt()
     try:

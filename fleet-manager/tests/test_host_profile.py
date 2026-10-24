@@ -294,7 +294,7 @@ class HostProfileTests(unittest.TestCase):
     def test_actual_kernel_and_process_decoders_use_only_fixtures(self):
         listing = self.work / "kernel"
         proc = self.work / "proc"
-        current = proc / "123/attr/current"
+        current = proc / "123/task/123/attr/current"
         current.parent.mkdir(parents=True)
         current.write_text(host.PROFILE_NAME + "//child (enforce)\n")
         listing.write_text(host.PROFILE_NAME + " (enforce)\n")
@@ -402,7 +402,7 @@ class HostProfileTests(unittest.TestCase):
     def test_nested_kernel_profile_and_empty_process_label_are_uncertain(self):
         listing = self.work / "kernel"
         listing.write_text(host.PROFILE_NAME + "//foreign-child (enforce)\n")
-        current = self.work / "proc/123/attr/current"
+        current = self.work / "proc/123/task/123/attr/current"
         current.parent.mkdir(parents=True)
         current.write_bytes(b"")
         with mock.patch.multiple(host, KERNEL_PROFILES=listing, PROC=self.work / "proc"):
@@ -413,7 +413,7 @@ class HostProfileTests(unittest.TestCase):
 
     def test_confirmed_exited_process_does_not_block_retirement(self):
         proc = self.work / "proc"
-        current = proc / "123/attr/current"
+        current = proc / "123/task/123/attr/current"
         current.parent.mkdir(parents=True)
         current.write_text("unconfined\n")
         original = Path.open
@@ -426,6 +426,97 @@ class HostProfileTests(unittest.TestCase):
 
         with (mock.patch.object(host, "PROC", proc), mock.patch.object(Path, "open", vanished)):
             self.real_unused()
+
+    def test_confined_worker_thread_blocks_retirement(self):
+        proc = self.work / "proc"
+        for relative, value in (
+            ("123/attr/current", "unconfined\n"),
+            ("123/task/123/attr/current", "unconfined\n"),
+            ("123/task/124/attr/current", host.PROFILE_NAME + " (enforce)\n"),
+        ):
+            path = proc / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value)
+        with mock.patch.object(host, "PROC", proc):
+            with self.assertRaisesRegex(host.ProfileError, "profile-in-use"):
+                self.real_unused()
+            (proc / "123/task/124/attr/current").write_text("unconfined\n")
+            self.real_unused()
+
+    def test_thread_evidence_requires_readable_label_or_confirmed_exit(self):
+        proc = self.work / "proc"
+        current = proc / "123/task/124/attr/current"
+        current.parent.mkdir(parents=True)
+        current.write_text("unconfined\n")
+        original = Path.open
+
+        def unavailable(path, *args, **kwargs):
+            if path == current:
+                raise PermissionError("fixture-only")
+            return original(path, *args, **kwargs)
+
+        with mock.patch.object(host, "PROC", proc):
+            with mock.patch.object(Path, "open", unavailable):
+                with self.assertRaises(PermissionError):
+                    self.real_unused()
+            current.unlink()
+            with self.assertRaises(FileNotFoundError):
+                self.real_unused()
+            current.write_text("unconfined\n")
+
+            def vanished(path, *args, **kwargs):
+                if path == current:
+                    shutil.rmtree(current.parent.parent)
+                    raise FileNotFoundError
+                return original(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "open", vanished):
+                self.real_unused()
+            self.assertTrue((proc / "123").exists())
+
+    def test_empty_or_oversized_thread_listing_blocks_retirement(self):
+        proc = self.work / "proc"
+        tasks = proc / "123/task"
+        tasks.mkdir(parents=True)
+        with mock.patch.object(host, "PROC", proc):
+            with self.assertRaisesRegex(host.ProfileError, "process-inspection-uncertain"):
+                self.real_unused()
+            original = Path.iterdir
+            with mock.patch.object(
+                Path, "iterdir",
+                lambda path: iter([tasks / "124"] * 131073) if path == tasks else original(path),
+            ):
+                with self.assertRaisesRegex(host.ProfileError, "process-inspection-overflow"):
+                    self.real_unused()
+            tasks.rmdir()
+            with self.assertRaises(FileNotFoundError):
+                self.real_unused()
+
+    def test_new_state_ancestors_are_synced_before_policy_effects(self):
+        self.state = self.work / "owned/inner/state"
+        events = []
+        original_new = host._new
+
+        def create(path, mode):
+            if path.parent == self.profiles:
+                events.append(("policy", path))
+            return original_new(path, mode)
+
+        with (mock.patch.object(host, "STATE_ROOT", self.state),
+              mock.patch.object(host, "_new", create),
+              mock.patch.object(host, "_flush_directory", lambda path: events.append(("sync", path)))):
+            self.install()
+        first_policy = next(index for index, event in enumerate(events) if event[0] == "policy")
+        for parent in (self.work, self.work / "owned", self.work / "owned/inner",
+                       self.state, self.state / host.PROFILE_NAME):
+            self.assertIn(("sync", parent), events[:first_policy])
+
+    def test_failed_state_ancestor_sync_never_publishes_policy(self):
+        with mock.patch.object(host, "_flush_directory", side_effect=OSError("fixture-only")):
+            with self.assertRaises(OSError):
+                host.operate("install")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(list(self.profiles.iterdir()), [])
 
     def test_root_group_is_required_before_creating_root_owned_state(self):
         with (mock.patch.object(sys, "platform", "linux"),

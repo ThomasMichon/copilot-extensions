@@ -144,11 +144,17 @@ def _locked(create: bool):
         for member in (*reversed(STATE_ROOT.parents), STATE_ROOT):
             if not member.exists() and not member.is_symlink():
                 member.mkdir(mode=0o700)
+                _flush_directory(member.parent)
             _directory(member)
         _directory(STATE_ROOT, private=True)
         state.mkdir(mode=0o700)
+        _flush_directory(STATE_ROOT)
         fd = _new(state / "lock", 0o600)
-        os.close(fd)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        _flush_directory(state)
         fresh = True
     roots = [_directory(STATE_ROOT, private=True), _directory(state, private=True)]
     _, lock_id = _file(state / "lock", 0o600)
@@ -199,20 +205,33 @@ def _unused() -> None:
     entries = list(PROC.iterdir())
     if len(entries) > 131072:
         raise ProfileError("process-inspection-overflow")
+    inspected = 0
     for entry in entries:
         if entry.name.isdecimal():
             try:
-                with (entry / "attr/current").open("rb") as stream:
-                    label = stream.read(4097)
+                tasks = [task for task in (entry / "task").iterdir() if task.name.isdecimal()]
             except FileNotFoundError:
                 if not entry.exists():
                     continue
                 raise
-            if len(label) > 4096 or not label.strip() or b"\0" in label:
+            inspected += len(tasks)
+            if inspected > 131072:
+                raise ProfileError("process-inspection-overflow")
+            if not tasks:
                 raise ProfileError("process-inspection-uncertain")
-            tokens = re.split(r"[\s/:&]+", label.decode("utf-8"))
-            if PROFILE_NAME in tokens:
-                raise ProfileError("profile-in-use")
+            for task in tasks:
+                try:
+                    with (task / "attr/current").open("rb") as stream:
+                        label = stream.read(4097)
+                except FileNotFoundError:
+                    if not task.exists():
+                        continue
+                    raise
+                if len(label) > 4096 or not label.strip() or b"\0" in label:
+                    raise ProfileError("process-inspection-uncertain")
+                tokens = re.split(r"[\s/:&]+", label.decode("utf-8"))
+                if PROFILE_NAME in tokens:
+                    raise ProfileError("profile-in-use")
 
 
 def _parser(action: str, path: Path) -> None:

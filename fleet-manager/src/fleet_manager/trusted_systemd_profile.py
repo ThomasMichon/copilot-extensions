@@ -54,6 +54,11 @@ profile @NAME@ flags=(attach_disconnected,mediate_deleted) {
   deny @{FLEET_SYSTEMD_ROOTS}sys/firmware/** rwklx,
   deny @{FLEET_SYSTEMD_ROOTS}sys/kernel/security/** rwklx,
 
+  # Entrypoint pins /run/systemd as a mountpoint so aliases cannot be renamed.
+  deny umount /,
+  deny umount @{FLEET_SYSTEMD_ROOTS}run/,
+  deny umount @{FLEET_SYSTEMD_ROOTS}run/systemd/,
+  mount options=(rw,bind) /run/systemd/ -> /run/systemd/,
   remount /sys/fs/cgroup/,
   mount options=(rw,rslave) -> /,
   mount options=(rw,rshared) -> /,

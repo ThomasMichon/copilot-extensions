@@ -39,6 +39,7 @@ class TrustedSystemdProfileTests(unittest.TestCase):
                 any(path in line for path in (
                     "/sys/fs/cgroup/", "/run/systemd/unit-root/",
                     "/dev/shm/", "/run/systemd/incoming/", "-> /dev/,", "-> /,",
+                    "mount options=(rw,bind) /run/systemd/ -> /run/systemd/,",
                 )),
                 line,
             )
@@ -67,6 +68,7 @@ class TrustedSystemdProfileTests(unittest.TestCase):
         }
         root = "/run/systemd/unit-root"
         self.assertEqual(pairs, {
+            ("/run/systemd/", "/run/systemd/"),
             ("/", root + "/"),
             (root + "/etc/", root + "/etc/"),
             (root + "/run/", root + "/run/"),
@@ -87,6 +89,16 @@ class TrustedSystemdProfileTests(unittest.TestCase):
             ("/run/credentials/*/", "/dev/shm/"),
         })
         self.assertEqual(len(rules), len(pairs))
+
+    def test_alias_ancestors_are_pinned_and_cannot_be_unmounted(self):
+        text = POLICY.profile_bytes().decode()
+        for rule in (
+            "mount options=(rw,bind) /run/systemd/ -> /run/systemd/,",
+            "deny umount /,",
+            "deny umount @{FLEET_SYSTEMD_ROOTS}run/,",
+            "deny umount @{FLEET_SYSTEMD_ROOTS}run/systemd/,",
+        ):
+            self.assertIn(rule, text)
 
     def test_remount_flag_families_keep_safety_flags_mandatory(self):
         text = POLICY.profile_bytes().decode()

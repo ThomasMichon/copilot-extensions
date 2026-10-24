@@ -39,8 +39,8 @@ CASES = [
         getattr(module, class_name)
     )
 ]
-assert sum(family == "host" for family, _ in CASES) == 26
-assert sum(family == "policy" for family, _ in CASES) == 6
+assert sum(family == "host" for family, _ in CASES) == 31
+assert sum(family == "policy" for family, _ in CASES) == 7
 
 
 @pytest.mark.parametrize(

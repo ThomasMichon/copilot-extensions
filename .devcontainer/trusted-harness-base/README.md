@@ -71,7 +71,11 @@ preserves data/identity, **not live processes**; drain before Komodo replacement
 
 Initialization refuses a non-PID-1 launch or an initially non-private root mount.
 Systemd's later namespace-local propagation changes do not authorize host-shared
-mounts. Image-root APT update services/timers are masked: root package changes
+mounts. `/run` must be a mountpoint; initialization self-bind pins `/run/systemd`
+before any unit-root aliases exist. The enforcing host policy denies unmounting
+those anchors, including aliases, preventing ancestor relocation from escaping
+the kernel-control path denials.
+Image-root APT update services/timers are masked: root package changes
 come from the admitted image build/update path, while explicit compatible
 home-runtime updates retain their own owners.
 Build-time unit enable/mask operations use Debian's absolute systemctl binary

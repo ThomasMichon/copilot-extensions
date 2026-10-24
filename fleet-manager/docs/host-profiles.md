@@ -28,6 +28,11 @@ and the same global-control denials apply through that alias.
 It does not allow arbitrary filesystems or arbitrary source/target binds, even
 inside the temporary root. Kernel-control denials also cover temporary root
 aliases so namespace setup cannot simply re-path protected files.
+The image entrypoint requires `/run` to be a mountpoint and self-bind pins
+`/run/systemd` before creating any unit-root aliases. Their mountpoint ancestors
+cannot be renamed. Policy denies unmount of `/`, `/run` and `/run/systemd`,
+including temporary-root aliases, so a confined process cannot unpin and
+relocate those aliases outside the protected paths.
 
 Use it only with an independently admitted private PID/mount/cgroup/UTS venue,
 bounded resources and no host control-filesystem or Docker-socket binds.
@@ -61,7 +66,9 @@ python -m fleet_manager.host_profile status
 
 The initial invocation creates exclusive owned state and an immutable profile
 file; it never replaces a profile. Receipt publication flushes before external
-effects. Parser validation uses the fixed executable and arguments:
+effects. Each newly created state directory is synced into its parent, and the
+lock inode and its directory entry are flushed before policy publication.
+Parser validation uses the fixed executable and arguments:
 
 ```text
 /usr/sbin/apparmor_parser --jobs=1 --skip-cache --skip-kernel-load <owned-profile-file>
@@ -89,9 +96,11 @@ new profile users throughout removal. The flag merely records that assertion;
 it neither verifies nor grants the fence, privilege or deployment authority.
 Process inspection is not an atomic kernel admission barrier.
 
-All current process labels must be inspectable and none may use this profile,
-including stacked/child labels. Missing labels for an existing process,
-unreadable, empty or oversized evidence refuses removal. A process confirmed
+Every thread label under `/proc/<pid>/task/<tid>/attr/current` must be
+inspectable and none may use this profile, including stacked/child labels.
+Process and aggregate thread enumeration are each bounded at 131,072 entries.
+Missing task directories/labels for existing processes/threads, unreadable,
+empty or oversized evidence refuses removal. A process or thread confirmed
 to have exited cannot retain the profile and does not block retirement.
 No process is killed. The saved receipt and physically
 attributed old profile bytes govern uninstall, independently of today's
