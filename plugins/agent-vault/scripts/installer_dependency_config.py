@@ -130,6 +130,16 @@ def retain_closed_wheels(
     if not python.is_absolute():
         raise error_type("closed wheel interpreter must be an absolute candidate path")
     uv = select_uv(uv)
+    if not Path(uv).is_absolute():
+        if os.path.dirname(uv):
+            selected = uv
+        else:
+            import shutil
+
+            selected = shutil.which(uv)
+            if selected is None:
+                raise error_type("closed wheel UV executable is unavailable")
+        uv = select_uv(os.path.abspath(selected))
     environment = {
         key: value for key, value in captured_environment(env).items()
         if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))

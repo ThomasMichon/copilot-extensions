@@ -3171,6 +3171,8 @@ without indexes, ambient UV/PIP/Python configuration, caches, dependency
 resolution, source discovery, interpreter downloads or build backends, using
 copy link mode and the exact candidate interpreter. Ordinary source policy
 continues to reject `--no-deps`; there is no blanket seasoning exemption.
+The policy owner resolves a caller-relative UV path or selected command name
+to an absolute executable before changing to the retained working directory.
 
 The existing `.runtime-input-origins.json` uses schema version 2 for this path
 (source receipts remain version 1). It binds the full profile/lock, mode,
@@ -3184,7 +3186,8 @@ refuse reuse. The health child reads that existing owned receipt and compares
 its canonical wheel evidence with a parent-supplied SHA-256 binding; fresh
 origin maps have their own parent binding. Complete profiles/maps never enter
 argv, so valid large closures do not hit native command-line size limits.
-These bindings check consistency, not authority. Source content plus the whole wheel binding enters the existing
+These bindings check consistency, not authority. Source content plus the whole
+wheel binding enters the existing
 immutable construction identity, so a changed policy, target or profile cannot
 reuse a numbered identity. A new retained copy of unchanged cached bytes can
 reuse a healthy runtime without a feed request or reconstruction.

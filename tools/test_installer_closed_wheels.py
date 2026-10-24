@@ -112,13 +112,14 @@ def snapshot(tmp_path, *, closure=False, version="1.0"):
     )
 
 
-def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path):
+@pytest.mark.parametrize("executable", ["path", "command"])
+def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, executable):
     uv = shutil.which("uv")
     assert uv, "native UV required"
     target = tmp_path / "candidate" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     with snapshot(tmp_path) as retained:
         with policy.retain_closed_wheel_install(
-            uv, retained, python=target,
+            uv if executable == "path" else "uv", retained, python=target,
             env={"UV_INDEX": "poison", "PIP_REQUIREMENT": "poison", "PYTHONPATH": "poison",
                  "VIRTUAL_ENV": "poison", "CONDA_PREFIX": "poison", "PATH": os.environ["PATH"]},
         ) as transaction:
@@ -241,6 +242,38 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
         with candidate(engine, tmp_path / "first-runtime", plugin, wheels) as reused:
             assert reused.reused
             assert reused.slot == slots[0]
+
+
+def test_closed_constructor_retains_caller_relative_uv_as_absolute(
+    tmp_path, engine, plugin, monkeypatch,
+):
+    uv = shutil.which("uv")
+    assert uv
+    tool = tmp_path / "tools" / ("uv.exe" if os.name == "nt" else "uv")
+    tool.parent.mkdir()
+    shutil.copy2(uv, tool)
+    monkeypatch.chdir(tmp_path)
+    child = engine._child
+    installations = []
+
+    def absolute(argv, **kwargs):
+        if argv[1:3] == ["pip", "install"]:
+            assert Path(argv[0]).is_absolute()
+            assert Path(argv[0]).samefile(tool)
+            assert kwargs["cwd"] != tmp_path
+            installations.append(argv)
+        return child(argv, **kwargs)
+
+    monkeypatch.setattr(engine, "_child", absolute)
+    with snapshot(tmp_path) as retained:
+        with engine.numbered_candidate(
+            tmp_path / "runtime", "1.0.0", plugin=plugin,
+            uv=tool.relative_to(tmp_path), base_python=Path(sys.executable),
+            health_module="demo_pkg", local_packages=("demo-pkg",),
+            wheel_inputs=inspected(retained),
+        ) as built:
+            assert not built.reused
+    assert len(installations) == 1
 
 
 def test_changed_closed_binding_cannot_reuse_numbered_identity(tmp_path, engine, plugin):

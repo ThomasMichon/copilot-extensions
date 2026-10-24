@@ -138,6 +138,15 @@ command bound. The 100-case closed/profile cohort and four focused existing
 source construction/origin/reuse controls pass after this correction; fresh
 current-head CI, native acceptance and review are still owed.
 
+The next current-head review confirmed the argv issue resolved and identified
+caller-relative UV paths surviving into the private working directory. The
+real constructor regression reproduced the relative command. Resolution now
+happens under the canonical policy owner before retention, preserving native
+Windows executable selection and PATH command-name support; all derived policy
+helpers are synchronized. Four focused real path/command and poisoned-config
+controls pass. Required CI and all six native jobs passed on the previous
+head, but fresh evidence is still required after this correction.
+
 ### Exact-set byte custody, 2026-10-24
 
 The next component adds `installer_wheel_snapshot.retain_wheel_inputs` beneath
