@@ -345,16 +345,12 @@ jobs:
           --test-file tests/test_reviewer_source.py
           -k test_windows_command_shim_uses_cmd
 
-  interactive-completion:
+  interactive-completion-linux:
     if: ${{ inputs.interactive_completion }}
-    name: Owned foreground completion (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Owned foreground completion (Linux)
+    runs-on: ubuntu-latest
     timeout-minutes: 6
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
+    steps: &interactive-completion-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -368,6 +364,20 @@ jobs:
         run: |
           python tools/seasoned_uv.py --uv uv -- --system pytest psutil
           python -m pytest -q libs/agent-procutil/tests/test_interactive.py
+
+  interactive-completion-macos:
+    if: ${{ inputs.interactive_completion }}
+    name: Owned foreground completion (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 6
+    steps: *interactive-completion-steps
+
+  interactive-completion-windows:
+    if: ${{ inputs.interactive_completion }}
+    name: Owned foreground completion (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *interactive-completion-steps
 
   candidate-profiles-linux:
     if: ${{ inputs.candidate_profiles }}
