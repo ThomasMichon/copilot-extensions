@@ -1,0 +1,9 @@
+{
+  "comment": "Align the launch-policy test profile with an inherited home override and verify real private registration.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
