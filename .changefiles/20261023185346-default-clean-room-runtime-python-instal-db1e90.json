@@ -1,0 +1,9 @@
+{
+  "comment": "Default clean-room runtime Python installs to the anonymous public Microsoft feed with explicit overrides and an unconfigured-index opt-out.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

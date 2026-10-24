@@ -109,13 +109,17 @@ Two orthogonal knobs a scenario sets:
 - **Prereq presence** — which of {python, uv, gh, node} are pre-present vs. must
   be provisioned by the flow. Start harshest and relax as we learn what the setup
   flow can legitimately assume.
-- **Feed governance** — an **opt-in** fixture reproducing the corp-box case. The
-  realistic profile is an **asymmetry, not a clean block**: policy configures
+- **Feed governance** — the runner normally supplies the anonymous public
+  Microsoft Python index, `https://packagefeedproxy.microsoft.io/pypi/simple/`,
+  through `UV_DEFAULT_INDEX`; no host configuration or credentials are borrowed.
+  CLI overrides `CR_UV_INDEX`, then the public default, and an explicit empty
+  override removes that fixture. Images retain no baked index configuration.
+  An opt-in negative profile is an **asymmetry, not a clean block**: policy configures
   **pip's** internal feed (a global `pip.conf` `index-url`) but **not uv**, so
   `pip install` resolves against the mirror while **uv** — used for every venv —
   still defaults to the TLS-blocked public PyPI. This is the single
   highest-probability provisioning jam; the fixture mirrors it exactly (write the
-  internal `pip.conf`, leave uv unconfigured), and is never baked into an image
+  internal `pip.conf`, explicitly disable the uv index fixture), and is never baked into an image
   (that would make the box non-fresh and bias the experiment).
 
 ## 4. The scenario contract
