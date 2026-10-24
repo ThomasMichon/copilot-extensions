@@ -24,6 +24,33 @@ deterministic objects with no live endpoint, GUI, process, timing measurement
 or storage fixture. The reducer imports only stdlib and Manager-owned pure
 F1 value/receiver modules. Production importer count is zero.
 
+### Captured follow-up and source-only review
+
+The earlier command summaries above are **transcript-only**: no separate raw
+logs or review artifacts were captured for those runs. A new unchanged-source
+execution at `a2377bd8b7074f0d2fd65d8994490c1c5215bbbf` ran the same focused
+selection with stdout/stderr opened before launch and the existing
+`PYTEST_ADDOPTS` JUnit option. It reported **63 passed in 3.10s**, exit 0;
+real JUnit recorded 63 tests, zero failures/errors/skips, SHA-256
+`3e3ccd373eff0a4a27dcb5216064afe1c4a3cd3f927ced91df4c4f297b51923b`.
+This is fresh evidence, not reconstruction of earlier output.
+
+The normal provider review identified four private-model defects: the F1
+producer's `phase: current` row frame was rejected; newer complete absence
+did not fence unseen IDs or advance old tombstones; equal-cursor snapshots
+could change roster/order; and snapshot reconstruction dropped validated stale
+availability. Corrections remain in the same two owned Python files and this
+effort's documentation, with no production importer or F2 wire API added.
+
+The same focused source runner plus the six added regressions reports
+**69 passed in 4.53s**, exit 0, with real JUnit recording 69 tests and zero
+failures/errors/skips. Canonical producer-shaped frames are now used by the
+test helper. Ruff remains clean. Raw command streams, real JUnit, invocation
+metadata and review/CI responses are retained as local evidence by the
+submitting worktree; those artifacts are not part of the shipped product.
+Source-only review/CI is not integration, native/GUI/installed qualification
+or authorization to merge.
+
 Coverage includes A10 locked → point A11 unlocked → twenty heartbeat/read
 ticks, independent B11 and feed base10, A12 new-owner supersession, source/
 project collisions, selected-identity refusal, epoch cancellation,

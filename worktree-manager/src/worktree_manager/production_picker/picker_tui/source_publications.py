@@ -22,7 +22,7 @@ _METADATA = {"_projection", "_availability", "_observations", "_observation_deri
 _FRAME_FIELDS = {
     "update": {"type", "contract_version", "project", "projection", "cursor",
                "base_cursor", "selected_count", "availability", "ok"},
-    "worktree": {"type", "projection", "wt"},
+    "worktree": {"type", "projection", "wt", "phase"},
     "delete": {"type", "projection", "id"},
     "observation": {"type", "projection", "observation"},
     "order": {"type", "projection", "ids"},
@@ -123,21 +123,27 @@ class _Partition:
     rows: dict = field(default_factory=dict)
     floors: dict = field(default_factory=dict)
     tombstones: dict = field(default_factory=dict)
+    published_ids: set = field(default_factory=set)
+    absence_revision: int = 0
     order: list = field(default_factory=list)
     receipts: dict = field(default_factory=dict)
     stale: bool = False
 
     def row(self, row: dict, revision: int) -> None:
         wid = row["id"]
-        floor = self.floors.get(wid, 0)
+        absence = self.absence_revision if wid not in self.published_ids else 0
+        floor = max(self.floors.get(wid, 0), absence)
         if revision < floor:
             return
         previous = self.rows.get(wid)
         if revision == floor:
             if previous is None or _content(previous) != _content(row):
                 raise ValueError("equal publication revision conflicts")
+            self.rows[wid] = {**previous, "_availability": row["_availability"]}
             return
-        if previous is None and row["semantic_revision"] <= self.tombstones.get(wid, 0):
+        if previous is None and row["semantic_revision"] <= max(
+            self.tombstones.get(wid, 0), absence,
+        ):
             raise ValueError("semantic row predates its tombstone")
         check_advance(previous, row, field="semantic_revision")
         check_observation_advance(None if previous is None else _observation(previous),
@@ -160,8 +166,9 @@ class _Partition:
 
     def replace(self, rows: list[dict], revision: int) -> None:
         incoming = {row["id"] for row in rows}
-        for wid in self.rows.keys() - incoming:
+        for wid in self.floors.keys() - incoming:
             self.delete(wid, revision)
+        self.published_ids, self.absence_revision = incoming, revision
         for row in rows:
             self.row(row, revision)
         self.order = [row["id"] for row in rows if row["id"] in self.rows] + [
@@ -227,6 +234,13 @@ class _SourcePublications:
             return False
         if not reset and head["revision"] < previous.feed.head["revision"]:
             return False
+        if not reset and head["revision"] == previous.feed.head["revision"] and (
+            head != previous.feed.head
+            or [_content(row) for row in rows] != [
+                _content(row) for row in previous.feed.rows
+            ]
+        ):
+            raise ValueError("equal publication revision conflicts with committed roster/order")
         if previous is None and len(self._partitions) >= _MAX_PARTITIONS:
             raise ValueError("source/project bound exceeded")
         candidate = _Partition(head["generation"]) if reset else deepcopy(previous)
@@ -235,15 +249,17 @@ class _SourcePublications:
         feed = CurrentFeed()
         begin = {"type": "begin", "ok": True, "contract_version": 2,
                  "project": key[1], "projection": head, "selected_count": len(rows),
-                 "cursor": head["revision"], "base_cursor": None}
+                 "cursor": head["revision"], "base_cursor": None,
+                 "availability": envelope.get("availability")}
         feed.receive(begin)
         for row in publication_wire_rows(rows):
-            feed.receive({"type": "worktree", "projection": head, "wt": row})
+            feed.receive({"type": "worktree", "phase": "current", "projection": head, "wt": row})
         for item in envelope["observations"]:
             feed.receive({"type": "observation", "projection": head, "observation": item})
         feed.receive({"type": "done", "projection": head, "cursor": head["revision"]})
         candidate.replace(feed.rows, head["revision"])
-        candidate.feed, candidate.stale, candidate.feed_epoch = feed, False, epoch
+        candidate.feed, candidate.feed_epoch = feed, epoch
+        candidate.stale = envelope.get("availability") is not None
         self._partitions[key] = candidate
         return True
 
@@ -288,6 +304,7 @@ class _SourcePublications:
                 raise ValueError("unsupported feed transaction frame")
             if frame["type"] == "worktree" and (
                 not isinstance(frame.get("wt"), dict) or set(frame["wt"]) & _METADATA
+                or frame.get("phase", "current") != "current"
             ):
                 raise ValueError("feed contains receiver metadata")
             if committed or (frame["type"] == "heartbeat" and len(frames) != 1):

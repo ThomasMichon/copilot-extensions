@@ -81,7 +81,8 @@ def update(revision=11, items=(), *, deleted=(), order=("tree",), base=10,
         {"type": "update", "contract_version": 2, "project": project,
          "projection": head, "cursor": revision, "base_cursor": base,
          "selected_count": len(order)},
-        *({"type": "worktree", "projection": head, "wt": item[0]} for item in items),
+        *({"type": "worktree", "phase": "current", "projection": head, "wt": item[0]}
+          for item in items),
         *({"type": "delete", "projection": head, "id": wid} for wid in deleted),
         *({"type": "observation", "projection": head, "observation": item[1]} for item in items),
         *([{"type": "order", "projection": head, "ids": list(order)}] if order else []),
@@ -231,15 +232,15 @@ def test_duplicate_equal_revision_is_idempotent_but_observation_conflict_is_not(
 
 def test_point_missing_is_not_deletion_and_older_complete_absence_cannot_delete_point():
     store, epoch = seeded()
-    assert point(store, epoch, envelope(11, [row(revision=11)]))
-    assert not point(store, epoch, envelope(12, []))
-    assert snapshot(store, epoch, envelope(10, []))
-    assert record(store)["semantic_revision"] == 11
-    assert state(store)["feed_cursor"] == 10
-    assert snapshot(store, epoch, envelope(12, []))
+    assert point(store, epoch, envelope(12, [row(revision=12)]))
+    assert not point(store, epoch, envelope(13, []))
+    assert snapshot(store, epoch, envelope(11, []))
+    assert record(store)["semantic_revision"] == 12
+    assert state(store)["feed_cursor"] == 11
+    assert snapshot(store, epoch, envelope(13, []))
     assert not store.records()
-    assert state(store)["tombstones"] == {"tree": 12}
-    assert point(store, epoch, envelope(11, [row(revision=11)]))
+    assert state(store)["tombstones"] == {"tree": 13}
+    assert point(store, epoch, envelope(12, [row(revision=12)]))
     assert not store.records()
 
 
@@ -463,7 +464,8 @@ def test_bounds_and_legacy_negotiation_refuse_without_synthesized_success():
 
 
 def test_unsupported_feed_epoch_owner_base_order_and_duplicate_barriers_are_atomic():
-    for mutation in ("unknown", "generation", "base", "order", "extra-commit", "unknown-field"):
+    for mutation in ("unknown", "generation", "base", "order", "extra-commit",
+                     "unknown-field", "phase"):
         store, epoch = seeded()
         frames = update(11, [row(revision=11)])
         if mutation == "unknown":
@@ -476,9 +478,54 @@ def test_unsupported_feed_epoch_owner_base_order_and_duplicate_barriers_are_atom
             frames[-2]["ids"] = ["another"]
         elif mutation == "extra-commit":
             frames.append(frames[-1])
+        elif mutation == "phase":
+            frames[1]["phase"] = "unsupported"
         else:
             frames[0]["future"] = True
         before = state(store)
         with pytest.raises(ValueError):
             feed(store, epoch, frames)
         assert state(store) == before
+
+
+@pytest.mark.parametrize("known", [False, True])
+def test_complete_absence_blocks_delayed_point_for_known_and_unseen_identity(known):
+    store, epoch = seeded(items=[row()] if known else [])
+    if known:
+        assert feed(store, epoch, update(deleted=["tree"], order=()))
+    assert snapshot(store, epoch, envelope(13, []))
+    if known:
+        assert state(store)["tombstones"] == {"tree": 13}
+    assert point(store, epoch, envelope(12, [row(revision=12)]))
+    assert not store.records()
+    with pytest.raises(ValueError, match="conflict"):
+        point(store, epoch, envelope(13, [row(revision=13)]))
+    with pytest.raises(ValueError, match="tombstone"):
+        point(store, epoch, envelope(14, [row(revision=12)]))
+    assert point(store, epoch, envelope(14, [row(revision=14)]))
+
+
+@pytest.mark.parametrize("change", ["order", "insert", "remove"])
+def test_equal_cursor_snapshot_compares_feed_roster_not_point_overlay(change):
+    store, epoch = seeded([row("a"), row("b")])
+    assert point(store, epoch, envelope(11, [row("a", 11)]), wid="a")
+    new_epoch = store.begin_epoch(SOURCE)
+    values = {"order": [row("b"), row("a")], "insert": [row("a"), row("b"), row("c")],
+              "remove": [row("a")]}
+    before_records, before_status = store.records(), state(store)
+    with pytest.raises(ValueError, match="roster/order"):
+        snapshot(store, new_epoch, envelope(items=values[change]))
+    assert store.records() == before_records and state(store) == before_status
+    assert snapshot(store, new_epoch, envelope(items=[row("a"), row("b")]))
+    assert record(store, "a")["semantic_revision"] == 11
+
+
+def test_snapshot_preserves_current_quality_stale_availability_at_equal_revision():
+    store, epoch = seeded()
+    value = envelope()
+    value["availability"] = {"status": "stale", "reason": "owner publication failed"}
+    assert snapshot(store, epoch, value)
+    assert state(store)["stale"]
+    assert dict(record(store)["_availability"]) == value["availability"]
+    assert snapshot(store, epoch, envelope())
+    assert not state(store)["stale"] and record(store)["_availability"] is None
