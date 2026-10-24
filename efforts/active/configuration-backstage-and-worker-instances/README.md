@@ -169,7 +169,7 @@ a request for a second daemon or parallel per-repository probes.
 ### Phase 5 - Release and local outcome
 
 - [x] Clear current-head review and required CI for every implementation and documentation slice.
-- [ ] Audit the monitor drain path and publish bounded diagnostics for its waits, blockers, timing and outcomes. _Audit/source merged in #6807; normal promotion and installed trace receipt remain pending._
+- [x] Audit the monitor drain path and publish bounded diagnostics for its waits, blockers, timing and outcomes. _Audit/source merged in #6807; read-only installed trace inspection confirmed phase timings, category counts and a clean unforced drain. Configuration/Workers acceptance remains separate._
 - [ ] Support the generated-main consumer repairs and the reviewed pre-merge candidate-validation slice under #6237/#6838 without duplicating retained PRs. _Source repairs, gate #6851 and bootstrap #6867 merged; candidate #6938 merged, but immutable-main CI `38865507739` failed. Fix-forward and qualified containing-release proof remain open. (agent-recommended implementation approach)_
 - [ ] Confirm normal promotion to main, run the unified local update, and verify the installed Manager/provider versions exercise the redesigned Configuration surface.
 - [ ] Review and deliver the [resident repository map amendment](resident-repository-map.md), then repeat the installed Workers acceptance without increasing its existing deadline.

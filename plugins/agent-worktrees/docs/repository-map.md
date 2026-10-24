@@ -44,7 +44,10 @@ Publication is immutable to readers. One owned producer thread inside the
 existing resident refreshes the pinned installation registry independently of
 Worktrees sweeps, including root-availability changes without registry edits.
 Its cadence is at most 30 seconds even when a sweep takes longer than the map's
-60-second freshness bound. A failed refresh retains last-good data only as explicitly
+60-second freshness bound. The canonical parent pins the installation while
+the registry filename remains observable across atomic symlink replacement;
+a dangling registry symlink is unavailable, not healthy empty inventory.
+A failed refresh retains last-good data only as explicitly
 advisory/stale. Observations older than 60 seconds are stale too. The CLI
 refuses these as current inventory and exits 2, as it does for an absent,
 unready, incompatible, draining or wrong-scope resident. Consumers must retain

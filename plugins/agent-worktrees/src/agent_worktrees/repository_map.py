@@ -62,7 +62,10 @@ def build_snapshot(
         except repos.RepositoryResolutionError as exc:
             row.update(registration="unavailable", path=None, reason=str(exc))
         entries.append(row)
-    if revision(read_bytes(Path(source))) != source_revision:
+    if (
+        str(registry_path.resolve()) != source
+        or revision(read_bytes(registry_path)) != source_revision
+    ):
         raise repos.RepositoryResolutionError("repository registry changed during map construction")
     return {
         "ok": True,
@@ -84,7 +87,8 @@ class RepositoryMapRuntime:
         self, scope: Path, *, now=time.time, monotonic=time.monotonic, wait=None,
     ):
         self.scope = str(scope.resolve())
-        self._registry_path = repos._repos_yaml_path().resolve()
+        registry = repos._repos_yaml_path()
+        self._registry_path = registry.parent.resolve() / registry.name
         self._now = now
         self._monotonic = monotonic
         self._last_demand: float | None = None

@@ -305,3 +305,57 @@ def test_failed_producer_thread_start_keeps_shutdown_available(registry, tmp_pat
     with pytest.raises(RuntimeError, match="thread unavailable"):
         owner.start()
     assert owner.shutdown()
+
+
+def registry_link(path, target):
+    try:
+        path.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+
+
+def test_registry_symlink_replacement_refreshes_the_installation_filename(registry, tmp_path):
+    old = tmp_path / "old.yaml"
+    write_registry(old, {"old": {"class": "reference"}})
+    registry_link(registry, old)
+    owner = maps.RepositoryMapRuntime(tmp_path)
+    owner.activate()
+    owner.refresh()
+    assert [r["name"] for r in owner.read(request(owner))["repos"]] == ["old"]
+    replacement = tmp_path / "replacement.yaml"
+    write_registry(replacement, {"replacement": {"class": "reference"}})
+    replacement.replace(registry)
+    owner.refresh()
+    result = client.validate_result(owner.read(request(owner)), owner.scope)
+    assert [r["name"] for r in result["repos"]] == ["replacement"]
+    assert json.loads(old.read_text(encoding="utf-8"))["repos"] == {"old": {"class": "reference"}}
+
+
+def test_dangling_registry_symlink_is_unavailable_not_healthy_empty(registry, tmp_path):
+    registry_link(registry, tmp_path / "absent.yaml")
+    owner = maps.RepositoryMapRuntime(tmp_path)
+    owner.activate()
+    owner.refresh()
+    result = owner.read(request(owner))
+    assert result["ok"] is False and result["error"]["code"] == "unavailable"
+    assert "repos" not in result
+
+
+def test_registry_symlink_change_during_construction_is_not_published(registry, tmp_path, monkeypatch):
+    old, replacement = tmp_path / "old.yaml", tmp_path / "replacement.yaml"
+    write_registry(old, {"old": {"class": "reference"}})
+    write_registry(replacement, {})
+    registry_link(registry, old)
+    resolve_root = repos.registered_entry_root
+
+    def replace(entry):
+        replacement.replace(registry)
+        return resolve_root(entry)
+
+    monkeypatch.setattr(repos, "registered_entry_root", replace)
+    owner = maps.RepositoryMapRuntime(tmp_path)
+    owner.activate()
+    owner.refresh()
+    result = owner.read(request(owner))
+    assert result["ok"] is False
+    assert "changed during" in result["error"]["message"]
