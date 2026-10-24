@@ -77,7 +77,13 @@ def test_static_admission_allows_only_exact_selected_hook(tmp_path, kind):
 
 
 @pytest.mark.parametrize("outcome", ["built", "reused", "reuse-miss", "failed", "invalid-admission"])
-def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypatch, outcome):
+@pytest.mark.parametrize("with_profiles", [False, True])
+def test_export_isolates_canonical_source_from_nested_scratch(
+    tmp_path, monkeypatch, outcome, with_profiles,
+):
+    from runtime_profile_cases import _record
+
+    profiles = [_record()] if with_profiles else None
     scratch = tmp_path / ".promote-scratch" / "promote-fixture"
     scratch.mkdir(parents=True)
     candidate = None
@@ -122,7 +128,9 @@ def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypa
         assert kwargs["candidate_root"] == candidate
         assert kwargs["content_tree"] == tree and kwargs["repo"] == tmp_path
         events.append(("reuse", candidate))
-        return {"reused": True} if outcome == "reused" else None
+        return {"reused": True, **(
+            {"runtime_profiles": profiles} if profiles is not None else {}
+        )} if outcome == "reused" else None
 
     def validate(directory, **kwargs):
         assert kwargs["candidate_root"] == candidate and kwargs["projects"] == {}
@@ -130,6 +138,7 @@ def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypa
         assert (candidate / "canonical.txt").read_bytes() == b"attribute-normalized\r\n"
         index = json.loads((directory / artifacts.INDEX_NAME).read_text())
         assert index["content_tree"] == tree
+        assert index.get("runtime_profiles") == profiles
         if outcome == "reuse-miss":
             assert index["admission"] == {
                 "signer_digest": commit, "source_digest": commit, "source_ref": "refs/heads/main",
@@ -148,6 +157,7 @@ def test_export_isolates_canonical_source_from_nested_scratch(tmp_path, monkeypa
         reuse_repository=(
             "example/plugins" if outcome in {"reused", "reuse-miss", "invalid-admission"} else None
         ),
+        runtime_profiles=profiles,
     )
     if outcome in {"failed", "invalid-admission"}:
         with pytest.raises(

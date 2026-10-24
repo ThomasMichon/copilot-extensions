@@ -526,6 +526,18 @@ optional: an authorized independently verified source/local-venv path must not
 wait for artifact publication or rollout proof. This does not permit bypassing
 source integrity, dependency governance or an invalid artifact's security refusal.
 
+The source-only artifact exporter also accepts optional `runtime_profiles`
+metadata: complete exact records, never third-party bytes. Existing exports
+omit it by default; the signing workflow does not currently supply profiles.
+The index retains its existing 1 MiB bound and immutable source reuse cannot
+change an explicitly requested profile set. The release-profile reader uses
+the existing pinned hosted Main attestation verifier over private retained
+index bytes, with expected release and approval-source identities supplied
+independently by the installation authority. This proves metadata approval,
+not wheel/feed admission or installation permission. The
+[exact-profile contract](../efforts/active/governed-python-artifact-promotion/exact-profile-contract.md#optional-release-index-adapter)
+documents this API and the remaining adopter/consumer gates.
+
 For manual runs, dispatch this workflow on the default branch. The gate
 resolves its live dev tip and applies the same ancestor proof as automated
 dispatch; it does not mistake the generated main workflow commit for a dev

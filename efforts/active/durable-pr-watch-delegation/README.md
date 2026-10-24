@@ -331,6 +331,10 @@ _Operator-required scope; agent-recommended implementation and validation._
   the existing shared artifact path, preserving plugin compatibility and
   canonical source/resource identity (confirmed by #8293). This source leaf
   does not admit a runtime dependency closure or establish image acceptance.
+- [x] Land canonical retained hashed dependency compile/export through the
+  existing installer owner, preserving resolver seasoning, input isolation and
+  ordinary installation behavior (confirmed by #8327). This source prerequisite
+  constructs candidate locks, not approved target profiles or acquired closures.
 - [ ] Deliver the [shared artifact construction](artifact-construction.md)
   proposal through review, standalone first-party artifact support, admitted
   runtime closure and actual offline image acceptance. Preserve public
@@ -689,6 +693,43 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-23 - Merge retained compile construction and continue exact closure admission
+
+- #8327 merged as `18b688bb57d2c7fb33ea793bfae8ff3065facff6` at
+  `2026-10-23T23:33:46Z`, from exact approved head
+  `1b1310c79ed783dbf10eb4890e186d3ddacaaa44`. Copilot approved with no
+  open issues; every review body, issue comment and all four complete thread
+  pages were read, and every thread is resolved. Required CI `40039650223`,
+  lockdown/attribution and identifier checks passed. Managed merge used only
+  the authorized additional CODEOWNER-vote exception, not a check or
+  blocking-feedback bypass. Closing references were empty; #7188 remains open.
+- Exact-head native acceptance `40039790134` passed all 55 selected tests on
+  Linux (12.27 seconds) and Windows (17.35 seconds), including real UV compile
+  mutation/age/hash/output and root-working-directory controls plus the existing
+  transitive/isolated-build installer cases. The local targeted selection
+  passed 234 tests; workflow scope passed 59. These are source-construction
+  proofs, not governed-feed/profile approval, exact runtime acquisition,
+  a selected native Worktrees artifact, image acceptance or installed/fleet proof.
+- Re-read this entire current parent after merge. Close only the canonical
+  compile/export source prerequisite. Approved target closure, offline context,
+  actual image/container lifecycle, provider/storage/update qualification,
+  release/authorized rollout, actual fleet and every retained client,
+  reviewer, migration, idle-record and nonevent obligation remain open.
+  The parent remains Active; no runtime update or finalization is authorized.
+- Preserve the reviewed tip. Managed pull-forward safely aborted a squash
+  replay conflict without changing the branch. The complete five-commit
+  published range and provider-confirmed squash merge have the same stable
+  patch identity `3eee2f990380da09f1682d82f5885554d27f9e88`.
+  Exclude only that already-merged range; managed continuation then confirms
+  the same worktree is current on `dev`, with unchanged canonical policy and
+  parent content and no unpublished work discarded.
+- Next inspect the canonical exact-profile approval and wheel-acquisition
+  seams for target-specific offline context construction. Reuse existing
+  installer/artifact authority, keep third-party bytes outside public release
+  bundles, and refuse missing approval or exact artifacts rather than add a
+  PR-only resolver or treat a generated hash as permission. The independent
+  inert bundle-input proposal #6941 retains its author's scope.
 
 ### 2026-10-23 - Retain canonical dependency compile inputs before runtime admission
 
