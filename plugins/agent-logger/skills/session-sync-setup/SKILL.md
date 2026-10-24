@@ -420,6 +420,15 @@ per-tenant `sync-state-<tenant_id>.db`) remembers each session's last-synced
 content signature, so a routine run only pushes sessions that actually
 changed -- and skips the push entirely when nothing did.
 
+Filesystem pushes prune traversal before entering unrelated source directories
+or sessions outside the selected batch. They do not walk installed plugins or
+other non-session trees merely to discard their files afterward.
+
+Each actual run flushes content-free phase start/end timings to stderr, including
+accounting, session transfer and retention. A finished phase is a timing marker,
+not proof of a successful result; keep the final exit and partial/deferred
+diagnostics when assessing scheduled runs.
+
 ```yaml
 sync:
   change_tracking:
