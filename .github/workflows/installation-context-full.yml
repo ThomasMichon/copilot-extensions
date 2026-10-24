@@ -18,12 +18,71 @@ on:
           - ssh-commands
           - codespaces-recipes
           - codespaces-bootstrap
+          - logger-recipes
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  logger-recipes-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'
+    name: Logger fixed recipes (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify fixed Logger recipes, concurrent cold callers and installed consumers
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger.py
+          --test-timeout 900 --timeout 1200
+      - name: Qualify Logger caller loss and ordinary durable result
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_genesis.py -k owning_logger
+          --test-timeout 900 --timeout 1080
+  logger-recipes-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'
+    name: Logger fixed recipes (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify fixed Logger recipes, concurrent cold callers and installed consumers
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger.py
+          --test-timeout 900 --timeout 1200
+      - name: Qualify Logger caller loss and ordinary durable result
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_genesis.py -k owning_logger
+          --test-timeout 900 --timeout 1080
   codespaces-bootstrap-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-bootstrap'
     name: CodeSpaces bootstrap (Ubuntu)

@@ -1009,11 +1009,12 @@ _snapshot_requires_materialized_engine() {
 _materialize_snapshot_libs() {
     local snapshot_dir="$1"
     local libs_dir="$snapshot_dir/libs"
-    local lib src
+    local lib src package project temporary
+    project="$snapshot_dir/pyproject.toml"
     mkdir -p "$libs_dir" || {
         _fail "Snapshot libraries directory cannot be prepared: $libs_dir"; return 1;
     }
-    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation; do
+    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation single-instance-lease; do
         src="$PLUGIN_DIR/libs/$lib"
         if [[ ! -f "$src/pyproject.toml" ]]; then
             src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib" || {
@@ -1028,6 +1029,20 @@ _materialize_snapshot_libs() {
             cp -a "$src" "$libs_dir/$lib" || {
                 _fail "Snapshot library copy failed: $lib"; return 1;
             }
+            package="agent-$lib"
+            [[ "$lib" != agent-procutil ]] || package=agent-procutil
+            temporary="$project.tmp.$$"
+            sed "s|$package = { path = \"../../libs/$lib\", editable = true }|$package = { path = \"libs/$lib\" }|" \
+                "$project" >"$temporary" && mv -f "$temporary" "$project" || {
+                _fail "Snapshot dependency mapping failed: $lib"; return 1;
+            }
+            project="$libs_dir/$lib/pyproject.toml"
+            temporary="$project.tmp.$$"
+            sed 's/, editable = true }/ }/g' "$project" >"$temporary" &&
+                mv -f "$temporary" "$project" || {
+                _fail "Snapshot library mapping failed: $lib"; return 1;
+            }
+            project="$snapshot_dir/pyproject.toml"
         fi
     done
 }

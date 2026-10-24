@@ -1,0 +1,29 @@
+{
+  "comment": "Qualify fixed Logger legacy stamp and provision recipes through the canonical installation driver; preserve its six-command contract and service-less provisioning.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

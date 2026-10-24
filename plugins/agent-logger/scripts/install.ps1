@@ -882,7 +882,19 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('config-migrate', 'agent-procutil', 'dropin-registry', 'plugin-resolve', 'plugin-activation')) {
+    $libraries = [ordered]@{
+        'agent-config-migrate' = 'config-migrate'
+        'agent-procutil' = 'agent-procutil'
+        'agent-dropin-registry' = 'dropin-registry'
+        'agent-plugin-resolve' = 'plugin-resolve'
+        'agent-plugin-activation' = 'plugin-activation'
+        'agent-single-instance-lease' = 'single-instance-lease'
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $project = Join-Path $SnapshotDir 'pyproject.toml'
+    $text = [IO.File]::ReadAllText($project)
+    foreach ($entry in $libraries.GetEnumerator()) {
+        $lib = $entry.Value
         $source = Join-Path $PluginDir "libs\$lib"
         if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
             $source = Join-Path $PluginDir "..\..\libs\$lib"
@@ -894,7 +906,14 @@ function Materialize-SnapshotLibs {
         }
         Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+        $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $lib
+        $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $lib
+        $text = $text.Replace($oldLine, $newLine)
+        $nestedProject = Join-Path $destination 'pyproject.toml'
+        $nestedText = [IO.File]::ReadAllText($nestedProject).Replace(', editable = true }', ' }')
+        [IO.File]::WriteAllText($nestedProject, $nestedText, $utf8NoBom)
     }
+    [IO.File]::WriteAllText($project, $text, $utf8NoBom)
 }
 
 function Materialize-SnapshotInstallerEngine {

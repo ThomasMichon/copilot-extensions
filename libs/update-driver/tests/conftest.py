@@ -92,6 +92,7 @@ def owning_context(area, monkeypatch):
         *provision.CONTEXT_KEYS, *provision.PULL_REQUESTS_CONTEXT_KEYS,
         *provision.SSH_CONTEXT_KEYS,
         *provision.CODESPACES_CONTEXT_KEYS,
+        *provision.LOGGER_CONTEXT_KEYS,
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
         "AGENT_PULL_REQUESTS_INSTALL_DIR", "UPDATE_DRIVER_WITNESS",
@@ -99,6 +100,8 @@ def owning_context(area, monkeypatch):
         "AGENT_SSH_ACTION", "AGENT_SSH_DRY_RUN",
         "AGENT_CODESPACES_VALIDATED_CONTEXT", "AGENT_CODESPACES_PAYLOAD_ROOT",
         "AGENT_CODESPACES_ACTION", "AGENT_CODESPACES_FORCE", "AGENT_CODESPACES_DRY_RUN",
+        "AGENT_LOGGER_VALIDATED_CONTEXT", "AGENT_LOGGER_PAYLOAD_ROOT",
+        "AGENT_LOGGER_ACTION", "AGENT_LOGGER_DRY_RUN",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HOME", str(profile))
@@ -244,3 +247,22 @@ def owning_codespaces(owning_ssh):
             encoding="utf-8",
         )
     return payload, installation.with_name(".agent-codespaces"), project
+
+
+@pytest.fixture
+def owning_logger(owning_codespaces):
+    payload, installation, project = owning_codespaces
+    payload = payload.rename(payload.with_name("agent-logger"))
+    for name in ("plugin.json", "pyproject.toml", "scripts/install.ps1", "scripts/install.sh"):
+        path = payload / name
+        path.write_text(path.read_text().replace(
+            "agent-codespaces", "agent-logger",
+        ).replace("agent_codespaces", "agent_logger").replace(
+            "AGENT_CODESPACES", "AGENT_LOGGER",
+        ), encoding="utf-8")
+    repository = Path(__file__).resolve().parents[3]
+    shutil.copyfile(
+        repository / "plugins/agent-logger/payload-invocation.json",
+        payload / "payload-invocation.json",
+    )
+    return payload, installation.with_name(".agent-logger"), project
