@@ -1,0 +1,9 @@
+{
+  "comment": "Support explicit endpoint-bound bearer credential commands for HTTP read clients",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
