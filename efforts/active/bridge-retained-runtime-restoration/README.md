@@ -292,6 +292,17 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   The checker accepts both contracts and 658 fixtures. Current-head review
   remains owed; this correction does not complete the actual SDK or parent
   restoration gates.
+- A subsequent review found active-alias gaps before cleanup: the HTTP route
+  erased the original target before admission, and receipt projection followed
+  aliases for retained rows. Nine focused cases reproduced those failures and
+  the prior enrollment test's obsolete row-moving expectation. The route now
+  preserves its requested target through admission and receipt recovery;
+  retained duplicate matching and read-only projections use exact native ids,
+  while legacy rows retain alias forwarding. Internal unqualified controls
+  also retain the original enrollment refusal. The corrected enrollment test
+  requires an empty successor inbox and the complete unchanged original row.
+  All 312 selected producer/enrollment/receipt/legacy cases pass. Fresh source
+  evidence and independent review remain required.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

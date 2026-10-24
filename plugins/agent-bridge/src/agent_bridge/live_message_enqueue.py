@@ -44,7 +44,7 @@ def _duplicate(
         "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
     )
     existing = db.execute_read(
-        "SELECT id, sender, body, reply_to, kind, delivery, runtime_custody_json, "
+        "SELECT id, session_id, sender, body, reply_to, kind, delivery, runtime_custody_json, handoff_json, "
         f"{msg_canon} = {_CANON} AS same_target, "
         f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
         "FROM live_messages WHERE idempotency_key = ?",
@@ -55,8 +55,13 @@ def _duplicate(
     if not existing:
         return None
     row = existing[0]
+    retained = row["runtime_custody_json"] is not None or row["handoff_json"] is not None
+    same_target = row["session_id"] == request.session_id if retained else bool(row["same_target"])
+    same_expected = (
+        request.expected_session_id is None or request.expected_session_id == row["session_id"]
+    ) if retained else bool(row["same_expected"])
     if (
-        bool(row["same_target"]) and bool(row["same_expected"])
+        same_target and same_expected
         and row["sender"] == request.sender and row["body"] == request.body
         and row["reply_to"] == request.reply_to and row["kind"] == request.kind
         and row["delivery"] == request.delivery
@@ -76,9 +81,9 @@ def _enrolled_admission(
         (request.session_id, request.session_id, request.session_id),
     ).fetchall()
     retained = conn.execute(
-        f"SELECT 1 FROM live_messages WHERE session_id={_CANON} "
+        f"SELECT 1 FROM live_messages WHERE (session_id=? OR session_id={_CANON}) "
         "AND (runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL) LIMIT 1",
-        (request.session_id, request.session_id),
+        (request.session_id, request.session_id, request.session_id),
     ).fetchone()
     if not rows and retained is None:
         return None
@@ -152,7 +157,7 @@ def _insert(
         "        AND (pending.delivered_at IS NULL OR pending.consumption_tracked=1) "
         "        AND pending.kind NOT LIKE 'control:%')))"
         ") AND (? = 0 OR ? IS NOT NULL OR NOT EXISTS ("
-        f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id={_CANON}))",
+        f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? OR session_id={_CANON}))",
         (
             request.session_id, request.session_id, request.sender, request.body,
             request.reply_to, request.kind, request.delivery, request.idempotency_key,
@@ -160,7 +165,7 @@ def _insert(
             request.expected_session_id, request.expected_session_id, request.expected_session_id,
             request.require_idle,
             request.delivery == "interrupt" or request.kind.casefold().startswith(("control:", "startup:")),
-            association, request.session_id, request.session_id,
+            association, request.session_id, request.session_id, request.session_id,
         ),
     )
     if cur.rowcount == 1:
@@ -171,8 +176,8 @@ def _insert(
     if association is None and (
         request.delivery == "interrupt" or request.kind.casefold().startswith(("control:", "startup:"))
     ) and db.execute_read(
-        f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id={_CANON} LIMIT 1",
-        (request.session_id, request.session_id),
+        f"SELECT 1 FROM bridge_inbox_consumers WHERE session_id=? OR session_id={_CANON} LIMIT 1",
+        (request.session_id, request.session_id, request.session_id),
     ):
         return None, "retained_inbox_requires_admission"
     row = db.get_live_session(request.session_id)

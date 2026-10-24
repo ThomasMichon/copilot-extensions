@@ -11,6 +11,13 @@ CANONICAL_SESSION_SQL = (
     "WHERE alias_session_id = ?), ?)"
 )
 
+# Retained rows name their original native context; only legacy rows follow
+# routing aliases. Binds the requested id three times.
+MESSAGE_TARGET_SQL = (
+    "(CASE WHEN runtime_custody_json IS NOT NULL OR handoff_json IS NOT NULL "
+    f"THEN ? ELSE {CANONICAL_SESSION_SQL} END)"
+)
+
 import json
 import logging
 from typing import Any

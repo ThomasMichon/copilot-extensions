@@ -157,6 +157,11 @@ or handoffs to its successor; only unassociated legacy messages follow aliases.
 The original retained target, input and producer association therefore survive
 alias cleanup, and an original-URL keyed retry still recovers that same row
 after deregistration or purge without granting a new send opportunity.
+While aliases still exist, retained admission, keyed recovery, receipt reads
+and pending-input inspection also use the original native target. An original
+URL cannot downgrade a retired enrollment to the successor's legacy queue,
+and the successor cannot recover the predecessor's retained operation key.
+Unassociated legacy rows continue to follow their routing aliases.
 
 Enrollment history is immutable apart from irreversible retirement, survives
 registration cleanup and participates in DB revision/inventory observations.

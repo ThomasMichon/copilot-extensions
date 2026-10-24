@@ -246,10 +246,11 @@ def test_actual_same_process_alias_fold_retires_old_enrollment_without_inheritin
         db.begin_live_message_handoff(
             owner, admission, consumer, row["id"], row["handoff"]["id"], now=12.0,
         )
-    with pytest.raises(RuntimeCustodyError, match="observations changed"):
-        db.poll_live_message_handoffs(owner, admission, successor, now=12.0)
+    assert db.poll_live_message_handoffs(owner, admission, successor, now=12.0) == []
     history, = db.execute_read("SELECT * FROM live_messages")
-    assert history["body"] == "original body" and history["handoff_json"] == row["handoff_json"]
+    original = {key: value for key, value in row.items() if key not in ("handoff", "handoff_stage")}
+    assert dict(history) == original
+    assert history["session_id"] == consumer.session_id
 
 
 @pytest.mark.parametrize("damage", [

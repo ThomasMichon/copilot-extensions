@@ -39,6 +39,11 @@
     "native_rename": {
       "original_row_unchanged": true,
       "original_begin_refused": 409,
+      "original_retry_receipt": true,
+      "original_receipt_status": 200,
+      "successor_retry": 409,
+      "successor_receipt": 404,
+      "new_key_refused": 409,
       "aliases_removed": true
     },
     "outcomes_after_close": [

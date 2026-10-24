@@ -120,9 +120,23 @@ def test_http48_capture_actual_observations(
             **registration, "session_id": successor,
         })
         assert renamed.status_code == 200, renamed.text
+    original_retry = client.post(ordinary, json=message)
+    original_receipt = client.get(f"{ordinary}/{mid}/receipt")
+    successor_url = "/api/v1/live-sessions/native-c/messages"
     observed["native_rename"] = {
         "original_row_unchanged": dict(db.execute_read("SELECT * FROM live_messages")[0]) == original,
         "original_begin_refused": client.post(PREFIX + "/begin", json=attempt(body, row)).status_code,
+        "original_retry_receipt": (
+            original_retry.status_code == 200 and original_retry.json()["receipt_current"]
+            and original_retry.json()["session_id"] == consumer.session_id
+            and original_retry.json()["receipt"] == original_receipt.json()
+        ),
+        "original_receipt_status": original_receipt.status_code,
+        "successor_retry": client.post(successor_url, json=message).status_code,
+        "successor_receipt": client.get(f"{successor_url}/{mid}/receipt").status_code,
+        "new_key_refused": client.post(
+            ordinary, json={**message, "idempotency_key": "synthetic-new-operation"},
+        ).status_code,
     }
     db.close_runtime_epoch(
         owner, db.runtime_epoch(owner), transition_id="synthetic-transition",

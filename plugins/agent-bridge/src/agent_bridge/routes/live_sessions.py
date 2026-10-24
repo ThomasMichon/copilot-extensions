@@ -744,7 +744,7 @@ async def post_live_message(
     from .live_inbox import enqueue_message
 
     message_id, reason = enqueue_message(
-        request, db, target_session_id, body, kind=message_kind,
+        request, db, session_id, body, kind=message_kind,
         expected_session_id=expected_session_id, now=now,
     )
     duplicate = reason == "duplicate"
@@ -790,7 +790,7 @@ async def post_live_message(
     if message_id is None:  # defensive: unreachable when reason is None
         raise HTTPException(status_code=500, detail="enqueue produced no id")
     admitted_receipt, receipt_current = admission_evidence(
-        db, target_session_id, message_id, now, duplicate
+        db, session_id, message_id, now, duplicate
     )
     if admitted_receipt:
         target_session_id = admitted_receipt.session_id
