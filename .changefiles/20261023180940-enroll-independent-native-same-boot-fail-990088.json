@@ -1,0 +1,17 @@
+{
+  "comment": "Enroll independent native same-boot failure and legacy settlement admission qualification for the shared execution driver.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
