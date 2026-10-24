@@ -1275,9 +1275,6 @@
     "tools/promotion_unit_tests/test_ci_contract.py::test_every_code_impact_consumer_requires_prior_selector[ast-source AST guards must follow validated admission without weakening scans]",
     "tools/promotion_unit_tests/test_contract.py::test_pr_scope_uses_merge_base_while_push_scope_retains_both_tips[pull_request-True]",
     "tools/promotion_unit_tests/test_contract.py::test_pr_scope_uses_merge_base_while_push_scope_retains_both_tips[push-False]",
-    "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_scan_commands_and_outcomes_cannot_be_weakened[3-change0]",
-    "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_scan_commands_and_outcomes_cannot_be_weakened[3-change1]",
-    "tools/promotion_unit_tests/test_ci_contract.py::test_source_ast_scan_commands_and_outcomes_cannot_be_weakened[3-change2]",
     "tools/promotion_unit_tests/test_candidate_units.py::test_candidate_composition_fields_are_not_optional_or_self_declared[candidate_tree]",
     "tools/promotion_unit_tests/test_candidate_units.py::test_candidate_composition_fields_are_not_optional_or_self_declared[dev_sha]",
     "tools/promotion_unit_tests/test_candidate_units.py::test_candidate_composition_fields_are_not_optional_or_self_declared[development_sources]",
@@ -1384,7 +1381,10 @@
     "tools/promotion_unit_tests/test_qualification.py::test_v3_refuses_mutated_bytes_or_forged_development_attribution[dev-mutation]",
     "tools/promotion_unit_tests/test_qualification.py::test_v3_refuses_mutated_bytes_or_forged_development_attribution[forged-map]",
     "tools/promotion_unit_tests/test_qualification.py::test_v3_refuses_mutated_bytes_or_forged_development_attribution[forged-projection]",
-    "tools/promotion_unit_tests/test_qualification.py::test_v3_refuses_mutated_bytes_or_forged_development_attribution[wrong-tree]"
+    "tools/promotion_unit_tests/test_qualification.py::test_v3_refuses_mutated_bytes_or_forged_development_attribution[wrong-tree]",
+    "tools/promotion_unit_tests/test_frozen_candidate.py::test_promotion_message_keeps_its_existing_public_api",
+    "tools/promotion_unit_tests/test_frozen_candidate.py::test_frozen_consumers_validate_the_content_index_not_the_full_commit[publication]",
+    "tools/promotion_unit_tests/test_frozen_candidate.py::test_frozen_consumers_validate_the_content_index_not_the_full_commit[attestation-validation]"
   ],
   "sources": {
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
@@ -1458,14 +1458,14 @@
     "tools/coverage_guided_selection/__init__.py": "29e9e5a122d7f4e2a6be3f8793381df448e8d578ef8c381093edd64db7a65d80",
     "tools/coverage_guided_selection/selection.py": "bfa87b4332a72b4def6536914b3d39daa785561d90a72162ebd96339984697fb",
     "tools/materialized_candidate_inventory.py": "cfb7852c4d0c510a80ef86b88b4c8a30ef0c9d6db943cfb4240fcee27f05e6bd",
-    "tools/promote_release.py": "104f2e9fa0f9c9d8c91de0f55d0b0dce45fe5e884aa7d86495c3b8b3ae226235",
+    "tools/promote_release.py": "966c7377e9591d5594ebcbc10dbe7e1e2846e4c94e9734fe4a174a722ad4aa02",
     "tools/promotion_admission_evidence.py": "fcfca78b764933b5d40e347eb296a3d4f471a4ec0c0e5c5eaa81136c75419365",
     "tools/promotion_artifact_readiness.py": "7ba79b5b4f5140f35ae5bfe7540163ec90068f28639aa3fce00904e4f1613ea1",
-    "tools/promotion_candidate.py": "44f7ec8491bacf480f033e1fb10827e225956134d0544b40b8a663e7e7fb2575",
+    "tools/promotion_candidate.py": "0801c38fc259381b904c65f32a4d1e21714961088995aa04ae9bcc937ac70475",
     "tools/promotion_candidate_units.py": "3034c8bc4f05e45ef5154845d525a769509478258647280c3b844d0fe15f18c8",
     "tools/promotion_development_map.py": "6b1c25d6d8ee796bac2d23cdaf8cb20de9fee701c8a0bd0713e979541626ca20",
     "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
-    "tools/promotion_frozen_candidate.py": "c6b413d4f4b39a5a49e509f152e06a2b7f4526e212c03c648fbab27702deeb02",
+    "tools/promotion_frozen_candidate.py": "dbf6c9d263230ebdceded131ad7ba4aaa5cae329581f400cb0abbe6f84914676",
     "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
     "tools/promotion_python_artifacts.py": "78cb5e37e20839657461872b73599b2ea09419e939cc4a83d24442c529c8cf48",
     "tools/promotion_unit_contract.py": "6da37634ee0b692c1a0dd664535d1ed5ba31133fdbcae4f27e3ace49d5bd7392",
@@ -1485,7 +1485,7 @@
     "tools/promotion_unit_tests/test_dropin_registry.py": "4a9d1b9e49dab865066957982a9a7af32fd1cc77f269fe688730f4e25e4f98f0",
     "tools/promotion_unit_tests/test_effects.py": "2fbb5d87e781f3a9acc83e6194d2f0c9822e46d6d6b37a907a92a8367e9d0007",
     "tools/promotion_unit_tests/test_fleet_contracts.py": "3600994bd34df5cd249d6cd3ad3389b7568f4ba599d4786da455dcc8db3bbc01",
-    "tools/promotion_unit_tests/test_frozen_candidate.py": "3b0e1c4b0207ea4dbbe5f1c2063e48536598ca859f7cdd2cf8b47a8d78ca1653",
+    "tools/promotion_unit_tests/test_frozen_candidate.py": "8701ef0441a01b9226d971803ee726f6a4119de310b6882d158a8df815a8a9cb",
     "tools/promotion_unit_tests/test_lazy_dispatch.py": "7a206f98c1f7686b83ad5c8fe11a3f801d93e3939c1b8d75294fe4deef5040dd",
     "tools/promotion_unit_tests/test_legacy_version_evidence.py": "741716970463c8ae8bf53cbd7d046faa02450593eb13f88d46984ba821d3668d",
     "tools/promotion_unit_tests/test_lifecycle.py": "b002067cfec30fda962f3a9546371abfe87957dd9f940593264860b52bcbd728",
@@ -1571,7 +1571,8 @@
     "tools/promote_release.py",
     "tools/promotion_candidate_units.py",
     "tools/promotion_development_map.py",
-    "tools/promotion_frozen_candidate.py"
+    "tools/promotion_frozen_candidate.py",
+    "tools/promotion_candidate.py"
   ],
   "max_seconds": 300
 }

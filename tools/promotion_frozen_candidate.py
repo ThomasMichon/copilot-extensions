@@ -119,6 +119,38 @@ def import_candidate(directory: Path, *, repo: Path, dev_sha: str, main_before: 
     return record
 
 
+def publish_frozen(
+    directory: Path, *, repo: Path, dev_head: str, main_head: str,
+    promotion_time: str | None, python_artifacts_dir: Path | None,
+    push: bool, candidate_branch: str | None,
+) -> dict:
+    import promote_release as promotion
+    from promotion_python_artifacts import validate_composed_artifacts
+
+    record = import_candidate(directory, repo=repo, dev_sha=dev_head, main_before=main_head)
+    if promotion_time is not None and promotion_time != record["prepared_at"]:
+        raise promotion.PromotionError("frozen candidate preparation time changed")
+    if python_artifacts_dir is None:
+        raise promotion.PromotionError("frozen publication requires validated candidate artifacts")
+    if push and not candidate_branch:
+        raise promotion.PromotionError("frozen publication requires the normal candidate PR path")
+    scratch = promotion.add_scratch_worktree(record["candidate_sha"], repo=repo)
+    try:
+        promotion._git(["read-tree", record["content_tree"]], cwd=scratch)
+        validate_composed_artifacts(
+            python_artifacts_dir, scratch=scratch, content_tree=record["content_tree"],
+            dev_head=dev_head, main_before=main_head,
+        )
+        if push:
+            promotion.push_candidate(record["candidate_sha"], candidate_branch, cwd=scratch, git=promotion._git)
+    finally:
+        promotion.remove_scratch_worktree(scratch, repo=repo)
+    return {
+        **record["report"], "pushed": push,
+        "candidate_branch": candidate_branch if push else None,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, required=True)
@@ -155,6 +187,7 @@ def main() -> None:
 
         scratch = promotion.add_scratch_worktree(record["candidate_sha"], repo=args.repo)
         try:
+            promotion._git(["read-tree", record["content_tree"]], cwd=scratch)
             validate_composed_artifacts(
                 args.validate_artifacts, scratch=scratch, content_tree=record["content_tree"],
                 dev_head=args.dev_sha, main_before=args.main_before,

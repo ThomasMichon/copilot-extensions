@@ -1221,6 +1221,20 @@ also appears in raw evidence. The combined focused contract suite passes all
 300 cases after that refinement; containing hosted release evidence is still
 required.
 
+Source implementation PR #8454 is open. Its first CI pass found the composer
+over the module cap and three obsolete selectors inadvertently retained during
+pull-forward reconciliation. The frozen-publication path now lives with its
+transport owner, message formatting remains available through its existing
+public API, and retired selectors stay retired. Review also found that frozen
+artifact consumers supplied the full commit index to the content-only validator.
+Two new in-process regressions reproduced that refusal in both publication and
+attestation validation, then passed after each disposable index explicitly
+loaded the recorded content tree. No frozen commit is changed. The focused
+cohort passes 128 cases and the composer is below the unchanged module cap;
+renewed hosted CI and current-head review remain required.
+The resulting local effect-observed slice, including the original historical
+controls, passes 214 units in 21.406 seconds with zero prohibited effects.
+
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as
   `a1f431264eede9764c1e051112b0869b0351d88a` after exact-head approval
