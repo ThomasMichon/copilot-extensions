@@ -311,8 +311,11 @@ function Invoke-VersionedActivate {
     Test-SourceRuntimeUnchanged
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) { return $true }
+    $py = $VenvPython
+    if (-not (Test-Path -LiteralPath $py -PathType Leaf)) {
+        Write-Fail "Candidate runtime interpreter is unavailable (versions/$SrcVersion) -- not activating"
+        return $false
+    }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $nativeError = ''

@@ -6,10 +6,14 @@ import shlex
 import subprocess
 import venv
 
+import pytest
 from agent_procutil import no_window_kwargs
 
 
-def test_legacy_cli_health_rejects_importable_package_with_broken_entrypoint(tmp_path):
+@pytest.mark.parametrize("missing_python", [False, True])
+def test_legacy_cli_health_rejects_importable_package_with_broken_entrypoint(
+    tmp_path, missing_python,
+):
     slot = tmp_path / "candidate"
     venv.EnvBuilder(with_pip=False).create(slot)
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -28,6 +32,8 @@ def test_legacy_cli_health_rejects_importable_package_with_broken_entrypoint(tmp
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
     assert imported.returncode == 0, imported.stderr
+    if missing_python:
+        python.rename(python.with_suffix(".unavailable"))
     scripts = Path(__file__).resolve().parents[1] / "scripts"
     marker = tmp_path / "completed"
     if os.name == "nt":
@@ -55,7 +61,7 @@ def test_legacy_cli_health_rejects_importable_package_with_broken_entrypoint(tmp
         )[1].split("# === end install-contract:v3 versioned-venv ===", 1)[0]
         program = (
             "set -eu\n"
-            f"VENV_DIR={shlex.quote(str(slot))}; VENV_PYTHON={shlex.quote(str(python))}\n"
+            f"VENV_DIR={shlex.quote(str(slot))}; LINK_DIR=$VENV_DIR; VENV_PYTHON={shlex.quote(str(python))}\n"
             f"INSTALL_DIR={shlex.quote(str(tmp_path))}; SCRIPT_DIR=$INSTALL_DIR; SRC_VERSION=fixture\n"
             "_source_runtime_unchanged() { :; }\n"
             "_fail() { printf '%s\\n' \"$1\" >&2; }\n"
@@ -71,5 +77,8 @@ def test_legacy_cli_health_rejects_importable_package_with_broken_entrypoint(tmp
         timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "fixture installed CLI is broken" in result.stderr
+    assert (
+        "not activating" in result.stderr if missing_python
+        else "fixture installed CLI is broken" in result.stderr
+    )
     assert not marker.exists(), "an importable package must not complete a broken CLI"

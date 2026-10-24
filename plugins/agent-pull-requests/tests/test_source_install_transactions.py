@@ -86,6 +86,10 @@ def _payload(root: Path) -> Path:
     package = payload / "src" / PLUGIN.name.replace("-", "_")
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("from vendored_fixture import VALUE\n")
+    (package / "__main__.py").write_text(
+        "import argparse\nfrom . import VALUE\n"
+        "assert VALUE == 42\nargparse.ArgumentParser(prog='fixture-cli').parse_args()\n",
+    )
     lib = payload / "libs" / "agent-procutil"
     (lib / "src" / "vendored_fixture").mkdir(parents=True)
     (lib / "src" / "vendored_fixture" / "__init__.py").write_text("VALUE = 42\n")
