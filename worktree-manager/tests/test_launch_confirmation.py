@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from types import SimpleNamespace
 import pytest
 from textual.app import App
 from textual.screen import Screen
@@ -383,3 +384,180 @@ def test_new_decision_option_fidelity():
         "options": dict.fromkeys(["anchor", "bare", "no_mux", "ahp", "local_model"], True)
         | {"seed_prompt": "normalized execution"},
     }
+
+
+def unresolved_locality(*_args):
+    raise RuntimeError("Locality snapshot is not ready.")
+
+
+def refusal_screen():
+    from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
+        PickerScreenWorktreeActionsMixin,
+    )
+
+    class RefusalScreen(
+        PickerScreenWorktreeActionsMixin, PickerScreenMaintenanceActionsMixin, Screen,
+    ):
+        real_ops = True
+        src = SimpleNamespace(is_local=unresolved_locality, LOCAL=("observer", "Win"))
+        debug = ""
+
+        def _current_tab(self):
+            return {}
+
+        def _run_bg(self, *_args, **_kwargs):
+            pytest.fail("a refused action must not embody, allocate or launch")
+
+    return RefusalScreen()
+
+
+@pytest.mark.parametrize("entry", ["resume", "open", "bare", "new-window", "task-open"])
+def test_unresolved_confirmed_action_retains_target_options_and_refusal(
+    private_root, monkeypatch, entry,
+):
+    from worktree_manager.production_picker.picker_tui.headed_actions import open_worktree_cli_headed
+
+    async def run():
+        app, notices = App(), []
+        owner = refusal_screen()
+        monkeypatch.setattr(owner, "notify", lambda text, **_: notices.append(text))
+        row = {
+            "raw": {"id": "selected-worktree"}, "id4": "tree", "title": "selected title",
+            "machine": "selected-host", "env": "POSIX", "mux_live": entry == "open",
+        }
+        async with app.run_test() as pilot:
+            await app.push_screen(owner)
+            if entry == "task-open":
+                ok, _ = owner._embody_task_cli({
+                    "task_id": "selected-task", "machine": row["machine"], "env": row["env"],
+                    "title": row["title"], "source_kind": "machine-ssh",
+                })
+                assert ok is False
+            elif entry == "new-window":
+                open_worktree_cli_headed(owner, row, no_mux=True, ahp=True)
+            else:
+                assert owner._decide(owner._resume_decision(
+                    row, no_mux=True, ahp=True, bare_resume=entry == "bare",
+                )) is False
+            await settled(pilot, lambda: bool(notices))
+            assert app.screen is owner and getattr(app, "result", None) is None
+            entries = LaunchAttempts(private_root).entries()
+            assert len(entries) == 1 and entries[0]["is_local"] is None
+            detail = LaunchAttempts(private_root).detail(entries[0]["attempt_id"], include_input=True)
+            assert detail["machine"] == row["machine"] and detail["environment"] == row["env"]
+            assert detail["action"] == {
+                "bare": "bare-resume", "new-window": "resume", "task-open": "open",
+            }.get(entry, entry)
+            assert detail["surface"] == (
+                entry if entry in {"new-window", "task-open"} else "picker-action"
+            )
+            assert detail["input"]["prompt"] == ""
+            assert detail["input"]["options"]["title"] == row["title"]
+            if entry == "task-open":
+                assert detail["input"]["options"]["task_id"] == "selected-task"
+            else:
+                assert detail["worktree_id"] == "selected-worktree"
+                assert detail["input"]["options"]["no_mux"] is True
+                assert detail["input"]["options"]["ahp"] is True
+            if entry == "new-window":
+                assert detail["input"]["options"]["new_window"] is True
+            assert [event["phase"] for event in detail["events"]] == ["confirmed", "refused"]
+            assert detail["events"][-1]["details"] == {"code": "locality-unresolved"}
+            assert notices == ["Locality snapshot is not ready."]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("entry", ["resume", "new-window", "task-open"])
+def test_mock_unresolved_action_never_creates_journal(private_root, monkeypatch, entry):
+    from worktree_manager.production_picker.picker_tui.headed_actions import open_worktree_cli_headed
+
+    async def run():
+        app = App()
+        owner = refusal_screen()
+        owner.real_ops = False
+        row = {"raw": {"id": "selected-worktree"}, "machine": "selected-host", "env": "POSIX"}
+        monkeypatch.setattr(
+            LaunchAttempts, "record_intent",
+            lambda *_args, **_kwargs: pytest.fail("mock action attempted persistence"),
+        )
+        async with app.run_test():
+            await app.push_screen(owner)
+            if entry == "new-window":
+                open_worktree_cli_headed(owner, row, no_mux=True)
+            elif entry == "task-open":
+                assert owner._embody_task_cli({
+                    "task_id": "selected-task", "machine": row["machine"], "env": row["env"],
+                })[0] is False
+            else:
+                assert owner._decide(owner._resume_decision(row)) is False
+            assert app.screen is owner and getattr(app, "result", None) is None
+            assert not LaunchAttempts(private_root).path.exists()
+    asyncio.run(run())
+
+
+def test_opening_unavailable_resume_prompt_is_not_a_confirmed_launch(private_root, monkeypatch):
+    from worktree_manager.production_picker.picker_tui.resume_prompt_actions import open_resume_prompt
+
+    async def run():
+        app, notices = App(), []
+        owner = refusal_screen()
+        row = {"raw": {"id": "selected-worktree"}, "machine": "selected-host", "env": "POSIX"}
+        monkeypatch.setattr(owner, "notify", lambda text, **_: notices.append(text))
+        monkeypatch.setattr(owner, "_find_internal_worktree", lambda *_: (row, None))
+        monkeypatch.setattr(owner, "_session_action_verbs", lambda _: ["Resume prompt\u2026"])
+        async with app.run_test():
+            await app.push_screen(owner)
+            open_resume_prompt(owner, row)
+            assert app.screen is owner and getattr(app, "result", None) is None
+            assert owner.debug == "Locality snapshot is not ready."
+            assert notices == [] and not LaunchAttempts(private_root).path.exists()
+    asyncio.run(run())
+
+
+def test_deferred_continuation_never_creates_a_replacement_intent(private_root):
+    async def run():
+        app = App()
+        owner = refusal_screen()
+        store = LaunchAttempts(private_root)
+        attempt_id = "a" * 32
+        store.record_intent(
+            attempt_id, action="open", project="demo", surface="task-open", is_local=True,
+        )
+        original = store.detail(attempt_id, include_input=True)
+        async with app.run_test():
+            await app.push_screen(owner)
+            decision = owner._resume_decision({"raw": {"id": "allocated-worktree"}})
+            decision["attempt_id"] = attempt_id
+            assert owner._decide(decision) is False
+            assert app.screen is owner and getattr(app, "result", None) is None
+            assert len(store.entries()) == 1
+            assert store.detail(attempt_id, include_input=True) == original
+    asyncio.run(run())
+
+
+def test_unresolved_refusal_storage_error_does_not_exit_or_release_effects(
+    private_root, monkeypatch,
+):
+    async def run():
+        app, notices = App(), []
+        owner = refusal_screen()
+        monkeypatch.setattr(owner, "notify", lambda text, **_: notices.append(text))
+
+        def fail(*_args, **_kwargs):
+            raise LaunchAttemptError("private diagnostic must not escape")
+
+        monkeypatch.setattr(LaunchAttempts, "record_intent", fail)
+        async with app.run_test() as pilot:
+            await app.push_screen(owner)
+            decision = owner._resume_decision({
+                "raw": {"id": "selected-worktree"}, "machine": "selected-host", "env": "POSIX",
+            }, no_mux=True)
+            assert owner._decide(decision) is False
+            await settled(pilot, lambda: bool(notices))
+            assert app.screen is owner and getattr(app, "result", None) is None
+            assert notices == [
+                "Could not save launch confirmation. Your draft is unchanged; no launch started.",
+            ]
+            assert owner._launch_confirmation.decision["options"] == {"no_mux": True}
+            assert not LaunchAttempts(private_root).path.exists()
+    asyncio.run(run())

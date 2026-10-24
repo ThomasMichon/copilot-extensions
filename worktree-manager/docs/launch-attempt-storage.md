@@ -13,9 +13,13 @@ The production New and cold Resume composers save exact original field text,
 options, project and selected venue before dismissing. Ordinary Open/Resume,
 Bare Resume, Restore, new-window launches, compact Picker launches, task Open
 before embodiment, and provider venue Open use the same confirmation gate.
-These paths require resolved target locality. A locality-resolution refusal
-still precedes persistence; representing unknown locality without inventing
-a local/remote claim remains an explicit effort follow-up.
+Confirmed Open/Resume, Bare Resume, new-window and task Open actions that fail
+locality resolution retain their selected target/options with unknown locality
+and a structured `locality-unresolved` refusal. They neither exit nor start
+embodiment or launch. Opening an unavailable Resume prompt editor is not a
+confirmation and records nothing. A deferred continuation already carrying an
+attempt ID never creates a replacement intent; later outcome correlation
+remains incomplete.
 The attempt ID remains on the Manager decision and `LaunchRequest`; it is not
 yet an engine or native-receipt correlation contract.
 
@@ -74,7 +78,8 @@ launched Copilot, consumed prompt or safe replay.
 
 `entries` returns bounded metadata, with optional project/action/time filters.
 `detail` adds bounded structured observations. Neither selects private input.
-Metadata includes boolean `is_local` and `inputs_available` fields.
+Metadata includes `is_local` (`true`, `false`, or `null` for unresolved) and
+boolean `inputs_available` fields.
 Event history is paged with `event_limit` (at most 1000) and `after_sequence`;
 `events_has_more` and `next_event_sequence` explicitly identify another page.
 Growing accepted history never prevents recovery of unexpired private input.
@@ -94,6 +99,15 @@ The SQLite header is inspected before opening a connection, so an unsupported
 WAL-mode database is refused without creating WAL/shared-memory bookkeeping.
 Schema validation compares every object row, including its type; a trigger
 cannot hide behind an index with the same name.
+
+Version 2 preserves the original table/index shape and encodes unknown locality
+as `-1`, exposing it only as `null` through the API. Version 1 remains readable
+without writes or permission repair. The first writer validates all original
+metadata under version 1's stricter boolean-locality rules, then advances the
+version in the same transaction as its mutation. A corrupt old `-1` cannot
+become a valid unknown merely through migration. Failed migration or mutation
+rolls back both together. Older version-1-only software refuses a version 2
+store rather than interpreting unknown locality as local.
 
 `expire` physically clears expired input using SQLite secure deletion while
 retaining metadata and observations. Reads hide expired input even before

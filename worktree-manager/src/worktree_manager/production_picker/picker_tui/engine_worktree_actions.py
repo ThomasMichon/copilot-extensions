@@ -867,8 +867,9 @@ class PickerScreenWorktreeActionsMixin:
         try:
             remote = not self.src.is_local(machine, env)
         except RuntimeError as exc:
-            self.debug = str(exc)
-            self.refresh()
+            self._decide({"action": "open", "machine": machine, "env": env, "is_local": None,
+                          "title": title, "options": {"task_id": task_id},
+                          "deferred": True, "reason": str(exc)}, surface="task-open")
             return False, self.debug
         base_argv = ["agent-dispatch", "embody", task_id, "--interactive", "--machine", machine]
         def _work():
