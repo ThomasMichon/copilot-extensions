@@ -241,7 +241,8 @@ and the authority-integration Plan item above is not complete.
 release authentication. It freezes the resolved owner/policy intent, uses its
 backend selection, and prefers a matching authenticated release profile.
 `ProfileUnavailable` distinguishes an absent matching/preferred approved record
-from malformed, ambiguous or unapproved input. Only explicit discovery absence
+from malformed, ambiguous or unapproved input. Lock preference validation
+precedes every availability-dependent path. Only explicit discovery absence
 or that typed absence can request a policy-permitted source fallback. A supplied
 index still authenticates if no artifact was discovered; I/O, integrity,
 provenance and cancellation failures propagate rather than requesting fallback.

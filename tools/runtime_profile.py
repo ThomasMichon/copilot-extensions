@@ -285,6 +285,14 @@ class SelectedProfile:
     approval_source: str
 
 
+def validate_profile_preference(preference: tuple[str, ...]) -> None:
+    """Validate desired lock identities before any availability-dependent path."""
+    for identity in preference:
+        _digest(identity, "profile preference")
+    if len(set(preference)) != len(preference):
+        raise ProfileError("duplicate profile preference")
+
+
 def select_profile(
     candidates: Iterable[dict], *, approvals: Mapping[str, str],
     release: dict, target: dict, component: str, roots: list[str], mode: str,
@@ -297,10 +305,7 @@ def select_profile(
     that map. No adapter/runtime loader is provided here. Mode/backend changes
     are explicit; this function never performs an automatic fallback.
     """
-    for identity in preference:
-        _digest(identity, "profile preference")
-    if len(set(preference)) != len(preference):
-        raise ProfileError("duplicate profile preference")
+    validate_profile_preference(preference)
     if backend is None:
         backend = retained_backend
         if backend is None:

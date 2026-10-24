@@ -689,13 +689,18 @@ win grows with build complexity.
   failures. A supplied release subject authenticates even if its artifact was
   not discovered; integrity, I/O, provenance and cancellation do not fall back.
   Existing managed/profile-aware publication holds remain unchanged.
-- Local validation: 143 policy/release/exact-selection/installation-policy
+- Local validation: 147 policy/release/exact-selection/installation-policy
   controls pass, including an isolated fresh Python caller with no artifact
   infrastructure; touched Python lint, diff checks and the install-contract
   guard pass. The optional Linux/Windows wheel lane includes the new tests.
   Required no-actor inventory changes only the already-admitted selector hash;
   effectful planner tests do not join that packet. Full packet, native remote
   qualification and review are pending publication.
+- Review on #8586 found preference validation was skipped when the index was
+  absent. Moved the shared validation ahead of every availability branch and
+  covered malformed/duplicate preferences with present, missing-index and
+  missing-artifact inputs. Required CI and all four optional native jobs passed
+  the original head; the repaired head must qualify separately.
 - This is not source verification, an exact source lock, acquisition admission
   or production enablement. The parent stays **Active**; complete the independent
   source-lock/feed-admission seam and real profile publication next.

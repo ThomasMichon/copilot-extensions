@@ -112,10 +112,13 @@ def test_missing_supplied_subject_is_not_reclassified_as_discovery_absence(adopt
 @pytest.mark.parametrize("preference", [
     ("not-a-lock",), ("sha256:" + "9" * 64,) * 2,
 ])
-def test_invalid_preference_is_not_an_availability_result(adopter, release, monkeypatch, preference):
+@pytest.mark.parametrize("missing", [{}, {"release_index": None}, {"artifact": None}])
+def test_invalid_preference_is_not_an_availability_result(
+    adopter, release, monkeypatch, preference, missing,
+):
     _verification(monkeypatch, release)
     with pytest.raises(ProfileError) as raised:
-        plan(adopter, release, preference=preference)
+        plan(adopter, release, preference=preference, **missing)
     assert not isinstance(raised.value, ProfileUnavailable)
 
 

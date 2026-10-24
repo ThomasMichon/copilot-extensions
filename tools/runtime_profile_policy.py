@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installation-context"))
 from installation_context import resolve_runtime_profile_policy
-from runtime_profile import ProfileError, ProfileUnavailable
+from runtime_profile import ProfileError, ProfileUnavailable, validate_profile_preference
 from runtime_profile_release import ReleaseSelection, select_release_profile
 
 
@@ -43,6 +43,7 @@ def plan_installation_profile(
     All authentication, malformed-record, I/O and cancellation failures propagate;
     only the selector's typed absence can request permitted source fallback.
     """
+    validate_profile_preference(preference)
     resolution = resolve_runtime_profile_policy(
         **installation, backend=backend, retained_backend=retained_backend,
         existing_installation=existing_installation,
