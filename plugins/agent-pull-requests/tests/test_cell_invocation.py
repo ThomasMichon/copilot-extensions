@@ -356,6 +356,8 @@ def test_first_touch_uses_canonical_receipt_and_activation_without_owner(first_t
 
 def test_command_cannot_activate_an_unqualified_cold_cell(first_touch, monkeypatch):
     module, profile = first_touch
+    monkeypatch.setattr(module, "installer", lambda: SimpleNamespace(foundation=lambda: api))
+    assert module.discover(api)[0]["reason"] == "activation-required"
     before = set(profile.rglob("*"))
     monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: pytest.fail(
         "ordinary cold command must not start an installer",
