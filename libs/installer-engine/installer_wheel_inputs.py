@@ -31,6 +31,7 @@ class WheelLimits:
     max_member_bytes: int
     max_metadata_bytes: int
     max_members: int
+    max_tags: int
 
     def __post_init__(self):
         if any(type(value) is not int or value <= 0 for value in vars(self).values()):
@@ -85,6 +86,27 @@ def _headers(data: bytes) -> Message:
     return message
 
 
+def bounded_tag(text: str, *, limit: int, deadline: float) -> tuple[str, int]:
+    """Canonicalize compressed tags without allocating their Cartesian product."""
+    _check_deadline(deadline)
+    fields = text.split("-")
+    if len(fields) != 3:
+        raise WheelError("invalid wheel tag")
+    canonical = []
+    count = 1
+    for field in fields:
+        _check_deadline(deadline)
+        alternatives = set(field.split("."))
+        if any(not re.fullmatch(r"[A-Za-z0-9_]+", item) for item in alternatives):
+            raise WheelError("invalid wheel tag alternatives")
+        count *= len(alternatives)
+        if count > limit:
+            raise WheelError("wheel tag expansion limit exceeded")
+        canonical.append(".".join(sorted(alternatives)))
+    _check_deadline(deadline)
+    return "-".join(canonical), count
+
+
 def _read(stream: BinaryIO, *, limit: int, deadline: float) -> bytes:
     data = bytearray()
     while True:
@@ -112,48 +134,52 @@ def inspect_archive(
             if len(members) > limits.max_members:
                 raise WheelError("wheel member count limit exceeded")
             names = [member.filename for member in members]
-            folded = [name.rstrip("/").casefold() for name in names]
-            if len(set(folded)) != len(folded):
-                raise WheelError("duplicate or case-ambiguous wheel members")
-            files = {member.filename.casefold() for member in members if not member.is_dir()}
-            if any(
-                "/".join(name.split("/")[:index]).casefold() in files
-                for name in names for index in range(1, len(name.rstrip("/").split("/")))
-            ):
-                raise WheelError("ambiguous wheel file/directory members")
+            seen = set()
+            tree = {}
+            prefixes = set()
             expanded = 0
             for member in members:
                 _check_deadline(deadline)
                 name = member.orig_filename
+                parts = name.rstrip("/").split("/")
                 kind = stat.S_IFMT(member.external_attr >> 16)
                 if (
                     member.flag_bits & 1 or "\\" in name or "\0" in name
                     or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
                     or name.startswith("/") or ":" in name
-                    or any(part in ("", ".", "..") for part in name.rstrip("/").split("/"))
+                    or any(part in ("", ".", "..") for part in parts)
                     or kind not in (0, stat.S_IFREG, stat.S_IFDIR)
                     or (kind == stat.S_IFDIR and not member.is_dir())
                     or (member.is_dir() and member.file_size)
                 ):
                     raise WheelError("unsafe wheel member")
+                folded = name.rstrip("/").casefold()
+                if folded in seen:
+                    raise WheelError("duplicate or case-ambiguous wheel members")
+                seen.add(folded)
+                node = tree
+                for index, part in enumerate(parts):
+                    _check_deadline(deadline)
+                    if None in node:
+                        raise WheelError("ambiguous wheel file/directory members")
+                    node = node.setdefault(part.casefold(), {})
+                    if part.endswith(".dist-info"):
+                        if index != 0:
+                            raise WheelError("ambiguous wheel dist-info")
+                        prefixes.add(part + "/")
+                if not member.is_dir():
+                    if node:
+                        raise WheelError("ambiguous wheel file/directory members")
+                    node[None] = True
                 expanded += member.file_size
                 if (
                     expanded > limits.max_expanded_bytes
                     or member.file_size > limits.max_member_bytes
                 ):
                     raise WheelError("wheel expanded/member limit exceeded")
-            prefixes = {
-                part + "/" for name in names for part in [name.split("/")[0]]
-                if part.endswith(".dist-info")
-            }
             if len(prefixes) != 1:
                 raise WheelError("ambiguous or missing wheel dist-info")
             prefix = prefixes.pop()
-            if any(
-                part.endswith(".dist-info") and (index != 0 or part + "/" != prefix)
-                for name in names for index, part in enumerate(name.rstrip("/").split("/"))
-            ):
-                raise WheelError("ambiguous wheel dist-info")
             metadata_names = [prefix + name for name in ("METADATA", "WHEEL", "RECORD")]
             if not set(metadata_names) <= set(names):
                 raise WheelError("missing wheel metadata")
@@ -180,9 +206,18 @@ def inspect_archive(
                        for tag in tags)
             ):
                 raise WheelError("invalid wheel tags")
-            rows = list(csv.reader(
+            tag_count = 0
+            for tag in tags:
+                _, count = bounded_tag(tag, limit=limits.max_tags - tag_count, deadline=deadline)
+                tag_count += count
+            rows = []
+            for row in csv.reader(
                 io.StringIO(metadata[prefix + "RECORD"].decode("utf-8")), strict=True,
-            ))
+            ):
+                _check_deadline(deadline)
+                if len(rows) >= len(members):
+                    raise WheelError("wheel RECORD row limit exceeded")
+                rows.append(row)
             if (
                 any(len(row) != 3 for row in rows)
                 or len(rows) != len({row[0] for row in rows})

@@ -1473,7 +1473,7 @@
     "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
     "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
     "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
-    "tools/promotion_python_artifacts.py": "78cb5e37e20839657461872b73599b2ea09419e939cc4a83d24442c529c8cf48",
+    "tools/promotion_python_artifacts.py": "794a469128a99565e9d84fcadc87c0d0b09b85ff574b97f4332f7475c8715084",
     "tools/promotion_unit_contract.py": "6da37634ee0b692c1a0dd664535d1ed5ba31133fdbcae4f27e3ace49d5bd7392",
     "tools/promotion_unit_effects.py": "bc724db0e33571f32fc80b016eb7a852935adeb08a7aa0cd4bfa4ca4513c3519",
     "tools/promotion_unit_packet.py": "b10961a370c5cbc897307f1e5e2e25297acf500e3ba47110d93b35a25ef5532b",
@@ -1518,9 +1518,9 @@
     "tools/test_check_docs_consistency.py": "60577ce827514cc996a23c7e654a66286b83c202daea2f25e806dcb4315ba494",
     "tools/validate_materialized_candidate.py": "47935f3988182f1e8762bef1894c2e829fa2f27b81bd962a731e6b04f25f3661",
     "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990",
-    "libs/installer-engine/installer_wheel_inputs.py": "5ec59e454d0389a7d14f33c7c3f1d9f45c64ceb1f5dcc3b3359409415f67aee3",
+    "libs/installer-engine/installer_wheel_inputs.py": "9c647e11e289014e97ead90bca1d025edc62d80f559f90f48195711f1f46e0a9",
     "tools/wheel_input_fixture.py": "21196f6e62a76be0714181b74b794465c8d20c83277bea309e5946488f3f8131",
-    "tools/promotion_unit_tests/test_wheel_inputs.py": "8fdfccd141f7e41c5e1ba90f15c9d771a28cb91577166d55c4a34d1f811c5a53"
+    "tools/promotion_unit_tests/test_wheel_inputs.py": "0a2f8b7d7a02592d08ab9f0bdfe78753b9d34d9609fbaa995254324722b1ab27"
   },
   "coverage_targets": [
     "plugins/agent-worktrees/src/agent_worktrees/context_cli.py",

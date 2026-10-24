@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import time
 from typing import Any, Iterable, Mapping
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -22,7 +23,9 @@ from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
-from installer_wheel_inputs import InspectedWheel, WheelError, WheelLimits, inspect_wheel
+from installer_wheel_inputs import (
+    InspectedWheel, WheelError, WheelLimits, bounded_tag, inspect_wheel,
+)
 
 SCHEMA = "copilot-extensions.exact-runtime-profile"
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -43,12 +46,19 @@ def inspect_profile_wheel(
 ) -> InspectedWheel:
     """Compare byte facts with an asserted record; never authenticate that record."""
     try:
-        if Path(path).name != entry["filename"]:
+        if Path(path).name != entry["filename"] or not entry["filename"].endswith(".whl"):
             raise ProfileError("wheel filename differs from selected record")
         inspected = inspect_wheel(path, sha256=entry["sha256"], limits=limits, deadline=deadline)
-        name, version, _, tags = parse_wheel_filename(entry["filename"])
+        prefix, python, abi, platform = entry["filename"].removesuffix(".whl").rsplit("-", 3)
+        filename_tags, _ = bounded_tag(
+            "-".join((python, abi, platform)), limit=limits.max_tags, deadline=deadline,
+        )
+        name, version, _, tags = parse_wheel_filename(prefix + "-" + filename_tags + ".whl")
         prefix_name, prefix_version = inspected.prefix.removesuffix(".dist-info/").rsplit("-", 1)
-        actual_tags = {tag for text in inspected.tags for tag in parse_tag(text)}
+        actual_tags = set()
+        for text in inspected.tags:
+            canonical, _ = bounded_tag(text, limit=len(tags), deadline=deadline)
+            actual_tags.update(parse_tag(canonical))
         actual_extras = {canonicalize_name(extra, validate=True) for extra in inspected.provides_extras}
         actual_requirements = {_requirement(text) for text in inspected.requires_dist}
         if (
@@ -65,6 +75,8 @@ def inspect_profile_wheel(
             or len(actual_requirements) != len(inspected.requires_dist)
         ):
             raise ProfileError("wheel bytes differ from selected metadata record")
+        if time.monotonic() >= deadline:
+            raise ProfileError("wheel inspection deadline exhausted")
         return inspected
     except (WheelError, KeyError, TypeError, ValueError) as exc:
         if isinstance(exc, ProfileError):

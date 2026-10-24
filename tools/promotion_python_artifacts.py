@@ -24,7 +24,7 @@ from artifact_source_build import (
 from standalone_python_artifacts import COMPONENTS, artifact_label, project_key
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
-from installer_wheel_inputs import WheelError, WheelLimits, inspect_archive
+from installer_wheel_inputs import WheelError, WheelLimits, bounded_tag, inspect_archive
 
 try:
     import tomllib
@@ -40,6 +40,7 @@ _PLUGIN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _VERSION = re.compile(r"[0-9][A-Za-z0-9.+-]*")
 _MANIFEST_LIMIT = 1 << 20
 _BUNDLE_LIMIT = 512 << 20
+_WHEEL_TAG_LIMIT = 10_000
 
 
 def _artifact_label(record: dict) -> str:
@@ -417,15 +418,20 @@ def inspect_wheel(
             archive, limits=WheelLimits(
                 max_archive_bytes=_BUNDLE_LIMIT, max_expanded_bytes=_BUNDLE_LIMIT,
                 max_member_bytes=_BUNDLE_LIMIT, max_metadata_bytes=3 * _MANIFEST_LIMIT,
-                max_members=100_000,
+                max_members=100_000, max_tags=_WHEEL_TAG_LIMIT,
             ), deadline=deadline,
         )
         wheel_metadata, package_metadata = facts.wheel_metadata, facts.metadata
+        canonical_tags, _ = bounded_tag(
+            "-".join(info[key] for key in ("python_tag", "abi_tag", "platform_tag")),
+            limit=_WHEEL_TAG_LIMIT, deadline=deadline,
+        )
+        python_tags, abi_tags, platform_tags = canonical_tags.split("-")
         expected_tags = {
             f"{python}-{abi}-{platform}"
-            for python in info["python_tag"].split(".")
-            for abi in info["abi_tag"].split(".")
-            for platform in info["platform_tag"].split(".")
+            for python in python_tags.split(".")
+            for abi in abi_tags.split(".")
+            for platform in platform_tags.split(".")
         }
         if (
             facts.prefix != prefix

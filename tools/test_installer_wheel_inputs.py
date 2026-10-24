@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import hashlib
+import itertools
 import os
 from pathlib import Path
 import subprocess
@@ -24,6 +25,7 @@ def limits():
     return inspection.WheelLimits(
         max_archive_bytes=100_000, max_expanded_bytes=100_000,
         max_member_bytes=20_000, max_metadata_bytes=10_000, max_members=30,
+        max_tags=100,
     )
 
 
@@ -200,7 +202,7 @@ sys.path.insert(0, sys.argv[1])
 from installer_wheel_inputs import WheelLimits, inspect_wheel
 path = pathlib.Path(sys.argv[2])
 facts = inspect_wheel(path, sha256='sha256:' + hashlib.sha256(path.read_bytes()).hexdigest(),
-    limits=WheelLimits(100000, 100000, 20000, 10000, 30), deadline=time.monotonic() + 5)
+    limits=WheelLimits(100000, 100000, 20000, 10000, 30, 100), deadline=time.monotonic() + 5)
 assert facts.name == 'demo-pkg' and facts.tags == ('py3-none-any',)
 assert 'packaging' not in sys.modules
 """
@@ -281,6 +283,18 @@ def test_deadline_checked_during_archive_reads(wheel_path, limits, monkeypatch):
         )
 
 
+def test_deep_member_walk_observes_deadline_before_metadata(wheel_path, limits, monkeypatch):
+    wheel_path.write_bytes(wheel_bytes(extra={"/".join(["nested"] * 500) + "/module.py": b"x"}))
+    ticks = itertools.count(1)
+    monkeypatch.setattr(inspection.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(inspection, "_headers", lambda *_: pytest.fail("walk exceeded its deadline"))
+    with pytest.raises(inspection.WheelError, match="deadline"):
+        inspection.inspect_wheel(
+            wheel_path, sha256="sha256:" + hashlib.sha256(wheel_path.read_bytes()).hexdigest(),
+            limits=limits, deadline=50,
+        )
+
+
 def selected_record(path):
     return {
         "filename": path.name, "name": "demo.pkg", "version": "1.0.0",
@@ -345,3 +359,40 @@ def test_actual_dependency_and_extra_changes_refuse(wheel_path, limits, before, 
         runtime_profile.inspect_profile_wheel(
             wheel_path, record, limits=limits, deadline=time.monotonic() + 10,
         )
+
+
+@pytest.mark.parametrize("alternatives", [2, 200])
+def test_compressed_tags_refuse_before_cartesian_allocation(wheel_path, limits, monkeypatch, alternatives):
+    field = ".".join(f"tag{index}" for index in range(alternatives))
+    tag = "-".join([field] * 3)
+    wheel_path.write_bytes(wheel_bytes(wheel=(
+        "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: " + tag + "\n\n"
+    ).encode()))
+    monkeypatch.setattr(runtime_profile, "parse_tag", lambda *_: pytest.fail("unbounded Tag allocation"))
+    with pytest.raises(runtime_profile.ProfileError, match="limit"):
+        runtime_profile.inspect_profile_wheel(
+            wheel_path, selected_record(wheel_path), limits=limits, deadline=time.monotonic() + 10,
+        )
+
+
+def test_selected_filename_tag_expansion_is_also_bounded(wheel_path, limits, monkeypatch):
+    field = ".".join(f"tag{index}" for index in range(10))
+    path = wheel_path.with_name("demo_pkg-1.0-" + "-".join([field] * 3) + ".whl")
+    wheel_path.rename(path)
+    monkeypatch.setattr(
+        runtime_profile, "parse_wheel_filename", lambda *_: pytest.fail("unbounded filename allocation"),
+    )
+    with pytest.raises(runtime_profile.ProfileError, match="limit"):
+        runtime_profile.inspect_profile_wheel(
+            path, selected_record(path), limits=limits, deadline=time.monotonic() + 10,
+        )
+
+
+def test_repeated_compressed_alternatives_are_deduplicated_before_parsing(wheel_path, limits):
+    tag = ".".join(["py3"] * 200) + "-none-any"
+    wheel_path.write_bytes(wheel_bytes(wheel=(
+        "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: " + tag + "\n\n"
+    ).encode()))
+    assert runtime_profile.inspect_profile_wheel(
+        wheel_path, selected_record(wheel_path), limits=limits, deadline=time.monotonic() + 10,
+    ).name == "demo-pkg"
