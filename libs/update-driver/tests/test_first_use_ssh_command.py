@@ -51,6 +51,8 @@ def owning_command(fixture, entry, *, custom=False):
             installation = installation.with_name("custom-ssh")
             result = subprocess.run(
                 ["/bin/bash", "-c",
+                 '_ok() { printf "  [OK] %s\\n" "$1"; }; '
+                 '_fail() { printf "  [FAIL] %s\\n" "$1" >&2; }; '
                  'source "$1"; write_simple_binstub agent-ssh agent_ssh "$2" "$3" '
                  '"$2/bin" scripts/install.sh AGENT_SSH_NO_SELFPROVISION '
                  '"$4/resolve-runtime.ps1" "$4/resolve-runtime.sh"',

@@ -147,7 +147,7 @@ def test_shared_actual_stamp_first_use_admission(
         '#!/usr/bin/env bash\nprintf yes > "$(dirname "$0")/../installer-ran"\nexit 37\n',
         encoding="utf-8",
     )
-    if plugin in {"agent-vault", "agent-pull-requests"} and state == "standalone":
+    if plugin in {"agent-vault", "agent-pull-requests", "agent-ssh"} and state == "standalone":
         producer = snapshot / "libs" / "update-driver" / "scripts" / (
             "foundation-produce.ps1" if os.name == "nt" else "foundation-produce.sh"
         )
@@ -207,7 +207,7 @@ def test_shared_actual_stamp_first_use_admission(
     )
     marker = snapshot / "installer-ran"
     if state == "standalone":
-        if plugin in {"agent-vault", "agent-pull-requests"}:
+        if plugin in {"agent-vault", "agent-pull-requests", "agent-ssh"}:
             driver = binding_fixture["home"] / ".copilot-extensions" / "update-driver"
             assert result.returncode != 0, result.stdout + result.stderr
             assert (driver / "foundation-entered").is_file(), result.stdout + result.stderr
