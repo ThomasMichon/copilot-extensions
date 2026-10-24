@@ -345,8 +345,11 @@ def _record(manager: SessionManager, session: Session, row: dict[str, Any]) -> d
     for name, item in execution.items():
         if name == "child" and child_exited:
             continue
-        with process_exit.open_process(item["pid"], item["start_time"]):
-            pass
+        try:
+            with process_exit.open_process(item["pid"], item["start_time"]):
+                pass
+        except ProcessLookupError as exc:
+            raise ValueError("Cold replacement exited or changed during admission; retain custody") from exc
     return {
         "execution": execution,
         "nonce_sha256": nonce,

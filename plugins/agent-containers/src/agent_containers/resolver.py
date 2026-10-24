@@ -748,6 +748,8 @@ class ContainerResolver:
             spec["venue"]["ready"] = False
             spec["venue"]["capabilities"]["task_projection"] = True
         if not restricted:
+            from .hosting_policy import guarded_launch
+
             ssh_config = await asyncio.to_thread(
                 prepare_ssh_config,
                 name,
@@ -760,7 +762,7 @@ class ContainerResolver:
                 "workspace_folder": workspace_folder,
                 "security_profile": fleet.security_profile,
                 "user": user,
-                "acp_command": config.acp_command_for(fleet),
+                "acp_command": guarded_launch(config.acp_command_for(fleet), workspace_folder),
                 "ssh": asdict(ssh_config),
                 "provider_command": payload_command_argv(),
                 "relay_remote_port": (

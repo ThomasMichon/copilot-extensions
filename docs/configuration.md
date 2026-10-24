@@ -199,6 +199,47 @@ unqualified state automatically. See
   or to adapt a foreign repo. Full precedence rules:
   [agent-worktrees config-reference § Config sources](../plugins/agent-worktrees/docs/config-reference.md#config-sources-layered).
 
+## Repository-owned agent exposure
+
+A source repository can explicitly refuse suite-managed authoring agents without
+giving up source worktree, editing, test or PR operations from another harness:
+
+```yaml
+# .copilot-extensions/agent-worktrees/config.yaml
+expose_agent: false
+```
+
+This is a negative eligibility policy, not an ordinary machine-overridable
+preference. Managed adoption and authoring callers read the actual execution
+checkout, and receiving launch boundaries read it again before effects. A stale
+project registration, cached launch plan or explicit target cannot override the
+repository denial. Direct repository checks assume a possible agent unless the
+repository opts out: missing policy or `true` means no repository veto, not
+independent adoption or launch authority. Existing machine-local restrictions
+remain independent.
+
+Discovery catalogs have a different default. `repos.yaml` and `related.yaml`
+entries must explicitly opt in to declaring an agent; merely registering or
+relating a source repository does not advertise one. `projects.yaml` contains
+projects intended to launch Copilot and use Worktree Manager, not every
+worktree-class source repository. Catalog opt-in cannot override a repository
+veto. Source-only related repositories need neither project adoption nor an
+agent declaration.
+
+The canonical file takes precedence over the supported legacy aliases listed
+above. Only the selected marketplace's repository overlay participates. It can
+add a denial but cannot weaken the base repository's denial. `expose_agent` must
+be a boolean when present; malformed or unreadable required policy refuses
+visibly instead of permitting a launch. Unlike ordinary config preferences,
+hosting eligibility is not read through a permissive malformed-file fallback.
+
+The shared [repository-policy resolver](../libs/repository-policy/README.md)
+owns these parsing and provenance semantics. It does not mutate registration or
+existing session state. A policy change does not terminate existing sessions or
+erase history, claims or tracking. Externally hosted Copilot Code Review remains
+outside managed authoring launch; merely carrying review-agent instructions does
+not permit hosting, and a caller-supplied review purpose cannot bypass denial.
+
 ## See also
 
 - [Adopter documentation index](README.md) and [reference index](reference-index.md).

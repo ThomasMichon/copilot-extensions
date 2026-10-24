@@ -259,15 +259,15 @@ class _SessionHandoffMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .hosting_policy import require_session_hosting
         from .cold_outages import assert_prompt_allowed
 
+        hosting_fence = await require_session_hosting(self, session, operation="handoff successor")
         assert_prompt_allowed(self._db, session_id, None)
         # A cooperative stop announced before or at any point during this
         # handoff wins: never leave a successor the stop can't reach.
-        notices_at_start = session._stop_notices
-
         def stop_arrived() -> bool:
-            return session._stop_requested or session._stop_notices != notices_at_start
+            return hosting_fence.changed(self)
 
         # Single-checkout (CodeSpace/command) agents cannot host predecessor and
         # successor at once, so the spawn-then-retire ordering below does not
@@ -293,6 +293,7 @@ class _SessionHandoffMixin:
                 )
             session.status = SessionStatus.STOPPED
             await self.resume_session(session_id, drain=False)
+            hosting_fence = hosting_fence.after_authorized_resume(self)
 
         assert_prompt_allowed(self._db, session_id, None)
         # 1. Resolve the successor's opening turn. External requestors may

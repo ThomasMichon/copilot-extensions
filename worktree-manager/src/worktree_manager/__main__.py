@@ -1256,6 +1256,11 @@ def _run_launch(req) -> int:
             print(f"error: could not inspect the persisted execution leg: {error}")
             return 1
     if use_ahp:
+        try:
+            engine_client.require_agent_hosting(str(plan.work_dir))
+        except engine_client.EngineError as error:
+            print(f"error: repository hosting admission refused: {error}")
+            return 1
         if new_window:
             print('error: "new window" launches are not yet supported for AHP-backed sessions.')
             return 1

@@ -564,6 +564,7 @@ def _create_worktree_core(
     creation_key: str | None = None,
     creation_intent: Callable[[dict], None] | None = None,
     identity_mode: IdentityMode = "legacy",
+    build_launch_plan: bool = True,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -593,6 +594,10 @@ def _create_worktree_core(
     core = _core()
     from .execution_spaces import require_current_execution_space, require_record_mutation
 
+    if (build_launch_plan and kind != "system") or pending_seed:
+        from .launch_preflight import require_repository_hosting
+
+        require_repository_hosting(config.default_repo.anchor)
     require_current_execution_space(config)
     validate_mode(identity_mode)
     if creation_key is not None:
@@ -610,6 +615,7 @@ def _create_worktree_core(
             "defer_projections": defer_projections,
             "pending_seed_id": pending_seed_id, "allocation": allocation,
             "identity_mode": identity_mode, "admitted_allocation": admitted_allocation,
+            "build_launch_plan": build_launch_plan,
         }
         return creation_requests.create(
             config, creation_key, creation_requests.allocation_facts(config, **options),
@@ -684,9 +690,9 @@ def _create_worktree_core(
             raise CoordinationReadinessFailure(readiness)
 
     _validate_profile_assignment_config(config)
-    launches_copilot = kind != "system" and creation_intent is None
+    launches_copilot = build_launch_plan and kind != "system" and creation_intent is None
     fake_args = None
-    if launches_copilot:
+    if launches_copilot or pending_seed:
         fake_args = argparse.Namespace(
             copilot_args=[],
             recovery=recovery,
@@ -698,6 +704,7 @@ def _create_worktree_core(
             config,
             fake_args,
             worktree_path,
+            allocation_source=repo.anchor,
         )
         if launch_preflight.error:
             raise core.LaunchPreflightError(launch_preflight.error)
@@ -904,18 +911,22 @@ def _create_worktree_core(
 
     seed_id = pending_seed_id or uuid.uuid4().hex
     try:
+        if launches_copilot or pending_seed:
+            from . import agent_policy
+
+            agent_policy.require(worktree_path)
         staged_seed = None
         if pending_seed:
             with step("Staging launch prompt", worktree_id=worktree_id):
                 staged_seed = launch_seed_state.stage(
                     record.yaml_path, kind="new", text=pending_seed, seed_id=seed_id,
                 )
-        if permissions.clone_permissions(repo.anchor, worktree_path):
+        if build_launch_plan and permissions.clone_permissions(repo.anchor, worktree_path):
             print("Copied Copilot permissions to worktree path.", file=sys.stderr)
         activity.log_event("worktree_created", worktree_id=worktree_id, branch=branch)
-        if permissions.ensure_trusted_folder(worktree_path):
+        if build_launch_plan and permissions.ensure_trusted_folder(worktree_path):
             print("Added worktree path to trustedFolders.", file=sys.stderr)
-        if permissions.ensure_extension_permission_approvals(worktree_path):
+        if build_launch_plan and permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
         composition_ready = True
         if kind == "session" and not no_pair:
@@ -938,7 +949,7 @@ def _create_worktree_core(
             )
         if not composition_ready:
             local_cache_refresh.mark_pair_pending(worktree_path)
-        if not defer_projections and composition_ready:
+        if build_launch_plan and not defer_projections and composition_ready:
             local_cache_refresh.prepare_for_launch(worktree_path)
         result = {"worktree": core._worktree_to_dict(record)}
         if not launches_copilot:

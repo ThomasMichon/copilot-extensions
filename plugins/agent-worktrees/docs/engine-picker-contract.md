@@ -7,6 +7,21 @@ boundary is what keeps the coupling one-way and dependency-free (the Picker owns
 no worktree logic or state), and it is why the TUI framework (Textual) stays
 entirely out of the plugin engine.
 
+## Repository hosting admission
+
+The read-only [`agent-policy check`](repository-agent-policy.md) API is
+project-independent and reads the explicit `--path`, including denied or
+unadopted repositories. Policy version 1 is distinct from launch transport
+versions. It returns the policy provenance and `allowed: true`, or nonzero JSON
+`version`, `code`, `error`. A successful negative-policy check is not adoption
+or launch permission.
+
+Manager launch planning and SSH receivers require `--require-agent-hosting`;
+the flag is a compatibility fence, not an opt-in to enforcement. The current
+engine enforces repository policy even without the flag. Unsupported engines
+must refuse, with no fallback that removes it. Source-only `create` omits
+optional launch planning and returns no `launch` member.
+
 ## SSH launch-prompt admission
 
 The Worktrees composer is host-rendered for local and machine-SSH sources.
@@ -16,7 +31,8 @@ is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries version 1,
 `request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`
 and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
 are encoded. Prompt text never enters the interactive SSH launch string.
-Structured admission/status accepts only its protocol options and `--json`;
+Structured admission/status accepts only its protocol options, `--json`, and
+the hosting-admission capability fence;
 ordinary resolve selectors, modifiers and positional Copilot arguments are
 rejected before reading or mutating target launch state. Exactly one nonempty
 protocol option is required; an empty value never enters ordinary resolve.
@@ -25,6 +41,9 @@ launch-request error envelope and exit status 3 for both admission and status;
 they never enter ordinary or remote machine resolution.
 
 The target's existing tracking-write daemon owns admission and seed staging.
+Hosting-aware admission and seed stage/take require verb version 7; older
+writers cannot receive a weak fallback. The receiver checks fresh policy before
+writing an admission receipt or seed.
 Admission retains a text-free fingerprint and allocated worktree/intent IDs
 under external tracking state. The returned receipt carries those identities,
 not prompt text. The host's subsequent remote plan launches the same worktree

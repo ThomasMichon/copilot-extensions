@@ -33,9 +33,11 @@ dependencies = [
     "agent-worktree-identity",
     "agent-update-telemetry",
     "agent-update-driver",
+    "agent-repository-policy",
 ]
 
 [tool.uv.sources]
+agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
 # Always resolve the vendored config-schema-migration lib from the local path,
 # never an index. Distribution name is namespaced (agent-config-migrate, not the

@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-repository-policy",
     "agent-process-telemetry",
     "fastapi>=0.141.1",
     # Plain uvicorn (not the [standard] extra) so the HTTP path stays pure
@@ -50,6 +51,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-process-telemetry = { path = "../../libs/process-telemetry", editable = true }
 agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
 # Always resolve the vendored lib from the local path, never an index.

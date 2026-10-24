@@ -16,6 +16,7 @@ authors = [
     { name = "Thomas Michon" }
 ]
 dependencies = [
+    "agent-repository-policy",
     "agent-process-telemetry",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
@@ -31,6 +32,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-process-telemetry = { path = "../../libs/process-telemetry", editable = true }
 agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator

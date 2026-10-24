@@ -20,6 +20,7 @@ from ssh_manager import keeper_holds as shared_keeper_holds
 from agent_containers import copilot_detach as detach
 from agent_containers import forward_keeper
 from agent_containers.config import ContainersConfig, FleetConfig, RESTRICTED_PROFILE
+from tests._hosting_owner import policy_reply
 
 
 def _args(**kw):
@@ -424,6 +425,7 @@ def _target(profile: str = "trusted"):
     )
     return types.SimpleNamespace(
         name="repo-1",
+        container_id="a" * 64,
         config=config,
         fleet=fleet,
         actual_profile=profile,
@@ -467,8 +469,17 @@ def seams(monkeypatch):
         shims=[],
         messages=[],
         pending={},
+        admissions=[],
     )
     target = _target()
+    def policy_run(argv, **kwargs):
+        calls.admissions.append(argv)
+        return policy_reply(
+            argv, container_id=target.container_id, workspace=target.workspace_folder,
+        )
+    monkeypatch.setattr("agent_containers.hosting_policy.subprocess", types.SimpleNamespace(
+        run=policy_run, SubprocessError=subprocess.SubprocessError,
+    ))
     monkeypatch.setattr("venue_copilot.refs.deliver_note",
                         lambda sid, note, **kwargs: calls.messages.append((sid, note, kwargs)) or True)
     import agent_containers.config as config_mod

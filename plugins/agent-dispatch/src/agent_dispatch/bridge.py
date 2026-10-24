@@ -375,6 +375,36 @@ def spawn_worker(
     exe = _agent_bridge_launch_prefix()
     if exe is None:
         raise BridgeUnavailable("agent-bridge CLI not found on PATH")
+    from .hosting_policy import require_execution_harness
+
+    record = _resolve_agent_record(
+        agent,
+        timeout=min(timeout, 8.0) if timeout is not None else 8.0,
+        include_unaddressable=True,
+    )
+    remote_target = (
+        ":" in agent or "@" in agent
+        or (isinstance(record, dict) and record.get("type") in {"ssh", "remote", "container", "codespace"})
+    )
+    if (worktree_id or target_dir) and not remote_target:
+        require_execution_harness(
+            path=target_dir, project=project, worktree_id=worktree_id, timeout=timeout,
+        )
+    elif not remote_target:
+        local_path = None
+        if isinstance(record, dict) and _record_is_direct_spawn_target(record):
+            if record.get("type") in (None, "command", "local"):
+                local_path = record.get("cwd")
+                if local_path is None:
+                    local_path = record.get("target_dir")
+        selected = (
+            project if isinstance(record, dict) and not _record_is_direct_spawn_target(record)
+            else record.get("project") if isinstance(record, dict) else None
+        )
+        if local_path is not None:
+            require_execution_harness(path=local_path, timeout=timeout)
+        elif selected:
+            require_execution_harness(project=selected, timeout=timeout)
     if prompt is None:
         prompt = worker_prompt(task_id, worker_id=worker_id, route=route)
     if resume_worktree:
@@ -387,11 +417,6 @@ def spawn_worker(
             caller=f"agent-dispatch:{worker_id}", wait=wait,
             json_output=json_output, timeout=timeout, allow_takeover=False,
         )
-    record = _resolve_agent_record(
-        agent,
-        timeout=min(timeout, 8.0) if timeout is not None else 8.0,
-        include_unaddressable=True,
-    )
     if (
         record not in (None, _AGENT_NOT_FOUND)
         and isinstance(record, dict)

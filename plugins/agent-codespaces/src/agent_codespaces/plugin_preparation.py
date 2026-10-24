@@ -128,7 +128,9 @@ async def prepare_plugins(manager, name: str, repo: str | None, config, workspac
                           sources=(), *, worktree_id: str | None = None, repo_roots=(),
                           prelude: str = "", relay_port: int | None = None,
                           prepared_context: dict | None = None,
-                          include_compiled_context: bool = True) -> list[str]:
+                          include_compiled_context: bool = True,
+                          live_attachment: bool = False,
+                          hosting_required: bool = True) -> list[str]:
     from ._ssh_retry import exec_with_retry
 
     plan = plugin_plan(repo, config, sources, repo_roots=repo_roots)
@@ -148,6 +150,10 @@ async def prepare_plugins(manager, name: str, repo: str | None, config, workspac
         if resolved.exit_code:
             raise RuntimeError("Venue could not resolve the explicit execution worktree")
         workspace = parse_execution_checkout(resolved.stdout)
+    from .hosting_policy import require_guest_hosting
+
+    if hosting_required and not live_attachment:
+        await require_guest_hosting(manager, name, workspace)
     script = prelude + "\n" + build_prepare_script(
         plan, workspace,
         **({"include_prepared_context": True} if prepared_context is not None and include_compiled_context else {}),
@@ -233,6 +239,7 @@ async def prepare_attached(
             prelude=prelude, relay_port=port,
             **({"prepared_context": prepared_context} if prepared_context is not None else {}),
             include_compiled_context=False,
+            live_attachment=rejoining,
         )
         if on_ready is not None:
             on_ready(not args.no_relay)

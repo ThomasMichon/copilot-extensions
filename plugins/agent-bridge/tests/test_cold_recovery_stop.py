@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from zdd import diagnostics
+from zdd import diagnostics, process_exit
 
 from agent_bridge import cold_outages
 from agent_bridge.db import Database, SCHEMA_VERSION
@@ -35,6 +36,67 @@ def _prompts(transcript: Path) -> list[dict[str, Any]]:
 
 def _boots(transcript: Path) -> int:
     return len([item for item in messages(transcript) if "boot" in item])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry,pause_at", [
+    ("resume", 1), ("resync", 1), ("handoff", 1), ("resume", 2), ("resync", 2),
+])
+async def test_stop_during_hosting_admission_is_not_absorbed_as_manual_authority(
+    interrupted_successor: RecoveryFixture, monkeypatch: pytest.MonkeyPatch,
+    entry: str, pause_at: int,
+) -> None:
+    from agent_bridge import hosting_policy
+
+    manager, session_id, transcript = interrupted_successor
+    session = manager.get_session(session_id)
+    before_boots = _boots(transcript)
+    before_prompts = _prompts(transcript)
+    entered, release = asyncio.Event(), asyncio.Event()
+    checks = 0
+
+    async def admit(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal checks
+        checks += 1
+        if checks == pause_at:
+            entered.set()
+            await release.wait()
+
+    monkeypatch.setattr(hosting_policy, "require_target_hosting", admit)
+    connect = AsyncMock(side_effect=AssertionError("superseded admission launched a native process"))
+    monkeypatch.setattr(manager, "_connect_via_session_host", connect)
+    operation = (
+        manager.resume_session(session_id) if entry == "resume"
+        else manager.resync_session(session_id) if entry == "resync"
+        else manager.handoff_session(session_id, seed_text="retained task")
+    )
+    pending = asyncio.create_task(operation)
+    stopping = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        stopping = asyncio.create_task(manager.stop_session(session_id, force=True))
+        await until(lambda: _token(manager, session_id) is not None)
+        token = _token(manager, session_id)
+        if pause_at == 1:
+            await stopping
+            assert session._stop_requested is False
+        release.set()
+        with pytest.raises(cold_outages.ColdRecoveryStoppedError, match="stop superseded"):
+            await pending
+        await stopping
+        assert _token(manager, session_id) == token
+        assert session.background_recovery_enabled is False
+        assert cold_outages.latest(manager.db, session_id)["state"] == "interrupted"
+        assert _boots(transcript) == before_boots
+        assert _prompts(transcript) == before_prompts
+        connect.assert_not_awaited()
+        assert getattr(manager, "_active_acquisitions", 0) == 0
+    finally:
+        release.set()
+        await asyncio.gather(
+            pending, *([stopping] if stopping is not None else []),
+            return_exceptions=True,
+        )
 
 
 def test_cold_stop_migration_preserves_ambiguous_legacy_dormancy(tmp_path: Path) -> None:
@@ -293,9 +355,9 @@ async def test_cold_stop_after_native_launch_prevents_reconnect(
         )
 
 
-@pytest.mark.asyncio
-async def test_cold_stop_unknown_reconnect_is_not_replayed_by_manual_resume(
+async def _assert_unknown_reconnect_is_not_replayed(
     interrupted_successor: RecoveryFixture, monkeypatch: pytest.MonkeyPatch,
+    exit_race: bool,
 ) -> None:
     manager, session_id, transcript = interrupted_successor
     connect = manager._connect_via_session_host
@@ -317,11 +379,46 @@ async def test_cold_stop_unknown_reconnect_is_not_replayed_by_manual_resume(
     assert cold_outages.latest(manager.db, session_id)["state"] == "reconnect_unknown"
     await manager.stop_session(session_id, force=True)
     token = _token(manager, session_id)
-    with pytest.raises(ValueError):
-        await manager.resume_session(session_id)
+    with monkeypatch.context() as observation:
+        opened = []
+        if exit_race:
+            saved = json.loads(cold_outages.latest(manager.db, session_id)["replacement_json"])
+            replacements = {
+                (value["pid"], value["start_time"]) for value in saved["execution"].values()
+            }
+            observe = process_exit.observe_original_exit
+
+            def before_exit(pid: int, start_time: str) -> bool:
+                return False if (pid, start_time) in replacements else observe(pid, start_time)
+
+            def exited_during_open(pid: int, start_time: str) -> None:
+                assert (pid, start_time) in replacements
+                opened.append(pid)
+                raise ProcessLookupError("replacement exited during reference acquisition")
+
+            observation.setattr(process_exit, "observe_original_exit", before_exit)
+            observation.setattr(process_exit, "open_process", exited_during_open)
+        with pytest.raises(ValueError):
+            await manager.resume_session(session_id)
+        if exit_race:
+            assert len(opened) == 1
     assert _token(manager, session_id) == token
     assert cold_outages.latest(manager.db, session_id)["state"] == "reconnect_unknown"
     assert len(_prompts(transcript)) == 1
+
+
+@pytest.mark.asyncio
+async def test_cold_stop_unknown_reconnect_is_not_replayed_by_manual_resume(
+    interrupted_successor: RecoveryFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _assert_unknown_reconnect_is_not_replayed(interrupted_successor, monkeypatch, False)
+
+
+@pytest.mark.asyncio
+async def test_cold_stop_replacement_exit_race_preserves_unknown_reconnect(
+    interrupted_successor: RecoveryFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _assert_unknown_reconnect_is_not_replayed(interrupted_successor, monkeypatch, True)
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,11 @@ through its routing table (`active.json`), so nothing well-known is reserved
 manages agent conversations across multiple Copilot CLI sessions,
 spawning agent subprocesses locally or via SSH.
 
+Managed authoring launch and cold resume honor
+[repository-owned hosting eligibility](repository-hosting.md). Fresh caller and
+receiver checks are independent of discovery, existing custody and source-only
+access; opaque provider/relay protocols currently refuse before launch.
+
 ```
 Copilot CLI sessions (multiple)
   |

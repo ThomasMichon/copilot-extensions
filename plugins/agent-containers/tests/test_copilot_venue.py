@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from argparse import Namespace
 from types import SimpleNamespace
+import subprocess
 
 import pytest
+from tests._hosting_owner import policy_reply
 
 
 @pytest.fixture(autouse=True)
@@ -120,6 +122,14 @@ def _call(
     subprocess_run=None,
 ):
     seen: dict = {}
+    def policy_run(argv, **kwargs):
+        seen.setdefault("admissions", []).append(argv)
+        return policy_reply(
+            argv, container_id=target.container_id, workspace=target.workspace_folder,
+        )
+    monkeypatch.setattr("agent_containers.hosting_policy.subprocess", SimpleNamespace(
+        run=policy_run, SubprocessError=subprocess.SubprocessError,
+    ))
 
     def default_venue_copilot_run(worktree_id, *, connect, **kwargs):
         return connect("agent-worktrees copilot --worktree-id wt-A")

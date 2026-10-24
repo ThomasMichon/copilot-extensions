@@ -43,6 +43,18 @@ def _core_helper(name: str, local):
     return local
 
 
+def policy_invocation(args: list[str]) -> tuple[list[str], str | None] | None:
+    """Recognize policy reads without activating or adopting a project."""
+    args = args[1:] if args[:1] == ["agent-worktrees"] else args
+    if args[:1] == ["agent-policy"]:
+        return args[1:], None
+    if args and (args[0] in {"--project", "-p"} or args[0].startswith("--project=")):
+        remaining, project = _extract_project_flag(args)
+        if remaining[:1] == ["agent-policy"]:
+            return remaining[1:], project
+    return None
+
+
 # ── `<repo> <slug>` command-surface router ───────────────────────────────────
 # The router DERIVES its routable set from the installed ``agent-<slug>``
 # binstubs (so a newly-installed agent-* plugin auto-gets a `<repo> <slug>`

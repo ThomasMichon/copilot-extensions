@@ -75,9 +75,11 @@ def session_manager(tmp_db: Database) -> SessionManager:
 
 
 @pytest.fixture
-def spawn_target() -> SpawnTarget:
+def spawn_target(tmp_path: Path) -> SpawnTarget:
     """A local SpawnTarget for testing."""
-    return SpawnTarget(type="local", cwd="/tmp/test-dir")
+    cwd = tmp_path / "test-dir"
+    cwd.mkdir()
+    return SpawnTarget(type="local", cwd=str(cwd))
 
 
 @pytest.fixture

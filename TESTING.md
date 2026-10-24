@@ -926,6 +926,15 @@ platform's native build prerequisites.
 
 ## The turn-key runner
 
+The read-only repository hosting-policy resolver has the explicit
+`repository-policy` target, backed by `libs/repository-policy/tests`. Run
+`tools/run_tests_in_devcontainer.py repository-policy` through the bounded
+supervisor for canonical/legacy/marketplace parsing, negative-policy precedence,
+fresh checkout selection and actionable refusal controls. This target neither
+launches agents nor changes adoption state. Consumer entry-point and receiving
+boundary tests remain with their owning plugins; passing the resolver target
+alone is not proof that every managed launch is covered.
+
 The dependency-free worktree identity codec has the explicit
 `worktree-identity` target, backed by `libs/worktree-identity/tests`. Run it
 through `tools/run_tests_in_devcontainer.py worktree-identity` with the same

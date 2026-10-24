@@ -402,6 +402,9 @@ async def _spawn_child(
     argv: list[str], cwd: str | None, env: dict[str, str] | None,
     *, pass_fds: tuple[int, ...] = (),
 ) -> asyncio.subprocess.Process:
+    from ..hosting_policy import require_path_hosting
+
+    require_path_hosting(cwd or os.getcwd())
     child_env = os.environ.copy()
     if env:
         child_env.update(env)
@@ -460,6 +463,9 @@ async def run_host(
     child is held after an unexpected disconnect before the host lets it go (0
     disables -- an active child then lives until its own stop).
     """
+    from ..hosting_policy import require_path_hosting
+
+    require_path_hosting(cwd or os.getcwd())
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
     from ..preference_attestation import SHELL_MARKER

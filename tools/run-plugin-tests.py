@@ -85,6 +85,7 @@ VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 EXTERNAL_TEST_DEPENDENCIES = {
+    "repository-policy": ("pyyaml>=6.0.3",),
     "payload-invocation": ("pyyaml>=6.0.3",),
     "runtime-source": ("pyyaml>=6.0.3",),
 }

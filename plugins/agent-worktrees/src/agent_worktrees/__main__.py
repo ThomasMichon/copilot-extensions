@@ -119,7 +119,7 @@ from . import installer as inst
 from . import loop_governance as loop_governance_mod  # noqa: F401 -- compatibility re-export
 from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
-from . import state_root as state_root_mod
+from . import state_root as state_root_mod  # noqa: F401 -- compatibility re-export
 from .copilot_launch_prefs import resolve_launch_pref_flags
 from .process_launcher import apply_process_launcher, bind_execution_directory, native_option_tokens, quote_powershell_command
 from .update_stage import cmd_stage_update as cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
@@ -1953,38 +1953,20 @@ def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
     return out
 
 
-@dataclasses.dataclass(frozen=True)
-class LaunchPreflight:
-    """Read-only validation required before constructing a launch plan."""
-
-    config_root: state_root_mod.ConfigRoot | None = None
-
-    @property
-    def error(self) -> str | None:
-        if self.config_root is not None and not self.config_root.path:
-            return (
-                self.config_root.error or "could not resolve the machine-local configuration root"
-            )
-        return None
-
-    @property
-    def config_root_path(self) -> str:
-        return (self.config_root.path or "") if self.config_root else ""
-
-
-class LaunchPreflightError(RuntimeError):
-    """A launch plan cannot be built without mutating unsafe state."""
+from .launch_preflight import LaunchPreflight, LaunchPreflightError
 
 
 def _preflight_launch(
     config: cfg.Config,
     args: argparse.Namespace,
     work_dir: str,
+    *,
+    allocation_source: str | None = None,
 ) -> LaunchPreflight:
     """Validate normalized setup state before any launch-side mutation."""
     from .resolve_launch_cli import preflight_launch
 
-    return preflight_launch(config, args, work_dir)
+    return preflight_launch(config, args, work_dir, allocation_source=allocation_source)
 
 
 def _launch_preflight_error(
@@ -6325,6 +6307,13 @@ def main(argv: list[str] | None = None) -> int:
 
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
+
+    # Policy inspection must not resolve/adopt a project or prepare runtime state.
+    policy_args = front_door_cli.policy_invocation(args_list)
+    if policy_args is not None:
+        from . import agent_policy
+
+        return agent_policy.main(policy_args[0], project=policy_args[1])
 
     # ── Raw pre-dispatch ──────────────────────────────────────────────
     # Handle compatibility aliases and the default "launch" action

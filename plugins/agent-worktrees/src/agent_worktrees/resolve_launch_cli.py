@@ -35,10 +35,20 @@ def emit_launch_preflight_error(
 
 
 def preflight_launch(
-    config: cfg.Config, args: argparse.Namespace, work_dir: str
+    config: cfg.Config, args: argparse.Namespace, work_dir: str,
+    *, allocation_source: str | None = None,
 ) -> LaunchPreflight:
     """Read-only validation before any launch-side mutation."""
     from . import state_root as state_root_mod
+    from . import agent_policy
+    from repository_policy import AgentHostingError
+
+    try:
+        # A New allocation does not exist yet; its source policy is authoritative
+        # until the allocated checkout can be checked at the receiving boundary.
+        agent_policy.require(allocation_source if allocation_source is not None else work_dir)
+    except AgentHostingError as exc:
+        return _core().LaunchPreflight(policy_error=str(exc))
 
     recovery = getattr(args, "recovery", False)
     repo = config.default_repo
@@ -391,6 +401,10 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     record = context.record
     assert record is not None
 
+    admission = _preflight_launch(config, args, record.worktree_path)
+    if admission.error:
+        return _launch_preflight_error(admission)
+
     from .execution_spaces import ExecutionSpaceError, require_record_mutation
     try:
         require_record_mutation(record, config)
@@ -706,7 +720,9 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
     print(f"   Path:     {worktree_path}")
     print()
 
-    launch_preflight = _preflight_launch(config, args, worktree_path)
+    launch_preflight = _preflight_launch(
+        config, args, worktree_path, allocation_source=repo.anchor,
+    )
     if launch_preflight.error:
         return _launch_preflight_error(launch_preflight)
 

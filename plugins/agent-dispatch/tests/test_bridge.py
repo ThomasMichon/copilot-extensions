@@ -11,6 +11,7 @@ import pytest
 from agent_dispatch import bridge, bridge_agent_registry, bridge_reclaim, procutil
 from agent_dispatch.queue import Status
 from tests._helpers import RepoDefaultingQueue as TaskQueue
+from tests._hosting_owner import admission_owner as admission_owner
 
 # -- claim by id -------------------------------------------------------------
 
@@ -178,7 +179,7 @@ def test_spawn_worker_charter_appends_to_direct_create(monkeypatch):
     assert cmd[cmd.index("--charter") + 1] == "cab-sweep-reconciler"
 
 
-def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkeypatch):
+def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkeypatch, admission_owner):
     calls: list[tuple[list[str], dict]] = []
 
     def fake_run(cmd, **kwargs):
@@ -230,7 +231,7 @@ def test_spawn_worker_uses_worktree_resume_send_for_unaddressable_profile(monkey
     ]
 
 
-def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeypatch):
+def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeypatch, admission_owner):
     """A bound-charter worker (the non-direct-spawn-target path) with
     reclaim=True must go through the same stop-then-revalidate-then-force
     sequence as the direct-spawn path -- not a blind 'resume --force', which
@@ -271,7 +272,7 @@ def test_spawn_worker_via_worktree_routes_reclaim_through_bridge_reclaim(monkeyp
     assert kw["json_output"] is True
 
 
-def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypatch):
+def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypatch, admission_owner):
     """``resume_worktree=True`` is the non-forcing conversation-recovery path
     (distinct from ``reclaim=True`` above, which is an explicit forceful
     take-over): it must delegate with ``allow_takeover=False`` so
@@ -304,7 +305,7 @@ def test_spawn_worker_resume_worktree_requests_strict_no_fresh_fallback(monkeypa
     assert kw["allow_takeover"] is False
 
 
-def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeypatch):
+def test_spawn_worker_resume_worktree_refuses_when_bridge_record_missing(monkeypatch, admission_owner):
     """End-to-end (through ``spawn_worker``, not just ``resume_worktree_and_
     send`` directly): a missing bridge session record must surface as the
     caller's own refusal, never a swallowed/retried fresh session."""
@@ -395,7 +396,7 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
     assert result.returncode == 0
 
 
-def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch):
+def test_spawn_worker_reclaim_resumes_then_sends(monkeypatch, admission_owner):
     """``reclaim=True`` (#6744 Phase 3, since ``create --reclaim`` was removed
     from agent-bridge) resolves via ``resume <worktree_id>`` (no ``--force`` --
     see ``bridge_reclaim``'s own docstring on why this never bypasses the
@@ -443,7 +444,7 @@ def test_spawn_worker_reclaim_requires_worktree_id(monkeypatch):
         bridge.spawn_worker("task42", worker_id="w1", reclaim=True)
 
 
-def test_spawn_worker_omits_reclaim_by_default(monkeypatch):
+def test_spawn_worker_omits_reclaim_by_default(monkeypatch, admission_owner):
     calls = {}
 
     def fake_run(cmd, **kwargs):

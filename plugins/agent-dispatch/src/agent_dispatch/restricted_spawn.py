@@ -178,6 +178,14 @@ def start(task: dict, *, spec: dict, charter: str | None = None) -> dict:
         or reservation.get("worktree") or reservation.get("allocation_project")
     ):
         raise BridgeUnavailable("restricted startup reservation is not admitted")
+    if not (reservation.get("agent_info") or {}).get("delivered"):
+        admission = _provider(spec, "dispatch-check-hosting", {})
+        if (
+            type(admission.get("version")) is not int or admission["version"] != 1
+            or admission.get("allowed") is not True or admission.get("checked") is not True
+            or admission.get("container_id") != spec["instance_id"]
+        ):
+            raise BridgeUnavailable("Restricted provider repository hosting receiver is unsupported")
     facts = {field: spec[field] for field in ("name", "instance_id", "coordinator_url")}
     current = client.get(task["id"])
     info = reservation.get("agent_info")

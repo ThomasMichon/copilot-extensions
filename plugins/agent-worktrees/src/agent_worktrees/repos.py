@@ -125,10 +125,9 @@ class RepoEntry:
     # :func:`resolve_copilot_account` / :func:`copilot_account_for` and
     # ThomasMichon/copilot-extensions#3296.
     copilot_account: str = ""
-    # Whether this repo backs a same-machine agent in agent-bridge. Defaults
-    # ON for worktree/singleton repos (you adopt them to work in them); OFF for
-    # reference repos (read-only). `register`/`add --no-agent` forces it off.
-    agent: bool = True
+    # Registry agent discovery is opt-in, independently of editing class.
+    # A direct repository policy check remains permissive unless vetoed.
+    agent: bool = False
     # Audience-exposure tier ("private"/"internal"/"public") -- see
     # ``VALID_VISIBILITY`` above. Empty string means unset; resolve a
     # fail-safe default via ``identifier_blocklist.resolve_visibility_rank``
@@ -789,7 +788,7 @@ def add_repo(
             tags=list(tags) if tags else [],
             contributing=contributing,
             account=account,
-            agent=agent if agent is not None else (normalized_class != "reference"),
+            agent=agent if agent is not None else False,
             visibility=normalize_visibility(visibility),
             paths={plat: path},
         )

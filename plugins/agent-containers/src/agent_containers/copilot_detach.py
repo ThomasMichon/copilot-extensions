@@ -397,6 +397,17 @@ def cmd_detach(
         )
         return 0
 
+    from venue_copilot import live_session_for
+    from .hosting_policy import require_container_hosting
+
+    rejoining = (live_session_for(plan["scope_id"]) or {}).get("status") == "live"
+    args.hosting_live_attachment = rejoining
+    try:
+        require_container_hosting(
+            target, worktree_id=getattr(args, "worktree_id", None), live_attachment=rejoining,
+        )
+    except RuntimeError as exc:
+        return _fail(str(exc), plan)
     target_lock = TargetLock(f"container:{args.name}", op="copilot")
     try:
         target_lock.acquire(force=getattr(args, "force", False))

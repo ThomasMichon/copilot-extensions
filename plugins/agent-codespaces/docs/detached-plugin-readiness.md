@@ -12,6 +12,25 @@ registration without an original marketplace declaration.
 
 ## No owned TTY seed
 
+Repository hosting eligibility is checked inside the selected guest checkout,
+including a resolved explicit worktree, before launch preparation. ACP commands
+also carry a guest-side check before the native process. The receiver must
+support `agent-worktrees agent-policy check --path <checkout> --operation launch
+--json`; a missing or unsupported receiver is a visible refusal, not permission
+to fall back to an unchecked launch. The host's venue-name launch policy is a
+separate restriction, never a replacement for repository policy.
+Direct managed `ssh --stdio` uses this read-only admission before taking a
+venue claim, minting relay credentials, or provisioning hooks and plugins. It
+retains the final guest-side check. Ordinary non-stdio source/diagnostic SSH
+does not acquire an agent-hosting requirement.
+
+A genuine live attachment preserves its session and custody. If that child
+exits during rejoin, the receiving Worktrees launch boundary must check current
+repository policy before creating a replacement. A refusal must not create a
+child and then stop it. Saved launch history and pending delivery receipts
+remain available. Policy semantics belong to the shared
+[repository-policy library](../../../libs/repository-policy/README.md).
+
 The existing Worktrees owner receives `--bridge-seed-operation`, not the task,
 a task-file pointer, or its reference-file note through `--seed`.
 `--bridge-seed-pending` preserves new-task conversation intent without exposing

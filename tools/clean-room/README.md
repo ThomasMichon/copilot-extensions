@@ -291,6 +291,25 @@ Give simultaneous runs distinct `CR_RESULTS_DIR` paths outside the checkout;
 the runner's second-resolution default can otherwise select the same report
 directory even when the container suffixes differ.
 
+### Credential-free repository exposure policy
+
+The Tier-P/F1 `repository-agent-exposure` scenario stamps and provisions
+Worktrees from the read-only candidate checkout, then exercises the installed
+policy CLI against disposable repository fixtures. It proves absent/true/false
+and malformed policy, fresh reads, review-label denial, and source-only
+registration/worktree allocation without a launch or project adoption. It
+also proves adoption refusal leaves project registration unchanged. It does not launch an authoring agent,
+read account credentials or alter host registrations:
+
+```bash
+bash tools/clean-room/run.sh --scenario repository-agent-exposure \
+  --harness-mount "$PWD" --name-suffix exposure-candidate run
+```
+
+Use a unique suffix. The scenario retains its disposable container for
+inspection; remove that specific run through the normal clean-room lifecycle
+after inspecting the report.
+
 ### Credential-free budget-guidance snapshot
 
 The Tier-P/F1 `budget-guidance-solo` scenario requires no Copilot or forge

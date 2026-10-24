@@ -21,6 +21,25 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## Set up the harness
 
+Managed authoring launch honors the target repository's
+[`expose_agent` hosting veto](../plugins/agent-worktrees/docs/repository-agent-policy.md).
+The Manager uses the engine's read-only policy API, never imports the plugin,
+and refuses engines without hosting admission instead of dropping the guard.
+Recovery resolves its runtime first, then checks the actual setup repository
+before running its setup script. Source-only worktree allocation remains
+available through `agent-worktrees create --json`; it does not return a launch
+plan or adopt the source repository as a harness.
+The shell launchers defer setup-log creation/pruning, trace publication, root
+registration and automatic update staging/apply until the actual target passes
+the versioned owner check. Early diagnostic messages remain in memory. Recovery
+checks its setup directory first; refresh checks the plan's execution directory
+or explicitly resolves the selected project's `get repo-dir` before maintenance.
+Argument errors retain their original ordering. Direct inspection/source CLI
+commands run without implicit maintenance or persistent launch diagnostics.
+Agent discovery requires explicit `repos.yaml` `agent: true`, independent
+of editing class; a current source directory is never promoted into the project
+profile roster. Direct repository eligibility remains opt-out, not default-deny.
+
 A bare `worktree-manager` invocation reports its running and installed versions,
 observed core/engine availability, baseline prerequisite gaps, and registered
 project count. Next steps are derived from that snapshot: an installed setup

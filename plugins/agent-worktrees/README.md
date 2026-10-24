@@ -11,6 +11,11 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+Source repositories can veto managed authoring agents without losing source
+worktree and contribution operations. See
+[repository hosting policy](docs/repository-agent-policy.md) for `expose_agent`,
+read-only admission checks, and the allocation/launch distinction.
+
 For optional encrypted PR attribution with an already configured agent-vault
 KeePass database, use `identity-vault setup/status/verify` or the
 [setting-up-pr-identity skill](skills/setting-up-pr-identity/SKILL.md).

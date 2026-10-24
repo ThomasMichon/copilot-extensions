@@ -37,9 +37,7 @@ def render_registry(registry: ReposRegistry) -> str:
     for name in sorted(registry.repos):
         entry = registry.repos[name]
         lines.extend([f"  {name}:", f"    class: {entry.repo_class}"])
-        class_default_agent = entry.repo_class != "reference"
-        if entry.agent != class_default_agent:
-            lines.append(f"    agent: {'true' if entry.agent else 'false'}")
+        lines.append(f"    agent: {'true' if entry.agent else 'false'}")
         if entry.remote:
             lines.append(f"    remote: {_quote(entry.remote)}")
         if entry.account:

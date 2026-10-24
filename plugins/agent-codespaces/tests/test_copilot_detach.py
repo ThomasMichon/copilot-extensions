@@ -37,6 +37,8 @@ def _args(**kw):
 
 @pytest.fixture
 def seams(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.hosting_policy.require_codespace_hosting",
+                        lambda *args, **kwargs: None)
     calls = types.SimpleNamespace(
         holds=[], releases=[], reserve=[], release_res=[], remote=[], ssh=[], deregistered=[], ref_payloads=[],
         live_rows={"anchor-example-web@cs-1": {"session_id": "sid-42", "venue": {"target": "cs-1"}},
@@ -116,6 +118,20 @@ def seams(monkeypatch):
     monkeypatch.setattr("venue_copilot.refs.deliver_note",
                         lambda sid, note, **kwargs: calls.messages.append((sid, note, kwargs)) or True)
     return calls
+
+
+def test_repository_refusal_precedes_owner_reservation_and_launch(seams, monkeypatch, capsys):
+    def denied(*args, **kwargs):
+        raise RuntimeError("expose_agent: false")
+
+    monkeypatch.setattr("agent_codespaces.hosting_policy.require_codespace_hosting", denied)
+    assert detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED)) == 1
+    assert seams.holds == []
+    assert seams.reserve == []
+    assert seams.ssh == []
+    assert seams.remote == []
+    captured = capsys.readouterr()
+    assert "expose_agent: false" in captured.out + captured.err
 
 
 def _ssh(calls, *, stdout="", stderr="", code=0, rc=None):

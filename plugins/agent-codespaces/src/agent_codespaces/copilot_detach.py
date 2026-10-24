@@ -544,12 +544,14 @@ def cmd_detach(
                 file=sys.stderr,
             )
 
-    # A rejoin of a running worker launches nothing, so it isn't the launch
-    # policy's to refuse; should the "rejoin" create a session after all, the
-    # policy is asked then (below) and a refused one is stopped.
-    import venue_copilot as _vc
+    # A live attachment preserves custody. The receiving embody command must
+    # recheck repository policy if the child exits before the request arrives.
+    from .hosting_policy import admit_detached_launch
 
-    rejoining = (_vc.live_session_for(plan["scope_id"]) or {}).get("status") == "live"
+    try:
+        rejoining = admit_detached_launch(args, plan)
+    except (RuntimeError, OSError) as exc:
+        return _fail(str(exc), plan)
     claim_rc = claim_or_exit_code(args, launch_policy=not rejoining)
     if claim_rc is not None:
         return claim_rc
@@ -651,6 +653,7 @@ def cmd_detach(
                 ssh_args = _ssh_namespace(args, "agent-worktrees embody", timeout=launch_timeout)
                 ssh_args.plugin_worktree_id = getattr(args, "worktree_id", None)
                 ssh_args.plugin_prepared_context = captured["prepared_context"]
+                ssh_args.hosting_live_attachment = rejoining
                 rc = ssh_session(
                     ssh_args,
                     remote_cmd_builder=builder, result_sink=sink, settle_on_disconnect=False,
@@ -709,11 +712,11 @@ def cmd_detach(
             plan["mux_session"] = actual_mux
             plan["venue"]["mux_session_name"] = actual_mux
             owner.hold(args.name, plan["tenant"], daemon_port=daemon_port, mux_session=actual_mux)
-        if created and rejoining:  # the worker stopped meanwhile: this was a launch after all
+        if created and rejoining:
             from .launch_policy import refused_exit_code
 
             refused = refused_exit_code(args.name)
-            if refused is not None:  # ok stays False: cleanup stops the session it really started
+            if refused is not None:
                 print(json.dumps({"ok": False, "error": "launch refused by the host launch policy", **plan}, indent=2))
                 return refused
         from venue_copilot.refs import deferred_seed

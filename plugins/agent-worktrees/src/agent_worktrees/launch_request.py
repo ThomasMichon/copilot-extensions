@@ -151,6 +151,19 @@ def _require_complete_record(receipt: dict, record: tracking.WorktreeRecord) -> 
 
 
 def _apply_admit(args: dict) -> dict:
+    from . import agent_policy
+
+    if args["kind"] == "resume":
+        target = tracking.load_record(
+            Path(args["tracking_dir"]) / f"{args['worktree_id']}.yaml"
+        ).worktree_path
+    else:
+        project = args.get("project")
+        if not isinstance(project, str) or not project.strip():
+            raise ValueError("Hosting-aware New admission requires an explicit project identity")
+        config = project_record_config(SimpleNamespace(repo=project))
+        target = config.default_repo.anchor
+    agent_policy.require(target, operation="remote launch admission")
     directory = Path(args["tracking_dir"])
     path = _admission_path(directory, args["request_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -190,6 +203,14 @@ def _apply_admit(args: dict) -> dict:
 
 def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") -> dict:
     """Admit once; recover the same worktree after a lost response."""
+    from . import agent_policy
+
+    target = config.default_repo.anchor
+    if request["kind"] == "resume":
+        target = tracking.load_record(
+            cfg.tracking_dir() / f"{request['worktree_id']}.yaml"
+        ).worktree_path
+    agent_policy.require(target, operation="remote launch admission")
     directory = cfg.tracking_dir()
     validate_mode(identity_mode)
     detected_platform = cfg.detect_platform()
@@ -220,6 +241,7 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
         json.dumps(request, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
     admission_args = {
+        "project": config.repo_name,
         "tracking_dir": str(directory), "request_id": request_id,
         "fingerprint": fingerprint, "kind": request["kind"],
         "worktree_id": wid, "timestamp": timestamp, "suffix": suffix,
@@ -301,8 +323,12 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
 
 
 def _apply_stage(args: dict) -> dict:
+    from . import agent_policy
+
     directory = Path(args["tracking_dir"])
     admission = _admission_path(directory, args["request_id"])
+    initial = _read_admission(directory, args["request_id"])
+    agent_policy.require_record(directory / f"{initial['worktree_id']}.yaml")
     with tracking._RecordLock(admission.with_suffix(".yaml"), require_sidecar=True):
         receipt = _read_admission(directory, args["request_id"])
         if receipt["fingerprint"] != args["fingerprint"]:
@@ -312,6 +338,7 @@ def _apply_stage(args: dict) -> dict:
             path, require_sidecar=True,
         ):
             record = tracking.load_record(path)
+            agent_policy.require(record.worktree_path)
             require_project_record_mutation(record)
             if "allocation" in receipt:
                 _require_complete_record(receipt, record)
@@ -389,7 +416,10 @@ def cmd_request(args) -> int:
     from . import output
     request_id = None
     try:
-        protocol_options = {"command", "json", "launch_request_b64", "launch_request_status"}
+        protocol_options = {
+            "command", "json", "launch_request_b64", "launch_request_status",
+            "require_agent_hosting",
+        }
         if not args.json or any(
             value is not None and value is not False and value != []
             for key, value in vars(args).items() if key not in protocol_options
@@ -451,7 +481,7 @@ def inspect(request_id: str) -> dict:
 
 def _dispatch(verb: str, args: dict) -> dict:
     result = launch_seed_state._dispatch(
-        verb, args, min_version=6,
+        verb, args, min_version=7,
     )
     if result.get("error"):
         raise ValueError(result["error"])
@@ -468,7 +498,7 @@ def _guard(handler):
     return apply
 
 
-tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=6)
-tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=6)
-tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=6)
-tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=6)
+tracking_write.register_verb("launch_request_admit", _guard(_apply_admit), version=7)
+tracking_write.register_verb("launch_request_stage", _guard(_apply_stage), version=7)
+tracking_write.register_verb("launch_request_creation_start", _guard(_apply_creation_start), version=7)
+tracking_write.register_verb("launch_request_creation_finish", _guard(_apply_creation_finish), version=7)
