@@ -7,7 +7,7 @@ import math
 
 from .loadout_templates import builtin_templates
 from .planning import (
-    MAX_BYTES, MAX_ITEMS, PlanError, boolean, canonical, configuration_capacity,
+    MAX_BYTES, MAX_ITEMS, MAX_PLAN_ITEMS, PlanError, boolean, canonical, configuration_capacity,
     digest, identifier, integer, record,
 )
 from .role_bindings import fields, reference, references
@@ -271,10 +271,13 @@ def design_loadout(config: object, inventory: object, catalog: object | None = N
     suggested = copy.deepcopy(config)
     suggested["extensions"]["loadout_composition"] = copy.deepcopy(composition)
     canonical(suggested)
+    diagnostics = sorted(set(blockers))
     result = {
         "schema": "fleet-manager.loadout-design", "version": 1,
-        "status": "blocked" if blockers else "review-required",
-        "blockers": sorted(set(blockers)), "grid": grid, "composition": composition,
+        "status": "blocked" if diagnostics else "review-required",
+        "blockers": diagnostics[:MAX_PLAN_ITEMS], "blocker_count": len(diagnostics),
+        "blockers_omitted": max(0, len(diagnostics) - MAX_PLAN_ITEMS),
+        "grid": grid, "composition": composition,
         "suggested_config": suggested,
         "source_digests": {key: digest(value) for key, value in (
             ("config", config), ("inventory", inventory), ("catalog", catalog),

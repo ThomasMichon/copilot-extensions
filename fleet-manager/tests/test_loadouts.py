@@ -10,7 +10,7 @@ import pytest
 
 from fleet_manager.__main__ import main
 from fleet_manager.loadouts import DIMENSIONS, design_loadout
-from fleet_manager.planning import PlanError, canonical, decode
+from fleet_manager.planning import MAX_PLAN_ITEMS, PlanError, canonical, decode
 
 
 def resource(cpu=1000, memory=2048, disk=4096):
@@ -106,6 +106,33 @@ def test_named_host_grid_exact_fit_support_dedup_and_publication_preserve_custom
     assert compute(*args)["digest"] == result["digest"]
     reloaded = decode(canonical(suggested))
     assert compute(reloaded, *args[1:])["suggested_config"] == suggested
+
+
+@pytest.mark.parametrize("count", [171, 172, 256])
+def test_full_size_blocked_grid_survives_diagnostic_collection_boundary(count):
+    config, inventory, catalog = inputs()
+    support = allocation(config, "support")
+    allocations = {
+        f"allocation-{index:03d}": {**copy.deepcopy(support), "target": f"host-{index:03d}"}
+        for index in range(count)
+    }
+    config["capacity"]["machine_limit"] = count
+    config["extensions"]["loadouts"]["allocations"] = allocations
+    inventory["baseline_excludes"] = list(allocations)
+    inventory["hosts"] = [
+        {"id": f"host-{index:03d}", "owned": True, "ready": True,
+         **{name: resource(0, 0, 0) for name in ("capacity", "headroom", "reserved", "observed")}}
+        for index in range(count)
+    ]
+    result = compute(config, inventory, catalog)
+    assert result["status"] == "blocked"
+    assert len(result["grid"]) == count
+    assert result["blocker_count"] == count * 3
+    assert len(result["blockers"]) == min(count * 3, MAX_PLAN_ITEMS)
+    assert result["blockers_omitted"] == max(0, count * 3 - MAX_PLAN_ITEMS)
+    assert all(row["remaining"] == resource(-1000, -2048, -4096)
+               for row in result["grid"].values())
+    assert json.loads(canonical(result, output=True)) == result
 
 
 @pytest.mark.parametrize("excess", ["nesting", "bytes"])

@@ -218,6 +218,11 @@ retained, not removed to manufacture a fit.
 
 The `fleet-manager.loadout-design` result carries `grid`, `blockers`,
 `composition`, the inventory expiry, source digests and an overall digest.
+`blocker_count` reports the total number of distinct diagnostics. The sorted
+`blockers` summary is capped at the existing 513-item output collection bound;
+`blockers_omitted` explicitly reports any remaining count. The full grid and
+composition are retained even for a 256-machine blocked design: diagnostic
+summary overflow cannot turn valid input into an invalid-input error.
 Its `suggested_config` preserves the complete input configuration and adds
 the resolved composition at `extensions.loadout_composition`. The knowledge
 repository's existing publication owner can review and publish that desired
