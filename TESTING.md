@@ -191,6 +191,14 @@ budget; no floating-point tolerance is added to that assertion.
 
 ## Wheel-input inspection
 
+`tools/test_installer_dependency_compile.py` covers both ordinary metadata-only
+exports and the explicit retained source-graph mode. Native dated loopback-feed
+controls freeze source/configuration inputs, export hashed seasoned transitive
+dependencies without local distributions, and refuse missing upload-age
+evidence without replacing an existing output. Graph and effective-omission
+refusals preserve ordinary compile's directory-dependency boundary. These are
+candidate-export controls, not source-origin approval or real-feed admission.
+
 `python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
 synthetic wheel archives, streamed digest/RECORD checks, independent selected
 metadata mutations, ambiguous/linked/encrypted members, compressed metadata

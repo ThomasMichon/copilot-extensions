@@ -49,6 +49,7 @@ _VALUE_OPTIONS = _INDEX_OPTIONS | _FILE_OPTIONS | {
     "-C", "--config-setting", "--config-settings-package", "--no-build-isolation-package",
     "--cache-dir", "--refresh-package", "-p", "--python", "--color", "--allow-insecure-host",
     "--directory", "--project", "--config-file", "-o", "--output-file", "--format",
+    "--no-emit-package",
 }
 
 
@@ -58,6 +59,10 @@ class DependencyPolicyError(RuntimeError):
 
 class _CompileMetadata(set):
     """Compile project roots are metadata inputs, never directory dependencies."""
+
+
+class _SourceCompileMetadata(set):
+    """Only unconditional owned path mappings may define omitted distributions."""
 
 
 def _captured_environment(env):
@@ -239,7 +244,14 @@ def _inspect_project(
     if not isinstance(mappings, dict):
         raise DependencyPolicyError("local UV source graph is unsupported")
     for name, entries in mappings.items():
-        for entry in entries if isinstance(entries, list) else [entries]:
+        candidates = entries if isinstance(entries, list) else [entries]
+        local = any(isinstance(entry, dict) and "path" in entry
+                    for entry in candidates)
+        if isinstance(seen, _SourceCompileMetadata) and local and (
+            not isinstance(entries, dict) or set(entries) - {"path", "editable"}
+        ):
+            raise DependencyPolicyError("source lock export requires unconditional local source mappings")
+        for entry in candidates:
             if not isinstance(entry, dict):
                 raise DependencyPolicyError("local UV source entry is unsupported")
             if "path" in entry:
@@ -249,7 +261,7 @@ def _inspect_project(
                 child = _contained(source / entry["path"], roots)
                 if isinstance(seen, _CompileMetadata):
                     raise DependencyPolicyError("lock export cannot retain directory dependencies or local artifacts")
-                if _bundled_dbus_next(identity, name, child):
+                if not isinstance(seen, _SourceCompileMetadata) and _bundled_dbus_next(identity, name, child):
                     continue
                 if not child.is_dir():
                     raise DependencyPolicyError("local UV artifacts cannot prove release age")
@@ -420,7 +432,10 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
             project_directory = value
     if directory:
         base = (base / directory).resolve()
-    seen: set[Path] = _CompileMetadata() if operation == "compile" else set()
+    seen: set[Path] = (
+        _CompileMetadata() if operation == "compile" else
+        _SourceCompileMetadata() if operation == "source-compile" else set()
+    )
     files: set[Path] = set()
     editables: set[Path] = set()
     for option, value in pairs:
@@ -440,7 +455,7 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
                 _check_project(path.parent, roots, seen)
             else:
                 _check_requirements_sources(path, set(), roots, base, seen, files, editables)
-        elif not option and operation == "compile":
+        elif not option and operation in ("compile", "source-compile"):
             _check_requirements_sources(base / value, set(), roots, base, seen, files, editables)
         elif option in ("", "-e", "--editable"):
             source = _check_requirement(value, base, roots, seen)
@@ -497,7 +512,8 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
             for path in environment[variable].split():
                 _check_requirements_sources(base / path, set(), roots, base, seen, files, editables)
     source_editables = (
-        "--no-sources" not in dict(pairs) and "--no-editable" not in dict(pairs)
+        operation != "source-compile"
+        and "--no-sources" not in dict(pairs) and "--no-editable" not in dict(pairs)
         and environment.get("UV_NO_SOURCES", "").lower() not in ("1", "true")
         and environment.get("UV_NO_EDITABLE", "").lower() not in ("1", "true")
     )
@@ -510,6 +526,22 @@ def _source_inputs(arguments, environment, cwd, trusted_source_roots, *, operati
     return base, seen, files, editables
 
 
+def _compile_arguments(arguments, environment, cwd, roots, operation):
+    packages = ()
+    if operation == "source-compile":
+        _, projects, _, _ = _source_inputs(
+            arguments, environment, cwd, roots, operation=operation,
+        )
+        packages = tuple(sorted(_identity(_toml(path / "pyproject.toml")["project"]["name"])
+                                for path in projects))
+        if not packages or len(set(packages)) != len(packages):
+            raise DependencyPolicyError("source lock export needs an unambiguous owned project graph")
+    return _configuration.compile_arguments(
+        arguments, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
+        source_packages=packages,
+    )
+
+
 def prepare_uv_install(
     uv: str, arguments: list[str], *, env: dict[str, str] | None = None,
     cwd: Path | None = None, now: datetime | None = None,
@@ -519,9 +551,9 @@ def prepare_uv_install(
 ) -> list[str]:
     """Preflight only. Installations must execute a retained UV transaction."""
     env = _captured_environment(env)
-    if _operation == "compile":
-        arguments = _configuration.compile_arguments(
-            arguments, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
+    if _operation in ("compile", "source-compile"):
+        arguments = _compile_arguments(
+            arguments, env, cwd, trusted_source_roots, _operation,
         )
     _source_inputs(
         arguments, env, cwd, trusted_source_roots,
@@ -532,7 +564,8 @@ def prepare_uv_install(
         argument for argument in arguments
         if argument != "--quiet" and not re.fullmatch(r"-q+", argument)
     ]
-    command = [uv, "pip", _operation, "--show-settings", *probe_arguments]
+    operation = "compile" if _operation == "source-compile" else _operation
+    command = [uv, "pip", operation, "--show-settings", *probe_arguments]
     try:
         result = subprocess.run(
             command, capture_output=True, text=True, env=env, cwd=cwd,
@@ -543,8 +576,8 @@ def prepare_uv_install(
     if result.returncode != 0:
         # Do not include UV's debug projection or credential-bearing arguments.
         raise DependencyPolicyError("UV seasoning configuration probe failed")
-    admitted = cutoff_arguments(result.stdout, now=now, _operation=_operation)
-    if _operation == "compile":
+    admitted = cutoff_arguments(result.stdout, now=now, _operation=operation)
+    if operation == "compile":
         _configuration.check_compile_projection(
             result.stdout, arguments, argument_pairs=_argument_pairs,
             balanced=_balanced, error_type=DependencyPolicyError,
@@ -695,9 +728,9 @@ def _retain_uv_install(
     """Own the admitted graph until the caller's execution and health settle."""
     now = datetime.now(timezone.utc) if now is None else now
     environment = _captured_environment(env)
-    if _operation == "compile":
-        arguments = _configuration.compile_arguments(
-            arguments, argument_pairs=_argument_pairs, error_type=DependencyPolicyError,
+    if _operation in ("compile", "source-compile"):
+        arguments = _compile_arguments(
+            arguments, environment, cwd, trusted_source_roots, _operation,
         )
     base, projects, files, editables = _source_inputs(
         arguments, environment, cwd, trusted_source_roots,
@@ -837,7 +870,7 @@ def _retain_uv_install(
             destination = mirror(path)
             Path(_native_retained_path(destination.parent)).mkdir(parents=True, exist_ok=True)
             text = Path(_native_retained_path(path)).read_text(encoding="utf-8")
-            if _operation == "compile":
+            if _operation in ("compile", "source-compile"):
                 text = _configuration.compile_requirement_includes(text, path, mirror, remap)
             else:
                 text = remap(text)
@@ -883,7 +916,7 @@ def _retain_uv_install(
         for option, value in _argument_pairs(original):
             if option in ("--directory", "--config-file"):
                 continue
-            if (_operation == "compile" and not option) or option in _FILE_OPTIONS or option == "--project":
+            if (_operation in ("compile", "source-compile") and not option) or option in _FILE_OPTIONS or option == "--project":
                 value = str(mirror(base / value))
             elif option in ("-p", "--python", "--target", "-t", "--prefix", "--cache-dir", "--cert"):
                 if (base / value).exists() or Path(value).is_absolute():
@@ -916,7 +949,8 @@ def _retain_uv_install(
         if editables:
             admitted.extend(["--config-setting", "editable_mode=compat"])
         yield RetainedUVInstall(
-            (uv, "pip", _operation, *admitted), retained_environment, retained_base,
+            (uv, "pip", "compile" if _operation == "source-compile" else _operation, *admitted),
+            retained_environment, retained_base,
             {path: mirror(path) for path in projects}, source_hashes,
         )
 
@@ -961,6 +995,16 @@ def prepare_uv_compile(uv: str, arguments: list[str], **options) -> list[str]:
 def retain_uv_compile(uv: str, arguments: list[str], **options):
     """Retain the admitted compile graph for the lifetime of its execution."""
     return retain_uv_install(uv, arguments, _operation="compile", **options)
+
+
+def retain_uv_source_compile(uv: str, arguments: list[str], **options):
+    """Retain an owned source graph and omit only its projects from lock output.
+
+    The caller independently verifies source identity and owns the returned
+    snapshot through export consumption. This is a candidate third-party lock,
+    not feed admission, source approval or permission to construct a runtime.
+    """
+    return retain_uv_install(uv, arguments, _operation="source-compile", **options)
 
 
 def run_uv_compile(uv: str, arguments: list[str], **options) -> subprocess.CompletedProcess:
