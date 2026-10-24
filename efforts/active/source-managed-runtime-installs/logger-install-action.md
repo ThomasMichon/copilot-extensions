@@ -34,8 +34,11 @@ publishers remain unchanged here.
    top-level command/module or another provision mode to force compatibility.
 3. Execute the actual materialized native installer through its existing
    `install` action. Keep package construction/selection and native registration
-   outcomes distinguishable: registration failure is a nonzero durable result,
-   not a successful installation merely because a healthy runtime was built.
+   outcomes distinguishable: fatal registration failure is a nonzero durable
+   result, not success merely because a healthy runtime was built. Retain the
+   canonical Windows access-denied warning/unchanged-task compatibility path
+   and its visible diagnostics; its successful process exit is not proof of
+   successful registration.
    Preserve healthy-prior selection on failed construction and do not claim
    transactional registration rollback where the canonical installer has none.
 4. Document the newly qualified fixed action and its limits. Do not route
@@ -63,8 +66,10 @@ installation-context portfolio. Do not grow exhaustive required PR CI.
   the two platforms implement identical registration mechanics.
 - Inject registration failure after successful construction and verify the
   original failure reaches the ordinary durable result; inspect resulting
-  selection and registration state rather than assuming rollback. Prove
-  `stamp`/`provision` still perform no task/timer registration.
+  selection and registration state rather than assuming rollback. Separately
+  exercise Windows' tolerated access-denied path and retained warning; do not
+  silently strengthen its established exit contract. Prove `stamp`/`provision`
+  still perform no task/timer registration.
 - Prove Python-free concurrent callers and caller loss retain the same
   canonical operation/receipt/result on both native lanes. Refuse source
   substitution, unsupported snapshot/custom-root/cell/options, managed
