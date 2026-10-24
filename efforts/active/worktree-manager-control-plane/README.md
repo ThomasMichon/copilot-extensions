@@ -1712,7 +1712,147 @@ revive completed relocation or seize lifecycle work.
   incumbent Plan/Validation/Journal clause unchanged and name the next bounded
   unfinished item.
 
+<!-- backlog-reconciliation:7556:transfer:4096:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+### Direct repository-class confirmation/intent policy from #4096
+
+Append DIRECTLY to the EXISTING Active ROOT's owner-bound registration/local-write Plan,
+own Validation, actual global Validation Plan and continuing Journal/Coordination.
+Preserve every incumbent phase, accepted source-read-only boundary and SAME
+repository-class API/CLI, configuration/contribution, agent/project/unadoption and
+current source/resource owners. This is a finite safety-policy intake, not Manager
+takeover of the registry writer or completed GUI/registration work.
+
+#### Plan
+
+- [ ] P1: Credit #7547's real explicit bidirectional class repair, omitted sentinel,
+  explicit reference/legacy aliases, validation-before-write and independent
+  agent/project/metadata/platform behavior. Do not reopen the repaired downgrade or
+  completed finite #7510 unadoption axes.
+- [ ] P2: Resolve the ORIGINAL confirmation prompt OR explicit force flag through the
+  existing repository-class owner, OR obtain an explicit reviewed requirement-preserving
+  decision replacing that mechanism with the supported intentional-change contract. A
+  registration success line, old provider merge or silently assuming --class already
+  supplies the requested prompt is not a decision.
+- [ ] P3: Preserve interactive/noninteractive/refusal behavior, invalid/missing values
+  failing before writes and unchanged omitted/default registration semantics.
+  Reclassification must not uninstall, unadopt a project, change agent exposure/runtime,
+  transfer a command or rewrite private lifecycle state.
+- [ ] P4: Reuse the actual engine registration/API/CLI and any owner-declared Manager
+  adapter. Do not invent a new registry, generic YAML editor, global confirmation
+  service or compulsory GUI dependency; repository/versioned source remains read-only
+  under the existing workbench contract.
+
+#### Validation
+
+- [ ] V1: Cover upward/downward/explicit-reference and omitted classes, valid aliases,
+  invalid/missing input, the chosen actual prompt/force or explicitly accepted
+  intent-disposition, cancellation/refusal and noninteractive use. Verify preserved
+  agent/project/metadata/platform state through the actual supported writer, not a
+  post-write message.
+- [ ] V2: Qualify this finite source/consumer policy at the ORIGINAL tier. Do not
+  require unrelated full Configurator/adoption/runtime/native-every-host completion;
+  existing per-wave/source-specific gates remain independent.
+- [ ] V3: BEFORE #4096 administrative supersession, obtain a NEW normal reviewed ACTUAL
+  merge containing this COMPLETE direct ROOT Plan/Validation/Coordination/Journal and
+  actual global row, then read back CURRENT FULL receiving sections. Closed #7510,
+  #7547, a child-only link, old creation or this proposal is not this receipt. If finite
+  scope/custody is not accepted, retain the source.
+
+#### Continuing Coordination and Journal
+
+- [ ] C1: Keep actual repository-class API/CLI and owner-declared
+  registration/configuration adapter custody, current #356 adoption claim, #542
+  assignment and all other module/wave/source/resource holds unchanged. Continue through
+  this existing ROOT Journal and eligible OPEN bounded-source claims; no new blanket ACK
+  or closed-source live token.
+- [ ] C2: Journal the NEW reviewed intake/current full readback, delivered class
+  behavior, exact remaining confirmation/intent decision and next bounded Plan item.
+  Keep this ROOT Active and all incumbent Plan/Validation/Journal rows intact. No
+  registration/configuration/process/test/native action occurs.
+
+<!-- backlog-reconciliation:7556:transfer:4098:to:efforts/active/worktree-manager-control-plane/README.md -->
+
+### Direct configuration mutation fidelity from #4098
+
+Receive the COMPLETE original comments/unknown-data round-trip case and accepted
+supported project-write refinements DIRECTLY in the EXISTING Active ROOT's plugin-owned
+machine-local writer safety Plan, own Validation, actual global Validation Plan and
+continuing Coordination/Journal. Preserve ALL current phases/Journal and SAME
+engine/config-migrate/registry, configuration-adapter and source/resource owners.
+Manager does NOT gain a generic YAML/source writer.
+
+#### Plan
+
+- [ ] P1: Preserve BOTH lexical user comments AND unrecognized top-level/nested values
+  through the ACTUAL supported machine-local config.yaml read/write round trip, plus the
+  accepted supported project-config mutation refinements at their existing authority
+  boundary. Map actual file/schema and writer, not every unrelated YAML file or
+  hypothetical future migrator.
+- [ ] P2: Credit raw-map deep copy, baseline/no-op textual marker insertion and current
+  baseline machine config. Reconcile changed-value/adoption/template and applicable real
+  shape-migration paths separately; typed load, a no-op fixture or an unrelated
+  registry-preference writer is not all mutation fidelity.
+- [ ] P3: Preserve deliberately reviewed known obsolete/duplicated-field removal and
+  registry-owned identity as a distinct accepted migration. Unknown user data cannot be
+  dropped by typed-model normalization, but this intake does not restore shadow
+  ownership fields.
+- [ ] P4: Preserve malformed/newer/unsupported/missing-migration refusal, idempotence,
+  atomic publication/backups and source/owner/error behavior without lossy fallback or
+  accidental write-on-read. Do not claim every current read loses comments simply
+  because real-shape safe_dump is lexical-lossy.
+- [ ] P5: Keep serialization/migration with the ACTUAL existing owning plugin/library
+  API. Manager only composes declared machine-local preview/apply/reset;
+  repository/knowledge/plugin/preset views remain read-only and versioned changes retain
+  their existing reviewed maintenance owner. No generic source editor or second config
+  authority.
+
+#### Validation
+
+- [ ] V1: Exercise actual supported file consumers for no-op, baseline stamp, changed
+  value and applicable migration with comments and unknown nested/top-level values.
+  Prove byte/semantic preservation according to the original contract; separately assert
+  deliberately removed known fields and unchanged unrelated settings.
+- [ ] V2: Cover malformed/newer/unsupported/refused/interrupted writes, atomic
+  retry/idempotence and owned recovery without touching real user config. A successful
+  template, raw-map copy or no-op test alone is not the full result; keep source versus
+  actual consumer proof explicit.
+- [ ] V3: Preserve the finite ORIGINAL supported-file tier and per-wave applicability.
+  Do not add every schema/every host, whole Configurator or mandatory live GUI
+  acceptance for an independently delivered engine/library fidelity fix; preserve
+  existing native/source gates where originally applicable.
+- [ ] V4: BEFORE #4098 administrative supersession, obtain a NEW normal reviewed ACTUAL
+  merge of this COMPLETE direct ROOT Plan/Validation/Coordination/Journal plus actual
+  global row, then read back CURRENT FULL receiving sections and unchanged
+  writers/custody. Closed #357, an old migration foundation, a child link or this
+  proposal is not receipt. Retain #4098 if any clause/owner cannot survive.
+
+#### Continuing Coordination and Journal
+
+- [ ] C1: Continue SAME engine/config-migrate/registry and owning local-write adapter
+  roles through this ROOT Journal and eligible OPEN bounded-source claims. Preserve
+  current #356/#542 and all config/domain/native/source/resource reservations without a
+  new generic ACK or source-write entitlement.
+- [ ] C2: Journal new reviewed intake/current full readback, actual baseline
+  preservation, precise remaining changed-value/migration fidelity and next bounded
+  item. Keep this ROOT Active, every incumbent Plan/Validation/Journal clause intact,
+  and perform no config read/write, migration, test/import or native operation through
+  this intake.
+
 ## Validation Plan
+
+- [ ] G1: Resolve EVERY directly retained #4096 original
+  confirmation-OR-force/accepted-disposition and validation/continuing Coordination
+  clause at its finite tier, preserving delivered class repair, independent axes and
+  SAME custodians. Administrative intake is not policy implementation, GUI/native
+  acceptance or parent completion.
+
+- [ ] G1: Resolve EVERY directly retained #4098 comment/unknown-data,
+  supported-writer/migration, refusal and continuing Coordination clause at its original
+  finite source/consumer tier, preserving known-field migration policy, source-read-only
+  authority and SAME writer custodians. Administrative consolidation is not general
+  round-trip fidelity, native rollout or parent completion.
+
 
 - [ ] Resolve EVERY directly retained #3935 Plan/Validation/continuing Coordination
   clause above at its original finite source/native tier, preserving same custodians,
@@ -1792,6 +1932,14 @@ revive completed relocation or seize lifecycle work.
 
 ## Coordination
 
+The direct retained #4096/#4098 acceptance continues through this SAME existing Active
+ROOT's Plan, own and actual global Validation, and Journal under the incumbent domain,
+source, native and resource custodians. Every prior phase, alternative, hold and
+responsibility remains. Administrative supersession retires only duplicate tracking; a
+closed source is historical provenance, not a required live claim token. This intake
+grants no implementation, rollout, process action, reassignment or new blanket approval
+gate.
+
 The complete #3935 retained finite family continues through this existing Active ROOT's
 reviewed Plan, actual global Validation and Journal/open bounded-source process under
 the SAME declared and source-specific custodians. Preserve every incumbent alternative,
@@ -1851,6 +1999,8 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- [2026-10-24 - Direct retained acceptance from #4096, #4098](<journal/2026/10.24 backlog-intake-85-86.md>)
 
 ### 2026-10-24 - Optional repository bootstrap contract proposal
 

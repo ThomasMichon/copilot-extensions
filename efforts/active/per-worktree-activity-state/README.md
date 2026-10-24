@@ -42,6 +42,13 @@ authority that already exists.
 
 ## Coordination
 
+The direct retained #4127 acceptance continues through this SAME existing Active ROOT's
+Plan, own and actual global Validation, and Journal under the incumbent domain, source,
+native and resource custodians. Every prior phase, alternative, hold and responsibility
+remains. Administrative supersession retires only duplicate tracking; a closed source is
+historical provenance, not a required live claim token. This intake grants no
+implementation, rollout, process action, reassignment or new blanket approval gate.
+
 - **Topology:** single sequential driver, no parallel implementation slices.
   Each phase targets `dev` and clears review/merge before the next phase
   begins. Phase 1 now has a reviewed rollout amendment followed by a
@@ -482,7 +489,122 @@ archived-journal discovery, standalone-install retention floor):
 - [ ] The unscoped `activity` view (Phase 3) can still discover archived
       history via the fixed, agent-worktrees-known archive path.
 
+<!-- backlog-reconciliation:7556:transfer:4127:to:efforts/active/per-worktree-activity-state/README.md -->
+
+### Direct retained #4127 acceptance: cheap current state and owner-directed doctor reconciliation
+
+Append this COMPLETE unchecked intake while preserving the ENTIRE incumbent ROOT Plan,
+completed progress, Validation, Participants, Coordination, dependencies and append-only
+Journal. Original https://github.com/ThomasMichon/copilot-extensions/issues/4127 and
+accepted refinement
+https://github.com/ThomasMichon/copilot-extensions/issues/4127#issuecomment-6320488887
+retain the capability goal. The originally proposed lock lattice and stale-age death are
+proposed means, explicitly reconciled to the accepted owner-maintained schema-bounded
+contract, not new reclamation authority. This is administrative intake, not
+implementation/readiness/rollout or custody transfer.
+
+#### Plan
+
+- [ ] P1. Deliver cheap current session/worktree state to the actual Picker AND
+  applicable doctor current-state reader through the existing state owner. Ordinary
+  lookup/read/decode/render is O(fixed bounded schema), independently addressed by
+  worktree identity, not growing records, journals, histories, handoff lists, claims
+  graphs or fleet lists. No query-time per-worktree process spawning or rival reader
+  computation; existing owned startup/held-feed mechanisms retain their accepted
+  boundaries.
+- [ ] P2. Use one transactionally maintained current projection with explicit
+  source/identity/revision/freshness/readiness. Do not add a competing lock lattice,
+  registry, daemon or status database. Preserve bounded
+  cold/warm/restart/advisory-degraded/unavailable behavior. Missing, stale or malformed
+  evidence means explicit unknown/unready/unavailable, NEVER dead owner, free slot,
+  settled obligation, expired claim or cleanup/termination permission.
+- [ ] P3. Preserve the EXISTING staged
+  producer-enrollment/bootstrap/backfill/read-cutover protocol and single writer.
+  Coverage of roots predating enrollment must be established; natural legacy-root exit
+  and readiness-false barriers remain, with no killing old roots or treating
+  registration/enrollment alone as complete producer coverage. Preserve supported
+  rollback and unknown mutation outcomes.
+- [ ] P4. Consume owner-pushed claims-derived status and direct current handoff head.
+  Keep older unresolved retirement duties durably owned, automatically visible through
+  the existing bounded due-work selection and explicitly repairable; a new head or stale
+  timestamp cannot hide/release them. Current ordinary reads do not reconstruct
+  journals/graphs.
+- [ ] P5. Separate ordinary cheap state from explicit authorized doctor/history/repair.
+  Diagnostic history may be read on demand by its existing owner, and repair may gather
+  necessary authoritative evidence through its admitted path; a read-only
+  projection/lock age never grants mutation, claim release, lease cleanup or
+  process/service control. No new all-host or whole journal/archive program completion
+  gate is imposed on this finite source.
+- [ ] P6. Credit actual bounded resident/held-feed and current Picker consumer delivery;
+  do not infer current absence from old pause/config/planning prose or infer native
+  readiness from source alone. Journal exact source, containing release,
+  installed/native subject and proof limits. Obtain NEW ordinary reviewed actual merge
+  of this COMPLETE intake plus actual global Validation entry, then read back the WHOLE
+  current ROOT before superseding #4127; otherwise retain.
+
+#### Validation
+
+- [ ] V1. Exercise actual Picker and applicable doctor current-state access across cold,
+  warm, restart, unready, degraded/advisory and unavailable paths, verifying
+  schema-bounded lookup/read/decode/render and no per-row process/history/graph
+  reconstruction. Small returned data or fewer subprocesses alone is insufficient;
+  preserve existing access/scaling acceptance at its original tier.
+- [ ] V2. Verify independently addressed current state, atomic owner updates,
+  source/revision/freshness/readiness and stale/missing/invalid uncertainty. Demonstrate
+  that no reader treats stale age as confirmed process death, a free slot, claim
+  abandonment or mutation permission. A reader cache is not an ownership authority.
+- [ ] V3. Verify producer-root coverage, pre-enrollment bootstrap, natural drain,
+  concurrency, backfill/readiness cutover, interruption and supported rollback through
+  the existing approved protocol. Enrollment alone cannot switch readers to unready
+  slots; missing native/legacy evidence remains an explicit hold, not an absence-shaped
+  success.
+- [ ] V4. Verify pushed claims/current-head reads remain bounded while history grows;
+  preserve every older unresolved retirement duty and its owner/retry visibility.
+  Explicit repair can inspect all relevant duties without moving those scans into
+  ordinary status serving.
+- [ ] V5. Verify actual doctor current-state reads versus explicit diagnostic/repair
+  operations: uncertainty and owner-directed repair remain truthful,
+  native/process/resource effects need their own existing authority, and no cached
+  observation settles custody. Distinguish source/component/containing-release evidence
+  from actual installed/native acceptance where required.
+- [ ] V6. Verify P1-P6, V1-V6 and C1-C3, the ACTUAL global Validation entry and whole
+  incumbent ROOT after NEW normal reviewed actual merge/current readback. Keep all
+  pre-existing producer, native, claim and coordination gates; no extra
+  whole-parent/all-host/archive completion or universal ACK ceremony.
+
+#### Continuing Coordination
+
+- [ ] C1. The existing single sequential #5664 driver remains the host/integration
+  owner. #3761 remains the authoritative write/read publication owner; #5559 retains
+  process-membership/query custody, and #6086's exact-selection/enrichment reservation
+  remains untouched even where its concrete current owner is unresolved. Preserve
+  related storage/catalog/wakeup and lifecycle owners; add no second source of truth or
+  worker.
+- [ ] C2. Preserve every incumbent Plan/Validation/Journal, completed finite source
+  delivery, producer/backfill/readiness/native/runtime hold and actual
+  assignee/textual/nonexpiring claim. Age, silence, no formal assignee or missing local
+  task cannot release it. This tracker intake grants no implementation, service restart,
+  enrollment activation, rollout or resource cleanup.
+- [ ] C3. Integration/publication remains with the existing owner. NEW ordinary reviewed
+  actual ROOT intake merge and WHOLE current readback with every original
+  residual/choice/evidence tier/owner intact precede source supersession. Missing any
+  direct clause or global Validation entry keeps #4127 OPEN; unchanged broader phases
+  stay open independently.
+
+Public delivery foundations:
+https://github.com/ThomasMichon/copilot-extensions/pull/5669 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6448 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/6595 .
+
 ## Validation Plan
+
+- [ ] Complete EVERY directly retained #4127 P1-P6, V1-V6 and C1-C3 clause above at its
+  original finite scope/evidence tiers, preserving the entire incumbent
+  Plan/Validation/Journal, producer-root and backfill/readiness barriers, unresolved
+  duties, claims and current owners/holds. Tracker consolidation is not implementation,
+  native readiness or rollout; NEW normally reviewed actual merge and WHOLE current ROOT
+  readback precede source supersession.
+
 
 - [ ] The [schema-bounded read validation](schema-bounded-read-contract.md#validation-plan)
       passes for cold, warm, restart, and advisory-degrade paths, including
@@ -549,6 +671,8 @@ implementation starts. Phase 1's existing local slot/backfill groundwork
 remains unpublished and is not evidence of production readiness.
 
 ## Journal
+
+- [2026-10-24 - Direct retained acceptance from #4127](<journal/2026/10.24 backlog-intake-85-86.md>)
 
 ### 2026-10-12 — Schema-bounded reads and monitoring eligibility clarified
 
