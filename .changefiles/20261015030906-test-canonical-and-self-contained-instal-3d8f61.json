@@ -1,5 +1,5 @@
 {
-  "comment": "Qualify canonical native snapshot copying, materialized copy contracts and complete bounded Windows installer acceptance",
+  "comment": "Qualify canonical native snapshot copying and bounded Windows installer acceptance; reduce redundant materialization and manifest path work while retaining live refusal and complete-content checks",
   "changes": [
     {
       "plugin": "agent-bridge",

@@ -3240,6 +3240,13 @@ The shared PowerShell copy helper stays canonical on `dev`; normal release
 materialization, not checked-in per-plugin engine copies, supplies shipped bytes.
 Focused copy-contract results do not replace the complete automatic installer
 run or increase its existing native/item/group/aggregate limits.
+Ordinary absolute materialization paths use fresh no-follow metadata checks
+within their resolved root rather than resolving every ancestor again for each
+asset. Relative paths, parent traversal and reparse aliases retain the original
+resolved walk. Snapshot manifests accumulate relative keys during traversal but
+still read fresh metadata and hash complete file contents on every call; no
+content or identity is cached across calls, no input is discarded, and fixture
+time remains charged to the existing budgets.
 Interrupt/internal/usage failures, unfiltered empty collection, containment
 exceptions, resource failures and aggregate timeouts still abort immediately
 with their original status. The runner's multi-plugin policy is unchanged.

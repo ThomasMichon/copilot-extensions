@@ -13,9 +13,8 @@ def snapshot_tree_manifest(root: Path) -> dict[str, tuple[str, str]]:
     """Record complete contents without following a link or junction."""
     entries: dict[str, tuple[str, str]] = {}
 
-    def visit(path: Path) -> None:
+    def visit(path: Path, key: str) -> None:
         info = path.lstat()
-        key = path.relative_to(root).as_posix()
         if stat.S_ISLNK(info.st_mode) or (
             getattr(info, "st_file_attributes", 0)
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
@@ -24,11 +23,12 @@ def snapshot_tree_manifest(root: Path) -> dict[str, tuple[str, str]]:
         elif stat.S_ISDIR(info.st_mode):
             entries[key] = ("directory", "")
             for child in sorted(path.iterdir()):
-                visit(child)
+                child_key = child.name if key == "." else f"{key}/{child.name}"
+                visit(child, child_key)
         else:
             entries[key] = ("file", hashlib.sha256(path.read_bytes()).hexdigest())
 
-    visit(root)
+    visit(root, ".")
     return entries
 
 
