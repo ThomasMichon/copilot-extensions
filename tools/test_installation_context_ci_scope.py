@@ -249,6 +249,7 @@ def test_codespaces_bootstrap_remains_an_explicit_bounded_native_portfolio() -> 
             ["python", "tools/run-plugin-tests.py", "update-driver",
              "--test-file", "tests/test_first_use_codespaces_bootstrap.py",
              "--test-file", "tests/test_first_use_codespaces.py",
+             "--test-file", "tests/test_first_use_codespaces_checkout.py",
              "--test-timeout", "900", "--timeout", "1200"],
             ["python", "tools/run-plugin-tests.py", "agent-codespaces",
              "--test-file", "tests/test_bootstrap_check_reconcile_always_on.py",

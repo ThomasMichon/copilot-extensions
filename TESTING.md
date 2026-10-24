@@ -106,6 +106,12 @@ ordinary receipt/result, own-installed-payload drift, failed-candidate selection
 preservation, healthy no-op and source-independent installed CLI/module/
 distribution identity. The foundation must come from canonical payload
 materialization, not a fixture's separately supplied source tree.
+Windows additionally stamps the actual unmaterialized checkout shape, removes
+that source, validates the retained complete local dependency graph and provisions
+the real installed CLI from its snapshot. This protects the added driver
+dependency; it does not replace #6909's separate copy/runner/native matrix.
+POSIX legacy stamping retains its original payload pointer, so that Windows-only
+snapshot regression is not relabelled as a POSIX contract.
 
 No-write controls cover publication policy, no-self/pinned/nested invocation,
 unsupported source/context and missing/skewed support. Provider/guidance hooks

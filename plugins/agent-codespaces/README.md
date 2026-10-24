@@ -140,6 +140,8 @@ Windows stamping captures the private snapshot candidate's canonical source
 before publishing the command and replacing the previous selection. Failed
 resolver or command publication leaves that previous snapshot and its selectors
 intact. Resolver destinations must be files, not directories.
+Checkout-stamped Windows snapshots retain the declared local dependency graph,
+including the bootstrap driver, for provisioning without the original checkout.
 The global command binds configuration and provisioning to its installed root.
 The generated PowerShell command uses UTF-8 with a BOM so Windows PowerShell
 5.1 preserves non-ASCII installation paths.
