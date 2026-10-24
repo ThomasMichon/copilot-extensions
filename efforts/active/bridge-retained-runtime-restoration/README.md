@@ -239,6 +239,28 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
 
 ## Journal
 
+### 2026-10-24 - Close the installation-owner capture gap found in review
+- Review of #8540 identified that the initial HTTP-48 closure covered the
+  separately packaged installation module but omitted the actual payload
+  `scripts/installation-context` entrypoint and fragments used by LoopGovernance.
+  Those initial observations did not qualify this dependency. Their provenance
+  remains retained; corrected current evidence supersedes that incomplete claim.
+- The closure now pins every Python file in that payload helper directory.
+  Required execution is derived from the captured entrypoint's fragment
+  declaration: the entrypoint and all 18 fragments must execute under the
+  source/origin/code guard, including their non-`src` paths.
+- Controls refuse dirty entrypoint/fragment inputs before probes and reject
+  foreign helper locations, forged executable code, incomplete inventories and
+  missing required execution before effects or publication.
+- Genuine source `b179c886e69306bc7318c9d39e24dce6b7820b99` completed actual
+  write/no-write capture in both fixture installation modes with all 19 helper
+  executions required. The 74 current outputs preserve every HTTP-47 packet and
+  complete provenance; the checker still accepts two contracts and 656 fixtures.
+  The corrected contract/fixture consumer cohort passes 123 cases.
+- Current-head review and merge remain open. Ordinary producer/SDK integration,
+  native and deployed qualification, and the parent restoration gates are not
+  closed by this evidence repair.
+
 ### 2026-10-24 - HTTP-48 adapter source qualified; review and SDK integration open
 - Added explicit `retained-inbox-v1` negotiation, predecessor-CAS enrollment,
   original-row polling, one-shot final admission and original outcome reporting
