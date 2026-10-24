@@ -5,6 +5,8 @@
 - **Branch(es):** independent, dependency-ordered PRs against `dev`
 - **Created:** 2026-10-22
 - **Status:** Blocked
+- **F1 source gate:** Recorded contended-tier results accepted; source approval
+  hold released. Ordinary current-head review/CI/merge remain required.
 - **Vision:** `visions/plugins/agent-worktrees/README.md`, resident authoritative live-state database; `visions/picker/README.md`, consumer presentation
 - **Umbrella issue:** #7937
 - **Sub-issues:** #7936 · #7946
@@ -98,6 +100,8 @@ or additional execution authorization.
 - [x] Implement the negotiated observation/semantic split and changed-row
   persistence from [implementation.md](implementation.md).
 - [x] Preserve atomic head, row, order, observation and deletion publication.
+- [x] Accept the explicitly authorized contended-host tier for F1 source
+  completion, retaining nominal performance work in #7935/#7936/#7946.
 - [ ] Complete the scoped F1 source review/merge and transfer remaining
   consumer, effect and installed qualification to their existing owners.
 
@@ -153,6 +157,22 @@ and exact shared-file owners. Its source review merged in #8139;
 it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
+
+### 2026-10-24 — F1 source-tier acceptance; approval hold released
+- The operator independently accepted exact candidate `0ef1505b`, current
+  green CI `40064027710`, clean owner-authored Comment `5636917775` and
+  all resolved code-finding threads. All 74 archived evidence members and
+  the Manager/Worktrees JUnit/results were independently byte-verified.
+- The accepted source tier is Manager 2x plus Worktrees module 2x and the
+  single timing-only console/guarded 3x follow-up. This is not a nominal
+  two-second pass or production SLA/configuration change.
+- The F1 source approval hold is released; ordinary readiness, current-head
+  review/required CI and configured managed merge are authorized. The
+  owner-authored clean-Comment policy applies; no additional Approve label
+  is required. New source/review findings or failing required CI still block.
+- Nominal #7935/#7936/#7946, F2/F3/F4, integrated GUI/installed validation
+  and overall effort completion remain open. This acceptance does not mark
+  this whole effort Done or authorize a rollout.
 
 ### 2026-10-24 — Explicit contended-host test tier; nominal performance stays open
 - Added only test-local opt-in factor 1/2/3, default 1. Production source and

@@ -799,8 +799,31 @@ values; two in-process reporting tests cover this correction. Parser/ratio
 validation passed 11 Worktrees and 11 Manager cases; the corrected Manager
 reporting selector passed 13 cases without any timed rerun.
 
-The current result awaits explicit acceptance of the exact contended-tier
-evidence, fresh current-head review and required CI. Nominal performance work
-remains tracked by #7935/#7936/#7946; this tier neither changes production
-SLAs/configuration nor closes those goals. No automatic PR-ready/merge or
-rollout follows from scaled intent or success alone.
+The operator subsequently accepted the exact contended-tier evidence for F1
+source completion and released its source approval hold. Ordinary current-head
+review, required CI and managed merge remain required. Nominal performance work
+stays tracked by #7935/#7936/#7946; acceptance neither changes production
+SLAs/configuration nor closes those goals. A scaled intent or pass alone was
+not the authorization: independent exact-result acceptance was.
+
+### Accepted source disposition
+
+On 2026-10-24 the operator independently verified candidate `0ef1505b`,
+required green CI `40064027710`, owner-authored clean Comment `5636917775`,
+all resolved code threads, the complete test-only diff, no production/src/libs/
+configuration change, and byte-identical copies of all 74 evidence members.
+The exact contended results are accepted for this source slice.
+
+The F1 source approval hold is therefore released. The original nominal
+two-second goal is **not** a prerequisite to this source PR's completion under
+that accepted disposition, and it is **not** reported as passed. Parent
+performance #7935/#7936/#7946, F2/F3/F4, GUI and installed qualification remain
+open under their existing owners.
+
+Apply the repository's normal owner-authored verdict policy: an accepted
+current-head Comment with no Medium/High findings is sufficient; an Approve
+label or another operator approval is not an additional gate. Current required
+CI, exact head/provenance, resolved threads and the configured role/profile
+still apply. Use normal readiness and managed merge, with the configured
+CODEOWNER exception only; never bypass a new finding or required check.
+No rollout is authorized by source completion.
