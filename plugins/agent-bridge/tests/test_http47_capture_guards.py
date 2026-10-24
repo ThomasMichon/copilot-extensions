@@ -111,6 +111,14 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return seed
 
 
+def test_http47_shared_capture_seed_has_owned_committed_inputs(source_seed):
+    registry = read_registry(source_seed)
+    http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
+    assert http["declared_range"]["current"] == 47
+    packet = json.loads((source_seed / evidence.PRIMARY).read_bytes())
+    assert fixture_git(source_seed, "rev-parse", "HEAD") == packet["captured_from"]["commit"]
+
+
 def commit_fixture(root: Path, message: str) -> str:
     fixture_git(root, "add", ".")
     fixture_git(

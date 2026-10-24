@@ -24,7 +24,8 @@ def test_bridge_contracts_portfolio_keeps_existing_budgets_and_explicit_scope():
     assert commands[1].split()[:3] == ["python", "tools/run-plugin-tests.py", "agent-bridge"]
     assert "--timeout" not in commands[1] and "--test-timeout" not in commands[1]
     assert commands[1].count("--test-file") == 3
-    assert '"http48 or capture_reproducible_real_commit_preserves_history"' in commands[1]
+    assert "shared_capture_seed_has_owned_committed_inputs" in commands[1]
+    assert "capture_reproducible_real_commit_preserves_history" in commands[1]
 
 
 def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path):

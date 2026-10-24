@@ -12,6 +12,8 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 The manual `installation-context-full.yml` portfolio `bridge-contracts`
 runs only the canonical Bridge evidence checker, HTTP-48 archive byte controls,
 HTTP-48/49 publication guards and HTTP-47 history-preservation cases on Ubuntu.
+Shared immutable-input preparation has its own bounded qualification control;
+each publication case still creates a fresh consumer fixture.
 It retains the ordinary runner's containment and test deadlines. This is
 source/publication evidence, not SDK, native Windows or installed qualification.
 Use a fresh canonical-history-only clone to check proof retention across a

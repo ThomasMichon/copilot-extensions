@@ -50,7 +50,7 @@ jobs:
           --test-file tests/test_http48_source_retention.py
           --test-file tests/test_http48_capture_guards.py
           --test-file tests/test_http47_capture_guards.py
-          -k "http48 or capture_reproducible_real_commit_preserves_history"
+          -k "http48 or shared_capture_seed_has_owned_committed_inputs or capture_reproducible_real_commit_preserves_history"
 
   logger-recipes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'
