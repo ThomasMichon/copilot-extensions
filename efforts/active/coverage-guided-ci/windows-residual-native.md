@@ -65,8 +65,8 @@ copier changes instead belong to B6909, not an already-merged claim.
 
 ### Subsequent actual-merge settlement
 
-At Dev `0f5b38374525c7dfbc11b47212a7a9905a9b6ec8`, the following eight
-independent contracts have actually merged. Their **22 exact census keys**
+At Dev `abe1c6a7b0ae52807a9d41db5a4efa3a37d0797d`, the following nine
+independent contracts have actually merged. Their **34 exact census keys**
 now carry the corresponding merged code below, not their former retained
 batch label. The linked merged PRs retain their scoped implementation, review,
 checks and validation context. This is a semantic contract disposition, not
@@ -82,6 +82,7 @@ an assertion that historical patches were replayed byte-for-byte.
 | M8425 | W4-VAULT-NOSERVICE | 2 | #8425, `cf2cfd14ca9fb9129bfc4dbc15e3c24691d23bdd` |
 | M8437 | W4-INDEX-SHUTDOWN | 4 | #8437, `1f711668a1950a0cdbbafc85243d33fd57b116b7` |
 | M8444 | W4-BRIDGE-STDIO | 1 | #8444, `0f5b38374525c7dfbc11b47212a7a9905a9b6ec8` |
+| M8470 | W4-BIND | 12 | #8470, `abe1c6a7b0ae52807a9d41db5a4efa3a37d0797d` |
 
 The batch descriptions below preserve their original scope, not permission to
 republish settled work. In particular, the pane tests moved into the existing
@@ -91,10 +92,30 @@ assertion is accompanied by actual isolated native pipe/exit controls.
 Vault's compiler and NoService contracts remain separate, with their failed
 diagnostics retained rather than converted to timing qualification.
 No other retained, blocked or retirement-proposed key changes disposition.
-The 62 carried-forward retained keys are custody labels, not newly verified
+The 50 carried-forward retained keys are custody labels, not newly verified
 findings that every associated behavior is absent from current Dev.
 The parent remains #5682; the operator-closed #5694 is preserved history,
 not an open publication objective.
+
+### Subsequent admission: W4-BIND
+
+M8470 settles the original twelve path/header/hash keys under the binding
+README, generator, tests and generated Worktrees PowerShell emitter. The
+generator and emitted bootstrap implement the historical single-interpreter,
+isolated-helper and stderr-only trace contract. Current tests retain the
+stronger initialized-host outcome/snapshot fixture rather than replaying an
+older fixture. The user-site launcher forwards the real bootstrap output;
+unavailable Python, admitted helper failure and empty response are separate
+controls. Failure and empty response forbid fallback discovery after admission.
+Environment-level trace removal plus ordinary-emission silence checks realize
+the original no-trace control. A changed foreign receipt between real emissions
+requires immediate refusal without writes, rather than cached ownership.
+
+The linked PR retains the complete 143-pass/24-existing-skip native consumer
+run and the earlier unexplained worker-loss diagnostic. Neither the passing
+rerun nor its small before/after launch sample qualifies complete same-head
+timing. No other disposition changes, no new skip or budget increase, and no
+installer-owner or retirement acceptance is implied.
 
 ### Blocked existing owner
 
@@ -405,21 +426,21 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `libs/payload-invocation/README.md`
 
-- `@@ -65,10 +65,16 @@ the real Worktrees CLI retain the complete copied runtime and staged dependencie` — `82efa7836d8b` — W4-BIND
+- `@@ -65,10 +65,16 @@ the real Worktrees CLI retain the complete copied runtime and staged dependencie` — `82efa7836d8b` — M8470
 
 ### `libs/payload-invocation/generate.py`
 
-- `@@ -462,14 +462,39 @@ def render(` — `861a8d2296c7` — W4-BIND
-- `@@ -480,19 +505,27 @@ def render(` — `e9bbf0de1d0d` — W4-BIND
+- `@@ -462,14 +462,39 @@ def render(` — `861a8d2296c7` — M8470
+- `@@ -480,19 +505,27 @@ def render(` — `e9bbf0de1d0d` — M8470
 
 ### `libs/payload-invocation/tests/test_command_binding.py`
 
-- `@@ -449,9 +449,8 @@ def test_command_binding_catalog_disables_user_site_startup(` — `559f0578fc59` — W4-BIND
-- `@@ -642,6 +641,7 @@ def test_command_binding_real_catalog_read_only(` — `f2caae713082` — W4-BIND
-- `@@ -671,11 +671,14 @@ def test_command_binding_real_catalog_read_only(` — `999c4dc5154f` — W4-BIND
-- `@@ -687,7 +690,13 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `8efa6a7c1482` — W4-BIND
-- `@@ -698,12 +707,12 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `d4d416365954` — W4-BIND
-- `@@ -717,11 +726,28 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `7bdbb1eebf76` — W4-BIND
+- `@@ -449,9 +449,8 @@ def test_command_binding_catalog_disables_user_site_startup(` — `559f0578fc59` — M8470
+- `@@ -642,6 +641,7 @@ def test_command_binding_real_catalog_read_only(` — `f2caae713082` — M8470
+- `@@ -671,11 +671,14 @@ def test_command_binding_real_catalog_read_only(` — `999c4dc5154f` — M8470
+- `@@ -687,7 +690,13 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `8efa6a7c1482` — M8470
+- `@@ -698,12 +707,12 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `d4d416365954` — M8470
+- `@@ -717,11 +726,28 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(` — `7bdbb1eebf76` — M8470
 
 ### `libs/versioned-runtime/tests/test_source_install_transactions.py`
 
@@ -676,9 +697,9 @@ anything, and the relevant native consumer is exercised locally.
 
 ### `plugins/agent-worktrees/scripts/emit-command-catalog.ps1`
 
-- `@@ -1,6 +1,6 @@` — `2041e504e346` — W4-BIND
-- `@@ -26,11 +26,28 @@ $catalog = [ordered]@{` — `12e7feef63a7` — W4-BIND
-- `@@ -40,16 +57,24 @@ if (-not $bindingPython) {` — `da9969913718` — W4-BIND
+- `@@ -1,6 +1,6 @@` — `2041e504e346` — M8470
+- `@@ -26,11 +26,28 @@ $catalog = [ordered]@{` — `12e7feef63a7` — M8470
+- `@@ -40,16 +57,24 @@ if (-not $bindingPython) {` — `da9969913718` — M8470
 
 ### `plugins/agent-worktrees/scripts/install.human-output.json`
 
@@ -704,13 +725,13 @@ whose final contents differ.
 
 - `libs/payload-invocation/README.md`: original binding behavior additions are
   retained verbatim; unrelated intervening fixture documentation shifts hunk
-  context. Its contract remains W4-BIND.
+  context. Its W4-BIND contract is now settled as M8470.
 - `libs/payload-invocation/generate.py`: both original changed hunks are
   retained; other intervening generator content differs. No original binding
   behavior disappeared.
 - `libs/payload-invocation/tests/test_command_binding.py`: all six original
   changed assertion/setup blocks remain in the continuation, with shifted
-  coordinates. Their contract remains W4-BIND.
+  coordinates. Their W4-BIND contract is now settled as M8470.
 - `plugins/agent-worktrees/scripts/install.ps1`: both original changed blocks
   remain in the continuation; their independent current-Dev dispositions are
   M6707 and M7304 above. Larger intervening installer reconciliation is not an
@@ -741,8 +762,8 @@ handling is separately counted. No unspecified hunk is silently retired.
 
 Mechanical self-check passed against freshly read immutable Git objects:
 **62 distinct paths, 128 distinct exact keys, zero missing/extra/duplicate
-keys, and one disposition on every row**. Updated totals are **39 actual-merged,
-25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 62 retained, and 2
+keys, and one disposition on every row**. Updated totals are **51 actual-merged,
+25 blocked (24 B6909 and 1 B-CODESPACES-SPLIT), 50 retained, and 2
 proposed-retirement** continuation hunks. The blocked mixed key additionally
 partitions retained portability subspans from the R-BASH-SKIP review proposal;
 these are not additional full-hunk census rows.
