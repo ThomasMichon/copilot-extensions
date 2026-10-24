@@ -141,6 +141,11 @@ The command arrays are process-boundary contracts. The Manager invokes the
 contributing plugin's canonical CLI; it never imports the plugin runtime or
 reads the plugin's private state.
 
+For the existing provider-owned authentication use of these seams, see the
+[in-Picker device-authorization pattern](../../docs/patterns/in-picker-device-authorization.md).
+It covers account/scope verification, safe progress presentation, cancellation,
+SSH browser use and candidate-consumer ownership without changing this schema.
+
 ### Shared form drafts
 
 A row-scoped `kind: "form"` action may declare `draft`:

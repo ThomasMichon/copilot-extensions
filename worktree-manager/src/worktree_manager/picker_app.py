@@ -28,6 +28,7 @@ from . import engine_client as ec
 from .engine_client import EngineError, Worktree
 from .pivot_runtime import PivotLoadError, PivotPayload, load_pivot
 from .plugin_contracts import PivotContract, PluginContribution, parse_manifest
+from .picker_button import PickerButton
 
 Source = Callable[[], "list[Worktree]"]
 ContextSource = Callable[[], "Mapping[str, object]"]
@@ -278,7 +279,7 @@ class WorktreeManagerApp(App):
         yield Static("", id="status")
         from textual.containers import Horizontal
         yield Horizontal(*(
-            Button(action.label, id=f"view-{descriptor.key}-{action.key}")
+            PickerButton(action.label, id=f"view-{descriptor.key}-{action.key}")
             for descriptor in self._pivots for action in descriptor.pivot.view_actions
             if action.kind == "command" and action.run
         ), id="view-actions")

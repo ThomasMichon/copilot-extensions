@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; HTTP-48 transport and HTTP-49 ordinary producer merged; SDK integration and full Phase 1 open
+- **Status:** Active; opt-in SDK source integration in progress; native qualification and full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -154,9 +154,13 @@ require their own review and qualification.
       authenticated proxy owners and reject unsupported exposure.
       The explicit local HTTP-48 adapter merged in #8540 and ordinary HTTP-49
       producer admission/recovery merged in #8569. Actual extension SDK
-      enrollment/delivery remains open. The next source prerequisite adds
-      bounded, read-only original-handoff recovery and one-message polling
-      through the existing inbox/receipt owners before SDK wiring.
+      enrollment/delivery is now wired behind an explicit opt-in, with controlled
+      source qualification; actual native/platform qualification remains open.
+      Bounded, read-only original-handoff
+      recovery and one-message polling through the existing inbox/receipt
+      owners merged in #8661. The
+      [consumer guide](../../../plugins/agent-bridge/docs/retained-sdk-consumer.md)
+      records the current source boundary and unsupported cases.
 - [ ] Preserve original durable messages, handoffs and outcomes across
       disconnect, timeout, restart and lost replies; reconcile uncertainty
       without dropping work or blindly resending it.
@@ -243,6 +247,60 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, authenticated consumer/SDK integration and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Wire the explicit retained SDK consumer
+- The existing interactive extension selects retained delivery only through
+  an explicit environment opt-in. It requires advertised recovery protocol 50,
+  the actual SDK handle's native session ID and a matching metadata snapshot.
+  Legacy defaults remain unchanged; selected retained delivery cannot use
+  legacy ACKs, controls or interrupt/resend as a fallback.
+- The serialized consumer preserves the enrollment predecessor across lost
+  replies, polls one original handoff, and rechecks native context around
+  one-shot final admission. SDK acceptance, attributed consumption and unknown
+  outcomes remain distinct. Recovery uses the exact original consumer after
+  reload/closure and lazy shared durable history, not bounded event caches.
+- Controlled helper and actual-extension loading cases cover legacy/retained
+  routing, unsupported SDK/protocol cases, original identity, reply loss and
+  nonblocking event handlers. Independent Node consumers execute the actual
+  ASGI/installation/SQLite owners across six process-loss boundaries in both
+  installation modes; reopened storage retains the original work after closure.
+  These are source controls with a synthetic SDK sink, not native proof.
+- The preferred container image lacked Node and skipped its Node-dependent
+  controls; that run is not execution evidence. The Node-equipped bounded
+  host runner executes all 12 process-boundary cases and the combined Node
+  helper regression wrapper. No dependency, runtime or installed setting changes.
+- Normal source review and merge remain owed. Full Phase 1b, native Linux/Windows
+  qualification, remaining custody cohorts, target compatibility, guarded
+  restoration and separately authorized running adoption remain open.
+- Independent review reproduced two source recovery gaps: an already-enrolled
+  consumer did not reinitialize a restarted frontend, and history cooldown could
+  advance unreconciled pages while older unknowns phase-locked later evidence
+  out of every history read. Focused failing controls reproduce both.
+  Recovery now checks the original binding and current/predecessor observations,
+  repeats the original enrollment CAS, and retains a page cursor until its
+  history can be reconciled. Foreign binding/consumer and lost-enrollment/restart
+  negatives remain held. All 15 selected Python controls pass, including two
+  actual-frontend restart cases and the combined 93-case Node wrapper.
+  The 201-receipt control keeps 100 older unknowns outstanding while settling
+  all 101 later receipts through three bounded shared history reads.
+
+### 2026-10-24 - Recovery prerequisite merged; continue the actual SDK consumer
+- #8661 merged as `7db62f243e91da9ad25d2f354b27914a686aa65f` at
+  13:17:08 PDT after exact-head Copilot approval `5639791371` on
+  `65008cc1cd8830073104c885463ca5620747758e`, no inline findings and
+  all three required checks passing.
+- Reread the Plan and Validation Plan. This closes only the original-handoff
+  recovery source prerequisite: HTTP 50, metadata-only original observations,
+  bounded polling and prepared indexing. No full Phase 1b or parent
+  restoration/adoption item closes from it.
+- Next bind the actual receiving extension to explicit opt-in enrollment,
+  serialized one-message polling, invocation-only final admission and original
+  outcome/consumption recovery. Preserve legacy defaults; do not use legacy
+  ACK/interrupt-resend or bounded event caches as retained custody truth.
+  Uncertain originals remain visible, never blind retries under new identities.
+- The source worktree reconciled through the normal verified merged-PR
+  operation, retaining its previous head in the managed backup. No runtime
+  installation, rollout, native effect or platform qualification is inferred.
 
 ### 2026-10-24 - Qualify original-handoff recovery before SDK integration
 - Source `50581e0f432c50c679d449ea3b0302c49a384d29` adds bounded,

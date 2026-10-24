@@ -22,6 +22,7 @@ distinct consequences before submission.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Coordinator | Own reviewed proposal, shared Manager contract, integration, publication, and completion | Current managed planning worktree |
+| Source-review implementer | Own #8678 source-only read-only Picker inner loop; no installed rollout or service ownership | Dedicated managed source worktree |
 | Backend implementer | Own bounded worker catalog and local instance lifecycle slice after contract review | Dedicated managed worktree allocated by Coordinator |
 | Release-cooperation peer | Completed #6758/#6759 coordination through their writers; no source edits, merge authority, or updater | Existing #6421 consumer driver |
 
@@ -132,6 +133,16 @@ The [resident repository map amendment](resident-repository-map.md) captures
 this direction. It retains the existing service and registry owners; it is not
 a request for a second daemon or parallel per-repository probes.
 
+Subsequent source-review direction, verbatim:
+
+> We should make sure there is a way for you to load and run a decoupled instance of worktree-manager that can draw from the real data sources but not fight with them. This would allow you to have a proper "inner loop" for eview and validation that doesn't require promotion between rounds
+
+The operator selected **read-only**, rather than edits against an isolated
+overlay. The [source-review amendment](source-review-inner-loop.md) proposes
+the bounded implementation under #8678. This closes the existing Picker
+vision's programmatic-parity and auditable-testable-rendering intent; it does
+not replace installed acceptance or authorize deployment.
+
 ## Plan
 
 ### Phase 1 - Review the workspace and lifecycle contract
@@ -175,6 +186,10 @@ a request for a second daemon or parallel per-repository probes.
 - [ ] Review and deliver the [resident repository map amendment](resident-repository-map.md), then repeat the installed Workers acceptance without increasing its existing deadline.
 - [ ] Reconcile all Plan and Validation Plan items, archive the completed effort, release its binding, and finalize owned worktrees. _(agent-recommended)_
 
+### Source-review slice - Read-only inner loop
+
+- [ ] Review and deliver the [source-review inner loop](source-review-inner-loop.md): run the production Picker from a source candidate against real owner reads, without live mutations or promotion between review rounds.
+
 ## Validation Plan
 
 - [x] With a deliberately blocked provider, Config/section chrome and loading content render before the provider returns; section switching and returning to the prior operational pivot remain responsive.
@@ -190,6 +205,7 @@ a request for a second daemon or parallel per-repository probes.
 - [x] Targeted tests and real consumer-boundary integration exercise the combined Manager/provider path; record Windows and Linux coverage and the reason for any skipped clean-room or live-venue lane. _(agent-recommended)_
 - [ ] Documentation navigation/assets pass existing guards, and the final installed local surface matches the promoted source.
 - [ ] A single bounded read returns the daemon-produced registered-repository map; Workers does not issue a lookup per repository, and stale/unavailable inventory is not accepted as current empty inventory.
+- [ ] Source-review validation proves real owner data reaches the candidate UI, actions cannot mutate live state, candidate identity is visible, and installed selectors/service ownership remain unchanged; fixture captures alone do not satisfy this check.
 
 ## Proposal
 

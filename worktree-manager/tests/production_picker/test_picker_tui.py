@@ -95,7 +95,14 @@ def test_codespaces_view_action_actual_click_and_modal(monkeypatch, auth_state, 
             assert scr._task_rows() == []
             assert scr._pivot_view_actions()[0].label == label
             assert calls == []
-            assert label in scr.query_one("#nf-buttons").render().plain
+            from rich.style import Style
+            from worktree_manager.production_picker.picker_tui.styles import C_BTN, C_BTN_SEL
+
+            buttons = scr.query_one("#nf-buttons").render()
+            offset = buttons.plain.index(label)
+            assert buttons.get_style_at_offset(app.console, offset) in (
+                Style.parse(C_BTN), Style.parse(C_BTN_SEL),
+            )
             await pilot.click("#nf-buttons", offset=(4, 1))
             await pilot.pause()
             assert calls == [] and not isinstance(app.screen, PivotProgressScreen)

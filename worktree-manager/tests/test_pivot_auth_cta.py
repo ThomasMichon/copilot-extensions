@@ -59,7 +59,13 @@ def test_preview_cta_click_and_refresh(monkeypatch):
         async with app.run_test(size=(100, 30)) as pilot:
             descriptor = await _select_contribution(app, contribution, pilot)
             assert calls == []
-            assert app.query_one("#view-contribution-0-authorize").display
+            from rich.style import Style
+            from worktree_manager.picker_button import PickerButton
+            from worktree_manager.production_picker.picker_tui.styles import C_BTN
+
+            authorize = app.query_one("#view-contribution-0-authorize", PickerButton)
+            assert authorize.display and authorize.region.height == 1
+            assert authorize.styles.background.rgb == Style.parse(C_BTN).bgcolor.get_truecolor()
             assert app._last_status == "Authorize the codespace scope."
             await pilot.click("#view-contribution-0-authorize")
             for _ in range(30):
