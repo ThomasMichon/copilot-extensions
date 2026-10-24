@@ -3022,6 +3022,25 @@ Already-retained include targets do not pass through lexical remapping again.
 preflight. This is candidate lock construction, not target-profile approval,
 wheel acquisition, feed qualification or runtime activation.
 
+`retain_uv_source_compile` is a separate, explicit candidate-export mode. It
+retains the attributable first-party project graph using the same transaction.
+It derives `--no-emit-package` only from unconditional local mappings required
+by each owning project's unmarked base dependencies, never from the inspected
+project set alone. Root metadata does not suppress its own registry identity.
+UV still resolves local dependencies' transitive requirements. Effective
+omissions must match exactly, source mappings cannot be disabled, and ambiguous
+identities, direct local directory requirements (including inactive markers or
+unselected extras), conditional/alternative local mappings, mappings used only
+by optional or conditional branches, context-only project mappings, local
+artifacts and remote sources refuse. Source mode refuses explicit `--project`/
+`UV_PROJECT` contexts; discovered configuration cannot add projects outside the
+compiled input graph.
+Editables remain private metadata inputs, never references back
+to live code. Ordinary compile exports keep their directory-dependency refusal.
+The caller independently verifies the selected source, retains the transaction
+through output consumption, and binds its own lock/trigger before assembly.
+An export alone proves neither source approval nor governed acquisition.
+
 Retain complete admitted projects before merging their declared build-resource
 directories. A resource may be a package subdirectory of another admitted
 project; its presence must not make that parent look fully copied while its
