@@ -633,6 +633,7 @@ def promote(
     reuse_artifacts_repository: str | None = None,
     prepare_candidate_dir: Path | None = None,
     frozen_candidate_dir: Path | None = None,
+    expected_candidate_sha: str | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
     "nothing to promote" (reported via ``report["promoted"] is False``).
@@ -668,6 +669,8 @@ def promote(
     -- with no real `dev` content change -- never forces a vacuous
     promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
+    if expected_candidate_sha is not None and frozen_candidate_dir is None:
+        raise PromotionError("an expected candidate SHA requires the frozen-candidate path")
     if prepare_candidate_dir is not None and (
         push or build_python_artifacts_dir is not None or python_artifacts_dir is not None
         or frozen_candidate_dir is not None
@@ -718,10 +721,13 @@ def promote(
 
         if prepare_candidate_dir is not None or build_python_artifacts_dir is not None:
             raise PromotionError("a frozen candidate cannot be recomposed")
+        if expected_candidate_sha is None:
+            raise PromotionError("frozen publication requires the admitted composition SHA")
         return publish_frozen(
             frozen_candidate_dir, repo=repo, dev_head=dev_head, main_head=main_head,
             promotion_time=promotion_time, python_artifacts_dir=python_artifacts_dir,
             push=push, candidate_branch=candidate_branch,
+            candidate_sha=expected_candidate_sha,
         )
     scratch = add_scratch_worktree(dev_head, repo=repo)
     try:
@@ -885,6 +891,7 @@ def main(argv: list[str] | None = None) -> int:
     artifacts.add_argument("--python-artifacts-dir", type=Path)
     ap.add_argument("--prepare-candidate-dir", type=Path)
     ap.add_argument("--frozen-candidate-dir", type=Path)
+    ap.add_argument("--expected-candidate-sha")
     ap.add_argument("--reuse-artifacts-repository", help="reuse the admitted immutable development artifact set")
     ap.add_argument(
         "--toolchain-source", choices=("governed", "seasoned-public"), default="governed"
@@ -909,6 +916,7 @@ def main(argv: list[str] | None = None) -> int:
             python_artifacts_dir=args.python_artifacts_dir,
             prepare_candidate_dir=args.prepare_candidate_dir,
             frozen_candidate_dir=args.frozen_candidate_dir,
+            expected_candidate_sha=args.expected_candidate_sha,
             toolchain_source=args.toolchain_source,
             toolchain_min_age_days=args.toolchain_min_age_days,
             promotion_time=args.promotion_time,

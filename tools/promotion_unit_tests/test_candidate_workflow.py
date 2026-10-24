@@ -24,6 +24,16 @@ def test_real_candidate_workflow_freezes_once_before_units_and_artifacts():
         assert "consume_pending_changes" not in commands
         assert "--build-python-artifacts-dir" not in commands
         assert "--prepare-candidate-dir" not in commands
+        expected = (
+            '--expected-candidate-sha "$EXPECTED_CANDIDATE_SHA"' if name == "promote"
+            else '--candidate-sha "$CANDIDATE_SHA"'
+        )
+        assert expected in commands
+        assert any(
+            step.get("env", {}).get("EXPECTED_CANDIDATE_SHA" if name == "promote" else "CANDIDATE_SHA")
+            == "${{ needs.compose-candidate.outputs.candidate_sha }}"
+            for step in actions
+        )
     units = "\n".join(step.get("run", "") for step in jobs["source-units"]["steps"])
     assert '"$RUNNER_TEMP/candidate/tools/run-promotion-unit-tests.py"' in units
     assert '--development-root "$GITHUB_WORKSPACE"' in units and '--candidate-tree "$CANDIDATE_TREE"' in units

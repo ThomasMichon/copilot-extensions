@@ -135,6 +135,8 @@ The Source controller proposal freezes the stamped, vendored candidate before
 release execution. `compose-candidate` runs the existing composer once and
 retains its exact Git commit, content tree, admitted Dev/Main inputs and
 preparation time in a bounded `candidate.bundle` / `candidate.json` transport.
+Every consumer also requires the candidate SHA emitted by the composition job;
+internally consistent replacement transport data cannot select another object.
 Units and the unsigned artifact build independently import those objects.
 Artifact validation and publication consume the same frozen object; they do
 not recompute version allocation or vendoring after tests. A changed Main base

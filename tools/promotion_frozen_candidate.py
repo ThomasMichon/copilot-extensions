@@ -16,7 +16,7 @@ FILES = {"candidate.bundle", "candidate.json"}
 _SHA = re.compile(r"[0-9a-f]{40}")
 
 
-def validate_record(record: object, *, dev_sha: str, main_before: str) -> dict:
+def validate_record(record: object, *, dev_sha: str, main_before: str, candidate_sha: str) -> dict:
     if (
         not isinstance(record, dict) or set(record) != {
             "schema", "version", "dev_sha", "main_before", "candidate_sha",
@@ -26,6 +26,7 @@ def validate_record(record: object, *, dev_sha: str, main_before: str) -> dict:
         or any(not isinstance(record[key], str) or not _SHA.fullmatch(record[key])
                for key in ("dev_sha", "main_before", "candidate_sha", "content_tree", "tree"))
         or record["dev_sha"] != dev_sha or record["main_before"] != main_before
+        or record["candidate_sha"] != candidate_sha
         or not isinstance(record["bundle_sha256"], str)
         or not re.fullmatch(r"[0-9a-f]{64}", record["bundle_sha256"])
         or not isinstance(record["report"], dict)
@@ -71,14 +72,18 @@ def export_candidate(
         "bundle_sha256": hashlib.sha256((directory / "candidate.bundle").read_bytes()).hexdigest(),
         "report": report,
     }
-    validate_record(record, dev_sha=report["dev_head"], main_before=report["main_before"])
+    validate_record(
+        record, dev_sha=report["dev_head"], main_before=report["main_before"], candidate_sha=commit,
+    )
     (directory / "candidate.json").write_text(
         json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8",
     )
     return record
 
 
-def import_candidate(directory: Path, *, repo: Path, dev_sha: str, main_before: str) -> dict:
+def import_candidate(
+    directory: Path, *, repo: Path, dev_sha: str, main_before: str, candidate_sha: str,
+) -> dict:
     """Import only object data and recheck the full candidate and content trees."""
     import promote_release as promotion
 
@@ -86,7 +91,7 @@ def import_candidate(directory: Path, *, repo: Path, dev_sha: str, main_before: 
         raise ValueError("frozen candidate transport has an unexpected inventory")
     record = validate_record(
         decode_json(regular_bytes(directory, "candidate.json")),
-        dev_sha=dev_sha, main_before=main_before,
+        dev_sha=dev_sha, main_before=main_before, candidate_sha=candidate_sha,
     )
     bundle = directory / "candidate.bundle"
     if bundle.is_symlink() or not bundle.is_file() or bundle.stat().st_size > 512 * 1024 * 1024:
@@ -122,12 +127,14 @@ def import_candidate(directory: Path, *, repo: Path, dev_sha: str, main_before: 
 def publish_frozen(
     directory: Path, *, repo: Path, dev_head: str, main_head: str,
     promotion_time: str | None, python_artifacts_dir: Path | None,
-    push: bool, candidate_branch: str | None,
+    push: bool, candidate_branch: str | None, candidate_sha: str,
 ) -> dict:
     import promote_release as promotion
     from promotion_python_artifacts import validate_composed_artifacts
 
-    record = import_candidate(directory, repo=repo, dev_sha=dev_head, main_before=main_head)
+    record = import_candidate(
+        directory, repo=repo, dev_sha=dev_head, main_before=main_head, candidate_sha=candidate_sha,
+    )
     if promotion_time is not None and promotion_time != record["prepared_at"]:
         raise promotion.PromotionError("frozen candidate preparation time changed")
     if python_artifacts_dir is None:
@@ -157,6 +164,7 @@ def main() -> None:
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--dev-sha", required=True)
     parser.add_argument("--main-before", required=True)
+    parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--checkout", type=Path)
     parser.add_argument("--build-artifacts", type=Path)
     parser.add_argument("--validate-artifacts", type=Path)
@@ -164,6 +172,7 @@ def main() -> None:
     args = parser.parse_args()
     record = import_candidate(
         args.directory, repo=args.repo, dev_sha=args.dev_sha, main_before=args.main_before,
+        candidate_sha=args.candidate_sha,
     )
     if args.checkout is not None:
         import promote_release as promotion

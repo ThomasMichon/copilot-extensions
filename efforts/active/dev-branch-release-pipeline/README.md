@@ -1245,6 +1245,13 @@ the existing process-tree supervisor; matching historical v2 snapshots pass
 rehearsals, not new promotion dependencies. Current-head review and renewed CI
 for the fixture update still precede Source merge.
 
+Final input-boundary inspection also connected every frozen-object consumer to
+the composition job's exported candidate SHA. Dev/Main identity and a
+self-consistent transport alone cannot select a replacement candidate. A
+negative unit verifies rejection before Git import; real-workflow assertions
+verify the trusted output reaches units, build, validation and publication.
+The record schema and Dev-owned release identity are unchanged.
+
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as
   `a1f431264eede9764c1e051112b0869b0351d88a` after exact-head approval

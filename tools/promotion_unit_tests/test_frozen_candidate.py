@@ -29,7 +29,7 @@ def test_frozen_identity_rejects_invalid_or_mutated_inputs(field):
     data = record()
     data[field] = "invalid"
     with pytest.raises(ValueError):
-        frozen.validate_record(data, dev_sha=DEV, main_before=MAIN)
+        frozen.validate_record(data, dev_sha=DEV, main_before=MAIN, candidate_sha=CANDIDATE)
 
 
 @pytest.mark.parametrize("field", ["commit", "dev_head", "main_before"])
@@ -37,7 +37,7 @@ def test_frozen_report_cannot_introduce_another_release_identity(field):
     data = record()
     data["report"][field] = "f" * 40
     with pytest.raises(ValueError):
-        frozen.validate_record(data, dev_sha=DEV, main_before=MAIN)
+        frozen.validate_record(data, dev_sha=DEV, main_before=MAIN, candidate_sha=CANDIDATE)
 
 
 @pytest.fixture
@@ -70,7 +70,9 @@ def bundle(tmp_path, monkeypatch):
 
 def test_frozen_import_checks_objects_not_only_self_declared_hashes(bundle):
     directory, calls, _state = bundle
-    assert frozen.import_candidate(directory, repo=directory, dev_sha=DEV, main_before=MAIN) == record()
+    assert frozen.import_candidate(
+        directory, repo=directory, dev_sha=DEV, main_before=MAIN, candidate_sha=CANDIDATE,
+    ) == record()
     assert calls[0][:2] == ["bundle", "verify"]
     assert any(call[:3] == ["fetch", "--no-tags", "--no-write-fetch-head"] for call in calls)
     assert not any(call[0] in ("push", "commit", "commit-tree") for call in calls)
@@ -88,7 +90,9 @@ def test_frozen_import_refuses_post_test_mutation(bundle, monkeypatch, change):
     else:
         (directory / "extra.json").write_text("{}")
     with pytest.raises(ValueError):
-        frozen.import_candidate(directory, repo=directory, dev_sha=DEV, main_before=MAIN)
+        frozen.import_candidate(
+            directory, repo=directory, dev_sha=DEV, main_before=MAIN, candidate_sha=CANDIDATE,
+        )
     assert not any(call[0] == "push" for call in calls)
 
 
@@ -110,6 +114,7 @@ def test_frozen_publication_consumes_the_tested_object_without_recomposing(tmp_p
         repo=tmp_path, dev_ref="source", main_ref="base", push=True,
         candidate_branch="release/promote-1", promotion_time=PREPARED,
         python_artifacts_dir=tmp_path / "artifacts", frozen_candidate_dir=tmp_path / "frozen",
+        expected_candidate_sha=CANDIDATE,
     )
     assert observed == ["validate", CANDIDATE, "cleanup"]
     assert report["commit"] == CANDIDATE and report["dev_head"] == DEV
@@ -118,7 +123,7 @@ def test_frozen_publication_consumes_the_tested_object_without_recomposing(tmp_p
 def test_frozen_candidate_record_validation_does_not_mutate_input():
     data = record()
     before = copy.deepcopy(data)
-    assert frozen.validate_record(data, dev_sha=DEV, main_before=MAIN) == before
+    assert frozen.validate_record(data, dev_sha=DEV, main_before=MAIN, candidate_sha=CANDIDATE) == before
     assert data == before
 
 
@@ -172,11 +177,26 @@ def test_frozen_consumers_validate_the_content_index_not_the_full_commit(
         frozen.publish_frozen(
             tmp_path, repo=tmp_path, dev_head=DEV, main_head=MAIN, promotion_time=PREPARED,
             python_artifacts_dir=tmp_path / "artifacts", push=False, candidate_branch=None,
+            candidate_sha=CANDIDATE,
         )
     else:
         monkeypatch.setattr("sys.argv", [
             "promotion_frozen_candidate.py", "--repo", str(tmp_path), "--directory", str(tmp_path),
-            "--dev-sha", DEV, "--main-before", MAIN, "--validate-artifacts", str(tmp_path / "artifacts"),
+            "--dev-sha", DEV, "--main-before", MAIN, "--candidate-sha", CANDIDATE,
+            "--validate-artifacts", str(tmp_path / "artifacts"),
         ])
         frozen.main()
     assert observed == ["content-index", "canonical-checkout", "validated", "cleanup"]
+
+
+def test_self_consistent_transport_cannot_replace_the_admitted_candidate(bundle):
+    directory, calls, _state = bundle
+    data = record()
+    data["candidate_sha"] = "f" * 40
+    data["report"]["commit"] = "f" * 40
+    (directory / "candidate.json").write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="admitted"):
+        frozen.import_candidate(
+            directory, repo=directory, dev_sha=DEV, main_before=MAIN, candidate_sha=CANDIDATE,
+        )
+    assert calls == []

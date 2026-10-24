@@ -349,10 +349,12 @@ jobs:
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
+          CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
         run: |
           python reviewed-helpers/tools/promotion_frozen_candidate.py \
             --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
             --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" \
+            --candidate-sha "$CANDIDATE_SHA" \
             --checkout "$RUNNER_TEMP/candidate"
       - id: producer
         name: Record the actual unit-producing attempt
@@ -417,6 +419,7 @@ jobs:
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
           MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
+          CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
           ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
           QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
           GH_TOKEN: ${{ github.token }}
@@ -428,6 +431,7 @@ jobs:
           "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/promotion_frozen_candidate.py \
             --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
             --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" \
+            --candidate-sha "$CANDIDATE_SHA" \
             --build-artifacts "$ARTIFACT_DIR" --reuse-artifacts-repository "$GITHUB_REPOSITORY"
           if [ -f "$ARTIFACT_DIR/python-artifacts.json" ]; then
             echo "exported=true" >> "$GITHUB_OUTPUT"
@@ -491,12 +495,14 @@ jobs:
         if: needs.build-python-artifacts.outputs.exported == 'true'
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
+          CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
           ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
           QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
           "$RUNNER_TEMP/artifact-validator/bin/python" reviewed-helpers/tools/promotion_frozen_candidate.py \
             --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
             --dev-sha "$DEV_SHA" --main-before "${{ needs.gate.outputs.main_before }}" \
+            --candidate-sha "$CANDIDATE_SHA" \
             --validate-artifacts "$ARTIFACT_DIR"
       - name: Attest the validated index and every first-party bundle
         if: needs.build-python-artifacts.outputs.exported == 'true'
@@ -725,11 +731,13 @@ jobs:
           GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           PUSH_INPUT: ${{ github.event.inputs.push }}
           DEV_SHA: ${{ needs.gate.outputs.sha }}
+          EXPECTED_CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
           PROMOTION_TIME: ${{ needs.compose-candidate.outputs.prepared_at }}
           QUALIFICATION_ONLY: ${{ needs.gate.outputs.qualification_only }}
         run: |
           args=(--repo "$GITHUB_WORKSPACE" --dev-ref "$DEV_SHA" --main-ref origin/main
             --python-artifacts-dir python-artifacts
+            --expected-candidate-sha "$EXPECTED_CANDIDATE_SHA"
             --frozen-candidate-dir "$RUNNER_TEMP/frozen-candidate")
           if [ "$QUALIFICATION_ONLY" = "true" ]; then args+=(--qualification-only); fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
