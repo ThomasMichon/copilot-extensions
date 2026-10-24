@@ -45,6 +45,10 @@ class UsageStoreMissingError(UsageReadError):
     """The accounting store or its containing directory is absent."""
 
 
+class UsageRowLimitError(UsageReadError):
+    """The scoped read exceeds its row budget; a smaller scope may fit."""
+
+
 def _pin_file(
     directory: ArchiveDirectory,
     name: str,
@@ -241,7 +245,7 @@ def read_sqlite_usage(
                         check_budget()
                         count += 1
                         if count > max_rows:
-                            raise UsageReadError("accounting store read exceeded row budget")
+                            raise UsageRowLimitError("accounting store read exceeded row budget")
                         if row[-1] != 1:
                             raise UsageReadError("accounting store contains invalid scalar values")
                         values = dict(zip(columns, row[:-1], strict=True))

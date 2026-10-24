@@ -16,6 +16,7 @@ from agent_logger.config import Config, load_config
 from agent_logger.sync import engine
 from agent_logger.sync.lock import sync_lock
 from agent_logger.usage_capture import capture_usage
+from agent_logger.usage_sqlite import UsageRowLimitError, read_sqlite_usage
 from agent_logger.usage_ledger import (
     ARTIFACT, UsageEvidenceError, evidence_lock_path, merge_session_evidence,
 )
@@ -71,6 +72,52 @@ def _cfg(tmp_path: Path) -> Config:
     data["sync"]["compact"] = {"enabled": False}
     data["machine"] = {"name": "synthetic"}
     return Config(data, tmp_path / "home")
+
+
+def _large_store(source: Path, counts: dict[str, int]) -> dict[str, Path]:
+    sessions = {sid: _session(source, sid) for sid in counts}
+    _db(source)
+    with closing(sqlite3.connect(source / "session-store.db")) as db, db:
+        db.execute("DELETE FROM assistant_usage_events")
+        for sid, count in counts.items():
+            db.executemany(
+                "INSERT INTO assistant_usage_events VALUES(?,?,?,?,?,?)",
+                [(sid, "2026-01-01T00:00:00Z", "model-a", 10, 2, None)] * count,
+            )
+    return sessions
+
+
+def test_usage_capture_splits_large_corpus_without_raising_reader_budget(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    counts = {f"s{index}": 6000 for index in range(4)}
+    sessions = _large_store(cfg.sync_source, counts)
+    with pytest.raises(UsageRowLimitError, match="row budget"):
+        read_sqlite_usage(cfg.sync_source / "session-store.db", set(sessions))
+
+    result = capture_usage(cfg.sync_source, None)
+
+    assert result.complete
+    assert result.updated == 4
+    for sid, session in sessions.items():
+        evidence = json.loads((session / ARTIFACT).read_text())
+        stored = [row for row in evidence["records"] if row["source"] == "session-store"]
+        assert sum(row["multiplicity"] for row in stored) == counts[sid]
+    assert capture_usage(cfg.sync_source, None).updated == 0
+    assert engine.run_sync(cfg) == 0
+    for sid, session in sessions.items():
+        published = tmp_path / "dest" / "synthetic" / "session-state" / sid / ARTIFACT
+        assert published.read_bytes() == (session / ARTIFACT).read_bytes()
+
+
+def test_usage_capture_retains_oversized_session_failure_and_captures_siblings(tmp_path: Path) -> None:
+    sessions = _large_store(tmp_path, {"healthy": 2, "oversized": 20001})
+    result = capture_usage(tmp_path, None)
+    assert result.updated == 1
+    assert result.failures == (
+        "oversized: session-store capture: accounting store read exceeded row budget",
+    )
+    assert not (sessions["oversized"] / ARTIFACT).exists()
+    assert (sessions["healthy"] / ARTIFACT).is_file()
 
 
 @pytest.mark.parametrize("include", [None, {"s1"}])
