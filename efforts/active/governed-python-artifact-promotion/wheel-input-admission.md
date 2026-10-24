@@ -134,3 +134,14 @@ the caller, initial hashing reads no more than the per-wheel cap plus one
 overflow byte, and validation/packaging/dependency walks retain the same
 deadline. The corrected profile/source/native cohort passes 292 tests; fresh
 review and hosted evidence remain required after these fixes.
+
+On `35a9eb058a`, all four hosted Linux/Windows inspection and real-built/offline
+standalone artifact jobs passed. Required CI executed all 1,411 eligible cases
+successfully, then correctly rejected a 17,291,606-byte coverage report at its
+unchanged 16,777,216-byte packet-file bound. Diagnostic reporting now names the
+observed size and bound. The profile tests' state-free class wrapper was
+flattened into the same 26 functions / 82 parameterized cases to remove repeated
+class-name text from per-line coverage contexts; every test body/decorator and
+the packet limit remain intact. All 82 cases pass locally. The next CI run must
+prove the resulting packet actually fits; this is not a test-selection or
+admission exception.
