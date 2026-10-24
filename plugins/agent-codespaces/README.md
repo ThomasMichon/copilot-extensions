@@ -540,6 +540,17 @@ Authentication and inventory use one shared set of mapped, bound, configured,
 provider-authorized and active account candidates. A mapped-only account
 missing scope therefore offers Authorize even when another account has rows.
 
+The internal `account_candidates.read_candidates(*, on_account=None,
+concurrent=False)` seam returns a frozen `CandidateRead` containing that
+invocation's ordered accounts, routing inventory, effective configuration,
+actual configuration-provider reports and bound/provider/active selection
+observations. `candidates()` remains the ordered accounts tuple. The result
+contains no credentials and is not a cache or a currentness authority; nested
+source-owned configuration/routing values must not be mutated. Consumers make
+their own immutable projection. The Connection Owner uses the actual reports
+to withhold authority when a provider is indeterminate, including when retained
+configuration would otherwise produce the same merged value.
+
 No private broker, persistent authentication daemon, PAT or repository opt-out
 is required. A remote terminal without an available browser can still use the
 displayed vendor verification URL/code in a browser. Native authorization and

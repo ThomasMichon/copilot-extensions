@@ -9,8 +9,10 @@
   concurrency, and compatible atomic heartbeat generation fencing.
 - **Current contract:** [selected admission, full publication](selected-authority-contract.md),
   explicitly selected by the user and reviewed/merged in #8278.
-- **Current blocker:** [protected candidate read-result seam](selected-readresult-dependency.md).
-  The #5761 owner has not released or agreed that seam; no shared API edit is made.
+- **Current blocker:** [one-venue total-work acceptance conflict](selected-readresult-dependency.md).
+  The additive candidate seam has narrow explicit user authorization, not an
+  owner release. Selected/publication integration, review and qualification
+  remain open.
 - **Historical evidence:** [authority accounting](s3ab-authority-proposal.md) and
   [strict-boundary lower bound](s3ab-boundary-decision.md) remain retained, not
   current-policy performance qualification.
@@ -33,7 +35,8 @@ launch/recovery, production deployment or live venue probes.
 - [x] Recheck issue/task/file claims and verify the merged design.
 - [x] Obtain admission for the narrow shared heartbeat signature.
 - [x] Review and merge the explicit selected-authority semantic amendment (#8278).
-- [ ] Obtain the protected #5761 owner's agreement for the candidate read-result seam.
+- [x] Obtain narrow explicit authorization for the candidate read-result seam;
+  preserve every other #5761 reservation.
 - [x] Implement immutable inventory and batch protocol with explicit wave adapter.
 - [x] Implement bounded concurrent probes, cancellation and atomic renewal fence.
 - [ ] Validate and independently review; publish and merge through normal gates.
@@ -64,6 +67,51 @@ conservatively withholds connection authority for the wave. Expired evidence
 defers to the next due wave, with no hidden per-venue refresh.
 
 ## Journal
+
+### 2026-10-23 — Narrow additive reader checkpoint, total-work conflict retained
+
+- Accepted committed source registration/head evidence after an ambiguous client
+  timeout; no force, controller repair or second owner was introduced. Missing
+  native child hosting projections remain qualification/cleanup limitations,
+  not a substitute editing guard.
+- Resumed the same retained task with its verified owner and no wake. Fresh
+  open-PR subject/file checks found only #8143 on the candidate/owner-wave files.
+  The user's narrow authorization, not absence of a conflicting PR, admitted
+  `CandidateRead`/`read_candidates`. All other namespace reservations remain.
+- Implemented the invocation-local seam and its unchanged tuple projection.
+  Owner scope capture consumes actual already-read effective config/routing/
+  provider reports and fails closed on indeterminate provider authority.
+  No selected-effect, transport, retry or publication algorithm change is kept.
+- Reader/ordering/concurrency/account/authentication selection: **83 passed,
+  1 skipped**. Non-native owner safety and new scope controls: **228 passed**.
+  Complete accounting/scope selection: **27 passed**, retaining **72 complete
+  raw frames** across 0/1/10 venues, both credential backends, bridge/no-bridge,
+  cold/warm/not-due. Touched-source Ruff and install contract pass.
+- The matrix is intercepted production-callgraph evidence, not native process,
+  CPU, internal GH HTTP or saturated-host wall-clock qualification. An initial
+  native binding-lock fixture run failed/returned partial observations; it is
+  retained. The final matched count fixture uses the same synthetic lock
+  boundary for baseline/candidate while retaining actual binding-file and
+  account/config/credential reads. It cannot qualify native lock behavior.
+- A broader native regression selection encountered an assertion failure and
+  then its unchanged 30-second watchdog while reading native event evidence.
+  No deadline was increased and no blind timing retry was run. The separate
+  non-native selection above is not a pass for that failed native lane.
+- A fresh independent reviewer returned “Review paused before reading the
+  source delta. No findings or approval issued.” This is not a review receipt;
+  no replacement reviewer was launched.
+- The retained draft still costs **596 vs 103** CLI requests for ten mux venues,
+  **926 vs 123** with bridge. More importantly, the amended contract's optimistic
+  one-venue minimum is **17 vs 13 cold / 10 warm**, even before selected metadata
+  and retry overhead. See the exact [lower bound](selected-readresult-dependency.md).
+  That conflict requires campaign adjudication; no freshness, total-work,
+  deadline, review or publication gate is waived.
+- Documentation impact: documented the additive source API, actual-report
+  qualification and the unresolved acceptance conflict. This closes a narrow
+  implementation prerequisite beneath existing vision/pattern intent; it does
+  not revise the selected-authority policy. No new daemon/cutover or deployment
+  behavior is introduced. #8143 stays draft/unmerged; source merge, release,
+  installed qualification and remaining campaign work are not complete.
 
 ### 2026-10-23 — Selected-authority amendment merged; ownership dependency retained
 

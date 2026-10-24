@@ -1,0 +1,116 @@
+{
+  "schema": "producer-work-reuse.candidate-read-checkpoint",
+  "version": 1,
+  "source_base": "1e5d0f1c141af9abf28954c567abed73cf33f765",
+  "baseline": "35872e7ad67e1c0ef182a1f4401a49af69c4afb6",
+  "baseline_scope": "pinned SessionForwards consumer with current shared resolution/listing/auth functions; not a whole-repository installed baseline or authority-equivalent comparator",
+  "baseline_one_venue_cli_without_bridge": {
+    "cold_process_requests": {
+      "account_routing_discovery": 1,
+      "active_account_discovery": 1,
+      "credential_token": 3,
+      "account_listing": 3,
+      "ssh_config": 1,
+      "individual_mux_commands": 4
+    },
+    "cold_total": 13,
+    "warm_total": 10,
+    "warm_difference": "legacy CLI credential cache eliminates three token requests",
+    "omitted_guarantees": [
+      "full live authority validation before publication",
+      "fresh selected credential at each true effect/retry",
+      "complete unique cross-account inventory",
+      "bounded inventory proof age",
+      "indeterminate-provider report rejection",
+      "observed-generation heartbeat fence"
+    ]
+  },
+  "instrumentation": "plugins/agent-codespaces/tests/test_owner_total_work.py",
+  "scope": "additive CandidateRead/read_candidates plus full-scope immutable consumer projection; selected/publication algorithm not implemented",
+  "qualification": "not-qualified",
+  "prior_evidence": "authority-manifest.json",
+  "runs": [
+    {
+      "file": "authority-run-07.jsonl",
+      "frames": 0,
+      "runner_exit": 2,
+      "outcome": "runner rejected unsupported -s; no tests ran"
+    },
+    {
+      "file": "authority-run-08.jsonl",
+      "frames": 0,
+      "runner_exit": 1,
+      "outcome": "collection failed: test fixture import needed package-relative import"
+    },
+    {
+      "file": "authority-run-09.jsonl",
+      "frames": 65,
+      "runner_exit": 1,
+      "outcome": "24 passed, 3 failed; native binding-lock errors/partial observations",
+      "coverage": "only completed pre-assertion phases were emitted; missing failing-phase counters were not reconstructed",
+      "failures": [
+        {"implementation": "draft", "bridge": false, "provider": true, "venues": 10, "completed_at_failed_assertion": 36, "expected": 40},
+        {"implementation": "draft", "bridge": true, "provider": false, "venues": 10, "scope_errors_at_failed_assertion": 1},
+        {"implementation": "draft", "bridge": true, "provider": true, "venues": 10, "completed_at_failed_assertion": 38, "expected": 40}
+      ]
+    },
+    {
+      "file": "authority-run-10.jsonl",
+      "frames": 72,
+      "runner_exit": 0,
+      "outcome": "27 passed; all final matrix observations complete",
+      "coverage": "baseline/draft x 0/1/10 venues x CLI/keyring x bridge/no-bridge x cold/warm/not-due",
+      "fixture_correction": "matched synthetic binding RLock for baseline/candidate; actual binding-file reads and production candidate/config/credential callgraph retained; all raw frames emitted before assertions",
+      "native_lock_qualification": false,
+      "performance_acceptance": false
+    }
+  ],
+  "optimistic_selected_contract_lower_bound": {
+    "classification": "derived-not-an-amended-implementation-measurement",
+    "accounts": 3,
+    "venues": 1,
+    "muxes": 4,
+    "full_candidate_credential_reads": 2,
+    "discovery_processes_per_full_read": 2,
+    "listing_processes": 3,
+    "without_bridge": {
+      "effects": 2,
+      "fresh_selected_credentials": 2,
+      "cli_minimum": 17,
+      "cli_baseline_cold": 13,
+      "cli_baseline_warm": 10,
+      "keyring_api_minimum": 8,
+      "keyring_api_baseline": 4
+    },
+    "with_bridge": {
+      "effects": 4,
+      "fresh_selected_credentials": 4,
+      "cli_minimum": 21,
+      "cli_baseline_cold": 15,
+      "cli_baseline_warm": 12,
+      "keyring_api_minimum": 10,
+      "keyring_api_baseline": 5
+    },
+    "omitted_costs": [
+      "selected-source metadata discovery",
+      "additional effective-config reads",
+      "ControlMaster connection attempts",
+      "retries",
+      "additional publication batches"
+    ],
+    "already_removed_costs": [
+      "post-list acquisition authority reread",
+      "listing credential rereads"
+    ]
+  },
+  "unqualified": [
+    "selected/publication implementation",
+    "total-work non-regression",
+    "independent source review",
+    "native timing/lock lane",
+    "CPU and saturated-host wall-clock",
+    "opaque gh-internal HTTP",
+    "source CI and merge",
+    "release and installed rollout"
+  ]
+}

@@ -92,27 +92,44 @@ def credential(account: str | None) -> str:
     return token
 
 
+def _read_authority():
+    from .account_candidates import read_candidates
+    from .config import RUNTIME_DIR
+    from .worktrees import validate_context
+
+    context = validate_context()
+    read = read_candidates()
+    reports = (read.provider_reports.active_plugins, read.provider_reports.config_d)
+    if any(report.authority.value not in {"complete", "absent"} for report in reports):
+        raise RuntimeError("Owner configuration provider authority unavailable")
+    source = _digest(json.dumps(
+        [str(RUNTIME_DIR), context, os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")],
+        sort_keys=True,
+    ))
+    configuration = _digest(repr((
+        read.configuration, tuple(report.to_dict() for report in reports),
+    )))
+    selection = _digest(repr((
+        read.bound_accounts, tuple((login, str(path)) for login, path in read.provider_configs),
+        read.active_account, read.routing.accounts,
+        tuple(sorted(read.routing.repositories.items())),
+        tuple(sorted(read.routing.owners.items())),
+        read.routing.unmapped_owner_fallback,
+    )))
+    return read, source, _digest(configuration + selection)
+
+
 def capture_scope() -> InventoryScope:
-    """Revalidate selected installation, effective config, accounts and credentials.
+    """Fresh full publication authority, projected from one candidate read.
 
     This performs no CodeSpace listing. Rechecking the authority at admission
     deliberately costs metadata reads rather than granting a stale connection.
     Tokens themselves never enter the returned snapshot.
     """
-    from .account_candidates import candidates
-    from .config import RUNTIME_DIR, load_merged_config
-    from .worktrees import validate_context
-
-    context = validate_context()
-    accounts = candidates()
-    source = json.dumps(
-        [str(RUNTIME_DIR), context, os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")],
-        sort_keys=True,
-    )
-    configuration = repr(load_merged_config(include_cwd=False))
+    read, source, configuration = _read_authority()
     return InventoryScope(
-        _digest(source), _digest(configuration), accounts,
-        tuple(_digest(credential(account)) for account in accounts),
+        source, configuration, read.accounts,
+        tuple(_digest(credential(account)) for account in read.accounts),
     )
 
 
