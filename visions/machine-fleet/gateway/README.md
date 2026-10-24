@@ -3,7 +3,7 @@
 - **Subject:** A reusable, live-configured Gateway for declared services and outbound role channels
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-24
 
 ## Purpose & Intent
 
@@ -89,6 +89,14 @@ through admitted operations. These remain distinct from persistent configuration
 which changes through source pull requests and ordinary propagation.
 
 ### repository-declared-service-surface
+
+The Gateway-backed Fleet standard integrated profile includes a central
+[Vault service container](../../vault/README.md). The selected external
+deployment manager owns its container lifecycle; Vault owns credential
+lifecycle and authentication transactions, including coordination with
+authorized local/native custody and interaction capabilities. Gateway provides
+authorized routing, not another credential owner. Independent machine-local
+Vault use needs no Gateway; federation requires explicit scoped trust.
 
 The manifest assigns routes and namespaces before a service is present.
 Connecting instances prove the identity authorized to supply an expected role;
@@ -213,4 +221,5 @@ Live configuration does not eliminate necessary code and security updates.
 - Parent: [machine fleet](../README.md)
 - Factory interaction: [agentic factory](../../agent-fabric/agentic-factory/README.md)
 - Ownership and lifecycle: [plugin services](../../plugin-services/README.md)
+- Credential and authentication authority: [Vault](../../vault/README.md)
 - Reality: [Gateway runtime](../../../fleet-manager/docs/gateway-runtime.md)

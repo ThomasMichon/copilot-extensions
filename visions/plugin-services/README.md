@@ -180,6 +180,11 @@ resource fencing, or existing standalone-service defaults.
   vision.
 - **Per-plugin visions** — concrete leaves under `visions/plugins/<name>/` refine
   this model for a specific service. Linked from here as they are authored.
+- **Vault service** - the [credential and authentication authority](../vault/README.md)
+  owns credential lifecycle and durable transactions while Manager remains a
+  stateless client. Its independent local deployment follows this service
+  model; the explicitly adopted Gateway-backed Fleet standard profile supplies
+  a central container through its existing deployment-manager lifecycle.
 
 ## Features
 
@@ -1097,6 +1102,7 @@ an incomplete change, the same way an undocumented behavior change is.
 
 - Parent vision: [visions index](../README.md)
 - Child visions:
+  [Vault](../vault/README.md) ·
   [Marketplace Installation Cells](installation-cells/README.md) ·
   [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) ·
   per-plugin service visions live under `visions/plugins/<name>/`
