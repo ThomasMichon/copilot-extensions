@@ -495,7 +495,7 @@ shared-multiplex contracts above.
 - Qualification exercises real competing processes, reconstruction after the
   producer exits, canonical ownership checking and later restoration, plus
   target/backup/context/receipt drift refusal. The native Windows focused
-  publication/header/generator packet reports152 passed and3 platform skips.
+  publication/header/generator packet reports156 passed and3 platform skips.
   The skips are explicitly non-Windows cases, not claimed native evidence.
   These are fresh disposable publication roots, not a selected Chat
   installation or live service test.
@@ -505,6 +505,12 @@ shared-multiplex contracts above.
   to the captured transaction in retained settlement, rollback and cleanup.
   Fifteen regressions cover five valid-JSON binding mutations across all
   three paths; no live output or recovery evidence is deleted on refusal.
+- The second review's full body identified altered created-state receipts
+  despite its empty open-thread count. Require every newly created output's
+  captured physical state in the retained proofs before releasing custody.
+  Inode/time drift and a missing created record refuse; a mixed normalized
+  no-op remains non-owned and can still settle. Read the complete review,
+  not only its summary or open-thread count.
 - Synchronize generated publication companions from their canonical source.
   The standard generator also reconciles eight already-drifted dependency
   policy/config companions byte-for-byte; no dependency policy is redesigned

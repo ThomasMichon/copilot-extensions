@@ -148,6 +148,29 @@ def test_retained_settlement_requires_a_successful_unsettled_copy(tmp_path):
         transaction.retain()
 
 
+@pytest.mark.parametrize("damage", ["inode", "modified", "missing-created"])
+def test_retained_settlement_requires_original_created_output_states(tmp_path, damage):
+    transaction, _before = case(tmp_path)
+    transaction.publish()
+    receipt = transaction.receipts[0]
+    records = [json.loads(line) for line in receipt.read_text().splitlines()]
+    if damage == "missing-created":
+        del records[1]
+        for sequence, record in enumerate(records[1:-1], 1):
+            record["sequence"] = sequence
+        records[-1]["sequence"] = len(records) - 2
+    else:
+        records[1]["state"][damage] += 1
+    receipt.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
+    observed = {path: publication.state_path(path) for path in transaction.outputs}
+    with pytest.raises(publication.PublicationProofError, match="absent from its proofs"):
+        transaction.retain()
+    assert transaction._custody is not None
+    assert {path: publication.state_path(path) for path in observed} == observed
+    assert receipt.exists() and transaction.context.exists()
+    transaction._release()
+
+
 @pytest.mark.parametrize("settlement", ["retain", "rollback", "keep"])
 @pytest.mark.parametrize("damage", ["root", "missing-target", "no-backup", "backup-path", "backup-state"])
 def test_valid_context_drift_cannot_change_captured_recovery_bindings(
@@ -259,7 +282,8 @@ def test_foreign_final_target_is_preserved_while_earlier_owned_outputs_recover(
     assert transaction.context.exists() and transaction.receipts[0].exists()
 
 
-def test_noop_is_explicit_but_never_a_created_ownership_claim(tmp_path):
+@pytest.mark.parametrize("settlement", ["keep", "retain"])
+def test_noop_is_explicit_but_never_a_created_ownership_claim(tmp_path, settlement):
     transaction, _before = case(tmp_path)
     item = transaction.bindings[0]
     item.target.write_bytes(item.source.read_bytes().replace(b"\n", b"\r\n"))
@@ -276,7 +300,7 @@ def test_noop_is_explicit_but_never_a_created_ownership_claim(tmp_path):
     assert any(row.get("kind") == "noop" for row in records)
     owned = publication.read_receipt(transaction.receipts[0], transaction.root, set(transaction.baseline))
     assert owned[item.target] == []
-    transaction.keep()
+    getattr(transaction, settlement)()
 
 
 def test_foreign_earlier_output_survives_a_later_copy_failure(tmp_path, monkeypatch):

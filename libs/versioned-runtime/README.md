@@ -334,6 +334,9 @@ bytes or a matching digest alone never authorize a foreign replacement.
 All three settlements bind the context's root and exact target-to-backup/state
 mapping to the values captured during publication. Valid JSON with altered
 recovery bindings cannot silently change restoration into removal.
+Retained settlement additionally requires each newly created output's exact
+captured physical state in the producer proofs. Unchanged normalized no-ops
+remain explicitly non-owned and do not acquire a created-output claim.
 
 Rollback restores proven uncontested outputs, preserves foreign replacements
 and reports incomplete recovery with evidence retained. The separate

@@ -733,7 +733,10 @@ class CopyPublication:
             if state_path(path) != before:
                 raise PublicationProofError(f"Backup changed before retained settlement: {path}")
         root, entries = self._context()
-        _proofs(self.receipts, root, entries, self.expected)
+        proofs = _proofs(self.receipts, root, entries, self.expected)
+        for path, created in self.outputs.items():
+            if created != self.baseline[path] and created not in proofs.get(path, ()):
+                raise PublicationProofError(f"Captured copy output is absent from its proofs: {path}")
         self._release()
 
     def keep(self) -> None:
