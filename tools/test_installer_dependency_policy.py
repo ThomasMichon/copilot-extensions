@@ -988,7 +988,8 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
     None,
     "[metadata]\ndescription = 100% retained\n",
     "[metadata]\ndescription = 100% retained\n"
-    "[egg_info]\ntag_build = .fixture\negg_base = src\n",
+    "[egg_info]\ntag_build = .fixture\negg_base = src\n"
+    "[options.data_files]\nshare/WidgetPkg = first.txt\nshare/widgetpkg = second.txt\n",
 ])
 def test_retained_editable_metadata_configuration_stays_private(tmp_path, monkeypatch, configuration):
     import configparser
@@ -1011,12 +1012,16 @@ def test_retained_editable_metadata_configuration_stays_private(tmp_path, monkey
             return CompletedProcess(command, 0, settings(), "")
         retained.append(Path(command[command.index("-e") + 1]))
         config = configparser.ConfigParser(interpolation=None)
+        config.optionxform = str
         config.read(retained[-1] / "setup.cfg", encoding="utf-8")
         assert config["egg_info"]["egg_base"] == "."
         if configuration is not None:
             assert config["metadata"]["description"] == "100% retained"
         if configuration is not None and "tag_build" in configuration:
             assert config["egg_info"]["tag_build"] == ".fixture"
+            assert dict(config["options.data_files"]) == {
+                "share/WidgetPkg": "first.txt", "share/widgetpkg": "second.txt",
+            }
         return CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(policy.subprocess, "run", run)

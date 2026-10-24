@@ -1,6 +1,7 @@
 """Private UV settings-projection and configuration-retention primitives."""
 from __future__ import annotations
 
+import configparser
 import errno
 import hashlib
 import json
@@ -256,6 +257,22 @@ def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_t
                 break
         candidates.append((system, False))
     return [(path, project) for path, project in candidates if path.is_file()]
+
+
+def retain_editable_metadata(project, *, error_type):
+    configuration = Path(native_retained_path(project / "setup.cfg"))
+    config = configparser.ConfigParser(interpolation=None)
+    config.optionxform = str
+    try:
+        if configuration.exists():
+            config.read_string(configuration.read_text(encoding="utf-8"))
+        if not config.has_section("egg_info"):
+            config.add_section("egg_info")
+        config.set("egg_info", "egg_base", ".")
+        with configuration.open("w", encoding="utf-8") as stream:
+            config.write(stream)
+    except (OSError, configparser.Error) as error:
+        raise error_type("cannot retain editable build metadata") from error
 
 
 def metadata_needs_caller_layout(value):

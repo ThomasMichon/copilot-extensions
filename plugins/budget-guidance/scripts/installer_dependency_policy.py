@@ -8,7 +8,6 @@ Captured settings may contain credentials and must never be printed.
 from __future__ import annotations
 
 import argparse
-import configparser
 import hashlib
 import importlib
 import json
@@ -831,18 +830,7 @@ def _retain_uv_install(
             find["where"] = [relative]
             setuptools["package-dir"] = {"": relative}
             _write_toml(Path(_native_retained_path(manifest)), data)
-            configuration = Path(_native_retained_path(mirror(project) / "setup.cfg"))
-            config = configparser.ConfigParser(interpolation=None)
-            try:
-                if configuration.exists():
-                    config.read_string(configuration.read_text(encoding="utf-8"))
-                if not config.has_section("egg_info"):
-                    config.add_section("egg_info")
-                config.set("egg_info", "egg_base", ".")
-                with configuration.open("w", encoding="utf-8") as stream:
-                    config.write(stream)
-            except (OSError, configparser.Error) as error:
-                raise DependencyPolicyError("cannot retain editable build metadata") from error
+            _configuration.retain_editable_metadata(mirror(project), error_type=DependencyPolicyError)
         for path in files:
             destination = mirror(path)
             Path(_native_retained_path(destination.parent)).mkdir(parents=True, exist_ok=True)
